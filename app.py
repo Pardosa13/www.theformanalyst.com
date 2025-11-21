@@ -85,4 +85,5 @@ def analyze():
     if file.filename == '':
         flash('No selected file', 'danger')
         return redirect(url_for('dashboard'))
-    if file and allowed_fil_
+    if file and allowed_file(file.filename):
+
