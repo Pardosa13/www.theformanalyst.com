@@ -16,7 +16,12 @@ from analyzer import process_csv_and_analyze, get_meeting_results
 # Initialize Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///theformanalyst.db')
+
+# Use the private PostgreSQL URL from Railway
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+    'DATABASE_URL', 
+    'sqlite:///theformanalyst.db'  # fallback if env variable missing
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
@@ -38,7 +43,6 @@ def load_user(user_id):
 
 @app.route('/')
 def index():
-    """Homepage - redirects to login or dashboard"""
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
     return redirect(url_for('auth.login'))
@@ -46,16 +50,13 @@ def index():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    """Main dashboard - upload and analyze CSV files"""
     recent_meetings = Meeting.query.filter_by(user_id=current_user.id).order_by(Meeting.uploaded_at.desc()).limit(10).all()
     return render_template('dashboard.html', recent_meetings=recent_meetings)
 
 @app.route('/analyze', methods=['POST'])
 @login_required
 def analyze():
-    """Process uploaded CSV and run analysis"""
     try:
-        # Check if file was uploaded
         if 'csv_file' not in request.files:
             flash('No file uploaded', 'danger')
             return redirect(url_for('dashboard'))
@@ -70,19 +71,11 @@ def analyze():
             flash('Please upload a CSV file', 'danger')
             return redirect(url_for('dashboard'))
         
-        # Get parameters
         track_condition = request.form.get('track_condition', 'good')
         is_advanced = request.form.get('advanced_mode') == 'on'
         
-        # Process and analyze
         filename = secure_filename(file.filename)
-        result = process_csv_and_analyze(
-            file,
-            filename,
-            track_condition,
-            current_user.id,
-            is_advanced
-        )
+        result = process_csv_and_analyze(file, filename, track_condition, current_user.id, is_advanced)
         
         flash(f'Analysis complete for {result["meeting_name"]}!', 'success')
         return redirect(url_for('view_meeting', meeting_id=result['meeting_id']))
@@ -94,10 +87,7 @@ def analyze():
 @app.route('/meeting/<int:meeting_id>')
 @login_required
 def view_meeting(meeting_id):
-    """View analysis results for a specific meeting"""
     meeting = Meeting.query.get_or_404(meeting_id)
-    
-    # Check user has access (own meeting or admin)
     if meeting.user_id != current_user.id and not current_user.is_admin:
         flash('You do not have permission to view this meeting', 'danger')
         return redirect(url_for('dashboard'))
@@ -108,14 +98,10 @@ def view_meeting(meeting_id):
 @app.route('/history')
 @login_required
 def history():
-    """View all past meetings"""
     if current_user.is_admin:
-        # Admins see all meetings
         meetings = Meeting.query.order_by(Meeting.uploaded_at.desc()).all()
     else:
-        # Users see only their meetings
         meetings = Meeting.query.filter_by(user_id=current_user.id).order_by(Meeting.uploaded_at.desc()).all()
-    
     return render_template('history.html', meetings=meetings)
 
 # ===== ADMIN ROUTES =====
@@ -124,7 +110,6 @@ def history():
 @login_required
 @admin_required
 def admin_panel():
-    """Admin control panel"""
     users = User.query.order_by(User.created_at.desc()).all()
     total_meetings = Meeting.query.count()
     total_analyses = Prediction.query.count()
@@ -142,19 +127,16 @@ def admin_panel():
 @login_required
 @admin_required
 def create_user():
-    """Create a new user account"""
     try:
         username = request.form.get('username')
         email = request.form.get('email')
         password = request.form.get('password')
         is_admin = request.form.get('is_admin') == 'on'
         
-        # Validate
         if not username or not email or not password:
             flash('All fields are required', 'danger')
             return redirect(url_for('admin_panel'))
         
-        # Check if user exists
         if User.query.filter_by(username=username).first():
             flash(f'Username "{username}" already exists', 'danger')
             return redirect(url_for('admin_panel'))
@@ -163,14 +145,8 @@ def create_user():
             flash(f'Email "{email}" already exists', 'danger')
             return redirect(url_for('admin_panel'))
         
-        # Create user
-        user = User(
-            username=username,
-            email=email,
-            is_admin=is_admin
-        )
+        user = User(username=username, email=email, is_admin=is_admin)
         user.set_password(password)
-        
         db.session.add(user)
         db.session.commit()
         
@@ -186,7 +162,6 @@ def create_user():
 @login_required
 @admin_required
 def toggle_user(user_id):
-    """Enable/disable a user account"""
     user = User.query.get_or_404(user_id)
     
     if user.id == current_user.id:
@@ -204,7 +179,6 @@ def toggle_user(user_id):
 @login_required
 @admin_required
 def delete_user(user_id):
-    """Delete a user account"""
     user = User.query.get_or_404(user_id)
     
     if user.id == current_user.id:
@@ -232,11 +206,9 @@ def internal_error(error):
 # ===== DATABASE INITIALIZATION =====
 
 def init_db():
-    """Initialize database and create admin user"""
     with app.app_context():
         db.create_all()
         
-        # Create admin user if doesn't exist
         admin_username = os.getenv('ADMIN_USERNAME', 'admin')
         admin = User.query.filter_by(username=admin_username).first()
         
@@ -255,10 +227,7 @@ def init_db():
 
 if __name__ == '__main__':
     with app.app_context():
-        # Create tables if they don't exist
         db.create_all()
-        
-        # Create admin user if not exists
         admin_username = os.getenv('ADMIN_USERNAME', 'admin')
         admin = User.query.filter_by(username=admin_username).first()
         if not admin:
