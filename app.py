@@ -1,49 +1,47 @@
-from flask import Flask, request, redirect, url_for, flash
+from flask import Flask, request, render_template_string
 from werkzeug.utils import secure_filename
 import os
-import subprocess
-from datetime import datetime
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'
-meetings = []
+UPLOAD_FOLDER = "/app/uploads"  # make sure this exists
+ALLOWED_EXTENSIONS = {"txt", "pdf", "png", "jpg", "jpeg", "gif"}
+
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'mp3', 'wav', 'mp4'}
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/analyze', methods=['POST'])
-def analyze():
-    file = request.files.get('file')
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
+@app.route("/upload", methods=["GET", "POST"])
+def upload_file():
+    if request.method == "POST":
+        # Check if a file is part of the request
+        if "file" not in request.files:
+            return "No file part in the request", 400
+        
+        file = request.files["file"]
 
-        track_condition = request.form.get('track_condition', 'good')
-        advanced_mode = 'advanced_mode' in request.form
+        # Check if the user submitted a file
+        if file.filename == "":
+            return "No file selected", 400
+        
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            save_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+            file.save(save_path)
+            return f"File uploaded successfully: {filename}"
+        else:
+            return "File type not allowed", 400
 
-        try:
-            cmd = ['node', 'analyze.js', filepath, track_condition]
-            if advanced_mode:
-                cmd.append('--advanced')
+    # If GET, show a simple HTML form for testing
+    return render_template_string('''
+        <!doctype html>
+        <title>Upload a File</title>
+        <h1>Upload a file</h1>
+        <form method="POST" enctype="multipart/form-data">
+            <input type="file" name="file">
+            <input type="submit" value="Upload">
+        </form>
+    ''')
 
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            analysis_result = result.stdout
-
-        except subprocess.CalledProcessError as e:
-            flash(f'Analysis failed: {e.stderr}', 'danger')
-            return redirect(url_for('dashboard'))
-
-        meeting = {
-            'id': len(meetings) + 1,
-            'meeting_name': filename,
-            'uploaded_at': datetime.now(),
-            'results': analysis_result
-        }
-        meetings.append(meeting)
-
-        return redirect(url_for('view_meeting', meeting_id=meeting['id']))
-
-    else:
-        flash('Invalid file type or no file uploaded.', 'warning')
-        return redirect(url_for('dashboard'))
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
