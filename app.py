@@ -254,6 +254,25 @@ def init_db():
             print(f'Admin user already exists: {admin_username}')
 
 if __name__ == '__main__':
-    init_db()
+    with app.app_context():
+        # Create tables if they don't exist
+        db.create_all()
+        
+        # Create admin user if not exists
+        admin_username = os.getenv('ADMIN_USERNAME', 'admin')
+        admin = User.query.filter_by(username=admin_username).first()
+        if not admin:
+            admin = User(
+                username=admin_username,
+                email=os.getenv('ADMIN_EMAIL', 'admin@theformanalyst.com'),
+                is_admin=True
+            )
+            admin.set_password(os.getenv('ADMIN_PASSWORD', 'changeme123'))
+            db.session.add(admin)
+            db.session.commit()
+            print(f'Admin user created: {admin_username}')
+        else:
+            print(f'Admin user already exists: {admin_username}')
+
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
