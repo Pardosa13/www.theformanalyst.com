@@ -46,17 +46,17 @@ def login():
         username = request.form.get("username")
         password = request.form.get("password")
         remember = bool(request.form.get("remember"))
-
+        
         user_info = users.get(username)
         if not user_info or not check_password_hash(user_info["password"], password):
             flash("Invalid username or password", "danger")
             return redirect(url_for("login"))
-
+        
         user = User(username, user_info["is_admin"])
         login_user(user, remember=remember)
         flash(f"Welcome back, {username}!", "success")
         return redirect(url_for("dashboard"))
-
+    
     return render_template("login.html")
 
 @app.route("/logout")
@@ -66,25 +66,29 @@ def logout():
     flash("You have been logged out", "info")
     return redirect(url_for("login"))
 
-@app.route("/dashboard", methods=["GET", "POST"])
+@app.route("/dashboard")
 @login_required
 def dashboard():
-    if request.method == "POST":
-        # Simulate CSV upload handling
-        csv_file = request.files.get("csv_file")
-        meeting_name = csv_file.filename if csv_file else "Meeting " + str(len(recent_meetings) + 1)
-        track_condition = request.form.get("track_condition", "Good")
-        advanced_mode = bool(request.form.get("advanced_mode"))
-        recent_meetings.insert(0, {
-            "id": len(recent_meetings) + 1,
-            "meeting_name": meeting_name,
-            "uploaded_at": datetime.now(),
-            "user": current_user
-        })
-        flash(f"{meeting_name} analyzed successfully!", "success")
-        return redirect(url_for("dashboard"))
-
     return render_template("dashboard.html", recent_meetings=recent_meetings)
+
+@app.route("/analyze", methods=["POST"])
+@login_required
+def analyze():
+    # Handle CSV upload and analysis
+    csv_file = request.files.get("csv_file")
+    meeting_name = csv_file.filename if csv_file else "Meeting " + str(len(recent_meetings) + 1)
+    track_condition = request.form.get("track_condition", "Good")
+    advanced_mode = bool(request.form.get("advanced_mode"))
+    
+    recent_meetings.insert(0, {
+        "id": len(recent_meetings) + 1,
+        "meeting_name": meeting_name,
+        "uploaded_at": datetime.now(),
+        "user": current_user.username
+    })
+    
+    flash(f"{meeting_name} analyzed successfully!", "success")
+    return redirect(url_for("dashboard"))
 
 @app.route("/history")
 @login_required
