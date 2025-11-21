@@ -16,12 +16,8 @@ from analyzer import process_csv_and_analyze, get_meeting_results
 # Initialize Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
-
-# Use the private PostgreSQL URL from Railway
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
-    'DATABASE_URL', 
-    'sqlite:///theformanalyst.db'  # fallback if env variable missing
-)
+# Use the private Railway URL for database connection
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://postgres:uCPvvMcMtRhYMxdFaDVGzhRXzYmOWwxL@postgres.railway.internal:5432/railway')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
@@ -75,7 +71,13 @@ def analyze():
         is_advanced = request.form.get('advanced_mode') == 'on'
         
         filename = secure_filename(file.filename)
-        result = process_csv_and_analyze(file, filename, track_condition, current_user.id, is_advanced)
+        result = process_csv_and_analyze(
+            file,
+            filename,
+            track_condition,
+            current_user.id,
+            is_advanced
+        )
         
         flash(f'Analysis complete for {result["meeting_name"]}!', 'success')
         return redirect(url_for('view_meeting', meeting_id=result['meeting_id']))
@@ -102,6 +104,7 @@ def history():
         meetings = Meeting.query.order_by(Meeting.uploaded_at.desc()).all()
     else:
         meetings = Meeting.query.filter_by(user_id=current_user.id).order_by(Meeting.uploaded_at.desc()).all()
+    
     return render_template('history.html', meetings=meetings)
 
 # ===== ADMIN ROUTES =====
@@ -147,6 +150,7 @@ def create_user():
         
         user = User(username=username, email=email, is_admin=is_admin)
         user.set_password(password)
+        
         db.session.add(user)
         db.session.commit()
         
@@ -163,7 +167,6 @@ def create_user():
 @admin_required
 def toggle_user(user_id):
     user = User.query.get_or_404(user_id)
-    
     if user.id == current_user.id:
         flash('You cannot disable your own account', 'danger')
         return redirect(url_for('admin_panel'))
@@ -180,7 +183,6 @@ def toggle_user(user_id):
 @admin_required
 def delete_user(user_id):
     user = User.query.get_or_404(user_id)
-    
     if user.id == current_user.id:
         flash('You cannot delete your own account', 'danger')
         return redirect(url_for('admin_panel'))
@@ -206,19 +208,18 @@ def internal_error(error):
 # ===== DATABASE INITIALIZATION =====
 
 def init_db():
+    """Initialize database and create admin user"""
     with app.app_context():
         db.create_all()
         
         admin_username = os.getenv('ADMIN_USERNAME', 'admin')
-        admin = User.query.filter_by(username=admin_username).first()
+        admin_email = os.getenv('ADMIN_EMAIL', 'admin@theformanalyst.com')
+        admin_password = os.getenv('ADMIN_PASSWORD', 'changeme123')
         
+        admin = User.query.filter_by(username=admin_username).first()
         if not admin:
-            admin = User(
-                username=admin_username,
-                email=os.getenv('ADMIN_EMAIL', 'admin@theformanalyst.com'),
-                is_admin=True
-            )
-            admin.set_password(os.getenv('ADMIN_PASSWORD', 'changeme123'))
+            admin = User(username=admin_username, email=admin_email, is_admin=True)
+            admin.set_password(admin_password)
             db.session.add(admin)
             db.session.commit()
             print(f'Admin user created: {admin_username}')
@@ -226,22 +227,6 @@ def init_db():
             print(f'Admin user already exists: {admin_username}')
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-        admin_username = os.getenv('ADMIN_USERNAME', 'admin')
-        admin = User.query.filter_by(username=admin_username).first()
-        if not admin:
-            admin = User(
-                username=admin_username,
-                email=os.getenv('ADMIN_EMAIL', 'admin@theformanalyst.com'),
-                is_admin=True
-            )
-            admin.set_password(os.getenv('ADMIN_PASSWORD', 'changeme123'))
-            db.session.add(admin)
-            db.session.commit()
-            print(f'Admin user created: {admin_username}')
-        else:
-            print(f'Admin user already exists: {admin_username}')
-
+    init_db()
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
