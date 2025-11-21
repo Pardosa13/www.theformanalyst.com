@@ -21,5 +21,5 @@ RUN pip install -r requirements.txt
 # Expose the port for Railway
 EXPOSE 8080
 
-# Run the app with Gunicorn
+# Run the app
 CMD ["gunicorn", "-b", "0.0.0.0:8080", "app:app"]
