@@ -225,6 +225,19 @@ def admin_panel():
                 users[username_to_reset]["password"] = generate_password_hash(new_password)
                 flash(f"Password reset successfully for '{username_to_reset}'", "success")
         
+        elif action == "toggle_admin":
+            username_to_toggle = request.form.get("username")
+            
+            if username_to_toggle == current_user.username:
+                flash("You cannot change your own admin status", "danger")
+            elif username_to_toggle not in users:
+                flash(f"User '{username_to_toggle}' not found", "danger")
+            else:
+                # Toggle admin status
+                users[username_to_toggle]["is_admin"] = not users[username_to_toggle]["is_admin"]
+                new_status = "admin" if users[username_to_toggle]["is_admin"] else "regular user"
+                flash(f"'{username_to_toggle}' is now a {new_status}", "success")
+        
         return redirect(url_for("admin_panel"))
     
     # Prepare admin statistics
