@@ -27,10 +27,8 @@
                 {% endif %}
                 <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">{{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
                 <td style="padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0;">
-                    <a href="{{ url_for('view_meeting', meeting_id=meeting.id) }}" class="btn btn-primary" 
-                       style="font-size: 12px; padding: 6px 12px;">
-                        View Results
-                    </a>
+                    <a href="{{ url_for('view_meeting', meeting_id=meeting.id) }}" class="btn btn-primary"
+                       style="font-size: 12px; padding: 6px 12px;">View Results</a>
                 </td>
             </tr>
             {% endfor %}
