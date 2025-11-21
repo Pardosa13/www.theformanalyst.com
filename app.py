@@ -83,5 +83,5 @@ def view_meeting(meeting_id):
     return render_template('meeting.html', meeting=meeting, results={'races': []})  # replace empty races with actual parsed data
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=8080, debug=True)
 
