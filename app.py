@@ -168,23 +168,87 @@ def view_meeting(meeting_id):
     
     return render_template("view_meeting.html", meeting=meeting)
 
-@app.route("/admin")
+@app.route("/admin", methods=["GET", "POST"])
 @login_required
 def admin_panel():
     if not current_user.is_admin:
         flash("Access denied", "danger")
         return redirect(url_for("dashboard"))
     
-    # Admin can see all users' meetings
+    # Handle user creation form
+    if request.method == "POST":
+        action = request.form.get("action")
+        
+        if action == "create_user":
+            new_username = request.form.get("username")
+            new_password = request.form.get("password")
+            is_admin = bool(request.form.get("is_admin"))
+            
+            # Validation
+            if not new_username or not new_password:
+                flash("Username and password are required", "danger")
+            elif new_username in users:
+                flash(f"User '{new_username}' already exists", "danger")
+            elif len(new_password) < 6:
+                flash("Password must be at least 6 characters long", "danger")
+            else:
+                # Create new user
+                users[new_username] = {
+                    "password": generate_password_hash(new_password),
+                    "is_admin": is_admin
+                }
+                flash(f"User '{new_username}' created successfully", "success")
+        
+        elif action == "delete_user":
+            username_to_delete = request.form.get("username")
+            
+            if username_to_delete == current_user.username:
+                flash("You cannot delete your own account", "danger")
+            elif username_to_delete not in users:
+                flash(f"User '{username_to_delete}' not found", "danger")
+            else:
+                # Delete user and their meetings
+                del users[username_to_delete]
+                if username_to_delete in all_meetings:
+                    del all_meetings[username_to_delete]
+                flash(f"User '{username_to_delete}' deleted successfully", "success")
+        
+        elif action == "reset_password":
+            username_to_reset = request.form.get("username")
+            new_password = request.form.get("new_password")
+            
+            if username_to_reset not in users:
+                flash(f"User '{username_to_reset}' not found", "danger")
+            elif not new_password or len(new_password) < 6:
+                flash("Password must be at least 6 characters long", "danger")
+            else:
+                users[username_to_reset]["password"] = generate_password_hash(new_password)
+                flash(f"Password reset successfully for '{username_to_reset}'", "success")
+        
+        return redirect(url_for("admin_panel"))
+    
+    # Prepare admin statistics
     admin_stats = {
         "total_users": len(users),
         "total_meetings": sum(len(meetings) for meetings in all_meetings.values()),
-        "users_data": []
+        "users_data": [],
+        "all_users": []  # For user management
     }
     
+    # Get user activity data
     for username, user_meetings in all_meetings.items():
         admin_stats["users_data"].append({
             "username": username,
+            "meeting_count": len(user_meetings),
+            "last_activity": user_meetings[0]["uploaded_at"] if user_meetings else None
+        })
+    
+    # Get all users for management
+    for username, user_info in users.items():
+        user_meetings = all_meetings.get(username, [])
+        admin_stats["all_users"].append({
+            "username": username,
+            "is_admin": user_info["is_admin"],
             "meeting_count": len(user_meetings),
             "last_activity": user_meetings[0]["uploaded_at"] if user_meetings else None
         })
