@@ -1,86 +1,73 @@
-from flask import Flask, request, render_template_string, redirect, url_for, session
+from flask import Flask, render_template, request, redirect, url_for, flash, session
 from werkzeug.utils import secure_filename
 import os
 
 app = Flask(__name__)
-app.secret_key = "supersecretkey"  # Use a strong secret key in production
-UPLOAD_FOLDER = "/app/uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.secret_key = "your_secret_key"  # Keep your original secret key
 
-# Simple demo users (replace with DB or env vars in production)
-USERS = {"admin": "password123"}
+# Configure upload folder
+UPLOAD_FOLDER = 'uploads'
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif'}
 
-# HTML Templates
-LOGIN_PAGE = """
-<!doctype html>
-<title>Login</title>
-<h2>Login</h2>
-<form method="POST" action="/login">
-  Username: <input type="text" name="username"><br>
-  Password: <input type="password" name="password"><br>
-  <input type="submit" value="Login">
-</form>
-{% if error %}<p style="color:red">{{ error }}</p>{% endif %}
-"""
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
-DASHBOARD_PAGE = """
-<!doctype html>
-<title>Dashboard</title>
-<h2>Welcome, {{ user }}!</h2>
-<form method="POST" action="/upload" enctype="multipart/form-data">
-  Upload a file: <input type="file" name="file"><br>
-  <input type="submit" value="Upload">
-</form>
-<a href="/logout">Logout</a>
-{% if message %}<p>{{ message }}</p>{% endif %}
-"""
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Routes
-@app.route("/", methods=["GET"])
-def index():
-    if "username" in session:
-        return redirect(url_for("dashboard"))
-    return redirect(url_for("login"))
+# Home route
+@app.route('/')
+def home():
+    return render_template('index.html')  # restore your original homepage
 
-@app.route("/login", methods=["GET", "POST"])
+# Login route
+@app.route('/login', methods=['GET', 'POST'])
 def login():
-    error = None
-    if request.method == "POST":
-        username = request.form.get("username")
-        password = request.form.get("password")
-        if USERS.get(username) == password:
-            session["username"] = username
-            return redirect(url_for("dashboard"))
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        # Replace with your actual credentials
+        if username == 'admin' and password == 'password123':
+            session['user'] = username
+            return redirect(url_for('dashboard'))
         else:
-            error = "Invalid credentials"
-    return render_template_string(LOGIN_PAGE, error=error)
+            flash('Invalid credentials', 'danger')
+    return render_template('login.html')
 
-@app.route("/dashboard", methods=["GET"])
+# Dashboard route
+@app.route('/dashboard')
 def dashboard():
-    if "username" not in session:
-        return redirect(url_for("login"))
-    return render_template_string(DASHBOARD_PAGE, user=session["username"], message=None)
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    return render_template('dashboard.html')
 
-@app.route("/upload", methods=["POST"])
-def upload():
-    if "username" not in session:
-        return redirect(url_for("login"))
-    file = request.files.get("file")
-    message = ""
-    if file and file.filename:
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-        file.save(filepath)
-        message = f"File '{filename}' uploaded successfully!"
-    else:
-        message = "No file selected"
-    return render_template_string(DASHBOARD_PAGE, user=session["username"], message=message)
-
-@app.route("/logout")
+# Logout route
+@app.route('/logout')
 def logout():
-    session.pop("username", None)
-    return redirect(url_for("login"))
+    session.pop('user', None)
+    return redirect(url_for('login'))
+
+# File upload route
+@app.route('/upload', methods=['GET', 'POST'])
+def upload_file():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        if 'file' not in request.files:
+            flash('No file part', 'danger')
+            return redirect(request.url)
+        file = request.files['file']
+        if file.filename == '':
+            flash('No selected file', 'danger')
+            return redirect(request.url)
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            flash('File uploaded successfully', 'success')
+            return redirect(url_for('dashboard'))
+    return render_template('upload.html')
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host='0.0.0.0', port=8080)
