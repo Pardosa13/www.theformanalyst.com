@@ -1833,7 +1833,7 @@ function getUniqueHorsesOnly(data) {
         const currentDate = entry['form meeting date'];
         
         if (!latestByComposite.has(compositeKey) || 
-            parseDate(currentDate) > parseDate(latestByComposite.get(compositeKey)['form meeting date'])
+            parseDate(currentDate) > parseDate(latestByComposite.get(compositeKey)['form meeting date'])) {
             latestByComposite.set(compositeKey, entry);
         }
     });
