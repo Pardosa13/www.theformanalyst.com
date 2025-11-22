@@ -139,24 +139,9 @@ return [score, notes]; // Return the score based on the first letter
 
 
 function checkWeight(weight, claim) {
-    let addScore = 0;
-    let note = '';
-
-    const act_weight = weight;
-    if (act_weight > 65) {
-        addScore += 0;
-        note += 'ERR : weight less claim, above 65kg\n';
-    } else if (act_weight < 49) {
-        addScore += 0;
-        note += 'ERR : Weight less claim, below 49kg\n';
-    } else if (act_weight >= 49 && act_weight <=65) {
-        addScore += (65.0 - act_weight) * 2;
-        note += '+ ' +  addScore + ' : Weight less claim = ' + act_weight + 'kg\n';
-    } else {
-        addScore += 0;
-        note += 'ERR : Weight invalid\n';
-    }
-    return [addScore, note]; // Return the score from this function
+    // Weight scoring is now handled by calculateWeightScores() which compares to race average
+    // This function is kept for compatibility but returns 0
+    return [0, ''];
 }
 
 function checkLast10runs(last10) {
@@ -1654,7 +1639,131 @@ function getLowestSectionalsByRace(data) {
         horseScores[horseName].note = '??: No valid sectional\n';
       }
     });
-
+// Calculate weight-based scores relative to race average
+function calculateWeightScores(data) {
+    const results = [];
+    
+    // Group horses by race number
+    const raceGroups = {};
+    data.forEach(entry => {
+        const raceNum = entry['race number'];
+        if (!raceGroups[raceNum]) {
+            raceGroups[raceNum] = [];
+        }
+        raceGroups[raceNum].push(entry);
+    });
+    
+    // Process each race
+    Object.keys(raceGroups).forEach(raceNum => {
+        const raceHorses = raceGroups[raceNum];
+        
+        // Get unique horses in this race (by horse name)
+        const uniqueHorses = [];
+        const seenNames = new Set();
+        raceHorses.forEach(horse => {
+            const name = horse['horse name'];
+            if (!seenNames.has(name)) {
+                seenNames.add(name);
+                uniqueHorses.push(horse);
+            }
+        });
+        
+        // Calculate average weight in this race
+        let totalWeight = 0;
+        let validWeights = 0;
+        uniqueHorses.forEach(horse => {
+            const weight = parseFloat(horse['horse weight']);
+            if (!isNaN(weight) && weight >= 49 && weight <= 65) {
+                totalWeight += weight;
+                validWeights++;
+            }
+        });
+        
+        const avgWeight = validWeights > 0 ? totalWeight / validWeights : 55; // Default to 55 if no valid weights
+        
+        // Score each horse relative to average and weight change
+        uniqueHorses.forEach(horse => {
+            const horseName = horse['horse name'];
+            const currentWeight = parseFloat(horse['horse weight']);
+            const lastWeight = parseFloat(horse['form weight']);
+            
+            let score = 0;
+            let note = '';
+            
+            // PART A: Score relative to race average
+            if (!isNaN(currentWeight) && currentWeight >= 49 && currentWeight <= 65) {
+                const diffFromAvg = avgWeight - currentWeight; // Positive = lighter than average
+                
+                if (diffFromAvg >= 3) {
+                    score += 15;
+                    note += `+15.0 : Weight ${currentWeight}kg is ${diffFromAvg.toFixed(1)}kg BELOW race avg (${avgWeight.toFixed(1)}kg)\n`;
+                } else if (diffFromAvg >= 2) {
+                    score += 10;
+                    note += `+10.0 : Weight ${currentWeight}kg is ${diffFromAvg.toFixed(1)}kg below race avg (${avgWeight.toFixed(1)}kg)\n`;
+                } else if (diffFromAvg >= 1) {
+                    score += 6;
+                    note += `+ 6.0 : Weight ${currentWeight}kg is ${diffFromAvg.toFixed(1)}kg below race avg (${avgWeight.toFixed(1)}kg)\n`;
+                } else if (diffFromAvg >= 0.5) {
+                    score += 3;
+                    note += `+ 3.0 : Weight ${currentWeight}kg is ${diffFromAvg.toFixed(1)}kg below race avg (${avgWeight.toFixed(1)}kg)\n`;
+                } else if (diffFromAvg > -0.5) {
+                    // Within 0.5kg of average - neutral
+                    note += `  0.0 : Weight ${currentWeight}kg is near race avg (${avgWeight.toFixed(1)}kg)\n`;
+                } else if (diffFromAvg > -1) {
+                    score -= 3;
+                    note += `- 3.0 : Weight ${currentWeight}kg is ${Math.abs(diffFromAvg).toFixed(1)}kg above race avg (${avgWeight.toFixed(1)}kg)\n`;
+                } else if (diffFromAvg > -2) {
+                    score -= 6;
+                    note += `- 6.0 : Weight ${currentWeight}kg is ${Math.abs(diffFromAvg).toFixed(1)}kg above race avg (${avgWeight.toFixed(1)}kg)\n`;
+                } else if (diffFromAvg > -3) {
+                    score -= 10;
+                    note += `-10.0 : Weight ${currentWeight}kg is ${Math.abs(diffFromAvg).toFixed(1)}kg above race avg (${avgWeight.toFixed(1)}kg)\n`;
+                } else {
+                    score -= 15;
+                    note += `-15.0 : Weight ${currentWeight}kg is ${Math.abs(diffFromAvg).toFixed(1)}kg ABOVE race avg (${avgWeight.toFixed(1)}kg)\n`;
+                }
+            } else {
+                note += `  0.0 : Weight invalid or out of range\n`;
+            }
+            
+            // PART B: Score weight change from last start
+            if (!isNaN(currentWeight) && !isNaN(lastWeight) && lastWeight >= 49 && lastWeight <= 65) {
+                const weightChange = lastWeight - currentWeight; // Positive = dropped weight
+                
+                if (weightChange >= 3) {
+                    score += 15;
+                    note += `+15.0 : Dropped ${weightChange.toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`;
+                } else if (weightChange >= 2) {
+                    score += 10;
+                    note += `+10.0 : Dropped ${weightChange.toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`;
+                } else if (weightChange >= 1) {
+                    score += 5;
+                    note += `+ 5.0 : Dropped ${weightChange.toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`;
+                } else if (weightChange > -1) {
+                    // Within 1kg - no change
+                } else if (weightChange > -2) {
+                    score -= 5;
+                    note += `- 5.0 : Up ${Math.abs(weightChange).toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`;
+                } else if (weightChange > -3) {
+                    score -= 10;
+                    note += `-10.0 : Up ${Math.abs(weightChange).toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`;
+                } else {
+                    score -= 15;
+                    note += `-15.0 : Up ${Math.abs(weightChange).toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`;
+                }
+            }
+            
+            results.push({
+                race: raceNum,
+                name: horseName,
+                weightScore: score,
+                weightNote: note
+            });
+        });
+    });
+    
+    return results;
+}
     // Convert to results array
     Object.keys(horseScores).forEach(horseName => {
       results.push({
@@ -1876,6 +1985,7 @@ function analyzeCSV(csvData, trackCondition, isAdvanced) {
     // Calculate multi-row analysis data
     const filteredDataSectional = getLowestSectionalsByRace(data);
     const averageFormPrices = calculateAverageFormPrices(data);
+    const weightScores = calculateWeightScores(data);
     
     // Get unique horses only
     const uniqueHorses = getUniqueHorsesOnly(data);
@@ -1900,26 +2010,35 @@ function analyzeCSV(csvData, trackCondition, isAdvanced) {
         );
         
         if (matchingHorse) {
-            score += matchingHorse.sectionalScore;
-            notes += matchingHorse.sectionalNote;
+    score += matchingHorse.sectionalScore;
+    notes += matchingHorse.sectionalNote;
             
-            // Check for combo bonus
-            if (matchingHorse.hasAverage1st && matchingHorse.hasLastStart1st) {
-                const [classScore, classNotes] = compareClasses(
-                    horse['class restrictions'], 
-                    horse['form class'],
-                    horse['race prizemoney'],
-                    horse['prizemoney']
-                );
-                if (classScore > 0) {
-                    score += 15;
-                    notes += '+15.0 : COMBO BONUS - Fastest sectional + dropping in class\n';
-                }
-            }
+    // Check for combo bonus
+    if (matchingHorse.hasAverage1st && matchingHorse.hasLastStart1st) {
+        const [classScore, classNotes] = compareClasses(
+            horse['class restrictions'], 
+            horse['form class'],
+            horse['race prizemoney'],
+            horse['prizemoney']
+        );
+        if (classScore > 0) {
+            score += 15;
+            notes += '+15.0 : COMBO BONUS - Fastest sectional + dropping in class\n';
         }
+    }
+}
+
+// Add weight scores (outside matchingHorse block so ALL horses get weight scoring)
+const matchingWeight = weightScores.find(w => 
+    parseInt(w.race) === parseInt(raceNumber) && 
+    w.name.toLowerCase().trim() === horseName.toLowerCase().trim()
+);
+if (matchingWeight) {
+    score += matchingWeight.weightScore;
+    notes += matchingWeight.weightNote;
+}
         
-        analysisResults.push({ horse, score, notes });
-    });
+analysisResults.push({ horse, score, notes });
     
     // Remove duplicates and calculate odds
     let uniqueResults = Array.from(
