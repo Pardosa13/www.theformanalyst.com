@@ -2049,6 +2049,9 @@ analysisResults.push({ horse, score, notes });
     
     return uniqueResults;
 }
+      
+}
+
 
 // ============================================================
 // STDIN/STDOUT HANDLER - This is what Python calls
