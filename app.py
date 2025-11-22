@@ -107,6 +107,11 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
     races_data = {}
     for result in analysis_results:
         race_num = result['horse'].get('race number', '0')
+        
+        # Skip invalid rows (header rows that slipped through)
+        if not race_num or not str(race_num).isdigit():
+            continue
+            
         if race_num not in races_data:
             races_data[race_num] = []
         races_data[race_num].append(result)
@@ -430,6 +435,22 @@ def admin_panel():
                 db.session.commit()
                 status = "activated" if user.is_active else "deactivated"
                 flash(f"'{user.username}' has been {status}", "success")
+        
+        elif action == "change_my_password":
+            current_password = request.form.get("current_password")
+            new_password = request.form.get("new_password")
+            confirm_password = request.form.get("confirm_password")
+            
+            if not current_user.check_password(current_password):
+                flash("Current password is incorrect", "danger")
+            elif len(new_password) < 6:
+                flash("New password must be at least 6 characters", "danger")
+            elif new_password != confirm_password:
+                flash("New passwords do not match", "danger")
+            else:
+                current_user.set_password(new_password)
+                db.session.commit()
+                flash("Your password has been changed successfully", "success")
         
         return redirect(url_for("admin_panel"))
     
