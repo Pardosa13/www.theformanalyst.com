@@ -1,0 +1,5 @@
+# Add these to ignore local secrets and certs
+.env
+*.pem
+*.key
+cert_*.pem
