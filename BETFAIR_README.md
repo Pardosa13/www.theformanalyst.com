@@ -52,6 +52,9 @@ BETFAIR_TLD=com               # Use 'au' for Australian API
 SERVICE_HOST=127.0.0.1        # Host to bind service to
 SERVICE_PORT=5001             # Port for SSE endpoint
 
+# CORS - only needed if service runs on different domain
+# CORS_ALLOWED_ORIGINS=https://www.theformanalyst.com
+
 # Feature flag for main app
 BETFAIR_ENABLED=true
 ```
@@ -198,12 +201,14 @@ Add the following to any template where you want live odds:
 {% if config.get('BETFAIR_ENABLED') %}
 <script 
     src="{{ url_for('static', filename='js/betfair-live.js') }}"
-    data-betfair-sse-url="http://your-betfair-service-url:5001/stream">
+    data-betfair-sse-url="/betfair/stream">
 </script>
 {% endif %}
 ```
 
 ### Configuring SSE URL
+
+By default, the JavaScript uses a relative URL `/betfair/stream` which is safe for same-origin deployments. Configure your web server or reverse proxy to route this to the Betfair service.
 
 If running the Betfair service on a different host/port, configure the JavaScript:
 
