@@ -109,12 +109,14 @@
                     <th style="padding: 12px; text-align: center;">Score</th>
                     <th style="padding: 12px; text-align: center;">Odds</th>
                     <th style="padding: 12px; text-align: center;">Win %</th>
+                    <th style="padding: 12px; text-align: center;" class="betfair-result">Result</th>
                     <th style="padding: 12px; text-align: left;">Notes</th>
                 </tr>
             </thead>
             <tbody>
                 {% for horse in race.horses %}
-                <tr {% if loop.index == 1 %}style="background-color: #d4edda;"
+                <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
+                    {% if loop.index == 1 %}style="background-color: #d4edda;"
                     {% elif loop.index == 2 %}style="background-color: #fff3cd;"
                     {% elif loop.index == 3 %}style="background-color: #ffe4b3;"
                     {% else %}style="background-color: {% if loop.index is odd %}#f8f9fa{% else %}#ffffff{% endif %};"
@@ -137,6 +139,10 @@
                     </td>
                     <td style="padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0;">
                         {{ horse.win_probability }}
+                    </td>
+                    <td style="padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0;">
+                        {# This cell will be updated live by betfair-live.js via SSE #}
+                        <span class="betfair-result-cell"></span>
                     </td>
                     <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; font-size: 11px; max-width: 300px;">
                         <details>
@@ -602,4 +608,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+
+{% if config.get('BETFAIR_ENABLED') %}
+  <script src="{{ url_for('static', filename='js/betfair-live.js') }}"></script>
+{% endif %}
+
 {% endblock %}
