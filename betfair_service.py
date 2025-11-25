@@ -29,6 +29,7 @@ import os
 import threading
 import time
 from datetime import datetime
+from urllib.parse import urlencode
 
 import requests
 from flask import Flask, Response, jsonify
@@ -44,6 +45,10 @@ BETFAIR_POLL_INTERVAL = int(os.environ.get('BETFAIR_POLL_INTERVAL', '5'))
 BETFAIR_TLD = os.environ.get('BETFAIR_TLD', 'com')
 SERVICE_HOST = os.environ.get('SERVICE_HOST', '127.0.0.1')
 SERVICE_PORT = int(os.environ.get('SERVICE_PORT', '5001'))
+
+# CORS configuration - restrict to specific origins in production
+# Use comma-separated list of allowed origins or '*' for development only
+CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ALLOWED_ORIGINS', '')
 
 # Betfair API endpoints
 IDENTITY_SSO_URL = f'https://identitysso-cert.betfair.{BETFAIR_TLD}/api/certlogin'
@@ -85,7 +90,11 @@ def authenticate():
         return False
     
     try:
-        payload = f'username={BETFAIR_USERNAME}&password={BETFAIR_PASSWORD}'
+        # Use urlencode for proper encoding of special characters in credentials
+        payload = urlencode({
+            'username': BETFAIR_USERNAME,
+            'password': BETFAIR_PASSWORD
+        })
         headers = {
             'X-Application': BETFAIR_APP_KEY,
             'Content-Type': 'application/x-www-form-urlencoded'
@@ -287,18 +296,29 @@ def generate_sse():
         time.sleep(1)  # Check for updates every second
 
 
+def get_cors_headers():
+    """Get CORS headers based on configuration."""
+    if CORS_ALLOWED_ORIGINS:
+        # Use configured origins (can be comma-separated list or single origin)
+        return {'Access-Control-Allow-Origin': CORS_ALLOWED_ORIGINS.split(',')[0].strip()}
+    # No CORS header if not configured - same-origin only
+    return {}
+
+
 @app.route('/stream')
 def stream():
     """SSE endpoint for live odds updates."""
+    headers = {
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'  # Disable nginx buffering
+    }
+    headers.update(get_cors_headers())
+    
     return Response(
         generate_sse(),
         mimetype='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
-            'X-Accel-Buffering': 'no'  # Disable nginx buffering
-        }
+        headers=headers
     )
 
 

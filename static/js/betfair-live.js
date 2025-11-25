@@ -19,7 +19,16 @@
     'use strict';
 
     // Configuration
-    const DEFAULT_SSE_URL = 'http://127.0.0.1:5001/stream';
+    // Default to same-origin relative path for production safety
+    // In development, configure via window.BETFAIR_SSE_URL or data attribute
+    const DEFAULT_SSE_URL = '/betfair/stream';
+    
+    // Reconnection settings
+    const MAX_RETRY_ATTEMPTS = 10;
+    const INITIAL_RETRY_DELAY = 1000;  // 1 second
+    const MAX_RETRY_DELAY = 60000;     // 1 minute
+    let retryAttempts = 0;
+    let retryDelay = INITIAL_RETRY_DELAY;
     
     // Get SSE URL from config or default
     function getSSEUrl() {
@@ -196,6 +205,9 @@
         
         eventSource.onopen = function() {
             console.log('[Betfair] SSE connection established');
+            // Reset retry counters on successful connection
+            retryAttempts = 0;
+            retryDelay = INITIAL_RETRY_DELAY;
         };
         
         eventSource.onmessage = function(event) {
@@ -209,10 +221,18 @@
         
         eventSource.onerror = function(error) {
             console.error('[Betfair] SSE connection error:', error);
-            
-            // Reconnect after delay
             eventSource.close();
-            setTimeout(connectSSE, 5000);
+            
+            // Implement exponential backoff with maximum retries
+            if (retryAttempts < MAX_RETRY_ATTEMPTS) {
+                retryAttempts++;
+                console.log(`[Betfair] Reconnecting in ${retryDelay/1000}s (attempt ${retryAttempts}/${MAX_RETRY_ATTEMPTS})`);
+                setTimeout(connectSSE, retryDelay);
+                // Exponential backoff: double the delay up to max
+                retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
+            } else {
+                console.error('[Betfair] Maximum retry attempts reached. Please refresh the page to reconnect.');
+            }
         };
         
         return eventSource;
