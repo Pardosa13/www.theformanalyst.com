@@ -3,10 +3,20 @@
 {% block title %}{{ meeting.meeting_name }} - Analysis Results{% endblock %}
 
 {% block content %}
+{# Import Betfair macros if enabled #}
+{% if config.get('BETFAIR_ENABLED') %}
+{% from '_betfair_columns.html' import betfair_headers, betfair_cells, betfair_styles, betfair_status_widget, betfair_container %}
+{{ betfair_styles() }}
+{{ betfair_container() }}
+{% endif %}
+
 <h1>{{ meeting.meeting_name }}</h1>
 
-<div style="margin-bottom: 20px;">
+<div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
     <a href="{{ url_for('history') }}" style="color: #667eea; text-decoration: none;">← Back to History</a>
+    {% if config.get('BETFAIR_ENABLED') %}
+    {{ betfair_status_widget() }}
+    {% endif %}
 </div>
 
 <div class="card">
@@ -109,12 +119,15 @@
                     <th style="padding: 12px; text-align: center;">Score</th>
                     <th style="padding: 12px; text-align: center;">Odds</th>
                     <th style="padding: 12px; text-align: center;">Win %</th>
+                    {% if config.get('BETFAIR_ENABLED') %}
+                    {{ betfair_headers() }}
+                    {% endif %}
                     <th style="padding: 12px; text-align: left;">Notes</th>
                 </tr>
             </thead>
             <tbody>
                 {% for horse in race.horses %}
-                <tr {% if loop.index == 1 %}style="background-color: #d4edda;"
+                <tr data-selection-id="{{ horse.betfair_selection_id or '' }}" {% if loop.index == 1 %}style="background-color: #d4edda;"
                     {% elif loop.index == 2 %}style="background-color: #fff3cd;"
                     {% elif loop.index == 3 %}style="background-color: #ffe4b3;"
                     {% else %}style="background-color: {% if loop.index is odd %}#f8f9fa{% else %}#ffffff{% endif %};"
@@ -138,6 +151,9 @@
                     <td style="padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0;">
                         {{ horse.win_probability }}
                     </td>
+                    {% if config.get('BETFAIR_ENABLED') %}
+                    {{ betfair_cells(horse) }}
+                    {% endif %}
                     <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; font-size: 11px; max-width: 300px;">
                         <details>
                             <summary style="cursor: pointer; color: #667eea;">View Notes</summary>
@@ -602,4 +618,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+{% if config.get('BETFAIR_ENABLED') %}
+<script src="{{ url_for('static', filename='js/betfair-live.js') }}"></script>
+{% endif %}
 {% endblock %}

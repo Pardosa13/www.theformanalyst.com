@@ -45,6 +45,13 @@
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="myaccount-tab" data-bs-toggle="tab" data-bs-target="#myaccount" type="button">My Account</button>
         </li>
+        {% if config.get('BETFAIR_ENABLED') %}
+        <li class="nav-item" role="presentation">
+            <a class="nav-link" href="{{ url_for('betfair_mapping') }}">
+                <i class="bi bi-link-45deg"></i> Betfair Mapping
+            </a>
+        </li>
+        {% endif %}
     </ul>
 
     <!-- Tab Content -->

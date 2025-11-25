@@ -1,7 +1,7 @@
 import os
 import json
 import subprocess
-from flask import Flask, render_template, redirect, url_for, request, flash
+from flask import Flask, render_template, redirect, url_for, request, flash, jsonify
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
 from datetime import datetime
@@ -14,6 +14,9 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///formanalyst.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Betfair integration (opt-in, default disabled)
+app.config['BETFAIR_ENABLED'] = os.environ.get('BETFAIR_ENABLED', 'false').lower() == 'true'
 
 # Fix for postgres:// vs postgresql:// (Railway uses postgres://)
 if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
@@ -184,6 +187,8 @@ def get_meeting_results(meeting_id):
             'distance': race.distance,
             'race_class': race.race_class,
             'track_condition': race.track_condition,
+            'betfair_market_id': getattr(race, 'betfair_market_id', None),
+            'betfair_mapped': getattr(race, 'betfair_mapped', False),
             'horses': []
         }
         
@@ -201,7 +206,13 @@ def get_meeting_results(meeting_id):
                 'win_probability': pred.win_probability if pred else '',
                 'performance_component': pred.performance_component if pred else '',
                 'base_probability': pred.base_probability if pred else '',
-                'notes': pred.notes if pred else ''
+                'notes': pred.notes if pred else '',
+                # Betfair fields
+                'betfair_selection_id': getattr(horse, 'betfair_selection_id', None),
+                'final_position': getattr(horse, 'final_position', None),
+                'final_odds': getattr(horse, 'final_odds', None),
+                'result_settled_at': getattr(horse, 'result_settled_at', None),
+                'result_source': getattr(horse, 'result_source', None)
             }
             race_data['horses'].append(horse_data)
         
@@ -476,6 +487,104 @@ def admin_panel():
     }
     
     return render_template("admin.html", stats=stats)
+
+
+# ----- Betfair Mapping Admin Routes -----
+@app.route("/admin/betfair-mapping")
+@login_required
+def betfair_mapping():
+    """Admin page for managing Betfair race mappings"""
+    if not current_user.is_admin:
+        flash("Access denied", "danger")
+        return redirect(url_for("dashboard"))
+    
+    if not app.config.get('BETFAIR_ENABLED'):
+        flash("Betfair integration is not enabled", "warning")
+        return redirect(url_for("admin_panel"))
+    
+    # Get all unmapped races (races without betfair_market_id)
+    unmapped_races = Race.query.filter(
+        (Race.betfair_market_id == None) | (Race.betfair_mapped == False)
+    ).join(Meeting).order_by(Meeting.uploaded_at.desc(), Race.race_number).all()
+    
+    # Get all mapped races
+    mapped_races = Race.query.filter(
+        Race.betfair_market_id != None,
+        Race.betfair_mapped == True
+    ).join(Meeting).order_by(Meeting.uploaded_at.desc(), Race.race_number).all()
+    
+    return render_template(
+        "betfair_mapping.html",
+        unmapped_races=unmapped_races,
+        mapped_races=mapped_races
+    )
+
+
+@app.route("/admin/betfair-mapping/update", methods=["POST"])
+@login_required
+def update_betfair_mapping():
+    """Update Betfair mapping for a race"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    if not app.config.get('BETFAIR_ENABLED'):
+        return jsonify({'error': 'Betfair integration is not enabled'}), 400
+    
+    race_id = request.form.get('race_id')
+    market_id = request.form.get('market_id')
+    
+    if not race_id:
+        flash("Race ID is required", "danger")
+        return redirect(url_for("betfair_mapping"))
+    
+    race = Race.query.get(race_id)
+    if not race:
+        flash("Race not found", "danger")
+        return redirect(url_for("betfair_mapping"))
+    
+    if market_id:
+        race.betfair_market_id = market_id.strip()
+        race.betfair_mapped = True
+        flash(f"Race {race.race_number} mapped to market {market_id}", "success")
+    else:
+        race.betfair_market_id = None
+        race.betfair_mapped = False
+        flash(f"Race {race.race_number} mapping removed", "info")
+    
+    db.session.commit()
+    return redirect(url_for("betfair_mapping"))
+
+
+@app.route("/admin/betfair-mapping/update-horse", methods=["POST"])
+@login_required
+def update_horse_selection():
+    """Update Betfair selection ID for a horse"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    if not app.config.get('BETFAIR_ENABLED'):
+        return jsonify({'error': 'Betfair integration is not enabled'}), 400
+    
+    horse_id = request.form.get('horse_id')
+    selection_id = request.form.get('selection_id')
+    
+    if not horse_id:
+        return jsonify({'error': 'Horse ID is required'}), 400
+    
+    horse = Horse.query.get(horse_id)
+    if not horse:
+        return jsonify({'error': 'Horse not found'}), 404
+    
+    if selection_id:
+        try:
+            horse.betfair_selection_id = int(selection_id)
+        except ValueError:
+            return jsonify({'error': 'Invalid selection ID'}), 400
+    else:
+        horse.betfair_selection_id = None
+    
+    db.session.commit()
+    return jsonify({'success': True, 'message': f'Horse {horse.horse_name} updated'})
 
 
 # Error handlers

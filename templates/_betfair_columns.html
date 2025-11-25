@@ -1,0 +1,145 @@
+{# Betfair Integration Columns #}
+{# Include this in race tables when BETFAIR_ENABLED is true #}
+
+{# Table header columns for Betfair data #}
+{% macro betfair_headers() %}
+<th style="padding: 12px; text-align: center;" class="betfair-column">Live Odds</th>
+<th style="padding: 12px; text-align: center;" class="betfair-column">Result</th>
+{% endmacro %}
+
+{# Table data columns for a horse row #}
+{% macro betfair_cells(horse) %}
+<td style="padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0;" class="betfair-odds">
+    {% if horse.final_odds %}
+        ${{ "%.2f"|format(horse.final_odds) }}
+    {% else %}
+        -
+    {% endif %}
+</td>
+<td style="padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0;" class="betfair-result">
+    {% if horse.final_position == 1 %}
+        <span class="betfair-winner">🏆 1st</span>
+    {% elif horse.final_position == 2 %}
+        <span class="betfair-placed">🥈 2nd</span>
+    {% elif horse.final_position == 3 %}
+        <span class="betfair-placed">🥉 3rd</span>
+    {% elif horse.final_position %}
+        <span class="betfair-placed">{{ horse.final_position }}th</span>
+    {% else %}
+        -
+    {% endif %}
+</td>
+{% endmacro %}
+
+{# Betfair CSS styles #}
+{% macro betfair_styles() %}
+<style>
+.betfair-column {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%) !important;
+}
+
+.betfair-odds {
+    font-weight: 600;
+    color: #28a745;
+}
+
+.betfair-odds-updated {
+    animation: betfair-flash 0.5s ease;
+}
+
+@keyframes betfair-flash {
+    0% { background-color: #d4edda; }
+    100% { background-color: transparent; }
+}
+
+.betfair-final {
+    color: #17a2b8 !important;
+}
+
+.betfair-winner {
+    color: #ffc107;
+    font-weight: bold;
+}
+
+.betfair-placed {
+    color: #6c757d;
+    font-weight: 600;
+}
+
+.betfair-loser {
+    color: #dc3545;
+}
+
+.betfair-winner-row {
+    background: linear-gradient(90deg, rgba(255, 193, 7, 0.2), rgba(255, 193, 7, 0.1)) !important;
+}
+
+.betfair-placed-row {
+    background: linear-gradient(90deg, rgba(108, 117, 125, 0.1), rgba(108, 117, 125, 0.05)) !important;
+}
+
+/* Connection status indicator */
+.betfair-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.betfair-status-connected {
+    background: #d4edda;
+    color: #155724;
+}
+
+.betfair-status-disconnected {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.betfair-status-error {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.betfair-status::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.betfair-status-connected::before {
+    background: #28a745;
+    animation: pulse 2s infinite;
+}
+
+.betfair-status-disconnected::before {
+    background: #ffc107;
+}
+
+.betfair-status-error::before {
+    background: #dc3545;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+</style>
+{% endmacro %}
+
+{# Connection status indicator widget #}
+{% macro betfair_status_widget() %}
+<div id="betfair-connection-status" class="betfair-status betfair-status-disconnected" title="Betfair: connecting...">
+    <span class="betfair-status-text">Connecting...</span>
+</div>
+{% endmacro %}
+
+{# Container element for Betfair initialization #}
+{% macro betfair_container() %}
+<div id="betfair-live-container" data-enabled="true" style="display: none;"></div>
+{% endmacro %}
