@@ -197,36 +197,39 @@
             // Update live odds
             const oddsCell = row.querySelector('[data-betfair-cell="live-odds"] .betfair-odds');
             if (oddsCell) {
-                let odds = '-';
+                let oddsValue = null;
                 
                 // Prefer best back price, fall back to last traded price
                 if (runner.best_back && runner.best_back.price) {
-                    odds = formatOdds(runner.best_back.price);
+                    oddsValue = runner.best_back.price;
                 } else if (runner.last_price_traded) {
-                    odds = formatOdds(runner.last_price_traded);
+                    oddsValue = runner.last_price_traded;
                 }
 
-                // Add visual indicator for odds movement
-                const previousOdds = parseFloat(oddsCell.getAttribute('data-previous-odds') || '0');
-                const currentOdds = parseFloat(odds) || 0;
-                
-                if (previousOdds > 0 && currentOdds > 0) {
-                    if (currentOdds < previousOdds) {
-                        // Odds shortened (better for backers)
-                        oddsCell.style.color = '#27ae60'; // Green
-                    } else if (currentOdds > previousOdds) {
-                        // Odds drifted
-                        oddsCell.style.color = '#e74c3c'; // Red
-                    }
+                // Only update if we have valid odds
+                if (oddsValue !== null && oddsValue > 0) {
+                    const previousOdds = parseFloat(oddsCell.getAttribute('data-previous-odds') || '0');
+                    const currentOdds = parseFloat(oddsValue);
                     
-                    // Reset color after a short delay
-                    setTimeout(() => {
-                        oddsCell.style.color = '#333';
-                    }, 2000);
-                }
+                    // Add visual indicator for odds movement
+                    if (previousOdds > 0 && currentOdds > 0 && !isNaN(previousOdds) && !isNaN(currentOdds)) {
+                        if (currentOdds < previousOdds) {
+                            // Odds shortened (better for backers)
+                            oddsCell.style.color = '#27ae60'; // Green
+                        } else if (currentOdds > previousOdds) {
+                            // Odds drifted
+                            oddsCell.style.color = '#e74c3c'; // Red
+                        }
+                        
+                        // Reset color after a short delay
+                        setTimeout(() => {
+                            oddsCell.style.color = '#333';
+                        }, 2000);
+                    }
 
-                oddsCell.textContent = odds;
-                oddsCell.setAttribute('data-previous-odds', odds);
+                    oddsCell.textContent = formatOdds(currentOdds);
+                    oddsCell.setAttribute('data-previous-odds', String(currentOdds));
+                }
             }
         });
     }
@@ -294,6 +297,7 @@
 
     /**
      * Find a table row by horse name (fallback matching)
+     * Uses exact name matching to avoid false positives
      */
     function findRunnerRowByName(horseName) {
         if (!horseName) return null;
@@ -305,9 +309,12 @@
             // Look for horse name in the row
             const nameCell = row.querySelector('td:nth-child(2)');
             if (nameCell) {
-                const rowName = nameCell.textContent.toLowerCase().trim();
-                // Check if the row contains the horse name
-                if (rowName.includes(normalizedName) || normalizedName.includes(rowName.split('\n')[0])) {
+                // Get the first line of text (horse name without jockey/trainer info)
+                const cellText = nameCell.textContent || '';
+                const firstLine = cellText.split('\n')[0].toLowerCase().trim();
+                
+                // Use exact match or check if the cell's first line exactly matches
+                if (firstLine === normalizedName) {
                     return row;
                 }
             }

@@ -77,14 +77,21 @@ def setup_certificate() -> Optional[str]:
     global cert_file_path
     
     if BETFAIR_PEM_B64:
-        # Decode base64 PEM and write to temp file
+        # Decode base64 PEM and write to temp file with secure permissions from start
         try:
             pem_content = base64.b64decode(BETFAIR_PEM_B64)
-            # Create a secure temp file
-            fd, cert_file_path = tempfile.mkstemp(suffix='.pem', prefix='betfair_')
-            with os.fdopen(fd, 'wb') as f:
+            # Create a secure temp file with restricted permissions (0o600) from creation
+            # Using NamedTemporaryFile to ensure secure creation with proper mode
+            with tempfile.NamedTemporaryFile(
+                mode='wb',
+                suffix='.pem',
+                prefix='betfair_',
+                delete=False
+            ) as f:
+                # Set secure permissions before writing content
+                os.chmod(f.name, 0o600)
                 f.write(pem_content)
-            os.chmod(cert_file_path, 0o600)
+                cert_file_path = f.name
             logger.info(f"Certificate decoded from BETFAIR_PEM_B64 and written to {cert_file_path}")
             return cert_file_path
         except Exception as e:
