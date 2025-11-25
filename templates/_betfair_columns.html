@@ -1,0 +1,20 @@
+{# 
+    Betfair Live Odds Column Headers
+    ================================
+    
+    This partial adds Betfair live odds column headers to results tables.
+    The JavaScript (betfair-live.js) will automatically add columns if they
+    don't exist, so this partial is optional but provides better initial layout.
+    
+    Usage in a template:
+        {% include '_betfair_columns.html' %}
+    
+    The columns are added to table headers. Make sure this is included
+    within a <thead><tr> element.
+#}
+
+{# Only render if Betfair is enabled #}
+{% if config.get('BETFAIR_ENABLED') %}
+<th class="betfair-odds-header" style="padding: 12px; text-align: center;">Live Odds</th>
+<th class="betfair-result-header" style="padding: 12px; text-align: center;">Result</th>
+{% endif %}

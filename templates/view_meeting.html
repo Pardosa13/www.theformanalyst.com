@@ -602,4 +602,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+
+{# Betfair Live Odds Integration - Enable by setting BETFAIR_ENABLED=true in environment #}
+{% if config.get('BETFAIR_ENABLED') %}
+<script src="{{ url_for('static', filename='js/betfair-live.js') }}"></script>
+{% endif %}
 {% endblock %}
