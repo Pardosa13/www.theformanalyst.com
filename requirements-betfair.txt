@@ -1,0 +1,5 @@
+# Additional requirements for Betfair integration
+# Install with: pip install -r requirements-betfair.txt
+
+Flask==3.0.0
+requests==2.31.0
