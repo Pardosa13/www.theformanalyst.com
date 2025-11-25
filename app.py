@@ -15,6 +15,10 @@ app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-product
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///formanalyst.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Betfair integration configuration (off by default)
+app.config['BETFAIR_ENABLED'] = os.environ.get('BETFAIR_ENABLED', 'false').lower() == 'true'
+app.config['BETFAIR_SERVICE_URL'] = os.environ.get('BETFAIR_SERVICE_URL', '/betfair')
+
 # Fix for postgres:// vs postgresql:// (Railway uses postgres://)
 if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
     app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)

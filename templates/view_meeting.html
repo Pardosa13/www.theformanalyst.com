@@ -110,6 +110,7 @@
                     <th style="padding: 12px; text-align: center;">Odds</th>
                     <th style="padding: 12px; text-align: center;">Win %</th>
                     <th style="padding: 12px; text-align: left;">Notes</th>
+                    {% if config.get('BETFAIR_ENABLED') %}{% include '_betfair_columns.html' %}{% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -602,4 +603,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+{% if config.get('BETFAIR_ENABLED') %}
+<script>
+    // Configure Betfair service URL from config or default
+    window.BETFAIR_SERVICE_URL = '{{ config.get("BETFAIR_SERVICE_URL", "/betfair") }}';
+</script>
+<script src="{{ url_for('static', filename='js/betfair-live.js') }}"></script>
+{% endif %}
 {% endblock %}
