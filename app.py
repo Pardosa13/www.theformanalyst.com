@@ -596,9 +596,13 @@ def admin_betfair_mapping_update():
             horse_id = key.replace("selection_", "")
             selection_id = value.strip()
             if horse_id and selection_id:
-                horse = Horse.query.get(int(horse_id))
-                if horse and horse.race_id == race.id:
-                    horse.betfair_selection_id = int(selection_id) if selection_id.isdigit() else None
+                try:
+                    horse = Horse.query.get(int(horse_id))
+                    if horse and horse.race_id == race.id:
+                        horse.betfair_selection_id = int(selection_id)
+                except (ValueError, TypeError):
+                    # Skip invalid IDs
+                    pass
     
     db.session.commit()
     flash(f"Updated Betfair mapping for Race {race.race_number}", "success")

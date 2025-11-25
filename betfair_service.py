@@ -56,6 +56,9 @@ BETFAIR_POLL_INTERVAL = int(os.environ.get('BETFAIR_POLL_INTERVAL', '2'))
 BETFAIR_TLD = os.environ.get('BETFAIR_TLD', 'com')
 PORT = int(os.environ.get('PORT', '8081'))
 
+# Betfair API limits
+BETFAIR_MAX_MARKETS_PER_REQUEST = 40  # Betfair API limit
+
 # Betfair API endpoints
 IDENTITY_URL = f'https://identitysso.betfair.{BETFAIR_TLD}/api'
 IDENTITY_CERT_URL = f'https://identitysso-cert.betfair.{BETFAIR_TLD}/api'
@@ -425,9 +428,9 @@ def poll_markets():
                 time.sleep(BETFAIR_POLL_INTERVAL * 5)  # Longer sleep when no markets
                 continue
             
-            # Betfair limits to 40 markets per request
-            for i in range(0, len(market_ids), 40):
-                batch = market_ids[i:i + 40]
+            # Process markets in batches
+            for i in range(0, len(market_ids), BETFAIR_MAX_MARKETS_PER_REQUEST):
+                batch = market_ids[i:i + BETFAIR_MAX_MARKETS_PER_REQUEST]
                 
                 market_books = get_market_book(batch)
                 
