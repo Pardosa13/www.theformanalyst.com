@@ -230,7 +230,7 @@
      * Update runner with live odds
      */
     function updateRunner(runner) {
-        const row = findRunnerRow(runner.selectionId);
+        const row = findRunnerRow(runner.selectionId, runner.runnerName);
         if (!row) return;
 
         // Find or create odds cell
@@ -259,7 +259,7 @@
      * Update runner with final result
      */
     function updateRunnerResult(runner, position) {
-        const row = findRunnerRow(runner.selectionId);
+        const row = findRunnerRow(runner.selectionId, runner.runnerName);
         if (!row) return;
 
         // Find or create result cell

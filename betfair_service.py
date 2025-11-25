@@ -331,23 +331,34 @@ def save_raw_payload(market_id, payload):
 
 
 def persist_results(market_id, runners):
-    """Persist final results to database."""
+    """Persist final results to database.
+    
+    Note: Betfair only provides WINNER, PLACED, or LOSER status.
+    For placed runners, we can't determine exact position from the API alone.
+    We set placed runners to position 0 to indicate 'placed but position unknown'.
+    """
     try:
         from sqlalchemy import text
         engine = get_db_connection()
         
         with engine.connect() as conn:
+            # Track placed runner count to approximate positions
+            placed_position = 2
+            
             for runner in runners:
                 selection_id = runner.get('selectionId')
                 status = runner.get('status')
                 
                 # Determine final position from status
+                # Note: Betfair doesn't provide exact positions for non-winners
                 final_position = None
                 if status == 'WINNER':
                     final_position = 1
                 elif status == 'PLACED':
-                    # Could be 2nd, 3rd, etc. - Betfair doesn't give exact position for placed
-                    final_position = 2  # Approximate
+                    # Placed but exact position unknown - use incrementing value
+                    # This is approximate since Betfair doesn't give exact positions
+                    final_position = placed_position
+                    placed_position += 1
                 elif status == 'LOSER':
                     final_position = None  # Unknown position for losers
                 
@@ -437,6 +448,7 @@ def poll_markets():
                         for runner in runners:
                             runner_update = {
                                 'selectionId': runner.get('selectionId'),
+                                'runnerName': runner.get('runnerName', ''),  # Include runner name for fallback matching
                                 'status': runner.get('status'),
                                 'lastPriceTraded': runner.get('lastPriceTraded'),
                                 'totalMatched': runner.get('totalMatched')

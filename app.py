@@ -504,12 +504,12 @@ def betfair_mapping():
     
     # Get all unmapped races (races without betfair_market_id)
     unmapped_races = Race.query.filter(
-        (Race.betfair_market_id == None) | (Race.betfair_mapped == False)
+        (Race.betfair_market_id.is_(None)) | (Race.betfair_mapped == False)
     ).join(Meeting).order_by(Meeting.uploaded_at.desc(), Race.race_number).all()
     
     # Get all mapped races
     mapped_races = Race.query.filter(
-        Race.betfair_market_id != None,
+        Race.betfair_market_id.isnot(None),
         Race.betfair_mapped == True
     ).join(Meeting).order_by(Meeting.uploaded_at.desc(), Race.race_number).all()
     
