@@ -1,0 +1,6 @@
+# Betfair Service Requirements
+# These are additional dependencies for the Betfair live odds service
+# Install with: pip install -r requirements-betfair.txt
+
+Flask>=3.0.0
+requests>=2.31.0
