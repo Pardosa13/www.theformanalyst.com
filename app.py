@@ -1,7 +1,7 @@
 import os
 import json
 import subprocess
-from flask import Flask, render_template, redirect, url_for, request, flash
+from flask import Flask, render_template, redirect, url_for, request, flash, Response
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
 from datetime import datetime
@@ -14,6 +14,10 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///formanalyst.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Betfair integration config (disabled by default)
+app.config['BETFAIR_ENABLED'] = os.environ.get('BETFAIR_ENABLED', 'false').lower() == 'true'
+app.config['BETFAIR_SERVICE_URL'] = os.environ.get('BETFAIR_SERVICE_URL', 'http://localhost:8081')
 
 # Fix for postgres:// vs postgresql:// (Railway uses postgres://)
 if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
@@ -184,6 +188,7 @@ def get_meeting_results(meeting_id):
             'distance': race.distance,
             'race_class': race.race_class,
             'track_condition': race.track_condition,
+            'market_id': race.market_id,
             'horses': []
         }
         
@@ -201,7 +206,13 @@ def get_meeting_results(meeting_id):
                 'win_probability': pred.win_probability if pred else '',
                 'performance_component': pred.performance_component if pred else '',
                 'base_probability': pred.base_probability if pred else '',
-                'notes': pred.notes if pred else ''
+                'notes': pred.notes if pred else '',
+                # Betfair fields
+                'betfair_selection_id': horse.betfair_selection_id,
+                'final_position': horse.final_position,
+                'final_odds': horse.final_odds,
+                'result_settled_at': horse.result_settled_at,
+                'result_source': horse.result_source
             }
             race_data['horses'].append(horse_data)
         
@@ -476,6 +487,172 @@ def admin_panel():
     }
     
     return render_template("admin.html", stats=stats)
+
+
+# ----- Betfair Integration Routes -----
+
+@app.route("/betfair/stream")
+@login_required
+def betfair_stream():
+    """
+    Proxy endpoint for Betfair SSE stream.
+    This allows the frontend to connect to the Betfair service through the main app.
+    """
+    if not app.config.get('BETFAIR_ENABLED'):
+        return Response(
+            'data: {"error": "Betfair integration is disabled"}\n\n',
+            mimetype='text/event-stream'
+        )
+    
+    import requests
+    
+    def generate():
+        try:
+            betfair_url = app.config.get('BETFAIR_SERVICE_URL', 'http://localhost:8081')
+            response = requests.get(
+                f'{betfair_url}/stream',
+                stream=True,
+                timeout=(5, None)  # 5s connect, no read timeout
+            )
+            
+            for line in response.iter_lines(decode_unicode=True):
+                if line:
+                    yield line + '\n'
+                else:
+                    yield '\n'
+                    
+        except requests.RequestException as e:
+            yield f'data: {{"error": "Failed to connect to Betfair service: {str(e)}"}}\n\n'
+    
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+
+@app.route("/admin/betfair-mapping")
+@login_required
+def admin_betfair_mapping():
+    """
+    Admin UI for Betfair market mapping.
+    Lists unmapped races and provides a manual mapping interface.
+    """
+    if not current_user.is_admin:
+        flash("Access denied", "danger")
+        return redirect(url_for("dashboard"))
+    
+    # Get races without market_id
+    unmapped_races = Race.query.filter(
+        (Race.market_id.is_(None)) | (Race.market_id == '')
+    ).join(Meeting).order_by(Meeting.date.desc(), Race.race_number).all()
+    
+    # Get races with market_id for reference
+    mapped_races = Race.query.filter(
+        Race.market_id.isnot(None),
+        Race.market_id != ''
+    ).join(Meeting).order_by(Meeting.date.desc(), Race.race_number).limit(20).all()
+    
+    return render_template(
+        "admin_betfair_mapping.html",
+        unmapped_races=unmapped_races,
+        mapped_races=mapped_races,
+        betfair_enabled=app.config.get('BETFAIR_ENABLED', False)
+    )
+
+
+@app.route("/admin/betfair-mapping/update", methods=["POST"])
+@login_required
+def admin_betfair_mapping_update():
+    """
+    Update Betfair mapping for a race.
+    """
+    if not current_user.is_admin:
+        flash("Access denied", "danger")
+        return redirect(url_for("dashboard"))
+    
+    race_id = request.form.get("race_id")
+    market_id = request.form.get("market_id", "").strip()
+    
+    if not race_id:
+        flash("Race ID is required", "danger")
+        return redirect(url_for("admin_betfair_mapping"))
+    
+    race = Race.query.get(race_id)
+    if not race:
+        flash("Race not found", "danger")
+        return redirect(url_for("admin_betfair_mapping"))
+    
+    # Update market ID
+    race.market_id = market_id if market_id else None
+    
+    # Also update selection IDs if provided
+    for key, value in request.form.items():
+        if key.startswith("selection_"):
+            horse_id = key.replace("selection_", "")
+            selection_id = value.strip()
+            if horse_id and selection_id:
+                try:
+                    horse = Horse.query.get(int(horse_id))
+                    if horse and horse.race_id == race.id:
+                        horse.betfair_selection_id = int(selection_id)
+                except (ValueError, TypeError):
+                    # Skip invalid IDs
+                    pass
+    
+    db.session.commit()
+    flash(f"Updated Betfair mapping for Race {race.race_number}", "success")
+    return redirect(url_for("admin_betfair_mapping"))
+
+
+# ----- Fuzzy Matching Helper for Auto-Mapping -----
+
+def normalize_horse_name(name):
+    """Normalize horse name for comparison."""
+    if not name:
+        return ""
+    # Remove common suffixes, lowercase, strip whitespace
+    import re
+    name = name.lower().strip()
+    name = re.sub(r'\s*\([^)]*\)\s*', '', name)  # Remove parenthetical
+    name = re.sub(r'\s+', ' ', name)  # Normalize whitespace
+    return name
+
+
+def fuzzy_match_score(name1, name2):
+    """
+    Simple fuzzy match score between two horse names.
+    Returns a score from 0 to 100.
+    """
+    n1 = normalize_horse_name(name1)
+    n2 = normalize_horse_name(name2)
+    
+    if not n1 or not n2:
+        return 0
+    
+    # Exact match
+    if n1 == n2:
+        return 100
+    
+    # One contains the other
+    if n1 in n2 or n2 in n1:
+        return 90
+    
+    # Calculate simple ratio based on common characters
+    set1 = set(n1.replace(' ', ''))
+    set2 = set(n2.replace(' ', ''))
+    intersection = len(set1 & set2)
+    union = len(set1 | set2)
+    
+    if union == 0:
+        return 0
+    
+    jaccard = (intersection / union) * 100
+    return int(jaccard)
 
 
 # Error handlers

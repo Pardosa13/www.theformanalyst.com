@@ -63,6 +63,9 @@ class Race(db.Model):
     race_class = db.Column(db.String(50))
     track_condition = db.Column(db.String(50))
     
+    # Betfair integration
+    market_id = db.Column(db.String(50), nullable=True, index=True)
+    
     # Relationships
     horses = db.relationship('Horse', backref='race', lazy=True, cascade='all, delete-orphan')
     
@@ -85,6 +88,13 @@ class Horse(db.Model):
     
     # Store all CSV data as JSON for flexibility
     csv_data = db.Column(db.JSON)
+    
+    # Betfair integration fields
+    betfair_selection_id = db.Column(db.Integer, nullable=True, index=True)
+    final_position = db.Column(db.Integer, nullable=True)
+    final_odds = db.Column(db.Float, nullable=True)
+    result_settled_at = db.Column(db.DateTime, nullable=True)
+    result_source = db.Column(db.String(50), nullable=True)
     
     # Relationships
     prediction = db.relationship('Prediction', backref='horse', uselist=False, cascade='all, delete-orphan')

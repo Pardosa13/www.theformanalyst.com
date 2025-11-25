@@ -101,13 +101,14 @@
     </div>
     
     <div style="overflow-x: auto;">
-        <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 10px;"{% if config.get('BETFAIR_ENABLED') %} data-market-id="{{ race.market_id }}"{% endif %}>
             <thead>
                 <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
                     <th style="padding: 12px; text-align: center; width: 50px;">Pos</th>
                     <th style="padding: 12px; text-align: left;">Horse</th>
                     <th style="padding: 12px; text-align: center;">Score</th>
                     <th style="padding: 12px; text-align: center;">Odds</th>
+                    {% if config.get('BETFAIR_ENABLED') %}{% include '_betfair_columns.html' %}{% endif %}
                     <th style="padding: 12px; text-align: center;">Win %</th>
                     <th style="padding: 12px; text-align: left;">Notes</th>
                 </tr>
@@ -118,7 +119,7 @@
                     {% elif loop.index == 2 %}style="background-color: #fff3cd;"
                     {% elif loop.index == 3 %}style="background-color: #ffe4b3;"
                     {% else %}style="background-color: {% if loop.index is odd %}#f8f9fa{% else %}#ffffff{% endif %};"
-                    {% endif %}>
+                    {% endif %}{% if config.get('BETFAIR_ENABLED') and horse.betfair_selection_id %} data-selection-id="{{ horse.betfair_selection_id }}"{% endif %}>
                     <td style="padding: 12px; text-align: center; font-weight: bold; border-bottom: 1px solid #e2e8f0;">
                         {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
                     </td>
@@ -135,6 +136,16 @@
                     <td style="padding: 12px; text-align: center; font-weight: 600; border-bottom: 1px solid #e2e8f0; color: #28a745;">
                         {{ horse.odds }}
                     </td>
+                    {% if config.get('BETFAIR_ENABLED') %}
+                    <td class="betfair-live-odds" style="padding: 12px; text-align: center; font-weight: 600; border-bottom: 1px solid #e2e8f0; color: #17a2b8;">
+                        -
+                    </td>
+                    <td class="betfair-result" style="padding: 12px; text-align: center; font-weight: bold; border-bottom: 1px solid #e2e8f0;">
+                        {% if horse.final_position %}
+                            {% if horse.final_position == 1 %}🏆 1st{% elif horse.final_position == 2 %}2nd{% elif horse.final_position == 3 %}3rd{% else %}{{ horse.final_position }}th{% endif %}
+                        {% else %}-{% endif %}
+                    </td>
+                    {% endif %}
                     <td style="padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0;">
                         {{ horse.win_probability }}
                     </td>
@@ -602,4 +613,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+{% if config.get('BETFAIR_ENABLED') %}
+<script src="{{ url_for('static', filename='js/betfair-live.js') }}"></script>
+{% endif %}
 {% endblock %}
