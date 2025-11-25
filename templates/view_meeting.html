@@ -143,10 +143,10 @@
                     </td>
                     {% if config.get('BETFAIR_ENABLED') %}
                     <td class="betfair-odds-cell" style="padding: 12px; text-align: center; font-weight: 600; border-bottom: 1px solid #e2e8f0; color: #17a2b8;">
-                        {% if horse.final_odds %}{{ "%.2f"|format(horse.final_odds) }}{% else %}-{% endif %}
+                        {% if horse.final_odds is not none %}{{ "%.2f"|format(horse.final_odds) }}{% else %}-{% endif %}
                     </td>
                     <td class="betfair-result-cell" style="padding: 12px; text-align: center; font-weight: 600; border-bottom: 1px solid #e2e8f0;">
-                        {% if horse.final_position == 1 %}🥇 1st{% elif horse.final_position == 2 %}🥈 2nd{% elif horse.final_position == 3 %}🥉 3rd{% elif horse.final_position %} {{ horse.final_position }}{% else %}-{% endif %}
+                        {% if horse.final_position == 1 %}🥇 1st{% elif horse.final_position == 2 %}🥈 2nd{% elif horse.final_position == 3 %}🥉 3rd{% elif horse.final_position is not none %}{{ horse.final_position }}{% else %}-{% endif %}
                     </td>
                     {% endif %}
                     <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; font-size: 11px; max-width: 300px;">

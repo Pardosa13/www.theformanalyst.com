@@ -35,9 +35,17 @@
      * Find table row by selection ID or horse name
      */
     function findRowBySelection(selectionId, runnerName) {
-        // First, try to find by data-selection-id attribute
-        const byId = document.querySelector(`tr[data-selection-id="${selectionId}"]`);
-        if (byId) return byId;
+        // Sanitize selectionId to ensure it's a valid integer
+        const sanitizedId = parseInt(selectionId, 10);
+        if (!isNaN(sanitizedId)) {
+            // Use attribute selector with proper escaping
+            const rows = document.querySelectorAll('table tbody tr[data-selection-id]');
+            for (const row of rows) {
+                if (row.getAttribute('data-selection-id') === String(sanitizedId)) {
+                    return row;
+                }
+            }
+        }
 
         // Fallback: try to match by horse name
         if (!runnerName) return null;
@@ -51,8 +59,10 @@
 
             const horseName = nameCell.querySelector('div')?.textContent || nameCell.textContent;
             if (normalizeName(horseName) === normalizedRunnerName) {
-                // Set the selection ID for future lookups
-                row.setAttribute('data-selection-id', selectionId);
+                // Set the selection ID for future lookups (sanitized)
+                if (!isNaN(sanitizedId)) {
+                    row.setAttribute('data-selection-id', String(sanitizedId));
+                }
                 return row;
             }
         }

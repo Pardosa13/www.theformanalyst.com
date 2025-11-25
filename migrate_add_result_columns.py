@@ -21,7 +21,24 @@ def get_db_engine():
     """Create database engine from environment or default"""
     from sqlalchemy import create_engine
     
-    database_url = os.environ.get('DATABASE_URL', 'sqlite:///formanalyst.db')
+    database_url = os.environ.get('DATABASE_URL', '')
+    
+    # Default to SQLite in the instance directory (Flask default)
+    if not database_url:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # Try instance/ first (Flask-SQLAlchemy default), then current dir
+        instance_db = os.path.join(script_dir, 'instance', 'formanalyst.db')
+        current_db = os.path.join(script_dir, 'formanalyst.db')
+        
+        if os.path.exists(instance_db):
+            db_path = instance_db
+        elif os.path.exists(current_db):
+            db_path = current_db
+        else:
+            # Default to instance location
+            db_path = instance_db
+        
+        database_url = f'sqlite:///{db_path}'
     
     # Fix for postgres:// vs postgresql:// (Railway uses postgres://)
     if database_url.startswith('postgres://'):
@@ -33,10 +50,22 @@ def get_db_engine():
 def check_column_exists(engine, table_name, column_name):
     """Check if a column exists in a table"""
     from sqlalchemy import inspect
+    from sqlalchemy.exc import NoSuchTableError
+    
+    try:
+        inspector = inspect(engine)
+        columns = [col['name'] for col in inspector.get_columns(table_name)]
+        return column_name in columns
+    except NoSuchTableError:
+        return False
+
+
+def check_table_exists(engine, table_name):
+    """Check if a table exists"""
+    from sqlalchemy import inspect
     
     inspector = inspect(engine)
-    columns = [col['name'] for col in inspector.get_columns(table_name)]
-    return column_name in columns
+    return table_name in inspector.get_table_names()
 
 
 def add_column_if_not_exists(engine, table_name, column_name, column_type, dry_run=True):
@@ -108,6 +137,15 @@ def run_migration(dry_run=True):
     
     engine = get_db_engine()
     changes_needed = []
+    
+    # Check if tables exist
+    if not check_table_exists(engine, 'horses'):
+        print("  ⚠ Table 'horses' does not exist - run the main app first to create tables")
+        return True  # No migration needed yet
+    
+    if not check_table_exists(engine, 'races'):
+        print("  ⚠ Table 'races' does not exist - run the main app first to create tables")
+        return True  # No migration needed yet
     
     # Horse table columns
     print("Checking 'horses' table:")

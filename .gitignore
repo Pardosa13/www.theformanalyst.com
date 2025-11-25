@@ -58,6 +58,7 @@ node_modules/
 *.db
 *.sqlite
 *.sqlite3
+instance/
 
 # Logs
 *.log

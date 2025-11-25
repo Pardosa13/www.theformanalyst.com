@@ -167,8 +167,8 @@ def get_market_ids() -> List[str]:
 
 
 def payload_hash(payload: dict) -> str:
-    """Create hash of payload for deduplication"""
-    return hashlib.md5(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    """Create hash of payload for deduplication using SHA-256"""
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def broadcast_message(message: dict):
@@ -198,12 +198,13 @@ def update_horse_result(selection_id: int, market_id: str, position: int, odds: 
                 SET final_position = :position,
                     final_odds = :odds,
                     result_settled_at = :settled_at,
-                    result_source = 'betfair'
+                    result_source = :result_source
                 WHERE betfair_selection_id = :selection_id
             """), {
                 'position': position,
                 'odds': odds,
                 'settled_at': datetime.utcnow(),
+                'result_source': 'betfair',
                 'selection_id': selection_id
             })
             conn.commit()
