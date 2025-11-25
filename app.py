@@ -15,6 +15,10 @@ app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-product
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///formanalyst.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Betfair integration configuration
+app.config['BETFAIR_ENABLED'] = os.environ.get('BETFAIR_ENABLED', 'false').lower() == 'true'
+app.config['BETFAIR_SERVICE_URL'] = os.environ.get('BETFAIR_SERVICE_URL', '')
+
 # Fix for postgres:// vs postgresql:// (Railway uses postgres://)
 if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
     app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
@@ -201,7 +205,13 @@ def get_meeting_results(meeting_id):
                 'win_probability': pred.win_probability if pred else '',
                 'performance_component': pred.performance_component if pred else '',
                 'base_probability': pred.base_probability if pred else '',
-                'notes': pred.notes if pred else ''
+                'notes': pred.notes if pred else '',
+                # Betfair integration fields
+                'betfair_selection_id': horse.betfair_selection_id,
+                'final_position': horse.final_position,
+                'final_odds': horse.final_odds,
+                'result_settled_at': horse.result_settled_at,
+                'result_source': horse.result_source
             }
             race_data['horses'].append(horse_data)
         
@@ -476,6 +486,100 @@ def admin_panel():
     }
     
     return render_template("admin.html", stats=stats)
+
+
+# ----- Betfair Mapping Admin -----
+@app.route("/admin/betfair-mapping")
+@login_required
+def betfair_mapping():
+    """Admin UI for Betfair market/selection mapping"""
+    if not current_user.is_admin:
+        flash("Access denied", "danger")
+        return redirect(url_for("dashboard"))
+    
+    if not app.config.get('BETFAIR_ENABLED'):
+        flash("Betfair integration is not enabled", "warning")
+        return redirect(url_for("admin_panel"))
+    
+    # Get all races that need mapping (no betfair_market_id set)
+    unmapped_races = Race.query.filter(
+        Race.betfair_market_id.is_(None)
+    ).order_by(Race.meeting_id.desc()).all()
+    
+    # Get races with low confidence mapping
+    low_confidence_races = Race.query.filter(
+        Race.betfair_market_id.isnot(None),
+        Race.betfair_mapping_confidence < 0.8
+    ).order_by(Race.meeting_id.desc()).all()
+    
+    # Get successfully mapped races
+    mapped_races = Race.query.filter(
+        Race.betfair_market_id.isnot(None),
+        Race.betfair_mapping_confidence >= 0.8
+    ).order_by(Race.meeting_id.desc()).limit(20).all()
+    
+    return render_template("betfair_mapping.html",
+                         unmapped_races=unmapped_races,
+                         low_confidence_races=low_confidence_races,
+                         mapped_races=mapped_races)
+
+
+@app.route("/admin/betfair-mapping/assign", methods=["POST"])
+@login_required
+def assign_betfair_mapping():
+    """Assign Betfair market ID to a race"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    race_id = request.form.get('race_id')
+    market_id = request.form.get('market_id')
+    
+    if not race_id or not market_id:
+        flash("Race ID and Market ID are required", "danger")
+        return redirect(url_for("betfair_mapping"))
+    
+    race = Race.query.get(race_id)
+    if not race:
+        flash("Race not found", "danger")
+        return redirect(url_for("betfair_mapping"))
+    
+    race.betfair_market_id = market_id
+    race.betfair_mapping_confidence = 1.0  # Manual mapping = high confidence
+    race.betfair_mapped_at = datetime.utcnow()
+    
+    db.session.commit()
+    flash(f"Market {market_id} assigned to Race {race.race_number}", "success")
+    return redirect(url_for("betfair_mapping"))
+
+
+@app.route("/admin/betfair-mapping/assign-selection", methods=["POST"])
+@login_required
+def assign_betfair_selection():
+    """Assign Betfair selection ID to a horse"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    horse_id = request.form.get('horse_id')
+    selection_id = request.form.get('selection_id')
+    
+    if not horse_id or not selection_id:
+        flash("Horse ID and Selection ID are required", "danger")
+        return redirect(url_for("betfair_mapping"))
+    
+    horse = Horse.query.get(horse_id)
+    if not horse:
+        flash("Horse not found", "danger")
+        return redirect(url_for("betfair_mapping"))
+    
+    horse.betfair_selection_id = int(selection_id)
+    db.session.commit()
+    
+    flash(f"Selection {selection_id} assigned to {horse.horse_name}", "success")
+    return redirect(url_for("betfair_mapping"))
+
+
+# Import jsonify for API responses
+from flask import jsonify
 
 
 # Error handlers

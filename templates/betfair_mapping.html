@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+
+{% block title %}Betfair Market Mapping - Admin{% endblock %}
+
+{% block content %}
+<h1><i class="bi bi-link-45deg"></i> Betfair Market Mapping</h1>
+
+<div style="margin-bottom: 20px;">
+    <a href="{{ url_for('admin_panel') }}" style="color: #667eea; text-decoration: none;">← Back to Admin Panel</a>
+</div>
+
+<!-- Status Card -->
+<div class="card" style="margin-bottom: 20px;">
+    <div class="card-header">
+        <i class="bi bi-info-circle"></i> Mapping Status
+    </div>
+    <div class="card-body">
+        <div style="display: flex; gap: 30px; flex-wrap: wrap;">
+            <div class="stat-card primary" style="flex: 1; min-width: 150px;">
+                <div style="font-size: 28px; font-weight: bold; color: #667eea;">{{ unmapped_races|length }}</div>
+                <div style="color: #6c757d;">Unmapped Races</div>
+            </div>
+            <div class="stat-card warning" style="flex: 1; min-width: 150px;">
+                <div style="font-size: 28px; font-weight: bold; color: #f39c12;">{{ low_confidence_races|length }}</div>
+                <div style="color: #6c757d;">Low Confidence</div>
+            </div>
+            <div class="stat-card success" style="flex: 1; min-width: 150px;">
+                <div style="font-size: 28px; font-weight: bold; color: #27ae60;">{{ mapped_races|length }}</div>
+                <div style="color: #6c757d;">Successfully Mapped</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Unmapped Races -->
+{% if unmapped_races %}
+<div class="card" style="margin-bottom: 20px;">
+    <div class="card-header" style="background: linear-gradient(135deg, #e74c3c, #c0392b);">
+        <i class="bi bi-exclamation-triangle"></i> Unmapped Races
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Meeting</th>
+                        <th>Race #</th>
+                        <th>Distance</th>
+                        <th>Horses</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for race in unmapped_races[:20] %}
+                    <tr>
+                        <td>{{ race.meeting.meeting_name }}</td>
+                        <td>{{ race.race_number }}</td>
+                        <td>{{ race.distance or '-' }}</td>
+                        <td>{{ race.horses|length }}</td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#mapModal{{ race.id }}">
+                                <i class="bi bi-link"></i> Map
+                            </button>
+                        </td>
+                    </tr>
+                    
+                    <!-- Mapping Modal -->
+                    <div class="modal fade" id="mapModal{{ race.id }}" tabindex="-1">
+                        <div class="modal-dialog modal-lg">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title">Map Race {{ race.race_number }} - {{ race.meeting.meeting_name }}</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <form action="{{ url_for('assign_betfair_mapping') }}" method="post">
+                                    <div class="modal-body">
+                                        <input type="hidden" name="race_id" value="{{ race.id }}">
+                                        
+                                        <div class="mb-3">
+                                            <label class="form-label"><strong>Horses in this race:</strong></label>
+                                            <ul style="max-height: 150px; overflow-y: auto; background: #f8f9fa; padding: 10px; border-radius: 8px;">
+                                                {% for horse in race.horses %}
+                                                <li>{{ horse.horse_name }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                        
+                                        <div class="mb-3">
+                                            <label for="market_id_{{ race.id }}" class="form-label"><strong>Betfair Market ID:</strong></label>
+                                            <input type="text" class="form-control" id="market_id_{{ race.id }}" name="market_id" 
+                                                   placeholder="e.g., 1.234567890" required>
+                                            <div class="form-text">
+                                                Find the market ID on Betfair Exchange. Format: 1.XXXXXXXXX
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                        <button type="submit" class="btn btn-primary">
+                                            <i class="bi bi-check-circle"></i> Assign Market
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if unmapped_races|length > 20 %}
+        <p class="text-muted">Showing 20 of {{ unmapped_races|length }} unmapped races.</p>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Low Confidence Mappings -->
+{% if low_confidence_races %}
+<div class="card" style="margin-bottom: 20px;">
+    <div class="card-header" style="background: linear-gradient(135deg, #f39c12, #e67e22);">
+        <i class="bi bi-exclamation-circle"></i> Low Confidence Mappings (Review Recommended)
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Meeting</th>
+                        <th>Race #</th>
+                        <th>Market ID</th>
+                        <th>Confidence</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for race in low_confidence_races %}
+                    <tr>
+                        <td>{{ race.meeting.meeting_name }}</td>
+                        <td>{{ race.race_number }}</td>
+                        <td><code>{{ race.betfair_market_id }}</code></td>
+                        <td>
+                            <span class="badge bg-warning">{{ "%.0f"|format(race.betfair_mapping_confidence * 100) }}%</span>
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#reviewModal{{ race.id }}">
+                                <i class="bi bi-pencil"></i> Review
+                            </button>
+                        </td>
+                    </tr>
+                    
+                    <!-- Review Modal -->
+                    <div class="modal fade" id="reviewModal{{ race.id }}" tabindex="-1">
+                        <div class="modal-dialog modal-lg">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title">Review Mapping - Race {{ race.race_number }}</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <form action="{{ url_for('assign_betfair_mapping') }}" method="post">
+                                    <div class="modal-body">
+                                        <input type="hidden" name="race_id" value="{{ race.id }}">
+                                        
+                                        <div class="mb-3">
+                                            <label class="form-label"><strong>Current Market ID:</strong></label>
+                                            <p><code>{{ race.betfair_market_id }}</code></p>
+                                        </div>
+                                        
+                                        <div class="mb-3">
+                                            <label class="form-label"><strong>Horses:</strong></label>
+                                            <ul style="max-height: 150px; overflow-y: auto;">
+                                                {% for horse in race.horses %}
+                                                <li>{{ horse.horse_name }} 
+                                                    {% if horse.betfair_selection_id %}
+                                                    <span class="badge bg-success">ID: {{ horse.betfair_selection_id }}</span>
+                                                    {% else %}
+                                                    <span class="badge bg-secondary">No selection ID</span>
+                                                    {% endif %}
+                                                </li>
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                        
+                                        <div class="mb-3">
+                                            <label for="new_market_id_{{ race.id }}" class="form-label"><strong>New Market ID (leave blank to keep current):</strong></label>
+                                            <input type="text" class="form-control" id="new_market_id_{{ race.id }}" name="market_id" 
+                                                   value="{{ race.betfair_market_id }}" required>
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                        <button type="submit" class="btn btn-warning">
+                                            <i class="bi bi-check-circle"></i> Update Mapping
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Successfully Mapped Races -->
+{% if mapped_races %}
+<div class="card">
+    <div class="card-header" style="background: linear-gradient(135deg, #27ae60, #2ecc71);">
+        <i class="bi bi-check-circle"></i> Successfully Mapped Races (Recent)
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Meeting</th>
+                        <th>Race #</th>
+                        <th>Market ID</th>
+                        <th>Confidence</th>
+                        <th>Mapped At</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for race in mapped_races %}
+                    <tr>
+                        <td>{{ race.meeting.meeting_name }}</td>
+                        <td>{{ race.race_number }}</td>
+                        <td><code>{{ race.betfair_market_id }}</code></td>
+                        <td>
+                            <span class="badge bg-success">{{ "%.0f"|format(race.betfair_mapping_confidence * 100) }}%</span>
+                        </td>
+                        <td>{{ race.betfair_mapped_at.strftime('%Y-%m-%d %H:%M') if race.betfair_mapped_at else '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if not unmapped_races and not low_confidence_races and not mapped_races %}
+<div class="card">
+    <div class="card-body text-center" style="padding: 40px;">
+        <i class="bi bi-inbox" style="font-size: 48px; color: #6c757d;"></i>
+        <h4 style="margin-top: 20px; color: #6c757d;">No Races Found</h4>
+        <p class="text-muted">Upload race meetings to start mapping them to Betfair markets.</p>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Go to Dashboard</a>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

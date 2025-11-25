@@ -1,0 +1,15 @@
+# Additional dependencies for Betfair integration
+# Install with: pip install -r requirements-betfair.txt
+
+# Betfair API client
+betfairlightweight==2.19.1
+
+# For fuzzy string matching (race/horse name matching)
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.21.1
+
+# SSE support
+flask-sse==1.0.0
+
+# Redis for SSE pub/sub (optional - can use in-memory for single instance)
+redis==5.0.1
