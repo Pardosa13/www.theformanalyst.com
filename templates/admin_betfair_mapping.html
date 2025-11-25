@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+
+{% block title %}Betfair Mapping - Admin{% endblock %}
+
+{% block content %}
+<h1><i class="bi bi-link-45deg"></i> Betfair Market Mapping</h1>
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Betfair Integration Status</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6">
+                <p>
+                    <strong>Status:</strong>
+                    {% if betfair_enabled %}
+                    <span class="badge bg-success">Enabled</span>
+                    {% else %}
+                    <span class="badge bg-secondary">Disabled</span>
+                    {% endif %}
+                </p>
+                <p class="text-muted small">
+                    Set <code>BETFAIR_ENABLED=true</code> in environment variables to enable live odds.
+                </p>
+            </div>
+            <div class="col-md-6">
+                <p>
+                    <strong>Unmapped Races:</strong> {{ unmapped_races|length }}
+                </p>
+                <p>
+                    <strong>Mapped Races:</strong> {{ mapped_races|length }}+
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Unmapped Races -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-exclamation-triangle text-warning"></i> Unmapped Races</h5>
+    </div>
+    <div class="card-body">
+        {% if unmapped_races %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Meeting</th>
+                        <th>Race #</th>
+                        <th>Distance</th>
+                        <th>Horses</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for race in unmapped_races[:50] %}
+                    <tr>
+                        <td>
+                            <strong>{{ race.meeting.meeting_name }}</strong>
+                            <br><small class="text-muted">{{ race.meeting.date if race.meeting.date else 'No date' }}</small>
+                        </td>
+                        <td>R{{ race.race_number }}</td>
+                        <td>{{ race.distance or '-' }}</td>
+                        <td>{{ race.horses|length }}</td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-primary" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#mapModal{{ race.id }}">
+                                <i class="bi bi-pencil"></i> Map
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        {% if unmapped_races|length > 50 %}
+        <p class="text-muted">Showing first 50 of {{ unmapped_races|length }} unmapped races.</p>
+        {% endif %}
+        
+        {% else %}
+        <p class="text-success"><i class="bi bi-check-circle"></i> All races are mapped!</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Recently Mapped Races -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-check-circle text-success"></i> Recently Mapped Races</h5>
+    </div>
+    <div class="card-body">
+        {% if mapped_races %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Meeting</th>
+                        <th>Race #</th>
+                        <th>Market ID</th>
+                        <th>Mapped Horses</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for race in mapped_races %}
+                    <tr>
+                        <td>{{ race.meeting.meeting_name }}</td>
+                        <td>R{{ race.race_number }}</td>
+                        <td><code>{{ race.market_id }}</code></td>
+                        <td>
+                            {% set mapped_count = race.horses|selectattr('betfair_selection_id')|list|length %}
+                            {{ mapped_count }}/{{ race.horses|length }}
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline-primary" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#mapModal{{ race.id }}">
+                                <i class="bi bi-pencil"></i> Edit
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No mapped races yet.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Mapping Modals -->
+{% for race in unmapped_races[:50] + mapped_races %}
+<div class="modal fade" id="mapModal{{ race.id }}" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form action="{{ url_for('admin_betfair_mapping_update') }}" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        Map Race: {{ race.meeting.meeting_name }} - R{{ race.race_number }}
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="race_id" value="{{ race.id }}">
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Betfair Market ID</label>
+                        <input type="text" class="form-control" name="market_id" 
+                               value="{{ race.market_id or '' }}"
+                               placeholder="e.g., 1.234567890">
+                        <div class="form-text">
+                            Find this in the Betfair Exchange URL or API response.
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    <h6>Horse Selection IDs (Optional)</h6>
+                    <p class="small text-muted">
+                        Map each horse to their Betfair selection ID for accurate live odds matching.
+                    </p>
+                    
+                    <div class="row">
+                        {% for horse in race.horses %}
+                        <div class="col-md-6 mb-2">
+                            <label class="form-label small">{{ horse.horse_name }}</label>
+                            <input type="text" class="form-control form-control-sm" 
+                                   name="selection_{{ horse.id }}" 
+                                   value="{{ horse.betfair_selection_id or '' }}"
+                                   placeholder="Selection ID">
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save"></i> Save Mapping
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<!-- Instructions Card -->
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-info-circle"></i> How to Map Betfair Markets</h5>
+    </div>
+    <div class="card-body">
+        <ol>
+            <li>Go to <a href="https://www.betfair.com.au/exchange/plus/" target="_blank">Betfair Exchange</a></li>
+            <li>Navigate to the race you want to map</li>
+            <li>Copy the <strong>Market ID</strong> from the URL (the number after <code>/market/</code>)</li>
+            <li>For each horse, you can find their <strong>Selection ID</strong> in the page source or API</li>
+            <li>Paste the IDs into the mapping form above and save</li>
+        </ol>
+        
+        <div class="alert alert-info">
+            <i class="bi bi-lightbulb"></i>
+            <strong>Tip:</strong> If you only set the Market ID, the system will try to match horses by name automatically.
+        </div>
+    </div>
+</div>
+{% endblock %}
