@@ -80,6 +80,7 @@ Set these via environment variables in Railway.
 ## Support
 
 See **DEPLOYMENT.md** for detailed instructions.
+force deploy
 
 ## License
 
