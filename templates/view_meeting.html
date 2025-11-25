@@ -109,12 +109,15 @@
                     <th style="padding: 12px; text-align: center;">Score</th>
                     <th style="padding: 12px; text-align: center;">Odds</th>
                     <th style="padding: 12px; text-align: center;">Win %</th>
+                    {% if config.get('BETFAIR_ENABLED') %}
+                    {% include '_betfair_columns.html' %}
+                    {% endif %}
                     <th style="padding: 12px; text-align: left;">Notes</th>
                 </tr>
             </thead>
             <tbody>
                 {% for horse in race.horses %}
-                <tr {% if loop.index == 1 %}style="background-color: #d4edda;"
+                <tr data-selection-id="{{ horse.betfair_selection_id or '' }}" {% if loop.index == 1 %}style="background-color: #d4edda;"
                     {% elif loop.index == 2 %}style="background-color: #fff3cd;"
                     {% elif loop.index == 3 %}style="background-color: #ffe4b3;"
                     {% else %}style="background-color: {% if loop.index is odd %}#f8f9fa{% else %}#ffffff{% endif %};"
@@ -138,6 +141,14 @@
                     <td style="padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0;">
                         {{ horse.win_probability }}
                     </td>
+                    {% if config.get('BETFAIR_ENABLED') %}
+                    <td class="betfair-odds-cell" style="padding: 12px; text-align: center; font-weight: 600; border-bottom: 1px solid #e2e8f0; color: #17a2b8;">
+                        {% if horse.final_odds is not none %}{{ "%.2f"|format(horse.final_odds) }}{% else %}-{% endif %}
+                    </td>
+                    <td class="betfair-result-cell" style="padding: 12px; text-align: center; font-weight: 600; border-bottom: 1px solid #e2e8f0;">
+                        {% if horse.final_position == 1 %}🥇 1st{% elif horse.final_position == 2 %}🥈 2nd{% elif horse.final_position == 3 %}🥉 3rd{% elif horse.final_position is not none %}{{ horse.final_position }}{% else %}-{% endif %}
+                    </td>
+                    {% endif %}
                     <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; font-size: 11px; max-width: 300px;">
                         <details>
                             <summary style="cursor: pointer; color: #667eea;">View Notes</summary>
@@ -602,4 +613,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+{% if config.get('BETFAIR_ENABLED') %}
+<script>
+    // Configure Betfair service URL if different from main app
+    window.BETFAIR_SERVICE_URL = '{{ config.get("BETFAIR_SERVICE_URL", "") }}';
+</script>
+<script src="{{ url_for('static', filename='js/betfair-live.js') }}"></script>
+{% endif %}
 {% endblock %}
