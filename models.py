@@ -62,9 +62,6 @@ class Race(db.Model):
     distance = db.Column(db.String(50))
     race_class = db.Column(db.String(50))
     track_condition = db.Column(db.String(50))
-
-    # Optional Betfair market id mapping (nullable)
-    market_id = db.Column(db.String(64), nullable=True, index=True)
     
     # Relationships
     horses = db.relationship('Horse', backref='race', lazy=True, cascade='all, delete-orphan')
