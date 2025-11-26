@@ -34,7 +34,21 @@ def load_user(user_id):
 # Create tables and default admin user
 with app.app_context():
     db.create_all()
-
+    
+    # Migration: Add market_id column if it doesn't exist
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        races_columns = [col['name'] for col in inspector.get_columns('races')]
+        
+        if 'market_id' not in races_columns:
+            with db.engine.connect() as conn:
+                conn.execute(text('ALTER TABLE races ADD COLUMN market_id VARCHAR(255)'))
+                conn.commit()
+            print("✓ Added market_id column to races table")
+    except Exception as e:
+        print(f"Migration check: {e}")
+    
     # Create default admin if doesn't exist
     admin = User.query.filter_by(username='admin').first()
     if not admin:
