@@ -127,6 +127,25 @@ Or use a password generator to create a random 64-character string.
 3. Check the "Deployments" tab for progress
 4. Once complete, you'll get a URL like: `theformanalyst.up.railway.app`
 
+### Step 5.5: Run Database Migrations (if needed)
+
+If your database is missing required columns (e.g., `races.market_id` or Betfair result columns on `horses`), you can run migrations in Railway:
+
+**Option A: Run Alembic migration (preferred)**
+1. In Railway, go to your service settings
+2. Open the Railway shell or use a one-off command:
+   ```bash
+   alembic upgrade head
+   ```
+
+**Option B: Run fallback script (if Alembic is not configured)**
+1. In Railway, run the following one-off command:
+   ```bash
+   python scripts/ensure_db_columns.py
+   ```
+
+Both options are idempotent and safe to run multiple times. Check the logs to confirm columns were added/verified.
+
 ### Step 6: Test the Deployment
 1. Visit your Railway URL
 2. You should see the login page
