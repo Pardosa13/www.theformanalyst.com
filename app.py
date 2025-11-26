@@ -313,7 +313,7 @@ def analyze():
 @app.route('/history')
 @login_required
 def history():
-    meetings = Meeting.query.filter_by(user_id=current_user.id).order_by(Meeting.uploaded_at.desc()).all()
+    meetings = Meeting.query.order_by(Meeting.uploaded_at.desc()).all()
     
     # Convert meetings to JSON for calendar view
     meetings_json = [{
