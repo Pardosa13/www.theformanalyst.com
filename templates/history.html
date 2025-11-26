@@ -2,46 +2,40 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>History — Calendar</title>
-  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet" />
+  <title>History — Uploads</title>
   <style>
-    #calendar { max-width: 1100px; margin: 40px auto; }
+    body { font-family: sans-serif; max-width: 1000px; margin: 20px auto; padding: 0 16px; }
+    .meeting { border-bottom: 1px solid #ddd; padding: 12px 0; }
+    .meeting:last-child { border-bottom: none; }
+    .meta { color: #666; font-size: 0.9em; }
+    .actions { margin-top: 6px; }
+    a.button { display: inline-block; padding: 6px 10px; background:#1e90ff; color:#fff; border-radius:4px; text-decoration:none; }
+    form.inline { display:inline; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>History</h1>
-    <div id="calendar"></div>
-  </div>
+  <h1>History</h1>
+  <p><a href="{{ url_for('dashboard') }}">← Back to dashboard</a></p>
 
-  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', function () {
-      const calendarEl = document.getElementById('calendar');
-      const calendar = new FullCalendar.Calendar(calendarEl, {
-        initialView: 'dayGridMonth',
-        headerToolbar: {
-          left: 'prev,next today',
-          center: 'title',
-          right: 'dayGridMonth,timeGridWeek,listWeek'
-        },
-        events: function(fetchInfo, successCallback, failureCallback) {
-          const qs = `start=${encodeURIComponent(fetchInfo.startStr)}&end=${encodeURIComponent(fetchInfo.endStr)}`;
-          fetch('/api/events?' + qs)
-            .then(r => r.json())
-            .then(data => successCallback(data))
-            .catch(err => failureCallback(err));
-        },
-        eventClick: function(info) {
-          // open meeting page
-          if (info.event.url) {
-            window.location.href = info.event.url;
-          }
-        }
-      });
-
-      calendar.render();
-    });
-  </script>
+  {% if meetings %}
+    {% for m in meetings %}
+      <div class="meeting">
+        <h2><a href="{{ url_for('view_meeting', meeting_id=m.id) }}">{{ m.meeting_name }}</a></h2>
+        <div class="meta">
+          Uploaded by: {{ m.user.username if m.user else 'unknown' }} —
+          Uploaded at: {{ m.uploaded_at.strftime('%Y-%m-%d %H:%M') if m.uploaded_at else 'unknown' }}
+          {% if m.date %} — Meeting date: {{ m.date.strftime('%Y-%m-%d') }}{% endif %}
+        </div>
+        <div class="actions">
+          <form class="inline" method="post" action="{{ url_for('delete_meeting', meeting_id=m.id) }}" onsubmit="return confirm('Delete this meeting?');">
+            <button type="submit" class="button" style="background:#d9534f">Delete</button>
+          </form>
+          <a class="button" href="{{ url_for('view_meeting', meeting_id=m.id) }}">View</a>
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p>No meetings uploaded yet.</p>
+  {% endif %}
 </body>
 </html>
