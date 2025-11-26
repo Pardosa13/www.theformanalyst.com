@@ -8,6 +8,9 @@ from datetime import datetime
 
 from models import db, User, Meeting, Race, Horse, Prediction
 
+# NEW: import the admin blueprint for Betfair mapping
+from admin.betfair_mapping import bp as betfair_bp
+
 app = Flask(__name__)
 
 # Configuration
@@ -25,6 +28,11 @@ db.init_app(app)
 login_manager = LoginManager()
 login_manager.login_view = "login"
 login_manager.init_app(app)
+
+# Register the Betfair admin blueprint (only when enabled)
+# If you want the admin UI always available, change this to app.register_blueprint(betfair_bp)
+if app.config.get('BETFAIR_ENABLED'):
+    app.register_blueprint(betfair_bp)
 
 @login_manager.user_loader
 def load_user(user_id):

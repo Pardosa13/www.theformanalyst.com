@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head><title>Betfair mapping</title></head>
+<body>
+<h1>Unmapped Races</h1>
+{% if races %}
+  <table>
+    <thead><tr><th>ID</th><th>Date/Time</th><th>Track</th><th>Race #</th><th>Action</th></tr></thead>
+    <tbody>
+      {% for r in races %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td>{{ r.date }}</td>
+        <td>{{ r.track }}</td>
+        <td>{{ r.race_number }}</td>
+        <td>
+          <form method="post" action="{{ url_for('betfair_admin.mapping_index') }}">
+            <input type="hidden" name="race_id" value="{{ r.id }}">
+            <input type="text" name="market_id" placeholder="Enter Betfair marketId">
+            <button type="submit">Map</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p>No unmapped races.</p>
+{% endif %}
+</body>
+</html>
