@@ -1,51 +1,52 @@
-{% extends "base.html" %}
-{% block title %}Race Meetings - The Form Analyst{% endblock %}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>History — Calendar</title>
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet" />
+  <style>
+    #calendar { max-width: 1100px; margin: 40px auto; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>History</h1>
+    <div id="calendar"></div>
+  </div>
 
-{% block content %}
-<h1>
-    <i class="bi bi-calendar3"></i> Race Meetings
-</h1>
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const calendarEl = document.getElementById('calendar');
+      const calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        headerToolbar: {
+          left: 'prev,next today',
+          center: 'title',
+          right: 'dayGridMonth,timeGridWeek,listWeek'
+        },
+        events: function(fetchInfo, successCallback, failureCallback) {
+          const qs = `start=${encodeURIComponent(fetchInfo.startStr)}&end=${encodeURIComponent(fetchInfo.endStr)}`;
+          fetch('/api/events?' + qs)
+            .then(r => r.json())
+            .then(data => successCallback(data))
+            .catch(err => failureCallback(err));
+        },
+        eventClick: function(info) {
+          // show details inline (adapt as you like)
+          alert(info.event.title + (info.event.extendedProps.details ? '\n\n' + info.event.extendedProps.details : ''));
+        },
+        loading: function(isLoading) {
+          if (isLoading) {
+            // show spinner if you want
+          } else {
+            // hide spinner
+          }
+        }
+      });
 
-<div class="card">
-    {% if meetings %}
-    <div class="table-responsive">
-        <table class="table table-hover">
-            <thead>
-                <tr>
-                    <th>Meeting Name</th>
-                    {% if current_user.is_admin %}
-                    <th>User</th>
-                    {% endif %}
-                    <th>Date Analyzed</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for meeting in meetings %}
-                <tr>
-                    <td><strong>{{ meeting.meeting_name }}</strong></td>
-                    {% if current_user.is_admin %}
-                    <td>{{ meeting.user.username }}</td>
-                    {% endif %}
-                    <td>{{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                    <td>
-                        <a href="{{ url_for('view_meeting', meeting_id=meeting.id) }}" class="btn btn-sm btn-primary">
-                            <i class="bi bi-eye"></i> View Results
-                        </a>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="card-body text-center" style="padding: 3rem;">
-        <i class="bi bi-inbox" style="font-size: 4rem; color: #6c757d; opacity: 0.5;"></i>
-        <p style="color: #6c757d; margin-top: 1rem; font-size: 1.1rem;">
-            No meetings analyzed yet. <a href="{{ url_for('dashboard') }}" style="color: #667eea; text-decoration: none;">Upload your first CSV!</a>
-        </p>
-    </div>
-    {% endif %}
-</div>
-
-{% endblock %}
+      calendar.render();
+    });
+  </script>
+</body>
+</html>
