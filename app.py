@@ -18,7 +18,21 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Fix for postgres:// vs postgresql:// (Railway uses postgres://)
 if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
     app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
-
+# ONE-TIME DATABASE FIX - Add market_id column
+# Remove this code after it runs once successfully
+from sqlalchemy import text, inspect
+try:
+    inspector = inspect(db.engine)
+    columns = [col['name'] for col in inspector.get_columns('races')]
+    if 'market_id' not in columns:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE races ADD COLUMN market_id VARCHAR(100)"))
+            conn.commit()
+        print("✓ Added market_id column to races table")
+    else:
+        print("✓ market_id column already exists")
+except Exception as e:
+    print(f"Migration note: {e}")
 # Initialize extensions
 db.init_app(app)
 
