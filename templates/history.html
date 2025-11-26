@@ -33,14 +33,9 @@
             .catch(err => failureCallback(err));
         },
         eventClick: function(info) {
-          // show details inline (adapt as you like)
-          alert(info.event.title + (info.event.extendedProps.details ? '\n\n' + info.event.extendedProps.details : ''));
-        },
-        loading: function(isLoading) {
-          if (isLoading) {
-            // show spinner if you want
-          } else {
-            // hide spinner
+          // open meeting page
+          if (info.event.url) {
+            window.location.href = info.event.url;
           }
         }
       });
