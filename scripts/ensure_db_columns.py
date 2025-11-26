@@ -69,7 +69,7 @@ def main():
     horses_columns = {
         "betfair_selection_id": "INTEGER",
         "final_position": "INTEGER",
-        "final_odds": "DOUBLE PRECISION",
+        "final_odds": "FLOAT",
         "result_settled_at": "TIMESTAMP",
         "result_source": "VARCHAR(50)"
     }
@@ -96,6 +96,13 @@ def main():
                 else:
                     ensure_column(conn, "horses", col_name, col_type)
                     print(f"  ✓ Added column '{col_name}'.")
+
+            # Create index on betfair_selection_id if column was added
+            if "betfair_selection_id" in [c["name"] for c in inspector.get_columns("horses")]:
+                index_sql = 'CREATE INDEX IF NOT EXISTS "ix_horses_betfair_selection_id" ON "horses" ("betfair_selection_id");'
+                print(f"  Executing: {index_sql}")
+                conn.execute(text(index_sql))
+                print("  ✓ Index on 'betfair_selection_id' verified/created.")
 
     print("\n" + "=" * 60)
     print("Done. All required columns verified/added.")

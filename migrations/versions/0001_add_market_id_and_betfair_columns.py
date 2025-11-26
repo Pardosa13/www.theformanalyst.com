@@ -28,9 +28,15 @@ def upgrade() -> None:
     op.add_column('horses', sa.Column('result_settled_at', sa.DateTime(), nullable=True))
     op.add_column('horses', sa.Column('result_source', sa.String(length=50), nullable=True))
 
+    # Create index on betfair_selection_id to match model definition
+    op.create_index('ix_horses_betfair_selection_id', 'horses', ['betfair_selection_id'], unique=False)
+
 
 def downgrade() -> None:
     """Remove market_id column from races table and Betfair result columns from horses table."""
+    # Remove index on betfair_selection_id
+    op.drop_index('ix_horses_betfair_selection_id', table_name='horses')
+
     # Remove Betfair result columns from horses table
     op.drop_column('horses', 'result_source')
     op.drop_column('horses', 'result_settled_at')
