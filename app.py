@@ -18,21 +18,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Fix for postgres:// vs postgresql:// (Railway uses postgres://)
 if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
     app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
-# ONE-TIME DATABASE FIX - Add market_id column
-# Remove this code after it runs once successfully
-from sqlalchemy import text, inspect
-try:
-    inspector = inspect(db.engine)
-    columns = [col['name'] for col in inspector.get_columns('races')]
-    if 'market_id' not in columns:
-        with db.engine.connect() as conn:
-            conn.execute(text("ALTER TABLE races ADD COLUMN market_id VARCHAR(100)"))
-            conn.commit()
-        print("✓ Added market_id column to races table")
-    else:
-        print("✓ market_id column already exists")
-except Exception as e:
-    print(f"Migration note: {e}")
+
 # Initialize extensions
 db.init_app(app)
 
@@ -47,6 +33,24 @@ def load_user(user_id):
 # Create tables and default admin user
 with app.app_context():
     db.create_all()
+
+    # ONE-TIME DATABASE FIX: add missing market_id column if it doesn't exist
+    # Remove this block after you see the success message in the startup logs.
+    try:
+        from sqlalchemy import text, inspect
+        inspector = inspect(db.engine)
+        columns = [col['name'] for col in inspector.get_columns('races')]
+        if 'market_id' not in columns:
+            # Use transactional context to run the DDL safely
+            with db.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE races ADD COLUMN IF NOT EXISTS market_id VARCHAR(255);"))
+            print("✓ ONE-TIME: Added market_id column to races table")
+        else:
+            print("✓ ONE-TIME: market_id column already exists")
+    except Exception as e:
+        # Log but do not stop app startup
+        print(f"✓ ONE-TIME: migration-check error (non-fatal): {e}")
+
     # Create default admin if doesn't exist
     admin = User.query.filter_by(username='admin').first()
     if not admin:
