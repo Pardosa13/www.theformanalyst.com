@@ -33,6 +33,19 @@ def load_user(user_id):
 # Create tables and default admin user
 with app.app_context():
     db.create_all()
+    # ONE-TIME STARTUP FIX - add missing market_id if needed (remove after success)
+try:
+    from sqlalchemy import text, inspect
+    inspector = inspect(db.engine)
+    cols = [c['name'] for c in inspector.get_columns('races')]
+    if 'market_id' not in cols:
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE races ADD COLUMN IF NOT EXISTS market_id VARCHAR(255);"))
+        print("✓ ONE-TIME: Added races.market_id")
+    else:
+        print("✓ ONE-TIME: races.market_id already present")
+except Exception as e:
+    print("ONE-TIME: migration error (non-fatal):", e)
 
     # ONE-TIME DATABASE FIX: add missing market_id column if it doesn't exist
     # Remove this block after you see the success message in the startup logs.
