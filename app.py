@@ -1,4 +1,7 @@
 # Updated 2025-11-26 to fix deployment
+# This version includes a safe import for python-dateutil with a simple fallback parser
+# so the app can boot even when python-dateutil is not installed. Install
+# python-dateutil in production (add to requirements.txt) for best parsing coverage.
 import os
 import json
 import subprocess
@@ -8,8 +11,14 @@ import re
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
-from datetime import datetime
-from dateutil import parser as dateparser   # pip install python-dateutil
+from datetime import datetime, date as _date
+# Try to import dateutil; if unavailable, we'll fall back to a simpler parser.
+try:
+    from dateutil import parser as dateparser   # pip install python-dateutil
+    _HAS_DATEUTIL = True
+except Exception:
+    dateparser = None
+    _HAS_DATEUTIL = False
 
 from models import db, User, Meeting, Race, Horse, Prediction
 
@@ -53,6 +62,67 @@ with app.app_context():
 
 
 # ----- Helpers -----
+def parse_date_string_fallback(s):
+    """Very small fallback parser: recognizes common numeric formats and ISO-like substrings."""
+    if not s:
+        return None
+    s = str(s).strip()
+    if s == '':
+        return None
+
+    # ISO-like YYYY-MM-DD anywhere in the string
+    m = re.search(r'(\d{4}-\d{2}-\d{2})', s)
+    if m:
+        try:
+            return datetime.strptime(m.group(1), "%Y-%m-%d").date()
+        except Exception:
+            pass
+
+    # YYYY/MM/DD or YYYY.MM.DD
+    m = re.search(r'(\d{4})[\/\.](\d{1,2})[\/\.](\d{1,2})', s)
+    if m:
+        try:
+            return datetime.strptime(f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}", "%Y-%m-%d").date()
+        except Exception:
+            pass
+
+    # DD/MM/YYYY or DD-MM-YYYY or MM/DD/YYYY (try both common orders)
+    fmts = ["%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y", "%Y/%m/%d", "%Y.%m.%d", "%d %b %Y", "%d %B %Y"]
+    for f in fmts:
+        try:
+            return datetime.strptime(s, f).date()
+        except Exception:
+            continue
+
+    # contiguous YYYYMMDD
+    m2 = re.search(r'(\d{4})(\d{2})(\d{2})', s)
+    if m2:
+        try:
+            return datetime.strptime("".join(m2.groups()), "%Y%m%d").date()
+        except Exception:
+            pass
+
+    return None
+
+
+def parse_date_using_available_parser(s):
+    """
+    Use dateutil if available, otherwise fallback to parse_date_string_fallback.
+    Returns a datetime.date or None.
+    """
+    if not s:
+        return None
+    if _HAS_DATEUTIL:
+        try:
+            dt = dateparser.parse(str(s), dayfirst=False, yearfirst=True)
+            if dt:
+                return dt.date()
+        except Exception:
+            pass
+    # fallback
+    return parse_date_string_fallback(s)
+
+
 def parse_date_from_csv(csv_text, filename=None):
     """
     Try to determine a meeting date from:
@@ -68,6 +138,7 @@ def parse_date_from_csv(csv_text, filename=None):
             try:
                 return datetime.strptime(m.group(1), "%Y-%m-%d").date()
             except Exception:
+                # fall through to content parsing
                 pass
 
     # 2+3) inspect csv contents
@@ -77,28 +148,23 @@ def parse_date_from_csv(csv_text, filename=None):
         return None
 
     # Prefer explicit column names
-    date_keys = {'date', 'meeting_date', 'meeting date', 'race_date', 'race date', 'start_date', 'meetingDate'}
+    date_keys = {'date', 'meeting_date', 'meeting date', 'race_date', 'race date', 'start_date', 'meetingDate', 'meeting'}
     for i, row in enumerate(reader):
         # check header-like keys first
         for k, v in row.items():
             if not v or str(v).strip() == '':
                 continue
             if k and k.lower() in date_keys:
-                try:
-                    dt = dateparser.parse(v, dayfirst=False, yearfirst=True)
-                    return dt.date()
-                except Exception:
-                    pass
+                dt = parse_date_using_available_parser(v)
+                if dt:
+                    return dt
         # fallback: try parsing any cell in first few rows
         for k, v in row.items():
             if not v or str(v).strip() == '':
                 continue
-            try:
-                dt = dateparser.parse(v, fuzzy=False)
-                if dt.year >= 1900:
-                    return dt.date()
-            except Exception:
-                pass
+            dt = parse_date_using_available_parser(v)
+            if dt and dt.year >= 1900:
+                return dt
         # limit scanning to first N rows to avoid slowness
         if i >= 20:
             break
@@ -385,10 +451,9 @@ def api_events():
         return jsonify([])
 
     # Parse incoming start/end to dates (tolerant)
-    try:
-        start_d = dateparser.parse(start).date()
-        end_d = dateparser.parse(end).date()
-    except Exception:
+    start_d = parse_date_using_available_parser(start)
+    end_d = parse_date_using_available_parser(end)
+    if not start_d or not end_d:
         return jsonify([])
 
     # Query meetings for current user; filter in Python to handle null dates fallback
