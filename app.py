@@ -308,14 +308,21 @@ def analyze():
         return redirect(url_for("dashboard"))
 
 
-@app.route("/history")
+@app.route('/history')
 @login_required
 def history():
-    # Get all meetings (shared across all users)
-    meetings = Meeting.query\
-        .order_by(Meeting.uploaded_at.desc())\
-        .all()
-    return render_template("history.html", meetings=meetings)
+    meetings = Meeting.query.filter_by(user_id=current_user.id).order_by(Meeting.uploaded_at.desc()).all()
+    
+    # Convert meetings to JSON for calendar view
+    meetings_json = [{
+        'id': m.id,
+        'meeting_name': m.meeting_name,
+        'user': m.user.username,
+        'uploaded_at': m.uploaded_at.isoformat()
+    } for m in meetings]
+    
+    import json
+    return render_template('history.html', meetings=meetings, meetings_json=json.dumps(meetings_json))
 
 
 @app.route("/meeting/<int:meeting_id>")
