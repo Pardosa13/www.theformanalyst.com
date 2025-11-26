@@ -1,41 +1,67 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>History — Uploads</title>
-  <style>
-    body { font-family: sans-serif; max-width: 1000px; margin: 20px auto; padding: 0 16px; }
-    .meeting { border-bottom: 1px solid #ddd; padding: 12px 0; }
-    .meeting:last-child { border-bottom: none; }
-    .meta { color: #666; font-size: 0.9em; }
-    .actions { margin-top: 6px; }
-    a.button { display: inline-block; padding: 6px 10px; background:#1e90ff; color:#fff; border-radius:4px; text-decoration:none; }
-    form.inline { display:inline; }
-  </style>
-</head>
-<body>
-  <h1>History</h1>
-  <p><a href="{{ url_for('dashboard') }}">← Back to dashboard</a></p>
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  /* Small local tweaks to keep the list tidy and match site visuals */
+  .history-container { max-width: 1000px; margin: 24px auto; padding: 0 16px; }
+  .meeting-card { display:flex; align-items:center; justify-content:space-between; padding:14px; border:1px solid var(--border-color, #e6e6e6); border-radius:8px; background:var(--card-bg, #fff); margin-bottom:12px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+  .meeting-meta { color: var(--muted, #6c757d); font-size:0.95rem; margin-top:4px; }
+  .meeting-left { display:flex; gap:14px; align-items:center; min-width:0; }
+  .meeting-title { font-weight:600; color: var(--text-color, #222); margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:520px; }
+  .meeting-date-badge { font-size:0.85rem; padding:6px 8px; border-radius:6px; background:var(--accent, #1e90ff); color:#fff; }
+  .meeting-actions { display:flex; gap:8px; align-items:center; }
+  .small-muted { font-size:0.85rem; color:var(--muted, #6c757d); }
+  .no-meetings { padding:20px; text-align:center; color:var(--muted, #6c757d); }
+  /* responsive */
+  @media (max-width:640px) {
+    .meeting-left { flex-direction:column; align-items:flex-start; gap:6px; }
+    .meeting-title { max-width:260px; }
+  }
+</style>
+
+<div class="history-container">
+  <div class="page-header">
+    <h1 style="margin-bottom:6px">History</h1>
+    <p class="small-muted" style="margin-top:0">All your uploaded meetings and analyses — click a row to view details.</p>
+  </div>
 
   {% if meetings %}
     {% for m in meetings %}
-      <div class="meeting">
-        <h2><a href="{{ url_for('view_meeting', meeting_id=m.id) }}">{{ m.meeting_name }}</a></h2>
-        <div class="meta">
-          Uploaded by: {{ m.user.username if m.user else 'unknown' }} —
-          Uploaded at: {{ m.uploaded_at.strftime('%Y-%m-%d %H:%M') if m.uploaded_at else 'unknown' }}
-          {% if m.date %} — Meeting date: {{ m.date.strftime('%Y-%m-%d') }}{% endif %}
+      <div class="meeting-card" role="article" aria-labelledby="meeting-{{ m.id }}">
+        <div class="meeting-left">
+          <div>
+            <h2 id="meeting-{{ m.id }}" class="meeting-title">
+              <a href="{{ url_for('view_meeting', meeting_id=m.id) }}" style="color:inherit; text-decoration:none;">
+                {{ m.meeting_name }}
+              </a>
+            </h2>
+            <div class="meeting-meta">
+              Uploaded by <strong>{{ m.user.username if m.user else 'unknown' }}</strong>
+              &nbsp;•&nbsp;
+              <span title="{{ m.uploaded_at.isoformat() if m.uploaded_at }}">{{ m.uploaded_at.strftime('%Y-%m-%d %H:%M') if m.uploaded_at else 'unknown' }}</span>
+              {% if m.date %}
+                &nbsp;•&nbsp;
+                <span class="meeting-date-badge">{{ m.date.strftime('%Y-%m-%d') }}</span>
+              {% endif %}
+            </div>
+          </div>
         </div>
-        <div class="actions">
-          <form class="inline" method="post" action="{{ url_for('delete_meeting', meeting_id=m.id) }}" onsubmit="return confirm('Delete this meeting?');">
-            <button type="submit" class="button" style="background:#d9534f">Delete</button>
+
+        <div class="meeting-actions">
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('view_meeting', meeting_id=m.id) }}">View</a>
+
+          <form method="post" action="{{ url_for('delete_meeting', meeting_id=m.id) }}" onsubmit="return confirm('Delete this meeting?');" style="display:inline;">
+            <button type="submit" class="btn btn-sm btn-danger">Delete</button>
           </form>
-          <a class="button" href="{{ url_for('view_meeting', meeting_id=m.id) }}">View</a>
         </div>
       </div>
     {% endfor %}
   {% else %}
-    <p>No meetings uploaded yet.</p>
+    <div class="no-meetings">
+      <p><strong>No meetings uploaded yet.</strong></p>
+      <p>Return to the dashboard to upload CSVs and run analyses.</p>
+      <p><a href="{{ url_for('dashboard') }}" class="btn btn-primary">Go to Dashboard</a></p>
+    </div>
   {% endif %}
-</body>
-</html>
+</div>
+{% endblock %}
