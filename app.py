@@ -110,26 +110,42 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
     if not analysis_results:
         raise Exception("No results returned from analyzer")
     
-# Create meeting record
-filename_without_ext = filename.replace('.csv', '')
-
-# Try to extract date from filename (e.g., "251129_Rosehill")
-meeting_date = None
-if '_' in filename_without_ext:
-    date_str = filename_without_ext.split('_')[0]
-    if len(date_str) == 6 and date_str.isdigit():
-        try:
-            # Parse as DD/MM/YY (Australian format)
-            meeting_date = datetime.strptime(date_str, '%d%m%y').date()
-        except:
-            pass  # If parsing fails, just leave date as None
-
-# Create meeting record
+    # Create meeting record
     meeting = Meeting(
         user_id=user_id,
         meeting_name=filename.replace('.csv', ''),
         csv_data=csv_data
     )
+    db.session.add(meeting)
+    db.session.flush()  # Get meeting ID
+    
+    # Group results by race
+    races_data = {}
+    for result in analysis_results:
+        race_num = result['horse'].get('race number', '0')
+        
+        # Skip invalid rows (header rows that slipped through)
+        if not race_num or not str(race_num).isdigit():
+            continue
+            
+        if race_num not in races_data:
+            races_data[race_num] = []
+        races_data[race_num].append(result)
+    
+    # Create race and horse records
+    for race_num, horses_results in races_data.items():
+        # Get race info from first horse
+        first_horse = horses_results[0]['horse'] if horses_results else {}
+        
+        race = Race(
+            meeting_id=meeting.id,
+            race_number=int(race_num) if race_num else 0,
+            distance=first_horse.get('distance', ''),
+            race_class=first_horse.get('class restrictions', ''),
+            track_condition=track_condition
+        )
+        db.session.add(race)
+        db.session.flush()
         
         # Create horse and prediction records
         for result in horses_results:
