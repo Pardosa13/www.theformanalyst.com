@@ -110,15 +110,19 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
     if not analysis_results:
         raise Exception("No results returned from analyzer")
     
-   # Create meeting record
-# Extract and parse date from filename (Australian DD/MM/YY format)
+# Create meeting record
 filename_without_ext = filename.replace('.csv', '')
-date_str = filename_without_ext.split('_')[0]  # Gets "251129" from "251129_Rosehill"
 
-try:
-    meeting_date = datetime.strptime(date_str, '%d%m%y').date()
-except ValueError:
-    meeting_date = None  # If filename doesn't have date format, skip it
+# Try to extract date from filename (e.g., "251129_Rosehill")
+meeting_date = None
+if '_' in filename_without_ext:
+    date_str = filename_without_ext.split('_')[0]
+    if len(date_str) == 6 and date_str.isdigit():
+        try:
+            # Parse as DD/MM/YY (Australian format)
+            meeting_date = datetime.strptime(date_str, '%d%m%y').date()
+        except:
+            pass  # If parsing fails, just leave date as None
 
 meeting = Meeting(
     user_id=user_id,
@@ -126,8 +130,8 @@ meeting = Meeting(
     csv_data=csv_data,
     date=meeting_date
 )
-    db.session.add(meeting)
-    db.session.flush()  # Get meeting ID
+db.session.add(meeting)
+db.session.flush()  # Get meeting ID
     
     # Group results by race
     races_data = {}
