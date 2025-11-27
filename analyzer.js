@@ -1423,27 +1423,84 @@ function parseLastInteger(sectional) {
     return match ? parseInt(match[1], 10) : null; // Return the integer or null if not found
 }
 
+// ==========================================
+// SECTIONAL SCORING CONSTANTS (Module Level)
+// ==========================================
+const SECTIONAL_DISTANCE_TOLERANCE = 200;
+const SECTIONAL_WEIGHT_ADJUSTMENT_FACTOR = 0.06;
+const SECTIONAL_CLASS_ADJUSTMENT_FACTOR = 0.015;
+const SECTIONAL_BASELINE_CLASS_SCORE = 70;
+const SECTIONAL_RECENCY_WEIGHTS = [1.0, 0.7, 0.5];
+const SECTIONAL_DEFAULT_RACE_DISTANCE = 2000;
+
+// ==========================================
+// SECTIONAL SCORING HELPER FUNCTIONS (Module Level)
+// ==========================================
+
+function calculateMean(values) {
+  if (values.length === 0) return 0;
+  return values.reduce((sum, val) => sum + val, 0) / values.length;
+}
+
+function calculateStdDev(values, mean) {
+  if (values.length <= 1) return 0;
+  const squaredDiffs = values.map((val) => Math.pow(val - mean, 2));
+  const variance = squaredDiffs.reduce((sum, val) => sum + val, 0) / values.length;
+  return Math.sqrt(variance);
+}
+
+function calculateZScore(value, mean, stdDev) {
+  if (stdDev === 0) return 0;
+  return (value - mean) / stdDev;
+}
+
+function parseWeightSectional(weightRestriction) {
+  if (!weightRestriction) return null;
+  const match = String(weightRestriction).match(/[\d.]+/);
+  return match ? parseFloat(match[0]) : null;
+}
+
+function parsePrizeMoney(prizeString) {
+  if (!prizeString) return null;
+  
+  const cleaned = String(prizeString).replace(/[$,\s]/g, '');
+  const direct = parseInt(cleaned);
+  if (!isNaN(direct) && direct > 0) return direct;
+  
+  const match = prizeString.match(/1st\s+\$([0-9,]+)/i);
+  if (match) return parseInt(match[1].replace(/,/g, ''));
+  
+  return null;
+}
+
+function getTypicalWeightForClass(classScore) {
+  if (classScore >= 115) return 57.0;
+  if (classScore >= 100) return 56.5;
+  if (classScore >= 85) return 56.0;
+  if (classScore >= 70) return 55.0;
+  if (classScore >= 55) return 54.5;
+  if (classScore >= 40) return 54.0;
+  return 53.5;
+}
+
 function getLowestSectionalsByRace(data) {
-  // Filter out invalid rows first
+  
+  // Filter out invalid rows
   const validData = data.filter(entry => {
-    // Check if all required fields exist
     if (!entry['race number'] || !entry['horse name'] || !entry['sectional']) {
       return false;
     }
     
-    // Check if horse name is valid (not just the header text)
     const horseName = entry['horse name'].toString().trim().toLowerCase();
     if (horseName === 'horse name' || horseName === '' || horseName === 'nan' || horseName === 'null' || horseName === 'undefined') {
       return false;
     }
     
-    // Check if race number is valid
     const raceNum = parseInt(entry['race number']);
     if (isNaN(raceNum) || raceNum <= 0) {
       return false;
     }
     
-    // Check if sectional format is recognizable (even if 0 seconds)
     const sectionalMatch = entry['sectional'].toString().match(/^(\d+\.?\d*)sec (\d+)m$/);
     if (!sectionalMatch) {
       return false;
@@ -1468,198 +1525,356 @@ function getLowestSectionalsByRace(data) {
   Object.keys(raceGroups).forEach(raceNum => {
     const raceData = raceGroups[raceNum];
     
-    // Parse sectional data and check for consistency
+    // Parse sectional data first
     const parsedData = [];
-    const distances = new Set();
+    const sectionalDistances = new Set();
 
     raceData.forEach(entry => {
       const sectionalMatch = entry.sectional.toString().match(/^(\d+\.?\d*)sec (\d+)m$/);
       if (sectionalMatch) {
         const time = parseFloat(sectionalMatch[1]);
-        const distance = parseInt(sectionalMatch[2]);
+        const sectionalDistance = parseInt(sectionalMatch[2]);
+        const formDistance = parseInt(entry['form distance']);
         
-        // Only consider non-zero sectionals for distance checking
         if (time > 0) {
-          distances.add(distance);
+          sectionalDistances.add(sectionalDistance);
         }
         
         const newEntry = { ...entry };
-
-        // Only attach time if detected AND non-undefined
-        if (time !== undefined && !isNaN(time)) {
-          newEntry.time = time;
-        }
-
-        // Only attach distance if detected AND non-undefined
-        if (distance !== undefined && !isNaN(distance)) {
-          newEntry.distance = distance;
-        }
+        newEntry.time = time;
+        newEntry.sectionalDistance = sectionalDistance;
+        newEntry.formDistance = formDistance;
 
         parsedData.push(newEntry);
       }
     });
 
-    // If multiple distances, find the most common one
-    let targetDistance = null;
-    if (distances.size > 1) {
-      // Count horses per distance
+    // Find target sectional distance
+    let targetSectionalDistance = null;
+    if (sectionalDistances.size > 1) {
       const distanceHorseCounts = {};
-      distances.forEach(dist => {
+      sectionalDistances.forEach(dist => {
         const horsesAtDistance = new Set();
         parsedData.forEach(entry => {
-          if (entry.time > 0 && entry.distance === dist) {
+          if (entry.time > 0 && entry.sectionalDistance === dist) {
             horsesAtDistance.add(entry['horse name']);
           }
         });
         distanceHorseCounts[dist] = horsesAtDistance.size;
       });
       
-      // Find distance with most horses
-      targetDistance = Object.keys(distanceHorseCounts).reduce((a, b) => 
+      targetSectionalDistance = Object.keys(distanceHorseCounts).reduce((a, b) => 
         distanceHorseCounts[a] > distanceHorseCounts[b] ? a : b
       );
-      targetDistance = parseInt(targetDistance);
-    } else if (distances.size === 1) {
-      targetDistance = [...distances][0];
+      targetSectionalDistance = parseInt(targetSectionalDistance);
+    } else if (sectionalDistances.size === 1) {
+      targetSectionalDistance = [...sectionalDistances][0];
     }
+    
+    // ROBUST DISTANCE FALLBACK
+    let todaysRaceDistance = parseInt(raceData[0]?.distance);
+    
+    if (isNaN(todaysRaceDistance)) {
+      todaysRaceDistance = parseInt(raceData[0]?.['race distance']);
+    }
+    
+    if (isNaN(todaysRaceDistance)) {
+      todaysRaceDistance = targetSectionalDistance;
+    }
+    
+    if (isNaN(todaysRaceDistance) || !todaysRaceDistance) {
+      todaysRaceDistance = SECTIONAL_DEFAULT_RACE_DISTANCE;
+    }
+    
+    parsedData.forEach(entry => {
+      entry.todaysDistance = todaysRaceDistance;
+    });
 
-    // Collect sectional times at target distance with dates
+    // Collect and adjust sectional times
     const horseData = {};
     const allHorses = [...new Set(raceData.map(entry => entry['horse name']))];
     
-    // Initialize all horses
     allHorses.forEach(horseName => {
       horseData[horseName] = [];
     });
     
-    // Collect sectional times with dates at target distance
     parsedData.forEach(entry => {
       const horseName = entry['horse name'];
-      // Only include non-zero sectionals at the target distance
-      if (entry.time > 0 && (targetDistance === null || entry.distance === targetDistance)) {
+      const rawTime = entry.time;
+      const formDistance = entry.formDistance;
+      const sectionalDistance = entry.sectionalDistance;
+      
+      const formClassString = entry['form class'] || '';
+      const formPrizeString = entry['prizemoney'] || '';
+      const formClassScore = calculateClassScore(formClassString, formPrizeString);
+      
+      const pastWeightCarried = parseWeightSectional(entry['form weight']);
+      
+      if (pastWeightCarried === null) {
+        return;
+      }
+      
+      const typicalWeightForClass = getTypicalWeightForClass(formClassScore);
+      
+      const isDistanceRelevant = !isNaN(formDistance) && !isNaN(todaysRaceDistance) &&
+        Math.abs(formDistance - todaysRaceDistance) <= SECTIONAL_DISTANCE_TOLERANCE;
+      
+      const isCorrectSectionalDistance = targetSectionalDistance === null || 
+        sectionalDistance === targetSectionalDistance;
+      
+      if (rawTime > 0 && isDistanceRelevant && isCorrectSectionalDistance) {
+        
+        const weightDiff = pastWeightCarried - typicalWeightForClass;
+        const weightAdjustment = weightDiff * SECTIONAL_WEIGHT_ADJUSTMENT_FACTOR;
+        
+        const classPointsDiff = formClassScore - SECTIONAL_BASELINE_CLASS_SCORE;
+        const classAdjustment = classPointsDiff * SECTIONAL_CLASS_ADJUSTMENT_FACTOR;
+        
+        const adjustedTime = rawTime - weightAdjustment - classAdjustment;
+        
         horseData[horseName].push({
-          time: entry.time,
-          date: entry['form meeting date']
+          time: adjustedTime,
+          rawTime: rawTime,
+          weight: pastWeightCarried,
+          typicalWeight: typicalWeightForClass,
+          formClass: formClassString,
+          formClassScore: formClassScore,
+          date: entry['form meeting date'],
+          formDistance: formDistance,
+          adjustments: {
+            weight: -weightAdjustment,
+            weightDiff: weightDiff,
+            class: -classAdjustment,
+            classScore: formClassScore,
+            total: -(weightAdjustment + classAdjustment)
+          }
         });
       }
     });
 
-    // Sort by date (most recent first) for each horse
     Object.keys(horseData).forEach(horseName => {
       horseData[horseName].sort((a, b) => {
         return new Date(b.date) - new Date(a.date);
       });
     });
 
-    // SYSTEM 1: Average of Last 3 Runs
-    const averageLast3Data = [];
-    const horsesWithoutAverage = [];
-    
+    // SYSTEM 1: Weighted Average
+    const weightedAvgData = [];
+
     Object.keys(horseData).forEach(horseName => {
       const times = horseData[horseName];
       if (times.length > 0) {
-        // Take up to 3 most recent runs
-        const last3Times = times.slice(0, 3).map(entry => entry.time);
-        const average = last3Times.reduce((sum, time) => sum + time, 0) / last3Times.length;
-        averageLast3Data.push({
-          horseName: horseName,
-          averageTime: average,
-          runsUsed: last3Times.length
+        const last3 = times.slice(0, 3);
+        
+        let weightedSum = 0;
+        let totalWeight = 0;
+        last3.forEach((entry, index) => {
+          const weight = SECTIONAL_RECENCY_WEIGHTS[index] || 0.5;
+          weightedSum += entry.time * weight;
+          totalWeight += weight;
         });
-      } else {
-        horsesWithoutAverage.push(horseName);
+        const weightedAverage = weightedSum / totalWeight;
+        
+        const avgWeightAdj = last3.reduce((sum, e) => sum + e.adjustments.weight, 0) / last3.length;
+        const avgWeightDiff = last3.reduce((sum, e) => sum + e.adjustments.weightDiff, 0) / last3.length;
+        const avgClassAdj = last3.reduce((sum, e) => sum + e.adjustments.class, 0) / last3.length;
+        const avgClassScore = last3.reduce((sum, e) => sum + e.formClassScore, 0) / last3.length;
+        
+        weightedAvgData.push({
+          horseName: horseName,
+          averageTime: weightedAverage,
+          runsUsed: last3.length,
+          avgWeightAdj: avgWeightAdj,
+          avgWeightDiff: avgWeightDiff,
+          avgClassAdj: avgClassAdj,
+          avgClassScore: avgClassScore
+        });
       }
     });
 
-    // Sort by average time (fastest first)
-    averageLast3Data.sort((a, b) => a.averageTime - b.averageTime);
+    // SYSTEM 2: Best Sectional
+    const bestRecentData = [];
 
-    // SYSTEM 2: Best Single Sectional from Last Start Only
-    const lastStartData = [];
-    const horsesWithoutLastStart = [];
-    
     Object.keys(horseData).forEach(horseName => {
       const times = horseData[horseName];
       if (times.length > 0) {
-        // Take only the most recent run (index 0 after sorting)
-        const lastStartTime = times[0].time;
-        lastStartData.push({
+        const last5 = times.slice(0, 5);
+        const bestEntry = last5.reduce((best, current) => 
+          current.time < best.time ? current : best
+        );
+        
+        bestRecentData.push({
           horseName: horseName,
-          lastStartTime: lastStartTime
+          bestTime: bestEntry.time,
+          rawBestTime: bestEntry.rawTime,
+          fromLast: last5.length,
+          weight: bestEntry.weight,
+          typicalWeight: bestEntry.typicalWeight,
+          formClass: bestEntry.formClass,
+          adjustments: bestEntry.adjustments
         });
-      } else {
-        horsesWithoutLastStart.push(horseName);
       }
     });
 
-    // Sort by last start time (fastest first)
-    lastStartData.sort((a, b) => a.lastStartTime - b.lastStartTime);
+    // SYSTEM 3: Consistency
+    const consistencyData = [];
 
-    // Create a map to store scores for each horse
+    Object.keys(horseData).forEach(horseName => {
+      const times = horseData[horseName];
+      if (times.length >= 3) {
+        const last5Times = times.slice(0, 5).map(entry => entry.time);
+        const mean = calculateMean(last5Times);
+        const stdDev = calculateStdDev(last5Times, mean);
+        
+        consistencyData.push({
+          horseName: horseName,
+          stdDev: stdDev,
+          runsUsed: last5Times.length
+        });
+      }
+    });
+
+    // Z-SCORE CALCULATIONS
+    const avgTimes = weightedAvgData.map(h => h.averageTime);
+    const avgMean = calculateMean(avgTimes);
+    const avgStdDev = calculateStdDev(avgTimes, avgMean);
+
+    weightedAvgData.forEach(horse => {
+      horse.zScore = calculateZScore(horse.averageTime, avgMean, avgStdDev);
+      horse.points = horse.zScore * -12;
+    });
+
+    const bestTimes = bestRecentData.map(h => h.bestTime);
+    const bestMean = calculateMean(bestTimes);
+    const bestStdDev = calculateStdDev(bestTimes, bestMean);
+
+    bestRecentData.forEach(horse => {
+      horse.zScore = calculateZScore(horse.bestTime, bestMean, bestStdDev);
+      horse.points = horse.zScore * -15;
+    });
+
+    consistencyData.forEach(horse => {
+      horse.points = Math.max(0, 10 - (horse.stdDev * 8));
+    });
+
+    // SCORE AGGREGATION
     const horseScores = {};
     allHorses.forEach(horseName => {
       horseScores[horseName] = {
         score: 0,
         note: '',
-        hasAverage1st: false,
-        hasLastStart1st: false
+        dataSufficiency: 1.0,
+        details: {
+          weightedAvg: 0,
+          bestRecent: 0,
+          consistency: 0
+        }
       };
     });
 
-    // Assign points for System 1: Average of Last 3
-    averageLast3Data.forEach((horse, index) => {
-      let score = 0;
-      let note = '';
-      if (index === 0) {
-        score = 20;
-        note = `+20.0: fastest avg sectional (last ${horse.runsUsed} runs)\n`;
-        horseScores[horse.horseName].hasAverage1st = true;
-      } else if (index === 1) {
-        score = 10;
-        note = `+10.0: 2nd fastest avg sectional (last ${horse.runsUsed} runs)\n`;
-      } else if (index === 2) {
-        score = 5;
-        note = `+ 5.0: 3rd fastest avg sectional (last ${horse.runsUsed} runs)\n`;
-      }
-      horseScores[horse.horseName].score += score;
-      horseScores[horse.horseName].note += note;
+    weightedAvgData.forEach(horse => {
+      const points = Math.round(horse.points * 10) / 10;
+      horseScores[horse.horseName].score += points;
+      horseScores[horse.horseName].details.weightedAvg = points;
+      
+      const zScoreText = (horse.zScore * -1).toFixed(2);
+      const weightInfo = horse.avgWeightDiff >= 0 
+        ? `+${horse.avgWeightDiff.toFixed(1)}kg heavier` 
+        : `${Math.abs(horse.avgWeightDiff).toFixed(1)}kg lighter`;
+      const adjText = `wgt:${horse.avgWeightAdj >= 0 ? '+' : ''}${horse.avgWeightAdj.toFixed(2)}s (${weightInfo}), ` +
+                      `class:${horse.avgClassAdj >= 0 ? '+' : ''}${horse.avgClassAdj.toFixed(2)}s (avg ${horse.avgClassScore.toFixed(0)} pts)`;
+      
+      horseScores[horse.horseName].note += 
+        `+${points.toFixed(1)}: weighted avg (z=${zScoreText}, ${horse.runsUsed} runs)\n` +
+        `  └─ adj: ${adjText}\n`;
     });
 
-    // Assign points for System 2: Last Start Only
-    lastStartData.forEach((horse, index) => {
-      let score = 0;
-      let note = '';
-      if (index === 0) {
-        score = 20;
-        note = `+20.0: fastest last start sectional\n`;
-        horseScores[horse.horseName].hasLastStart1st = true;
-      } else if (index === 1) {
-        score = 10;
-        note = `+10.0: 2nd fastest last start sectional\n`;
-      } else if (index === 2) {
-        score = 5;
-        note = `+ 5.0: 3rd fastest last start sectional\n`;
-      }
-      horseScores[horse.horseName].score += score;
-      horseScores[horse.horseName].note += note;
+    bestRecentData.forEach(horse => {
+      const points = Math.round(horse.points * 10) / 10;
+      horseScores[horse.horseName].score += points;
+      horseScores[horse.horseName].details.bestRecent = points;
+      
+      const zScoreText = (horse.zScore * -1).toFixed(2);
+      const rawVsAdj = `${horse.rawBestTime.toFixed(2)}s → ${horse.bestTime.toFixed(2)}s`;
+      const classInfo = horse.formClass || 'unknown';
+      const classScore = horse.adjustments.classScore || 0;
+      const weightCarried = horse.weight.toFixed(1);
+      const typicalWeight = horse.typicalWeight.toFixed(1);
+      const adjText = `wgt:${horse.adjustments.weight >= 0 ? '+' : ''}${horse.adjustments.weight.toFixed(2)}s (carried ${weightCarried}kg vs ~${typicalWeight}kg typical), ` +
+                      `class:${horse.adjustments.class >= 0 ? '+' : ''}${horse.adjustments.class.toFixed(2)}s`;
+      
+      horseScores[horse.horseName].note += 
+        `+${points.toFixed(1)}: best of last ${horse.fromLast} (z=${zScoreText})\n` +
+        `  └─ ${rawVsAdj} (${adjText}) in ${classInfo} (${classScore.toFixed(0)} pts)\n`;
     });
 
-    // Add horses without sectionals
-    horsesWithoutAverage.forEach(horseName => {
-      if (!horseScores[horseName].note) {
-        horseScores[horseName].note = '??: No valid sectional\n';
+    consistencyData.forEach(horse => {
+      const points = Math.round(horse.points * 10) / 10;
+      horseScores[horse.horseName].score += points;
+      horseScores[horse.horseName].details.consistency = points;
+      
+      let consistencyRating = 'excellent';
+      if (horse.stdDev > 0.8) consistencyRating = 'poor';
+      else if (horse.stdDev > 0.5) consistencyRating = 'fair';
+      else if (horse.stdDev > 0.3) consistencyRating = 'good';
+      
+      horseScores[horse.horseName].note += 
+        `+${points.toFixed(1)}: consistency - ${consistencyRating} (SD=${horse.stdDev.toFixed(2)}s)\n`;
+    });
+
+    // DATA SUFFICIENCY PENALTIES
+    Object.keys(horseData).forEach(horseName => {
+      const validRuns = horseData[horseName].length;
+      let penalty = 1.0;
+      let penaltyNote = '';
+      
+      if (validRuns === 0) {
+        penalty = 0;
+        penaltyNote = `⚠️  No sectionals at relevant distance (±${SECTIONAL_DISTANCE_TOLERANCE}m from ${todaysRaceDistance}m)\n`;
+      } else if (validRuns === 1) {
+        penalty = 0.5;
+        penaltyNote = `⚠️  Only 1 relevant sectional (score ×${penalty})\n`;
+      } else if (validRuns === 2) {
+        penalty = 0.7;
+        penaltyNote = `⚠️  Only 2 relevant sectionals (score ×${penalty})\n`;
+      } else if (validRuns === 3) {
+        penalty = 0.85;
+        penaltyNote = `⚠️  Only 3 relevant sectionals (score ×${penalty})\n`;
+      } else if (validRuns === 4) {
+        penalty = 0.95;
+        penaltyNote = `ℹ️  4 relevant sectionals (score ×${penalty})\n`;
+      }
+      
+      horseScores[horseName].dataSufficiency = penalty;
+      
+      if (penalty < 1.0) {
+        horseScores[horseName].score *= penalty;
+        horseScores[horseName].note += penaltyNote;
+      }
+      
+      if (horseScores[horseName].score === 0 && validRuns === 0) {
+        horseScores[horseName].note = penaltyNote;
       }
     });
 
-    // Push per-horse race results to overall results
+    // CONVERT TO RESULTS - WITH BACKWARDS COMPATIBILITY
     allHorses.forEach(horseName => {
+      const finalScore = Math.max(0, Math.round(horseScores[horseName].score * 10) / 10);
+      
+      // Calculate backwards-compatible flags for combo bonus
+      const details = horseScores[horseName].details;
+      const hasEliteAverage = (details.weightedAvg || 0) >= 12;
+      const hasEliteBest = (details.bestRecent || 0) >= 15;
+      
       results.push({
         race: raceNum,
         name: horseName,
-        sectionalScore: horseScores[horseName].score,
-        sectionalNote: horseScores[horseName].note,
-        hasAverage1st: horseScores[horseName].hasAverage1st,
-        hasLastStart1st: horseScores[horseName].hasLastStart1st
+        sectionalScore: finalScore,
+        sectionalNote: horseScores[horseName].note.trim(),
+        sectionalDetails: horseScores[horseName].details,
+        dataSufficiency: horseScores[horseName].dataSufficiency,
+        hasAverage1st: hasEliteAverage,
+        hasLastStart1st: hasEliteBest
       });
     });
   });
