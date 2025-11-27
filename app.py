@@ -124,42 +124,12 @@ if '_' in filename_without_ext:
         except:
             pass  # If parsing fails, just leave date as None
 
-meeting = Meeting(
-    user_id=user_id,
-    meeting_name=filename_without_ext,
-    csv_data=csv_data,
-    date=meeting_date
-)
-db.session.add(meeting)
-db.session.flush()  # Get meeting ID
-    
-    # Group results by race
-    races_data = {}
-    for result in analysis_results:
-        race_num = result['horse'].get('race number', '0')
-        
-        # Skip invalid rows (header rows that slipped through)
-        if not race_num or not str(race_num).isdigit():
-            continue
-            
-        if race_num not in races_data:
-            races_data[race_num] = []
-        races_data[race_num].append(result)
-    
-    # Create race and horse records
-    for race_num, horses_results in races_data.items():
-        # Get race info from first horse
-        first_horse = horses_results[0]['horse'] if horses_results else {}
-        
-        race = Race(
-            meeting_id=meeting.id,
-            race_number=int(race_num) if race_num else 0,
-            distance=first_horse.get('distance', ''),
-            race_class=first_horse.get('class restrictions', ''),
-            track_condition=track_condition
-        )
-        db.session.add(race)
-        db.session.flush()
+# Create meeting record
+    meeting = Meeting(
+        user_id=user_id,
+        meeting_name=filename.replace('.csv', ''),
+        csv_data=csv_data
+    )
         
         # Create horse and prediction records
         for result in horses_results:
