@@ -341,30 +341,37 @@ const FILTER_CRITERIA = {
         label: 'Rising in Class',
         detect: (notes) => notes.includes('Stepping UP')
     },
-    fastestSectionalAvg: {
-        label: 'Fastest Sectional (Avg Last 3)',
-        detect: (notes) => notes.includes('fastest avg sectional')
+    
+    // NEW Z-SCORE BASED SECTIONAL FILTERS
+    strongWeightedAvg: {
+        label: 'Strong Weighted Avg Sectional (z > 1.0)',
+        detect: (notes) => /weighted avg \(z=[1-9]/.test(notes)
     },
-    secondFastestSectionalAvg: {
-        label: '2nd Fastest Sectional (Avg Last 3)',
-        detect: (notes) => notes.includes('2nd fastest avg sectional')
+    eliteWeightedAvg: {
+        label: 'Elite Weighted Avg Sectional (z > 2.0)',
+        detect: (notes) => /weighted avg \(z=[2-9]/.test(notes)
     },
-    thirdFastestSectionalAvg: {
-        label: '3rd Fastest Sectional (Avg Last 3)',
-        detect: (notes) => notes.includes('3rd fastest avg sectional')
+    strongBestRecent: {
+        label: 'Strong Best Recent Sectional (z > 1.0)',
+        detect: (notes) => /best of last \d+ \(z=[1-9]/.test(notes)
     },
-    fastestLastStart: {
-        label: 'Fastest Last Start Sectional',
-        detect: (notes) => notes.includes('fastest last start sectional')
+    eliteBestRecent: {
+        label: 'Elite Best Recent Sectional (z > 2.0)',
+        detect: (notes) => /best of last \d+ \(z=[2-9]/.test(notes)
     },
-    secondFastestLastStart: {
-        label: '2nd Fastest Last Start Sectional',
-        detect: (notes) => notes.includes('2nd fastest last start sectional')
+    excellentConsistency: {
+        label: 'Excellent Consistency (Sectionals)',
+        detect: (notes) => notes.includes('consistency - excellent')
     },
-    thirdFastestLastStart: {
-        label: '3rd Fastest Last Start Sectional',
-        detect: (notes) => notes.includes('3rd fastest last start sectional')
+    goodConsistency: {
+        label: 'Good Consistency (Sectionals)',
+        detect: (notes) => notes.includes('consistency - good') || notes.includes('consistency - excellent')
     },
+    hasSectionalData: {
+        label: 'Has Sectional Data',
+        detect: (notes) => notes.includes('weighted avg') || notes.includes('best of last')
+    },
+    
     comboBonus: {
         label: 'Combo Bonus (Sectional + Dropping Class)',
         detect: (notes) => notes.includes('COMBO BONUS')
@@ -372,6 +379,10 @@ const FILTER_CRITERIA = {
     wonLastStart: {
         label: 'Won Last Start',
         detect: (notes) => notes.includes('Dominant last start win') || notes.includes('Comfortable last start win') || notes.includes('Narrow last start win') || notes.includes('Photo finish last start win')
+    },
+    dominantWin: {
+        label: 'Dominant Last Start Win (5L+)',
+        detect: (notes) => notes.includes('Dominant last start win')
     },
     narrowLoss: {
         label: 'Narrow Loss (2nd/3rd)',
@@ -385,17 +396,9 @@ const FILTER_CRITERIA = {
         label: 'Ran Places in Last 10',
         detect: (notes) => notes.includes('Ran places:')
     },
-    freshAndReady: {
-        label: 'Fresh and Ready (0-21 days)',
-        detect: (notes) => notes.includes('Fresh and ready')
-    },
     quickBackup: {
-        label: 'Quick Back-up (< 14 days)',
-        detect: (notes) => notes.includes('Quick back-up')
-    },
-    idealSpacing: {
-        label: 'Ideal Spacing (21-60 days)',
-        detect: (notes) => notes.includes('Ideal spacing')
+        label: 'Quick Back-up (≤7 days)',
+        detect: (notes) => notes.includes('Quick backup')
     },
     undefeatedDistance: {
         label: 'Undefeated at Distance',
@@ -405,45 +408,77 @@ const FILTER_CRITERIA = {
         label: 'Undefeated at Track',
         detect: (notes) => notes.includes('UNDEFEATED') && notes.includes('at this track')
     },
+    undefeatedTrackDistance: {
+        label: 'Undefeated at Track+Distance',
+        detect: (notes) => notes.includes('UNDEFEATED') && notes.includes('at this track+distance')
+    },
+    undefeatedTrackCondition: {
+        label: 'Undefeated on Track Condition',
+        detect: (notes) => /UNDEFEATED in \d+ runs on (good|soft|heavy|firm|synthetic)!/.test(notes)
+    },
     exceptionalWinRate: {
-        label: 'Exceptional Win Rate',
+        label: 'Exceptional Win Rate (51%+)',
         detect: (notes) => notes.includes('Exceptional win rate')
     },
     strongWinRate: {
-        label: 'Strong Win Rate',
+        label: 'Strong Win Rate (36%+)',
         detect: (notes) => notes.includes('Strong win rate')
     },
     goodWinRate: {
-        label: 'Good Win Rate',
+        label: 'Good Win Rate (26%+)',
         detect: (notes) => notes.includes('Good win rate')
     },
+    elitePodiumRate: {
+        label: 'Elite Podium Rate (85%+)',
+        detect: (notes) => notes.includes('Elite podium rate')
+    },
+    excellentPodiumRate: {
+        label: 'Excellent Podium Rate (70%+)',
+        detect: (notes) => notes.includes('Excellent podium rate')
+    },
     loveTheJockey: {
-        label: 'Elite Jockey',
+        label: 'Elite Jockey (10 pts)',
         detect: (notes) => notes.includes('Love the Jockey')
     },
-    topJockey: {
-        label: 'Top Jockey',
-        detect: (notes) => notes.includes('Good Jockey')
+    likeTheJockey: {
+        label: 'Good Jockey (5 pts)',
+        detect: (notes) => notes.includes('Like the Jockey')
     },
-    loveTheTrainer: {
-        label: 'Elite Trainer',
-        detect: (notes) => notes.includes('Love the Trainer')
-    },
-    topTrainer: {
-        label: 'Top Trainer',
-        detect: (notes) => notes.includes('Good Trainer')
+    likeTheTrainer: {
+        label: 'Good Trainer (5 pts)',
+        detect: (notes) => notes.includes('Like the Trainer')
     },
     firstUpSpecialist: {
-        label: 'First Up Specialist',
-        detect: (notes) => notes.includes('first-up specialist')
+        label: 'First Up Specialist (Undefeated)',
+        detect: (notes) => notes.includes('First up specialist')
     },
     secondUpSpecialist: {
-        label: 'Second Up Specialist',
-        detect: (notes) => notes.includes('second-up specialist')
+        label: 'Second Up Specialist (Undefeated)',
+        detect: (notes) => notes.includes('Second up specialist')
     },
     positiveFormPrice: {
-        label: 'Positive Form Price',
+        label: 'Positive Form Price (Well-backed)',
         detect: (notes) => /\+\d+\.\d+ : Form price/.test(notes)
+    },
+    strongFormPrice: {
+        label: 'Strong Form Price (25+ pts)',
+        detect: (notes) => /\+[2-9]\d\.\d+ : Form price/.test(notes)
+    },
+    lightWeight: {
+        label: 'Light Weight vs Race Avg',
+        detect: (notes) => /\+\d+\.\d+ : Weight .* BELOW race avg/.test(notes)
+    },
+    droppedWeight: {
+        label: 'Dropped Weight from Last Start',
+        detect: (notes) => /\+\d+\.\d+ : Dropped .* from last start/.test(notes)
+    },
+    longerDistance: {
+        label: 'Longer Distance than Previous',
+        detect: (notes) => notes.includes('Longer dist than previous')
+    },
+    noWinsInLast10: {
+        label: 'No Wins in Last 10 (Risky)',
+        detect: (notes) => notes.includes('No wins in last 10 starts')
     }
 };
 
