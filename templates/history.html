@@ -12,6 +12,9 @@
   .meeting-actions .btn { white-space:nowrap; min-width:60px; }
   .small-muted { font-size:0.85rem; color:var(--muted, #6c757d); }
   .no-meetings { padding:20px; text-align:center; color:var(--muted, #6c757d); }
+  /* Make View button green */
+  .btn-view-green { background-color: #28a745; color: white; border-color: #28a745; }
+  .btn-view-green:hover { background-color: #218838; border-color: #1e7e34; }
   /* responsive */
   @media (max-width:640px) {
     .meeting-card { flex-direction:column; align-items:flex-start; gap:12px; }
@@ -47,7 +50,7 @@
           </div>
         </div>
         <div class="meeting-actions">
-          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('view_meeting', meeting_id=m.id) }}">View</a>
+          <a class="btn btn-sm btn-view-green" href="{{ url_for('view_meeting', meeting_id=m.id) }}">View</a>
           <form method="post" action="{{ url_for('delete_meeting', meeting_id=m.id) }}" onsubmit="return confirm('Delete this meeting?');" style="display:inline;">
             <button type="submit" class="btn btn-sm btn-danger">Delete</button>
           </form>
