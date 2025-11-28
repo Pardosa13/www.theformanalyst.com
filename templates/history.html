@@ -6,7 +6,7 @@
   .meeting-card { display:flex; align-items:center; justify-content:space-between; padding:14px; border:1px solid var(--border-color, #e6e6e6); border-radius:8px; background:var(--card-bg, #fff); margin-bottom:12px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
   .meeting-meta { color: var(--muted, #6c757d); font-size:0.95rem; margin-top:4px; }
   .meeting-left { display:flex; gap:14px; align-items:center; min-width:0; }
-  .meeting-title { font-weight:600; color: var(--text-color, #222); margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:520px; }
+  .meeting-title { font-weight:600; color: var(--text-color, #222); margin:0; overflow:hidden; text-overflow:ellipsis; max-width:100%; line-height:1.3; }
   .meeting-date-badge { font-size:0.85rem; padding:6px 8px; border-radius:6px; background:var(--accent, #1e90ff); color:#fff; }
   .meeting-actions { display:flex; gap:8px; align-items:center; flex-shrink:0; }
   .meeting-actions .btn { white-space:nowrap; min-width:60px; }
@@ -20,7 +20,6 @@
     .meeting-actions { width:100%; justify-content:flex-start; }
   }
 </style>
-<!-- Rest of your HTML stays exactly the same -->
 <div class="history-container">
   <div class="page-header">
     <h1 style="margin-bottom:6px">History</h1>
