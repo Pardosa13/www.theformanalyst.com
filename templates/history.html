@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-
 {% block content %}
 <style>
   /* Small local tweaks to keep the list tidy and match site visuals */
@@ -9,22 +8,24 @@
   .meeting-left { display:flex; gap:14px; align-items:center; min-width:0; }
   .meeting-title { font-weight:600; color: var(--text-color, #222); margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:520px; }
   .meeting-date-badge { font-size:0.85rem; padding:6px 8px; border-radius:6px; background:var(--accent, #1e90ff); color:#fff; }
-  .meeting-actions { display:flex; gap:8px; align-items:center; }
+  .meeting-actions { display:flex; gap:8px; align-items:center; flex-shrink:0; }
+  .meeting-actions .btn { white-space:nowrap; min-width:60px; }
   .small-muted { font-size:0.85rem; color:var(--muted, #6c757d); }
   .no-meetings { padding:20px; text-align:center; color:var(--muted, #6c757d); }
   /* responsive */
   @media (max-width:640px) {
-    .meeting-left { flex-direction:column; align-items:flex-start; gap:6px; }
-    .meeting-title { max-width:260px; }
+    .meeting-card { flex-direction:column; align-items:flex-start; gap:12px; }
+    .meeting-left { flex-direction:column; align-items:flex-start; gap:6px; width:100%; }
+    .meeting-title { max-width:100%; }
+    .meeting-actions { width:100%; justify-content:flex-start; }
   }
 </style>
-
+<!-- Rest of your HTML stays exactly the same -->
 <div class="history-container">
   <div class="page-header">
     <h1 style="margin-bottom:6px">History</h1>
     <p class="small-muted" style="margin-top:0">All your uploaded meetings and analyses — click a row to view details.</p>
   </div>
-
   {% if meetings %}
     {% for m in meetings %}
       <div class="meeting-card" role="article" aria-labelledby="meeting-{{ m.id }}">
@@ -46,10 +47,8 @@
             </div>
           </div>
         </div>
-
         <div class="meeting-actions">
           <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('view_meeting', meeting_id=m.id) }}">View</a>
-
           <form method="post" action="{{ url_for('delete_meeting', meeting_id=m.id) }}" onsubmit="return confirm('Delete this meeting?');" style="display:inline;">
             <button type="submit" class="btn btn-sm btn-danger">Delete</button>
           </form>
