@@ -49,28 +49,30 @@
 {% if recent_meetings %}
 <div class="card">
     <h2>Recent Analyses</h2>
-    <table style="width: 100%; border-collapse: collapse;">
-        <thead>
-            <tr style="background-color: #f5f7fa;">
-                <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e2e8f0;">Meeting</th>
-                <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e2e8f0;">Date</th>
-                <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e2e8f0;">Action</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for meeting in recent_meetings %}
-            <tr>
-                <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">{{ meeting.meeting_name }}</td>
-                <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">{{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">
-                    <a href="{{ url_for('view_meeting', meeting_id=meeting.id) }}" class="btn btn-primary" style="font-size: 12px; padding: 6px 12px;">
-                        View Results
-                    </a>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-responsive">
+        <table class="recent-table">
+            <thead>
+                <tr>
+                    <th>Meeting</th>
+                    <th>Date</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for meeting in recent_meetings %}
+                <tr>
+                    <td data-label="Meeting">{{ meeting.meeting_name }}</td>
+                    <td data-label="Date">{{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td data-label="Action">
+                        <a href="{{ url_for('view_meeting', meeting_id=meeting.id) }}" class="btn btn-primary btn-view-results">
+                            View Results
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
 {% endif %}
 
@@ -82,6 +84,77 @@
     
     #advanced_mode:checked + span + span {
         transform: translateX(22px);
+    }
+
+    /* Table styling */
+    .recent-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .recent-table thead tr {
+        background-color: #f5f7fa;
+    }
+
+    .recent-table th {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 2px solid #e2e8f0;
+        font-weight: 600;
+    }
+
+    .recent-table td {
+        padding: 12px;
+        border-bottom: 1px solid #e2e8f0;
+    }
+
+    .btn-view-results {
+        font-size: 12px;
+        padding: 6px 12px;
+        white-space: nowrap;
+        display: inline-block;
+    }
+
+    /* Mobile responsive table */
+    @media (max-width: 640px) {
+        .recent-table thead {
+            display: none;
+        }
+
+        .recent-table tr {
+            display: block;
+            margin-bottom: 16px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            background: white;
+        }
+
+        .recent-table td {
+            display: block;
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .recent-table td:last-child {
+            border-bottom: none;
+            padding-top: 12px;
+        }
+
+        .recent-table td::before {
+            content: attr(data-label);
+            font-weight: 600;
+            display: block;
+            margin-bottom: 4px;
+            color: #4a5568;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        .btn-view-results {
+            width: 100%;
+            text-align: center;
+        }
     }
 </style>
 {% endblock %}
