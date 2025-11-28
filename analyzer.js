@@ -1861,10 +1861,7 @@ function getLowestSectionalsByRace(data) {
     allHorses.forEach(horseName => {
       const finalScore = Math.max(0, Math.round(horseScores[horseName].score * 10) / 10);
       
-      // Calculate backwards-compatible flags for combo bonus
-      const details = horseScores[horseName].details;
-      const hasEliteAverage = (details.weightedAvg || 0) >= 12;
-      const hasEliteBest = (details.bestRecent || 0) >= 15;
+// Flags will be set after determining actual 1st place
       
       results.push({
         race: raceNum,
@@ -1873,9 +1870,55 @@ function getLowestSectionalsByRace(data) {
         sectionalNote: horseScores[horseName].note.trim(),
         sectionalDetails: horseScores[horseName].details,
         dataSufficiency: horseScores[horseName].dataSufficiency,
-        hasAverage1st: hasEliteAverage,
-        hasLastStart1st: hasEliteBest
+        hasAverage1st: false,
+        hasLastStart1st: false
       });
+    });
+  });
+
+  // NOW determine the actual 1st place horses for combo bonus
+  const raceGroupsForCombo = {};
+  results.forEach(r => {
+    if (!raceGroupsForCombo[r.race]) {
+      raceGroupsForCombo[r.race] = [];
+    }
+    raceGroupsForCombo[r.race].push(r);
+  });
+  
+  // For each race, mark the 1st place horses
+  Object.values(raceGroupsForCombo).forEach(raceHorses => {
+    // Find horse with highest weightedAvg score
+    let bestWeightedAvg = null;
+    let bestWeightedAvgScore = -Infinity;
+    
+    raceHorses.forEach(horse => {
+      const weightedAvgScore = horse.sectionalDetails?.weightedAvg || 0;
+      if (weightedAvgScore > bestWeightedAvgScore) {
+        bestWeightedAvgScore = weightedAvgScore;
+        bestWeightedAvg = horse.name;
+      }
+    });
+    
+    // Find horse with highest bestRecent score
+    let bestRecent = null;
+    let bestRecentScore = -Infinity;
+    
+    raceHorses.forEach(horse => {
+      const recentScore = horse.sectionalDetails?.bestRecent || 0;
+      if (recentScore > bestRecentScore) {
+        bestRecentScore = recentScore;
+        bestRecent = horse.name;
+      }
+    });
+    
+    // Mark the winners
+    raceHorses.forEach(horse => {
+      if (horse.name === bestWeightedAvg) {
+        horse.hasAverage1st = true;
+      }
+      if (horse.name === bestRecent) {
+        horse.hasLastStart1st = true;
+      }
     });
   });
 
