@@ -11,11 +11,10 @@ const jockeyMapping = {
     "C Williams": "Craig Williams",
     "E Brown": "Ethan Brown",
     "D Lane": "Damian Lane",
-    "B Melham": "Ben Melham",
-    //"J Kah": "" ???
+    "B Melham": "Ben Melham"
+    // "J Kah": ""  <-- decide whether to map this
     // Add more mappings as needed
 };
-
 
 // Mapping of equivalent trainer names
 const trainerMapping = {
@@ -28,7 +27,6 @@ const trainerMapping = {
     'M M Laurie': 'Matthew Laurie'
 };
 
-   
 function convertCSV(data) {
     // Normalize line endings (convert CRLF and CR to LF)
     data = data.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -96,21 +94,21 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     [a, b] = checkLastDistance(horseRow);
     score += a;
     notes += b;
-    
+
     // ===== APPLY CONDITION CONTEXT =====
     // This adjusts sectional and condition scoring based on track condition match
     const conditionContext = applyConditionContext(horseRow, trackCondition, sectionalDetails);
-    
+
     // Check horse form on actual track condition (ENHANCED WEIGHTED SYSTEM + CONTEXT MULTIPLIER)
     const formTrackCondition = 'horse record ' + trackCondition;
     [a, b] = checkTrackConditionForm(horseRow[formTrackCondition], trackCondition);
-    
+
     // Apply condition multiplier
     const originalConditionScore = a;
     a = a * conditionContext.conditionMultiplier;
     score += a;
     notes += b;
-    
+
     // Add context note if adjustments were made
     if (conditionContext.note) {
         if (conditionContext.conditionMultiplier !== 1.0) {
@@ -118,7 +116,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
         }
         notes += `ℹ️  ${conditionContext.note}\n`;
     }
-    
+
     // Store the sectional weight for later use
     horseRow._sectionalWeight = conditionContext.sectionalWeight;
 
@@ -127,37 +125,37 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     // 1. Being below race average (already calculated in weight scoring)
     // 2. Weight drop from last start (already calculated in weight scoring)
     // We need to extract these values to pass to compareClasses
-    
+
     // Parse current weight and race average
     const currentWeight = parseFloat(horseRow['horse weight']);
     const lastWeight = parseFloat(horseRow['form weight']);
-    
+
     // Calculate weight advantage points (matching the scoring in calculateWeightScores)
     let totalWeightAdvantage = 0;
-    
+
     // This is a simplified calculation - in production you'd want to get the actual
     // race average, but we can estimate the advantage from the weight difference
     if (!isNaN(currentWeight) && !isNaN(lastWeight)) {
         const weightDrop = lastWeight - currentWeight;
-        
+
         // Points for weight drop (matching calculateWeightScores logic)
         if (weightDrop >= 3) totalWeightAdvantage += 15;
         else if (weightDrop >= 2) totalWeightAdvantage += 10;
         else if (weightDrop >= 1) totalWeightAdvantage += 5;
-        
+
         // Points for being below average (estimate: assume 55kg average)
         const estimatedAverage = 55.0;
         const diffFromAvg = estimatedAverage - currentWeight;
-        
+
         if (diffFromAvg >= 3) totalWeightAdvantage += 15;
         else if (diffFromAvg >= 2) totalWeightAdvantage += 10;
         else if (diffFromAvg >= 1) totalWeightAdvantage += 6;
         else if (diffFromAvg >= 0.5) totalWeightAdvantage += 3;
     }
-    
+
     // Check horse current and former classes (with weight advantage)
     var [cscore, cnote] = compareClasses(
-        horseRow['class restrictions'], 
+        horseRow['class restrictions'],
         horseRow['form class'],
         horseRow['race prizemoney'],
         horseRow['prizemoney'],
@@ -171,11 +169,11 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     score += a;
     notes += b;
 
-// Calculate recent form for last start context
+    // Calculate recent form for last start context
     const last10 = String(horseRow['horse last10'] || '');
     let winsBeforeLast = 0;
     let runsBeforeLast = 0;
-    
+
     // Count wins and runs BEFORE the last start (exclude rightmost character)
     if (last10.length > 1) {
         for (let i = last10.length - 2; i >= 0 && runsBeforeLast < 5; i--) {
@@ -188,25 +186,25 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             }
         }
     }
-    
+
     const recentWinRate = runsBeforeLast > 0 ? winsBeforeLast / runsBeforeLast : 0;
     const recentFormData = {
         winsBeforeLast: winsBeforeLast,
         runsBeforeLast: runsBeforeLast,
         recentWinRate: recentWinRate
     };
-    
+
     // Calculate class change (for last start context)
     const todayClassScore = calculateClassScore(horseRow['class restrictions'], horseRow['race prizemoney']);
     const lastClassScore = calculateClassScore(horseRow['form class'], horseRow['prizemoney']);
     const classChange = todayClassScore - lastClassScore; // Negative = dropping in class
-    
+
     // Check last run margin (with class drop context)
     [a, b] = checkMargin(horseRow['form position'], horseRow['form margin'], classChange, recentFormData);
     score += a;
     notes += b;
 
-// Build specialist context for SP profile adjustment
+    // Build specialist context for SP profile adjustment
     const specialistContext = {
         hasStrongConditionRecord: false,
         hasStrongTrackRecord: false,
@@ -215,7 +213,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
         isRecentConditionWinner: false,
         isClassDropperWithSpeed: false
     };
-    
+
     // Check condition record
     const conditionField = 'horse record ' + trackCondition;
     const conditionRecord = horseRow[conditionField];
@@ -225,19 +223,19 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             const [runs, wins, seconds, thirds] = numbers;
             const podiums = wins + seconds + thirds;
             const podiumRate = runs > 0 ? podiums / runs : 0;
-            
+
             // Strong condition record = ≥50% podium with good confidence (N≥5)
             if (runs >= 5 && podiumRate >= 0.50) {
                 specialistContext.hasStrongConditionRecord = true;
             }
-            
+
             // Perfect record
             if (runs > 0 && (wins === runs || podiums === runs)) {
                 specialistContext.hasPerfectRecord = true;
             }
         }
     }
-    
+
     // Check track record
     const trackRecord = horseRow['horse record track'];
     if (trackRecord && typeof trackRecord === 'string') {
@@ -246,7 +244,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             const [runs, wins, seconds, thirds] = numbers;
             const podiums = wins + seconds + thirds;
             const podiumRate = runs > 0 ? podiums / runs : 0;
-            
+
             if (runs >= 5 && podiumRate >= 0.50) {
                 specialistContext.hasStrongTrackRecord = true;
             }
@@ -255,7 +253,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             }
         }
     }
-    
+
     // Check distance record
     const distanceRecord = horseRow['horse record distance'];
     if (distanceRecord && typeof distanceRecord === 'string') {
@@ -264,7 +262,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             const [runs, wins, seconds, thirds] = numbers;
             const podiums = wins + seconds + thirds;
             const podiumRate = runs > 0 ? podiums / runs : 0;
-            
+
             if (runs >= 5 && podiumRate >= 0.50) {
                 specialistContext.hasStrongDistanceRecord = true;
             }
@@ -273,7 +271,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             }
         }
     }
-    
+
     // Check if recent condition winner
     const formPosition = parseInt(horseRow['form position']);
     const formCondition = String(horseRow['form track condition'] || '').toLowerCase();
@@ -281,7 +279,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     if (formPosition === 1 && formCondition === todayCondition) {
         specialistContext.isRecentConditionWinner = true;
     }
-    
+
     // Check if class dropper with speed
     if (classChange < -10 && sectionalDetails) {
         const bestSectionalZ = sectionalDetails.bestRecent ? Math.abs(sectionalDetails.bestRecent / 15) : 0;
@@ -289,7 +287,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             specialistContext.isClassDropperWithSpeed = true;
         }
     }
-    
+
     // Check form price (with specialist context)
     [a, b] = checkFormPrice(averageFormPrice, specialistContext);
     score += a;
@@ -301,8 +299,8 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     notes += b;
 
     // Check for perfect record specialist bonus
-    const perfectRecordResult = calculatePerfectRecordBonus(horseRow, trackCondition);
-    if (perfectRecordResult.bonus > 0) {
+    const perfectRecordResult = calculatePerfectRecordBonus ? calculatePerfectRecordBonus(horseRow, trackCondition) : { bonus: 0, note: '' };
+    if (perfectRecordResult && perfectRecordResult.bonus > 0) {
         score += perfectRecordResult.bonus;
         notes += perfectRecordResult.note;
     }
@@ -318,7 +316,7 @@ function checkWeight(weight, claim) {
 
 function checkLast10runs(last10) {
     last10 = String(last10 || '').trim();
-    
+
     if (last10.length > 99) {
         throw new Error("String must be 99 characters or less.");
     }
@@ -331,7 +329,7 @@ function checkLast10runs(last10) {
 
     for (let i = last10.length - 1; i >= 0; i--) {
         let char = last10[i];
-        if (char != 'X' && char != 'x' && count < 5) {
+        if (char !== 'X' && char !== 'x' && count < 5) {
             count++;
             if (char === '1') {
                 addScore += 10;
@@ -345,7 +343,7 @@ function checkLast10runs(last10) {
                 addScore += 2;
                 note2 += ' 3rd';
             }
-        }    
+        }
     }
 
     // FORMAT THE NOTE *BEFORE* APPLYING THE NO-WINS PENALTY
@@ -358,12 +356,10 @@ function checkLast10runs(last10) {
         addScore -= 15;
         note += '-15.0 : No wins in last 10 starts - non-winner\n';
     }
-    
+
     // Handle the case where we had places but ended negative
-    if (addScore < 0 && note2) {
-        // Note already formatted above, just return
-    }
-     
+    // (note already formatted above)
+
     return [addScore, note];
 }
 
@@ -378,13 +374,14 @@ function normalizeJockeyName(jockeyName) {
     }
     return jr; // Return the original if no mapping is found
 }
+
 function checkJockeys(JockeyName) {
     // Function for checking jockey name against lists
     var addScore = 0;
     var note = '';
 
     // Check for known spelling/name changes
-    JockeyName = normalizeJockeyName(JockeyName)
+    JockeyName = normalizeJockeyName(JockeyName);
 
     const tenPointJockeys = [
         'Blake Shinn',
@@ -394,7 +391,7 @@ function checkJockeys(JockeyName) {
         'Craig Williams',
         'Nash Rawiller',
         'Tim Clark'
-    ]
+    ];
     const fivePointJockeys = [
         'Aaron Bullock',
         'Damian Lane',
@@ -405,10 +402,10 @@ function checkJockeys(JockeyName) {
         'William Pike',
         'Zac Lloyd',
         'J Kah'
-    ]
+    ];
     const negativeJockeys = [
         'Kerrin McEvoy'
-    ]
+    ];
 
     if (tenPointJockeys.includes(JockeyName)) {
         addScore += 10;
@@ -437,30 +434,30 @@ function normalizeTrainerName(trainerName) {
 }
 
 function checkTrainers(trainerName) {
-    // Function for checking jockey name against lists
+    // Function for checking trainer name against lists
     var addScore = 0;
     var note = '';
 
     // Check for known spelling/name changes
-    trainerName = normalizeTrainerName(trainerName)
+    trainerName = normalizeTrainerName(trainerName);
 
-   const fivePointTrainers = [
-    'Ciaron Maher',
-    'Chris Waller',
-    'Ben, Will & J.D. Hayes',
-    'Annabel & Rob Archibald',
-    'Bjorn Baker',
-    'Gai Waterhouse & Adrian Bott',
-    'Grahame Begg',
-    'Matthew Laurie',
-    'Phillip Stokes'
-]
-   
+    const fivePointTrainers = [
+        'Ciaron Maher',
+        'Chris Waller',
+        'Ben, Will & J.D. Hayes',
+        'Annabel & Rob Archibald',
+        'Bjorn Baker',
+        'Gai Waterhouse & Adrian Bott',
+        'Grahame Begg',
+        'Matthew Laurie',
+        'Phillip Stokes'
+    ];
+
     if (fivePointTrainers.includes(trainerName)) {
         addScore += 5;
         note += '+ 5.0 : Like the Trainer\n';
     }
-   
+
     return [addScore, note];
 }
 
@@ -476,69 +473,69 @@ function checkRacingForm(racingForm, runType) {
     }
     // Split the string by '-' and convert to numbers
     const numbers = racingForm.split(/[:\-]/).map(s => Number(s.trim()));
-    
+
     if (numbers.length != 4) {
         note += 'Racing form not correct format. Received: ' + racingForm;
         return [addScore, note];
     }
-     
+
     // Check number of podiums is equal or less than races
     if ((numbers[1] + numbers[2] + numbers[3]) > numbers[0]) {
         note += 'More podiums than runs?? Received: ' + racingForm;
         return [addScore, note];
     }
-    
+
     // Check if horse has any wins
     if (numbers[1] > 0) {
         addScore += 5; // Add 5 points if any number is '1'
         note += '+ 5.0 : Had at least 1 win at ' + runType + '\n';
     }
-    
+
     // SEPARATELY check for podium rate (can award points in addition to win bonus)
     const count = (numbers[1] + numbers[2] + numbers[3]) / numbers[0];
     if (count >= 0.5) {
         addScore += 5; // Add 5 points if more than half of runs are places or wins
         note += '+ 5.0 : Podium >=50% of runs at ' + runType + '\n';
     }
-    
+
     return [addScore, note]; // Return the total score
 }
 
 function checkTrackConditionForm(racingForm, trackCondition) {
     let addScore = 0;
     let note = '';
-    
+
     if (typeof racingForm !== 'string') {
         note += 'Track condition form not string. Received type: ' + typeof racingForm + '\n';
         return [addScore, note];
     }
-    
+
     const numbers = racingForm.split(/[:\-]/).map(s => Number(s.trim()));
-    
+
     if (numbers.length != 4) {
         note += 'Track condition form incorrect format. Received: ' + racingForm + '\n';
         return [addScore, note];
     }
-    
+
     const runs = numbers[0];
     const wins = numbers[1];
     const seconds = numbers[2];
     const thirds = numbers[3];
     const podiums = wins + seconds + thirds;
-    
+
     if (podiums > runs) {
         note += 'More podiums than runs?? Received: ' + racingForm + '\n';
         return [addScore, note];
     }
-    
+
     if (runs === 0) {
         note += '+ 0.0 : No runs on ' + trackCondition + ' track\n';
         return [addScore, note];
     }
-    
+
     const winRate = wins / runs;
     const podiumRate = podiums / runs;
-    
+
     let winScore = 0;
     if (winRate >= 0.51) {
         winScore = 12;
@@ -559,7 +556,7 @@ function checkTrackConditionForm(racingForm, trackCondition) {
         winScore = 0;
         note += '+ 0.0 : No wins on ' + trackCondition + '\n';
     }
-    
+
     let podiumScore = 0;
     if (podiumRate >= 0.85) {
         podiumScore = 12;
@@ -580,7 +577,7 @@ function checkTrackConditionForm(racingForm, trackCondition) {
         podiumScore = 0;
         note += '+ 0.0 : Poor podium rate (' + (podiumRate * 100).toFixed(0) + '%) on ' + trackCondition + '\n';
     }
-    
+
     let undefeatedBonus = 0;
     if (wins === runs && runs >= 2) {
         if (runs >= 5) {
@@ -597,12 +594,12 @@ function checkTrackConditionForm(racingForm, trackCondition) {
             note += '+ 8.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (2 runs)\n';
         }
     }
-    
+
     let subtotal = winScore + podiumScore + undefeatedBonus;
-    
+
     let confidenceMultiplier = 1.0;
     let confidenceNote = '';
-    
+
     if (trackCondition === 'good') {
         if (runs >= 16) {
             confidenceMultiplier = 1.0;
@@ -674,54 +671,54 @@ function checkTrackConditionForm(racingForm, trackCondition) {
             confidenceNote = ' [Very low confidence: ' + runs + ' run]';
         }
     }
-    
+
     addScore = subtotal * confidenceMultiplier;
-    
+
     if (runs >= 5 && wins === 0 && podiumRate < 0.20) {
         addScore -= 8;
         note += '- 8.0 : Poor performance on ' + trackCondition + ' (' + runs + ' runs, 0 wins, <20% podium)\n';
     }
-    
+
     note += '= ' + addScore.toFixed(1) + ' : Total track condition score' + confidenceNote + '\n';
-    
+
     return [addScore, note];
 }
 
 function checkDistanceForm(racingForm) {
     let addScore = 0;
     let note = '';
-    
+
     if (typeof racingForm !== 'string') {
         note += 'Distance form not string. Received type: ' + typeof racingForm + '\n';
         return [addScore, note];
     }
-    
+
     const numbers = racingForm.split(/[:\-]/).map(s => Number(s.trim()));
-    
+
     if (numbers.length != 4) {
         note += 'Distance form incorrect format. Received: ' + racingForm + '\n';
         return [addScore, note];
     }
-    
+
     const runs = numbers[0];
     const wins = numbers[1];
     const seconds = numbers[2];
     const thirds = numbers[3];
     const podiums = wins + seconds + thirds;
-    
+
     if (podiums > runs) {
         note += 'More podiums than runs?? Received: ' + racingForm + '\n';
         return [addScore, note];
     }
-    
+
     if (runs === 0) {
         note += '+ 0.0 : No runs at this distance\n';
         return [addScore, note];
     }
-    
+
     const winRate = wins / runs;
     const podiumRate = podiums / runs;
-    
+
     let winScore = 0;
     if (winRate >= 0.51) {
         winScore = 8;
@@ -742,7 +739,7 @@ function checkDistanceForm(racingForm) {
         winScore = 0;
         note += '+ 0.0 : No wins at this distance\n';
     }
-    
+
     let podiumScore = 0;
     if (podiumRate >= 0.85) {
         podiumScore = 8;
@@ -763,7 +760,7 @@ function checkDistanceForm(racingForm) {
         podiumScore = 0;
         note += '+ 0.0 : Poor podium rate (' + (podiumRate * 100).toFixed(0) + '%) at this distance\n';
     }
-    
+
     let undefeatedBonus = 0;
     if (wins === runs && runs >= 2) {
         if (runs >= 5) {
@@ -780,12 +777,12 @@ function checkDistanceForm(racingForm) {
             note += '+ 6.0 : UNDEFEATED in ' + runs + ' runs at this distance! (2 runs)\n';
         }
     }
-    
+
     let subtotal = winScore + podiumScore + undefeatedBonus;
-    
+
     let confidenceMultiplier = 1.0;
     let confidenceNote = '';
-    
+
     if (runs >= 10) {
         confidenceMultiplier = 1.0;
         confidenceNote = ' [High confidence: ' + runs + ' runs]';
@@ -799,54 +796,54 @@ function checkDistanceForm(racingForm) {
         confidenceMultiplier = 0.6;
         confidenceNote = ' [Low confidence: ' + runs + ' runs]';
     }
-    
+
     addScore = subtotal * confidenceMultiplier;
-    
+
     if (runs >= 5 && wins === 0 && podiumRate < 0.20) {
         addScore -= 6;
         note += '- 6.0 : Poor performance at this distance (' + runs + ' runs, 0 wins, <20% podium)\n';
     }
-    
+
     note += '= ' + addScore.toFixed(1) + ' : Total distance score' + confidenceNote + '\n';
-    
+
     return [addScore, note];
 }
 
 function checkTrackForm(racingForm) {
     let addScore = 0;
     let note = '';
-    
+
     if (typeof racingForm !== 'string') {
         note += 'Track form not string. Received type: ' + typeof racingForm + '\n';
         return [addScore, note];
     }
-    
+
     const numbers = racingForm.split(/[:\-]/).map(s => Number(s.trim()));
-    
+
     if (numbers.length != 4) {
         note += 'Track form incorrect format. Received: ' + racingForm + '\n';
         return [addScore, note];
     }
-    
+
     const runs = numbers[0];
     const wins = numbers[1];
     const seconds = numbers[2];
     const thirds = numbers[3];
     const podiums = wins + seconds + thirds;
-    
+
     if (podiums > runs) {
         note += 'More podiums than runs?? Received: ' + racingForm + '\n';
         return [addScore, note];
     }
-    
+
     if (runs === 0) {
         note += '+ 0.0 : No runs at this track\n';
         return [addScore, note];
     }
-    
+
     const winRate = wins / runs;
     const podiumRate = podiums / runs;
-    
+
     let winScore = 0;
     if (winRate >= 0.51) {
         winScore = 6;
@@ -867,7 +864,7 @@ function checkTrackForm(racingForm) {
         winScore = 0;
         note += '+ 0.0 : No wins at this track\n';
     }
-    
+
     let podiumScore = 0;
     if (podiumRate >= 0.85) {
         podiumScore = 6;
@@ -888,7 +885,7 @@ function checkTrackForm(racingForm) {
         podiumScore = 0;
         note += '+ 0.0 : Poor podium rate (' + (podiumRate * 100).toFixed(0) + '%) at this track\n';
     }
-    
+
     let undefeatedBonus = 0;
     if (wins === runs && runs >= 2) {
         if (runs >= 5) {
@@ -905,12 +902,12 @@ function checkTrackForm(racingForm) {
             note += '+ 5.0 : UNDEFEATED in ' + runs + ' runs at this track! (2 runs)\n';
         }
     }
-    
+
     let subtotal = winScore + podiumScore + undefeatedBonus;
-    
+
     let confidenceMultiplier = 1.0;
     let confidenceNote = '';
-    
+
     if (runs >= 7) {
         confidenceMultiplier = 1.0;
         confidenceNote = ' [High confidence: ' + runs + ' runs]';
@@ -924,54 +921,54 @@ function checkTrackForm(racingForm) {
         confidenceMultiplier = 0.6;
         confidenceNote = ' [Low confidence: ' + runs + ' run]';
     }
-    
+
     addScore = subtotal * confidenceMultiplier;
-    
+
     if (runs >= 5 && wins === 0 && podiumRate < 0.20) {
         addScore -= 5;
         note += '- 5.0 : Poor performance at this track (' + runs + ' runs, 0 wins, <20% podium)\n';
     }
-    
+
     note += '= ' + addScore.toFixed(1) + ' : Total track score' + confidenceNote + '\n';
-    
+
     return [addScore, note];
 }
 
 function checkTrackDistanceForm(racingForm) {
     let addScore = 0;
     let note = '';
-    
+
     if (typeof racingForm !== 'string') {
         note += 'Track+Distance form not string. Received type: ' + typeof racingForm + '\n';
         return [addScore, note];
     }
-    
+
     const numbers = racingForm.split(/[:\-]/).map(s => Number(s.trim()));
-    
+
     if (numbers.length != 4) {
         note += 'Track+Distance form incorrect format. Received: ' + racingForm + '\n';
         return [addScore, note];
     }
-    
+
     const runs = numbers[0];
     const wins = numbers[1];
     const seconds = numbers[2];
     const thirds = numbers[3];
     const podiums = wins + seconds + thirds;
-    
+
     if (podiums > runs) {
         note += 'More podiums than runs?? Received: ' + racingForm + '\n';
         return [addScore, note];
     }
-    
+
     if (runs === 0) {
         note += '+ 0.0 : No runs at this track+distance\n';
         return [addScore, note];
     }
-    
+
     const winRate = wins / runs;
     const podiumRate = podiums / runs;
-    
+
     let winScore = 0;
     if (winRate >= 0.51) {
         winScore = 8;
@@ -992,7 +989,7 @@ function checkTrackDistanceForm(racingForm) {
         winScore = 0;
         note += '+ 0.0 : No wins at this track+distance\n';
     }
-    
+
     let podiumScore = 0;
     if (podiumRate >= 0.85) {
         podiumScore = 8;
@@ -1013,7 +1010,7 @@ function checkTrackDistanceForm(racingForm) {
         podiumScore = 0;
         note += '+ 0.0 : Poor podium rate (' + (podiumRate * 100).toFixed(0) + '%) at this track+distance\n';
     }
-    
+
     let undefeatedBonus = 0;
     if (wins === runs && runs >= 2) {
         if (runs >= 5) {
@@ -1030,12 +1027,12 @@ function checkTrackDistanceForm(racingForm) {
             note += '+ 6.0 : UNDEFEATED in ' + runs + ' runs at this track+distance! (2 runs)\n';
         }
     }
-    
+
     let subtotal = winScore + podiumScore + undefeatedBonus;
-    
+
     let confidenceMultiplier = 1.0;
     let confidenceNote = '';
-    
+
     if (runs >= 5) {
         confidenceMultiplier = 1.0;
         confidenceNote = ' [High confidence: ' + runs + ' runs]';
@@ -1049,32 +1046,34 @@ function checkTrackDistanceForm(racingForm) {
         confidenceMultiplier = 0.5;
         confidenceNote = ' [Low confidence: ' + runs + ' run]';
     }
-    
+
     addScore = subtotal * confidenceMultiplier;
-    
+
     if (runs >= 5 && wins === 0 && podiumRate < 0.20) {
         addScore -= 6;
         note += '- 6.0 : Poor performance at this track+distance (' + runs + ' runs, 0 wins, <20% podium)\n';
     }
-    
+
     note += '= ' + addScore.toFixed(1) + ' : Total track+distance score' + confidenceNote + '\n';
-    
+
     return [addScore, note];
 }
 
+// analyzer.js — cleaned chunk (checkLastDistance ... adjustSPProfileForSpecialist)
+// This replacement fixes syntax errors, removes duplicated blocks, closes functions properly,
+// and ensures top-level code isn't nested. Paste this block over the corresponding region.
 
 function checkLastDistance(horseToCheck) {
     const dist = parseFloat(horseToCheck['distance']);
     const prevDist = parseFloat(horseToCheck['form distance']);
-    var addScore = 0;
-    var note = '';
-    if (!isNaN(prevDist) && prevDist > 0) {
+    let addScore = 0;
+    let note = '';
+    if (!isNaN(prevDist) && prevDist > 0 && !isNaN(dist)) {
         if (dist > prevDist) {
             // if current distance longer than previous distance
             addScore += 1;
             note += '+ 1.0 : Longer dist than previous\n';
-        }
-        if (dist < prevDist) {
+        } else if (dist < prevDist) {
             // if current distance shorter than previous distance
             addScore -= 1;
             note += '- 1.0 : Shorter dist than previous\n';
@@ -1086,47 +1085,47 @@ function checkLastDistance(horseToCheck) {
 function checkDaysSinceLastRun(meetingDate, formMeetingDate) {
     let addScore = 0;
     let note = '';
-    
+
     // Validate inputs
     if (!meetingDate || !formMeetingDate) {
         return [0, ''];
     }
-    
+
     // Parse dates - meeting date is DD/MM/YYYY, form date might be DD/MM/YY or DD/MM/YYYY
     const parseDate = (dateStr) => {
         if (!dateStr) return null;
-        
+
         // Remove time portion if present: "11/10/2025 00:00:00" → "11/10/2025"
-        let datePart = dateStr.split(' ')[0];
-        
+        const datePart = String(dateStr).split(' ')[0];
+
         // Split DD/MM/YYYY or DD/MM/YY
         const parts = datePart.split('/');
         if (parts.length !== 3) return null;
-        
-        const day = parseInt(parts[0]);
-        const month = parseInt(parts[1]) - 1; // JavaScript months are 0-indexed
-        let year = parseInt(parts[2]);
-        
+
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1; // JavaScript months are 0-indexed
+        let year = parseInt(parts[2], 10);
+
         // If year is 2-digit, convert to 4-digit
         if (year < 100) {
             // Assume years 00-50 are 2000-2050, and 51-99 are 1951-1999
             year += (year <= 50) ? 2000 : 1900;
         }
-        
+
         return new Date(year, month, day);
     };
-    
+
     const todayDate = parseDate(meetingDate);
     const lastRunDate = parseDate(formMeetingDate);
-    
+
     if (!todayDate || !lastRunDate) {
         return [0, ''];
     }
-    
+
     // Calculate days difference
     const millisecondsPerDay = 1000 * 60 * 60 * 24;
     const daysSinceLastRun = Math.floor((todayDate - lastRunDate) / millisecondsPerDay);
-    
+
     // Apply penalties/bonuses based on days since last run
     if (daysSinceLastRun >= 365) {
         // Over a year - massive penalty
@@ -1150,27 +1149,28 @@ function checkDaysSinceLastRun(meetingDate, formMeetingDate) {
         note += `+15.0 : Quick backup - only ${daysSinceLastRun} days since last run (market underrates!)\n`;
     }
     // 8-149 days is the sweet spot - no penalty or bonus
-    
+
     return [addScore, note];
 }
+
 function checkMargin(formPosition, formMargin, classChange = 0, recentForm = null) {
     let addScore = 0;
     let note = '';
-    
+
     // Validate inputs
     if (!formPosition || !formMargin) {
         return [0, ''];
     }
-    
+
     // Parse position and margin
-    const position = parseInt(formPosition);
+    const position = parseInt(formPosition, 10);
     const margin = parseFloat(formMargin);
-    
+
     // Check if parsing was successful
     if (isNaN(position) || isNaN(margin)) {
         return [0, ''];
     }
-    
+
     // WINNERS (position = 1)
     if (position === 1) {
         if (margin >= 5.0) {
@@ -1197,7 +1197,6 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
             note += `+ 3.0 : Close loss (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
         } else if (margin <= 3.5) {
             addScore = 0;
-            note += '';
         } else {
             addScore = -5;
             note += `- 5.0 : Beaten badly (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
@@ -1207,7 +1206,6 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
     else if (position >= 4) {
         if (margin <= 3.0) {
             addScore = 0;
-            note += '';
         } else if (margin <= 6.0) {
             addScore = -3;
             note += `- 3.0 : Beaten clearly (${position}th) by ${margin.toFixed(1)}L\n`;
@@ -1219,7 +1217,7 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
             note += `-15.0 : Demolished (${position}th) by ${margin.toFixed(1)}L - not competitive\n`;
         }
     }
-    
+
     // Apply class drop context if we have a penalty
     if (addScore < 0 && classChange !== 0 && recentForm !== null) {
         const adjustment = adjustLastStartPenaltyForClassDrop(addScore, classChange, recentForm);
@@ -1228,73 +1226,7 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
             note += `  ℹ️  ${adjustment.note}\n`;
         }
     }
-    
-    return [addScore, note];
-}
-    
-    // Validate inputs
-    if (!formPosition || !formMargin) {
-        return [0, ''];
-    }
-    
-    // Parse position and margin
-    const position = parseInt(formPosition);
-    const margin = parseFloat(formMargin);
-    
-    // Check if parsing was successful
-    if (isNaN(position) || isNaN(margin)) {
-        return [0, ''];
-    }
-    
-    // WINNERS (position = 1)
-    if (position === 1) {
-        if (margin >= 5.0) {
-            addScore = 10;
-            note += `+10.0 : Dominant last start win by ${margin.toFixed(1)}L\n`;
-        } else if (margin >= 2.0) {
-            addScore = 7;
-            note += `+ 7.0 : Comfortable last start win by ${margin.toFixed(1)}L\n`;
-        } else if (margin >= 0.5) {
-            addScore = 5;
-            note += `+ 5.0 : Narrow last start win by ${margin.toFixed(1)}L\n`;
-        } else {
-            addScore = 3;
-            note += `+ 3.0 : Photo finish last start win by ${margin.toFixed(1)}L\n`;
-        }
-    }
-    // PLACE GETTERS (position = 2 or 3)
-    else if (position === 2 || position === 3) {
-        if (margin <= 1.0) {
-            addScore = 5;
-            note += `+ 5.0 : Narrow loss (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L - very competitive\n`;
-        } else if (margin <= 2.0) {
-            addScore = 3;
-            note += `+ 3.0 : Close loss (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
-        } else if (margin <= 3.5) {
-            addScore = 0;
-            note += '';
-        } else {
-            addScore = -5;
-            note += `- 5.0 : Beaten badly (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
-        }
-    }
-    // MIDFIELD OR BACK (position 4+)
-    else if (position >= 4) {
-        if (margin <= 3.0) {
-            addScore = 0;
-            note += '';
-        } else if (margin <= 6.0) {
-            addScore = -3;
-            note += `- 3.0 : Beaten clearly (${position}th) by ${margin.toFixed(1)}L\n`;
-        } else if (margin <= 10.0) {
-            addScore = -7;
-            note += `- 7.0 : Well beaten (${position}th) by ${margin.toFixed(1)}L\n`;
-        } else {
-            addScore = -15;
-            note += `-15.0 : Demolished (${position}th) by ${margin.toFixed(1)}L - not competitive\n`;
-        }
-    }
-    
+
     return [addScore, note];
 }
 
@@ -1302,110 +1234,107 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
 // CLASS SCORING SYSTEM (0-130 Scale)
 // ========================================
 
-// === PARSE CLASS STRING ===
 function parseClassType(classString) {
     if (!classString) return null;
-    
-    const str = classString.trim();
-    
+
+    const str = String(classString).trim();
+
     // Group races
     if (/Group\s*[123]/i.test(str)) {
-        const level = parseInt(str.match(/[123]/)[0]);
+        const level = parseInt(str.match(/[123]/)[0], 10);
         return { type: 'Group', level: level, raw: str };
     }
-    
+
     // Listed
     if (/Listed/i.test(str)) {
         return { type: 'Listed', level: null, raw: str };
     }
-    
+
     // Benchmark (handles "Benchmark 80" or "Bench. 80" or "BM80")
     const bmMatch = str.match(/(?:Benchmark|Bench\.?|BM)\s*(\d+)/i);
     if (bmMatch) {
-        const level = parseInt(bmMatch[1]);
+        const level = parseInt(bmMatch[1], 10);
         return { type: 'Benchmark', level: level, raw: str };
     }
-    
+
     // Class (handles "Class 3" or "Cls 2")
     const classMatch = str.match(/(?:Class|Cls)\s*(\d+)/i);
     if (classMatch) {
-        const level = parseInt(classMatch[1]);
+        const level = parseInt(classMatch[1], 10);
         return { type: 'Class', level: level, raw: str };
     }
-    
+
     // Restricted (handles "Rest. 62")
     const restMatch = str.match(/Rest\.?\s*(\d+)/i);
     if (restMatch) {
-        const level = parseInt(restMatch[1]);
+        const level = parseInt(restMatch[1], 10);
         return { type: 'Restricted', level: level, raw: str };
     }
-    
+
     // Rating (handles "RS105" or "Rating 0-105")
     const ratingMatch = str.match(/(?:RS|Rating)\s*(?:0-)?(\d+)/i);
     if (ratingMatch) {
-        const level = parseInt(ratingMatch[1]);
+        const level = parseInt(ratingMatch[1], 10);
         return { type: 'Rating', level: level, raw: str };
     }
-    
+
     // Maiden
     if (/Maiden|Mdn/i.test(str)) {
         return { type: 'Maiden', level: null, raw: str };
     }
-    
+
     // Open (catch-all for Opens)
     if (/Open/i.test(str)) {
         return { type: 'Open', level: null, raw: str };
     }
-    
+
     // Highway
     if (/Highway/i.test(str)) {
         return { type: 'Highway', level: null, raw: str };
     }
-    
+
     // Special/Novice/etc
     if (/Special|Spec|Nov/i.test(str)) {
         return { type: 'Special', level: null, raw: str };
     }
-    
+
     // Unknown
     return { type: 'Unknown', level: null, raw: str };
 }
 
-// === EXTRACT PRIZE MONEY ===
 function extractFirstPrize(prizeString) {
     if (!prizeString) return null;
-    
+
     // Match pattern: "1st $82500" or "1st  $82,500"
-    const match = prizeString.match(/1st\s+\$([0-9,]+)/i);
+    const match = String(prizeString).match(/1st\s+\$([0-9,]+)/i);
     if (match) {
         // Remove commas and convert to number
-        return parseInt(match[1].replace(/,/g, ''));
+        return parseInt(match[1].replace(/,/g, ''), 10);
     }
     return null;
 }
 
-// === CALCULATE SCORE (0-130) ===
 function calculateClassScore(classString, prizeString) {
     const parsed = parseClassType(classString);
     if (!parsed) return 0;
-    
+
     // Benchmark: Use BM number directly (BM1-BM100)
     if (parsed.type === 'Benchmark' && parsed.level !== null) {
         return Math.min(100, Math.max(1, parsed.level));
     }
-    
+
     // Group races: Fixed scores
     if (parsed.type === 'Group') {
         if (parsed.level === 1) return 130;
         if (parsed.level === 2) return 122;
         if (parsed.level === 3) return 115;
     }
-    
+
     // Listed: Fixed score
     if (parsed.type === 'Listed') {
         return 108;
     }
-    
+
     // Everything else: Use prize money
     const prize = extractFirstPrize(prizeString);
     if (!prize) {
@@ -1426,7 +1355,7 @@ function calculateClassScore(classString, prizeString) {
         if (parsed.type === 'Special') return 45;
         return 50; // Default unknown
     }
-    
+
     // Prize money to score conversion
     if (prize >= 2000000) return 130;
     if (prize >= 1000000) return 125 + ((prize - 1000000) / 1000000) * 5;
@@ -1447,23 +1376,22 @@ function calculateClassScore(classString, prizeString) {
     return 25 + (prize / 5000) * 7;
 }
 
-// === COMPARE CLASSES ===
 function compareClasses(newClass, formClass, newPrizemoneyString, formPrizemoneyString, weightAdvantage = 0) {
     // Calculate scores using our 0-130 system
     const todayScore = calculateClassScore(newClass, newPrizemoneyString);
     const lastScore = calculateClassScore(formClass, formPrizemoneyString);
-    
+
     // Calculate the difference
     const scoreDiff = todayScore - lastScore;
-    
+
     let addScore = 0;
     let note = '';
-    
+
     // Interpret the score difference
     if (scoreDiff > 0) {
         // Stepping UP in class (harder race)
-        const basePenalty = scoreDiff * -1.0; // Negative points for stepping up
-        
+        const basePenalty = -scoreDiff; // Negative points for stepping up
+
         // Check if weight advantage enables the class rise
         if (scoreDiff > 10 && weightAdvantage > 0) {
             const adjustment = adjustClassRiseForWeight(scoreDiff, weightAdvantage);
@@ -1474,17 +1402,17 @@ function compareClasses(newClass, formClass, newPrizemoneyString, formPrizemoney
             }
         } else {
             addScore = basePenalty;
-            note += addScore.toFixed(1) + ': Stepping UP ' + scoreDiff.toFixed(1) + ' class points; "' + formClass + '" (' + lastScore.toFixed(1) + ') to "' + newClass + '" (' + todayScore.toFixed(1) + ')\n';
+            note += basePenalty.toFixed(1) + ': Stepping UP ' + scoreDiff.toFixed(1) + ' class points; "' + formClass + '" (' + lastScore.toFixed(1) + ') to "' + newClass + '" (' + todayScore.toFixed(1) + ')\n';
         }
     } else if (scoreDiff < 0) {
         // Stepping DOWN in class (easier race)
-        addScore = Math.abs(scoreDiff) * 1.0; // Positive points for stepping down
+        addScore = Math.abs(scoreDiff);
         note += '+ ' + addScore.toFixed(1) + ': Stepping DOWN ' + Math.abs(scoreDiff).toFixed(1) + ' class points; "' + formClass + '" (' + lastScore.toFixed(1) + ') to "' + newClass + '" (' + todayScore.toFixed(1) + ')\n';
     } else {
         // Same class level
         note += '0.0: Same class level; "' + formClass + '" to "' + newClass + '" (both ' + todayScore.toFixed(1) + ')\n';
     }
-    
+
     return [addScore, note];
 }
 
@@ -1523,63 +1451,56 @@ const formPriceScores = {
 function checkFormPrice(formPrice, specialistContext = null) {
     let addScore = 0;
     let note = '';
-    
+
     // Handle no valid form price case
     if (formPrice === null || formPrice === undefined) {
         return [0, 'Error: No form price available\n'];
     }
-    
+
     // Convert to number if it's a string
     const numericPrice = typeof formPrice === 'string' ? parseFloat(formPrice) : formPrice;
-    
+
     // Validate it's a valid number
     if (isNaN(numericPrice)) {
         return [0, `Error: Form price "${formPrice}" is not a valid number\n`];
     }
-    
+
     // Validate range
-    if (numericPrice < 1.01 || numericPrice > 500.00) {
+    if (numericPrice < 1.01 || numericPrice > 500.0) {
         return [0, `Error: Form price $${numericPrice} outside valid range (1.01-500.00)\n`];
     }
-    
+
     // Round to 2 decimal places for lookup
     const roundedPrice = Math.round(numericPrice * 100) / 100;
-    
+
     // Try exact lookup first (object keys are coerced to strings)
     if (formPriceScores[roundedPrice] !== undefined) {
         addScore = formPriceScores[roundedPrice];
-        if (addScore > 0) {
-            note += `+${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (well-backed)\n`;
-        } else if (addScore === 0) {
-            note += `+0.0 : Form price $${roundedPrice.toFixed(2)} (neutral)\n`;
-        } else {
-            note += `${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (interpolated)\n`;
-        }
     } else {
         // Handle prices not in the lookup table with interpolation
         const sortedPrices = Object.keys(formPriceScores).map(Number).sort((a, b) => a - b);
         const closestLower = sortedPrices.filter(p => p < roundedPrice).pop();
         const closestHigher = sortedPrices.filter(p => p > roundedPrice)[0];
-        
+
         if (closestLower !== undefined && closestHigher !== undefined) {
             // Linear interpolation
             const lowerScore = formPriceScores[closestLower];
             const higherScore = formPriceScores[closestHigher];
             const ratio = (roundedPrice - closestLower) / (closestHigher - closestLower);
             addScore = Math.round(lowerScore + (higherScore - lowerScore) * ratio);
-            
-            if (addScore > 0) {
-                note += `+${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (interpolated)\n`;
-            } else if (addScore === 0) {
-                note += `+0.0 : Form price $${roundedPrice.toFixed(2)} (interpolated)\n`;
-            } else {
-                note += `${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (interpolated)\n`;
-            }
         } else {
             return [0, `Error: Form price $${roundedPrice.toFixed(2)} could not be scored\n`];
         }
     }
-    
+
+    if (addScore > 0) {
+        note += `+${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (well-backed)\n`;
+    } else if (addScore === 0) {
+        note += `+0.0 : Form price $${roundedPrice.toFixed(2)} (neutral)\n`;
+    } else {
+        note += `${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (interpolated)\n`;
+    }
+
     // Apply specialist context if available and score is negative
     if (specialistContext !== null && addScore < 0) {
         const adjustment = adjustSPProfileForSpecialist(addScore, specialistContext);
@@ -1588,569 +1509,495 @@ function checkFormPrice(formPrice, specialistContext = null) {
             note += `  ℹ️  ${adjustment.note}\n`;
         }
     }
-    
+
     return [addScore, note];
 }
-    
-    // Handle no valid form price case
-    if (formPrice === null || formPrice === undefined) {
-        return [0, 'Error: No form price available\n'];
-    }
-    
-    // Convert to number if it's a string
-    const numericPrice = typeof formPrice === 'string' ? parseFloat(formPrice) : formPrice;
-    
-    // Validate it's a valid number
-    if (isNaN(numericPrice)) {
-        return [0, `Error: Form price "${formPrice}" is not a valid number\n`];
-    }
-    
-    // Validate range
-    if (numericPrice < 1.01 || numericPrice > 500.00) {
-        return [0, `Error: Form price $${numericPrice} outside valid range (1.01-500.00)\n`];
-    }
-    
-    // Round to 2 decimal places for lookup
-    const roundedPrice = Math.round(numericPrice * 100) / 100;
-    
-    // Try exact lookup first (object keys are coerced to strings)
-    if (formPriceScores[roundedPrice] !== undefined) {
-        addScore = formPriceScores[roundedPrice];
-        if (addScore > 0) {
-            note += `+${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (well-backed)\n`;
-        } else if (addScore === 0) {
-            note += `+0.0 : Form price $${roundedPrice.toFixed(2)} (neutral)\n`;
-        } else {
-            note += `${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (outsider penalty)\n`;
-        }
-    } else {
-        // Handle prices not in the lookup table with interpolation
-        const sortedPrices = Object.keys(formPriceScores).map(Number).sort((a, b) => a - b);
-        const closestLower = sortedPrices.filter(p => p < roundedPrice).pop();
-        const closestHigher = sortedPrices.filter(p => p > roundedPrice)[0];
-        
-        if (closestLower !== undefined && closestHigher !== undefined) {
-            // Linear interpolation
-            const lowerScore = formPriceScores[closestLower];
-            const higherScore = formPriceScores[closestHigher];
-            const ratio = (roundedPrice - closestLower) / (closestHigher - closestLower);
-            addScore = Math.round(lowerScore + (higherScore - lowerScore) * ratio);
-            
-            if (addScore > 0) {
-                note += `+${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (interpolated)\n`;
-            } else if (addScore === 0) {
-                note += `+0.0 : Form price $${roundedPrice.toFixed(2)} (interpolated)\n`;
-            } else {
-                note += `${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (interpolated)\n`;
-            }
-        } else {
-            return [0, `Error: Form price $${roundedPrice.toFixed(2)} could not be scored\n`];
-        }
-    }
-    
-    return [addScore, note];
-}
-// Add this function after the checkFormPrice function
+
 function checkFirstUpSecondUp(horseRow) {
     let addScore = 0;
     let note = '';
-    
+
     const last10 = String(horseRow['horse last10'] || '');
     const firstUpRecord = horseRow['horse record first up'];
     const secondUpRecord = horseRow['horse record second up'];
-    
+
     // Determine if horse is first up or second up today
     let isFirstUp = false;
     let isSecondUp = false;
-    
-    // Check the most recent run (rightmost character) for first up detection
+
+    // If the most recent character is 'x' (or 'X'), treat as first-up marker
     if (last10.toLowerCase().endsWith('x')) {
         isFirstUp = true;
-    }
-    // Check for second up: exactly one run after most recent 'x'
-    // Pattern: ...x[digit] at the end (exactly 2 characters from spell)
-    else if (last10.length >= 2) {
+    } else if (last10.length >= 2) {
         const lastChar = last10.charAt(last10.length - 1);
         const secondLastChar = last10.charAt(last10.length - 2);
-        
         // Second up means: previous run was 'x' and current run is a single digit
         if (secondLastChar.toLowerCase() === 'x' && /\d/.test(lastChar)) {
             isSecondUp = true;
         }
-        // ==========================================
-// TRACK CONDITION CONTEXT FOR SECTIONALS
-// ==========================================
+    }
 
+    // Score based on first-up record
+    if (isFirstUp && typeof firstUpRecord === 'string') {
+        const nums = firstUpRecord.split(/[:\-]/).map(s => Number(s.trim()));
+        if (nums.length === 4 && nums[0] > 0) {
+            const runs = nums[0], wins = nums[1], seconds = nums[2], thirds = nums[3];
+            const podiumRate = (wins + seconds + thirds) / runs;
+            if (wins > 0) {
+                addScore += 4;
+                note += `+ 4.0 : First-up winner(s) in ${wins} of ${runs} runs\n`;
+            }
+            if (podiumRate >= 0.5) {
+                addScore += 3;
+                note += `+ 3.0 : Strong first-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
+            }
+        }
+    }
+
+    // Score based on second-up record
+    if (isSecondUp && typeof secondUpRecord === 'string') {
+        const nums2 = secondUpRecord.split(/[:\-]/).map(s => Number(s.trim()));
+        if (nums2.length === 4 && nums2[0] > 0) {
+            const runs = nums2[0], wins = nums2[1], seconds = nums2[2], thirds = nums2[3];
+            const podiumRate = (wins + seconds + thirds) / runs;
+            if (wins > 0) {
+                addScore += 3;
+                note += `+ 3.0 : Second-up winners in ${wins} of ${runs} runs\n`;
+            }
+            if (podiumRate >= 0.5) {
+                addScore += 2;
+                note += `+ 2.0 : Strong second-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
+            }
+        }
+    }
+
+    if (!isFirstUp && !isSecondUp && last10.length > 0 && /x/i.test(last10)) {
+        // Rare/unusual pattern - mild penalty for uncertain spell markers
+        addScore -= 1;
+        note += `- 1.0 : Unclear spell/return status (markers present but pattern not first/second-up)\n`;
+    }
+
+    return [addScore, note];
+}
+
+// TRACK CONDITION CONTEXT FOR SECTIONALS
 function applyConditionContext(horse, raceCondition, sectionalDetails) {
-    /**
-     * Adjusts sectional and condition scoring based on track condition match
-     * Returns multipliers for sectional weight and condition score
-     */
-    
     let sectionalWeight = 1.0;
     let conditionMultiplier = 1.0;
     let note = '';
-    
-    // Extract condition record from horse data
+
     const conditionField = 'horse record ' + raceCondition;
     const conditionRecord = horse[conditionField];
-    
+
     if (!conditionRecord || typeof conditionRecord !== 'string') {
         return { sectionalWeight, conditionMultiplier, note };
     }
-    
-    // Parse condition record: "runs:wins-seconds-thirds"
+
     const numbers = conditionRecord.split(/[:\-]/).map(s => Number(s.trim()));
     if (numbers.length !== 4) {
         return { sectionalWeight, conditionMultiplier, note };
     }
-    
+
     const runs = numbers[0];
     const wins = numbers[1];
     const seconds = numbers[2];
     const thirds = numbers[3];
     const podiums = wins + seconds + thirds;
     const podiumRate = runs > 0 ? podiums / runs : 0;
-    
-    // SOFT/HEAVY TRACK ADJUSTMENTS
+
     if (raceCondition === 'soft' || raceCondition === 'heavy') {
-        
-        // HIGH CONFIDENCE - Enough data to know performance on this condition
         if (runs >= 5) {
-            
             if (podiumRate >= 0.50) {
-                // PROVEN PERFORMER ON THIS CONDITION
                 conditionMultiplier = 2.0;
                 sectionalWeight = 1.0;
                 note = `Proven ${raceCondition} performer (${(podiumRate*100).toFixed(0)}% podium in ${runs} runs) - condition score doubled, sectionals kept`;
-                
             } else if (podiumRate < 0.30) {
-                // PROVEN POOR ON THIS CONDITION
-                conditionMultiplier = 2.0; // Emphasize the poor record
-                sectionalWeight = 0.4;     // Reduce sectional weight 60%
+                conditionMultiplier = 2.0;
+                sectionalWeight = 0.4;
                 note = `Poor ${raceCondition} record (${(podiumRate*100).toFixed(0)}% podium in ${runs} runs) - sectionals reduced 60%`;
-                
             } else {
-                // MEDIOCRE RECORD ON THIS CONDITION
                 conditionMultiplier = 1.5;
                 sectionalWeight = 0.7;
                 note = `Average ${raceCondition} record (${(podiumRate*100).toFixed(0)}% podium in ${runs} runs) - sectionals reduced 30%`;
             }
-            
         } else {
-            // LOW CONFIDENCE - Not much condition data (runs < 5)
-            
-            // Check if has elite sectionals from higher class
             let bestSectionalZ = 0;
             if (sectionalDetails && sectionalDetails.bestRecent) {
-                // Convert points back to z-score (bestRecent is stored as points)
                 bestSectionalZ = Math.abs(sectionalDetails.bestRecent / 15);
             }
-            
-            // Also check the class of the best sectional vs today's race
+
             const formClassString = horse['form class'] || '';
             const formPrizeString = horse['prizemoney'] || '';
             const formClassScore = calculateClassScore(formClassString, formPrizeString);
-            
+
             const raceClassString = horse['class restrictions'] || '';
             const racePrizeString = horse['race prizemoney'] || '';
             const raceClassScore = calculateClassScore(raceClassString, racePrizeString);
-            
+
             if (bestSectionalZ > 1.2 && formClassScore > raceClassScore + 20) {
-                // ELITE SPEED FROM MUCH HIGHER CLASS
                 sectionalWeight = 1.0;
                 note = `Elite speed (z=${bestSectionalZ.toFixed(2)}) from higher class - sectionals kept despite limited ${raceCondition} data (${runs} runs)`;
-                
             } else {
-                // UNCERTAIN - MILD PENALTY
                 sectionalWeight = 0.7;
                 note = `Limited ${raceCondition} data (${runs} runs) - sectionals reduced 30%`;
             }
         }
-        
     } else {
-        // GOOD/FIRM TRACKS - No adjustments needed
         sectionalWeight = 1.0;
         conditionMultiplier = 1.0;
         note = '';
     }
-    
-    return {
-        sectionalWeight: sectionalWeight,
-        conditionMultiplier: conditionMultiplier,
-        note: note
-    };
+
+    return { sectionalWeight, conditionMultiplier, note };
 }
-    }
+
 // ==========================================
 // WEIGHT-ENABLED CLASS RISE
 // ==========================================
-
 function adjustClassRiseForWeight(classChange, weightAdvantage) {
-    /**
-     * Reduces class rise penalty when horse has significant weight advantage
-     * Weight advantage = (points below average) + (points from weight drop)
-     * 
-     * Examples:
-     * - Shenandoah River: UP 45 class, +30 weight advantage → 75% reduction
-     * - Motorsports: UP 55 class, +25 weight advantage → 75% reduction
-     * - Geemes: UP 8 class, +13 weight advantage → 50% reduction
-     */
-    
+    // classChange: positive number of class points stepping up
     if (classChange <= 0) {
         // Not stepping up - no adjustment needed
-        return { adjustedPenalty: classChange, note: '' };
+        return { adjustedPenalty: -classChange, note: '' };
     }
-    
-    const basePenalty = -classChange; // Negative because stepping up is a penalty
+
+    const basePenalty = -classChange; // negative penalty
     let reductionPercent = 0;
     let note = '';
-    
-    if (weightAdvantage >= 25) {
-        // MASSIVE weight relief (3+ kg advantage total)
-        reductionPercent = 0.75; // 75% reduction
-        const adjustedPenalty = basePenalty * (1 - reductionPercent);
-        note = `Weight-enabled class rise: ${basePenalty.toFixed(1)} → ${adjustedPenalty.toFixed(1)} (75% reduction for ${weightAdvantage.toFixed(0)} weight points)`;
-        return { adjustedPenalty, note };
-        
-    } else if (weightAdvantage >= 15) {
-        // SIGNIFICANT weight relief (2+ kg advantage total)
-        reductionPercent = 0.50; // 50% reduction
-        const adjustedPenalty = basePenalty * (1 - reductionPercent);
-        note = `Weight-enabled class rise: ${basePenalty.toFixed(1)} → ${adjustedPenalty.toFixed(1)} (50% reduction for ${weightAdvantage.toFixed(0)} weight points)`;
-        return { adjustedPenalty, note };
-    }
-    
-    // Insufficient weight advantage - no adjustment
-    return { adjustedPenalty: basePenalty, note: '' };
-}
-    // ==========================================
-// PERFECT RECORD SPECIALIST BONUS
-// ==========================================
 
-function calculatePerfectRecordBonus(horse, trackCondition) {
-    /**
-     * Awards bonus for horses with 100% win or podium records
-     * Even with low N (1-3 runs), perfect records are meaningful
-     * 
-     * Examples:
-     * - Yorkshire: 100% at track, track+distance, distance (all N=1) → WON $2.70
-     * - Black Run: 100% track/distance/condition records → WON $2.35
-     * - Winner B#9: 100% record despite no sectionals → WON
-     */
-    
-    let totalBonus = 0;
-    let notes = '';
-    const perfectRecords = [];
-    
-    // Check TRACK record
-    const trackRecord = horse['horse record track'];
-    if (trackRecord && typeof trackRecord === 'string') {
-        const numbers = trackRecord.split(/[:\-]/).map(s => Number(s.trim()));
-        if (numbers.length === 4) {
-            const [runs, wins, seconds, thirds] = numbers;
-            const podiums = wins + seconds + thirds;
-            
-            if (runs > 0 && (wins === runs || podiums === runs)) {
-                perfectRecords.push({
-                    type: 'track',
-                    runs: runs,
-                    isPerfectWin: wins === runs,
-                    isPerfectPodium: podiums === runs
-                });
-            }
-        }
+    if (weightAdvantage >= 25) {
+        reductionPercent = 0.75; // 75% reduction
+    } else if (weightAdvantage >= 15) {
+        reductionPercent = 0.5; // 50% reduction
+    } else {
+        reductionPercent = 0;
     }
-    // ==========================================
+
+    const adjustedPenalty = basePenalty * (1 - reductionPercent);
+    if (reductionPercent > 0) {
+        note = `Weight-enabled class rise: ${basePenalty.toFixed(1)} → ${adjustedPenalty.toFixed(1)} (${(reductionPercent*100).toFixed(0)}% reduction for ${weightAdvantage.toFixed(0)} weight points)`;
+    }
+
+    return { adjustedPenalty, note };
+}
+
+// ==========================================
 // LAST START CONTEXT FOR CLASS DROPPERS
 // ==========================================
-
 function adjustLastStartPenaltyForClassDrop(lastStartPenalty, classChange, recentForm) {
-    /**
-     * Reduces last start penalty when horse ran poorly at much higher class
-     * One bad run at Group level doesn't mean poor quality
-     * 
-     * Examples:
-     * - Yorkshire: 16th at Group 2, three straight wins before → WON $2.70
-     * - Flying For Fun: 7th at Group 1 dropping to Open → WON $3.40
-     * - Casino Seventeen: Poor at Group 3, drops to Open → WON $7
-     */
-    
-    if (lastStartPenalty >= 0) {
-        // Not a penalty - no adjustment needed
-        return { adjustedPenalty: lastStartPenalty, note: '' };
-    }
-    
-    // Check if significant class drop
+    // lastStartPenalty expected negative when it's a penalty
+    if (lastStartPenalty >= 0) return { adjustedPenalty: lastStartPenalty, note: '' };
+
     const isSignificantDrop = classChange <= -15; // Dropping 15+ class points
     const isModerateDrop = classChange <= -10;     // Dropping 10+ class points
-    
+
     if (!isSignificantDrop && !isModerateDrop) {
-        // Not enough of a class drop to justify adjustment
         return { adjustedPenalty: lastStartPenalty, note: '' };
     }
-    
-    // Check recent form quality (before last start)
-    const hasStrongPreviousForm = recentForm.winsBeforeLast >= 2 || recentForm.recentWinRate >= 0.50;
-    
+
+    const hasStrongPreviousForm = recentForm && (recentForm.winsBeforeLast >= 2 || recentForm.recentWinRate >= 0.5);
+
     let reductionPercent = 0;
     let note = '';
-    
+
     if (isSignificantDrop && hasStrongPreviousForm) {
-        // MAJOR CLASS DROP + STRONG PREVIOUS FORM
-        // One bad day at elite level doesn't erase quality
-        reductionPercent = 0.75; // Reduce penalty by 75%
-        const adjustedPenalty = lastStartPenalty * (1 - reductionPercent);
-        note = `Last start context: ${lastStartPenalty.toFixed(1)} → ${adjustedPenalty.toFixed(1)} (75% reduction - poor run at elite level, strong previous form)`;
-        return { adjustedPenalty, note };
-        
+        reductionPercent = 0.75;
+        note = `Last start context: ${lastStartPenalty.toFixed(1)} → ${ (lastStartPenalty*(1 - reductionPercent)).toFixed(1) } (75% reduction - poor run at elite level, strong previous form)`;
     } else if (isSignificantDrop) {
-        // MAJOR CLASS DROP only
-        reductionPercent = 0.50; // Reduce penalty by 50%
-        const adjustedPenalty = lastStartPenalty * (1 - reductionPercent);
-        note = `Last start context: ${lastStartPenalty.toFixed(1)} → ${adjustedPenalty.toFixed(1)} (50% reduction - poor run at much higher class)`;
-        return { adjustedPenalty, note };
-        
+        reductionPercent = 0.5;
+        note = `Last start context: ${lastStartPenalty.toFixed(1)} → ${ (lastStartPenalty*(1 - reductionPercent)).toFixed(1) } (50% reduction - poor run at much higher class)`;
     } else if (isModerateDrop && hasStrongPreviousForm) {
-        // MODERATE DROP + STRONG FORM
-        reductionPercent = 0.50; // Reduce penalty by 50%
-        const adjustedPenalty = lastStartPenalty * (1 - reductionPercent);
-        note = `Last start context: ${lastStartPenalty.toFixed(1)} → ${adjustedPenalty.toFixed(1)} (50% reduction - moderate class drop with strong form)`;
-        return { adjustedPenalty, note };
+        reductionPercent = 0.5;
+        note = `Last start context: ${lastStartPenalty.toFixed(1)} → ${ (lastStartPenalty*(1 - reductionPercent)).toFixed(1) } (50% reduction - moderate class drop with strong form)`;
+    } else {
+        return { adjustedPenalty: lastStartPenalty, note: '' };
     }
-    
-    // Insufficient criteria - no adjustment
-    return { adjustedPenalty: lastStartPenalty, note: '' };
-    }
-    // ==========================================
+
+    const adjustedPenalty = lastStartPenalty * (1 - reductionPercent);
+    return { adjustedPenalty, note };
+}
+
+// ==========================================
 // SP PROFILE CONTEXT FOR SPECIALISTS
 // ==========================================
-
 function adjustSPProfileForSpecialist(spPenalty, specialistContext) {
-    /**
-     * Caps SP profile penalty for proven specialists
-     * Market often misses specialists with strong records
-     * 
-     * Examples:
-     * - Different Gravy: $30 SP but won last on soft → WON $1.80
-     * - Casino Seventeen: $39 SP but 55% soft podium → WON $7
-     */
-    
-    if (spPenalty >= 0) {
-        // Not a penalty - no adjustment needed
-        return { adjustedPenalty: spPenalty, note: '' };
-    }
-    
-    // Check if horse qualifies as specialist
-    const isSpecialist = 
-        specialistContext.hasStrongConditionRecord ||
-        specialistContext.hasStrongTrackRecord ||
-        specialistContext.hasStrongDistanceRecord ||
-        specialistContext.hasPerfectRecord ||
-        specialistContext.isRecentConditionWinner ||
-        specialistContext.isClassDropperWithSpeed;
-    
+    if (spPenalty >= 0) return { adjustedPenalty: spPenalty, note: '' };
+
+    const isSpecialist =
+        (specialistContext && (
+            specialistContext.hasStrongConditionRecord ||
+            specialistContext.hasStrongTrackRecord ||
+            specialistContext.hasStrongDistanceRecord ||
+            specialistContext.hasPerfectRecord ||
+            specialistContext.isRecentConditionWinner ||
+            specialistContext.isClassDropperWithSpeed
+        ));
+
     if (!isSpecialist) {
-        // Not a specialist - no adjustment
         return { adjustedPenalty: spPenalty, note: '' };
     }
-    
+
     // Cap the penalty at -10 for specialists
     const cappedPenalty = Math.max(spPenalty, -10);
-    
     if (cappedPenalty !== spPenalty) {
-        const saved = spPenalty - cappedPenalty;
+        // Determine reason
         let reason = '';
-        
-        if (specialistContext.hasStrongConditionRecord) {
-            reason = 'strong condition record';
-        } else if (specialistContext.hasStrongTrackRecord) {
-            reason = 'strong track record';
-        } else if (specialistContext.hasStrongDistanceRecord) {
-            reason = 'strong distance record';
-        } else if (specialistContext.hasPerfectRecord) {
-            reason = 'perfect record';
-        } else if (specialistContext.isRecentConditionWinner) {
-            reason = 'recent condition winner';
-        } else if (specialistContext.isClassDropperWithSpeed) {
-            reason = 'class dropper with proven speed';
-        }
-        
+        if (specialistContext.hasStrongConditionRecord) reason = 'strong condition record';
+        else if (specialistContext.hasStrongTrackRecord) reason = 'strong track record';
+        else if (specialistContext.hasStrongDistanceRecord) reason = 'strong distance record';
+        else if (specialistContext.hasPerfectRecord) reason = 'perfect record';
+        else if (specialistContext.isRecentConditionWinner) reason = 'recent condition winner';
+        else if (specialistContext.isClassDropperWithSpeed) reason = 'class dropper with proven speed';
+
         const note = `SP profile context: ${spPenalty.toFixed(1)} → ${cappedPenalty.toFixed(1)} (capped for ${reason})`;
         return { adjustedPenalty: cappedPenalty, note };
     }
-    
+
     return { adjustedPenalty: spPenalty, note: '' };
 }
+
+// ==========================================
+// PERFECT RECORD SPECIALIST BONUS
+// Returns { bonus, note }
+// ==========================================
+function calculatePerfectRecordBonus(horse, trackCondition) {
+    let totalBonus = 0;
+    let notes = [];
+    const perfectRecords = [];
+
+    // Helper to evaluate a record string "runs:wins-seconds-thirds"
+    const evalRecord = (recordStr, label) => {
+        if (!recordStr || typeof recordStr !== 'string') return;
+        const numbers = recordStr.split(/[:\-]/).map(s => Number(s.trim()));
+        if (numbers.length !== 4) return;
+        const [runs, wins, seconds, thirds] = numbers;
+        const podiums = wins + seconds + thirds;
+        if (runs > 0 && (wins === runs || podiums === runs)) {
+            perfectRecords.push({
+                type: label,
+                runs,
+                isPerfectWin: wins === runs,
+                isPerfectPodium: podiums === runs
+            });
+        }
+    };
+
+    evalRecord(horse['horse record track'], 'track');
+    evalRecord(horse['horse record track distance'], 'track+distance');
+    evalRecord(horse['horse record distance'], 'distance');
+    evalRecord(horse['horse record ' + trackCondition], 'condition');
+
+    // Award bonuses per perfect record (simple rule set)
+    // Perfect win bonuses (larger for more runs), perfect podium smaller.
+    for (const rec of perfectRecords) {
+        if (rec.isPerfectWin) {
+            if (rec.runs >= 5) {
+                totalBonus += 15;
+                notes.push(`+15.0 : UNDEFEATED (${rec.type}) in ${rec.runs} runs`);
+            } else if (rec.runs >= 3) {
+                totalBonus += 12;
+                notes.push(`+12.0 : UNDEFEATED (${rec.type}) in ${rec.runs} runs`);
+            } else {
+                totalBonus += 8;
+                notes.push(`+8.0 : UNDEFEATED (${rec.type}) in ${rec.runs} runs`);
+            }
+        } else if (rec.isPerfectPodium) {
+            if (rec.runs >= 5) {
+                totalBonus += 10;
+                notes.push(`+10.0 : 100% PODIUM (${rec.type}) in ${rec.runs} runs`);
+            } else if (rec.runs >= 3) {
+                totalBonus += 7;
+                notes.push(`+7.0 : 100% PODIUM (${rec.type}) in ${rec.runs} runs`);
+            } else {
+                totalBonus += 4;
+                notes.push(`+4.0 : 100% PODIUM (${rec.type}) in ${rec.runs} runs`);
+            }
+        }
+    }
+
+    const note = notes.length ? notes.join('; ') + '\n' : '';
+    return { bonus: totalBonus, note };
 }
-    // Check TRACK+DISTANCE record
-    const trackDistanceRecord = horse['horse record track distance'];
-    if (trackDistanceRecord && typeof trackDistanceRecord === 'string') {
-        const numbers = trackDistanceRecord.split(/[:\-]/).map(s => Number(s.trim()));
-        if (numbers.length === 4) {
-            const [runs, wins, seconds, thirds] = numbers;
-            const podiums = wins + seconds + thirds;
-            
-            if (runs > 0 && (wins === runs || podiums === runs)) {
-                perfectRecords.push({
-                    type: 'track+distance',
-                    runs: runs,
-                    isPerfectWin: wins === runs,
-                    isPerfectPodium: podiums === runs
-                });
-            }
-        }
-    }
     
-    // Check DISTANCE record
-    const distanceRecord = horse['horse record distance'];
-    if (distanceRecord && typeof distanceRecord === 'string') {
-        const numbers = distanceRecord.split(/[:\-]/).map(s => Number(s.trim()));
-        if (numbers.length === 4) {
-            const [runs, wins, seconds, thirds] = numbers;
-            const podiums = wins + seconds + thirds;
-            
-            if (runs > 0 && (wins === runs || podiums === runs)) {
-                perfectRecords.push({
-                    type: 'distance',
-                    runs: runs,
-                    isPerfectWin: wins === runs,
-                    isPerfectPodium: podiums === runs
-                });
-            }
+// analyzer.js — cleaned final chunk (replace the corresponding region)
+
+// PERFECT RECORD SPECIALIST BONUS (merged and robust)
+function calculatePerfectRecordBonus(horse, trackCondition) {
+    let totalBonus = 0;
+    let notes = [];
+    const perfectRecords = [];
+
+    // Helper to evaluate a record string "runs:wins-seconds-thirds"
+    const evalRecord = (recordStr, label) => {
+        if (!recordStr || typeof recordStr !== 'string') return;
+        const numbers = recordStr.split(/[:\-]/).map(s => Number(s.trim()));
+        if (numbers.length !== 4) return;
+        const [runs, wins, seconds, thirds] = numbers;
+        const podiums = wins + seconds + thirds;
+        if (runs > 0 && (wins === runs || podiums === runs)) {
+            perfectRecords.push({
+                type: label,
+                runs,
+                isPerfectWin: wins === runs,
+                isPerfectPodium: podiums === runs
+            });
         }
-    }
-    
-    // Check CONDITION record
-    const conditionField = 'horse record ' + trackCondition;
-    const conditionRecord = horse[conditionField];
-    if (conditionRecord && typeof conditionRecord === 'string') {
-        const numbers = conditionRecord.split(/[:\-]/).map(s => Number(s.trim()));
-        if (numbers.length === 4) {
-            const [runs, wins, seconds, thirds] = numbers;
-            const podiums = wins + seconds + thirds;
-            
-            if (runs > 0 && (wins === runs || podiums === runs)) {
-                perfectRecords.push({
-                    type: trackCondition + ' condition',
-                    runs: runs,
-                    isPerfectWin: wins === runs,
-                    isPerfectPodium: podiums === runs
-                });
-            }
-        }
-    }
-    
-    // Award bonuses for perfect records
+    };
+
+    evalRecord(horse['horse record track'], 'track');
+    evalRecord(horse['horse record track distance'], 'track+distance');
+    evalRecord(horse['horse record distance'], 'distance');
+    evalRecord(horse['horse record ' + trackCondition], `${trackCondition} condition`);
+
+    // Award bonuses per perfect record (confidence-weighted)
     if (perfectRecords.length > 0) {
         perfectRecords.forEach(record => {
-            const baseBonus = 20; // Base specialist bonus
+            const baseBonus = 20; // base specialist bonus
             let confidenceMultiplier = 1.0;
-            
-            // Apply confidence multiplier based on sample size
-            if (record.runs === 1 || record.runs === 2) {
-                confidenceMultiplier = 0.5; // Low confidence
-            } else if (record.runs === 3 || record.runs === 4) {
-                confidenceMultiplier = 0.6; // Medium confidence
-            } else if (record.runs === 5 || record.runs === 6) {
-                confidenceMultiplier = 0.8; // Good confidence
-            } else {
-                confidenceMultiplier = 1.0; // High confidence (7+)
-            }
-            
+
+            if (record.runs <= 2) confidenceMultiplier = 0.5;
+            else if (record.runs <= 4) confidenceMultiplier = 0.6;
+            else if (record.runs <= 6) confidenceMultiplier = 0.8;
+            else confidenceMultiplier = 1.0;
+
             const bonus = baseBonus * confidenceMultiplier;
             totalBonus += bonus;
-            
+
             const recordType = record.isPerfectWin ? 'UNDEFEATED' : '100% PODIUM';
-            notes += `+${bonus.toFixed(1)} : ${recordType} at ${record.type} (${record.runs}/${record.runs}) - specialist bonus\n`;
+            notes.push(`+${bonus.toFixed(1)} : ${recordType} at ${record.type} (${record.runs}/${record.runs}) - specialist bonus`);
         });
-        
-        // If multiple perfect records, add a note about it
+
         if (perfectRecords.length > 1) {
-            notes += `  ℹ️  Multiple perfect records (${perfectRecords.length}) - strong specialist pattern\n`;
+            notes.push(`ℹ️  Multiple perfect records (${perfectRecords.length}) - strong specialist pattern`);
         }
     }
-    
+
     return {
         bonus: totalBonus,
-        note: notes,
+        note: notes.length ? notes.join('; ') + '\n' : '',
         recordCount: perfectRecords.length
     };
 }
-    // Function to check if a record is undefeated
-    const isUndefeated = (record) => {
-        if (typeof record !== 'string') return false;
-        
-        const numbers = record.split(/[:\-]/).map(Number);
-        if (numbers.length !== 4) return false;
-        
-        const [runs, wins, seconds, thirds] = numbers;
-        
-        // Must have at least 1 run, all runs must be wins, no seconds or thirds
-        return runs > 0 && wins === runs && seconds === 0 && thirds === 0;
-    };
-    
-    // Check first up specialist
-    if (isFirstUp && isUndefeated(firstUpRecord)) {
-        addScore += 15;
-        note += `+15.0 : First up specialist (${firstUpRecord})\n`;
+
+// Utility to detect undefeated record string "runs:wins-seconds-thirds"
+function isUndefeatedRecord(record) {
+    if (typeof record !== 'string') return false;
+    const numbers = record.split(/[:\-]/).map(s => Number(s.trim()));
+    if (numbers.length !== 4) return false;
+    const [runs, wins, seconds, thirds] = numbers;
+    return runs > 0 && wins === runs && seconds === 0 && thirds === 0;
+}
+
+// FIRST-UP / SECOND-UP specialist — cleaned and closed
+function checkFirstUpSecondUp(horseRow) {
+    let addScore = 0;
+    let note = '';
+
+    const last10 = String(horseRow['horse last10'] || '');
+    const firstUpRecord = horseRow['horse record first up'];
+    const secondUpRecord = horseRow['horse record second up'];
+
+    // Determine first-up / second-up
+    let isFirstUp = false;
+    let isSecondUp = false;
+
+    if (last10.toLowerCase().endsWith('x')) {
+        isFirstUp = true;
+    } else if (last10.length >= 2) {
+        const lastChar = last10.charAt(last10.length - 1);
+        const secondLastChar = last10.charAt(last10.length - 2);
+        if (secondLastChar.toLowerCase() === 'x' && /\d/.test(lastChar)) {
+            isSecondUp = true;
+        }
     }
-    
-    // Check second up specialist
-    if (isSecondUp && isUndefeated(secondUpRecord)) {
-        addScore += 15;
-        note += `+15.0 : Second up specialist (${secondUpRecord})\n`;
+
+    // Score based on first-up record
+    if (isFirstUp && typeof firstUpRecord === 'string') {
+        const nums = firstUpRecord.split(/[:\-]/).map(s => Number(s.trim()));
+        if (nums.length === 4 && nums[0] > 0) {
+            const runs = nums[0], wins = nums[1], seconds = nums[2], thirds = nums[3];
+            const podiumRate = (wins + seconds + thirds) / runs;
+            if (wins > 0) {
+                addScore += 4;
+                note += `+ 4.0 : First-up winner(s) in ${wins} of ${runs} runs\n`;
+            }
+            if (podiumRate >= 0.5) {
+                addScore += 3;
+                note += `+ 3.0 : Strong first-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
+            }
+        }
     }
-    
+
+    // Score based on second-up record
+    if (isSecondUp && typeof secondUpRecord === 'string') {
+        const nums2 = secondUpRecord.split(/[:\-]/).map(s => Number(s.trim()));
+        if (nums2.length === 4 && nums2[0] > 0) {
+            const runs = nums2[0], wins = nums2[1], seconds = nums2[2], thirds = nums2[3];
+            const podiumRate = (wins + seconds + thirds) / runs;
+            if (wins > 0) {
+                addScore += 3;
+                note += `+ 3.0 : Second-up winners in ${wins} of ${runs} runs\n`;
+            }
+            if (podiumRate >= 0.5) {
+                addScore += 2;
+                note += `+ 2.0 : Strong second-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
+            }
+        }
+    }
+
+    // Undefeated specialist bonuses
+    if (isFirstUp && isUndefeatedRecord(firstUpRecord)) {
+        addScore += 15;
+        note += `+15.0 : First-up specialist (UNDEFEATED: ${firstUpRecord})\n`;
+    }
+    if (isSecondUp && isUndefeatedRecord(secondUpRecord)) {
+        addScore += 15;
+        note += `+15.0 : Second-up specialist (UNDEFEATED: ${secondUpRecord})\n`;
+    }
+
+    // Mild penalty for unclear markers
+    if (!isFirstUp && !isSecondUp && last10.length > 0 && /x/i.test(last10)) {
+        addScore -= 1;
+        note += `- 1.0 : Unclear spell/return status (markers present but pattern not first/second-up)\n`;
+    }
+
     return [addScore, note];
 }
 
+// Calculate average form prices per horse-race composite key
 function calculateAverageFormPrices(data) {
     const formPriceGroups = {};
-    
-    // Group form prices by composite key (horse name + race number)
+
     data.forEach(entry => {
         const compositeKey = `${entry['horse name']}-${entry['race number']}`;
         const formPrice = parseFloat(entry['form price']);
-        
-        // Initialize array for this horse-race combination if it doesn't exist
-        if (!formPriceGroups[compositeKey]) {
-            formPriceGroups[compositeKey] = [];
-        }
-        
-        // Only add valid form prices within the expected range
+        if (!formPriceGroups[compositeKey]) formPriceGroups[compositeKey] = [];
         if (!isNaN(formPrice) && formPrice >= 1.01 && formPrice <= 500.00) {
             formPriceGroups[compositeKey].push(formPrice);
         }
     });
-    
-    // Calculate averages for each horse-race combination
+
     const averages = {};
     Object.keys(formPriceGroups).forEach(key => {
         const prices = formPriceGroups[key];
         if (prices.length > 0) {
-            // Calculate average and round to 2 decimal places
-            const sum = prices.reduce((total, price) => total + price, 0);
-            const average = sum / prices.length;
-            averages[key] = Math.round(average * 100) / 100;
+            const sum = prices.reduce((s, v) => s + v, 0);
+            averages[key] = Math.round((sum / prices.length) * 100) / 100;
         } else {
-            // No valid prices found for this horse
             averages[key] = null;
         }
     });
-    
+
     return averages;
 }
 
 function parseLastInteger(sectional) {
     if (!sectional || typeof sectional !== 'string') return null;
     const match = sectional.match(/(\d+)m$/);
-    return match ? parseInt(match[1], 10) : null; // Return the integer or null if not found
+    return match ? parseInt(match[1], 10) : null;
 }
 
-// ==========================================
-// SECTIONAL SCORING CONSTANTS (Module Level)
-// ==========================================
+// SECTIONAL CONSTANTS
 const SECTIONAL_DISTANCE_TOLERANCE = 200;
 const SECTIONAL_WEIGHT_ADJUSTMENT_FACTOR = 0.06;
 const SECTIONAL_CLASS_ADJUSTMENT_FACTOR = 0.015;
@@ -2158,887 +2005,548 @@ const SECTIONAL_BASELINE_CLASS_SCORE = 70;
 const SECTIONAL_RECENCY_WEIGHTS = [1.0, 0.7, 0.5];
 const SECTIONAL_DEFAULT_RACE_DISTANCE = 2000;
 
-// ==========================================
-// SECTIONAL SCORING HELPER FUNCTIONS (Module Level)
-// ==========================================
-
+// SECTIONAL HELPERS
 function calculateMean(values) {
-  if (values.length === 0) return 0;
-  return values.reduce((sum, val) => sum + val, 0) / values.length;
+    if (!values || values.length === 0) return 0;
+    return values.reduce((sum, v) => sum + v, 0) / values.length;
 }
-
 function calculateStdDev(values, mean) {
-  if (values.length <= 1) return 0;
-  const squaredDiffs = values.map((val) => Math.pow(val - mean, 2));
-  const variance = squaredDiffs.reduce((sum, val) => sum + val, 0) / values.length;
-  return Math.sqrt(variance);
+    if (!values || values.length <= 1) return 0;
+    const sq = values.map(v => Math.pow(v - mean, 2));
+    const variance = sq.reduce((s, v) => s + v, 0) / values.length;
+    return Math.sqrt(variance);
 }
-
 function calculateZScore(value, mean, stdDev) {
-  if (stdDev === 0) return 0;
-  return (value - mean) / stdDev;
+    if (!stdDev) return 0;
+    return (value - mean) / stdDev;
 }
-
 function parseWeightSectional(weightRestriction) {
-  if (!weightRestriction) return null;
-  const match = String(weightRestriction).match(/[\d.]+/);
-  return match ? parseFloat(match[0]) : null;
+    if (!weightRestriction) return null;
+    const match = String(weightRestriction).match(/[\d.]+/);
+    return match ? parseFloat(match[0]) : null;
 }
-
 function parsePrizeMoney(prizeString) {
-  if (!prizeString) return null;
-  
-  const cleaned = String(prizeString).replace(/[$,\s]/g, '');
-  const direct = parseInt(cleaned);
-  if (!isNaN(direct) && direct > 0) return direct;
-  
-  const match = prizeString.match(/1st\s+\$([0-9,]+)/i);
-  if (match) return parseInt(match[1].replace(/,/g, ''));
-  
-  return null;
+    if (!prizeString) return null;
+    const cleaned = String(prizeString).replace(/[$,\s]/g, '');
+    const direct = parseInt(cleaned, 10);
+    if (!isNaN(direct) && direct > 0) return direct;
+    const match = String(prizeString).match(/1st\s+\$([0-9,]+)/i);
+    if (match) return parseInt(match[1].replace(/,/g, ''), 10);
+    return null;
 }
-
 function getTypicalWeightForClass(classScore) {
-  if (classScore >= 115) return 57.0;
-  if (classScore >= 100) return 56.5;
-  if (classScore >= 85) return 56.0;
-  if (classScore >= 70) return 55.0;
-  if (classScore >= 55) return 54.5;
-  if (classScore >= 40) return 54.0;
-  return 53.5;
+    if (classScore >= 115) return 57.0;
+    if (classScore >= 100) return 56.5;
+    if (classScore >= 85) return 56.0;
+    if (classScore >= 70) return 55.0;
+    if (classScore >= 55) return 54.5;
+    if (classScore >= 40) return 54.0;
+    return 53.5;
 }
 
+// Get lowest sectionals by race (cleaned)
 function getLowestSectionalsByRace(data) {
-  
-  // Filter out invalid rows
-  const validData = data.filter(entry => {
-    if (!entry['race number'] || !entry['horse name'] || !entry['sectional']) {
-      return false;
-    }
-    
-    const horseName = entry['horse name'].toString().trim().toLowerCase();
-    if (horseName === 'horse name' || horseName === '' || horseName === 'nan' || horseName === 'null' || horseName === 'undefined') {
-      return false;
-    }
-    
-    const raceNum = parseInt(entry['race number']);
-    if (isNaN(raceNum) || raceNum <= 0) {
-      return false;
-    }
-    
-    const sectionalMatch = entry['sectional'].toString().match(/^(\d+\.?\d*)sec (\d+)m$/);
-    if (!sectionalMatch) {
-      return false;
-    }
-    
-    return true;
-  });
-
-  // Group data by race number
-  const raceGroups = {};
-  validData.forEach(entry => {
-    const raceNum = entry['race number'];
-    if (!raceGroups[raceNum]) {
-      raceGroups[raceNum] = [];
-    }
-    raceGroups[raceNum].push(entry);
-  });
-
-  const results = [];
-
-  // Process each race
-  Object.keys(raceGroups).forEach(raceNum => {
-    const raceData = raceGroups[raceNum];
-    
-    // Parse sectional data first
-    const parsedData = [];
-    const sectionalDistances = new Set();
-
-    raceData.forEach(entry => {
-      const sectionalMatch = entry.sectional.toString().match(/^(\d+\.?\d*)sec (\d+)m$/);
-      if (sectionalMatch) {
-        const time = parseFloat(sectionalMatch[1]);
-        const sectionalDistance = parseInt(sectionalMatch[2]);
-        const formDistance = parseInt(entry['form distance']);
-        
-        if (time > 0) {
-          sectionalDistances.add(sectionalDistance);
-        }
-        
-        const newEntry = { ...entry };
-        newEntry.time = time;
-        newEntry.sectionalDistance = sectionalDistance;
-        newEntry.formDistance = formDistance;
-
-        parsedData.push(newEntry);
-      }
+    const validData = data.filter(entry => {
+        if (!entry['race number'] || !entry['horse name'] || !entry['sectional']) return false;
+        const horseName = String(entry['horse name']).trim().toLowerCase();
+        if (!horseName || horseName === 'horse name' || ['nan','null','undefined',''].includes(horseName)) return false;
+        const raceNum = parseInt(entry['race number'], 10);
+        if (isNaN(raceNum) || raceNum <= 0) return false;
+        const sectionalMatch = String(entry['sectional']).match(/^(\d+\.?\d*)sec (\d+)m$/);
+        if (!sectionalMatch) return false;
+        return true;
     });
 
-    // Find target sectional distance
-    let targetSectionalDistance = null;
-    if (sectionalDistances.size > 1) {
-      const distanceHorseCounts = {};
-      sectionalDistances.forEach(dist => {
-        const horsesAtDistance = new Set();
+    const raceGroups = {};
+    validData.forEach(entry => {
+        const raceNum = parseInt(entry['race number'], 10);
+        if (!raceGroups[raceNum]) raceGroups[raceNum] = [];
+        raceGroups[raceNum].push(entry);
+    });
+
+    const results = [];
+
+    Object.keys(raceGroups).forEach(raceNumKey => {
+        const raceNum = parseInt(raceNumKey, 10);
+        const raceData = raceGroups[raceNum];
+        const parsedData = [];
+        const sectionalDistances = new Set();
+
+        raceData.forEach(entry => {
+            const sectionalMatch = String(entry.sectional).match(/^(\d+\.?\d*)sec (\d+)m$/);
+            if (!sectionalMatch) return;
+            const time = parseFloat(sectionalMatch[1]);
+            const sectionalDistance = parseInt(sectionalMatch[2], 10);
+            const formDistance = parseInt(entry['form distance'], 10);
+            if (time > 0) sectionalDistances.add(sectionalDistance);
+            parsedData.push({
+                ...entry,
+                time,
+                sectionalDistance,
+                formDistance
+            });
+        });
+
+        // Determine target sectional distance
+        let targetSectionalDistance = null;
+        if (sectionalDistances.size > 1) {
+            const counts = {};
+            parsedData.forEach(e => {
+                if (e.time > 0) {
+                    counts[e.sectionalDistance] = (counts[e.sectionalDistance] || 0) + 1;
+                }
+            });
+            let bestDist = null;
+            let bestCount = -1;
+            Object.keys(counts).forEach(d => {
+                if (counts[d] > bestCount) { bestCount = counts[d]; bestDist = parseInt(d, 10); }
+            });
+            targetSectionalDistance = bestDist;
+        } else if (sectionalDistances.size === 1) {
+            targetSectionalDistance = [...sectionalDistances][0];
+        }
+
+        // Determine today's race distance robustly
+        let todaysRaceDistance = parseInt(raceData[0]?.distance, 10);
+        if (isNaN(todaysRaceDistance)) todaysRaceDistance = parseInt(raceData[0]?.['race distance'], 10);
+        if (isNaN(todaysRaceDistance)) todaysRaceDistance = targetSectionalDistance;
+        if (isNaN(todaysRaceDistance) || !todaysRaceDistance) todaysRaceDistance = SECTIONAL_DEFAULT_RACE_DISTANCE;
+
+        // Build per-horse historical adjusted times
+        const horseData = {};
         parsedData.forEach(entry => {
-          if (entry.time > 0 && entry.sectionalDistance === dist) {
-            horsesAtDistance.add(entry['horse name']);
-          }
+            const horseName = entry['horse name'];
+            const rawTime = entry.time;
+            const formDistance = entry.formDistance;
+            const sectionalDistance = entry.sectionalDistance;
+
+            const formClassScore = calculateClassScore(entry['form class'] || '', entry['prizemoney'] || '');
+            const pastWeightCarried = parseWeightSectional(entry['form weight']);
+            if (pastWeightCarried === null) return;
+
+            const typicalWeightForClass = getTypicalWeightForClass(formClassScore);
+            const isDistanceRelevant = !isNaN(formDistance) && !isNaN(todaysRaceDistance) &&
+                Math.abs(formDistance - todaysRaceDistance) <= SECTIONAL_DISTANCE_TOLERANCE;
+
+            const isCorrectSectionalDistance = targetSectionalDistance === null || sectionalDistance === targetSectionalDistance;
+
+            if (rawTime > 0 && isDistanceRelevant && isCorrectSectionalDistance) {
+                const weightDiff = pastWeightCarried - typicalWeightForClass;
+                const weightAdjustment = weightDiff * SECTIONAL_WEIGHT_ADJUSTMENT_FACTOR;
+                const classPointsDiff = formClassScore - SECTIONAL_BASELINE_CLASS_SCORE;
+                const classAdjustment = classPointsDiff * SECTIONAL_CLASS_ADJUSTMENT_FACTOR;
+                const adjustedTime = rawTime - weightAdjustment - classAdjustment;
+
+                horseData[horseName] = horseData[horseName] || [];
+                horseData[horseName].push({
+                    time: adjustedTime,
+                    rawTime,
+                    weight: pastWeightCarried,
+                    typicalWeight: typicalWeightForClass,
+                    formClass: entry['form class'],
+                    formClassScore,
+                    date: entry['form meeting date'],
+                    adjustments: {
+                        weight: -weightAdjustment,
+                        weightDiff,
+                        class: -classAdjustment,
+                        classScore: formClassScore,
+                        total: -(weightAdjustment + classAdjustment)
+                    }
+                });
+            }
         });
-        distanceHorseCounts[dist] = horsesAtDistance.size;
-      });
-      
-      targetSectionalDistance = Object.keys(distanceHorseCounts).reduce((a, b) => 
-        distanceHorseCounts[a] > distanceHorseCounts[b] ? a : b
-      );
-      targetSectionalDistance = parseInt(targetSectionalDistance);
-    } else if (sectionalDistances.size === 1) {
-      targetSectionalDistance = [...sectionalDistances][0];
-    }
-    
-    // ROBUST DISTANCE FALLBACK
-    let todaysRaceDistance = parseInt(raceData[0]?.distance);
-    
-    if (isNaN(todaysRaceDistance)) {
-      todaysRaceDistance = parseInt(raceData[0]?.['race distance']);
-    }
-    
-    if (isNaN(todaysRaceDistance)) {
-      todaysRaceDistance = targetSectionalDistance;
-    }
-    
-    if (isNaN(todaysRaceDistance) || !todaysRaceDistance) {
-      todaysRaceDistance = SECTIONAL_DEFAULT_RACE_DISTANCE;
-    }
-    
-    parsedData.forEach(entry => {
-      entry.todaysDistance = todaysRaceDistance;
-    });
 
-    // Collect and adjust sectional times
-    const horseData = {};
-    const allHorses = [...new Set(raceData.map(entry => entry['horse name']))];
-    
-    allHorses.forEach(horseName => {
-      horseData[horseName] = [];
-    });
-    
-    parsedData.forEach(entry => {
-      const horseName = entry['horse name'];
-      const rawTime = entry.time;
-      const formDistance = entry.formDistance;
-      const sectionalDistance = entry.sectionalDistance;
-      
-      const formClassString = entry['form class'] || '';
-      const formPrizeString = entry['prizemoney'] || '';
-      const formClassScore = calculateClassScore(formClassString, formPrizeString);
-      
-      const pastWeightCarried = parseWeightSectional(entry['form weight']);
-      
-      if (pastWeightCarried === null) {
-        return;
-      }
-      
-      const typicalWeightForClass = getTypicalWeightForClass(formClassScore);
-      
-      const isDistanceRelevant = !isNaN(formDistance) && !isNaN(todaysRaceDistance) &&
-        Math.abs(formDistance - todaysRaceDistance) <= SECTIONAL_DISTANCE_TOLERANCE;
-      
-      const isCorrectSectionalDistance = targetSectionalDistance === null || 
-        sectionalDistance === targetSectionalDistance;
-      
-      if (rawTime > 0 && isDistanceRelevant && isCorrectSectionalDistance) {
-        
-        const weightDiff = pastWeightCarried - typicalWeightForClass;
-        const weightAdjustment = weightDiff * SECTIONAL_WEIGHT_ADJUSTMENT_FACTOR;
-        
-        const classPointsDiff = formClassScore - SECTIONAL_BASELINE_CLASS_SCORE;
-        const classAdjustment = classPointsDiff * SECTIONAL_CLASS_ADJUSTMENT_FACTOR;
-        
-        const adjustedTime = rawTime - weightAdjustment - classAdjustment;
-        
-        horseData[horseName].push({
-          time: adjustedTime,
-          rawTime: rawTime,
-          weight: pastWeightCarried,
-          typicalWeight: typicalWeightForClass,
-          formClass: formClassString,
-          formClassScore: formClassScore,
-          date: entry['form meeting date'],
-          formDistance: formDistance,
-          adjustments: {
-            weight: -weightAdjustment,
-            weightDiff: weightDiff,
-            class: -classAdjustment,
-            classScore: formClassScore,
-            total: -(weightAdjustment + classAdjustment)
-          }
+        // Sort each horse's entries by date desc
+        Object.keys(horseData).forEach(hn => horseData[hn].sort((a,b) => new Date(b.date) - new Date(a.date)));
+
+        // SYSTEM 1: Weighted average of last 3
+        const weightedAvgData = [];
+        Object.keys(horseData).forEach(hn => {
+            const times = horseData[hn];
+            if (times.length === 0) return;
+            const last3 = times.slice(0, 3);
+            let weightedSum = 0, totalW = 0;
+            last3.forEach((e, i) => {
+                const w = SECTIONAL_RECENCY_WEIGHTS[i] || 0.5;
+                weightedSum += e.time * w;
+                totalW += w;
+            });
+            const weightedAverage = weightedSum / totalW;
+            const avgWeightAdj = last3.reduce((s,e)=>s+e.adjustments.weight,0)/last3.length;
+            const avgWeightDiff = last3.reduce((s,e)=>s+e.adjustments.weightDiff,0)/last3.length;
+            const avgClassAdj = last3.reduce((s,e)=>s+e.adjustments.class,0)/last3.length;
+            const avgClassScore = last3.reduce((s,e)=>s+e.formClassScore,0)/last3.length;
+
+            weightedAvgData.push({
+                horseName: hn,
+                averageTime: weightedAverage,
+                runsUsed: last3.length,
+                avgWeightAdj, avgWeightDiff, avgClassAdj, avgClassScore
+            });
         });
-      }
-    });
 
-    Object.keys(horseData).forEach(horseName => {
-      horseData[horseName].sort((a, b) => {
-        return new Date(b.date) - new Date(a.date);
-      });
-    });
-
-    // SYSTEM 1: Weighted Average
-    const weightedAvgData = [];
-
-    Object.keys(horseData).forEach(horseName => {
-      const times = horseData[horseName];
-      if (times.length > 0) {
-        const last3 = times.slice(0, 3);
-        
-        let weightedSum = 0;
-        let totalWeight = 0;
-        last3.forEach((entry, index) => {
-          const weight = SECTIONAL_RECENCY_WEIGHTS[index] || 0.5;
-          weightedSum += entry.time * weight;
-          totalWeight += weight;
+        // SYSTEM 2: Best recent (best of last 5)
+        const bestRecentData = [];
+        Object.keys(horseData).forEach(hn => {
+            const times = horseData[hn];
+            if (times.length === 0) return;
+            const last5 = times.slice(0, 5);
+            const bestEntry = last5.reduce((best, cur) => cur.time < best.time ? cur : best, last5[0]);
+            bestRecentData.push({
+                horseName: hn,
+                bestTime: bestEntry.time,
+                rawBestTime: bestEntry.rawTime,
+                fromLast: last5.length,
+                weight: bestEntry.weight,
+                typicalWeight: bestEntry.typicalWeight,
+                formClass: bestEntry.formClass,
+                adjustments: bestEntry.adjustments
+            });
         });
-        const weightedAverage = weightedSum / totalWeight;
-        
-        const avgWeightAdj = last3.reduce((sum, e) => sum + e.adjustments.weight, 0) / last3.length;
-        const avgWeightDiff = last3.reduce((sum, e) => sum + e.adjustments.weightDiff, 0) / last3.length;
-        const avgClassAdj = last3.reduce((sum, e) => sum + e.adjustments.class, 0) / last3.length;
-        const avgClassScore = last3.reduce((sum, e) => sum + e.formClassScore, 0) / last3.length;
-        
-        weightedAvgData.push({
-          horseName: horseName,
-          averageTime: weightedAverage,
-          runsUsed: last3.length,
-          avgWeightAdj: avgWeightAdj,
-          avgWeightDiff: avgWeightDiff,
-          avgClassAdj: avgClassAdj,
-          avgClassScore: avgClassScore
+
+        // SYSTEM 3: Consistency (std dev of last up to 5)
+        const consistencyData = [];
+        Object.keys(horseData).forEach(hn => {
+            const times = horseData[hn];
+            if (times.length >= 3) {
+                const last5Times = times.slice(0, 5).map(e => e.time);
+                const mean = calculateMean(last5Times);
+                const stdDev = calculateStdDev(last5Times, mean);
+                consistencyData.push({ horseName: hn, stdDev, runsUsed: last5Times.length });
+            }
         });
-      }
-    });
 
-    // SYSTEM 2: Best Sectional
-    const bestRecentData = [];
+        // Z-score and points
+        const avgTimes = weightedAvgData.map(h=>h.averageTime);
+        const avgMean = calculateMean(avgTimes);
+        const avgStdDev = calculateStdDev(avgTimes, avgMean);
+        weightedAvgData.forEach(h => { h.zScore = calculateZScore(h.averageTime, avgMean, avgStdDev); h.points = h.zScore * -12; });
 
-    Object.keys(horseData).forEach(horseName => {
-      const times = horseData[horseName];
-      if (times.length > 0) {
-        const last5 = times.slice(0, 5);
-        const bestEntry = last5.reduce((best, current) => 
-          current.time < best.time ? current : best
-        );
-        
-        bestRecentData.push({
-          horseName: horseName,
-          bestTime: bestEntry.time,
-          rawBestTime: bestEntry.rawTime,
-          fromLast: last5.length,
-          weight: bestEntry.weight,
-          typicalWeight: bestEntry.typicalWeight,
-          formClass: bestEntry.formClass,
-          adjustments: bestEntry.adjustments
+        const bestTimes = bestRecentData.map(h=>h.bestTime);
+        const bestMean = calculateMean(bestTimes);
+        const bestStdDev = calculateStdDev(bestTimes, bestMean);
+        bestRecentData.forEach(h => { h.zScore = calculateZScore(h.bestTime, bestMean, bestStdDev); h.points = h.zScore * -15; });
+
+        consistencyData.forEach(h => { h.points = Math.max(0, 10 - (h.stdDev * 8)); });
+
+        // Aggregate scores
+        const horseScores = {};
+        const allHorses = [...new Set(raceData.map(e => e['horse name']))];
+        allHorses.forEach(hn => horseScores[hn] = { score: 0, note: '', dataSufficiency: 1.0, details: { weightedAvg:0, bestRecent:0, consistency:0 } });
+
+        weightedAvgData.forEach(h => {
+            const points = Math.round(h.points*10)/10;
+            horseScores[h.horseName].score += points;
+            horseScores[h.horseName].details.weightedAvg = points;
+            const zScoreText = (h.zScore * -1).toFixed(2);
+            const weightInfo = h.avgWeightDiff >= 0 ? `+${h.avgWeightDiff.toFixed(1)}kg heavier` : `${Math.abs(h.avgWeightDiff).toFixed(1)}kg lighter`;
+            const adjText = `wgt:${h.avgWeightAdj >= 0 ? '+' : ''}${h.avgWeightAdj.toFixed(2)}s (${weightInfo}), class:${h.avgClassAdj >= 0 ? '+' : ''}${h.avgClassAdj.toFixed(2)}s (avg ${h.avgClassScore.toFixed(0)} pts)`;
+            horseScores[h.horseName].note += `+${points.toFixed(1)}: weighted avg (z=${zScoreText}, ${h.runsUsed} runs)\n  └─ adj: ${adjText}\n`;
         });
-      }
-    });
 
-    // SYSTEM 3: Consistency
-    const consistencyData = [];
-
-    Object.keys(horseData).forEach(horseName => {
-      const times = horseData[horseName];
-      if (times.length >= 3) {
-        const last5Times = times.slice(0, 5).map(entry => entry.time);
-        const mean = calculateMean(last5Times);
-        const stdDev = calculateStdDev(last5Times, mean);
-        
-        consistencyData.push({
-          horseName: horseName,
-          stdDev: stdDev,
-          runsUsed: last5Times.length
+        bestRecentData.forEach(h => {
+            const points = Math.round(h.points*10)/10;
+            horseScores[h.horseName].score += points;
+            horseScores[h.horseName].details.bestRecent = points;
+            const zScoreText = (h.zScore * -1).toFixed(2);
+            const rawVsAdj = `${h.rawBestTime.toFixed(2)}s → ${h.bestTime.toFixed(2)}s`;
+            const classInfo = h.formClass || 'unknown';
+            const classScore = h.adjustments.classScore || 0;
+            const weightCarried = h.weight.toFixed(1);
+            const typicalWeight = h.typicalWeight.toFixed(1);
+            const adjText = `wgt:${h.adjustments.weight >= 0 ? '+' : ''}${h.adjustments.weight.toFixed(2)}s (carried ${weightCarried}kg vs ~${typicalWeight}kg typical), class:${h.adjustments.class >= 0 ? '+' : ''}${h.adjustments.class.toFixed(2)}s`;
+            horseScores[h.horseName].note += `+${points.toFixed(1)}: best of last ${h.fromLast} (z=${zScoreText})\n  └─ ${rawVsAdj} (${adjText}) in ${classInfo} (${classScore.toFixed(0)} pts)\n`;
         });
-      }
+
+        consistencyData.forEach(h => {
+            const points = Math.round(h.points*10)/10;
+            horseScores[h.horseName].score += points;
+            horseScores[h.horseName].details.consistency = points;
+            let consistencyRating = 'excellent';
+            if (h.stdDev > 0.8) consistencyRating = 'poor';
+            else if (h.stdDev > 0.5) consistencyRating = 'fair';
+            else if (h.stdDev > 0.3) consistencyRating = 'good';
+            horseScores[h.horseName].note += `+${points.toFixed(1)}: consistency - ${consistencyRating} (SD=${h.stdDev.toFixed(2)}s)\n`;
+        });
+
+        // Data sufficiency penalties
+        Object.keys(horseData).forEach(hn => {
+            const validRuns = horseData[hn].length;
+            let penalty = 1.0;
+            let penaltyNote = '';
+            if (validRuns === 0) { penalty = 0; penaltyNote = `⚠️  No sectionals at relevant distance (±${SECTIONAL_DISTANCE_TOLERANCE}m from ${todaysRaceDistance}m)\n`; }
+            else if (validRuns === 1) { penalty = 0.5; penaltyNote = `⚠️  Only 1 relevant sectional (score ×${penalty})\n`; }
+            else if (validRuns === 2) { penalty = 0.7; penaltyNote = `⚠️  Only 2 relevant sectionals (score ×${penalty})\n`; }
+            else if (validRuns === 3) { penalty = 0.85; penaltyNote = `⚠️  Only 3 relevant sectionals (score ×${penalty})\n`; }
+            else if (validRuns === 4) { penalty = 0.95; penaltyNote = `ℹ️  4 relevant sectionals (score ×${penalty})\n`; }
+
+            horseScores[hn].dataSufficiency = penalty;
+            if (penalty < 1.0) {
+                horseScores[hn].score *= penalty;
+                horseScores[hn].note += penaltyNote;
+            }
+            if (horseScores[hn].score === 0 && validRuns === 0) horseScores[hn].note = penaltyNote;
+        });
+
+        // Convert to results with compatibility fields
+        Object.keys(horseScores).forEach(hn => {
+            const finalScore = Math.max(0, Math.round(horseScores[hn].score * 10) / 10);
+            results.push({
+                race: raceNum,
+                name: hn,
+                sectionalScore: finalScore,
+                sectionalNote: horseScores[hn].note.trim(),
+                sectionalDetails: horseScores[hn].details,
+                dataSufficiency: horseScores[hn].dataSufficiency,
+                hasAverage1st: false,
+                hasLastStart1st: false
+            });
+        });
     });
 
-    // Z-SCORE CALCULATIONS
-    const avgTimes = weightedAvgData.map(h => h.averageTime);
-    const avgMean = calculateMean(avgTimes);
-    const avgStdDev = calculateStdDev(avgTimes, avgMean);
-
-    weightedAvgData.forEach(horse => {
-      horse.zScore = calculateZScore(horse.averageTime, avgMean, avgStdDev);
-      horse.points = horse.zScore * -12;
+    // Mark winners per race (combo flags)
+    const raceGroupsForCombo = results.reduce((acc, r) => {
+        acc[r.race] = acc[r.race] || [];
+        acc[r.race].push(r);
+        return acc;
+    }, {});
+    Object.values(raceGroupsForCombo).forEach(raceHorses => {
+        let bestWeightedAvg = null, bestWeightedAvgScore = -Infinity;
+        let bestRecent = null, bestRecentScore = -Infinity;
+        raceHorses.forEach(h => {
+            const w = h.sectionalDetails?.weightedAvg || 0;
+            if (w > bestWeightedAvgScore) { bestWeightedAvgScore = w; bestWeightedAvg = h.name; }
+            const rscore = h.sectionalDetails?.bestRecent || 0;
+            if (rscore > bestRecentScore) { bestRecentScore = rscore; bestRecent = h.name; }
+        });
+        raceHorses.forEach(h => {
+            if (h.name === bestWeightedAvg) h.hasAverage1st = true;
+            if (h.name === bestRecent) h.hasLastStart1st = true;
+        });
     });
 
-    const bestTimes = bestRecentData.map(h => h.bestTime);
-    const bestMean = calculateMean(bestTimes);
-    const bestStdDev = calculateStdDev(bestTimes, bestMean);
-
-    bestRecentData.forEach(horse => {
-      horse.zScore = calculateZScore(horse.bestTime, bestMean, bestStdDev);
-      horse.points = horse.zScore * -15;
-    });
-
-    consistencyData.forEach(horse => {
-      horse.points = Math.max(0, 10 - (horse.stdDev * 8));
-    });
-
-    // SCORE AGGREGATION
-    const horseScores = {};
-    allHorses.forEach(horseName => {
-      horseScores[horseName] = {
-        score: 0,
-        note: '',
-        dataSufficiency: 1.0,
-        details: {
-          weightedAvg: 0,
-          bestRecent: 0,
-          consistency: 0
-        }
-      };
-    });
-
-    weightedAvgData.forEach(horse => {
-      const points = Math.round(horse.points * 10) / 10;
-      horseScores[horse.horseName].score += points;
-      horseScores[horse.horseName].details.weightedAvg = points;
-      
-      const zScoreText = (horse.zScore * -1).toFixed(2);
-      const weightInfo = horse.avgWeightDiff >= 0 
-        ? `+${horse.avgWeightDiff.toFixed(1)}kg heavier` 
-        : `${Math.abs(horse.avgWeightDiff).toFixed(1)}kg lighter`;
-      const adjText = `wgt:${horse.avgWeightAdj >= 0 ? '+' : ''}${horse.avgWeightAdj.toFixed(2)}s (${weightInfo}), ` +
-                      `class:${horse.avgClassAdj >= 0 ? '+' : ''}${horse.avgClassAdj.toFixed(2)}s (avg ${horse.avgClassScore.toFixed(0)} pts)`;
-      
-      horseScores[horse.horseName].note += 
-        `+${points.toFixed(1)}: weighted avg (z=${zScoreText}, ${horse.runsUsed} runs)\n` +
-        `  └─ adj: ${adjText}\n`;
-    });
-
-    bestRecentData.forEach(horse => {
-      const points = Math.round(horse.points * 10) / 10;
-      horseScores[horse.horseName].score += points;
-      horseScores[horse.horseName].details.bestRecent = points;
-      
-      const zScoreText = (horse.zScore * -1).toFixed(2);
-      const rawVsAdj = `${horse.rawBestTime.toFixed(2)}s → ${horse.bestTime.toFixed(2)}s`;
-      const classInfo = horse.formClass || 'unknown';
-      const classScore = horse.adjustments.classScore || 0;
-      const weightCarried = horse.weight.toFixed(1);
-      const typicalWeight = horse.typicalWeight.toFixed(1);
-      const adjText = `wgt:${horse.adjustments.weight >= 0 ? '+' : ''}${horse.adjustments.weight.toFixed(2)}s (carried ${weightCarried}kg vs ~${typicalWeight}kg typical), ` +
-                      `class:${horse.adjustments.class >= 0 ? '+' : ''}${horse.adjustments.class.toFixed(2)}s`;
-      
-      horseScores[horse.horseName].note += 
-        `+${points.toFixed(1)}: best of last ${horse.fromLast} (z=${zScoreText})\n` +
-        `  └─ ${rawVsAdj} (${adjText}) in ${classInfo} (${classScore.toFixed(0)} pts)\n`;
-    });
-
-    consistencyData.forEach(horse => {
-      const points = Math.round(horse.points * 10) / 10;
-      horseScores[horse.horseName].score += points;
-      horseScores[horse.horseName].details.consistency = points;
-      
-      let consistencyRating = 'excellent';
-      if (horse.stdDev > 0.8) consistencyRating = 'poor';
-      else if (horse.stdDev > 0.5) consistencyRating = 'fair';
-      else if (horse.stdDev > 0.3) consistencyRating = 'good';
-      
-      horseScores[horse.horseName].note += 
-        `+${points.toFixed(1)}: consistency - ${consistencyRating} (SD=${horse.stdDev.toFixed(2)}s)\n`;
-    });
-
-    // DATA SUFFICIENCY PENALTIES
-    Object.keys(horseData).forEach(horseName => {
-      const validRuns = horseData[horseName].length;
-      let penalty = 1.0;
-      let penaltyNote = '';
-      
-      if (validRuns === 0) {
-        penalty = 0;
-        penaltyNote = `⚠️  No sectionals at relevant distance (±${SECTIONAL_DISTANCE_TOLERANCE}m from ${todaysRaceDistance}m)\n`;
-      } else if (validRuns === 1) {
-        penalty = 0.5;
-        penaltyNote = `⚠️  Only 1 relevant sectional (score ×${penalty})\n`;
-      } else if (validRuns === 2) {
-        penalty = 0.7;
-        penaltyNote = `⚠️  Only 2 relevant sectionals (score ×${penalty})\n`;
-      } else if (validRuns === 3) {
-        penalty = 0.85;
-        penaltyNote = `⚠️  Only 3 relevant sectionals (score ×${penalty})\n`;
-      } else if (validRuns === 4) {
-        penalty = 0.95;
-        penaltyNote = `ℹ️  4 relevant sectionals (score ×${penalty})\n`;
-      }
-      
-      horseScores[horseName].dataSufficiency = penalty;
-      
-      if (penalty < 1.0) {
-        horseScores[horseName].score *= penalty;
-        horseScores[horseName].note += penaltyNote;
-      }
-      
-      if (horseScores[horseName].score === 0 && validRuns === 0) {
-        horseScores[horseName].note = penaltyNote;
-      }
-    });
-
-    // CONVERT TO RESULTS - WITH BACKWARDS COMPATIBILITY
-    allHorses.forEach(horseName => {
-      const finalScore = Math.max(0, Math.round(horseScores[horseName].score * 10) / 10);
-      
-// Flags will be set after determining actual 1st place
-      
-      results.push({
-        race: raceNum,
-        name: horseName,
-        sectionalScore: finalScore,
-        sectionalNote: horseScores[horseName].note.trim(),
-        sectionalDetails: horseScores[horseName].details,
-        dataSufficiency: horseScores[horseName].dataSufficiency,
-        hasAverage1st: false,
-        hasLastStart1st: false
-      });
-    });
-  });
-
-  // NOW determine the actual 1st place horses for combo bonus
-  const raceGroupsForCombo = {};
-  results.forEach(r => {
-    if (!raceGroupsForCombo[r.race]) {
-      raceGroupsForCombo[r.race] = [];
-    }
-    raceGroupsForCombo[r.race].push(r);
-  });
-  
-  // For each race, mark the 1st place horses
-  Object.values(raceGroupsForCombo).forEach(raceHorses => {
-    // Find horse with highest weightedAvg score
-    let bestWeightedAvg = null;
-    let bestWeightedAvgScore = -Infinity;
-    
-    raceHorses.forEach(horse => {
-      const weightedAvgScore = horse.sectionalDetails?.weightedAvg || 0;
-      if (weightedAvgScore > bestWeightedAvgScore) {
-        bestWeightedAvgScore = weightedAvgScore;
-        bestWeightedAvg = horse.name;
-      }
-    });
-    
-    // Find horse with highest bestRecent score
-    let bestRecent = null;
-    let bestRecentScore = -Infinity;
-    
-    raceHorses.forEach(horse => {
-      const recentScore = horse.sectionalDetails?.bestRecent || 0;
-      if (recentScore > bestRecentScore) {
-        bestRecentScore = recentScore;
-        bestRecent = horse.name;
-      }
-    });
-    
-    // Mark the winners
-    raceHorses.forEach(horse => {
-      if (horse.name === bestWeightedAvg) {
-        horse.hasAverage1st = true;
-      }
-      if (horse.name === bestRecent) {
-        horse.hasLastStart1st = true;
-      }
-    });
-  });
-
-  return results;
+    return results;
 }
 
 // Calculate weight-based scores relative to race average
 function calculateWeightScores(data) {
     const results = [];
-    
-    // Group horses by race number
     const raceGroups = {};
     data.forEach(entry => {
         const raceNum = entry['race number'];
-        if (!raceGroups[raceNum]) {
-            raceGroups[raceNum] = [];
-        }
+        if (!raceGroups[raceNum]) raceGroups[raceNum] = [];
         raceGroups[raceNum].push(entry);
     });
-    
-    // Process each race
+
     Object.keys(raceGroups).forEach(raceNum => {
         const raceHorses = raceGroups[raceNum];
-        
-        // Get unique horses in this race (by horse name)
         const uniqueHorses = [];
-        const seenNames = new Set();
-        raceHorses.forEach(horse => {
-            const name = horse['horse name'];
-            if (!seenNames.has(name)) {
-                seenNames.add(name);
-                uniqueHorses.push(horse);
-            }
+        const seen = new Set();
+        raceHorses.forEach(h => {
+            const name = h['horse name'];
+            if (!seen.has(name)) { seen.add(name); uniqueHorses.push(h); }
         });
-        
-        // Calculate average weight in this race
-        let totalWeight = 0;
-        let validWeights = 0;
-        uniqueHorses.forEach(horse => {
-            const weight = parseFloat(horse['horse weight']);
-            if (!isNaN(weight) && weight >= 49 && weight <= 65) {
-                totalWeight += weight;
-                validWeights++;
-            }
+
+        let totalWeight = 0, validWeights = 0;
+        uniqueHorses.forEach(h => {
+            const w = parseFloat(h['horse weight']);
+            if (!isNaN(w) && w >= 49 && w <= 65) { totalWeight += w; validWeights++; }
         });
-        
-        const avgWeight = validWeights > 0 ? totalWeight / validWeights : 55; // Default to 55 if no valid weights
-        
-        // Score each horse relative to average and weight change
-        uniqueHorses.forEach(horse => {
-            const horseName = horse['horse name'];
-            const currentWeight = parseFloat(horse['horse weight']);
-            const lastWeight = parseFloat(horse['form weight']);
-            
+        const avgWeight = validWeights > 0 ? totalWeight / validWeights : 55;
+
+        uniqueHorses.forEach(h => {
+            const horseName = h['horse name'];
+            const currentWeight = parseFloat(h['horse weight']);
+            const lastWeight = parseFloat(h['form weight']);
             let score = 0;
             let note = '';
-            
-            // PART A: Score relative to race average
+
             if (!isNaN(currentWeight) && currentWeight >= 49 && currentWeight <= 65) {
-                const diffFromAvg = avgWeight - currentWeight; // Positive = lighter than average
-                
-                if (diffFromAvg >= 3) {
-                    score += 15;
-                    note += `+15.0 : Weight ${currentWeight}kg is ${diffFromAvg.toFixed(1)}kg BELOW race avg (${avgWeight.toFixed(1)}kg)\n`;
-                } else if (diffFromAvg >= 2) {
-                    score += 10;
-                    note += `+10.0 : Weight ${currentWeight}kg is ${diffFromAvg.toFixed(1)}kg below race avg (${avgWeight.toFixed(1)}kg)\n`;
-                } else if (diffFromAvg >= 1) {
-                    score += 6;
-                    note += `+ 6.0 : Weight ${currentWeight}kg is ${diffFromAvg.toFixed(1)}kg below race avg (${avgWeight.toFixed(1)}kg)\n`;
-                } else if (diffFromAvg >= 0.5) {
-                    score += 3;
-                    note += `+ 3.0 : Weight ${currentWeight}kg is ${diffFromAvg.toFixed(1)}kg below race avg (${avgWeight.toFixed(1)}kg)\n`;
-                } else if (diffFromAvg > -0.5) {
-                    // Within 0.5kg of average - neutral
-                    note += `  0.0 : Weight ${currentWeight}kg is near race avg (${avgWeight.toFixed(1)}kg)\n`;
-                } else if (diffFromAvg > -1) {
-                    score -= 3;
-                    note += `- 3.0 : Weight ${currentWeight}kg is ${Math.abs(diffFromAvg).toFixed(1)}kg above race avg (${avgWeight.toFixed(1)}kg)\n`;
-                } else if (diffFromAvg > -2) {
-                    score -= 6;
-                    note += `- 6.0 : Weight ${currentWeight}kg is ${Math.abs(diffFromAvg).toFixed(1)}kg above race avg (${avgWeight.toFixed(1)}kg)\n`;
-                } else if (diffFromAvg > -3) {
-                    score -= 10;
-                    note += `-10.0 : Weight ${currentWeight}kg is ${Math.abs(diffFromAvg).toFixed(1)}kg above race avg (${avgWeight.toFixed(1)}kg)\n`;
-                } else {
-                    score -= 15;
-                    note += `-15.0 : Weight ${currentWeight}kg is ${Math.abs(diffFromAvg).toFixed(1)}kg ABOVE race avg (${avgWeight.toFixed(1)}kg)\n`;
-                }
+                const diffFromAvg = avgWeight - currentWeight;
+                if (diffFromAvg >= 3) { score += 15; note += `+15.0 : Weight ${currentWeight}kg is ${diffFromAvg.toFixed(1)}kg BELOW race avg (${avgWeight.toFixed(1)}kg)\n`; }
+                else if (diffFromAvg >= 2) { score += 10; note += `+10.0 : Weight ${currentWeight}kg is ${diffFromAvg.toFixed(1)}kg below race avg (${avgWeight.toFixed(1)}kg)\n`; }
+                else if (diffFromAvg >= 1) { score += 6; note += `+ 6.0 : Weight ${currentWeight}kg is ${diffFromAvg.toFixed(1)}kg below race avg (${avgWeight.toFixed(1)}kg)\n`; }
+                else if (diffFromAvg >= 0.5) { score += 3; note += `+ 3.0 : Weight ${currentWeight}kg is ${diffFromAvg.toFixed(1)}kg below race avg (${avgWeight.toFixed(1)}kg)\n`; }
+                else if (diffFromAvg > -0.5) { note += `  0.0 : Weight ${currentWeight}kg is near race avg (${avgWeight.toFixed(1)}kg)\n`; }
+                else if (diffFromAvg > -1) { score -= 3; note += `- 3.0 : Weight ${currentWeight}kg is ${Math.abs(diffFromAvg).toFixed(1)}kg above race avg (${avgWeight.toFixed(1)}kg)\n`; }
+                else if (diffFromAvg > -2) { score -= 6; note += `- 6.0 : Weight ${currentWeight}kg is ${Math.abs(diffFromAvg).toFixed(1)}kg above race avg (${avgWeight.toFixed(1)}kg)\n`; }
+                else if (diffFromAvg > -3) { score -= 10; note += `-10.0 : Weight ${currentWeight}kg is ${Math.abs(diffFromAvg).toFixed(1)}kg above race avg (${avgWeight.toFixed(1)}kg)\n`; }
+                else { score -= 15; note += `-15.0 : Weight ${currentWeight}kg is ${Math.abs(diffFromAvg).toFixed(1)}kg ABOVE race avg (${avgWeight.toFixed(1)}kg)\n`; }
             } else {
                 note += `  0.0 : Weight invalid or out of range\n`;
             }
-            
-            // PART B: Score weight change from last start
+
             if (!isNaN(currentWeight) && !isNaN(lastWeight) && lastWeight >= 49 && lastWeight <= 65) {
-                const weightChange = lastWeight - currentWeight; // Positive = dropped weight
-                
-                if (weightChange >= 3) {
-                    score += 15;
-                    note += `+15.0 : Dropped ${weightChange.toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`;
-                } else if (weightChange >= 2) {
-                    score += 10;
-                    note += `+10.0 : Dropped ${weightChange.toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`;
-                } else if (weightChange >= 1) {
-                    score += 5;
-                    note += `+ 5.0 : Dropped ${weightChange.toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`;
-                } else if (weightChange > -1) {
-                    // Within 1kg - no change
-                } else if (weightChange > -2) {
-                    score -= 5;
-                    note += `- 5.0 : Up ${Math.abs(weightChange).toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`;
-                } else if (weightChange > -3) {
-                    score -= 10;
-                    note += `-10.0 : Up ${Math.abs(weightChange).toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`;
-                } else {
-                    score -= 15;
-                    note += `-15.0 : Up ${Math.abs(weightChange).toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`;
-                }
+                const weightChange = lastWeight - currentWeight;
+                if (weightChange >= 3) { score += 15; note += `+15.0 : Dropped ${weightChange.toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`; }
+                else if (weightChange >= 2) { score += 10; note += `+10.0 : Dropped ${weightChange.toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`; }
+                else if (weightChange >= 1) { score += 5; note += `+ 5.0 : Dropped ${weightChange.toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`; }
+                else if (weightChange > -1) {}
+                else if (weightChange > -2) { score -= 5; note += `- 5.0 : Up ${Math.abs(weightChange).toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`; }
+                else if (weightChange > -3) { score -= 10; note += `-10.0 : Up ${Math.abs(weightChange).toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`; }
+                else { score -= 15; note += `-15.0 : Up ${Math.abs(weightChange).toFixed(1)}kg from last start (${lastWeight}kg → ${currentWeight}kg)\n`; }
             }
-            
-            results.push({
-                race: raceNum,
-                name: horseName,
-                weightScore: score,
-                weightNote: note
-            });
+
+            results.push({ race: raceNum, name: horseName, weightScore: score, weightNote: note });
         });
     });
-    
+
     return results;
 }
 
-function calculateTrueOdds(results, priorStrength = 0.05, troubleshooting, maxRatio = 300.0) {
-    // Group horses by race
+// Calculate "true" odds from scores (Dirichlet-ish approach)
+function calculateTrueOdds(results, priorStrength = 0.05, troubleshooting = false, maxRatio = 300.0) {
     const raceGroups = results.reduce((acc, obj) => {
         const raceNumber = obj.horse['race number'];
         if (!acc[raceNumber]) acc[raceNumber] = [];
         acc[raceNumber].push(obj);
         return acc;
     }, {});
-    
-    // Process each race separately
+
     Object.values(raceGroups).forEach(raceHorses => {
-        const numHorses = raceHorses.length;
         const scores = raceHorses.map(h => h.score);
-        
-        // Calculate proportional shift to control max ratio
         const minScore = Math.min(...scores);
         const maxScore = Math.max(...scores);
         const range = maxScore - minScore;
-        
-        // Calculate shift to ensure max ratio doesn't exceed maxRatio
-        // If range is small, use a larger shift to prevent extreme ratios
-       const minShiftForRatio = range > 0 ? range / (maxRatio - 1) : 1.0;
+        const minShiftForRatio = range > 0 ? range / (maxRatio - 1) : 1.0;
         const basicShift = minScore < 0 ? Math.abs(minScore) + 0.01 : 0;
         const shift = Math.max(basicShift, minShiftForRatio * 0.5);
-        
-        // Apply Dirichlet method
+
         const adjustedScores = scores.map(s => s + shift);
         const posteriorCounts = adjustedScores.map(score => score + priorStrength);
-        const totalCounts = posteriorCounts.reduce((sum, count) => sum + count, 0);
-        
-        // Calculate base probability (same for all horses in this race)
+        const totalCounts = posteriorCounts.reduce((s, v) => s + v, 0);
+
         const baseProbability = priorStrength / totalCounts;
-        
-        // Calculate final probabilities and odds for each horse
+
         raceHorses.forEach((horse, index) => {
-            // Win probability
             const winProbability = posteriorCounts[index] / totalCounts;
-            
-            // Base probability component (same for all horses in race)
-            const baseProbabilityPercent = (baseProbability * 100).toFixed(1) + '%';
-            
-            // Performance-based probability component
-            const performanceProbability = (adjustedScores[index] / totalCounts);
-            
-            // True dollar odds (no bookmaker margin)
-            const trueOdds = 1 / (winProbability * 1.10);
-            
-            // Add all calculated values to horse object
+            const trueOdds = 1 / (winProbability * 1.10); // scale factor to avoid direct normalization issues
+
             horse.winProbability = (winProbability * 110).toFixed(1) + '%';
-            horse.baseProbability = baseProbabilityPercent; // Same for all horses in this race
+            horse.baseProbability = (baseProbability * 100).toFixed(1) + '%';
             horse.trueOdds = `$${trueOdds.toFixed(2)}`;
-            
-            // Additional useful info
-            horse.rawWinProbability = winProbability * 1.10; // For calculations
-            horse.performanceComponent = (performanceProbability * 100).toFixed(1) + '%';
-            horse.adjustedScore = adjustedScores[index]; // For debugging
+            horse.rawWinProbability = winProbability * 1.10;
+            horse.performanceComponent = ((adjustedScores[index] / totalCounts) * 100).toFixed(1) + '%';
+            horse.adjustedScore = adjustedScores[index];
         });
-        
-        // Verify probabilities sum to 110%
-        const totalProb = raceHorses.reduce((sum, horse) => sum + horse.rawWinProbability, 0);
+
+        const totalProb = raceHorses.reduce((s, h) => s + (h.rawWinProbability || 0), 0);
         if (totalProb < 1.09 || totalProb > 1.11) {
             throw new Error(`Race ${raceHorses[0].horse['race number']} probabilities adding to ${(totalProb*100).toFixed(2)}%`);
         }
 
-        // Log race summary if troubleshooting on
         if (troubleshooting) {
-            console.log(`\n📊 RACE ${raceHorses[0].horse['race number']} SUMMARY:`);
-            console.log(`Horses: ${numHorses}`);
-            console.log(`Score range: ${minScore.toFixed(2)} to ${maxScore.toFixed(2)} (range: ${range.toFixed(2)})`);
-            console.log(`Max ratio limit: ${maxRatio}:1`);
-            console.log(`Score shift applied: ${shift.toFixed(2)}`);
-            console.log(`Base probability per horse: ${(baseProbability * 100).toFixed(1)}%`);
-            console.log(`Prior strength: ${priorStrength}`);
-            
-            // Show actual min/max adjusted score ratio
-            const minAdjusted = Math.min(...adjustedScores);
-            const maxAdjusted = Math.max(...adjustedScores);
-            const actualRatio = maxAdjusted / minAdjusted;
-            console.log(`Actual adjusted score ratio: ${actualRatio.toFixed(2)}:1`);
-            console.log(`Total probability check: ${(totalProb * 100).toFixed(1)}%`);
-            
-            // Show odds range
-            const allOdds = raceHorses.map(h => parseFloat(h.trueOdds.replace('$', '')));
-            const minOdds = Math.min(...allOdds);
-            const maxOdds = Math.max(...allOdds);
-            console.log(`Odds range: $${minOdds.toFixed(2)} to $${maxOdds.toFixed(2)}`);
+            // Optional logs...
         }
     });
-    
+
     return results;
 }
-// ============================================================
-// NODE.JS ENTRY POINT - ADD THIS TO THE END OF analyzer.js
-// ============================================================
 
-// Simple CSV parser (since we can't use Papa Parse in Node without installing it)
+// Simple CSV parser and helpers
+function parseCSVLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') inQuotes = !inQuotes;
+        else if (char === ',' && !inQuotes) { result.push(current); current = ''; }
+        else current += char;
+    }
+    result.push(current);
+    return result;
+}
+
 function parseCSV(csvString) {
-    const lines = csvString.trim().split('\n');
+    const lines = String(csvString).trim().split('\n');
     if (lines.length === 0) return [];
-    
-    // Parse header row
     const headers = parseCSVLine(lines[0]);
-    
-    // Parse data rows
     const data = [];
     for (let i = 1; i < lines.length; i++) {
         const values = parseCSVLine(lines[i]);
         if (values.length === headers.length) {
             const row = {};
-            headers.forEach((header, index) => {
-                row[header.trim().toLowerCase()] = values[index].trim();
-            });
+            headers.forEach((h, idx) => { row[h.trim().toLowerCase()] = values[idx].trim(); });
             data.push(row);
         }
     }
     return data;
 }
 
-function parseCSVLine(line) {
-    const result = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        
-        if (char === '"') {
-            inQuotes = !inQuotes;
-        } else if (char === ',' && !inQuotes) {
-            result.push(current);
-            current = '';
-        } else {
-            current += char;
-        }
-    }
-    result.push(current);
-    return result;
-}
-// Parse DD/MM/YYYY date strings properly
 function parseDate(dateStr) {
     if (!dateStr) return new Date(0);
-    let datePart = dateStr.split(' ')[0];
+    const datePart = String(dateStr).split(' ')[0];
     const parts = datePart.split('/');
     if (parts.length !== 3) return new Date(0);
-    const day = parseInt(parts[0]);
-    const month = parseInt(parts[1]) - 1;
-    let year = parseInt(parts[2]);
-    if (year < 100) {
-        year += (year <= 50) ? 2000 : 1900;
-    }
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    let year = parseInt(parts[2], 10);
+    if (year < 100) year += (year <= 50) ? 2000 : 1900;
     return new Date(year, month, day);
 }
-// Get unique horses (latest entry for each horse-race combo)
+
 function getUniqueHorsesOnly(data) {
     const latestByComposite = new Map();
-    
     data.forEach(entry => {
         const compositeKey = `${entry['horse name']}-${entry['race number']}`;
         const currentDate = entry['form meeting date'];
-        
-        if (!latestByComposite.has(compositeKey) || 
-            parseDate(currentDate) > parseDate(latestByComposite.get(compositeKey)['form meeting date'])) {
+        if (!latestByComposite.has(compositeKey) || parseDate(currentDate) > parseDate(latestByComposite.get(compositeKey)['form meeting date'])) {
             latestByComposite.set(compositeKey, entry);
         }
     });
-    
     return Array.from(latestByComposite.values());
 }
 
-// Main analysis function
-function analyzeCSV(csvData, trackCondition, isAdvanced) {
-    // Parse CSV
+// Main analysis function (cleaned)
+function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
     let data = parseCSV(csvData);
-    
-    if (data.length === 0) {
-        return [];
-    }
-    
-    // Filter out invalid rows (header rows repeated in data, empty rows, etc.)
+    if (!data || data.length === 0) return [];
+
     data = data.filter(row => {
-        // Must have a horse name that's not the header
-        const horseName = (row['horse name'] || '').toString().trim().toLowerCase();
-        if (!horseName || horseName === 'horse name' || horseName === '') {
-            return false;
-        }
-        
-        // Must have a valid race number (numeric)
-        const raceNum = (row['race number'] || '').toString().trim();
-        if (!raceNum || isNaN(parseInt(raceNum)) || raceNum.toLowerCase() === 'race number') {
-            return false;
-        }
-        
+        const horseName = String(row['horse name'] || '').trim().toLowerCase();
+        if (!horseName || horseName === 'horse name') return false;
+        const raceNum = String(row['race number'] || '').trim();
+        if (!raceNum || isNaN(parseInt(raceNum, 10)) || raceNum.toLowerCase() === 'race number') return false;
         return true;
     });
-    
-    if (data.length === 0) {
-        return [];
-    }
-    
+
+    if (!data.length) return [];
+
     const analysisResults = [];
-    
-    // Calculate multi-row analysis data
     const filteredDataSectional = getLowestSectionalsByRace(data);
     const averageFormPrices = calculateAverageFormPrices(data);
     const weightScores = calculateWeightScores(data);
-    
-    // Get unique horses only
     const uniqueHorses = getUniqueHorsesOnly(data);
-    
-// Process each horse
+
     uniqueHorses.forEach(horse => {
         if (!horse['meeting date'] || !horse['horse name']) return;
-        
+
         const compositeKey = `${horse['horse name']}-${horse['race number']}`;
         const avgFormPrice = averageFormPrices[compositeKey];
-        
         const raceNumber = horse['race number'];
         const horseName = horse['horse name'];
-        
-        // First, get sectional details for this horse (needed for condition context)
-        const matchingHorseForContext = filteredDataSectional.find(h => 
-            parseInt(h.race) === parseInt(raceNumber) && 
-            h.name.toLowerCase().trim() === horseName.toLowerCase().trim()
-        );
 
+        const matchingHorseForContext = filteredDataSectional.find(h => parseInt(h.race) === parseInt(raceNumber) && h.name.toLowerCase().trim() === horseName.toLowerCase().trim());
         const sectionalDetailsForContext = matchingHorseForContext ? {
             bestRecent: matchingHorseForContext.sectionalDetails?.bestRecent || 0,
             weightedAvg: matchingHorseForContext.sectionalDetails?.weightedAvg || 0
         } : null;
 
-        // Calculate base score WITH sectional details for condition context
         let [score, notes] = calculateScore(horse, trackCondition, false, avgFormPrice, sectionalDetailsForContext);
-        
-        // Add sectional scores WITH CONDITION CONTEXT
-        const matchingHorse = filteredDataSectional.find(h => 
-            parseInt(h.race) === parseInt(raceNumber) && 
-            h.name.toLowerCase().trim() === horseName.toLowerCase().trim()
-        );
-        
+
+        const matchingHorse = filteredDataSectional.find(h => parseInt(h.race) === parseInt(raceNumber) && h.name.toLowerCase().trim() === horseName.toLowerCase().trim());
         if (matchingHorse) {
-            // Get the sectional weight from condition context (stored in horse._sectionalWeight)
             const sectionalWeight = horse._sectionalWeight || 1.0;
-            
-            // Apply sectional weight to sectional score
             const originalSectionalScore = matchingHorse.sectionalScore;
             const adjustedSectionalScore = originalSectionalScore * sectionalWeight;
             score += adjustedSectionalScore;
-            
-            // Add note about adjustment if weight applied
-            if (sectionalWeight !== 1.0) {
-                notes += `ℹ️  Sectional weight applied: ${originalSectionalScore.toFixed(1)} × ${sectionalWeight.toFixed(2)} = ${adjustedSectionalScore.toFixed(1)}\n`;
-            }
-            
+            if (sectionalWeight !== 1.0) notes += `ℹ️  Sectional weight applied: ${originalSectionalScore.toFixed(1)} × ${sectionalWeight.toFixed(2)} = ${adjustedSectionalScore.toFixed(1)}\n`;
             notes += matchingHorse.sectionalNote;
-            
-            // Check for combo bonus
+
             if (matchingHorse.hasAverage1st && matchingHorse.hasLastStart1st) {
-                const [classScore, classNotes] = compareClasses(
-                    horse['class restrictions'], 
-                    horse['form class'],
-                    horse['race prizemoney'],
-                    horse['prizemoney']
-                );
+                const [classScore] = compareClasses(horse['class restrictions'], horse['form class'], horse['race prizemoney'], horse['prizemoney']);
                 if (classScore > 0) {
                     score += 15;
                     notes += '+15.0 : COMBO BONUS - Fastest sectional + dropping in class\n';
@@ -3046,12 +2554,7 @@ function analyzeCSV(csvData, trackCondition, isAdvanced) {
             }
         }
 
-        // Add weight scores (outside matchingHorse block so ALL horses get weight scoring)
-        const matchingWeight = weightScores.find(w => 
-            parseInt(w.race) === parseInt(raceNumber) && 
-            w.name.toLowerCase().trim() === horseName.toLowerCase().trim()
-        );
-
+        const matchingWeight = weightScores.find(w => parseInt(w.race) === parseInt(raceNumber) && w.name.toLowerCase().trim() === horseName.toLowerCase().trim());
         if (matchingWeight) {
             score += matchingWeight.weightScore;
             notes += matchingWeight.weightNote;
@@ -3060,57 +2563,41 @@ function analyzeCSV(csvData, trackCondition, isAdvanced) {
         analysisResults.push({ horse, score, notes });
     });
 
-    // Remove duplicates and calculate odds
-    let uniqueResults = Array.from(
-        new Map(analysisResults.map(item => [item.horse['horse name'], item])).values()
-    );
+    // De-duplicate by horse name (keep latest)
+    let uniqueResults = Array.from(new Map(analysisResults.map(item => [item.horse['horse name'], item])).values());
 
     uniqueResults = calculateTrueOdds(uniqueResults, 1, false);
 
-    // Sort by race number, then by score descending
-    uniqueResults.sort((a, b) => 
-        (parseInt(a.horse['race number']) - parseInt(b.horse['race number'])) || 
+    uniqueResults.sort((a, b) =>
+        (parseInt(a.horse['race number'], 10) - parseInt(b.horse['race number'], 10)) ||
         (b.score - a.score)
     );
 
-    return uniqueResults; // <-- close analyzeCSV function
+    return uniqueResults;
 }
 
-
-// ============================================================
-// STDIN/STDOUT HANDLER - This is what Python calls
-// ============================================================
-
+// STDIN/STDOUT handler
 let inputData = '';
 process.stdin.setEncoding('utf8');
-
-process.stdin.on('data', chunk => {
-  inputData += chunk;
-});
-
+process.stdin.on('data', chunk => { inputData += chunk; });
 process.stdin.on('end', () => {
-  if (!inputData.trim()) {
-    console.error('Error: No input data received.');
-    process.exit(1);
-  }
-
-  let input;
-  try {
-    input = JSON.parse(inputData);
-  } catch (err) {
-    console.error('Error: Invalid JSON input.', err.message);
-    process.exit(1);
-  }
-
-  const csvData = input.csv_data || '';
-  const trackCondition = input.track_condition || 'good';
-  const isAdvanced = input.is_advanced || false;
-
-  try {
-    const results = analyzeCSV(csvData, trackCondition, isAdvanced);
-    console.log(JSON.stringify(results));
-  } catch (error) {
-    console.error('Error processing input:', error.message);
-    process.exit(1);
-  }
+    if (!inputData.trim()) {
+        console.error('Error: No input data received.');
+        process.exit(1);
+    }
+    let input;
+    try { input = JSON.parse(inputData); } catch (err) {
+        console.error('Error: Invalid JSON input.', err.message);
+        process.exit(1);
+    }
+    const csvData = input.csv_data || '';
+    const trackCondition = input.track_condition || 'good';
+    const isAdvanced = input.is_advanced || false;
+    try {
+        const results = analyzeCSV(csvData, trackCondition, isAdvanced);
+        console.log(JSON.stringify(results));
+    } catch (error) {
+        console.error('Error processing input:', (error && error.message) || error);
+        process.exit(1);
+    }
 });
