@@ -50,13 +50,13 @@ function convertCSV(data) {
     return data;
 }
 
-function calculateScore(horseRow, trackCondition, troubleshooting = false, averageFormPrice) {
+function calculateScore(horseRow, trackCondition, troubleshooting = false, averageFormPrice, sectionalDetails = null) {
     if (troubleshooting) console.log(`Calculating score for horse: ${horseRow['horse name']}`);
 
     var score = 0;
     var notes = '';
 
-    // Check horse weight  and score
+    // Check horse weight and score
     var [a, b] = checkWeight(horseRow['horse weight'], horseRow['horse claim']);
     score += a;
     notes += b;
@@ -72,17 +72,17 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     score += a;
     notes += b;
 
-    // Check if horse trainer  is someone we like or not
+    // Check if horse trainer is someone we like or not
     [a, b] = checkTrainers(horseRow['horse trainer']);
     score += a;
     notes += b;
 
-   // Check if horse has won at this track (ENHANCED WEIGHTED SYSTEM)
+    // Check if horse has won at this track (ENHANCED WEIGHTED SYSTEM)
     [a, b] = checkTrackForm(horseRow['horse record track']);
     score += a;
     notes += b;
 
-   // Check if horse has won at this track+distance combo (ENHANCED WEIGHTED SYSTEM)
+    // Check if horse has won at this track+distance combo (ENHANCED WEIGHTED SYSTEM)
     [a, b] = checkTrackDistanceForm(horseRow['horse record track distance']);
     score += a;
     notes += b;
@@ -97,19 +97,71 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     score += a;
     notes += b;
     
-   // Check horse form on actual track condition (ENHANCED WEIGHTED SYSTEM)
+    // ===== APPLY CONDITION CONTEXT =====
+    // This adjusts sectional and condition scoring based on track condition match
+    const conditionContext = applyConditionContext(horseRow, trackCondition, sectionalDetails);
+    
+    // Check horse form on actual track condition (ENHANCED WEIGHTED SYSTEM + CONTEXT MULTIPLIER)
     const formTrackCondition = 'horse record ' + trackCondition;
     [a, b] = checkTrackConditionForm(horseRow[formTrackCondition], trackCondition);
+    
+    // Apply condition multiplier
+    const originalConditionScore = a;
+    a = a * conditionContext.conditionMultiplier;
     score += a;
     notes += b;
     
+    // Add context note if adjustments were made
+    if (conditionContext.note) {
+        if (conditionContext.conditionMultiplier !== 1.0) {
+            notes += `ℹ️  Condition multiplier: ${originalConditionScore.toFixed(1)} × ${conditionContext.conditionMultiplier.toFixed(1)} = ${a.toFixed(1)}\n`;
+        }
+        notes += `ℹ️  ${conditionContext.note}\n`;
+    }
+    
+    // Store the sectional weight for later use
+    horseRow._sectionalWeight = conditionContext.sectionalWeight;
 
-   // Check horse current and former classes
+    // Calculate total weight advantage for class rise adjustment
+    // Weight advantage comes from two sources:
+    // 1. Being below race average (already calculated in weight scoring)
+    // 2. Weight drop from last start (already calculated in weight scoring)
+    // We need to extract these values to pass to compareClasses
+    
+    // Parse current weight and race average
+    const currentWeight = parseFloat(horseRow['horse weight']);
+    const lastWeight = parseFloat(horseRow['form weight']);
+    
+    // Calculate weight advantage points (matching the scoring in calculateWeightScores)
+    let totalWeightAdvantage = 0;
+    
+    // This is a simplified calculation - in production you'd want to get the actual
+    // race average, but we can estimate the advantage from the weight difference
+    if (!isNaN(currentWeight) && !isNaN(lastWeight)) {
+        const weightDrop = lastWeight - currentWeight;
+        
+        // Points for weight drop (matching calculateWeightScores logic)
+        if (weightDrop >= 3) totalWeightAdvantage += 15;
+        else if (weightDrop >= 2) totalWeightAdvantage += 10;
+        else if (weightDrop >= 1) totalWeightAdvantage += 5;
+        
+        // Points for being below average (estimate: assume 55kg average)
+        const estimatedAverage = 55.0;
+        const diffFromAvg = estimatedAverage - currentWeight;
+        
+        if (diffFromAvg >= 3) totalWeightAdvantage += 15;
+        else if (diffFromAvg >= 2) totalWeightAdvantage += 10;
+        else if (diffFromAvg >= 1) totalWeightAdvantage += 6;
+        else if (diffFromAvg >= 0.5) totalWeightAdvantage += 3;
+    }
+    
+    // Check horse current and former classes (with weight advantage)
     var [cscore, cnote] = compareClasses(
         horseRow['class restrictions'], 
         horseRow['form class'],
         horseRow['race prizemoney'],
-        horseRow['prizemoney']
+        horseRow['prizemoney'],
+        totalWeightAdvantage
     );
     score += cscore;
     notes += cnote;
@@ -119,13 +171,127 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     score += a;
     notes += b;
 
-    // Check last run margin
-    [a, b] = checkMargin(horseRow['form position'], horseRow['form margin']);
+// Calculate recent form for last start context
+    const last10 = String(horseRow['horse last10'] || '');
+    let winsBeforeLast = 0;
+    let runsBeforeLast = 0;
+    
+    // Count wins and runs BEFORE the last start (exclude rightmost character)
+    if (last10.length > 1) {
+        for (let i = last10.length - 2; i >= 0 && runsBeforeLast < 5; i--) {
+            const char = last10[i];
+            if (char !== 'X' && char !== 'x') {
+                runsBeforeLast++;
+                if (char === '1') {
+                    winsBeforeLast++;
+                }
+            }
+        }
+    }
+    
+    const recentWinRate = runsBeforeLast > 0 ? winsBeforeLast / runsBeforeLast : 0;
+    const recentFormData = {
+        winsBeforeLast: winsBeforeLast,
+        runsBeforeLast: runsBeforeLast,
+        recentWinRate: recentWinRate
+    };
+    
+    // Calculate class change (for last start context)
+    const todayClassScore = calculateClassScore(horseRow['class restrictions'], horseRow['race prizemoney']);
+    const lastClassScore = calculateClassScore(horseRow['form class'], horseRow['prizemoney']);
+    const classChange = todayClassScore - lastClassScore; // Negative = dropping in class
+    
+    // Check last run margin (with class drop context)
+    [a, b] = checkMargin(horseRow['form position'], horseRow['form margin'], classChange, recentFormData);
     score += a;
     notes += b;
 
-    // Check form price
-    [a, b] = checkFormPrice(averageFormPrice);
+// Build specialist context for SP profile adjustment
+    const specialistContext = {
+        hasStrongConditionRecord: false,
+        hasStrongTrackRecord: false,
+        hasStrongDistanceRecord: false,
+        hasPerfectRecord: false,
+        isRecentConditionWinner: false,
+        isClassDropperWithSpeed: false
+    };
+    
+    // Check condition record
+    const conditionField = 'horse record ' + trackCondition;
+    const conditionRecord = horseRow[conditionField];
+    if (conditionRecord && typeof conditionRecord === 'string') {
+        const numbers = conditionRecord.split(/[:\-]/).map(s => Number(s.trim()));
+        if (numbers.length === 4) {
+            const [runs, wins, seconds, thirds] = numbers;
+            const podiums = wins + seconds + thirds;
+            const podiumRate = runs > 0 ? podiums / runs : 0;
+            
+            // Strong condition record = ≥50% podium with good confidence (N≥5)
+            if (runs >= 5 && podiumRate >= 0.50) {
+                specialistContext.hasStrongConditionRecord = true;
+            }
+            
+            // Perfect record
+            if (runs > 0 && (wins === runs || podiums === runs)) {
+                specialistContext.hasPerfectRecord = true;
+            }
+        }
+    }
+    
+    // Check track record
+    const trackRecord = horseRow['horse record track'];
+    if (trackRecord && typeof trackRecord === 'string') {
+        const numbers = trackRecord.split(/[:\-]/).map(s => Number(s.trim()));
+        if (numbers.length === 4) {
+            const [runs, wins, seconds, thirds] = numbers;
+            const podiums = wins + seconds + thirds;
+            const podiumRate = runs > 0 ? podiums / runs : 0;
+            
+            if (runs >= 5 && podiumRate >= 0.50) {
+                specialistContext.hasStrongTrackRecord = true;
+            }
+            if (runs > 0 && (wins === runs || podiums === runs)) {
+                specialistContext.hasPerfectRecord = true;
+            }
+        }
+    }
+    
+    // Check distance record
+    const distanceRecord = horseRow['horse record distance'];
+    if (distanceRecord && typeof distanceRecord === 'string') {
+        const numbers = distanceRecord.split(/[:\-]/).map(s => Number(s.trim()));
+        if (numbers.length === 4) {
+            const [runs, wins, seconds, thirds] = numbers;
+            const podiums = wins + seconds + thirds;
+            const podiumRate = runs > 0 ? podiums / runs : 0;
+            
+            if (runs >= 5 && podiumRate >= 0.50) {
+                specialistContext.hasStrongDistanceRecord = true;
+            }
+            if (runs > 0 && (wins === runs || podiums === runs)) {
+                specialistContext.hasPerfectRecord = true;
+            }
+        }
+    }
+    
+    // Check if recent condition winner
+    const formPosition = parseInt(horseRow['form position']);
+    const formCondition = String(horseRow['form track condition'] || '').toLowerCase();
+    const todayCondition = trackCondition.toLowerCase();
+    if (formPosition === 1 && formCondition === todayCondition) {
+        specialistContext.isRecentConditionWinner = true;
+    }
+    
+    // Check if class dropper with speed
+    if (classChange < -10 && sectionalDetails) {
+        const bestSectionalZ = sectionalDetails.bestRecent ? Math.abs(sectionalDetails.bestRecent / 15) : 0;
+        if (bestSectionalZ > 0.8) {
+            specialistContext.isClassDropperWithSpeed = true;
+        }
+    }
+    
+    // Check form price (with specialist context)
+    [a, b] = checkFormPrice(averageFormPrice, specialistContext);
     score += a;
     notes += b;
 
@@ -134,9 +300,15 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     score += a;
     notes += b;
 
+    // Check for perfect record specialist bonus
+    const perfectRecordResult = calculatePerfectRecordBonus(horseRow, trackCondition);
+    if (perfectRecordResult.bonus > 0) {
+        score += perfectRecordResult.bonus;
+        notes += perfectRecordResult.note;
+    }
+
     return [score, notes]; // Return the score and notes
 }
-
 
 function checkWeight(weight, claim) {
     // Weight scoring is now handled by calculateWeightScores() which compares to race average
@@ -981,9 +1153,84 @@ function checkDaysSinceLastRun(meetingDate, formMeetingDate) {
     
     return [addScore, note];
 }
-function checkMargin(formPosition, formMargin) {
+function checkMargin(formPosition, formMargin, classChange = 0, recentForm = null) {
     let addScore = 0;
     let note = '';
+    
+    // Validate inputs
+    if (!formPosition || !formMargin) {
+        return [0, ''];
+    }
+    
+    // Parse position and margin
+    const position = parseInt(formPosition);
+    const margin = parseFloat(formMargin);
+    
+    // Check if parsing was successful
+    if (isNaN(position) || isNaN(margin)) {
+        return [0, ''];
+    }
+    
+    // WINNERS (position = 1)
+    if (position === 1) {
+        if (margin >= 5.0) {
+            addScore = 10;
+            note += `+10.0 : Dominant last start win by ${margin.toFixed(1)}L\n`;
+        } else if (margin >= 2.0) {
+            addScore = 7;
+            note += `+ 7.0 : Comfortable last start win by ${margin.toFixed(1)}L\n`;
+        } else if (margin >= 0.5) {
+            addScore = 5;
+            note += `+ 5.0 : Narrow last start win by ${margin.toFixed(1)}L\n`;
+        } else {
+            addScore = 3;
+            note += `+ 3.0 : Photo finish last start win by ${margin.toFixed(1)}L\n`;
+        }
+    }
+    // PLACE GETTERS (position = 2 or 3)
+    else if (position === 2 || position === 3) {
+        if (margin <= 1.0) {
+            addScore = 5;
+            note += `+ 5.0 : Narrow loss (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L - very competitive\n`;
+        } else if (margin <= 2.0) {
+            addScore = 3;
+            note += `+ 3.0 : Close loss (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
+        } else if (margin <= 3.5) {
+            addScore = 0;
+            note += '';
+        } else {
+            addScore = -5;
+            note += `- 5.0 : Beaten badly (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
+        }
+    }
+    // MIDFIELD OR BACK (position 4+)
+    else if (position >= 4) {
+        if (margin <= 3.0) {
+            addScore = 0;
+            note += '';
+        } else if (margin <= 6.0) {
+            addScore = -3;
+            note += `- 3.0 : Beaten clearly (${position}th) by ${margin.toFixed(1)}L\n`;
+        } else if (margin <= 10.0) {
+            addScore = -7;
+            note += `- 7.0 : Well beaten (${position}th) by ${margin.toFixed(1)}L\n`;
+        } else {
+            addScore = -15;
+            note += `-15.0 : Demolished (${position}th) by ${margin.toFixed(1)}L - not competitive\n`;
+        }
+    }
+    
+    // Apply class drop context if we have a penalty
+    if (addScore < 0 && classChange !== 0 && recentForm !== null) {
+        const adjustment = adjustLastStartPenaltyForClassDrop(addScore, classChange, recentForm);
+        addScore = adjustment.adjustedPenalty;
+        if (adjustment.note) {
+            note += `  ℹ️  ${adjustment.note}\n`;
+        }
+    }
+    
+    return [addScore, note];
+}
     
     // Validate inputs
     if (!formPosition || !formMargin) {
@@ -1201,7 +1448,7 @@ function calculateClassScore(classString, prizeString) {
 }
 
 // === COMPARE CLASSES ===
-function compareClasses(newClass, formClass, newPrizemoneyString, formPrizemoneyString) {
+function compareClasses(newClass, formClass, newPrizemoneyString, formPrizemoneyString, weightAdvantage = 0) {
     // Calculate scores using our 0-130 system
     const todayScore = calculateClassScore(newClass, newPrizemoneyString);
     const lastScore = calculateClassScore(formClass, formPrizemoneyString);
@@ -1215,8 +1462,20 @@ function compareClasses(newClass, formClass, newPrizemoneyString, formPrizemoney
     // Interpret the score difference
     if (scoreDiff > 0) {
         // Stepping UP in class (harder race)
-        addScore = scoreDiff * -1.0; // Negative points for stepping up
-        note += addScore.toFixed(1) + ': Stepping UP ' + scoreDiff.toFixed(1) + ' class points; "' + formClass + '" (' + lastScore.toFixed(1) + ') to "' + newClass + '" (' + todayScore.toFixed(1) + ')\n';
+        const basePenalty = scoreDiff * -1.0; // Negative points for stepping up
+        
+        // Check if weight advantage enables the class rise
+        if (scoreDiff > 10 && weightAdvantage > 0) {
+            const adjustment = adjustClassRiseForWeight(scoreDiff, weightAdvantage);
+            addScore = adjustment.adjustedPenalty;
+            note += addScore.toFixed(1) + ': Stepping UP ' + scoreDiff.toFixed(1) + ' class points; "' + formClass + '" (' + lastScore.toFixed(1) + ') to "' + newClass + '" (' + todayScore.toFixed(1) + ')\n';
+            if (adjustment.note) {
+                note += '  ℹ️  ' + adjustment.note + '\n';
+            }
+        } else {
+            addScore = basePenalty;
+            note += addScore.toFixed(1) + ': Stepping UP ' + scoreDiff.toFixed(1) + ' class points; "' + formClass + '" (' + lastScore.toFixed(1) + ') to "' + newClass + '" (' + todayScore.toFixed(1) + ')\n';
+        }
     } else if (scoreDiff < 0) {
         // Stepping DOWN in class (easier race)
         addScore = Math.abs(scoreDiff) * 1.0; // Positive points for stepping down
@@ -1261,9 +1520,77 @@ const formPriceScores = {
     250: -50, 300: -50, 350: -50, 400: -50, 450: -50, 500: -50
 };
 
-function checkFormPrice(formPrice) {
+function checkFormPrice(formPrice, specialistContext = null) {
     let addScore = 0;
     let note = '';
+    
+    // Handle no valid form price case
+    if (formPrice === null || formPrice === undefined) {
+        return [0, 'Error: No form price available\n'];
+    }
+    
+    // Convert to number if it's a string
+    const numericPrice = typeof formPrice === 'string' ? parseFloat(formPrice) : formPrice;
+    
+    // Validate it's a valid number
+    if (isNaN(numericPrice)) {
+        return [0, `Error: Form price "${formPrice}" is not a valid number\n`];
+    }
+    
+    // Validate range
+    if (numericPrice < 1.01 || numericPrice > 500.00) {
+        return [0, `Error: Form price $${numericPrice} outside valid range (1.01-500.00)\n`];
+    }
+    
+    // Round to 2 decimal places for lookup
+    const roundedPrice = Math.round(numericPrice * 100) / 100;
+    
+    // Try exact lookup first (object keys are coerced to strings)
+    if (formPriceScores[roundedPrice] !== undefined) {
+        addScore = formPriceScores[roundedPrice];
+        if (addScore > 0) {
+            note += `+${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (well-backed)\n`;
+        } else if (addScore === 0) {
+            note += `+0.0 : Form price $${roundedPrice.toFixed(2)} (neutral)\n`;
+        } else {
+            note += `${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (interpolated)\n`;
+        }
+    } else {
+        // Handle prices not in the lookup table with interpolation
+        const sortedPrices = Object.keys(formPriceScores).map(Number).sort((a, b) => a - b);
+        const closestLower = sortedPrices.filter(p => p < roundedPrice).pop();
+        const closestHigher = sortedPrices.filter(p => p > roundedPrice)[0];
+        
+        if (closestLower !== undefined && closestHigher !== undefined) {
+            // Linear interpolation
+            const lowerScore = formPriceScores[closestLower];
+            const higherScore = formPriceScores[closestHigher];
+            const ratio = (roundedPrice - closestLower) / (closestHigher - closestLower);
+            addScore = Math.round(lowerScore + (higherScore - lowerScore) * ratio);
+            
+            if (addScore > 0) {
+                note += `+${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (interpolated)\n`;
+            } else if (addScore === 0) {
+                note += `+0.0 : Form price $${roundedPrice.toFixed(2)} (interpolated)\n`;
+            } else {
+                note += `${addScore}.0 : Form price $${roundedPrice.toFixed(2)} (interpolated)\n`;
+            }
+        } else {
+            return [0, `Error: Form price $${roundedPrice.toFixed(2)} could not be scored\n`];
+        }
+    }
+    
+    // Apply specialist context if available and score is negative
+    if (specialistContext !== null && addScore < 0) {
+        const adjustment = adjustSPProfileForSpecialist(addScore, specialistContext);
+        addScore = adjustment.adjustedPenalty;
+        if (adjustment.note) {
+            note += `  ℹ️  ${adjustment.note}\n`;
+        }
+    }
+    
+    return [addScore, note];
+}
     
     // Handle no valid form price case
     if (formPrice === null || formPrice === undefined) {
@@ -1350,8 +1677,406 @@ function checkFirstUpSecondUp(horseRow) {
         if (secondLastChar.toLowerCase() === 'x' && /\d/.test(lastChar)) {
             isSecondUp = true;
         }
+        // ==========================================
+// TRACK CONDITION CONTEXT FOR SECTIONALS
+// ==========================================
+
+function applyConditionContext(horse, raceCondition, sectionalDetails) {
+    /**
+     * Adjusts sectional and condition scoring based on track condition match
+     * Returns multipliers for sectional weight and condition score
+     */
+    
+    let sectionalWeight = 1.0;
+    let conditionMultiplier = 1.0;
+    let note = '';
+    
+    // Extract condition record from horse data
+    const conditionField = 'horse record ' + raceCondition;
+    const conditionRecord = horse[conditionField];
+    
+    if (!conditionRecord || typeof conditionRecord !== 'string') {
+        return { sectionalWeight, conditionMultiplier, note };
     }
     
+    // Parse condition record: "runs:wins-seconds-thirds"
+    const numbers = conditionRecord.split(/[:\-]/).map(s => Number(s.trim()));
+    if (numbers.length !== 4) {
+        return { sectionalWeight, conditionMultiplier, note };
+    }
+    
+    const runs = numbers[0];
+    const wins = numbers[1];
+    const seconds = numbers[2];
+    const thirds = numbers[3];
+    const podiums = wins + seconds + thirds;
+    const podiumRate = runs > 0 ? podiums / runs : 0;
+    
+    // SOFT/HEAVY TRACK ADJUSTMENTS
+    if (raceCondition === 'soft' || raceCondition === 'heavy') {
+        
+        // HIGH CONFIDENCE - Enough data to know performance on this condition
+        if (runs >= 5) {
+            
+            if (podiumRate >= 0.50) {
+                // PROVEN PERFORMER ON THIS CONDITION
+                conditionMultiplier = 2.0;
+                sectionalWeight = 1.0;
+                note = `Proven ${raceCondition} performer (${(podiumRate*100).toFixed(0)}% podium in ${runs} runs) - condition score doubled, sectionals kept`;
+                
+            } else if (podiumRate < 0.30) {
+                // PROVEN POOR ON THIS CONDITION
+                conditionMultiplier = 2.0; // Emphasize the poor record
+                sectionalWeight = 0.4;     // Reduce sectional weight 60%
+                note = `Poor ${raceCondition} record (${(podiumRate*100).toFixed(0)}% podium in ${runs} runs) - sectionals reduced 60%`;
+                
+            } else {
+                // MEDIOCRE RECORD ON THIS CONDITION
+                conditionMultiplier = 1.5;
+                sectionalWeight = 0.7;
+                note = `Average ${raceCondition} record (${(podiumRate*100).toFixed(0)}% podium in ${runs} runs) - sectionals reduced 30%`;
+            }
+            
+        } else {
+            // LOW CONFIDENCE - Not much condition data (runs < 5)
+            
+            // Check if has elite sectionals from higher class
+            let bestSectionalZ = 0;
+            if (sectionalDetails && sectionalDetails.bestRecent) {
+                // Convert points back to z-score (bestRecent is stored as points)
+                bestSectionalZ = Math.abs(sectionalDetails.bestRecent / 15);
+            }
+            
+            // Also check the class of the best sectional vs today's race
+            const formClassString = horse['form class'] || '';
+            const formPrizeString = horse['prizemoney'] || '';
+            const formClassScore = calculateClassScore(formClassString, formPrizeString);
+            
+            const raceClassString = horse['class restrictions'] || '';
+            const racePrizeString = horse['race prizemoney'] || '';
+            const raceClassScore = calculateClassScore(raceClassString, racePrizeString);
+            
+            if (bestSectionalZ > 1.2 && formClassScore > raceClassScore + 20) {
+                // ELITE SPEED FROM MUCH HIGHER CLASS
+                sectionalWeight = 1.0;
+                note = `Elite speed (z=${bestSectionalZ.toFixed(2)}) from higher class - sectionals kept despite limited ${raceCondition} data (${runs} runs)`;
+                
+            } else {
+                // UNCERTAIN - MILD PENALTY
+                sectionalWeight = 0.7;
+                note = `Limited ${raceCondition} data (${runs} runs) - sectionals reduced 30%`;
+            }
+        }
+        
+    } else {
+        // GOOD/FIRM TRACKS - No adjustments needed
+        sectionalWeight = 1.0;
+        conditionMultiplier = 1.0;
+        note = '';
+    }
+    
+    return {
+        sectionalWeight: sectionalWeight,
+        conditionMultiplier: conditionMultiplier,
+        note: note
+    };
+}
+    }
+// ==========================================
+// WEIGHT-ENABLED CLASS RISE
+// ==========================================
+
+function adjustClassRiseForWeight(classChange, weightAdvantage) {
+    /**
+     * Reduces class rise penalty when horse has significant weight advantage
+     * Weight advantage = (points below average) + (points from weight drop)
+     * 
+     * Examples:
+     * - Shenandoah River: UP 45 class, +30 weight advantage → 75% reduction
+     * - Motorsports: UP 55 class, +25 weight advantage → 75% reduction
+     * - Geemes: UP 8 class, +13 weight advantage → 50% reduction
+     */
+    
+    if (classChange <= 0) {
+        // Not stepping up - no adjustment needed
+        return { adjustedPenalty: classChange, note: '' };
+    }
+    
+    const basePenalty = -classChange; // Negative because stepping up is a penalty
+    let reductionPercent = 0;
+    let note = '';
+    
+    if (weightAdvantage >= 25) {
+        // MASSIVE weight relief (3+ kg advantage total)
+        reductionPercent = 0.75; // 75% reduction
+        const adjustedPenalty = basePenalty * (1 - reductionPercent);
+        note = `Weight-enabled class rise: ${basePenalty.toFixed(1)} → ${adjustedPenalty.toFixed(1)} (75% reduction for ${weightAdvantage.toFixed(0)} weight points)`;
+        return { adjustedPenalty, note };
+        
+    } else if (weightAdvantage >= 15) {
+        // SIGNIFICANT weight relief (2+ kg advantage total)
+        reductionPercent = 0.50; // 50% reduction
+        const adjustedPenalty = basePenalty * (1 - reductionPercent);
+        note = `Weight-enabled class rise: ${basePenalty.toFixed(1)} → ${adjustedPenalty.toFixed(1)} (50% reduction for ${weightAdvantage.toFixed(0)} weight points)`;
+        return { adjustedPenalty, note };
+    }
+    
+    // Insufficient weight advantage - no adjustment
+    return { adjustedPenalty: basePenalty, note: '' };
+}
+    // ==========================================
+// PERFECT RECORD SPECIALIST BONUS
+// ==========================================
+
+function calculatePerfectRecordBonus(horse, trackCondition) {
+    /**
+     * Awards bonus for horses with 100% win or podium records
+     * Even with low N (1-3 runs), perfect records are meaningful
+     * 
+     * Examples:
+     * - Yorkshire: 100% at track, track+distance, distance (all N=1) → WON $2.70
+     * - Black Run: 100% track/distance/condition records → WON $2.35
+     * - Winner B#9: 100% record despite no sectionals → WON
+     */
+    
+    let totalBonus = 0;
+    let notes = '';
+    const perfectRecords = [];
+    
+    // Check TRACK record
+    const trackRecord = horse['horse record track'];
+    if (trackRecord && typeof trackRecord === 'string') {
+        const numbers = trackRecord.split(/[:\-]/).map(s => Number(s.trim()));
+        if (numbers.length === 4) {
+            const [runs, wins, seconds, thirds] = numbers;
+            const podiums = wins + seconds + thirds;
+            
+            if (runs > 0 && (wins === runs || podiums === runs)) {
+                perfectRecords.push({
+                    type: 'track',
+                    runs: runs,
+                    isPerfectWin: wins === runs,
+                    isPerfectPodium: podiums === runs
+                });
+            }
+        }
+    }
+    // ==========================================
+// LAST START CONTEXT FOR CLASS DROPPERS
+// ==========================================
+
+function adjustLastStartPenaltyForClassDrop(lastStartPenalty, classChange, recentForm) {
+    /**
+     * Reduces last start penalty when horse ran poorly at much higher class
+     * One bad run at Group level doesn't mean poor quality
+     * 
+     * Examples:
+     * - Yorkshire: 16th at Group 2, three straight wins before → WON $2.70
+     * - Flying For Fun: 7th at Group 1 dropping to Open → WON $3.40
+     * - Casino Seventeen: Poor at Group 3, drops to Open → WON $7
+     */
+    
+    if (lastStartPenalty >= 0) {
+        // Not a penalty - no adjustment needed
+        return { adjustedPenalty: lastStartPenalty, note: '' };
+    }
+    
+    // Check if significant class drop
+    const isSignificantDrop = classChange <= -15; // Dropping 15+ class points
+    const isModerateDrop = classChange <= -10;     // Dropping 10+ class points
+    
+    if (!isSignificantDrop && !isModerateDrop) {
+        // Not enough of a class drop to justify adjustment
+        return { adjustedPenalty: lastStartPenalty, note: '' };
+    }
+    
+    // Check recent form quality (before last start)
+    const hasStrongPreviousForm = recentForm.winsBeforeLast >= 2 || recentForm.recentWinRate >= 0.50;
+    
+    let reductionPercent = 0;
+    let note = '';
+    
+    if (isSignificantDrop && hasStrongPreviousForm) {
+        // MAJOR CLASS DROP + STRONG PREVIOUS FORM
+        // One bad day at elite level doesn't erase quality
+        reductionPercent = 0.75; // Reduce penalty by 75%
+        const adjustedPenalty = lastStartPenalty * (1 - reductionPercent);
+        note = `Last start context: ${lastStartPenalty.toFixed(1)} → ${adjustedPenalty.toFixed(1)} (75% reduction - poor run at elite level, strong previous form)`;
+        return { adjustedPenalty, note };
+        
+    } else if (isSignificantDrop) {
+        // MAJOR CLASS DROP only
+        reductionPercent = 0.50; // Reduce penalty by 50%
+        const adjustedPenalty = lastStartPenalty * (1 - reductionPercent);
+        note = `Last start context: ${lastStartPenalty.toFixed(1)} → ${adjustedPenalty.toFixed(1)} (50% reduction - poor run at much higher class)`;
+        return { adjustedPenalty, note };
+        
+    } else if (isModerateDrop && hasStrongPreviousForm) {
+        // MODERATE DROP + STRONG FORM
+        reductionPercent = 0.50; // Reduce penalty by 50%
+        const adjustedPenalty = lastStartPenalty * (1 - reductionPercent);
+        note = `Last start context: ${lastStartPenalty.toFixed(1)} → ${adjustedPenalty.toFixed(1)} (50% reduction - moderate class drop with strong form)`;
+        return { adjustedPenalty, note };
+    }
+    
+    // Insufficient criteria - no adjustment
+    return { adjustedPenalty: lastStartPenalty, note: '' };
+    }
+    // ==========================================
+// SP PROFILE CONTEXT FOR SPECIALISTS
+// ==========================================
+
+function adjustSPProfileForSpecialist(spPenalty, specialistContext) {
+    /**
+     * Caps SP profile penalty for proven specialists
+     * Market often misses specialists with strong records
+     * 
+     * Examples:
+     * - Different Gravy: $30 SP but won last on soft → WON $1.80
+     * - Casino Seventeen: $39 SP but 55% soft podium → WON $7
+     */
+    
+    if (spPenalty >= 0) {
+        // Not a penalty - no adjustment needed
+        return { adjustedPenalty: spPenalty, note: '' };
+    }
+    
+    // Check if horse qualifies as specialist
+    const isSpecialist = 
+        specialistContext.hasStrongConditionRecord ||
+        specialistContext.hasStrongTrackRecord ||
+        specialistContext.hasStrongDistanceRecord ||
+        specialistContext.hasPerfectRecord ||
+        specialistContext.isRecentConditionWinner ||
+        specialistContext.isClassDropperWithSpeed;
+    
+    if (!isSpecialist) {
+        // Not a specialist - no adjustment
+        return { adjustedPenalty: spPenalty, note: '' };
+    }
+    
+    // Cap the penalty at -10 for specialists
+    const cappedPenalty = Math.max(spPenalty, -10);
+    
+    if (cappedPenalty !== spPenalty) {
+        const saved = spPenalty - cappedPenalty;
+        let reason = '';
+        
+        if (specialistContext.hasStrongConditionRecord) {
+            reason = 'strong condition record';
+        } else if (specialistContext.hasStrongTrackRecord) {
+            reason = 'strong track record';
+        } else if (specialistContext.hasStrongDistanceRecord) {
+            reason = 'strong distance record';
+        } else if (specialistContext.hasPerfectRecord) {
+            reason = 'perfect record';
+        } else if (specialistContext.isRecentConditionWinner) {
+            reason = 'recent condition winner';
+        } else if (specialistContext.isClassDropperWithSpeed) {
+            reason = 'class dropper with proven speed';
+        }
+        
+        const note = `SP profile context: ${spPenalty.toFixed(1)} → ${cappedPenalty.toFixed(1)} (capped for ${reason})`;
+        return { adjustedPenalty: cappedPenalty, note };
+    }
+    
+    return { adjustedPenalty: spPenalty, note: '' };
+}
+}
+    // Check TRACK+DISTANCE record
+    const trackDistanceRecord = horse['horse record track distance'];
+    if (trackDistanceRecord && typeof trackDistanceRecord === 'string') {
+        const numbers = trackDistanceRecord.split(/[:\-]/).map(s => Number(s.trim()));
+        if (numbers.length === 4) {
+            const [runs, wins, seconds, thirds] = numbers;
+            const podiums = wins + seconds + thirds;
+            
+            if (runs > 0 && (wins === runs || podiums === runs)) {
+                perfectRecords.push({
+                    type: 'track+distance',
+                    runs: runs,
+                    isPerfectWin: wins === runs,
+                    isPerfectPodium: podiums === runs
+                });
+            }
+        }
+    }
+    
+    // Check DISTANCE record
+    const distanceRecord = horse['horse record distance'];
+    if (distanceRecord && typeof distanceRecord === 'string') {
+        const numbers = distanceRecord.split(/[:\-]/).map(s => Number(s.trim()));
+        if (numbers.length === 4) {
+            const [runs, wins, seconds, thirds] = numbers;
+            const podiums = wins + seconds + thirds;
+            
+            if (runs > 0 && (wins === runs || podiums === runs)) {
+                perfectRecords.push({
+                    type: 'distance',
+                    runs: runs,
+                    isPerfectWin: wins === runs,
+                    isPerfectPodium: podiums === runs
+                });
+            }
+        }
+    }
+    
+    // Check CONDITION record
+    const conditionField = 'horse record ' + trackCondition;
+    const conditionRecord = horse[conditionField];
+    if (conditionRecord && typeof conditionRecord === 'string') {
+        const numbers = conditionRecord.split(/[:\-]/).map(s => Number(s.trim()));
+        if (numbers.length === 4) {
+            const [runs, wins, seconds, thirds] = numbers;
+            const podiums = wins + seconds + thirds;
+            
+            if (runs > 0 && (wins === runs || podiums === runs)) {
+                perfectRecords.push({
+                    type: trackCondition + ' condition',
+                    runs: runs,
+                    isPerfectWin: wins === runs,
+                    isPerfectPodium: podiums === runs
+                });
+            }
+        }
+    }
+    
+    // Award bonuses for perfect records
+    if (perfectRecords.length > 0) {
+        perfectRecords.forEach(record => {
+            const baseBonus = 20; // Base specialist bonus
+            let confidenceMultiplier = 1.0;
+            
+            // Apply confidence multiplier based on sample size
+            if (record.runs === 1 || record.runs === 2) {
+                confidenceMultiplier = 0.5; // Low confidence
+            } else if (record.runs === 3 || record.runs === 4) {
+                confidenceMultiplier = 0.6; // Medium confidence
+            } else if (record.runs === 5 || record.runs === 6) {
+                confidenceMultiplier = 0.8; // Good confidence
+            } else {
+                confidenceMultiplier = 1.0; // High confidence (7+)
+            }
+            
+            const bonus = baseBonus * confidenceMultiplier;
+            totalBonus += bonus;
+            
+            const recordType = record.isPerfectWin ? 'UNDEFEATED' : '100% PODIUM';
+            notes += `+${bonus.toFixed(1)} : ${recordType} at ${record.type} (${record.runs}/${record.runs}) - specialist bonus\n`;
+        });
+        
+        // If multiple perfect records, add a note about it
+        if (perfectRecords.length > 1) {
+            notes += `  ℹ️  Multiple perfect records (${perfectRecords.length}) - strong specialist pattern\n`;
+        }
+    }
+    
+    return {
+        bonus: totalBonus,
+        note: notes,
+        recordCount: perfectRecords.length
+    };
+}
     // Function to check if a record is undefeated
     const isUndefeated = (record) => {
         if (typeof record !== 'string') return false;
@@ -2260,27 +2985,50 @@ function analyzeCSV(csvData, trackCondition, isAdvanced) {
     // Get unique horses only
     const uniqueHorses = getUniqueHorsesOnly(data);
     
-    // Process each horse
+// Process each horse
     uniqueHorses.forEach(horse => {
         if (!horse['meeting date'] || !horse['horse name']) return;
         
         const compositeKey = `${horse['horse name']}-${horse['race number']}`;
         const avgFormPrice = averageFormPrices[compositeKey];
         
-        // Calculate base score
-        let [score, notes] = calculateScore(horse, trackCondition, false, avgFormPrice);
-        
         const raceNumber = horse['race number'];
         const horseName = horse['horse name'];
         
-        // Add sectional scores
+        // First, get sectional details for this horse (needed for condition context)
+        const matchingHorseForContext = filteredDataSectional.find(h => 
+            parseInt(h.race) === parseInt(raceNumber) && 
+            h.name.toLowerCase().trim() === horseName.toLowerCase().trim()
+        );
+
+        const sectionalDetailsForContext = matchingHorseForContext ? {
+            bestRecent: matchingHorseForContext.sectionalDetails?.bestRecent || 0,
+            weightedAvg: matchingHorseForContext.sectionalDetails?.weightedAvg || 0
+        } : null;
+
+        // Calculate base score WITH sectional details for condition context
+        let [score, notes] = calculateScore(horse, trackCondition, false, avgFormPrice, sectionalDetailsForContext);
+        
+        // Add sectional scores WITH CONDITION CONTEXT
         const matchingHorse = filteredDataSectional.find(h => 
             parseInt(h.race) === parseInt(raceNumber) && 
             h.name.toLowerCase().trim() === horseName.toLowerCase().trim()
         );
         
         if (matchingHorse) {
-            score += matchingHorse.sectionalScore;
+            // Get the sectional weight from condition context (stored in horse._sectionalWeight)
+            const sectionalWeight = horse._sectionalWeight || 1.0;
+            
+            // Apply sectional weight to sectional score
+            const originalSectionalScore = matchingHorse.sectionalScore;
+            const adjustedSectionalScore = originalSectionalScore * sectionalWeight;
+            score += adjustedSectionalScore;
+            
+            // Add note about adjustment if weight applied
+            if (sectionalWeight !== 1.0) {
+                notes += `ℹ️  Sectional weight applied: ${originalSectionalScore.toFixed(1)} × ${sectionalWeight.toFixed(2)} = ${adjustedSectionalScore.toFixed(1)}\n`;
+            }
+            
             notes += matchingHorse.sectionalNote;
             
             // Check for combo bonus
