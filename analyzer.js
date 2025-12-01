@@ -1203,20 +1203,21 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
         }
     }
     // MIDFIELD OR BACK (position 4+)
-    else if (position >= 4) {
-        if (margin <= 3.0) {
-            addScore = 0;
-        } else if (margin <= 6.0) {
-            addScore = -3;
-            note += `- 3.0 : Beaten clearly (${position}th) by ${margin.toFixed(1)}L\n`;
-        } else if (margin <= 10.0) {
-            addScore = -7;
-            note += `- 7.0 : Well beaten (${position}th) by ${margin.toFixed(1)}L\n`;
-        } else {
-            addScore = -15;
-            note += `-15.0 : Demolished (${position}th) by ${margin.toFixed(1)}L - not competitive\n`;
-        }
+else if (position >= 4) {
+    if (margin <= 3.0) {
+        addScore = 0;
+        note += `+ 0.0 : Competitive effort (${position}th) by ${margin.toFixed(1)}L\n`;
+    } else if (margin <= 6.0) {
+        addScore = -3;
+        note += `- 3.0 : Beaten clearly (${position}th) by ${margin.toFixed(1)}L\n`;
+    } else if (margin <= 10.0) {
+        addScore = -7;
+        note += `- 7.0 : Well beaten (${position}th) by ${margin.toFixed(1)}L\n`;
+    } else {
+        addScore = -15;
+        note += `-15.0 : Demolished (${position}th) by ${margin.toFixed(1)}L - not competitive\n`;
     }
+}
 
     // Apply class drop context if we have a penalty
     if (addScore < 0 && classChange !== 0 && recentForm !== null) {
