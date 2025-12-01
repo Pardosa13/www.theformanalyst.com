@@ -328,23 +328,23 @@ function checkLast10runs(last10) {
     let hasWin = last10.includes('1');
 
     for (let i = last10.length - 1; i >= 0; i--) {
-        let char = last10[i];
-        if (char !== 'X' && char !== 'x' && count < 5) {
-            count++;
-            if (char === '1') {
-                addScore += 10;
-                note2 += ' 1st';
-            }
-            if (char === '2') {
-                addScore += 5;
-                note2 += ' 2nd';
-            }
-            if (char === '3') {
-                addScore += 2;
-                note2 += ' 3rd';
-            }
+    let char = last10[i];
+    if (char !== 'X' && char !== 'x' && count < 5) {
+        count++;
+        if (char === '1') {
+            addScore += 10;
+            note2 = ' 1st' + note2;  // ← Prepend instead of append
+        }
+        if (char === '2') {
+            addScore += 5;
+            note2 = ' 2nd' + note2;  // ← Prepend instead of append
+        }
+        if (char === '3') {
+            addScore += 2;
+            note2 = ' 3rd' + note2;  // ← Prepend instead of append
         }
     }
+}
 
     // FORMAT THE NOTE *BEFORE* APPLYING THE NO-WINS PENALTY
     if (addScore > 0) {
