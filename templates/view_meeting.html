@@ -652,7 +652,114 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+<script>
+function calculateRaceConfidence(horses) {
+    if (!horses || horses.length < 2) return null;
 
+    const winProbs = horses.map(h => parseFloat(h.winProb) / 100);
+    winProbs.sort((a, b) => b - a);
+
+    const top1 = winProbs[0];
+    const top2 = winProbs[1];
+    const top3 = winProbs[2] || 0;
+
+    // 1. Dominance
+    const top3Sum = top1 + top2 + top3;
+    const dominance = top3Sum > 0 ? (top1 / top3Sum) : 0;
+    const dominanceScore = Math.max(0, Math.min(100, ((dominance - 0.33) / (0.60 - 0.33)) * 100));
+
+    // 2. Gap Ratio
+    const gapRatio = top2 > 0 ? (top1 / top2) : 1;
+    const gapScore = Math.max(0, Math.min(100, ((gapRatio - 1.0) / (2.0 - 1.0)) * 100));
+
+    // 3. Strength
+    const strengthScore = Math.max(0, Math.min(100, ((top1 - 0.15) / (0.40 - 0.15)) * 100));
+
+    // 4. CV
+    const mean = winProbs.reduce((sum, p) => sum + p, 0) / winProbs.length;
+    const variance = winProbs.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / winProbs.length;
+    const stdDev = Math.sqrt(variance);
+    const cv = mean > 0 ? (stdDev / mean) : 0;
+    const cvScore = Math.max(0, Math.min(100, ((cv - 0.3) / (1.2 - 0.3)) * 100));
+
+    // 5. Entropy
+    let entropy = 0;
+    for (let p of winProbs) {
+        if (p > 0) entropy -= p * Math.log2(p);
+    }
+    const maxEntropy = Math.log2(winProbs.length);
+    const entropyScore = maxEntropy > 0 ? (((maxEntropy - entropy) / maxEntropy) * 100) : 0;
+
+    // Combine
+    const confidence = Math.round(
+        dominanceScore * 0.25 +
+        gapScore * 0.25 +
+        strengthScore * 0.20 +
+        cvScore * 0.15 +
+        entropyScore * 0.15
+    );
+
+    let rating, description, style;
+    if (confidence >= 70) {
+        rating = 'High';
+        description = 'Strong standout - clear betting opportunity';
+        style = 'background: #d4edda; border-left: 4px solid #28a745; color: #155724;';
+    } else if (confidence >= 50) {
+        rating = 'Medium-High';
+        description = 'Solid favorite with good separation';
+        style = 'background: #d4edda; border-left: 4px solid #28a745; color: #155724;';
+    } else if (confidence >= 35) {
+        rating = 'Medium';
+        description = 'Competitive field - proceed with caution';
+        style = 'background: #fff3cd; border-left: 4px solid #ffc107; color: #856404;';
+    } else if (confidence >= 20) {
+        rating = 'Low-Medium';
+        description = 'Tight race - consider smaller stakes or exotics';
+        style = 'background: #ffe4b3; border-left: 4px solid #fd7e14; color: #7d4a1a;';
+    } else {
+        rating = 'Low';
+        description = 'Very uncertain - high risk race';
+        style = 'background: #f8d7da; border-left: 4px solid #dc3545; color: #721c24;';
+    }
+
+    return { confidence, rating, description, style };
+}
+
+// Calculate and display confidence for each race
+document.addEventListener('DOMContentLoaded', function() {
+    const races = document.querySelectorAll('.card[id^="race-"]');
+    
+    races.forEach(raceCard => {
+        const rows = raceCard.querySelectorAll('tbody tr');
+        const horses = [];
+        
+        rows.forEach(row => {
+            const winProbCell = row.cells[4]; // Win % column
+            if (winProbCell) {
+                const winProb = winProbCell.textContent.trim().replace('%', '');
+                horses.push({ winProb });
+            }
+        });
+        
+        const result = calculateRaceConfidence(horses);
+        if (result) {
+            const banner = document.createElement('div');
+            banner.style.cssText = result.style + ' padding: 12px 15px; margin-bottom: 15px; border-radius: 4px;';
+            banner.innerHTML = `<strong>${result.rating === 'High' ? '🟢' : result.rating === 'Medium' ? '🟡' : result.rating === 'Medium-High' ? '🟢' : result.confidence >= 20 ? '🟠' : '🔴'} ${result.rating} Confidence: ${result.confidence}%</strong> - ${result.description}`;
+            
+            // Insert after maiden warning or after race header
+            const maidenWarning = raceCard.querySelector('div[style*="#fff3cd"]');
+            const tableContainer = raceCard.querySelector('div[style*="overflow-x"]');
+            
+            if (maidenWarning) {
+                maidenWarning.after(banner);
+            } else {
+                tableContainer.before(banner);
+            }
+        }
+    });
+});
+</script>
 {% if config.get('BETFAIR_ENABLED') %}
   <script src="{{ url_for('static', filename='js/betfair-live.js') }}"></script>
 {% endif %}
