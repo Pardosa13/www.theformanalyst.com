@@ -99,6 +99,15 @@
             {% endif %}
         </div>
     </div>
+        {# Maiden race warning #}
+    {% if race.race_class and 'Maiden' in race.race_class %}
+    <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px 15px; margin-bottom: 15px; border-radius: 4px;">
+        <strong style="color: #856404;">⚠️ Maiden Race Warning:</strong>
+        <span style="color: #856404;">Some horses may not appear in this analysis as they have no previous racing form.</span>
+    </div>
+    {% endif %}
+    
+    <div style="overflow-x: auto;">
     
     <div style="overflow-x: auto;">
         <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
