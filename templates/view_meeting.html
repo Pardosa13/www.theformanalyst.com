@@ -644,15 +644,10 @@ function applyFilters() {
     updateMatchCounter();
 }
 
-// Initialize filter bar when page loads
-document.addEventListener('DOMContentLoaded', function() {
-    const placeholder = document.getElementById('filter-bar-placeholder');
-    if (placeholder) {
-        placeholder.appendChild(createFilterBar());
-    }
-});
 </script>
+
 <script>
+// Confidence calculation function (define FIRST)
 function calculateRaceConfidence(horses) {
     if (!horses || horses.length < 2) return null;
 
@@ -781,8 +776,15 @@ function calculateRaceConfidence(horses) {
     return { confidence, rating, description, style, emoji };
 }
 
-// Calculate and display confidence for each race
+// Initialize filter bar and confidence banners when page loads (ONE listener)
 document.addEventListener('DOMContentLoaded', function() {
+    // Filter bar
+    const placeholder = document.getElementById('filter-bar-placeholder');
+    if (placeholder) {
+        placeholder.appendChild(createFilterBar());
+    }
+    
+    // Confidence banners
     const races = document.querySelectorAll('.card[id^="race-"]');
     
     races.forEach(raceCard => {
