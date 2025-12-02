@@ -663,56 +663,57 @@ function calculateRaceConfidence(horses) {
     const top2 = winProbs[1];
     const top3 = winProbs[2] || 0;
 
-    // 1. Dominance
+    // SIMPLIFIED AND RECALIBRATED FOR YOUR DATA
+    
+    // 1. Gap Ratio (most important) - heavily weighted
+    const gapRatio = top2 > 0 ? (top1 / top2) : 2.0;
+    // 1.0 = tied, 1.5 = 50% better, 2.0 = double
+    let gapScore;
+    if (gapRatio >= 2.0) gapScore = 100;      // Double or more = perfect
+    else if (gapRatio >= 1.5) gapScore = 80;  // 50% better = strong
+    else if (gapRatio >= 1.3) gapScore = 60;  // 30% better = medium
+    else if (gapRatio >= 1.15) gapScore = 40; // 15% better = low-medium
+    else gapScore = 20;                        // <15% = low
+
+    // 2. Top Pick Strength
+    let strengthScore;
+    if (top1 >= 0.30) strengthScore = 100;      // 30%+ = excellent
+    else if (top1 >= 0.25) strengthScore = 85;  // 25%+ = very good
+    else if (top1 >= 0.20) strengthScore = 70;  // 20%+ = good
+    else if (top1 >= 0.15) strengthScore = 50;  // 15%+ = medium
+    else strengthScore = 30;                     // <15% = weak
+
+    // 3. Dominance (top pick's share of top 3)
     const top3Sum = top1 + top2 + top3;
-    const dominance = top3Sum > 0 ? (top1 / top3Sum) : 0;
-    const dominanceScore = Math.max(0, Math.min(100, ((dominance - 0.33) / (0.60 - 0.33)) * 100));
+    const dominance = top3Sum > 0 ? (top1 / top3Sum) : 0.33;
+    let dominanceScore;
+    if (dominance >= 0.50) dominanceScore = 100;     // Controls 50%+ of top 3
+    else if (dominance >= 0.45) dominanceScore = 80;
+    else if (dominance >= 0.40) dominanceScore = 60;
+    else if (dominance >= 0.35) dominanceScore = 40;
+    else dominanceScore = 20;
 
-    // 2. Gap Ratio
-    const gapRatio = top2 > 0 ? (top1 / top2) : 1;
-    const gapScore = Math.max(0, Math.min(100, ((gapRatio - 1.0) / (2.0 - 1.0)) * 100));
-
-    // 3. Strength
-    const strengthScore = Math.max(0, Math.min(100, ((top1 - 0.15) / (0.40 - 0.15)) * 100));
-
-    // 4. CV
-    const mean = winProbs.reduce((sum, p) => sum + p, 0) / winProbs.length;
-    const variance = winProbs.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / winProbs.length;
-    const stdDev = Math.sqrt(variance);
-    const cv = mean > 0 ? (stdDev / mean) : 0;
-    const cvScore = Math.max(0, Math.min(100, ((cv - 0.3) / (1.2 - 0.3)) * 100));
-
-    // 5. Entropy
-    let entropy = 0;
-    for (let p of winProbs) {
-        if (p > 0) entropy -= p * Math.log2(p);
-    }
-    const maxEntropy = Math.log2(winProbs.length);
-    const entropyScore = maxEntropy > 0 ? (((maxEntropy - entropy) / maxEntropy) * 100) : 0;
-
-    // Combine
+    // WEIGHTED COMBINATION (gap ratio is most important)
     const confidence = Math.round(
-        dominanceScore * 0.25 +
-        gapScore * 0.25 +
-        strengthScore * 0.20 +
-        cvScore * 0.15 +
-        entropyScore * 0.15
+        gapScore * 0.50 +        // Gap is KING - 50% weight
+        strengthScore * 0.30 +   // Absolute strength - 30% weight
+        dominanceScore * 0.20    // Dominance - 20% weight
     );
 
     let rating, description, style;
-    if (confidence >= 70) {
+    if (confidence >= 80) {
         rating = 'High';
         description = 'Strong standout - clear betting opportunity';
         style = 'background: #d4edda; border-left: 4px solid #28a745; color: #155724;';
-    } else if (confidence >= 50) {
+    } else if (confidence >= 65) {
         rating = 'Medium-High';
         description = 'Solid favorite with good separation';
         style = 'background: #d4edda; border-left: 4px solid #28a745; color: #155724;';
-    } else if (confidence >= 35) {
+    } else if (confidence >= 45) {
         rating = 'Medium';
         description = 'Competitive field - proceed with caution';
         style = 'background: #fff3cd; border-left: 4px solid #ffc107; color: #856404;';
-    } else if (confidence >= 20) {
+    } else if (confidence >= 30) {
         rating = 'Low-Medium';
         description = 'Tight race - consider smaller stakes or exotics';
         style = 'background: #ffe4b3; border-left: 4px solid #fd7e14; color: #7d4a1a;';
@@ -743,17 +744,23 @@ document.addEventListener('DOMContentLoaded', function() {
         
         const result = calculateRaceConfidence(horses);
         if (result) {
+            // Check if banner already exists
+            if (raceCard.querySelector('.confidence-banner')) {
+                return;
+            }
+            
             const banner = document.createElement('div');
+            banner.className = 'confidence-banner';
             banner.style.cssText = result.style + ' padding: 12px 15px; margin-bottom: 15px; border-radius: 4px;';
-            banner.innerHTML = `<strong>${result.rating === 'High' ? '🟢' : result.rating === 'Medium' ? '🟡' : result.rating === 'Medium-High' ? '🟢' : result.confidence >= 20 ? '🟠' : '🔴'} ${result.rating} Confidence: ${result.confidence}%</strong> - ${result.description}`;
+            banner.innerHTML = `<strong>${result.rating === 'High' ? '🟢' : result.rating === 'Medium' ? '🟡' : result.rating === 'Medium-High' ? '🟢' : result.confidence >= 30 ? '🟠' : '🔴'} ${result.rating} Confidence: ${result.confidence}%</strong> - ${result.description}`;
             
             // Insert after maiden warning or after race header
-            const maidenWarning = raceCard.querySelector('div[style*="#fff3cd"]');
+            const maidenWarning = raceCard.querySelector('strong[style*="#856404"]')?.parentElement;
             const tableContainer = raceCard.querySelector('div[style*="overflow-x"]');
             
             if (maidenWarning) {
                 maidenWarning.after(banner);
-            } else {
+            } else if (tableContainer) {
                 tableContainer.before(banner);
             }
         }
