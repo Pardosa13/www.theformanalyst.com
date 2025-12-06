@@ -265,7 +265,177 @@ def login():
         return redirect(url_for("dashboard"))
     
     return render_template("login.html")
+import re
 
+def parse_notes_components(notes):
+    """
+    Parse the notes field to extract individual scoring components.
+    Returns a dict of component_name -> score_value
+    """
+    if not notes:
+        return {}
+    
+    components = {}
+    
+    # Define patterns to extract - (pattern, component_name, score_group)
+    patterns = [
+        # Last 10 Form
+        (r'([+-]?\s*[\d.]+)\s*:\s*Ran places:', 'Ran Places'),
+        (r'(-15\.0)\s*:\s*No wins in last 10', 'No Wins Last 10'),
+        
+        # Jockeys
+        (r'\+\s*10\.0\s*:\s*Love the Jockey', 'Elite Jockey'),
+        (r'\+\s*5\.0\s*:\s*Like the Jockey', 'Good Jockey'),
+        (r'-\s*5\.0\s*:\s*Kerrin', 'Negative Jockey'),
+        
+        # Trainers
+        (r'\+\s*5\.0\s*:\s*Like the Trainer', 'Good Trainer'),
+        
+        # Track Record
+        (r'([+-]?\s*[\d.]+)\s*:\s*Exceptional win rate.*at this track\n', 'Track Win Rate - Exceptional'),
+        (r'([+-]?\s*[\d.]+)\s*:\s*Strong win rate.*at this track\n', 'Track Win Rate - Strong'),
+        (r'([+-]?\s*[\d.]+)\s*:\s*Good win rate.*at this track\n', 'Track Win Rate - Good'),
+        (r'([+-]?\s*[\d.]+)\s*:\s*Moderate win rate.*at this track\n', 'Track Win Rate - Moderate'),
+        (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this track!', 'Undefeated at Track'),
+        
+        # Track+Distance
+        (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this track\+distance', 'Undefeated at Track+Distance'),
+        
+        # Distance
+        (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this distance', 'Undefeated at Distance'),
+        (r'=\s*([\d.]+)\s*:\s*Total distance score', 'Distance Score Total'),
+        
+        # Track Condition
+        (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*runs on (good|soft|heavy|firm|synthetic)', 'Undefeated on Condition'),
+        (r'=\s*([\d.]+)\s*:\s*Total track condition score', 'Track Condition Score Total'),
+        
+        # Distance Change
+        (r'\+\s*1\.0\s*:\s*Longer dist than previous', 'Longer Distance'),
+        (r'-\s*1\.0\s*:\s*Shorter dist than previous', 'Shorter Distance'),
+        
+        # Class Change
+        (r'\+\s*([\d.]+):\s*Stepping DOWN', 'Class Drop'),
+        (r'(-[\d.]+):\s*Stepping UP', 'Class Rise'),
+        
+        # Last Start Margin - Winners
+        (r'\+\s*10\.0\s*:\s*Dominant last start win', 'Last Start - Dominant Win'),
+        (r'\+\s*7\.0\s*:\s*Comfortable last start win', 'Last Start - Comfortable Win'),
+        (r'\+\s*5\.0\s*:\s*Narrow last start win', 'Last Start - Narrow Win'),
+        (r'\+\s*3\.0\s*:\s*Photo finish last start win', 'Last Start - Photo Win'),
+        
+        # Last Start Margin - Placed
+        (r'\+\s*5\.0\s*:\s*Narrow loss.*very competitive', 'Last Start - Competitive Loss'),
+        (r'\+\s*3\.0\s*:\s*Close loss', 'Last Start - Close Loss'),
+        
+        # Last Start Margin - Beaten
+        (r'-\s*3\.0\s*:\s*Beaten clearly', 'Last Start - Beaten Clearly'),
+        (r'-\s*7\.0\s*:\s*Well beaten', 'Last Start - Well Beaten'),
+        (r'-\s*15\.0\s*:\s*Demolished', 'Last Start - Demolished'),
+        
+        # Days Since Run
+        (r'\+\s*15\.0\s*:\s*Quick backup', 'Quick Backup'),
+        (r'(-[\d.]+)\s*:\s*Too fresh', 'Too Fresh'),
+        
+        # Form Price
+        (r'\+\s*([\d.]+)\.0\s*:\s*Form price.*well-backed', 'Form Price - Well Backed'),
+        (r'\+\s*0\.0\s*:\s*Form price.*neutral', 'Form Price - Neutral'),
+        (r'(-[\d.]+)\.0\s*:\s*Form price', 'Form Price - Negative'),
+        
+        # First/Second Up
+        (r'\+\s*4\.0\s*:\s*First-up winner', 'First Up Winner'),
+        (r'\+\s*3\.0\s*:\s*Strong first-up podium', 'First Up Strong Podium'),
+        (r'\+\s*3\.0\s*:\s*Second-up winner', 'Second Up Winner'),
+        (r'\+\s*2\.0\s*:\s*Strong second-up podium', 'Second Up Strong Podium'),
+        (r'\+\s*15\.0\s*:\s*First-up specialist \(UNDEFEATED\)', 'First Up Specialist'),
+        (r'\+\s*15\.0\s*:\s*Second-up specialist \(UNDEFEATED\)', 'Second Up Specialist'),
+        
+        # Sectionals
+        (r'\+\s*([\d.]+):\s*weighted avg \(z=([\d.]+)', 'Sectional Weighted Avg'),
+        (r'\+\s*([\d.]+):\s*best of last \d+ \(z=([\d.]+)', 'Sectional Best Recent'),
+        (r'\+\s*([\d.]+):\s*consistency - excellent', 'Sectional Consistency - Excellent'),
+        (r'\+\s*([\d.]+):\s*consistency - good', 'Sectional Consistency - Good'),
+        (r'\+\s*([\d.]+):\s*consistency - fair', 'Sectional Consistency - Fair'),
+        (r'\+\s*([\d.]+):\s*consistency - poor', 'Sectional Consistency - Poor'),
+        
+        # Weight
+        (r'\+\s*([\d.]+)\s*:\s*Weight.*BELOW race avg', 'Weight - Well Below Avg'),
+        (r'\+\s*([\d.]+)\s*:\s*Weight.*below race avg', 'Weight - Below Avg'),
+        (r'(-[\d.]+)\s*:\s*Weight.*above race avg', 'Weight - Above Avg'),
+        (r'(-[\d.]+)\s*:\s*Weight.*ABOVE race avg', 'Weight - Well Above Avg'),
+        (r'\+\s*([\d.]+)\s*:\s*Dropped.*from last start', 'Weight Drop'),
+        (r'(-[\d.]+)\s*:\s*Up.*from last start', 'Weight Rise'),
+        
+        # Combo Bonus
+        (r'\+\s*15\.0\s*:\s*COMBO BONUS', 'Combo Bonus'),
+        
+        # Specialist Bonuses
+        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(track\)', 'Specialist - Track'),
+        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(distance\)', 'Specialist - Distance'),
+        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(track\+distance\)', 'Specialist - Track+Distance'),
+        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(.*condition\)', 'Specialist - Condition'),
+        (r'\+\s*([\d.]+)\s*:\s*100% PODIUM', 'Specialist - Perfect Podium'),
+    ]
+    
+    for pattern, name in patterns:
+        match = re.search(pattern, notes, re.IGNORECASE)
+        if match:
+            # Try to extract the score value
+            try:
+                score_str = match.group(1).replace(' ', '').replace('+', '')
+                score = float(score_str)
+            except (IndexError, ValueError):
+                # Pattern matched but no numeric group - use 1 as indicator
+                score = 1.0
+            components[name] = score
+    
+    return components
+
+
+def aggregate_component_stats(all_results_data):
+    """
+    Aggregate component statistics across all results.
+    Returns dict of component_name -> {appearances, wins, total_score, avg_score}
+    """
+    component_stats = {}
+    
+    for entry in all_results_data:
+        prediction = entry['prediction']
+        result = entry['result']
+        
+        if not prediction or not result:
+            continue
+        
+        notes = prediction.notes or ''
+        components = parse_notes_components(notes)
+        won = result.finish_position == 1
+        placed = result.finish_position in [1, 2, 3]
+        
+        for component_name, score_value in components.items():
+            if component_name not in component_stats:
+                component_stats[component_name] = {
+                    'appearances': 0,
+                    'wins': 0,
+                    'places': 0,
+                    'total_score': 0,
+                    'scores': []
+                }
+            
+            stats = component_stats[component_name]
+            stats['appearances'] += 1
+            if won:
+                stats['wins'] += 1
+            if placed:
+                stats['places'] += 1
+            stats['total_score'] += score_value
+            stats['scores'].append(score_value)
+    
+    # Calculate averages and rates
+    for name, stats in component_stats.items():
+        stats['avg_score'] = stats['total_score'] / stats['appearances'] if stats['appearances'] > 0 else 0
+        stats['strike_rate'] = (stats['wins'] / stats['appearances'] * 100) if stats['appearances'] > 0 else 0
+        stats['place_rate'] = (stats['places'] / stats['appearances'] * 100) if stats['appearances'] > 0 else 0
+    
+    return component_stats
 
 @app.route("/logout")
 @login_required
