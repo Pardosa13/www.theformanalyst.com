@@ -672,18 +672,16 @@ def data_analytics():
     """Analytics dashboard showing model performance"""
     from sqlalchemy import func, case, and_
     
-    # Get filter parameters
     track_filter = request. args.get('track', '')
     min_score_filter = request. args.get('min_score', type=float)
     date_from = request.args.get('date_from', '')
     date_to = request.args. get('date_to', '')
     
-    # Base query: Get all horses with results, joined to predictions and races
     base_query = db. session.query(
         Horse, Prediction, Result, Race, Meeting
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
+    ). join(
+        Prediction, Horse. id == Prediction.horse_id
+    ). join(
         Result, Horse.id == Result. horse_id
     ).join(
         Race, Horse.race_id == Race. id
@@ -691,9 +689,8 @@ def data_analytics():
         Meeting, Race.meeting_id == Meeting.id
     )
     
-    # Apply filters
     if track_filter:
-        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+        base_query = base_query.filter(Meeting.meeting_name. ilike(f'%{track_filter}%'))
     if date_from:
         base_query = base_query.filter(Meeting.uploaded_at >= date_from)
     if date_to:
@@ -701,7 +698,6 @@ def data_analytics():
     
     all_results = base_query. all()
     
-    # Group by race to find top picks
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
         race_key = (meeting.id, race.race_number)
@@ -715,14 +711,12 @@ def data_analytics():
             'meeting': meeting
         })
     
-    # Calculate stats
     total_races = len(races_data)
     top_pick_wins = 0
     total_profit = 0
     stake = 10. 0
     winner_sps = []
     
-    # Score tier tracking
     score_tiers = {
         '90+': {'races': 0, 'wins': 0, 'profit': 0},
         '80-89': {'races': 0, 'wins': 0, 'profit': 0},
@@ -731,7 +725,6 @@ def data_analytics():
         '<60': {'races': 0, 'wins': 0, 'profit': 0},
     }
     
-    # Score gap tracking
     score_gaps = {
         '30+': {'races': 0, 'wins': 0, 'profit': 0},
         '20-29': {'races': 0, 'wins': 0, 'profit': 0},
@@ -740,7 +733,6 @@ def data_analytics():
     }
     
     for race_key, horses in races_data. items():
-        # Sort by score descending
         horses. sort(key=lambda x: x['prediction'].score, reverse=True)
         
         if not horses:
@@ -749,15 +741,12 @@ def data_analytics():
         top_pick = horses[0]
         top_score = top_pick['prediction'].score
         
-        # Apply min score filter
         if min_score_filter and top_score < min_score_filter:
             continue
         
-        # Calculate score gap
         second_score = horses[1]['prediction'].score if len(horses) > 1 else 0
         score_gap = top_score - second_score
         
-        # Determine tier
         if top_score >= 90:
             tier = '90+'
         elif top_score >= 80:
@@ -769,7 +758,6 @@ def data_analytics():
         else:
             tier = '<60'
         
-        # Determine gap bucket
         if score_gap >= 30:
             gap_bucket = '30+'
         elif score_gap >= 20:
@@ -779,35 +767,29 @@ def data_analytics():
         else:
             gap_bucket = '<10'
         
-        # Check if top pick won
-        won = top_pick['result'].finish_position == 1
-        sp = top_pick['result']. sp
+        won = top_pick['result']. finish_position == 1
+        sp = top_pick['result'].sp
         profit = (sp * stake - stake) if won else -stake
         
-        # Update totals
         if won:
             top_pick_wins += 1
             winner_sps.append(sp)
         total_profit += profit
         
-        # Update tier stats
         score_tiers[tier]['races'] += 1
         if won:
             score_tiers[tier]['wins'] += 1
         score_tiers[tier]['profit'] += profit
         
-        # Update gap stats
         score_gaps[gap_bucket]['races'] += 1
         if won:
             score_gaps[gap_bucket]['wins'] += 1
         score_gaps[gap_bucket]['profit'] += profit
     
-    # Calculate summary stats
     strike_rate = (top_pick_wins / total_races * 100) if total_races > 0 else 0
     roi = (total_profit / (total_races * stake) * 100) if total_races > 0 else 0
     avg_winner_sp = sum(winner_sps) / len(winner_sps) if winner_sps else 0
     
-    # Calculate tier strike rates and ROI
     for tier in score_tiers:
         t = score_tiers[tier]
         t['strike_rate'] = (t['wins'] / t['races'] * 100) if t['races'] > 0 else 0
@@ -818,9 +800,8 @@ def data_analytics():
         g['strike_rate'] = (g['wins'] / g['races'] * 100) if g['races'] > 0 else 0
         g['roi'] = (g['profit'] / (g['races'] * stake) * 100) if g['races'] > 0 else 0
     
-    # Get unique tracks for filter dropdown
-    tracks = db. session.query(Meeting.meeting_name). distinct().all()
-    track_list = sorted(set([t[0]. split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
+    tracks = db.session. query(Meeting.meeting_name). distinct().all()
+    track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
     
     return render_template("data. html",
         total_races=total_races,
