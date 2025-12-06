@@ -265,6 +265,9 @@ def login():
         flash(f"Welcome back, {username}!", "success")
         return redirect(url_for("dashboard"))
     
+    # This handles GET requests - notice it's NOT indented under the if POST block
+    return render_template("login.html")
+    
 def parse_notes_components(notes):
     """
     Parse the notes field to extract individual scoring components.
