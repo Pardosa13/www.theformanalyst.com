@@ -253,20 +253,389 @@
     </div>
 </div>
     
-    <!-- Section 4: External Factors (Placeholder) -->
-    <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center" 
-             data-bs-toggle="collapse" data-bs-target="#externalFactors" style="cursor: pointer;">
-            <h5 class="mb-0">🏇 External Factors</h5>
-            <i class="bi bi-chevron-down"></i>
-        </div>
-        <div id="externalFactors" class="collapse show">
-            <div class="card-body text-center text-muted py-5">
-                <i class="bi bi-hourglass-split display-4"></i>
-                <p class="mt-3">Coming soon — jockey, trainer, track, distance, and barrier analysis.</p>
+    <!-- Section 4: External Factors -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center" 
+         data-bs-toggle="collapse" data-bs-target="#externalFactors" style="cursor: pointer;">
+        <h5 class="mb-0">🏇 External Factors</h5>
+        <i class="bi bi-chevron-down"></i>
+    </div>
+    <div id="externalFactors" class="collapse show">
+        <div class="card-body">
+            {% if external_factors and (external_factors.jockeys_reliable or external_factors.barriers) %}
+            
+            <!-- Jockeys -->
+            <div class="mb-5">
+                <h5>🏇 Jockeys</h5>
+                <p class="text-muted small">Strike rates for all horses ridden, not just your top picks.</p>
+                
+                {% if external_factors.jockeys_reliable %}
+                <h6 class="text-success mt-3">Reliable Data (5+ rides)</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Jockey</th>
+                                <th class="text-center">Rides</th>
+                                <th class="text-center">Wins</th>
+                                <th class="text-center">Strike %</th>
+                                <th class="text-center">Places</th>
+                                <th class="text-center">Place %</th>
+                                <th class="text-center">ROI</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for name, stats in external_factors.jockeys_reliable.items() %}
+                            <tr>
+                                <td><strong>{{ name }}</strong></td>
+                                <td class="text-center">{{ stats.runs }}</td>
+                                <td class="text-center">{{ stats.wins }}</td>
+                                <td class="text-center {% if stats.strike_rate >= 25 %}text-success fw-bold{% elif stats.strike_rate >= 15 %}text-success{% elif stats.strike_rate < 8 %}text-danger{% endif %}">
+                                    {{ "%.1f"|format(stats.strike_rate) }}%
+                                </td>
+                                <td class="text-center">{{ stats.places }}</td>
+                                <td class="text-center {% if stats.place_rate >= 50 %}text-success{% endif %}">
+                                    {{ "%.1f"|format(stats.place_rate) }}%
+                                </td>
+                                <td class="text-center {% if stats.roi >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                    {{ "%.1f"|format(stats.roi) }}%
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+                
+                {% if external_factors.jockeys_limited %}
+                <div class="mt-3">
+                    <h6 class="text-secondary" data-bs-toggle="collapse" data-bs-target="#jockeysLimited" style="cursor: pointer;">
+                        Limited Data (2-4 rides) <i class="bi bi-chevron-down small"></i>
+                    </h6>
+                    <div id="jockeysLimited" class="collapse">
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead class="table-secondary">
+                                    <tr>
+                                        <th>Jockey</th>
+                                        <th class="text-center">Rides</th>
+                                        <th class="text-center">Wins</th>
+                                        <th class="text-center">Strike %</th>
+                                        <th class="text-center">Place %</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for name, stats in external_factors.jockeys_limited.items() %}
+                                    <tr>
+                                        <td>{{ name }}</td>
+                                        <td class="text-center">{{ stats.runs }}</td>
+                                        <td class="text-center">{{ stats.wins }}</td>
+                                        <td class="text-center {% if stats.strike_rate >= 40 %}text-success fw-bold{% endif %}">
+                                            {{ "%.1f"|format(stats.strike_rate) }}%
+                                        </td>
+                                        <td class="text-center">{{ "%.1f"|format(stats.place_rate) }}%</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
             </div>
+            
+            <!-- Trainers -->
+            <div class="mb-5">
+                <h5>👔 Trainers</h5>
+                
+                {% if external_factors.trainers_reliable %}
+                <h6 class="text-success mt-3">Reliable Data (3+ runners)</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Trainer</th>
+                                <th class="text-center">Runners</th>
+                                <th class="text-center">Wins</th>
+                                <th class="text-center">Strike %</th>
+                                <th class="text-center">Places</th>
+                                <th class="text-center">Place %</th>
+                                <th class="text-center">ROI</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for name, stats in external_factors.trainers_reliable.items() %}
+                            <tr>
+                                <td><strong>{{ name }}</strong></td>
+                                <td class="text-center">{{ stats.runs }}</td>
+                                <td class="text-center">{{ stats.wins }}</td>
+                                <td class="text-center {% if stats.strike_rate >= 25 %}text-success fw-bold{% elif stats.strike_rate >= 15 %}text-success{% elif stats.strike_rate < 8 %}text-danger{% endif %}">
+                                    {{ "%.1f"|format(stats.strike_rate) }}%
+                                </td>
+                                <td class="text-center">{{ stats.places }}</td>
+                                <td class="text-center {% if stats.place_rate >= 50 %}text-success{% endif %}">
+                                    {{ "%.1f"|format(stats.place_rate) }}%
+                                </td>
+                                <td class="text-center {% if stats.roi >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                    {{ "%.1f"|format(stats.roi) }}%
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+                
+                {% if external_factors.trainers_limited %}
+                <div class="mt-3">
+                    <h6 class="text-secondary" data-bs-toggle="collapse" data-bs-target="#trainersLimited" style="cursor: pointer;">
+                        Limited Data (2 runners) <i class="bi bi-chevron-down small"></i>
+                    </h6>
+                    <div id="trainersLimited" class="collapse">
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead class="table-secondary">
+                                    <tr>
+                                        <th>Trainer</th>
+                                        <th class="text-center">Runners</th>
+                                        <th class="text-center">Wins</th>
+                                        <th class="text-center">Strike %</th>
+                                        <th class="text-center">Place %</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for name, stats in external_factors.trainers_limited.items() %}
+                                    <tr>
+                                        <td>{{ name }}</td>
+                                        <td class="text-center">{{ stats.runs }}</td>
+                                        <td class="text-center">{{ stats.wins }}</td>
+                                        <td class="text-center {% if stats.strike_rate >= 50 %}text-success fw-bold{% endif %}">
+                                            {{ "%.1f"|format(stats.strike_rate) }}%
+                                        </td>
+                                        <td class="text-center">{{ "%.1f"|format(stats.place_rate) }}%</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            
+            <!-- Barriers -->
+            <div class="mb-5">
+                <h5>🚧 Barriers</h5>
+                <p class="text-muted small">Performance by barrier position across all races.</p>
+                <div class="row">
+                    <div class="col-md-8">
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Barrier</th>
+                                        <th class="text-center">Runs</th>
+                                        <th class="text-center">Wins</th>
+                                        <th class="text-center">Strike %</th>
+                                        <th class="text-center">Place %</th>
+                                        <th class="text-center">ROI</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for bucket, stats in external_factors.barriers.items() %}
+                                    {% if stats.runs > 0 %}
+                                    <tr>
+                                        <td><strong>{{ bucket }}</strong></td>
+                                        <td class="text-center">{{ stats.runs }}</td>
+                                        <td class="text-center">{{ stats.wins }}</td>
+                                        <td class="text-center {% if stats.strike_rate >= 15 %}text-success{% elif stats.strike_rate < 8 %}text-danger{% endif %}">
+                                            {{ "%.1f"|format(stats.strike_rate) }}%
+                                        </td>
+                                        <td class="text-center">{{ "%.1f"|format(stats.place_rate) }}%</td>
+                                        <td class="text-center {% if stats.roi >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                            {{ "%.1f"|format(stats.roi) }}%
+                                        </td>
+                                    </tr>
+                                    {% endif %}
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <canvas id="barrierChart" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Distances -->
+            <div class="mb-5">
+                <h5>📏 Distances</h5>
+                <p class="text-muted small">How horses perform across different distance ranges.</p>
+                <div class="row">
+                    <div class="col-md-8">
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Distance</th>
+                                        <th class="text-center">Runs</th>
+                                        <th class="text-center">Wins</th>
+                                        <th class="text-center">Strike %</th>
+                                        <th class="text-center">Place %</th>
+                                        <th class="text-center">ROI</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for bucket, stats in external_factors.distances.items() %}
+                                    {% if stats.runs > 0 %}
+                                    <tr>
+                                        <td><strong>{{ bucket }}</strong></td>
+                                        <td class="text-center">{{ stats.runs }}</td>
+                                        <td class="text-center">{{ stats.wins }}</td>
+                                        <td class="text-center {% if stats.strike_rate >= 15 %}text-success{% elif stats.strike_rate < 8 %}text-danger{% endif %}">
+                                            {{ "%.1f"|format(stats.strike_rate) }}%
+                                        </td>
+                                        <td class="text-center">{{ "%.1f"|format(stats.place_rate) }}%</td>
+                                        <td class="text-center {% if stats.roi >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                            {{ "%.1f"|format(stats.roi) }}%
+                                        </td>
+                                    </tr>
+                                    {% endif %}
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <canvas id="distanceChart" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Tracks -->
+            <div class="mb-4">
+                <h5>🏟️ Tracks</h5>
+                <p class="text-muted small">Performance by track (minimum 2 races).</p>
+                {% if external_factors.tracks %}
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Track</th>
+                                <th class="text-center">Races</th>
+                                <th class="text-center">Wins</th>
+                                <th class="text-center">Strike %</th>
+                                <th class="text-center">Places</th>
+                                <th class="text-center">Place %</th>
+                                <th class="text-center">ROI</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for name, stats in external_factors.tracks.items() %}
+                            <tr>
+                                <td><strong>{{ name }}</strong></td>
+                                <td class="text-center">{{ stats.runs }}</td>
+                                <td class="text-center">{{ stats.wins }}</td>
+                                <td class="text-center {% if stats.strike_rate >= 20 %}text-success fw-bold{% elif stats.strike_rate >= 12 %}text-success{% elif stats.strike_rate < 6 %}text-danger{% endif %}">
+                                    {{ "%.1f"|format(stats.strike_rate) }}%
+                                </td>
+                                <td class="text-center">{{ stats.places }}</td>
+                                <td class="text-center {% if stats.place_rate >= 40 %}text-success{% endif %}">
+                                    {{ "%.1f"|format(stats.place_rate) }}%
+                                </td>
+                                <td class="text-center {% if stats.roi >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                    {{ "%.1f"|format(stats.roi) }}%
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">No tracks with 2+ races yet.</p>
+                {% endif %}
+            </div>
+            
+            {% else %}
+            <div class="text-center text-muted py-5">
+                <i class="bi bi-bar-chart display-4"></i>
+                <p class="mt-3">No external factor data yet. Enter results to see jockey, trainer, barrier, distance and track analysis.</p>
+                <a href="{{ url_for('results') }}" class="btn btn-primary">Enter Results</a>
+            </div>
+            {% endif %}
         </div>
     </div>
+</div>
+
+<!-- Charts for External Factors -->
+<script>
+{% if external_factors and external_factors.barriers %}
+// Barrier Chart
+const barrierLabels = [];
+const barrierStrikeRates = [];
+{% for bucket, stats in external_factors.barriers.items() %}
+{% if stats.runs > 0 %}
+barrierLabels.push('{{ bucket }}');
+barrierStrikeRates.push({{ stats.strike_rate }});
+{% endif %}
+{% endfor %}
+
+if (barrierLabels.length > 0) {
+    new Chart(document.getElementById('barrierChart'), {
+        type: 'bar',
+        data: {
+            labels: barrierLabels,
+            datasets: [{
+                label: 'Strike Rate %',
+                data: barrierStrikeRates,
+                backgroundColor: ['rgba(40, 167, 69, 0.7)', 'rgba(54, 162, 235, 0.7)', 'rgba(255, 193, 7, 0.7)', 'rgba(220, 53, 69, 0.7)'],
+                borderColor: ['rgba(40, 167, 69, 1)', 'rgba(54, 162, 235, 1)', 'rgba(255, 193, 7, 1)', 'rgba(220, 53, 69, 1)'],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, max: Math.max(...barrierStrikeRates) + 10 } }
+        }
+    });
+}
+{% endif %}
+
+{% if external_factors and external_factors.distances %}
+// Distance Chart
+const distanceLabels = [];
+const distanceStrikeRates = [];
+{% for bucket, stats in external_factors.distances.items() %}
+{% if stats.runs > 0 %}
+distanceLabels.push('{{ bucket|replace("(", "")|replace(")", "")|replace("≤", "<") }}');
+distanceStrikeRates.push({{ stats.strike_rate }});
+{% endif %}
+{% endfor %}
+
+if (distanceLabels.length > 0) {
+    new Chart(document.getElementById('distanceChart'), {
+        type: 'bar',
+        data: {
+            labels: distanceLabels,
+            datasets: [{
+                label: 'Strike Rate %',
+                data: distanceStrikeRates,
+                backgroundColor: 'rgba(102, 126, 234, 0.7)',
+                borderColor: 'rgba(102, 126, 234, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, max: Math.max(...distanceStrikeRates) + 10 } }
+        }
+    });
+}
+{% endif %}
+</script>
     
    <!-- Section 5: Price Analysis -->
 <div class="card mb-4">
