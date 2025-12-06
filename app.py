@@ -38,19 +38,19 @@ with app.app_context():
     # Migration: Add market_id column if it doesn't exist
     try:
         from sqlalchemy import inspect, text
-        inspector = inspect(db.engine)
+        inspector = inspect(db. engine)
         races_columns = [col['name'] for col in inspector.get_columns('races')]
         
         if 'market_id' not in races_columns:
             with db.engine.connect() as conn:
                 conn.execute(text('ALTER TABLE races ADD COLUMN market_id VARCHAR(255)'))
-                conn.commit()
+                conn. commit()
             print("✓ Added market_id column to races table")
     except Exception as e:
         print(f"Migration check: {e}")
     
     # Create default admin if doesn't exist
-    admin = User.query.filter_by(username='admin').first()
+    admin = User. query.filter_by(username='admin').first()
     if not admin:
         admin = User(
             username='admin',
@@ -74,7 +74,7 @@ def run_analyzer(csv_data, track_condition, is_advanced=False):
         'is_advanced': is_advanced
     }
     
-    analyzer_path = os.path.join(os.path.dirname(__file__), 'analyzer.js')
+    analyzer_path = os.path.join(os.path.dirname(__file__), 'analyzer. js')
     
     try:
         result = subprocess.run(
@@ -95,7 +95,7 @@ def run_analyzer(csv_data, track_condition, is_advanced=False):
     except json.JSONDecodeError as e:
         raise Exception(f"Invalid analyzer output: {e}")
     except FileNotFoundError:
-        raise Exception("Node.js not found. Please ensure Node.js is installed.")
+        raise Exception("Node.js not found.  Please ensure Node.js is installed.")
     except Exception as e:
         raise Exception(f"Analysis failed: {str(e)}")
 
@@ -113,16 +113,16 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
     # Create meeting record
     meeting = Meeting(
         user_id=user_id,
-        meeting_name=filename.replace('.csv', ''),
+        meeting_name=filename. replace('.csv', ''),
         csv_data=csv_data
     )
-    db.session.add(meeting)
-    db.session.flush()  # Get meeting ID
+    db.session. add(meeting)
+    db. session.flush()  # Get meeting ID
     
     # Group results by race
     races_data = {}
     for result in analysis_results:
-        race_num = result['horse'].get('race number', '0')
+        race_num = result['horse']. get('race number', '0')
         
         # Skip invalid rows (header rows that slipped through)
         if not race_num or not str(race_num).isdigit():
@@ -144,7 +144,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
             race_class=first_horse.get('class restrictions', ''),
             track_condition=track_condition
         )
-        db.session.add(race)
+        db.session. add(race)
         db.session.flush()
         
         # Create horse and prediction records
@@ -161,8 +161,8 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
                 form=horse_data.get('horse last10', ''),
                 csv_data=horse_data
             )
-            db.session.add(horse)
-            db.session.flush()
+            db.session. add(horse)
+            db. session.flush()
             
             prediction = Prediction(
                 horse_id=horse.id,
@@ -207,7 +207,7 @@ def get_meeting_results(meeting_id):
             pred = horse.prediction
             horse_data = {
                 'horse_name': horse.horse_name,
-                'barrier': horse.barrier,
+                'barrier': horse. barrier,
                 'weight': horse.weight,
                 'jockey': horse.jockey,
                 'trainer': horse.trainer,
@@ -242,7 +242,7 @@ def login():
         return redirect(url_for("dashboard"))
         
     if request.method == "POST":
-        username = request.form.get("username")
+        username = request. form.get("username")
         password = request.form.get("password")
         remember = bool(request.form.get("remember"))
         
@@ -267,7 +267,7 @@ def login():
     return render_template("login.html")
 
 
-@app.route("/logout")
+@app. route("/logout")
 @login_required
 def logout():
     logout_user()
@@ -341,7 +341,7 @@ def history():
     return render_template('history.html', meetings=meetings, meetings_json=json.dumps(meetings_json))
 
 
-@app.route("/meeting/<int:meeting_id>")
+@app. route("/meeting/<int:meeting_id>")
 @login_required
 def view_meeting(meeting_id):
     """View analysis results for a meeting"""
@@ -367,6 +367,8 @@ def delete_meeting(meeting_id):
     
     flash(f"Meeting '{meeting.meeting_name}' deleted", "success")
     return redirect(url_for("history"))
+
+
 # ----- Results Tracking Routes -----
 
 @app.route("/results")
@@ -415,7 +417,7 @@ def results():
                           results_complete=results_complete)
 
 
-@app.route("/results/<int:meeting_id>")
+@app. route("/results/<int:meeting_id>")
 @login_required
 def results_entry(meeting_id):
     """Form to enter results for a meeting"""
@@ -430,13 +432,13 @@ def results_entry(meeting_id):
                 race_id=Race.query.filter_by(
                     meeting_id=meeting_id, 
                     race_number=race['race_number']
-                ).first().id,
+                ).first(). id,
                 horse_name=horse['horse_name']
             ).first()
             
             if horse_record and horse_record.result:
-                horse['result_finish'] = horse_record.result.finish_position
-                horse['result_sp'] = horse_record.result.sp
+                horse['result_finish'] = horse_record.result. finish_position
+                horse['result_sp'] = horse_record.result. sp
             else:
                 horse['result_finish'] = None
                 horse['result_sp'] = None
@@ -446,7 +448,7 @@ def results_entry(meeting_id):
     return render_template("results_entry.html", meeting=meeting, results=results)
 
 
-@app.route("/results/<int:meeting_id>/save", methods=["POST"])
+@app. route("/results/<int:meeting_id>/save", methods=["POST"])
 @login_required
 def save_results(meeting_id):
     """Save results for a race"""
@@ -514,7 +516,7 @@ def save_results(meeting_id):
                 sp=item['sp'],
                 recorded_by=current_user.id
             )
-            db.session.add(result)
+            db.session. add(result)
     
     db.session.commit()
     flash(f"Race {race_number} results saved successfully", "success")
@@ -534,7 +536,8 @@ def save_results(meeting_id):
     
     return redirect(url_for('results_entry', meeting_id=meeting_id))
 
-@app.route("/admin", methods=["GET", "POST"])
+
+@app. route("/admin", methods=["GET", "POST"])
 @login_required
 def admin_panel():
     if not current_user.is_admin:
@@ -575,7 +578,7 @@ def admin_panel():
                 flash("You cannot delete your own account", "danger")
             else:
                 username = user.username
-                db.session.delete(user)
+                db. session.delete(user)
                 db.session.commit()
                 flash(f"User '{username}' deleted", "success")
         
@@ -590,7 +593,7 @@ def admin_panel():
                 flash("Password must be at least 6 characters", "danger")
             else:
                 user.set_password(new_password)
-                db.session.commit()
+                db. session.commit()
                 flash(f"Password reset for '{user.username}'", "success")
         
         elif action == "toggle_admin":
@@ -602,8 +605,8 @@ def admin_panel():
             elif user.id == current_user.id:
                 flash("You cannot change your own admin status", "danger")
             else:
-                user.is_admin = not user.is_admin
-                db.session.commit()
+                user. is_admin = not user.is_admin
+                db.session. commit()
                 status = "admin" if user.is_admin else "regular user"
                 flash(f"'{user.username}' is now a {status}", "success")
         
@@ -616,7 +619,7 @@ def admin_panel():
             elif user.id == current_user.id:
                 flash("You cannot deactivate your own account", "danger")
             else:
-                user.is_active = not user.is_active
+                user.is_active = not user. is_active
                 db.session.commit()
                 status = "activated" if user.is_active else "deactivated"
                 flash(f"'{user.username}' has been {status}", "success")
@@ -663,7 +666,9 @@ def admin_panel():
         'users': users_data
     }
     
-    return render_template("admin.html", stats=stats)
+    return render_template("admin. html", stats=stats)
+
+
 # ----- Data Analytics Route -----
 
 @app.route("/data")
@@ -672,38 +677,38 @@ def data_analytics():
     """Analytics dashboard showing model performance"""
     from sqlalchemy import func, case, and_
     
-    track_filter = request. args.get('track', '')
-    min_score_filter = request. args.get('min_score', type=float)
+    track_filter = request.args.get('track', '')
+    min_score_filter = request.args.get('min_score', type=float)
     date_from = request.args.get('date_from', '')
-    date_to = request.args. get('date_to', '')
+    date_to = request. args.get('date_to', '')
     
-    base_query = db. session.query(
+    base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
-    ). join(
-        Prediction, Horse. id == Prediction.horse_id
-    ). join(
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
         Result, Horse.id == Result. horse_id
     ).join(
-        Race, Horse.race_id == Race. id
+        Race, Horse.race_id == Race.id
     ).join(
         Meeting, Race.meeting_id == Meeting.id
     )
     
     if track_filter:
-        base_query = base_query.filter(Meeting.meeting_name. ilike(f'%{track_filter}%'))
+        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
         base_query = base_query.filter(Meeting.uploaded_at >= date_from)
     if date_to:
-        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
+        base_query = base_query.filter(Meeting. uploaded_at <= date_to)
     
-    all_results = base_query. all()
+    all_results = base_query.all()
     
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
         race_key = (meeting.id, race.race_number)
         if race_key not in races_data:
             races_data[race_key] = []
-        races_data[race_key]. append({
+        races_data[race_key].append({
             'horse': horse,
             'prediction': pred,
             'result': result,
@@ -714,7 +719,7 @@ def data_analytics():
     total_races = len(races_data)
     top_pick_wins = 0
     total_profit = 0
-    stake = 10.0
+    stake = 10. 0
     winner_sps = []
     
     score_tiers = {
@@ -732,8 +737,8 @@ def data_analytics():
         '<10': {'races': 0, 'wins': 0, 'profit': 0},
     }
     
-    for race_key, horses in races_data. items():
-        horses. sort(key=lambda x: x['prediction'].score, reverse=True)
+    for race_key, horses in races_data.items():
+        horses. sort(key=lambda x: x['prediction']. score, reverse=True)
         
         if not horses:
             continue
@@ -767,7 +772,7 @@ def data_analytics():
         else:
             gap_bucket = '<10'
         
-        won = top_pick['result']. finish_position == 1
+        won = top_pick['result'].finish_position == 1
         sp = top_pick['result'].sp
         profit = (sp * stake - stake) if won else -stake
         
@@ -800,8 +805,8 @@ def data_analytics():
         g['strike_rate'] = (g['wins'] / g['races'] * 100) if g['races'] > 0 else 0
         g['roi'] = (g['profit'] / (g['races'] * stake) * 100) if g['races'] > 0 else 0
     
-    tracks = db.session. query(Meeting.meeting_name). distinct().all()
-    track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
+    tracks = db.session.query(Meeting.meeting_name).distinct().all()
+    track_list = sorted(set([t[0]. split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
     
     return render_template("data. html",
         total_races=total_races,
@@ -820,6 +825,8 @@ def data_analytics():
             'date_to': date_to
         }
     )
+
+
 # Error handlers
 @app.errorhandler(404)
 def not_found_error(error):
@@ -830,6 +837,11 @@ def not_found_error(error):
 def internal_error(error):
     db.session.rollback()
     return render_template('500.html'), 500
+
+
+# ----- Run -----
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
 
 
 # ----- Run -----
