@@ -673,16 +673,16 @@ def data_analytics():
     from sqlalchemy import func, case, and_
     
     # Get filter parameters
-    track_filter = request.args.get('track', '')
-    min_score_filter = request.args.get('min_score', type=float)
-    date_from = request.args. get('date_from', '')
+    track_filter = request. args.get('track', '')
+    min_score_filter = request. args.get('min_score', type=float)
+    date_from = request.args.get('date_from', '')
     date_to = request.args. get('date_to', '')
     
     # Base query: Get all horses with results, joined to predictions and races
-    base_query = db.session.query(
+    base_query = db. session.query(
         Horse, Prediction, Result, Race, Meeting
     ).join(
-        Prediction, Horse. id == Prediction. horse_id
+        Prediction, Horse.id == Prediction.horse_id
     ).join(
         Result, Horse.id == Result. horse_id
     ).join(
@@ -719,7 +719,7 @@ def data_analytics():
     total_races = len(races_data)
     top_pick_wins = 0
     total_profit = 0
-    stake = 10.0
+    stake = 10. 0
     winner_sps = []
     
     # Score tier tracking
@@ -741,7 +741,7 @@ def data_analytics():
     
     for race_key, horses in races_data. items():
         # Sort by score descending
-        horses. sort(key=lambda x: x['prediction']. score, reverse=True)
+        horses. sort(key=lambda x: x['prediction'].score, reverse=True)
         
         if not horses:
             continue
@@ -754,7 +754,7 @@ def data_analytics():
             continue
         
         # Calculate score gap
-        second_score = horses[1]['prediction']. score if len(horses) > 1 else 0
+        second_score = horses[1]['prediction'].score if len(horses) > 1 else 0
         score_gap = top_score - second_score
         
         # Determine tier
@@ -781,7 +781,7 @@ def data_analytics():
         
         # Check if top pick won
         won = top_pick['result'].finish_position == 1
-        sp = top_pick['result'].sp
+        sp = top_pick['result']. sp
         profit = (sp * stake - stake) if won else -stake
         
         # Update totals
@@ -819,10 +819,10 @@ def data_analytics():
         g['roi'] = (g['profit'] / (g['races'] * stake) * 100) if g['races'] > 0 else 0
     
     # Get unique tracks for filter dropdown
-    tracks = db.session.query(Meeting.meeting_name). distinct().all()
+    tracks = db. session.query(Meeting.meeting_name). distinct().all()
     track_list = sorted(set([t[0]. split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
     
-    return render_template("data.html",
+    return render_template("data. html",
         total_races=total_races,
         top_pick_wins=top_pick_wins,
         strike_rate=strike_rate,
@@ -839,7 +839,6 @@ def data_analytics():
             'date_to': date_to
         }
     )
-
 # Error handlers
 @app.errorhandler(404)
 def not_found_error(error):
