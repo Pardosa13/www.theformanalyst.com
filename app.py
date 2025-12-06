@@ -264,7 +264,25 @@ def login():
         flash(f"Welcome back, {username}!", "success")
         return redirect(url_for("dashboard"))
     
-    return render_template("login.html")
+return render_template("data.html",
+        total_races=total_races,
+        top_pick_wins=top_pick_wins,
+        strike_rate=strike_rate,
+        roi=roi,
+        total_profit=total_profit,
+        avg_winner_sp=avg_winner_sp,
+        score_tiers=score_tiers,
+        score_gaps=score_gaps,
+        track_list=track_list,
+        component_stats=sorted_components,
+        price_analysis=price_analysis,
+        filters={
+            'track': track_filter,
+            'min_score': min_score_filter,
+            'date_from': date_from,
+            'date_to': date_to
+        }
+    )
 import re
 
 def parse_notes_components(notes):
