@@ -538,22 +538,8 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
         except (ValueError, TypeError):
             pass
         
-        # Track (from meeting name - format is "YYMMDD_TrackName")
-        meeting_name = meeting.meeting_name or ''
-        if '_' in meeting_name:
-            track = meeting_name.split('_')[1]
-        else:
-            track = meeting_name
-        
-        if track:
-            if track not in tracks:
-                tracks[track] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
-            tracks[track]['runs'] += 1
-            if won:
-                tracks[track]['wins'] += 1
-            if placed:
-                tracks[track]['places'] += 1
-            tracks[track]['profit'] += profit
+        # Track - skip here, handled separately below using top picks only
+        pass
     
     # Calculate rates for all categories
     def calc_rates(data_dict, stake):
