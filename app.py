@@ -367,7 +367,172 @@ def delete_meeting(meeting_id):
     
     flash(f"Meeting '{meeting.meeting_name}' deleted", "success")
     return redirect(url_for("history"))
+# ----- Results Tracking Routes -----
 
+@app.route("/results")
+@login_required
+def results():
+    """Show meetings needing results and completed meetings"""
+    all_meetings = Meeting.query.order_by(Meeting.uploaded_at.desc()).all()
+    
+    needs_results = []
+    results_complete = []
+    
+    for meeting in all_meetings:
+        # Count total horses and horses with results
+        total_horses = 0
+        horses_with_results = 0
+        total_races = len(meeting.races)
+        races_complete = 0
+        
+        for race in meeting.races:
+            race_horses = len(race.horses)
+            race_results = sum(1 for h in race.horses if h.result is not None)
+            total_horses += race_horses
+            horses_with_results += race_results
+            
+            if race_horses > 0 and race_results == race_horses:
+                races_complete += 1
+        
+        meeting_data = {
+            'id': meeting.id,
+            'meeting_name': meeting.meeting_name,
+            'uploaded_at': meeting.uploaded_at,
+            'user': meeting.user.username,
+            'total_races': total_races,
+            'races_complete': races_complete,
+            'total_horses': total_horses,
+            'horses_with_results': horses_with_results
+        }
+        
+        if total_horses > 0 and horses_with_results == total_horses:
+            results_complete.append(meeting_data)
+        else:
+            needs_results.append(meeting_data)
+    
+    return render_template("results.html", 
+                          needs_results=needs_results, 
+                          results_complete=results_complete)
+
+
+@app.route("/results/<int:meeting_id>")
+@login_required
+def results_entry(meeting_id):
+    """Form to enter results for a meeting"""
+    meeting = Meeting.query.get_or_404(meeting_id)
+    results = get_meeting_results(meeting_id)
+    
+    # Add result data to each horse
+    for race in results['races']:
+        for horse in race['horses']:
+            # Find the horse record to get any existing result
+            horse_record = Horse.query.filter_by(
+                race_id=Race.query.filter_by(
+                    meeting_id=meeting_id, 
+                    race_number=race['race_number']
+                ).first().id,
+                horse_name=horse['horse_name']
+            ).first()
+            
+            if horse_record and horse_record.result:
+                horse['result_finish'] = horse_record.result.finish_position
+                horse['result_sp'] = horse_record.result.sp
+            else:
+                horse['result_finish'] = None
+                horse['result_sp'] = None
+            
+            horse['horse_id'] = horse_record.id if horse_record else None
+    
+    return render_template("results_entry.html", meeting=meeting, results=results)
+
+
+@app.route("/results/<int:meeting_id>/save", methods=["POST"])
+@login_required
+def save_results(meeting_id):
+    """Save results for a race"""
+    meeting = Meeting.query.get_or_404(meeting_id)
+    
+    race_number = request.form.get('race_number', type=int)
+    
+    if not race_number:
+        flash("No race specified", "danger")
+        return redirect(url_for('results_entry', meeting_id=meeting_id))
+    
+    race = Race.query.filter_by(meeting_id=meeting_id, race_number=race_number).first()
+    
+    if not race:
+        flash(f"Race {race_number} not found", "danger")
+        return redirect(url_for('results_entry', meeting_id=meeting_id))
+    
+    # Collect all horse results from form
+    errors = []
+    results_to_save = []
+    
+    for horse in race.horses:
+        finish_key = f"finish_{horse.id}"
+        sp_key = f"sp_{horse.id}"
+        
+        finish = request.form.get(finish_key, type=int)
+        sp = request.form.get(sp_key, type=float)
+        
+        if finish is None:
+            errors.append(f"Missing finish position for {horse.horse_name}")
+        elif finish not in [1, 2, 3, 4, 5]:
+            errors.append(f"Invalid finish position for {horse.horse_name}")
+        
+        if sp is None:
+            errors.append(f"Missing SP for {horse.horse_name}")
+        elif sp < 1.01 or sp > 999:
+            errors.append(f"Invalid SP for {horse.horse_name} (must be $1.01 - $999)")
+        
+        if finish is not None and sp is not None:
+            results_to_save.append({
+                'horse': horse,
+                'finish': finish,
+                'sp': sp
+            })
+    
+    if errors:
+        for error in errors:
+            flash(error, "danger")
+        return redirect(url_for('results_entry', meeting_id=meeting_id))
+    
+    # All validation passed - save results
+    for item in results_to_save:
+        horse = item['horse']
+        
+        # Update existing or create new
+        if horse.result:
+            horse.result.finish_position = item['finish']
+            horse.result.sp = item['sp']
+            horse.result.recorded_at = datetime.utcnow()
+            horse.result.recorded_by = current_user.id
+        else:
+            result = Result(
+                horse_id=horse.id,
+                finish_position=item['finish'],
+                sp=item['sp'],
+                recorded_by=current_user.id
+            )
+            db.session.add(result)
+    
+    db.session.commit()
+    flash(f"Race {race_number} results saved successfully", "success")
+    
+    # Check if all races are complete
+    all_complete = True
+    for r in meeting.races:
+        for h in r.horses:
+            if h.result is None:
+                all_complete = False
+                break
+        if not all_complete:
+            break
+    
+    if all_complete:
+        flash(f"All results for {meeting.meeting_name} are now complete!", "success")
+    
+    return redirect(url_for('results_entry', meeting_id=meeting_id))
 
 @app.route("/admin", methods=["GET", "POST"])
 @login_required
