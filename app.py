@@ -996,8 +996,105 @@ def data_analytics():
         g['strike_rate'] = (g['wins'] / g['races'] * 100) if g['races'] > 0 else 0
         g['roi'] = (g['profit'] / (g['races'] * stake) * 100) if g['races'] > 0 else 0
     
-    tracks = db.session.query(Meeting.meeting_name).distinct().all()
+   tracks = db.session.query(Meeting.meeting_name).distinct().all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
+    
+    # Price Analysis
+    price_analysis = {
+        'overlays': {'count': 0, 'wins': 0, 'profit': 0},
+        'underlays': {'count': 0, 'wins': 0, 'profit': 0},
+        'accurate': {'count': 0, 'wins': 0, 'profit': 0},
+        'total_compared': 0,
+        'price_diffs': [],
+        'overlay_examples': [],
+        'underlay_examples': []
+    }
+    
+    for race_key, horses in races_data.items():
+        horses.sort(key=lambda x: x['prediction'].score, reverse=True)
+        
+        if not horses:
+            continue
+        
+        top_pick = horses[0]
+        pred = top_pick['prediction']
+        result = top_pick['result']
+        
+        # Parse predicted odds (remove $ sign)
+        predicted_odds_str = pred.predicted_odds or ''
+        try:
+            predicted_odds = float(predicted_odds_str.replace('$', '').strip())
+        except (ValueError, AttributeError):
+            continue
+        
+        sp = result.sp
+        
+        if not sp or sp <= 0 or not predicted_odds or predicted_odds <= 0:
+            continue
+        
+        price_analysis['total_compared'] += 1
+        
+        won = result.finish_position == 1
+        profit = (sp * stake - stake) if won else -stake
+        
+        # Calculate difference (positive = overlay/value)
+        price_diff = sp - predicted_odds
+        price_diff_pct = ((sp - predicted_odds) / predicted_odds) * 100
+        price_analysis['price_diffs'].append(price_diff_pct)
+        
+        horse_name = top_pick['horse'].horse_name
+        meeting_name = top_pick['meeting'].meeting_name
+        
+        # Categorize: overlay if SP is 10%+ higher than your price
+        if price_diff_pct >= 10:
+            # Overlay - market offering better odds than you assessed
+            price_analysis['overlays']['count'] += 1
+            if won:
+                price_analysis['overlays']['wins'] += 1
+            price_analysis['overlays']['profit'] += profit
+            
+            if len(price_analysis['overlay_examples']) < 5:
+                price_analysis['overlay_examples'].append({
+                    'horse': horse_name,
+                    'meeting': meeting_name,
+                    'your_price': predicted_odds,
+                    'sp': sp,
+                    'diff_pct': price_diff_pct,
+                    'won': won
+                })
+        
+        elif price_diff_pct <= -10:
+            # Underlay - market odds shorter than your assessment
+            price_analysis['underlays']['count'] += 1
+            if won:
+                price_analysis['underlays']['wins'] += 1
+            price_analysis['underlays']['profit'] += profit
+            
+            if len(price_analysis['underlay_examples']) < 5:
+                price_analysis['underlay_examples'].append({
+                    'horse': horse_name,
+                    'meeting': meeting_name,
+                    'your_price': predicted_odds,
+                    'sp': sp,
+                    'diff_pct': price_diff_pct,
+                    'won': won
+                })
+        
+        else:
+            # Accurate - within 10% either way
+            price_analysis['accurate']['count'] += 1
+            if won:
+                price_analysis['accurate']['wins'] += 1
+            price_analysis['accurate']['profit'] += profit
+    
+    # Calculate rates
+    for category in ['overlays', 'underlays', 'accurate']:
+        cat = price_analysis[category]
+        cat['strike_rate'] = (cat['wins'] / cat['count'] * 100) if cat['count'] > 0 else 0
+        cat['roi'] = (cat['profit'] / (cat['count'] * stake) * 100) if cat['count'] > 0 else 0
+    
+    # Average price difference
+    price_analysis['avg_diff'] = sum(price_analysis['price_diffs']) / len(price_analysis['price_diffs']) if price_analysis['price_diffs'] else 0
     
     return render_template("data.html",
         total_races=total_races,
