@@ -110,3 +110,21 @@ class Prediction(db.Model):
     
     def __repr__(self):
         return f'<Prediction {self.horse_id}: {self.score}>'
+        
+class Result(db.Model):
+    """Actual race results for tracking model performance"""
+    __tablename__ = 'results'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    horse_id = db.Column(db.Integer, db.ForeignKey('horses.id'), nullable=False)
+    finish_position = db.Column(db.Integer, nullable=False)  # 1, 2, 3, 4, or 5 for unplaced
+    sp = db.Column(db.Float, nullable=False)  # Starting price as decimal
+    recorded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    recorded_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    
+    # Relationships
+    horse = db.relationship('Horse', backref=db.backref('result', uselist=False, cascade='all, delete-orphan'))
+    user = db.relationship('User', backref='recorded_results')
+    
+    def __repr__(self):
+        return f'<Result {self.horse_id}: P{self.finish_position} @ ${self.sp}>'
