@@ -74,7 +74,7 @@ def run_analyzer(csv_data, track_condition, is_advanced=False):
         'is_advanced': is_advanced
     }
     
-    analyzer_path = os.path.join(os.path.dirname(__file__), 'analyzer. js')
+    analyzer_path = os.path.join(os.path.dirname(__file__), 'analyzer.js')
     
     try:
         result = subprocess.run(
@@ -666,7 +666,7 @@ def admin_panel():
         'users': users_data
     }
     
-    return render_template("admin. html", stats=stats)
+    return render_template("admin.html", stats=stats)
 
 
 # ----- Data Analytics Route -----
