@@ -264,26 +264,6 @@ def login():
         flash(f"Welcome back, {username}!", "success")
         return redirect(url_for("dashboard"))
     
-return render_template("data.html",
-        total_races=total_races,
-        top_pick_wins=top_pick_wins,
-        strike_rate=strike_rate,
-        roi=roi,
-        total_profit=total_profit,
-        avg_winner_sp=avg_winner_sp,
-        score_tiers=score_tiers,
-        score_gaps=score_gaps,
-        track_list=track_list,
-        component_stats=sorted_components,
-        price_analysis=price_analysis,
-        filters={
-            'track': track_filter,
-            'min_score': min_score_filter,
-            'date_from': date_from,
-            'date_to': date_to
-        }
-    )
-
 def parse_notes_components(notes):
     """
     Parse the notes field to extract individual scoring components.
@@ -1009,12 +989,12 @@ def data_analytics():
         t['roi'] = (t['profit'] / (t['races'] * stake) * 100) if t['races'] > 0 else 0
     
     for gap in score_gaps:
-    g = score_gaps[gap]
-    g['strike_rate'] = (g['wins'] / g['races'] * 100) if g['races'] > 0 else 0
-    g['roi'] = (g['profit'] / (g['races'] * stake) * 100) if g['races'] > 0 else 0
-
-tracks = db.session.query(Meeting.meeting_name).distinct().all()
-track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
+        g = score_gaps[gap]
+        g['strike_rate'] = (g['wins'] / g['races'] * 100) if g['races'] > 0 else 0
+        g['roi'] = (g['profit'] / (g['races'] * stake) * 100) if g['races'] > 0 else 0
+    
+    tracks = db.session.query(Meeting.meeting_name).distinct().all()
+    track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
     
     # Price Analysis
     price_analysis = {
@@ -1057,7 +1037,7 @@ track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tr
         # Calculate difference (positive = overlay/value)
         price_diff = sp - predicted_odds
         price_diff_pct = ((sp - predicted_odds) / predicted_odds) * 100
-        price_analysis['price_diffs'].append(price_diff_pct)
+        price_analysis['price_diffs']. append(price_diff_pct)
         
         horse_name = top_pick['horse'].horse_name
         meeting_name = top_pick['meeting'].meeting_name
@@ -1088,7 +1068,7 @@ track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tr
             price_analysis['underlays']['profit'] += profit
             
             if len(price_analysis['underlay_examples']) < 5:
-                price_analysis['underlay_examples'].append({
+                price_analysis['underlay_examples']. append({
                     'horse': horse_name,
                     'meeting': meeting_name,
                     'your_price': predicted_odds,
@@ -1124,6 +1104,7 @@ track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tr
         score_gaps=score_gaps,
         track_list=track_list,
         component_stats=sorted_components,
+        price_analysis=price_analysis,
         filters={
             'track': track_filter,
             'min_score': min_score_filter,
@@ -1131,7 +1112,6 @@ track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tr
             'date_to': date_to
         }
     )
-
 
 # Error handlers
 @app.errorhandler(404)
