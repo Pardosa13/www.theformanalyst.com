@@ -1009,12 +1009,12 @@ def data_analytics():
         t['roi'] = (t['profit'] / (t['races'] * stake) * 100) if t['races'] > 0 else 0
     
     for gap in score_gaps:
-        g = score_gaps[gap]
-        g['strike_rate'] = (g['wins'] / g['races'] * 100) if g['races'] > 0 else 0
-        g['roi'] = (g['profit'] / (g['races'] * stake) * 100) if g['races'] > 0 else 0
-    
-   tracks = db.session.query(Meeting.meeting_name).distinct().all()
-    track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
+    g = score_gaps[gap]
+    g['strike_rate'] = (g['wins'] / g['races'] * 100) if g['races'] > 0 else 0
+    g['roi'] = (g['profit'] / (g['races'] * stake) * 100) if g['races'] > 0 else 0
+
+tracks = db.session.query(Meeting.meeting_name).distinct().all()
+track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
     
     # Price Analysis
     price_analysis = {
