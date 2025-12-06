@@ -1,0 +1,287 @@
+{% extends "base. html" %}
+
+{% block title %}Data Analytics{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <h1 class="mb-4">📊 Data Analytics</h1>
+    
+    <!-- Filters -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">🔍 Filters</h5>
+        </div>
+        <div class="card-body">
+            <form method="get" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Track</label>
+                    <select name="track" class="form-select">
+                        <option value="">All Tracks</option>
+                        {% for track in track_list %}
+                        <option value="{{ track }}" {% if filters.track == track %}selected{% endif %}>{{ track }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Min Score</label>
+                    <input type="number" name="min_score" class="form-control" step="0.1" 
+                           value="{{ filters.min_score or '' }}" placeholder="e.g.  60">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Date From</label>
+                    <input type="date" name="date_from" class="form-control" value="{{ filters.date_from }}">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Date To</label>
+                    <input type="date" name="date_to" class="form-control" value="{{ filters.date_to }}">
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary me-2">Apply Filters</button>
+                    <a href="{{ url_for('data_analytics') }}" class="btn btn-outline-secondary">Reset</a>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Section 1: Overview Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <h3 class="display-4">{{ total_races }}</h3>
+                    <p class="text-muted mb-0">Races Analysed</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <h3 class="display-4">{{ "%. 1f"|format(strike_rate) }}%</h3>
+                    <p class="text-muted mb-0">Strike Rate ({{ top_pick_wins }}/{{ total_races }})</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center h-100 {% if roi >= 0 %}border-success{% else %}border-danger{% endif %}">
+                <div class="card-body">
+                    <h3 class="display-4 {% if roi >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        {{ "%.1f"|format(roi) }}%
+                    </h3>
+                    <p class="text-muted mb-0">ROI (${{ "%.2f"|format(total_profit) }})</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <h3 class="display-4">${{ "%.2f"|format(avg_winner_sp) }}</h3>
+                    <p class="text-muted mb-0">Avg Winner SP</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Section 2: Score Analysis -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center" 
+             data-bs-toggle="collapse" data-bs-target="#scoreAnalysis" style="cursor: pointer;">
+            <h5 class="mb-0">📈 Score Analysis</h5>
+            <i class="bi bi-chevron-down"></i>
+        </div>
+        <div id="scoreAnalysis" class="collapse show">
+            <div class="card-body">
+                <div class="row">
+                    <!-- Score Tier Table -->
+                    <div class="col-md-6">
+                        <h6>Strike Rate by Score Tier</h6>
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Score</th>
+                                    <th>Races</th>
+                                    <th>Wins</th>
+                                    <th>Strike %</th>
+                                    <th>ROI</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for tier, data in score_tiers.items() %}
+                                <tr>
+                                    <td><strong>{{ tier }}</strong></td>
+                                    <td>{{ data. races }}</td>
+                                    <td>{{ data.wins }}</td>
+                                    <td>{{ "%.1f"|format(data.strike_rate) }}%</td>
+                                    <td class="{% if data.roi >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                        {{ "%.1f"|format(data.roi) }}%
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <!-- Score Tier Chart -->
+                    <div class="col-md-6">
+                        <canvas id="scoreTierChart" height="200"></canvas>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <div class="row mt-4">
+                    <!-- Score Gap Table -->
+                    <div class="col-md-6">
+                        <h6>Strike Rate by Score Gap (to 2nd place)</h6>
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Gap</th>
+                                    <th>Races</th>
+                                    <th>Wins</th>
+                                    <th>Strike %</th>
+                                    <th>ROI</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for gap, data in score_gaps.items() %}
+                                <tr>
+                                    <td><strong>{{ gap }}</strong></td>
+                                    <td>{{ data.races }}</td>
+                                    <td>{{ data.wins }}</td>
+                                    <td>{{ "%. 1f"|format(data.strike_rate) }}%</td>
+                                    <td class="{% if data.roi >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                        {{ "%.1f"|format(data.roi) }}%
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <!-- Score Gap Chart -->
+                    <div class="col-md-6">
+                        <canvas id="scoreGapChart" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Section 3: Component Analysis (Placeholder) -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center" 
+             data-bs-toggle="collapse" data-bs-target="#componentAnalysis" style="cursor: pointer;">
+            <h5 class="mb-0">🧩 Component Analysis</h5>
+            <i class="bi bi-chevron-down"></i>
+        </div>
+        <div id="componentAnalysis" class="collapse show">
+            <div class="card-body text-center text-muted py-5">
+                <i class="bi bi-hourglass-split display-4"></i>
+                <p class="mt-3">Coming soon — will show which scoring components (class drop, sectionals, combo bonus, etc.) actually predict winners.</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Section 4: External Factors (Placeholder) -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center" 
+             data-bs-toggle="collapse" data-bs-target="#externalFactors" style="cursor: pointer;">
+            <h5 class="mb-0">🏇 External Factors</h5>
+            <i class="bi bi-chevron-down"></i>
+        </div>
+        <div id="externalFactors" class="collapse show">
+            <div class="card-body text-center text-muted py-5">
+                <i class="bi bi-hourglass-split display-4"></i>
+                <p class="mt-3">Coming soon — jockey, trainer, track, distance, and barrier analysis.</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Section 5: Price Analysis (Placeholder) -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center" 
+             data-bs-toggle="collapse" data-bs-target="#priceAnalysis" style="cursor: pointer;">
+            <h5 class="mb-0">💰 Price Analysis</h5>
+            <i class="bi bi-chevron-down"></i>
+        </div>
+        <div id="priceAnalysis" class="collapse show">
+            <div class="card-body text-center text-muted py-5">
+                <i class="bi bi-hourglass-split display-4"></i>
+                <p class="mt-3">Coming soon — your predicted odds vs actual SP, overlay detection, and ROI by price range.</p>
+            </div>
+        </div>
+    </div>
+    
+    {% if total_races == 0 %}
+    <div class="alert alert-info">
+        <h5>No results data yet! </h5>
+        <p class="mb-0">Go to <a href="{{ url_for('results') }}">Results</a> to start entering race outcomes, then come back here to see your analytics. </p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr. net/npm/chart.js"></script>
+<script>
+// Score Tier Chart
+const tierLabels = {{ score_tiers. keys()|list|tojson }};
+const tierStrikeRates = {{ score_tiers.values()|map(attribute='strike_rate')|list|tojson }};
+const tierROIs = {{ score_tiers.values()|map(attribute='roi')|list|tojson }};
+
+new Chart(document.getElementById('scoreTierChart'), {
+    type: 'bar',
+    data: {
+        labels: tierLabels,
+        datasets: [{
+            label: 'Strike Rate %',
+            data: tierStrikeRates,
+            backgroundColor: 'rgba(54, 162, 235, 0.7)',
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        scales: {
+            y: {
+                beginAtZero: true,
+                max: 100,
+                title: { display: true, text: 'Strike Rate %' }
+            }
+        },
+        plugins: {
+            legend: { display: false }
+        }
+    }
+});
+
+// Score Gap Chart
+const gapLabels = {{ score_gaps. keys()|list|tojson }};
+const gapStrikeRates = {{ score_gaps. values()|map(attribute='strike_rate')|list|tojson }};
+
+new Chart(document. getElementById('scoreGapChart'), {
+    type: 'bar',
+    data: {
+        labels: gapLabels,
+        datasets: [{
+            label: 'Strike Rate %',
+            data: gapStrikeRates,
+            backgroundColor: 'rgba(75, 192, 192, 0. 7)',
+            borderColor: 'rgba(75, 192, 192, 1)',
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        scales: {
+            y: {
+                beginAtZero: true,
+                max: 100,
+                title: { display: true, text: 'Strike Rate %' }
+            }
+        },
+        plugins: {
+            legend: { display: false }
+        }
+    }
+});
+</script>
+{% endblock %}
