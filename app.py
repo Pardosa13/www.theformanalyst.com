@@ -808,7 +808,7 @@ def data_analytics():
     tracks = db.session.query(Meeting.meeting_name).distinct().all()
     track_list = sorted(set([t[0]. split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
     
-    return render_template("data. html",
+    return render_template("data.html",
         total_races=total_races,
         top_pick_wins=top_pick_wins,
         strike_rate=strike_rate,
