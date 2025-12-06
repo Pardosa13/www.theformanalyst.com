@@ -558,6 +558,37 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
     trainers = calc_rates(trainers, stake)
     barriers = calc_rates(barriers, stake)
     distances = calc_rates(distances, stake)
+    # Track analysis - top picks only
+    for race_key, horses in races_data.items():
+        if not horses:
+            continue
+        
+        horses_sorted = sorted(horses, key=lambda x: x['prediction'].score, reverse=True)
+        top_pick = horses_sorted[0]
+        
+        result = top_pick['result']
+        meeting = top_pick['meeting']
+        
+        won = result.finish_position == 1
+        placed = result.finish_position in [1, 2, 3]
+        sp = result.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        
+        meeting_name = meeting.meeting_name or ''
+        if '_' in meeting_name:
+            track = meeting_name.split('_')[1]
+        else:
+            track = meeting_name
+        
+        if track:
+            if track not in tracks:
+                tracks[track] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
+            tracks[track]['runs'] += 1
+            if won:
+                tracks[track]['wins'] += 1
+            if placed:
+                tracks[track]['places'] += 1
+            tracks[track]['profit'] += profit
     tracks = calc_rates(tracks, stake)
     
     # Split jockeys into reliable (5+) and limited (2-4)
@@ -1249,7 +1280,7 @@ def data_analytics():
     price_analysis['avg_diff'] = sum(price_analysis['price_diffs']) / len(price_analysis['price_diffs']) if price_analysis['price_diffs'] else 0
     
     # External Factors Analysis
-    external_factors = analyze_external_factors(all_results_data, stake)
+    external_factors = analyze_external_factors(all_results_data, races_data, stake)
     
     return render_template("data.html",
         total_races=total_races,
