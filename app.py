@@ -434,7 +434,175 @@ def aggregate_component_stats(all_results_data):
         stats['place_rate'] = (stats['places'] / stats['appearances'] * 100) if stats['appearances'] > 0 else 0
     
     return component_stats
-
+def analyze_external_factors(all_results_data, stake=10.0):
+    """
+    Analyze external factors: jockeys, trainers, barriers, distances, tracks
+    Returns dict with stats for each factor
+    """
+    
+    jockeys = {}
+    trainers = {}
+    barriers = {'1-3': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0},
+                '4-6': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0},
+                '7-9': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0},
+                '10+': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}}
+    distances = {'Sprint (≤1200m)': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0},
+                 'Short (1300-1500m)': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0},
+                 'Mile (1550-1700m)': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0},
+                 'Middle (1800-2200m)': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0},
+                 'Staying (2400m+)': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}}
+    tracks = {}
+    
+    for entry in all_results_data:
+        horse = entry['horse']
+        result = entry['result']
+        meeting = entry['meeting']
+        race = entry['race']
+        
+        if not result:
+            continue
+        
+        won = result.finish_position == 1
+        placed = result.finish_position in [1, 2, 3]
+        sp = result.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        
+        # Get CSV data
+        csv_data = horse.csv_data or {}
+        
+        # Jockey
+        jockey = csv_data.get('horse jockey', '').strip()
+        if jockey:
+            if jockey not in jockeys:
+                jockeys[jockey] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
+            jockeys[jockey]['runs'] += 1
+            if won:
+                jockeys[jockey]['wins'] += 1
+            if placed:
+                jockeys[jockey]['places'] += 1
+            jockeys[jockey]['profit'] += profit
+        
+        # Trainer
+        trainer = csv_data.get('horse trainer', '').strip()
+        if trainer:
+            if trainer not in trainers:
+                trainers[trainer] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
+            trainers[trainer]['runs'] += 1
+            if won:
+                trainers[trainer]['wins'] += 1
+            if placed:
+                trainers[trainer]['places'] += 1
+            trainers[trainer]['profit'] += profit
+        
+        # Barrier
+        try:
+            barrier = int(csv_data.get('horse barrier', 0))
+            if barrier >= 1:
+                if barrier <= 3:
+                    bucket = '1-3'
+                elif barrier <= 6:
+                    bucket = '4-6'
+                elif barrier <= 9:
+                    bucket = '7-9'
+                else:
+                    bucket = '10+'
+                barriers[bucket]['runs'] += 1
+                if won:
+                    barriers[bucket]['wins'] += 1
+                if placed:
+                    barriers[bucket]['places'] += 1
+                barriers[bucket]['profit'] += profit
+        except (ValueError, TypeError):
+            pass
+        
+        # Distance
+        try:
+            dist = int(csv_data.get('distance', 0))
+            if dist > 0:
+                if dist <= 1200:
+                    bucket = 'Sprint (≤1200m)'
+                elif dist <= 1500:
+                    bucket = 'Short (1300-1500m)'
+                elif dist <= 1700:
+                    bucket = 'Mile (1550-1700m)'
+                elif dist <= 2200:
+                    bucket = 'Middle (1800-2200m)'
+                else:
+                    bucket = 'Staying (2400m+)'
+                distances[bucket]['runs'] += 1
+                if won:
+                    distances[bucket]['wins'] += 1
+                if placed:
+                    distances[bucket]['places'] += 1
+                distances[bucket]['profit'] += profit
+        except (ValueError, TypeError):
+            pass
+        
+        # Track (from meeting name - format is "YYMMDD_TrackName")
+        meeting_name = meeting.meeting_name or ''
+        if '_' in meeting_name:
+            track = meeting_name.split('_')[1]
+        else:
+            track = meeting_name
+        
+        if track:
+            if track not in tracks:
+                tracks[track] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
+            tracks[track]['runs'] += 1
+            if won:
+                tracks[track]['wins'] += 1
+            if placed:
+                tracks[track]['places'] += 1
+            tracks[track]['profit'] += profit
+    
+    # Calculate rates for all categories
+    def calc_rates(data_dict, stake):
+        for key, stats in data_dict.items():
+            if stats['runs'] > 0:
+                stats['strike_rate'] = (stats['wins'] / stats['runs']) * 100
+                stats['place_rate'] = (stats['places'] / stats['runs']) * 100
+                stats['roi'] = (stats['profit'] / (stats['runs'] * stake)) * 100
+            else:
+                stats['strike_rate'] = 0
+                stats['place_rate'] = 0
+                stats['roi'] = 0
+        return data_dict
+    
+    jockeys = calc_rates(jockeys, stake)
+    trainers = calc_rates(trainers, stake)
+    barriers = calc_rates(barriers, stake)
+    distances = calc_rates(distances, stake)
+    tracks = calc_rates(tracks, stake)
+    
+    # Split jockeys into reliable (5+) and limited (2-4)
+    jockeys_reliable = {k: v for k, v in jockeys.items() if v['runs'] >= 5}
+    jockeys_limited = {k: v for k, v in jockeys.items() if 2 <= v['runs'] < 5}
+    
+    # Sort by strike rate
+    jockeys_reliable = dict(sorted(jockeys_reliable.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
+    jockeys_limited = dict(sorted(jockeys_limited.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
+    
+    # Split trainers into reliable (3+) and limited (2)
+    trainers_reliable = {k: v for k, v in trainers.items() if v['runs'] >= 3}
+    trainers_limited = {k: v for k, v in trainers.items() if v['runs'] == 2}
+    
+    # Sort by strike rate
+    trainers_reliable = dict(sorted(trainers_reliable.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
+    trainers_limited = dict(sorted(trainers_limited.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
+    
+    # Filter tracks with 2+ races
+    tracks = {k: v for k, v in tracks.items() if v['runs'] >= 2}
+    tracks = dict(sorted(tracks.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
+    
+    return {
+        'jockeys_reliable': jockeys_reliable,
+        'jockeys_limited': jockeys_limited,
+        'trainers_reliable': trainers_reliable,
+        'trainers_limited': trainers_limited,
+        'barriers': barriers,
+        'distances': distances,
+        'tracks': tracks
+    }
 @app.route("/logout")
 @login_required
 def logout():
@@ -1109,6 +1277,7 @@ def data_analytics():
         track_list=track_list,
         component_stats=sorted_components,
         price_analysis=price_analysis,
+        external_factors=external_factors,
         filters={
             'track': track_filter,
             'min_score': min_score_filter,
