@@ -845,7 +845,6 @@ def admin_panel():
 @login_required
 def data_analytics():
     """Analytics dashboard showing model performance"""
-    from sqlalchemy import func, case, and_
     
     track_filter = request.args.get('track', '')
     min_score_filter = request.args.get('min_score', type=float)
@@ -873,6 +872,28 @@ def data_analytics():
     
     all_results = base_query.all()
     
+    # Build structured data for component analysis
+    all_results_data = []
+    for horse, pred, result, race, meeting in all_results:
+        all_results_data.append({
+            'horse': horse,
+            'prediction': pred,
+            'result': result,
+            'race': race,
+            'meeting': meeting
+        })
+    
+    # Get component stats
+    component_stats = aggregate_component_stats(all_results_data)
+    
+    # Sort components by appearances (most common first)
+    sorted_components = sorted(
+        component_stats.items(),
+        key=lambda x: x[1]['appearances'],
+        reverse=True
+    )
+    
+    # Group races for score analysis
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
         race_key = (meeting.id, race.race_number)
@@ -988,6 +1009,7 @@ def data_analytics():
         score_tiers=score_tiers,
         score_gaps=score_gaps,
         track_list=track_list,
+        component_stats=sorted_components,
         filters={
             'track': track_filter,
             'min_score': min_score_filter,
