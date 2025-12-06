@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Results - The Form Analyst{% endblock %}
+
+{% block content %}
+<h1>Results</h1>
+
+<div style="margin-bottom: 20px;">
+    <a href="{{ url_for('dashboard') }}" style="color: #667eea; text-decoration: none;">← Back to Dashboard</a>
+</div>
+
+<!-- Section 1: Results Needed -->
+<div class="card" style="margin-bottom: 25px;">
+    <h2 style="margin: 0 0 20px 0;">📝 Results Needed</h2>
+    
+    {% if needs_results %}
+    <div style="display: flex; flex-direction: column; gap: 15px;">
+        {% for meeting in needs_results %}
+        <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+            <div>
+                <div style="font-size: 18px; font-weight: 600;">{{ meeting.meeting_name }}</div>
+                <div style="font-size: 14px; color: #6c757d; margin-top: 5px;">
+                    Uploaded by {{ meeting.user }} • {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
+                </div>
+                <div style="font-size: 14px; color: #856404; margin-top: 5px;">
+                    <strong>{{ meeting.races_complete }} of {{ meeting.total_races }}</strong> races complete
+                </div>
+            </div>
+            <a href="{{ url_for('results_entry', meeting_id=meeting.id) }}" 
+               class="btn btn-primary" 
+               style="white-space: nowrap;">
+                Enter Results
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="color: #6c757d; margin: 0;">No meetings waiting for results.</p>
+    {% endif %}
+</div>
+
+<!-- Section 2: Results Complete -->
+<div class="card">
+    <h2 style="margin: 0 0 20px 0;">✅ Results Complete</h2>
+    
+    {% if results_complete %}
+    <div style="display: flex; flex-direction: column; gap: 15px;">
+        {% for meeting in results_complete %}
+        <div style="background: #d4edda; border-left: 4px solid #28a745; padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+            <div>
+                <div style="font-size: 18px; font-weight: 600;">{{ meeting.meeting_name }}</div>
+                <div style="font-size: 14px; color: #6c757d; margin-top: 5px;">
+                    Uploaded by {{ meeting.user }} • {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
+                </div>
+                <div style="font-size: 14px; color: #155724; margin-top: 5px;">
+                    <strong>{{ meeting.total_races }}</strong> races • <strong>{{ meeting.total_horses }}</strong> horses recorded
+                </div>
+            </div>
+            <a href="{{ url_for('results_entry', meeting_id=meeting.id) }}" 
+               class="btn" 
+               style="background: #6c757d; color: white; white-space: nowrap;">
+                View / Edit
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="color: #6c757d; margin: 0;">No completed meetings yet. Enter results above to see them here.</p>
+    {% endif %}
+</div>
+
+{% endblock %}
