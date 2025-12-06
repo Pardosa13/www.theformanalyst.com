@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+
+{% block title %}{{ meeting.meeting_name }} - Enter Results{% endblock %}
+
+{% block content %}
+<h1>{{ meeting.meeting_name }}</h1>
+
+<div style="margin-bottom: 20px;">
+    <a href="{{ url_for('results') }}" style="color: #667eea; text-decoration: none;">← Back to Results</a>
+</div>
+
+<div class="card">
+    <div style="margin-bottom: 20px;">
+        <p style="margin: 0; color: #6c757d;">
+            <strong>Analyzed:</strong> {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
+        </p>
+        <p style="margin: 5px 0 0 0; color: #6c757d;">
+            <strong>Total Races:</strong> {{ results.races|length }}
+        </p>
+    </div>
+</div>
+
+<!-- Race Navigation -->
+<div class="card" style="margin-bottom: 20px;">
+    <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+        <span style="font-weight: 600; margin-right: 10px;">Jump to Race:</span>
+        {% for race in results.races %}
+        {% set race_complete = true %}
+        {% for horse in race.horses %}
+            {% if horse.result_finish is none %}
+                {% set race_complete = false %}
+            {% endif %}
+        {% endfor %}
+        <a href="#race-{{ race.race_number }}" 
+           style="padding: 8px 16px; background: {% if race_complete %}linear-gradient(135deg, #28a745 0%, #20c997 100%){% else %}linear-gradient(135deg, #667eea 0%, #764ba2 100%){% endif %}; color: white; border-radius: 8px; text-decoration: none; font-weight: 600;">
+            R{{ race.race_number }} {% if race_complete %}✓{% endif %}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Results Entry for Each Race -->
+{% for race in results.races %}
+{% set race_complete = true %}
+{% for horse in race.horses %}
+    {% if horse.result_finish is none %}
+        {% set race_complete = false %}
+    {% endif %}
+{% endfor %}
+
+<div class="card" id="race-{{ race.race_number }}" style="scroll-margin-top: 20px; {% if race_complete %}border-left: 4px solid #28a745;{% endif %}">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+        <h2 style="margin: 0;">
+            Race {{ race.race_number }}
+            {% if race_complete %}<span style="color: #28a745; font-size: 16px;">✓ Complete</span>{% endif %}
+        </h2>
+        <div style="display: flex; gap: 15px; color: #6c757d; font-size: 14px;">
+            {% if race.distance %}
+            <span><strong>Distance:</strong> {{ race.distance }}</span>
+            {% endif %}
+            {% if race.race_class %}
+            <span><strong>Class:</strong> {{ race.race_class }}</span>
+            {% endif %}
+            {% if race.track_condition %}
+            <span><strong>Track:</strong> {{ race.track_condition|capitalize }}</span>
+            {% endif %}
+        </div>
+    </div>
+    
+    <form method="POST" action="{{ url_for('save_results', meeting_id=meeting.id) }}">
+        <input type="hidden" name="race_number" value="{{ race.race_number }}">
+        
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                <thead>
+                    <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                        <th style="padding: 12px; text-align: center; width: 50px;">Pos</th>
+                        <th style="padding: 12px; text-align: left;">Horse</th>
+                        <th style="padding: 12px; text-align: center;">Score</th>
+                        <th style="padding: 12px; text-align: center;">Odds</th>
+                        <th style="padding: 12px; text-align: center;">Finish</th>
+                        <th style="padding: 12px; text-align: center;">SP</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for horse in race.horses %}
+                    <tr style="background-color: {% if horse.result_finish is not none %}#d4edda{% elif loop.index is odd %}#f8f9fa{% else %}#ffffff{% endif %};">
+                        <td style="padding: 12px; text-align: center; font-weight: bold; border-bottom: 1px solid #e2e8f0;">
+                            {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
+                        </td>
+                        <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">
+                            <div style="font-weight: 600;">{{ horse.horse_name }}</div>
+                            <div style="font-size: 12px; color: #6c757d;">
+                                {% if horse.jockey %}J: {{ horse.jockey }}{% endif %}
+                                {% if horse.trainer %} | T: {{ horse.trainer }}{% endif %}
+                            </div>
+                        </td>
+                        <td style="padding: 12px; text-align: center; font-weight: bold; font-size: 18px; border-bottom: 1px solid #e2e8f0;">
+                            {{ "%.1f"|format(horse.score) }}
+                        </td>
+                        <td style="padding: 12px; text-align: center; font-weight: 600; border-bottom: 1px solid #e2e8f0; color: #28a745;">
+                            {{ horse.odds }}
+                        </td>
+                        <td style="padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0;">
+                            <div class="finish-buttons" data-horse-id="{{ horse.horse_id }}">
+                                {% for pos in [1, 2, 3, 4] %}
+                                <button type="button" 
+                                        class="finish-btn {% if horse.result_finish == pos %}selected{% endif %}" 
+                                        data-position="{{ pos }}"
+                                        onclick="selectFinish(this, {{ horse.horse_id }}, {{ pos }})">
+                                    {{ pos }}
+                                </button>
+                                {% endfor %}
+                                <button type="button" 
+                                        class="finish-btn {% if horse.result_finish == 5 %}selected{% endif %}" 
+                                        data-position="5"
+                                        onclick="selectFinish(this, {{ horse.horse_id }}, 5)">
+                                    UP
+                                </button>
+                                <input type="hidden" name="finish_{{ horse.horse_id }}" id="finish_{{ horse.horse_id }}" value="{{ horse.result_finish or '' }}">
+                            </div>
+                        </td>
+                        <td style="padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0;">
+                            <input type="number" 
+                                   name="sp_{{ horse.horse_id }}" 
+                                   id="sp_{{ horse.horse_id }}"
+                                   value="{{ horse.result_sp or '' }}" 
+                                   step="0.01" 
+                                   min="1.01" 
+                                   max="999"
+                                   placeholder="$0.00"
+                                   class="sp-input"
+                                   style="width: 80px; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px; text-align: center; font-weight: 600;">
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
+            <button type="submit" class="btn btn-primary" style="padding: 12px 24px; font-size: 16px;">
+                💾 Save Race {{ race.race_number }} Results
+            </button>
+        </div>
+    </form>
+</div>
+{% endfor %}
+
+<!-- Back to Top -->
+<div style="text-align: center; margin: 30px 0;">
+    <a href="#" style="padding: 10px 20px; background: #2d2d2d; color: white; border-radius: 8px; text-decoration: none;">
+        ↑ Back to Top
+    </a>
+</div>
+
+<style>
+.finish-buttons {
+    display: flex;
+    gap: 5px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.finish-btn {
+    width: 36px;
+    height: 36px;
+    border: 2px solid #e2e8f0;
+    border-radius: 6px;
+    background: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.finish-btn:hover {
+    border-color: #667eea;
+    background: #f0f0ff;
+}
+
+.finish-btn.selected {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: #667eea;
+}
+
+.finish-btn[data-position="1"].selected {
+    background: linear-gradient(135deg, #ffd700 0%, #ffb800 100%);
+    border-color: #ffd700;
+    color: #333;
+}
+
+.finish-btn[data-position="2"].selected {
+    background: linear-gradient(135deg, #c0c0c0 0%, #a8a8a8 100%);
+    border-color: #c0c0c0;
+    color: #333;
+}
+
+.finish-btn[data-position="3"].selected {
+    background: linear-gradient(135deg, #cd7f32 0%, #b87333 100%);
+    border-color: #cd7f32;
+    color: white;
+}
+
+.finish-btn[data-position="5"].selected {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    border-color: #dc3545;
+    color: white;
+}
+
+.sp-input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+}
+
+.sp-input.filled {
+    border-color: #28a745;
+    background: #f0fff4;
+}
+</style>
+
+<script>
+function selectFinish(button, horseId, position) {
+    // Remove selected class from siblings
+    const container = button.parentElement;
+    container.querySelectorAll('.finish-btn').forEach(btn => {
+        btn.classList.remove('selected');
+    });
+    
+    // Add selected class to clicked button
+    button.classList.add('selected');
+    
+    // Update hidden input
+    document.getElementById('finish_' + horseId).value = position;
+    
+    // Update row background if both fields filled
+    checkRowComplete(horseId);
+}
+
+function checkRowComplete(horseId) {
+    const finish = document.getElementById('finish_' + horseId).value;
+    const sp = document.getElementById('sp_' + horseId).value;
+    const row = document.querySelector(`input[name="finish_${horseId}"]`).closest('tr');
+    
+    if (finish && sp) {
+        row.style.backgroundColor = '#d4edda';
+    }
+}
+
+// Add listeners to SP inputs
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.sp-input').forEach(input => {
+        input.addEventListener('input', function() {
+            const horseId = this.name.replace('sp_', '');
+            
+            if (this.value) {
+                this.classList.add('filled');
+            } else {
+                this.classList.remove('filled');
+            }
+            
+            checkRowComplete(horseId);
+        });
+        
+        // Check initial state
+        if (input.value) {
+            input.classList.add('filled');
+        }
+    });
+});
+</script>
+
+{% endblock %}
