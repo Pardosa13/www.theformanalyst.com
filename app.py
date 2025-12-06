@@ -1094,6 +1094,9 @@ def data_analytics():
     # Average price difference
     price_analysis['avg_diff'] = sum(price_analysis['price_diffs']) / len(price_analysis['price_diffs']) if price_analysis['price_diffs'] else 0
     
+    # External Factors Analysis
+    external_factors = analyze_external_factors(all_results_data, stake)
+    
     return render_template("data.html",
         total_races=total_races,
         top_pick_wins=top_pick_wins,
