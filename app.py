@@ -283,7 +283,6 @@ return render_template("data.html",
             'date_to': date_to
         }
     )
-import re
 
 def parse_notes_components(notes):
     """
