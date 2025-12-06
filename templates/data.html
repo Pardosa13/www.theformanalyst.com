@@ -165,20 +165,93 @@
         </div>
     </div>
     
-    <!-- Section 3: Component Analysis (Placeholder) -->
-    <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center" 
-             data-bs-toggle="collapse" data-bs-target="#componentAnalysis" style="cursor: pointer;">
-            <h5 class="mb-0">🧩 Component Analysis</h5>
-            <i class="bi bi-chevron-down"></i>
-        </div>
-        <div id="componentAnalysis" class="collapse show">
-            <div class="card-body text-center text-muted py-5">
-                <i class="bi bi-hourglass-split display-4"></i>
-                <p class="mt-3">Coming soon — will show which scoring components (class drop, sectionals, combo bonus, etc.) actually predict winners.</p>
+    <!-- Section 3: Component Analysis -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center" 
+         data-bs-toggle="collapse" data-bs-target="#componentAnalysis" style="cursor: pointer;">
+        <h5 class="mb-0">🧩 Component Analysis</h5>
+        <i class="bi bi-chevron-down"></i>
+    </div>
+    <div id="componentAnalysis" class="collapse show">
+        <div class="card-body">
+            {% if component_stats and component_stats|length > 0 %}
+            <p class="text-muted mb-3">Which scoring factors actually predict winners? Components sorted by frequency.</p>
+            
+            <div class="table-responsive">
+                <table class="table table-sm table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Component</th>
+                            <th class="text-center">Appearances</th>
+                            <th class="text-center">Wins</th>
+                            <th class="text-center">Strike %</th>
+                            <th class="text-center">Places</th>
+                            <th class="text-center">Place %</th>
+                            <th class="text-center">Avg Score</th>
+                            <th class="text-center">Value?</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for name, stats in component_stats %}
+                        {% if stats.appearances >= 2 %}
+                        <tr>
+                            <td><strong>{{ name }}</strong></td>
+                            <td class="text-center">{{ stats.appearances }}</td>
+                            <td class="text-center">{{ stats.wins }}</td>
+                            <td class="text-center {% if stats.strike_rate >= 30 %}text-success fw-bold{% elif stats.strike_rate >= 20 %}text-success{% elif stats.strike_rate < 10 %}text-danger{% endif %}">
+                                {{ "%.1f"|format(stats.strike_rate) }}%
+                            </td>
+                            <td class="text-center">{{ stats.places }}</td>
+                            <td class="text-center {% if stats.place_rate >= 50 %}text-success{% endif %}">
+                                {{ "%.1f"|format(stats.place_rate) }}%
+                            </td>
+                            <td class="text-center">
+                                {% if stats.avg_score >= 0 %}
+                                <span class="text-success">+{{ "%.1f"|format(stats.avg_score) }}</span>
+                                {% else %}
+                                <span class="text-danger">{{ "%.1f"|format(stats.avg_score) }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                {% if stats.strike_rate >= 25 and stats.appearances >= 5 %}
+                                <span class="badge bg-success">✓ Strong</span>
+                                {% elif stats.strike_rate >= 18 and stats.appearances >= 3 %}
+                                <span class="badge bg-info">Promising</span>
+                                {% elif stats.strike_rate < 10 and stats.appearances >= 5 %}
+                                <span class="badge bg-danger">Weak</span>
+                                {% elif stats.appearances < 5 %}
+                                <span class="badge bg-secondary">Low Data</span>
+                                {% else %}
+                                <span class="badge bg-warning text-dark">Neutral</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
+            
+            <div class="mt-4 p-3 bg-light rounded">
+                <h6>📊 How to read this:</h6>
+                <ul class="mb-0 small">
+                    <li><strong>Strike %</strong> - How often horses with this component win</li>
+                    <li><strong>Place %</strong> - How often they finish 1st, 2nd, or 3rd</li>
+                    <li><strong>Avg Score</strong> - Average points this component contributes</li>
+                    <li><strong>Value?</strong> - Quick assessment: Strong (25%+ strike, 5+ appearances), Promising (18%+), Weak (&lt;10%), or needs more data</li>
+                </ul>
+            </div>
+            
+            {% else %}
+            <div class="text-center text-muted py-5">
+                <i class="bi bi-database display-4"></i>
+                <p class="mt-3">No component data yet. Enter results for analysed meetings to see which scoring factors predict winners.</p>
+                <a href="{{ url_for('results') }}" class="btn btn-primary">Enter Results</a>
+            </div>
+            {% endif %}
         </div>
     </div>
+</div>
     
     <!-- Section 4: External Factors (Placeholder) -->
     <div class="card mb-4">
