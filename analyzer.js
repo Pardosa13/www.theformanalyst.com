@@ -1999,12 +1999,12 @@ function parseLastInteger(sectional) {
 }
 
 // SECTIONAL CONSTANTS
-const SECTIONAL_DISTANCE_TOLERANCE = 200;
+const SECTIONAL_DISTANCE_TOLERANCE = 400;  // ← Changed from 200 to 400
 const SECTIONAL_WEIGHT_ADJUSTMENT_FACTOR = 0.06;
 const SECTIONAL_CLASS_ADJUSTMENT_FACTOR = 0.015;
 const SECTIONAL_BASELINE_CLASS_SCORE = 70;
 const SECTIONAL_RECENCY_WEIGHTS = [1.0, 0.7, 0.5];
-const SECTIONAL_DEFAULT_RACE_DISTANCE = 2000;
+// SECTIONAL_DEFAULT_RACE_DISTANCE removed - now throws error if distance missing
 
 // SECTIONAL HELPERS
 function calculateMean(values) {
@@ -2111,7 +2111,10 @@ function getLowestSectionalsByRace(data) {
         let todaysRaceDistance = parseInt(raceData[0]?.distance, 10);
         if (isNaN(todaysRaceDistance)) todaysRaceDistance = parseInt(raceData[0]?.['race distance'], 10);
         if (isNaN(todaysRaceDistance)) todaysRaceDistance = targetSectionalDistance;
-        if (isNaN(todaysRaceDistance) || !todaysRaceDistance) todaysRaceDistance = SECTIONAL_DEFAULT_RACE_DISTANCE;
+        if (isNaN(todaysRaceDistance) || !todaysRaceDistance) {
+    console.error(`Race ${raceNum}: No valid race distance found in CSV data - skipping sectional analysis`);
+    return;  // Skip this race, move to next one
+}
 
         // Build per-horse historical adjusted times
         const horseData = {};
@@ -2272,27 +2275,35 @@ function getLowestSectionalsByRace(data) {
         });
 
         // Data sufficiency penalties
-        Object.keys(horseData).forEach(hn => {
-            const validRuns = horseData[hn].length;
-            let penalty = 1.0;
-            let penaltyNote = '';
-            if (validRuns === 0) { penalty = 0; penaltyNote = `⚠️  No sectionals at relevant distance (±${SECTIONAL_DISTANCE_TOLERANCE}m from ${todaysRaceDistance}m)\n`; }
-            else if (validRuns === 1) { penalty = 0.5; penaltyNote = `⚠️  Only 1 relevant sectional (score ×${penalty})\n`; }
-            else if (validRuns === 2) { penalty = 0.7; penaltyNote = `⚠️  Only 2 relevant sectionals (score ×${penalty})\n`; }
-            else if (validRuns === 3) { penalty = 0.85; penaltyNote = `⚠️  Only 3 relevant sectionals (score ×${penalty})\n`; }
-            else if (validRuns === 4) { penalty = 0.95; penaltyNote = `ℹ️  4 relevant sectionals (score ×${penalty})\n`; }
+Object.keys(horseData).forEach(hn => {
+    const validRuns = horseData[hn].length;
+    let penalty = 1.0;
+    let penaltyNote = '';
+    
+    if (validRuns === 0) { 
+        penalty = 0; 
+        penaltyNote = `⚠️  No sectionals at relevant distance (±${SECTIONAL_DISTANCE_TOLERANCE}m from ${todaysRaceDistance}m)\n`; 
+    }
+    else if (validRuns === 1) { penalty = 0.5; penaltyNote = `⚠️  Only 1 relevant sectional (score ×${penalty})\n`; }
+    else if (validRuns === 2) { penalty = 0.7; penaltyNote = `⚠️  Only 2 relevant sectionals (score ×${penalty})\n`; }
+    else if (validRuns === 3) { penalty = 0.85; penaltyNote = `⚠️  Only 3 relevant sectionals (score ×${penalty})\n`; }
+    else if (validRuns === 4) { penalty = 0.95; penaltyNote = `ℹ️  4 relevant sectionals (score ×${penalty})\n`; }
 
-            horseScores[hn].dataSufficiency = penalty;
-            if (penalty < 1.0) {
-                horseScores[hn].score *= penalty;
-                horseScores[hn].note += penaltyNote;
-            }
-            if (horseScores[hn].score === 0 && validRuns === 0) horseScores[hn].note = penaltyNote;
-        });
+    horseScores[hn].dataSufficiency = penalty;
+    
+    // NEW LOGIC: Handle zero penalty specially
+    if (penalty === 0) {
+        horseScores[hn].score = 0;  // Explicitly set to 0 (neutral)
+        horseScores[hn].note = penaltyNote;
+    } else if (penalty < 1.0) {
+        horseScores[hn].score *= penalty;
+        horseScores[hn].note += penaltyNote;
+    }
+});
 
         // Convert to results with compatibility fields
         Object.keys(horseScores).forEach(hn => {
-            const finalScore = Math.max(0, Math.round(horseScores[hn].score * 10) / 10);
+          const finalScore = Math.round(horseScores[hn].score * 10) / 10;  // Allow negative scores
             results.push({
                 race: raceNum,
                 name: hn,
