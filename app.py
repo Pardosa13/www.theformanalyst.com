@@ -47,6 +47,12 @@ with app.app_context():
                 conn.execute(text('ALTER TABLE races ADD COLUMN market_id VARCHAR(255)'))
                 conn.commit()
             print("✓ Added market_id column to races table")
+        
+        # Migration: Make sp column nullable in results table
+        with db.engine.connect() as conn:
+            conn.execute(text('ALTER TABLE results ALTER COLUMN sp DROP NOT NULL'))
+            conn.commit()
+        print("✓ Made sp column nullable in results table")
     except Exception as e:
         print(f"Migration check: {e}")
     
