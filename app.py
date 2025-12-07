@@ -838,10 +838,11 @@ def save_results(meeting_id):
         elif finish not in [1, 2, 3, 4, 5]:
             errors.append(f"Invalid finish position for {horse.horse_name}")
         
-        if sp is None:
-            errors.append(f"Missing SP for {horse.horse_name}")
-        elif sp < 1.01 or sp > 999:
-            errors.append(f"Invalid SP for {horse.horse_name} (must be $1.01 - $999)")
+        if finish in [1, 2, 3, 4]:
+            if sp is None:
+                errors.append(f"Missing SP for {horse.horse_name}")
+            elif sp < 1.01 or sp > 999:
+                errors.append(f"Invalid SP for {horse.horse_name} (must be $1.01 - $999)")
         
         if finish is not None and sp is not None:
             results_to_save.append({
