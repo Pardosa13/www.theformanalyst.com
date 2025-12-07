@@ -118,7 +118,7 @@ class Result(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     horse_id = db.Column(db.Integer, db.ForeignKey('horses.id'), nullable=False)
     finish_position = db.Column(db.Integer, nullable=False)  # 1, 2, 3, 4, or 5 for unplaced
-    sp = db.Column(db.Float, nullable=False)  # Starting price as decimal
+    sp = db.Column(db.Float, nullable=True)  # Starting price as decimal
     recorded_at = db.Column(db.DateTime, default=datetime.utcnow)
     recorded_by = db.Column(db.Integer, db.ForeignKey('users.id'))
     
