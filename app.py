@@ -583,6 +583,9 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
         else:
             track = meeting_name
         
+        # Clean track name - remove (1), (2), etc.
+        track = re.sub(r'\s*\(\d+\)\s*$', '', track).strip()
+        
         if track:
             if track not in tracks:
                 tracks[track] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
