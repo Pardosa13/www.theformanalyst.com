@@ -303,7 +303,8 @@ function checkRowComplete(horseId) {
     const sp = document.getElementById('sp_' + horseId).value;
     const row = document.querySelector(`input[name="finish_${horseId}"]`).closest('tr');
     
-    if (finish && sp) {
+    // Horse is complete if: has finish AND (has SP OR is UP/SCR)
+    if (finish && (sp || finish === '5' || finish === '0')) {
         row.style.backgroundColor = '#d4edda';
     }
 }
