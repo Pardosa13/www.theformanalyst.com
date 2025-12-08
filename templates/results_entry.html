@@ -10,11 +10,11 @@
 </div>
 
 <div class="card">
-    <div style="margin-bottom: 20px;">
+    <div ="margin-bottom: 20px;">
         <p style="margin: 0; color: #6c757d;">
             <strong>Analyzed:</strong> {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
         </p>
-        <p style="margin: 5px 0 0 0; color: #6c757d;">
+        <p ="margin: 5px 0 0 0; color: #6c757d;">
             <strong>Total Races:</strong> {{ results.races|length }}
         </p>
     </div>
@@ -225,6 +225,30 @@
 .sp-input.filled {
     border-color: #28a745;
     background: #f0fff4;
+}
+    /* SCR button styling */
+.finish-btn.scr-btn {
+    background: #6c757d;
+    color: white;
+    border-color: #6c757d;
+}
+
+.finish-btn.scr-btn:hover {
+    background: #5a6268;
+    border-color: #5a6268;
+}
+
+.finish-btn.scr-btn.selected,
+.finish-btn[data-position="0"].selected {
+    background: linear-gradient(135deg, #6c757d 0%, #545b62 100%);
+    border-color: #545b62;
+    color: white;
+}
+
+.sp-input:disabled {
+    background: #e9ecef;
+    cursor: not-allowed;
+    border-color: #ced4da;
 }
 </style>
 
