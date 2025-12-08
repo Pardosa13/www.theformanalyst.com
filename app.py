@@ -405,6 +405,7 @@ def aggregate_component_stats(all_results_data):
     Returns dict of component_name -> {appearances, wins, total_score, avg_score}
     """
     component_stats = {}
+    stake = 1.0  # Unit stake for profit calculations
     
     for entry in all_results_data:
         prediction = entry['prediction']
