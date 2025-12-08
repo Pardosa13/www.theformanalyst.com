@@ -292,9 +292,9 @@ def parse_notes_components(notes):
         (r'(-15.0)\s*:\s*No wins in last 10', 'No Wins Last 10'),
         
         # Jockeys
-        (r'\+\s*10.0\s*:\s*Love the Jockey', 'Elite Jockey'),
-        (r'\+\s*5.0\s*:\s*Like the Jockey', 'Good Jockey'),
-        (r'-\s*5.0\s*:\s*Kerrin', 'Negative Jockey'),
+        (r'\+\s*10.0\s*:\s*Elite Jockey', 'Elite Jockey'),
+        (r'\+\s*5.0\s*:\s*Good Jockey', 'Good Jockey'),
+        (r'-\s*5.0\s*:\s*Negative Jockey', 'Negative Jockey'),
         
         # Trainers
         (r'\+\s*5.0\s*:\s*Like the Trainer', 'Good Trainer'),
@@ -307,7 +307,7 @@ def parse_notes_components(notes):
         (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this track!', 'Undefeated at Track'),
         
         # Track+Distance
-        (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this track\+distance', 'Undefeated at Track+Distance'),
+        (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this track+distance', 'Undefeated at Track+Distance'),
         
         # Distance
         (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this distance', 'Undefeated at Distance'),
@@ -342,12 +342,12 @@ def parse_notes_components(notes):
         
         # Days Since Run
         (r'\+\s*15.0\s*:\s*Quick backup', 'Quick Backup'),
-        (r'(-[\d.]+)\s*:\s*Too fresh', 'Too Fresh'),
+        (r'(-\d+)\s*:\s*Too fresh', 'Too Fresh'),
         
         # Form Price
-        (r'\+\s*([\d.]+).0\s*:\s*Form price.*well-backed', 'Form Price - Well Backed'),
+        (r'\+\s*([\d.]+)\.0\s*:\s*Form price.*well-backed', 'Form Price - Well Backed'),
         (r'\+\s*0.0\s*:\s*Form price.*neutral', 'Form Price - Neutral'),
-        (r'(-[\d.]+).0\s*:\s*Form price', 'Form Price - Negative'),
+        (r'(-[\d.]+)\.0\s*:\s*Form price', 'Form Price - Negative'),
         
         # First/Second Up
         (r'\+\s*4.0\s*:\s*First-up winner', 'First Up Winner'),
@@ -368,10 +368,10 @@ def parse_notes_components(notes):
         # Weight
         (r'\+\s*([\d.]+)\s*:\s*Weight.*BELOW race avg', 'Weight - Well Below Avg'),
         (r'\+\s*([\d.]+)\s*:\s*Weight.*below race avg', 'Weight - Below Avg'),
-        (r'(-[\d.]+)\s*:\s*Weight.*above race avg', 'Weight - Above Avg'),
-        (r'(-[\d.]+)\s*:\s*Weight.*ABOVE race avg', 'Weight - Well Above Avg'),
+        (r'(-\d+)\s*:\s*Weight.*above race avg', 'Weight - Above Avg'),
+        (r'(-\d+)\s*:\s*Weight.*ABOVE race avg', 'Weight - Well Above Avg'),
         (r'\+\s*([\d.]+)\s*:\s*Dropped.*from last start', 'Weight Drop'),
-        (r'(-[\d.]+)\s*:\s*Up.*from last start', 'Weight Rise'),
+        (r'(-\d+)\s*:\s*Up.*from last start', 'Weight Rise'),
         
         # Combo Bonus
         (r'\+\s*15.0\s*:\s*COMBO BONUS', 'Combo Bonus'),
@@ -380,7 +380,7 @@ def parse_notes_components(notes):
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(track\)', 'Specialist - Track'),
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(distance\)', 'Specialist - Distance'),
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(track\+distance\)', 'Specialist - Track+Distance'),
-        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(.*?condition\)', 'Specialist - Condition'),
+        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(.*condition\)', 'Specialist - Condition'),
         (r'\+\s*([\d.]+)\s*:\s*100% PODIUM', 'Specialist - Perfect Podium'),
     ]
     
@@ -412,11 +412,13 @@ def aggregate_component_stats(all_results_data):
         
         if not prediction or not result:
             continue
-        
+            
         notes = prediction.notes or ''
         components = parse_notes_components(notes)
         won = result.finish_position == 1
         placed = result.finish_position in [1, 2, 3]
+        sp = result.sp or 0
+        profit = (sp * stake - stake) if won else -stake
         
         for component_name, score_value in components.items():
             if component_name not in component_stats:
@@ -444,6 +446,7 @@ def aggregate_component_stats(all_results_data):
         stats['place_rate'] = (stats['places'] / stats['appearances'] * 100) if stats['appearances'] > 0 else 0
     
     return component_stats
+
 def analyze_external_factors(all_results_data, races_data, stake=10.0):
     """
     Analyze external factors: jockeys, trainers, barriers, distances, tracks
@@ -471,7 +474,7 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
         
         if not result:
             continue
-        
+            
         won = result.finish_position == 1
         placed = result.finish_position in [1, 2, 3]
         sp = result.sp or 0
@@ -603,7 +606,7 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
                 tracks[track]['places'] += 1
             tracks[track]['profit'] += profit
     tracks = calc_rates(tracks, stake)
-
+    
 @app.route("/logout")
 @login_required
 def logout():
@@ -615,10 +618,12 @@ def logout():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    # Get all recent meetings (shared across all users)
-    recent_meetings = Meeting.query    .order_by(Meeting.uploaded_at.desc())
+    recent_meetings = (
+        Meeting.query
+        .order_by(Meeting.uploaded_at.desc())
         .limit(5)
         .all()
+    )
     return render_template("dashboard.html", recent_meetings=recent_meetings)
 
 
@@ -880,7 +885,7 @@ def save_results(meeting_id):
             break
     
     if all_complete:
-        flash(f"All results for {meeting.meeting_name} are now complete!", "success")
+        flash(f"All results for {meeting.meeting_name} are now complete! 🎉", "success")
     
     return redirect(url_for('results_entry', meeting_id=meeting_id))
 @app.route("/results/<int:meeting_id>/save_all", methods=["POST"])
