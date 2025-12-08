@@ -10,11 +10,11 @@
 </div>
 
 <div class="card">
-    <div ="margin-bottom: 20px;">
+    <div style="margin-bottom: 20px;">
         <p style="margin: 0; color: #6c757d;">
             <strong>Analyzed:</strong> {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
         </p>
-        <p ="margin: 5px 0 0 0; color: #6c757d;">
+        <p style="margin: 5px 0 0 0; color: #6c757d;">
             <strong>Total Races:</strong> {{ results.races|length }}
         </p>
     </div>
@@ -112,17 +112,17 @@
                                 </button>
                                 {% endfor %}
                                 <button type="button" 
-        class="finish-btn {% if horse.result_finish == 5 %}selected{% endif %}" 
-        data-position="5"
-        onclick="selectFinish(this, {{ horse.horse_id }}, 5)">
-    UP
-</button>
-<button type="button" 
-        class="finish-btn scr-btn {% if horse.result_finish == 0 %}selected{% endif %}" 
-        data-position="0"
-        onclick="selectFinish(this, {{ horse.horse_id }}, 0)">
-    SCR
-</button>
+                                        class="finish-btn {% if horse.result_finish == 5 %}selected{% endif %}" 
+                                        data-position="5"
+                                        onclick="selectFinish(this, {{ horse.horse_id }}, 5)">
+                                    UP
+                                </button>
+                                <button type="button" 
+                                        class="finish-btn scr-btn {% if horse.result_finish == 0 %}selected{% endif %}" 
+                                        data-position="0"
+                                        onclick="selectFinish(this, {{ horse.horse_id }}, 0)">
+                                    SCR
+                                </button>
                                 <input type="hidden" name="finish_{{ horse.horse_id }}" id="finish_{{ horse.horse_id }}" value="{{ horse.result_finish or '' }}">
                             </div>
                         </td>
@@ -153,47 +153,7 @@
 </div>
 {% endfor %}
 
-<script>
-function selectFinish(button, horseId, position) {
-    // Remove selected class from siblings
-    const container = button.parentElement;
-    container.querySelectorAll('.finish-btn').forEach(btn => {
-        btn.classList.remove('selected');
-    });
-    
-    // Add selected class to clicked button
-    button.classList.add('selected');
-    
-    // Update hidden input
-    document.getElementById('finish_' + horseId).value = position;
-    
-    // Handle SP field for scratched horses
-    const spInput = document.getElementById('sp_' + horseId);
-    if (position === 0) {
-        // Scratched horses don't have SP
-        spInput.value = '';
-        spInput.disabled = true;
-        spInput.placeholder = 'N/A';
-    } else {
-        // Enable SP field for horses that ran
-        spInput.disabled = false;
-        spInput.placeholder = '$0.00';
-    }
-    
-    // Update row background if both fields filled
-    checkRowComplete(horseId);
-}
-
-function checkRowComplete(horseId) {
-    const finish = document.getElementById('finish_' + horseId).value;
-    const sp = document.getElementById('sp_' + horseId).value;
-    const row = document.querySelector(`input[name="finish_${horseId}"]`).closest('tr');
-    
-    if (finish && sp) {
-        row.style.backgroundColor = '#d4edda';
-    }
-}
-    <!-- Batch Submit Section -->
+<!-- Batch Submit Section -->
 <div class="card" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white;">
     <h3 style="margin: 0 0 15px 0;">🚀 Batch Submit</h3>
     <p style="margin: 0 0 20px 0; opacity: 0.9;">
@@ -207,6 +167,7 @@ function checkRowComplete(horseId) {
     </button>
     <div id="batch-status" style="margin-top: 15px; font-weight: 600;"></div>
 </div>
+
 <!-- Back to Top -->
 <div style="text-align: center; margin: 30px 0;">
     <a href="#" style="padding: 10px 20px; background: #2d2d2d; color: white; border-radius: 8px; text-decoration: none;">
@@ -270,17 +231,6 @@ function checkRowComplete(horseId) {
     color: white;
 }
 
-.sp-input:focus {
-    outline: none;
-    border-color: #667eea;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
-}
-
-.sp-input.filled {
-    border-color: #28a745;
-    background: #f0fff4;
-}
-    /* SCR button styling */
 .finish-btn.scr-btn {
     background: #6c757d;
     color: white;
@@ -299,12 +249,65 @@ function checkRowComplete(horseId) {
     color: white;
 }
 
+.sp-input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+}
+
+.sp-input.filled {
+    border-color: #28a745;
+    background: #f0fff4;
+}
+
 .sp-input:disabled {
     background: #e9ecef;
     cursor: not-allowed;
     border-color: #ced4da;
 }
 </style>
+
+<script>
+function selectFinish(button, horseId, position) {
+    // Remove selected class from siblings
+    const container = button.parentElement;
+    container.querySelectorAll('.finish-btn').forEach(btn => {
+        btn.classList.remove('selected');
+    });
+    
+    // Add selected class to clicked button
+    button.classList.add('selected');
+    
+    // Update hidden input
+    document.getElementById('finish_' + horseId).value = position;
+    
+    // Handle SP field for scratched horses
+    const spInput = document.getElementById('sp_' + horseId);
+    if (position === 0) {
+        // Scratched horses don't have SP
+        spInput.value = '';
+        spInput.disabled = true;
+        spInput.placeholder = 'N/A';
+    } else {
+        // Enable SP field for horses that ran
+        spInput.disabled = false;
+        spInput.placeholder = '$0.00';
+    }
+    
+    // Update row background if both fields filled
+    checkRowComplete(horseId);
+}
+
+function checkRowComplete(horseId) {
+    const finish = document.getElementById('finish_' + horseId).value;
+    const sp = document.getElementById('sp_' + horseId).value;
+    const row = document.querySelector(`input[name="finish_${horseId}"]`).closest('tr');
+    
+    if (finish && sp) {
+        row.style.backgroundColor = '#d4edda';
+    }
+}
+
 function submitAllRaces() {
     const statusDiv = document.getElementById('batch-status');
     statusDiv.innerHTML = '⏳ Checking races...';
@@ -328,8 +331,8 @@ function submitAllRaces() {
             // Check if this horse is complete
             if (!finish) {
                 allComplete = false;
-            } else if (finish !== '5' && !sp) {
-                // Placed horses need SP
+            } else if (finish !== '5' && finish !== '0' && !sp) {
+                // Placed horses (not UP or SCR) need SP
                 allComplete = false;
             }
             
@@ -358,8 +361,7 @@ function submitAllRaces() {
     
     // Confirm with user
     const totalRaces = forms.length;
-    const confirmMsg = `Submit ${racesData.length} of ${totalRaces} races?\n\n` +
-                      `Incomplete races will be skipped.`;
+    const confirmMsg = `Submit ${racesData.length} of ${totalRaces} races?\n\nIncomplete races will be skipped.`;
     
     if (!confirm(confirmMsg)) {
         statusDiv.innerHTML = '';
