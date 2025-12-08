@@ -1147,7 +1147,7 @@ def data_analytics():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     
-   base_query = db.session.query(
+        base_query = db.session.query(
     Horse, Prediction, Result, Race, Meeting
 ).join(
     Prediction, Horse.id == Prediction.horse_id
