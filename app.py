@@ -380,7 +380,7 @@ def parse_notes_components(notes):
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(track\)', 'Specialist - Track'),
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(distance\)', 'Specialist - Distance'),
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(track\+distance\)', 'Specialist - Track+Distance'),
-        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(.*condition\)', 'Specialist - Condition'),
+        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(.*?condition\)', 'Specialist - Condition'),
         (r'\+\s*([\d.]+)\s*:\s*100% PODIUM', 'Specialist - Perfect Podium'),
     ]
     
@@ -417,8 +417,6 @@ def aggregate_component_stats(all_results_data):
         components = parse_notes_components(notes)
         won = result.finish_position == 1
         placed = result.finish_position in [1, 2, 3]
-        sp = result.sp or 0
-        profit = (sp * stake - stake) if won else -stake
         
         for component_name, score_value in components.items():
             if component_name not in component_stats:
@@ -446,7 +444,6 @@ def aggregate_component_stats(all_results_data):
         stats['place_rate'] = (stats['places'] / stats['appearances'] * 100) if stats['appearances'] > 0 else 0
     
     return component_stats
-
 def analyze_external_factors(all_results_data, races_data, stake=10.0):
     """
     Analyze external factors: jockeys, trainers, barriers, distances, tracks
@@ -605,37 +602,8 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
             if placed:
                 tracks[track]['places'] += 1
             tracks[track]['profit'] += profit
-tracks = calc_rates(tracks, stake)
-    
-    # Split jockeys into reliable (5+) and limited (2-4)
-    jockeys_reliable = {k: v for k, v in jockeys.items() if v['runs'] >= 5}
-    jockeys_limited = {k: v for k, v in jockeys.items() if 2 <= v['runs'] < 5}
-    
-    # Sort by strike rate
-    jockeys_reliable = dict(sorted(jockeys_reliable.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
-    jockeys_limited = dict(sorted(jockeys_limited.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
-    
-    # Split trainers into reliable (3+) and limited (2)
-    trainers_reliable = {k: v for k, v in trainers.items() if v['runs'] >= 3}
-    trainers_limited = {k: v for k, v in trainers.items() if v['runs'] == 2}
-    
-    # Sort by strike rate
-    trainers_reliable = dict(sorted(trainers_reliable.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
-    trainers_limited = dict(sorted(trainers_limited.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
-    
-    # Filter tracks with 2+ races
-    tracks = {k: v for k, v in tracks.items() if v['runs'] >= 2}
-    tracks = dict(sorted(tracks.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
-    
-    return {
-        'jockeys_reliable': jockeys_reliable,
-        'jockeys_limited': jockeys_limited,
-        'trainers_reliable': trainers_reliable,
-        'trainers_limited': trainers_limited,
-        'barriers': barriers,
-        'distances': distances,
-        'tracks': tracks
-    }
+    tracks = calc_rates(tracks, stake)
+
 @app.route("/logout")
 @login_required
 def logout():
@@ -648,8 +616,7 @@ def logout():
 @login_required
 def dashboard():
     # Get all recent meetings (shared across all users)
-    recent_meetings = Meeting.query\ 
-        .order_by(Meeting.uploaded_at.desc())
+    recent_meetings = Meeting.query    .order_by(Meeting.uploaded_at.desc())
         .limit(5)
         .all()
     return render_template("dashboard.html", recent_meetings=recent_meetings)
@@ -913,7 +880,7 @@ def save_results(meeting_id):
             break
     
     if all_complete:
-        flash(f"All results for {meeting.meeting_name} are now complete! 🎉", "success")
+        flash(f"All results for {meeting.meeting_name} are now complete!", "success")
     
     return redirect(url_for('results_entry', meeting_id=meeting_id))
 @app.route("/results/<int:meeting_id>/save_all", methods=["POST"])
