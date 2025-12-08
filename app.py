@@ -1048,17 +1048,19 @@ def data_analytics():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     
-    base_query = db.session.query(
-        Horse, Prediction, Result, Race, Meeting
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
-        Result, Horse.id == Result.horse_id
-    ).join(
-        Race, Horse.race_id == Race.id
-    ).join(
-        Meeting, Race.meeting_id == Meeting.id
-    )
+   base_query = db.session.query(
+    Horse, Prediction, Result, Race, Meeting
+).join(
+    Prediction, Horse.id == Prediction.horse_id
+).join(
+    Result, Horse.id == Result.horse_id
+).join(
+    Race, Horse.race_id == Race.id
+).join(
+    Meeting, Race.meeting_id == Meeting.id
+).filter(
+    Result.finish_position > 0  # Exclude scratched horses
+)
     
     if track_filter:
         base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
