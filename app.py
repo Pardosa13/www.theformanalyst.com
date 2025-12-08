@@ -117,25 +117,10 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
     if not analysis_results:
         raise Exception("No results returned from analyzer")
     
-    # Extract meeting name from filename
-    meeting_name = filename.replace('.csv', '')
-
-    # Check for existing meeting with the same name for this user
-    existing_meeting = Meeting.query.filter_by(
-        user_id=user_id,
-        meeting_name=meeting_name
-    ).first()
-
-    if existing_meeting:
-        # Delete existing meeting and its related data
-        # Cascade delete will handle races, horses, predictions, and results
-        db.session.delete(existing_meeting)
-        db.session.commit() # Commit deletion before creating new, to avoid conflicts
-    
-    # Create new meeting record
+    # Create meeting record
     meeting = Meeting(
         user_id=user_id,
-        meeting_name=meeting_name,
+        meeting_name=filename.replace('.csv', ''),
         csv_data=csv_data
     )
     db.session.add(meeting)
@@ -304,15 +289,15 @@ def parse_notes_components(notes):
     patterns = [
         # Last 10 Form
         (r'([+-]?\s*[\d.]+)\s*:\s*Ran places:', 'Ran Places'),
-        (r'(-15\.0)\s*:\s*No wins in last 10', 'No Wins Last 10'),
+        (r'(-15.0)\s*:\s*No wins in last 10', 'No Wins Last 10'),
         
         # Jockeys
-        (r'\+\s*10\.0\s*:\s*Love the Jockey', 'Elite Jockey'),
-        (r'\+\s*5\.0\s*:\s*Like the Jockey', 'Good Jockey'),
-        (r'-\s*5\.0\s*:\s*Kerrin', 'Negative Jockey'),
+        (r'\+\s*10.0\s*:\s*Love the Jockey', 'Elite Jockey'),
+        (r'\+\s*5.0\s*:\s*Like the Jockey', 'Good Jockey'),
+        (r'-\s*5.0\s*:\s*Kerrin', 'Negative Jockey'),
         
         # Trainers
-        (r'\+\s*5\.0\s*:\s*Like the Trainer', 'Good Trainer'),
+        (r'\+\s*5.0\s*:\s*Like the Trainer', 'Good Trainer'),
         
         # Track Record
         (r'([+-]?\s*[\d.]+)\s*:\s*Exceptional win rate.*at this track\n', 'Track Win Rate - Exceptional'),
@@ -333,44 +318,44 @@ def parse_notes_components(notes):
         (r'=\s*([\d.]+)\s*:\s*Total track condition score', 'Track Condition Score Total'),
         
         # Distance Change
-        (r'\+\s*1\.0\s*:\s*Longer dist than previous', 'Longer Distance'),
-        (r'-\s*1\.0\s*:\s*Shorter dist than previous', 'Shorter Distance'),
+        (r'\+\s*1.0\s*:\s*Longer dist than previous', 'Longer Distance'),
+        (r'-\s*1.0\s*:\s*Shorter dist than previous', 'Shorter Distance'),
         
         # Class Change
         (r'\+\s*([\d.]+):\s*Stepping DOWN', 'Class Drop'),
         (r'(-[\d.]+):\s*Stepping UP', 'Class Rise'),
         
         # Last Start Margin - Winners
-        (r'\+\s*10\.0\s*:\s*Dominant last start win', 'Last Start - Dominant Win'),
-        (r'\+\s*7\.0\s*:\s*Comfortable last start win', 'Last Start - Comfortable Win'),
-        (r'\+\s*5\.0\s*:\s*Narrow last start win', 'Last Start - Narrow Win'),
-        (r'\+\s*3\.0\s*:\s*Photo finish last start win', 'Last Start - Photo Win'),
+        (r'\+\s*10.0\s*:\s*Dominant last start win', 'Last Start - Dominant Win'),
+        (r'\+\s*7.0\s*:\s*Comfortable last start win', 'Last Start - Comfortable Win'),
+        (r'\+\s*5.0\s*:\s*Narrow last start win', 'Last Start - Narrow Win'),
+        (r'\+\s*3.0\s*:\s*Photo finish last start win', 'Last Start - Photo Win'),
         
         # Last Start Margin - Placed
-        (r'\+\s*5\.0\s*:\s*Narrow loss.*very competitive', 'Last Start - Competitive Loss'),
-        (r'\+\s*3\.0\s*:\s*Close loss', 'Last Start - Close Loss'),
+        (r'\+\s*5.0\s*:\s*Narrow loss.*very competitive', 'Last Start - Competitive Loss'),
+        (r'\+\s*3.0\s*:\s*Close loss', 'Last Start - Close Loss'),
         
         # Last Start Margin - Beaten
-        (r'-\s*3\.0\s*:\s*Beaten clearly', 'Last Start - Beaten Clearly'),
-        (r'-\s*7\.0\s*:\s*Well beaten', 'Last Start - Well Beaten'),
-        (r'-\s*15\.0\s*:\s*Demolished', 'Last Start - Demolished'),
+        (r'-\s*3.0\s*:\s*Beaten clearly', 'Last Start - Beaten Clearly'),
+        (r'-\s*7.0\s*:\s*Well beaten', 'Last Start - Well Beaten'),
+        (r'-\s*15.0\s*:\s*Demolished', 'Last Start - Demolished'),
         
         # Days Since Run
-        (r'\+\s*15\.0\s*:\s*Quick backup', 'Quick Backup'),
+        (r'\+\s*15.0\s*:\s*Quick backup', 'Quick Backup'),
         (r'(-[\d.]+)\s*:\s*Too fresh', 'Too Fresh'),
         
         # Form Price
-        (r'\+\s*([\d.]+)\.0\s*:\s*Form price.*well-backed', 'Form Price - Well Backed'),
-        (r'\+\s*0\.0\s*:\s*Form price.*neutral', 'Form Price - Neutral'),
-        (r'(-[\d.]+)\.0\s*:\s*Form price', 'Form Price - Negative'),
+        (r'\+\s*([\d.]+).0\s*:\s*Form price.*well-backed', 'Form Price - Well Backed'),
+        (r'\+\s*0.0\s*:\s*Form price.*neutral', 'Form Price - Neutral'),
+        (r'(-[\d.]+).0\s*:\s*Form price', 'Form Price - Negative'),
         
         # First/Second Up
-        (r'\+\s*4\.0\s*:\s*First-up winner', 'First Up Winner'),
-        (r'\+\s*3\.0\s*:\s*Strong first-up podium', 'First Up Strong Podium'),
-        (r'\+\s*3\.0\s*:\s*Second-up winner', 'Second Up Winner'),
-        (r'\+\s*2\.0\s*:\s*Strong second-up podium', 'Second Up Strong Podium'),
-        (r'\+\s*15\.0\s*:\s*First-up specialist \(UNDEFEATED\)', 'First Up Specialist'),
-        (r'\+\s*15\.0\s*:\s*Second-up specialist \(UNDEFEATED\)', 'Second Up Specialist'),
+        (r'\+\s*4.0\s*:\s*First-up winner', 'First Up Winner'),
+        (r'\+\s*3.0\s*:\s*Strong first-up podium', 'First Up Strong Podium'),
+        (r'\+\s*3.0\s*:\s*Second-up winner', 'Second Up Winner'),
+        (r'\+\s*2.0\s*:\s*Strong second-up podium', 'Second Up Strong Podium'),
+        (r'\+\s*15.0\s*:\s*First-up specialist \(UNDEFEATED\)', 'First Up Specialist'),
+        (r'\+\s*15.0\s*:\s*Second-up specialist \(UNDEFEATED\)', 'Second Up Specialist'),
         
         # Sectionals
         (r'\+\s*([\d.]+):\s*weighted avg \(z=([\d.]+)', 'Sectional Weighted Avg'),
@@ -389,7 +374,7 @@ def parse_notes_components(notes):
         (r'(-[\d.]+)\s*:\s*Up.*from last start', 'Weight Rise'),
         
         # Combo Bonus
-        (r'\+\s*15\.0\s*:\s*COMBO BONUS', 'Combo Bonus'),
+        (r'\+\s*15.0\s*:\s*COMBO BONUS', 'Combo Bonus'),
         
         # Specialist Bonuses
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(track\)', 'Specialist - Track'),
@@ -432,6 +417,8 @@ def aggregate_component_stats(all_results_data):
         components = parse_notes_components(notes)
         won = result.finish_position == 1
         placed = result.finish_position in [1, 2, 3]
+        sp = result.sp or 0
+        profit = (sp * stake - stake) if won else -stake
         
         for component_name, score_value in components.items():
             if component_name not in component_stats:
@@ -459,6 +446,7 @@ def aggregate_component_stats(all_results_data):
         stats['place_rate'] = (stats['places'] / stats['appearances'] * 100) if stats['appearances'] > 0 else 0
     
     return component_stats
+
 def analyze_external_factors(all_results_data, races_data, stake=10.0):
     """
     Analyze external factors: jockeys, trainers, barriers, distances, tracks
@@ -617,7 +605,7 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
             if placed:
                 tracks[track]['places'] += 1
             tracks[track]['profit'] += profit
-    tracks = calc_rates(tracks, stake)
+tracks = calc_rates(tracks, stake)
     
     # Split jockeys into reliable (5+) and limited (2-4)
     jockeys_reliable = {k: v for k, v in jockeys.items() if v['runs'] >= 5}
@@ -660,9 +648,9 @@ def logout():
 @login_required
 def dashboard():
     # Get all recent meetings (shared across all users)
-    recent_meetings = Meeting.query\
-        .order_by(Meeting.uploaded_at.desc())\
-        .limit(5)\
+    recent_meetings = Meeting.query\ 
+        .order_by(Meeting.uploaded_at.desc())
+        .limit(5)
         .all()
     return render_template("dashboard.html", recent_meetings=recent_meetings)
 
@@ -925,7 +913,7 @@ def save_results(meeting_id):
             break
     
     if all_complete:
-        flash(f"All results for {meeting.meeting_name} are now complete!", "success")
+        flash(f"All results for {meeting.meeting_name} are now complete! 🎉", "success")
     
     return redirect(url_for('results_entry', meeting_id=meeting_id))
 @app.route("/results/<int:meeting_id>/save_all", methods=["POST"])
@@ -1181,7 +1169,8 @@ def data_analytics():
     ).join(
         Meeting, Race.meeting_id == Meeting.id
     ).filter(
-        Result.finish_position > 0  # Exclude scratched horses
+        Result.finish_position > 0,  # Exclude scratched horses
+        Meeting.user_id == current_user.id # Filter by current user
     )
     if track_filter:
         base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
