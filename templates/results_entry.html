@@ -152,7 +152,48 @@
     </form>
 </div>
 {% endfor %}
-<!-- Batch Submit Section -->
+
+<script>
+function selectFinish(button, horseId, position) {
+    // Remove selected class from siblings
+    const container = button.parentElement;
+    container.querySelectorAll('.finish-btn').forEach(btn => {
+        btn.classList.remove('selected');
+    });
+    
+    // Add selected class to clicked button
+    button.classList.add('selected');
+    
+    // Update hidden input
+    document.getElementById('finish_' + horseId).value = position;
+    
+    // Handle SP field for scratched horses
+    const spInput = document.getElementById('sp_' + horseId);
+    if (position === 0) {
+        // Scratched horses don't have SP
+        spInput.value = '';
+        spInput.disabled = true;
+        spInput.placeholder = 'N/A';
+    } else {
+        // Enable SP field for horses that ran
+        spInput.disabled = false;
+        spInput.placeholder = '$0.00';
+    }
+    
+    // Update row background if both fields filled
+    checkRowComplete(horseId);
+}
+
+function checkRowComplete(horseId) {
+    const finish = document.getElementById('finish_' + horseId).value;
+    const sp = document.getElementById('sp_' + horseId).value;
+    const row = document.querySelector(`input[name="finish_${horseId}"]`).closest('tr');
+    
+    if (finish && sp) {
+        row.style.backgroundColor = '#d4edda';
+    }
+}
+    <!-- Batch Submit Section -->
 <div class="card" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white;">
     <h3 style="margin: 0 0 15px 0;">🚀 Batch Submit</h3>
     <p style="margin: 0 0 20px 0; opacity: 0.9;">
@@ -350,46 +391,6 @@ function submitAllRaces() {
     .catch(error => {
         statusDiv.innerHTML = `❌ Error: ${error.message}`;
     });
-}
-<script>
-function selectFinish(button, horseId, position) {
-    // Remove selected class from siblings
-    const container = button.parentElement;
-    container.querySelectorAll('.finish-btn').forEach(btn => {
-        btn.classList.remove('selected');
-    });
-    
-    // Add selected class to clicked button
-    button.classList.add('selected');
-    
-    // Update hidden input
-    document.getElementById('finish_' + horseId).value = position;
-    
-    // Handle SP field for scratched horses
-    const spInput = document.getElementById('sp_' + horseId);
-    if (position === 0) {
-        // Scratched horses don't have SP
-        spInput.value = '';
-        spInput.disabled = true;
-        spInput.placeholder = 'N/A';
-    } else {
-        // Enable SP field for horses that ran
-        spInput.disabled = false;
-        spInput.placeholder = '$0.00';
-    }
-    
-    // Update row background if both fields filled
-    checkRowComplete(horseId);
-}
-
-function checkRowComplete(horseId) {
-    const finish = document.getElementById('finish_' + horseId).value;
-    const sp = document.getElementById('sp_' + horseId).value;
-    const row = document.querySelector(`input[name="finish_${horseId}"]`).closest('tr');
-    
-    if (finish && sp) {
-        row.style.backgroundColor = '#d4edda';
-    }
 }
 
 // Add listeners to SP inputs
