@@ -112,13 +112,19 @@ class Prediction(db.Model):
         return f'<Prediction {self.horse_id}: {self.score}>'
         
 class Result(db.Model):
-    """Actual race results for tracking model performance"""
+    """Actual race results for tracking model performance
+    
+    finish_position codes:
+    - 1, 2, 3, 4 = actual finishing positions
+    - 5 = unplaced (ran but finished 5th or worse)
+    - 0 = scratched (did not run)
+    """
     __tablename__ = 'results'
     
     id = db.Column(db.Integer, primary_key=True)
     horse_id = db.Column(db.Integer, db.ForeignKey('horses.id'), nullable=False)
-    finish_position = db.Column(db.Integer, nullable=False)  # 1, 2, 3, 4, or 5 for unplaced
-    sp = db.Column(db.Float, nullable=False)  # Starting price as decimal
+    finish_position = db.Column(db.Integer, nullable=False)  # 0=scratched, 1-4=placed, 5=unplaced
+    sp = db.Column(db.Float, nullable=True)  # NULL for scratched horses
     recorded_at = db.Column(db.DateTime, default=datetime.utcnow)
     recorded_by = db.Column(db.Integer, db.ForeignKey('users.id'))
     
@@ -126,5 +132,17 @@ class Result(db.Model):
     horse = db.relationship('Horse', backref=db.backref('result', uselist=False, cascade='all, delete-orphan'))
     user = db.relationship('User', backref='recorded_results')
     
+    @property
+    def is_scratched(self):
+        """Check if this horse was scratched"""
+        return self.finish_position == 0
+    
+    @property
+    def actually_ran(self):
+        """Check if this horse actually competed"""
+        return self.finish_position > 0
+    
     def __repr__(self):
+        if self.finish_position == 0:
+            return f'<Result {self.horse_id}: SCRATCHED>'
         return f'<Result {self.horse_id}: P{self.finish_position} @ ${self.sp}>'
