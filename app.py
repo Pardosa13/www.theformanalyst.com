@@ -736,82 +736,50 @@ def delete_meeting(meeting_id):
 
 # ----- Results Tracking Routes -----
 
-@app.route("/results")
-@login_required
-def results():
-    """Show meetings needing results and completed meetings"""
-    all_meetings = Meeting.query.order_by(Meeting.uploaded_at.desc()).all()
-    
-    needs_results = []
-    results_complete = []
-    
-    for meeting in all_meetings:
-        # Count total horses and horses with results
-        total_horses = 0
-        horses_with_results = 0
-        total_races = len(meeting.races)
-        races_complete = 0
-        
-        for race in meeting.races:
-            race_horses = len(race.horses)
-            race_results = sum(1 for h in race.horses if h.result is not None)
-            total_horses += race_horses
-            horses_with_results += race_results
-            
-            if race_horses > 0 and race_results == race_horses:
-                races_complete += 1
-        
-        meeting_data = {
-            'id': meeting.id,
-            'meeting_name': meeting.meeting_name,
-            'uploaded_at': meeting.uploaded_at,
-            'user': meeting.user.username,
-            'total_races': total_races,
-            'races_complete': races_complete,
-            'total_horses': total_horses,
-            'horses_with_results': horses_with_results
-        }
-        
-        if total_horses > 0 and horses_with_results == total_horses:
-            results_complete.append(meeting_data)
-        else:
-            needs_results.append(meeting_data)
-    
-    return render_template("results.html", 
-                          needs_results=needs_results, 
-                          results_complete=results_complete)
-
-
 @app.route("/results/<int:meeting_id>")
 @login_required
 def results_entry(meeting_id):
     """Form to enter results for a meeting"""
     meeting = Meeting.query.get_or_404(meeting_id)
-    results = get_meeting_results(meeting_id)
+    races = Race.query.filter_by(meeting_id=meeting_id).order_by(Race.race_number).all()
     
-    # Add result data to each horse
-    for race in results['races']:
-        for horse in race['horses']:
-            # Find the horse record to get any existing result
-            horse_record = Horse.query.filter_by(
-                race_id=Race.query.filter_by(
-                    meeting_id=meeting_id, 
-                    race_number=race['race_number']
-                ).first().id,
-                horse_name=horse['horse_name']
-            ).first()
-            
-            if horse_record and horse_record.result:
-                horse['result_finish'] = horse_record.result.finish_position
-                horse['result_sp'] = horse_record.result.sp
-            else:
-                horse['result_finish'] = None
-                horse['result_sp'] = None
-            
-            horse['horse_id'] = horse_record.id if horse_record else None
+    races_data = []
+    for race in races:
+        horses_data = []
+        for horse in race.horses:
+            pred = horse.prediction
+            horse_data = {
+                'horse_id': horse.id,
+                'horse_name': horse.horse_name,
+                'barrier': horse.barrier,
+                'jockey': horse.jockey,
+                'trainer': horse.trainer,
+                'score': pred.score if pred else 0,
+                'odds': pred.predicted_odds if pred else '',
+                'result_finish': horse.result.finish_position if horse.result else None,
+                'result_sp': horse.result.sp if horse.result else None
+            }
+            horses_data.append(horse_data)
+        
+        # Sort by score
+        horses_data.sort(key=lambda x: x['score'], reverse=True)
+        
+        race_data = {
+            'race_number': race.race_number,
+            'distance': race.distance,
+            'race_class': race.race_class,
+            'track_condition': race.track_condition,
+            'horses': horses_data
+        }
+        races_data.append(race_data)
+    
+    results = {
+        'meeting_name': meeting.meeting_name,
+        'uploaded_at': meeting.uploaded_at,
+        'races': races_data
+    }
     
     return render_template("results_entry.html", meeting=meeting, results=results)
-
 
 @app.route("/results/<int:meeting_id>/save", methods=["POST"])
 @login_required
