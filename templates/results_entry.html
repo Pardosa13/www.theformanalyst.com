@@ -313,7 +313,6 @@ function submitAllRaces() {
     const statusDiv = document.getElementById('batch-status');
     statusDiv.innerHTML = '⏳ Checking races...';
     
-    // Collect all race data
     const racesData = [];
     const forms = document.querySelectorAll('form[action*="save_results"]');
     
@@ -322,31 +321,27 @@ function submitAllRaces() {
         const horses = [];
         let allComplete = true;
         
-        // Get all horses in this race
         const finishInputs = form.querySelectorAll('input[name^="finish_"]');
         finishInputs.forEach(finishInput => {
             const horseId = finishInput.name.replace('finish_', '');
             const finish = finishInput.value;
             const sp = form.querySelector(`input[name="sp_${horseId}"]`).value;
             
-            // Check if this horse is complete
-            if (!finish) {
+            if (!finish && finish !== '0') {
                 allComplete = false;
-            } else if (finish !== '5' && finish !== '0' && !sp) {
-                // Placed horses (not UP or SCR) need SP
+            } else if (finish && [1, 2, 3, 4].includes(parseInt(finish)) && !sp) {
                 allComplete = false;
             }
             
-            if (finish) {
+            if (finish || finish === '0') {
                 horses.push({
                     horse_id: horseId,
-                    finish: finish,
-                    sp: sp || null
+                    finish: parseInt(finish),
+                    sp: sp ? parseFloat(sp) : null
                 });
             }
         });
         
-        // Only include races where ALL horses have results
         if (allComplete && horses.length > 0) {
             racesData.push({
                 race_number: raceNumber,
@@ -356,37 +351,27 @@ function submitAllRaces() {
     });
     
     if (racesData.length === 0) {
-        statusDiv.innerHTML = '⚠️ No completed races to submit. Please fill in all horses for at least one race.';
+        statusDiv.innerHTML = '⚠️ No completed races to submit.';
         return;
     }
     
-    // Confirm with user
-    const totalRaces = forms.length;
-    const confirmMsg = `Submit ${racesData.length} of ${totalRaces} races?\n\nIncomplete races will be skipped.`;
-    
-    if (!confirm(confirmMsg)) {
+    if (!confirm(`Submit ${racesData.length} races?`)) {
         statusDiv.innerHTML = '';
         return;
     }
     
     statusDiv.innerHTML = `⏳ Submitting ${racesData.length} races...`;
     
-    // Send to server
     fetch("{{ url_for('save_all_results', meeting_id=meeting.id) }}", {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ races: racesData })
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
             statusDiv.innerHTML = `✅ ${data.message}`;
-            // Reload page to show updated status
-            setTimeout(() => {
-                window.location.reload();
-            }, 1500);
+            setTimeout(() => window.location.reload(), 1500);
         } else {
             statusDiv.innerHTML = `❌ Error: ${data.message}`;
         }
