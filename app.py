@@ -117,14 +117,30 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
     if not analysis_results:
         raise Exception("No results returned from analyzer")
     
-    # Create meeting record
+    # Extract meeting name from filename
+    meeting_name = filename.replace('.csv', '')
+
+    # Check for existing meeting with the same name for this user
+    existing_meeting = Meeting.query.filter_by(
+        user_id=user_id,
+        meeting_name=meeting_name
+    ).first()
+
+    if existing_meeting:
+        # Delete existing meeting and its related data
+        # Cascade delete will handle races, horses, predictions, and results
+        db.session.delete(existing_meeting)
+        db.session.commit() # Commit deletion before creating new, to avoid conflicts
+    
+    # Create new meeting record
     meeting = Meeting(
         user_id=user_id,
-        meeting_name=filename.replace('.csv', ''),
+        meeting_name=meeting_name,
         csv_data=csv_data
     )
     db.session.add(meeting)
     db.session.flush()  # Get meeting ID
+    
     
     # Group results by race
     races_data = {}
