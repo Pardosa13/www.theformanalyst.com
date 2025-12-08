@@ -47,12 +47,6 @@ with app.app_context():
                 conn.execute(text('ALTER TABLE races ADD COLUMN market_id VARCHAR(255)'))
                 conn.commit()
             print("✓ Added market_id column to races table")
-        
-        # Migration: Make sp column nullable in results table
-        with db.engine.connect() as conn:
-            conn.execute(text('ALTER TABLE results ALTER COLUMN sp DROP NOT NULL'))
-            conn.commit()
-        print("✓ Made sp column nullable in results table")
     except Exception as e:
         print(f"Migration check: {e}")
     
@@ -125,7 +119,6 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
     )
     db.session.add(meeting)
     db.session.flush()  # Get meeting ID
-    
     
     # Group results by race
     races_data = {}
@@ -289,15 +282,15 @@ def parse_notes_components(notes):
     patterns = [
         # Last 10 Form
         (r'([+-]?\s*[\d.]+)\s*:\s*Ran places:', 'Ran Places'),
-        (r'(-15.0)\s*:\s*No wins in last 10', 'No Wins Last 10'),
+        (r'(-15\.0)\s*:\s*No wins in last 10', 'No Wins Last 10'),
         
         # Jockeys
-        (r'\+\s*10.0\s*:\s*Elite Jockey', 'Elite Jockey'),
-        (r'\+\s*5.0\s*:\s*Good Jockey', 'Good Jockey'),
-        (r'-\s*5.0\s*:\s*Negative Jockey', 'Negative Jockey'),
+        (r'\+\s*10\.0\s*:\s*Love the Jockey', 'Elite Jockey'),
+        (r'\+\s*5\.0\s*:\s*Like the Jockey', 'Good Jockey'),
+        (r'-\s*5\.0\s*:\s*Kerrin', 'Negative Jockey'),
         
         # Trainers
-        (r'\+\s*5.0\s*:\s*Like the Trainer', 'Good Trainer'),
+        (r'\+\s*5\.0\s*:\s*Like the Trainer', 'Good Trainer'),
         
         # Track Record
         (r'([+-]?\s*[\d.]+)\s*:\s*Exceptional win rate.*at this track\n', 'Track Win Rate - Exceptional'),
@@ -307,7 +300,7 @@ def parse_notes_components(notes):
         (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this track!', 'Undefeated at Track'),
         
         # Track+Distance
-        (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this track+distance', 'Undefeated at Track+Distance'),
+        (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this track\+distance', 'Undefeated at Track+Distance'),
         
         # Distance
         (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this distance', 'Undefeated at Distance'),
@@ -318,44 +311,44 @@ def parse_notes_components(notes):
         (r'=\s*([\d.]+)\s*:\s*Total track condition score', 'Track Condition Score Total'),
         
         # Distance Change
-        (r'\+\s*1.0\s*:\s*Longer dist than previous', 'Longer Distance'),
-        (r'-\s*1.0\s*:\s*Shorter dist than previous', 'Shorter Distance'),
+        (r'\+\s*1\.0\s*:\s*Longer dist than previous', 'Longer Distance'),
+        (r'-\s*1\.0\s*:\s*Shorter dist than previous', 'Shorter Distance'),
         
         # Class Change
         (r'\+\s*([\d.]+):\s*Stepping DOWN', 'Class Drop'),
         (r'(-[\d.]+):\s*Stepping UP', 'Class Rise'),
         
         # Last Start Margin - Winners
-        (r'\+\s*10.0\s*:\s*Dominant last start win', 'Last Start - Dominant Win'),
-        (r'\+\s*7.0\s*:\s*Comfortable last start win', 'Last Start - Comfortable Win'),
-        (r'\+\s*5.0\s*:\s*Narrow last start win', 'Last Start - Narrow Win'),
-        (r'\+\s*3.0\s*:\s*Photo finish last start win', 'Last Start - Photo Win'),
+        (r'\+\s*10\.0\s*:\s*Dominant last start win', 'Last Start - Dominant Win'),
+        (r'\+\s*7\.0\s*:\s*Comfortable last start win', 'Last Start - Comfortable Win'),
+        (r'\+\s*5\.0\s*:\s*Narrow last start win', 'Last Start - Narrow Win'),
+        (r'\+\s*3\.0\s*:\s*Photo finish last start win', 'Last Start - Photo Win'),
         
         # Last Start Margin - Placed
-        (r'\+\s*5.0\s*:\s*Narrow loss.*very competitive', 'Last Start - Competitive Loss'),
-        (r'\+\s*3.0\s*:\s*Close loss', 'Last Start - Close Loss'),
+        (r'\+\s*5\.0\s*:\s*Narrow loss.*very competitive', 'Last Start - Competitive Loss'),
+        (r'\+\s*3\.0\s*:\s*Close loss', 'Last Start - Close Loss'),
         
         # Last Start Margin - Beaten
-        (r'-\s*3.0\s*:\s*Beaten clearly', 'Last Start - Beaten Clearly'),
-        (r'-\s*7.0\s*:\s*Well beaten', 'Last Start - Well Beaten'),
-        (r'-\s*15.0\s*:\s*Demolished', 'Last Start - Demolished'),
+        (r'-\s*3\.0\s*:\s*Beaten clearly', 'Last Start - Beaten Clearly'),
+        (r'-\s*7\.0\s*:\s*Well beaten', 'Last Start - Well Beaten'),
+        (r'-\s*15\.0\s*:\s*Demolished', 'Last Start - Demolished'),
         
         # Days Since Run
-        (r'\+\s*15.0\s*:\s*Quick backup', 'Quick Backup'),
-        (r'(-\d+)\s*:\s*Too fresh', 'Too Fresh'),
+        (r'\+\s*15\.0\s*:\s*Quick backup', 'Quick Backup'),
+        (r'(-[\d.]+)\s*:\s*Too fresh', 'Too Fresh'),
         
         # Form Price
         (r'\+\s*([\d.]+)\.0\s*:\s*Form price.*well-backed', 'Form Price - Well Backed'),
-        (r'\+\s*0.0\s*:\s*Form price.*neutral', 'Form Price - Neutral'),
+        (r'\+\s*0\.0\s*:\s*Form price.*neutral', 'Form Price - Neutral'),
         (r'(-[\d.]+)\.0\s*:\s*Form price', 'Form Price - Negative'),
         
         # First/Second Up
-        (r'\+\s*4.0\s*:\s*First-up winner', 'First Up Winner'),
-        (r'\+\s*3.0\s*:\s*Strong first-up podium', 'First Up Strong Podium'),
-        (r'\+\s*3.0\s*:\s*Second-up winner', 'Second Up Winner'),
-        (r'\+\s*2.0\s*:\s*Strong second-up podium', 'Second Up Strong Podium'),
-        (r'\+\s*15.0\s*:\s*First-up specialist \(UNDEFEATED\)', 'First Up Specialist'),
-        (r'\+\s*15.0\s*:\s*Second-up specialist \(UNDEFEATED\)', 'Second Up Specialist'),
+        (r'\+\s*4\.0\s*:\s*First-up winner', 'First Up Winner'),
+        (r'\+\s*3\.0\s*:\s*Strong first-up podium', 'First Up Strong Podium'),
+        (r'\+\s*3\.0\s*:\s*Second-up winner', 'Second Up Winner'),
+        (r'\+\s*2\.0\s*:\s*Strong second-up podium', 'Second Up Strong Podium'),
+        (r'\+\s*15\.0\s*:\s*First-up specialist \(UNDEFEATED\)', 'First Up Specialist'),
+        (r'\+\s*15\.0\s*:\s*Second-up specialist \(UNDEFEATED\)', 'Second Up Specialist'),
         
         # Sectionals
         (r'\+\s*([\d.]+):\s*weighted avg \(z=([\d.]+)', 'Sectional Weighted Avg'),
@@ -368,13 +361,13 @@ def parse_notes_components(notes):
         # Weight
         (r'\+\s*([\d.]+)\s*:\s*Weight.*BELOW race avg', 'Weight - Well Below Avg'),
         (r'\+\s*([\d.]+)\s*:\s*Weight.*below race avg', 'Weight - Below Avg'),
-        (r'(-\d+)\s*:\s*Weight.*above race avg', 'Weight - Above Avg'),
-        (r'(-\d+)\s*:\s*Weight.*ABOVE race avg', 'Weight - Well Above Avg'),
+        (r'(-[\d.]+)\s*:\s*Weight.*above race avg', 'Weight - Above Avg'),
+        (r'(-[\d.]+)\s*:\s*Weight.*ABOVE race avg', 'Weight - Well Above Avg'),
         (r'\+\s*([\d.]+)\s*:\s*Dropped.*from last start', 'Weight Drop'),
-        (r'(-\d+)\s*:\s*Up.*from last start', 'Weight Rise'),
+        (r'(-[\d.]+)\s*:\s*Up.*from last start', 'Weight Rise'),
         
         # Combo Bonus
-        (r'\+\s*15.0\s*:\s*COMBO BONUS', 'Combo Bonus'),
+        (r'\+\s*15\.0\s*:\s*COMBO BONUS', 'Combo Bonus'),
         
         # Specialist Bonuses
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(track\)', 'Specialist - Track'),
@@ -405,7 +398,6 @@ def aggregate_component_stats(all_results_data):
     Returns dict of component_name -> {appearances, wins, total_score, avg_score}
     """
     component_stats = {}
-    stake = 1.0  # Unit stake for profit calculations
     
     for entry in all_results_data:
         prediction = entry['prediction']
@@ -413,13 +405,11 @@ def aggregate_component_stats(all_results_data):
         
         if not prediction or not result:
             continue
-            
+        
         notes = prediction.notes or ''
         components = parse_notes_components(notes)
         won = result.finish_position == 1
         placed = result.finish_position in [1, 2, 3]
-        sp = result.sp or 0
-        profit = (sp * stake - stake) if won else -stake
         
         for component_name, score_value in components.items():
             if component_name not in component_stats:
@@ -447,7 +437,6 @@ def aggregate_component_stats(all_results_data):
         stats['place_rate'] = (stats['places'] / stats['appearances'] * 100) if stats['appearances'] > 0 else 0
     
     return component_stats
-
 def analyze_external_factors(all_results_data, races_data, stake=10.0):
     """
     Analyze external factors: jockeys, trainers, barriers, distances, tracks
@@ -475,7 +464,7 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
         
         if not result:
             continue
-            
+        
         won = result.finish_position == 1
         placed = result.finish_position in [1, 2, 3]
         sp = result.sp or 0
@@ -594,9 +583,6 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
         else:
             track = meeting_name
         
-        # Clean track name - remove (1), (2), etc.
-        track = re.sub(r'\s*\(\d+\)\s*$', '', track).strip()
-        
         if track:
             if track not in tracks:
                 tracks[track] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
@@ -608,6 +594,35 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
             tracks[track]['profit'] += profit
     tracks = calc_rates(tracks, stake)
     
+    # Split jockeys into reliable (5+) and limited (2-4)
+    jockeys_reliable = {k: v for k, v in jockeys.items() if v['runs'] >= 5}
+    jockeys_limited = {k: v for k, v in jockeys.items() if 2 <= v['runs'] < 5}
+    
+    # Sort by strike rate
+    jockeys_reliable = dict(sorted(jockeys_reliable.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
+    jockeys_limited = dict(sorted(jockeys_limited.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
+    
+    # Split trainers into reliable (3+) and limited (2)
+    trainers_reliable = {k: v for k, v in trainers.items() if v['runs'] >= 3}
+    trainers_limited = {k: v for k, v in trainers.items() if v['runs'] == 2}
+    
+    # Sort by strike rate
+    trainers_reliable = dict(sorted(trainers_reliable.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
+    trainers_limited = dict(sorted(trainers_limited.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
+    
+    # Filter tracks with 2+ races
+    tracks = {k: v for k, v in tracks.items() if v['runs'] >= 2}
+    tracks = dict(sorted(tracks.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
+    
+    return {
+        'jockeys_reliable': jockeys_reliable,
+        'jockeys_limited': jockeys_limited,
+        'trainers_reliable': trainers_reliable,
+        'trainers_limited': trainers_limited,
+        'barriers': barriers,
+        'distances': distances,
+        'tracks': tracks
+    }
 @app.route("/logout")
 @login_required
 def logout():
@@ -619,12 +634,11 @@ def logout():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    recent_meetings = (
-        Meeting.query
-        .order_by(Meeting.uploaded_at.desc())
-        .limit(5)
+    # Get all recent meetings (shared across all users)
+    recent_meetings = Meeting.query\
+        .order_by(Meeting.uploaded_at.desc())\
+        .limit(5)\
         .all()
-    )
     return render_template("dashboard.html", recent_meetings=recent_meetings)
 
 
@@ -712,6 +726,7 @@ def delete_meeting(meeting_id):
 
 
 # ----- Results Tracking Routes -----
+
 @app.route("/results")
 @login_required
 def results():
@@ -722,6 +737,7 @@ def results():
     results_complete = []
     
     for meeting in all_meetings:
+        # Count total horses and horses with results
         total_horses = 0
         horses_with_results = 0
         total_races = len(meeting.races)
@@ -755,50 +771,38 @@ def results():
     return render_template("results.html", 
                           needs_results=needs_results, 
                           results_complete=results_complete)
+
+
 @app.route("/results/<int:meeting_id>")
 @login_required
 def results_entry(meeting_id):
     """Form to enter results for a meeting"""
     meeting = Meeting.query.get_or_404(meeting_id)
-    races = Race.query.filter_by(meeting_id=meeting_id).order_by(Race.race_number).all()
+    results = get_meeting_results(meeting_id)
     
-    races_data = []
-    for race in races:
-        horses_data = []
-        for horse in race.horses:
-            pred = horse.prediction
-            horse_data = {
-                'horse_id': horse.id,
-                'horse_name': horse.horse_name,
-                'barrier': horse.barrier,
-                'jockey': horse.jockey,
-                'trainer': horse.trainer,
-                'score': pred.score if pred else 0,
-                'odds': pred.predicted_odds if pred else '',
-                'result_finish': horse.result.finish_position if horse.result else None,
-                'result_sp': horse.result.sp if horse.result else None
-            }
-            horses_data.append(horse_data)
-        
-        # Sort by score
-        horses_data.sort(key=lambda x: x['score'], reverse=True)
-        
-        race_data = {
-            'race_number': race.race_number,
-            'distance': race.distance,
-            'race_class': race.race_class,
-            'track_condition': race.track_condition,
-            'horses': horses_data
-        }
-        races_data.append(race_data)
-    
-    results = {
-        'meeting_name': meeting.meeting_name,
-        'uploaded_at': meeting.uploaded_at,
-        'races': races_data
-    }
+    # Add result data to each horse
+    for race in results['races']:
+        for horse in race['horses']:
+            # Find the horse record to get any existing result
+            horse_record = Horse.query.filter_by(
+                race_id=Race.query.filter_by(
+                    meeting_id=meeting_id, 
+                    race_number=race['race_number']
+                ).first().id,
+                horse_name=horse['horse_name']
+            ).first()
+            
+            if horse_record and horse_record.result:
+                horse['result_finish'] = horse_record.result.finish_position
+                horse['result_sp'] = horse_record.result.sp
+            else:
+                horse['result_finish'] = None
+                horse['result_sp'] = None
+            
+            horse['horse_id'] = horse_record.id if horse_record else None
     
     return render_template("results_entry.html", meeting=meeting, results=results)
+
 
 @app.route("/results/<int:meeting_id>/save", methods=["POST"])
 @login_required
@@ -831,21 +835,19 @@ def save_results(meeting_id):
         
         if finish is None:
             errors.append(f"Missing finish position for {horse.horse_name}")
-        elif finish not in [0, 1, 2, 3, 4, 5]:  # CHANGED: Added 0 for scratched
+        elif finish not in [1, 2, 3, 4, 5]:
             errors.append(f"Invalid finish position for {horse.horse_name}")
         
-        # CHANGED: Only require SP for horses that actually ran (not scratched)
-        if finish in [1, 2, 3, 4]:
-            if sp is None:
-                errors.append(f"Missing SP for {horse.horse_name}")
-            elif sp < 1.01 or sp > 999:
-                errors.append(f"Invalid SP for {horse.horse_name} (must be $1.01 - $999)")
+        if sp is None:
+            errors.append(f"Missing SP for {horse.horse_name}")
+        elif sp < 1.01 or sp > 999:
+            errors.append(f"Invalid SP for {horse.horse_name} (must be $1.01 - $999)")
         
-        if finish is not None:
+        if finish is not None and sp is not None:
             results_to_save.append({
                 'horse': horse,
                 'finish': finish,
-                'sp': sp if finish > 0 else None  # CHANGED: NULL SP for scratched horses
+                'sp': sp
             })
     
     if errors:
@@ -860,14 +862,14 @@ def save_results(meeting_id):
         # Update existing or create new
         if horse.result:
             horse.result.finish_position = item['finish']
-            horse.result.sp = item['sp']  # Will be None for scratched horses
+            horse.result.sp = item['sp']
             horse.result.recorded_at = datetime.utcnow()
             horse.result.recorded_by = current_user.id
         else:
             result = Result(
                 horse_id=horse.id,
                 finish_position=item['finish'],
-                sp=item['sp'],  # Will be None for scratched horses
+                sp=item['sp'],
                 recorded_by=current_user.id
             )
             db.session.add(result)
@@ -886,110 +888,11 @@ def save_results(meeting_id):
             break
     
     if all_complete:
-        flash(f"All results for {meeting.meeting_name} are now complete! 🎉", "success")
+        flash(f"All results for {meeting.meeting_name} are now complete!", "success")
     
     return redirect(url_for('results_entry', meeting_id=meeting_id))
-@app.route("/results/<int:meeting_id>/save_all", methods=["POST"])
-@login_required
-def save_all_results(meeting_id):
-    """Save results for multiple races at once"""
-    meeting = Meeting.query.get_or_404(meeting_id)
-    
-    try:
-        data = request.get_json()
-        races_data = data.get('races', [])
-        
-        if not races_data:
-            return {'success': False, 'message': 'No race data provided'}, 400
-        
-        total_saved = 0
-        total_horses = 0
-        errors = []
-        
-        # Process each race
-        for race_data in races_data:
-            race_number = race_data.get('race_number')
-            horses_data = race_data.get('horses', [])
-            
-            race = Race.query.filter_by(meeting_id=meeting_id, race_number=race_number).first()
-            
-            if not race:
-                errors.append(f"Race {race_number} not found")
-                continue
-            
-                        # Save results for each horse in this race
-            for horse_data in horses_data:
-                horse_id = horse_data.get('horse_id')
-                finish = horse_data.get('finish')
-                sp = horse_data.get('sp')
-                
-                horse = Horse.query. get(horse_id)
-                
-                if not horse or horse.race_id != race.id:
-                    errors.append(f"Invalid horse ID {horse_id} for race {race_number}")
-                    continue
-                
-                # Validation
-                if finish not in [0, 1, 2, 3, 4, 5]:
-                    errors.append(f"Invalid finish position for {horse.horse_name}")
-                    continue
-                
-                if finish in [1, 2, 3, 4] and (not sp or sp < 1.01 or sp > 999):
-                    errors.append(f"Invalid SP for {horse.horse_name}")
-                    continue
-                
-                # Update or create result
-                if horse.result:
-                    horse.result.finish_position = finish
-                    horse.result.sp = sp
-                    horse.result.recorded_at = datetime.utcnow()
-                    horse.result. recorded_by = current_user.id
-                else:
-                    result = Result(
-                        horse_id=horse.id,
-                        finish_position=finish,
-                        sp=sp,
-                        recorded_by=current_user.id
-                    )
-                    db.session.add(result)
-                
-                total_horses += 1
-            
-            total_saved += 1
-        
-        db.session.commit()
-        
-        # Build success message
-        message = f"Saved {total_saved} races ({total_horses} horses)"
-        
-        if errors:
-            message += f" with {len(errors)} errors"
-        
-        # Check if meeting is now complete
-        all_complete = True
-        for race in meeting.races:
-            for horse in race.horses:
-                if horse.result is None:
-                    all_complete = False
-                    break
-            if not all_complete:
-                break
-        
-        if all_complete:
-            message += " - Meeting Complete! 🎉"
-        
-        return {
-            'success': True,
-            'message': message,
-            'total_saved': total_saved,
-            'total_horses': total_horses,
-            'errors': errors,
-            'meeting_complete': all_complete
-        }
-        
-    except Exception as e:
-        db.session.rollback()
-        return {'success': False, 'message': str(e)}, 500
+
+
 @app.route("/admin", methods=["GET", "POST"])
 @login_required
 def admin_panel():
@@ -1120,7 +1023,10 @@ def admin_panel():
     }
     
     return render_template("admin.html", stats=stats)
+
+
 # ----- Data Analytics Route -----
+
 @app.route("/data")
 @login_required
 def data_analytics():
@@ -1141,10 +1047,8 @@ def data_analytics():
         Race, Horse.race_id == Race.id
     ).join(
         Meeting, Race.meeting_id == Meeting.id
-    ).filter(
-        Result.finish_position > 0,  # Exclude scratched horses
-        Meeting.user_id == current_user.id # Filter by current user
     )
+    
     if track_filter:
         base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
