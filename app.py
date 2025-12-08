@@ -941,12 +941,12 @@ def save_all_results(meeting_id):
                 continue
             
             # Save results for each horse in this race
-                for horse_data in horses_data:
-                    horse_id = horse_data.get('horse_id')
-                    finish = horse_data.get('finish')
-                    sp = horse_data.get('sp')
+            for horse_data in horses_data:
+                horse_id = horse_data.get('horse_id')
+                finish = horse_data.get('finish')
+                sp = horse_data.get('sp')
                     
-                    horse = Horse.query.get(horse_id)
+                horse = Horse.query.get(horse_id)
                     
                     if not horse or horse.race_id != race.id:
                         errors.append(f"Invalid horse ID {horse_id} for race {race_number}")
