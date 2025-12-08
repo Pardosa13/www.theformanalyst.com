@@ -266,6 +266,19 @@ function selectFinish(button, horseId, position) {
     // Update hidden input
     document.getElementById('finish_' + horseId).value = position;
     
+    // Handle SP field for scratched horses
+    const spInput = document.getElementById('sp_' + horseId);
+    if (position === 0) {
+        // Scratched horses don't have SP
+        spInput.value = '';
+        spInput.disabled = true;
+        spInput.placeholder = 'N/A';
+    } else {
+        // Enable SP field for horses that ran
+        spInput.disabled = false;
+        spInput.placeholder = '$0.00';
+    }
+    
     // Update row background if both fields filled
     checkRowComplete(horseId);
 }
