@@ -1133,16 +1133,13 @@ def admin_panel():
     }
     
     return render_template("admin.html", stats=stats)
-
-
 # ----- Data Analytics Route -----
-
 @app.route("/data")
 @login_required
 def data_analytics():
     """Analytics dashboard showing model performance"""
     
-track_filter = request.args.get('track', '')
+    track_filter = request.args.get('track', '')
     min_score_filter = request.args.get('min_score', type=float)
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
