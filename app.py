@@ -940,33 +940,33 @@ def save_all_results(meeting_id):
                 errors.append(f"Race {race_number} not found")
                 continue
             
-            # Save results for each horse in this race
+                        # Save results for each horse in this race
             for horse_data in horses_data:
                 horse_id = horse_data.get('horse_id')
                 finish = horse_data.get('finish')
                 sp = horse_data.get('sp')
-                    
-                horse = Horse.query.get(horse_id)
-                    
-                    if not horse or horse.race_id != race.id:
-                        errors.append(f"Invalid horse ID {horse_id} for race {race_number}")
-                        continue
-                    
-                    # Validation
-                    if finish not in [0, 1, 2, 3, 4, 5]:
-                        errors.append(f"Invalid finish position for {horse.horse_name}")
-                        continue
-                    
-                    if finish in [1, 2, 3, 4] and (not sp or sp < 1.01 or sp > 999):
-                        errors.append(f"Invalid SP for {horse.horse_name}")
-                        continue
+                
+                horse = Horse.query. get(horse_id)
+                
+                if not horse or horse.race_id != race.id:
+                    errors.append(f"Invalid horse ID {horse_id} for race {race_number}")
+                    continue
+                
+                # Validation
+                if finish not in [0, 1, 2, 3, 4, 5]:
+                    errors.append(f"Invalid finish position for {horse.horse_name}")
+                    continue
+                
+                if finish in [1, 2, 3, 4] and (not sp or sp < 1.01 or sp > 999):
+                    errors.append(f"Invalid SP for {horse.horse_name}")
+                    continue
                 
                 # Update or create result
                 if horse.result:
                     horse.result.finish_position = finish
                     horse.result.sp = sp
                     horse.result.recorded_at = datetime.utcnow()
-                    horse.result.recorded_by = current_user.id
+                    horse.result. recorded_by = current_user.id
                 else:
                     result = Result(
                         horse_id=horse.id,
