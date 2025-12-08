@@ -314,7 +314,7 @@ function submitAllRaces() {
     statusDiv.innerHTML = '⏳ Checking races...';
     
     const racesData = [];
-    const forms = document.querySelectorAll('form[action*="save_results"]');
+    const forms = document.querySelectorAll('form[action*="/save"]');
     
     forms.forEach(form => {
         const raceNumber = form.querySelector('input[name="race_number"]').value;
