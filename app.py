@@ -902,8 +902,107 @@ def save_results(meeting_id):
         flash(f"All results for {meeting.meeting_name} are now complete!", "success")
     
     return redirect(url_for('results_entry', meeting_id=meeting_id))
-
-
+@app.route("/results/<int:meeting_id>/save_all", methods=["POST"])
+@login_required
+def save_all_results(meeting_id):
+    """Save results for multiple races at once"""
+    meeting = Meeting.query.get_or_404(meeting_id)
+    
+    try:
+        data = request.get_json()
+        races_data = data.get('races', [])
+        
+        if not races_data:
+            return {'success': False, 'message': 'No race data provided'}, 400
+        
+        total_saved = 0
+        total_horses = 0
+        errors = []
+        
+        # Process each race
+        for race_data in races_data:
+            race_number = race_data.get('race_number')
+            horses_data = race_data.get('horses', [])
+            
+            race = Race.query.filter_by(meeting_id=meeting_id, race_number=race_number).first()
+            
+            if not race:
+                errors.append(f"Race {race_number} not found")
+                continue
+            
+            # Save results for each horse in this race
+            for horse_data in horses_data:
+                horse_id = horse_data.get('horse_id')
+                finish = horse_data.get('finish')
+                sp = horse_data.get('sp')
+                
+                horse = Horse.query.get(horse_id)
+                
+                if not horse or horse.race_id != race.id:
+                    errors.append(f"Invalid horse ID {horse_id} for race {race_number}")
+                    continue
+                
+                # Validation
+                if finish not in [1, 2, 3, 4, 5]:
+                    errors.append(f"Invalid finish position for {horse.horse_name}")
+                    continue
+                
+                if finish in [1, 2, 3, 4] and (not sp or sp < 1.01 or sp > 999):
+                    errors.append(f"Invalid SP for {horse.horse_name}")
+                    continue
+                
+                # Update or create result
+                if horse.result:
+                    horse.result.finish_position = finish
+                    horse.result.sp = sp
+                    horse.result.recorded_at = datetime.utcnow()
+                    horse.result.recorded_by = current_user.id
+                else:
+                    result = Result(
+                        horse_id=horse.id,
+                        finish_position=finish,
+                        sp=sp,
+                        recorded_by=current_user.id
+                    )
+                    db.session.add(result)
+                
+                total_horses += 1
+            
+            total_saved += 1
+        
+        db.session.commit()
+        
+        # Build success message
+        message = f"Saved {total_saved} races ({total_horses} horses)"
+        
+        if errors:
+            message += f" with {len(errors)} errors"
+        
+        # Check if meeting is now complete
+        all_complete = True
+        for race in meeting.races:
+            for horse in race.horses:
+                if horse.result is None:
+                    all_complete = False
+                    break
+            if not all_complete:
+                break
+        
+        if all_complete:
+            message += " - Meeting Complete! 🎉"
+        
+        return {
+            'success': True,
+            'message': message,
+            'total_saved': total_saved,
+            'total_horses': total_horses,
+            'errors': errors,
+            'meeting_complete': all_complete
+        }
+        
+    except Exception as e:
+        db.session.rollback()
+        return {'success': False, 'message': str(e)}, 500
 @app.route("/admin", methods=["GET", "POST"])
 @login_required
 def admin_panel():
