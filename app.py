@@ -844,9 +844,10 @@ def save_results(meeting_id):
         
         if finish is None:
             errors.append(f"Missing finish position for {horse.horse_name}")
-        elif finish not in [1, 2, 3, 4, 5]:
+        elif finish not in [0, 1, 2, 3, 4, 5]:  # CHANGED: Added 0 for scratched
             errors.append(f"Invalid finish position for {horse.horse_name}")
         
+        # CHANGED: Only require SP for horses that actually ran (not scratched)
         if finish in [1, 2, 3, 4]:
             if sp is None:
                 errors.append(f"Missing SP for {horse.horse_name}")
@@ -857,7 +858,7 @@ def save_results(meeting_id):
             results_to_save.append({
                 'horse': horse,
                 'finish': finish,
-                'sp': sp
+                'sp': sp if finish > 0 else None  # CHANGED: NULL SP for scratched horses
             })
     
     if errors:
@@ -872,14 +873,14 @@ def save_results(meeting_id):
         # Update existing or create new
         if horse.result:
             horse.result.finish_position = item['finish']
-            horse.result.sp = item['sp']
+            horse.result.sp = item['sp']  # Will be None for scratched horses
             horse.result.recorded_at = datetime.utcnow()
             horse.result.recorded_by = current_user.id
         else:
             result = Result(
                 horse_id=horse.id,
                 finish_position=item['finish'],
-                sp=item['sp'],
+                sp=item['sp'],  # Will be None for scratched horses
                 recorded_by=current_user.id
             )
             db.session.add(result)
