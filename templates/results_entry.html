@@ -112,11 +112,17 @@
                                 </button>
                                 {% endfor %}
                                 <button type="button" 
-                                        class="finish-btn {% if horse.result_finish == 5 %}selected{% endif %}" 
-                                        data-position="5"
-                                        onclick="selectFinish(this, {{ horse.horse_id }}, 5)">
-                                    UP
-                                </button>
+        class="finish-btn {% if horse.result_finish == 5 %}selected{% endif %}" 
+        data-position="5"
+        onclick="selectFinish(this, {{ horse.horse_id }}, 5)">
+    UP
+</button>
+<button type="button" 
+        class="finish-btn scr-btn {% if horse.result_finish == 0 %}selected{% endif %}" 
+        data-position="0"
+        onclick="selectFinish(this, {{ horse.horse_id }}, 0)">
+    SCR
+</button>
                                 <input type="hidden" name="finish_{{ horse.horse_id }}" id="finish_{{ horse.horse_id }}" value="{{ horse.result_finish or '' }}">
                             </div>
                         </td>
