@@ -735,7 +735,49 @@ def delete_meeting(meeting_id):
 
 
 # ----- Results Tracking Routes -----
-
+@app.route("/results")
+@login_required
+def results():
+    """Show meetings needing results and completed meetings"""
+    all_meetings = Meeting.query.order_by(Meeting.uploaded_at.desc()).all()
+    
+    needs_results = []
+    results_complete = []
+    
+    for meeting in all_meetings:
+        total_horses = 0
+        horses_with_results = 0
+        total_races = len(meeting.races)
+        races_complete = 0
+        
+        for race in meeting.races:
+            race_horses = len(race.horses)
+            race_results = sum(1 for h in race.horses if h.result is not None)
+            total_horses += race_horses
+            horses_with_results += race_results
+            
+            if race_horses > 0 and race_results == race_horses:
+                races_complete += 1
+        
+        meeting_data = {
+            'id': meeting.id,
+            'meeting_name': meeting.meeting_name,
+            'uploaded_at': meeting.uploaded_at,
+            'user': meeting.user.username,
+            'total_races': total_races,
+            'races_complete': races_complete,
+            'total_horses': total_horses,
+            'horses_with_results': horses_with_results
+        }
+        
+        if total_horses > 0 and horses_with_results == total_horses:
+            results_complete.append(meeting_data)
+        else:
+            needs_results.append(meeting_data)
+    
+    return render_template("results.html", 
+                          needs_results=needs_results, 
+                          results_complete=results_complete)
 @app.route("/results/<int:meeting_id>")
 @login_required
 def results_entry(meeting_id):
