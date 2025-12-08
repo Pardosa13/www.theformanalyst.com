@@ -982,7 +982,6 @@ def admin_panel():
 
 
 # ----- Data Analytics Route -----
-
 @app.route("/data")
 @login_required
 def data_analytics():
@@ -1003,6 +1002,8 @@ def data_analytics():
         Race, Horse.race_id == Race.id
     ).join(
         Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Result.finish_position > 0  # Exclude scratched horses
     )
     
     if track_filter:
