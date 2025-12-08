@@ -804,49 +804,95 @@ def results_entry(meeting_id):
     return render_template("results_entry.html", meeting=meeting, results=results)
 
 
-@app.route('/results/<int:meeting_id>/save', methods=['POST'])
+@app.route("/results/<int:meeting_id>/save", methods=["POST"])
 @login_required
 def save_results(meeting_id):
+    """Save results for a race"""
     meeting = Meeting.query.get_or_404(meeting_id)
-    data = request.json
     
-    try:
-        for race_data in data.get('races', []):
-            race_id = race_data.get('race_id')
-            
-            for horse_data in race_data.get('horses', []):
-                horse_id = horse_data.get('horse_id')
-                position = horse_data.get('position')
-                sp = horse_data.get('sp')
-                
-                if not horse_id or position is None:
-                    continue
-                
-                # Find existing result or create new
-                result = Result.query.filter_by(horse_id=horse_id).first()
-                
-                if result:
-                    # Update existing
-                    result.finish_position = position
-                    result.sp = sp if position > 0 else None  # No SP for scratched horses
-                    result.recorded_by = current_user.id
-                    result.recorded_at = datetime.utcnow()
-                else:
-                    # Create new
-                    result = Result(
-                        horse_id=horse_id,
-                        finish_position=position,
-                        sp=sp if position > 0 else None,  # No SP for scratched horses
-                        recorded_by=current_user.id
-                    )
-                    db.session.add(result)
+    race_number = request.form.get('race_number', type=int)
+    
+    if not race_number:
+        flash("No race specified", "danger")
+        return redirect(url_for('results_entry', meeting_id=meeting_id))
+    
+    race = Race.query.filter_by(meeting_id=meeting_id, race_number=race_number).first()
+    
+    if not race:
+        flash(f"Race {race_number} not found", "danger")
+        return redirect(url_for('results_entry', meeting_id=meeting_id))
+    
+    # Collect all horse results from form
+    errors = []
+    results_to_save = []
+    
+    for horse in race.horses:
+        finish_key = f"finish_{horse.id}"
+        sp_key = f"sp_{horse.id}"
         
-        db.session.commit()
-        return jsonify({'success': True, 'message': 'Results saved successfully'})
+        finish = request.form.get(finish_key, type=int)
+        sp = request.form.get(sp_key, type=float)
+        
+        if finish is None:
+            errors.append(f"Missing finish position for {horse.horse_name}")
+        elif finish not in [0, 1, 2, 3, 4, 5]:  # Added 0 for scratched
+            errors.append(f"Invalid finish position for {horse.horse_name}")
+        
+        # Only require SP for horses that actually ran (not scratched)
+        if finish in [1, 2, 3, 4]:
+            if sp is None:
+                errors.append(f"Missing SP for {horse.horse_name}")
+            elif sp < 1.01 or sp > 999:
+                errors.append(f"Invalid SP for {horse.horse_name} (must be $1.01 - $999)")
+        
+        if finish is not None:
+            results_to_save.append({
+                'horse': horse,
+                'finish': finish,
+                'sp': sp if finish > 0 else None  # NULL SP for scratched horses
+            })
     
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'success': False, 'error': str(e)}), 500
+    if errors:
+        for error in errors:
+            flash(error, "danger")
+        return redirect(url_for('results_entry', meeting_id=meeting_id))
+    
+    # All validation passed - save results
+    for item in results_to_save:
+        horse = item['horse']
+        
+        # Update existing or create new
+        if horse.result:
+            horse.result.finish_position = item['finish']
+            horse.result.sp = item['sp']  # Will be None for scratched horses
+            horse.result.recorded_at = datetime.utcnow()
+            horse.result.recorded_by = current_user.id
+        else:
+            result = Result(
+                horse_id=horse.id,
+                finish_position=item['finish'],
+                sp=item['sp'],  # Will be None for scratched horses
+                recorded_by=current_user.id
+            )
+            db.session.add(result)
+    
+    db.session.commit()
+    flash(f"Race {race_number} results saved successfully", "success")
+    
+    # Check if all races are complete
+    all_complete = True
+    for r in meeting.races:
+        for h in r.horses:
+            if h.result is None:
+                all_complete = False
+                break
+        if not all_complete:
+            break
+    
+    if all_complete:
+        flash(f"All results for {meeting.meeting_name} are now complete!", "success")
+    
+    return redirect(url_for('results_entry', meeting_id=meeting_id))
 
 
 @app.route("/admin", methods=["GET", "POST"])
