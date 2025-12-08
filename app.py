@@ -952,14 +952,14 @@ def save_all_results(meeting_id):
                     errors.append(f"Invalid horse ID {horse_id} for race {race_number}")
                     continue
                 
-                # Validation
-                if finish not in [1, 2, 3, 4, 5]:
-                    errors.append(f"Invalid finish position for {horse.horse_name}")
-                    continue
-                
-                if finish in [1, 2, 3, 4] and (not sp or sp < 1.01 or sp > 999):
-                    errors.append(f"Invalid SP for {horse.horse_name}")
-                    continue
+               # Validation
+if finish not in [0, 1, 2, 3, 4, 5]:
+    errors.append(f"Invalid finish position for {horse.horse_name}")
+    continue
+
+if finish in [1, 2, 3, 4] and (not sp or sp < 1.01 or sp > 999):
+    errors.append(f"Invalid SP for {horse.horse_name}")
+    continue
                 
                 # Update or create result
                 if horse.result:
