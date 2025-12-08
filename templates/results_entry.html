@@ -25,7 +25,7 @@
     <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
         <span style="font-weight: 600; margin-right: 10px;">Jump to Race:</span>
         {% for race in results.races %}
-        {% set race_complete = namespace(value=true) %}
+        {% set race_complete = true %}
         {% for horse in race.horses %}
             {% if horse.result_finish is none %}
                 {% set race_complete = false %}
@@ -41,7 +41,7 @@
 
 <!-- Results Entry for Each Race -->
 {% for race in results.races %}
-{% set race_complete = namespace(value=true) %}
+{% set race_complete = true %}
 {% for horse in race.horses %}
     {% if horse.result_finish is none %}
         {% set race_complete = false %}
@@ -117,12 +117,6 @@
                                         onclick="selectFinish(this, {{ horse.horse_id }}, 5)">
                                     UP
                                 </button>
-                                <button type="button" 
-                                        class="finish-btn scr-btn {% if horse.result_finish == 0 %}selected{% endif %}" 
-                                        data-position="0"
-                                        onclick="selectFinish(this, {{ horse.horse_id }}, 0)">
-                                    SCR
-                                </button>
                                 <input type="hidden" name="finish_{{ horse.horse_id }}" id="finish_{{ horse.horse_id }}" value="{{ horse.result_finish or '' }}">
                             </div>
                         </td>
@@ -152,21 +146,6 @@
     </form>
 </div>
 {% endfor %}
-
-<!-- Batch Submit Section -->
-<div class="card" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white;">
-    <h3 style="margin: 0 0 15px 0;">🚀 Batch Submit</h3>
-    <p style="margin: 0 0 20px 0; opacity: 0.9;">
-        Save all completed races at once instead of race-by-race. Only races with all horses entered will be submitted.
-    </p>
-    <button type="button" 
-            onclick="submitAllRaces()" 
-            class="btn"
-            style="background: white; color: #28a745; font-weight: 600; padding: 12px 32px; font-size: 16px;">
-        💾 Submit All Completed Races
-    </button>
-    <div id="batch-status" style="margin-top: 15px; font-weight: 600;"></div>
-</div>
 
 <!-- Back to Top -->
 <div style="text-align: center; margin: 30px 0;">
@@ -231,24 +210,6 @@
     color: white;
 }
 
-.finish-btn.scr-btn {
-    background: #6c757d;
-    color: white;
-    border-color: #6c757d;
-}
-
-.finish-btn.scr-btn:hover {
-    background: #5a6268;
-    border-color: #5a6268;
-}
-
-.finish-btn.scr-btn.selected,
-.finish-btn[data-position="0"].selected {
-    background: linear-gradient(135deg, #6c757d 0%, #545b62 100%);
-    border-color: #545b62;
-    color: white;
-}
-
 .sp-input:focus {
     outline: none;
     border-color: #667eea;
@@ -258,12 +219,6 @@
 .sp-input.filled {
     border-color: #28a745;
     background: #f0fff4;
-}
-
-.sp-input:disabled {
-    background: #e9ecef;
-    cursor: not-allowed;
-    border-color: #ced4da;
 }
 </style>
 
@@ -281,19 +236,6 @@ function selectFinish(button, horseId, position) {
     // Update hidden input
     document.getElementById('finish_' + horseId).value = position;
     
-    // Handle SP field for scratched horses
-    const spInput = document.getElementById('sp_' + horseId);
-    if (position === 0) {
-        // Scratched horses don't have SP
-        spInput.value = '';
-        spInput.disabled = true;
-        spInput.placeholder = 'N/A';
-    } else {
-        // Enable SP field for horses that ran
-        spInput.disabled = false;
-        spInput.placeholder = '$0.00';
-    }
-    
     // Update row background if both fields filled
     checkRowComplete(horseId);
 }
@@ -303,82 +245,9 @@ function checkRowComplete(horseId) {
     const sp = document.getElementById('sp_' + horseId).value;
     const row = document.querySelector(`input[name="finish_${horseId}"]`).closest('tr');
     
-    // Horse is complete if: has finish AND (has SP OR is UP/SCR)
-    if (finish && (sp || finish === '5' || finish === '0')) {
+    if (finish && sp) {
         row.style.backgroundColor = '#d4edda';
     }
-}
-
-function submitAllRaces() {
-    const statusDiv = document.getElementById('batch-status');
-    statusDiv.innerHTML = '⏳ Checking races...';
-    
-    const racesData = [];
-    const forms = document.querySelectorAll('form[action*="/save"]');
-    
-    forms.forEach(form => {
-        const raceNumber = form.querySelector('input[name="race_number"]').value;
-        const horses = [];
-        let allComplete = true;
-        
-        const finishInputs = form.querySelectorAll('input[name^="finish_"]');
-        finishInputs.forEach(finishInput => {
-            const horseId = finishInput.name.replace('finish_', '');
-            const finish = finishInput.value;
-            const sp = form.querySelector(`input[name="sp_${horseId}"]`).value;
-            
-            if (!finish && finish !== '0') {
-                allComplete = false;
-            } else if (finish && [1, 2, 3, 4].includes(parseInt(finish)) && !sp) {
-                allComplete = false;
-            }
-            
-            if (finish || finish === '0') {
-                horses.push({
-                    horse_id: horseId,
-                    finish: parseInt(finish),
-                    sp: sp ? parseFloat(sp) : null
-                });
-            }
-        });
-        
-        if (allComplete && horses.length > 0) {
-            racesData.push({
-                race_number: raceNumber,
-                horses: horses
-            });
-        }
-    });
-    
-    if (racesData.length === 0) {
-        statusDiv.innerHTML = '⚠️ No completed races to submit.';
-        return;
-    }
-    
-    if (!confirm(`Submit ${racesData.length} races?`)) {
-        statusDiv.innerHTML = '';
-        return;
-    }
-    
-    statusDiv.innerHTML = `⏳ Submitting ${racesData.length} races...`;
-    
-    fetch("{{ url_for('save_all_results', meeting_id=meeting.id) }}", {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ races: racesData })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            statusDiv.innerHTML = `✅ ${data.message}`;
-            setTimeout(() => window.location.reload(), 1500);
-        } else {
-            statusDiv.innerHTML = `❌ Error: ${data.message}`;
-        }
-    })
-    .catch(error => {
-        statusDiv.innerHTML = `❌ Error: ${error.message}`;
-    });
 }
 
 // Add listeners to SP inputs
