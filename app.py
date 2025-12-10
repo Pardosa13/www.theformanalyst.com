@@ -1080,7 +1080,7 @@ def data_analytics():
         })
     
     # Get component stats
-    component_stats = aggregate_component_stats(all_results_data)
+    component_stats = aggregate_component_stats(all_results_data, stake)
     
     # Sort components by appearances (most common first)
     sorted_components = sorted(
