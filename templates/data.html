@@ -205,13 +205,9 @@
                             <td class="text-center {% if stats.place_rate >= 50 %}text-success{% endif %}">
                                 {{ "%.1f"|format(stats.place_rate) }}%
                             </td>
-                            <td class="text-center">
-                                {% if stats.avg_score >= 0 %}
-                                <span class="text-success">+{{ "%.1f"|format(stats.avg_score) }}</span>
-                                {% else %}
-                                <span class="text-danger">{{ "%.1f"|format(stats.avg_score) }}</span>
-                                {% endif %}
-                            </td>
+                            <td class="text-center {% if stats.roi >= 0 %}text-success{% else %}text-danger{% endif %}">
+    {{ "%.1f"|format(stats.roi) }}%
+</td>
                             <td class="text-center">
                                 {% if stats.strike_rate >= 25 and stats.appearances >= 5 %}
                                 <span class="badge bg-success">✓ Strong</span>
@@ -237,7 +233,7 @@
                 <ul class="mb-0 small">
                     <li><strong>Strike %</strong> - How often horses with this component win</li>
                     <li><strong>Place %</strong> - How often they finish 1st, 2nd, or 3rd</li>
-                    <li><strong>Avg Score</strong> - Average points this component contributes</li>
+                    <li><strong>ROI %</strong> - Return on investment betting $10 on every horse with this component</li>
                     <li><strong>Value?</strong> - Quick assessment: Strong (25%+ strike, 5+ appearances), Promising (18%+), Weak (&lt;10%), or needs more data</li>
                 </ul>
             </div>
