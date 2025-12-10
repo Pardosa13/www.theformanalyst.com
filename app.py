@@ -1144,22 +1144,22 @@ def data_analytics():
         score_gap = top_score - second_score
         
         if top_score >= 150:
-    tier = '150+'
-elif top_score >= 140:
-    tier = '140-149'
-elif top_score >= 130:
-    tier = '130-139'
-elif top_score >= 120:
-    tier = '120-129'
-elif top_score >= 110:
-    tier = '110-119'
-elif top_score >= 100:
-    tier = '100-109'
-elif top_score >= 90:
-    tier = '90-99'
-else:
-    # Skip races below 90 score
-    continue
+            tier = '150+'
+        elif top_score >= 140:
+            tier = '140-149'
+        elif top_score >= 130:
+            tier = '130-139'
+        elif top_score >= 120:
+            tier = '120-129'
+        elif top_score >= 110:
+            tier = '110-119'
+        elif top_score >= 100:
+            tier = '100-109'
+        elif top_score >= 90:
+            tier = '90-99'
+        else:
+            # Skip races below 90 score
+            continue
         
         if score_gap >= 30:
             gap_bucket = '30+'
