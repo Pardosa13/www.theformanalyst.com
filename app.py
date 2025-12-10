@@ -392,10 +392,10 @@ def parse_notes_components(notes):
     return components
 
 
-def aggregate_component_stats(all_results_data):
+def aggregate_component_stats(all_results_data, stake=10.0):
     """
     Aggregate component statistics across all results.
-    Returns dict of component_name -> {appearances, wins, total_score, avg_score}
+    Returns dict of component_name -> {appearances, wins, places, total_score, avg_score, strike_rate, place_rate, roi}
     """
     component_stats = {}
     
@@ -410,6 +410,10 @@ def aggregate_component_stats(all_results_data):
         components = parse_notes_components(notes)
         won = result.finish_position == 1
         placed = result.finish_position in [1, 2, 3]
+        sp = result.sp or 0
+        
+        # Calculate profit for this horse
+        profit = (sp * stake - stake) if won else -stake
         
         for component_name, score_value in components.items():
             if component_name not in component_stats:
@@ -418,6 +422,7 @@ def aggregate_component_stats(all_results_data):
                     'wins': 0,
                     'places': 0,
                     'total_score': 0,
+                    'total_profit': 0,
                     'scores': []
                 }
             
@@ -428,6 +433,7 @@ def aggregate_component_stats(all_results_data):
             if placed:
                 stats['places'] += 1
             stats['total_score'] += score_value
+            stats['total_profit'] += profit
             stats['scores'].append(score_value)
     
     # Calculate averages and rates
@@ -435,6 +441,7 @@ def aggregate_component_stats(all_results_data):
         stats['avg_score'] = stats['total_score'] / stats['appearances'] if stats['appearances'] > 0 else 0
         stats['strike_rate'] = (stats['wins'] / stats['appearances'] * 100) if stats['appearances'] > 0 else 0
         stats['place_rate'] = (stats['places'] / stats['appearances'] * 100) if stats['appearances'] > 0 else 0
+        stats['roi'] = (stats['total_profit'] / (stats['appearances'] * stake) * 100) if stats['appearances'] > 0 else 0
     
     return component_stats
 def analyze_external_factors(all_results_data, races_data, stake=10.0):
