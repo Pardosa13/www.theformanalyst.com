@@ -1068,43 +1068,43 @@ def data_analytics():
     
     all_results = base_query.all()
     
-   # Build structured data for component analysis
-all_results_data = []
-for horse, pred, result, race, meeting in all_results:
-    all_results_data.append({
-        'horse': horse,
-        'prediction': pred,
-        'result': result,
-        'race': race,
-        'meeting': meeting
-    })
+    # Build structured data for component analysis
+    all_results_data = []
+    for horse, pred, result, race, meeting in all_results:
+        all_results_data.append({
+            'horse': horse,
+            'prediction': pred,
+            'result': result,
+            'race': race,
+            'meeting': meeting
+        })
 
-# Define stake for all calculations
-stake = 10.0
+    # Define stake for all calculations
+    stake = 10.0
 
-# Get component stats
-component_stats = aggregate_component_stats(all_results_data, stake)
+    # Get component stats
+    component_stats = aggregate_component_stats(all_results_data, stake)
 
-# Sort components by appearances (most common first)
-sorted_components = sorted(
-    component_stats.items(),
-    key=lambda x: x[1]['appearances'],
-    reverse=True
-)
+    # Sort components by appearances (most common first)
+    sorted_components = sorted(
+        component_stats.items(),
+        key=lambda x: x[1]['appearances'],
+        reverse=True
+    )
 
-# Group races for score analysis
-races_data = {}
-for horse, pred, result, race, meeting in all_results:
-    race_key = (meeting.id, race.race_number)
-    if race_key not in races_data:
-        races_data[race_key] = []
-    races_data[race_key].append({
-        'horse': horse,
-        'prediction': pred,
-        'result': result,
-        'race': race,
-        'meeting': meeting
-    })
+    # Group races for score analysis
+    races_data = {}
+    for horse, pred, result, race, meeting in all_results:
+        race_key = (meeting.id, race.race_number)
+        if race_key not in races_data:
+            races_data[race_key] = []
+        races_data[race_key].append({
+            'horse': horse,
+            'prediction': pred,
+            'result': result,
+            'race': race,
+            'meeting': meeting
+        })
     
     total_races = len(races_data)
     top_pick_wins = 0
