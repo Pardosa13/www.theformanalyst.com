@@ -1112,12 +1112,14 @@ def data_analytics():
     winner_sps = []
     
     score_tiers = {
-        '90+': {'races': 0, 'wins': 0, 'profit': 0},
-        '80-89': {'races': 0, 'wins': 0, 'profit': 0},
-        '70-79': {'races': 0, 'wins': 0, 'profit': 0},
-        '60-69': {'races': 0, 'wins': 0, 'profit': 0},
-        '<60': {'races': 0, 'wins': 0, 'profit': 0},
-    }
+    '150+': {'races': 0, 'wins': 0, 'profit': 0},
+    '140-149': {'races': 0, 'wins': 0, 'profit': 0},
+    '130-139': {'races': 0, 'wins': 0, 'profit': 0},
+    '120-129': {'races': 0, 'wins': 0, 'profit': 0},
+    '110-119': {'races': 0, 'wins': 0, 'profit': 0},
+    '100-109': {'races': 0, 'wins': 0, 'profit': 0},
+    '90-99': {'races': 0, 'wins': 0, 'profit': 0},
+}
     
     score_gaps = {
         '30+': {'races': 0, 'wins': 0, 'profit': 0},
