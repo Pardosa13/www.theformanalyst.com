@@ -1109,7 +1109,6 @@ for horse, pred, result, race, meeting in all_results:
     total_races = len(races_data)
     top_pick_wins = 0
     total_profit = 0
-    stake = 10.0
     winner_sps = []
     
     score_tiers = {
