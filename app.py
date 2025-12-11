@@ -601,17 +601,17 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
             tracks[track]['profit'] += profit
     tracks = calc_rates(tracks, stake)
     
-    # Split jockeys into reliable (5+) and limited (2-4)
-    jockeys_reliable = {k: v for k, v in jockeys.items() if v['runs'] >= 5}
-    jockeys_limited = {k: v for k, v in jockeys.items() if 2 <= v['runs'] < 5}
+    # Split jockeys into reliable (25+) and limited (5-24)
+    jockeys_reliable = {k: v for k, v in jockeys.items() if v['runs'] >= 25}
+    jockeys_limited = {k: v for k, v in jockeys.items() if 5 <= v['runs'] < 25}
     
     # Sort by strike rate
     jockeys_reliable = dict(sorted(jockeys_reliable.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
     jockeys_limited = dict(sorted(jockeys_limited.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
     
-    # Split trainers into reliable (3+) and limited (2)
-    trainers_reliable = {k: v for k, v in trainers.items() if v['runs'] >= 3}
-    trainers_limited = {k: v for k, v in trainers.items() if v['runs'] == 2}
+    # Split trainers into reliable (25+) and limited (5-24)
+    trainers_reliable = {k: v for k, v in trainers.items() if v['runs'] >= 25}
+    trainers_limited = {k: v for k, v in trainers.items() if v['runs'] == 25}
     
     # Sort by strike rate
     trainers_reliable = dict(sorted(trainers_reliable.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
