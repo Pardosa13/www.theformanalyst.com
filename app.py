@@ -1122,7 +1122,9 @@ def data_analytics():
 }
     
     score_gaps = {
-        '30+': {'races': 0, 'wins': 0, 'profit': 0},
+        '50+': {'races': 0, 'wins': 0, 'profit': 0},
+        '40-49': {'races': 0, 'wins': 0, 'profit': 0},
+        '30-39': {'races': 0, 'wins': 0, 'profit': 0},
         '20-29': {'races': 0, 'wins': 0, 'profit': 0},
         '10-19': {'races': 0, 'wins': 0, 'profit': 0},
         '<10': {'races': 0, 'wins': 0, 'profit': 0},
