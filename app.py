@@ -1085,10 +1085,10 @@ def data_analytics():
     # Get component stats
     component_stats = aggregate_component_stats(all_results_data, stake)
 
-    # Sort components by appearances (most common first)
+    # Sort components by ROI (best value first)
     sorted_components = sorted(
         component_stats.items(),
-        key=lambda x: x[1]['appearances'],
+        key=lambda x: x[1]['roi'],
         reverse=True
     )
 
