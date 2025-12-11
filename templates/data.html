@@ -42,7 +42,21 @@
             </form>
         </div>
     </div>
-    
+    <!-- ML Export Button -->
+<div class="mb-4">
+    <a href="{{ url_for('export_ml_data', track=filters.track or '', min_score=filters.min_score or '', date_from=filters.date_from or '', date_to=filters.date_to or '') }}" 
+       class="btn btn-success btn-lg">
+        <i class="bi bi-download"></i> Download Complete ML Training Data
+    </a>
+    <p class="text-muted small mt-2">
+        Export all race data with 22 parsed scoring components + complete raw CSV fields for machine learning analysis.
+        {% if total_races > 0 %}
+        Currently showing {{ total_races }} races with complete results.
+        {% else %}
+        No data available yet - enter results to start exporting.
+        {% endif %}
+    </p>
+</div>
     <!-- Section 1: Overview Cards -->
     <div class="row mb-4">
         <div class="col-md-3">
