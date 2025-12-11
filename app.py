@@ -1332,7 +1332,247 @@ def data_analytics():
             'date_to': date_to
         }
     )
-
+# ----- ML Data Export Route -----
+@app.route("/data/export")
+@login_required
+def export_ml_data():
+    """Export all race data with parsed scoring components AND raw CSV data for ML analysis"""
+    import csv
+    from io import StringIO
+    from flask import make_response
+    
+    # Apply same filters as data page
+    track_filter = request.args.get('track', '')
+    min_score_filter = request.args.get('min_score', type=float)
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    
+    # Query all horses with predictions and results
+    base_query = db.session.query(
+        Meeting.date,
+        Meeting.meeting_name,
+        Race.race_number,
+        Race.distance,
+        Race.race_class,
+        Race.track_condition,
+        Horse.id,
+        Horse.horse_name,
+        Horse.barrier,
+        Horse.weight,
+        Horse.jockey,
+        Horse.trainer,
+        Horse.form,
+        Horse.csv_data,
+        Prediction.score,
+        Prediction.predicted_odds,
+        Prediction.win_probability,
+        Prediction.notes,
+        Result.finish_position,
+        Result.sp
+    ).join(Race, Horse.race_id == Race.id)\
+     .join(Meeting, Race.meeting_id == Meeting.id)\
+     .join(Prediction, Horse.id == Prediction.horse_id)\
+     .join(Result, Horse.id == Result.horse_id)\
+     .filter(Result.finish_position > 0)
+    
+    # Apply filters
+    if track_filter:
+        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        base_query = base_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
+    
+    query_results = base_query.order_by(Meeting.date.desc(), Race.race_number.asc()).limit(50000).all()
+    
+    # First pass: collect all unique CSV field names
+    all_csv_fields = set()
+    for row in query_results:
+        csv_data = row[13]  # Horse.csv_data is at index 13
+        if csv_data and isinstance(csv_data, dict):
+            all_csv_fields.update(csv_data.keys())
+    
+    # Sort CSV fields alphabetically for consistent column ordering
+    csv_field_names = sorted(list(all_csv_fields))
+    
+    # Create CSV in memory
+    si = StringIO()
+    writer = csv.writer(si)
+    
+    # Define parsed component columns
+    component_columns = [
+        'ran_places', 'no_wins_last_10', 'elite_jockey', 'good_jockey', 'negative_jockey',
+        'good_trainer', 'track_win_rate', 'track_distance_form', 'distance_form',
+        'track_condition_score', 'distance_change', 'class_change',
+        'last_start_margin', 'days_since_run', 'form_price',
+        'first_second_up', 'sectional_weighted_avg', 'sectional_best_recent',
+        'sectional_consistency', 'weight_vs_avg', 'weight_change',
+        'combo_bonus', 'specialist_bonus'
+    ]
+    
+    # Write header: basic info + predictions + results + parsed components + ALL raw CSV fields
+    header = [
+        'date', 'meeting_name', 'track', 'race_number', 'distance', 'race_class', 'track_condition',
+        'horse_name', 'barrier', 'weight', 'jockey', 'trainer', 'form',
+        'total_score', 'predicted_odds', 'win_probability',
+        'finish_position', 'sp', 'won', 'placed', 'roi'
+    ] + component_columns + csv_field_names
+    
+    writer.writerow(header)
+    
+    # Write data rows
+    for row in query_results:
+        date, meeting_name, race_num, distance, race_class, track_cond, \
+        horse_id, horse_name, barrier, weight, jockey, trainer, form, csv_data, \
+        score, pred_odds, win_prob, notes, finish_pos, sp = row
+        
+        # SAFE: Extract track from meeting name
+        track = ''
+        if meeting_name:
+            if '_' in meeting_name:
+                parts = meeting_name.split('_')
+                track = parts[1] if len(parts) > 1 else meeting_name
+            else:
+                track = meeting_name
+        
+        # SAFE: Format date
+        date_str = date.strftime('%Y-%m-%d') if date else ''
+        
+        # SAFE: Clean predicted odds
+        try:
+            pred_odds_str = str(pred_odds or '').replace('$', '').strip()
+            pred_odds_clean = pred_odds_str if pred_odds_str else ''
+        except:
+            pred_odds_clean = ''
+        
+        # SAFE: Calculate derived fields
+        won = 1 if finish_pos == 1 else 0
+        placed = 1 if finish_pos <= 3 else 0
+        
+        # SAFE: Calculate ROI
+        try:
+            roi = ((float(sp) - 1) * 100) if (finish_pos == 1 and sp) else -100
+        except (ValueError, TypeError):
+            roi = -100
+        
+        # Parse components from notes
+        components = parse_notes_components(notes or '')
+        
+        # Map parsed components to simplified column names
+        component_values = {
+            'ran_places': components.get('Ran Places', 0),
+            'no_wins_last_10': components.get('No Wins Last 10', 0),
+            'elite_jockey': components.get('Elite Jockey', 0),
+            'good_jockey': components.get('Good Jockey', 0),
+            'negative_jockey': components.get('Negative Jockey', 0),
+            'good_trainer': components.get('Good Trainer', 0),
+            'track_win_rate': sum([
+                components.get('Track Win Rate - Exceptional', 0),
+                components.get('Track Win Rate - Strong', 0),
+                components.get('Track Win Rate - Good', 0),
+                components.get('Track Win Rate - Moderate', 0),
+                components.get('Undefeated at Track', 0)
+            ]),
+            'track_distance_form': components.get('Undefeated at Track+Distance', 0) or components.get('Distance Score Total', 0),
+            'distance_form': components.get('Undefeated at Distance', 0) or components.get('Distance Score Total', 0),
+            'track_condition_score': components.get('Track Condition Score Total', 0) or components.get('Undefeated on Condition', 0),
+            'distance_change': components.get('Longer Distance', 0) + components.get('Shorter Distance', 0),
+            'class_change': components.get('Class Drop', 0) + components.get('Class Rise', 0),
+            'last_start_margin': sum([
+                components.get('Last Start - Dominant Win', 0),
+                components.get('Last Start - Comfortable Win', 0),
+                components.get('Last Start - Narrow Win', 0),
+                components.get('Last Start - Photo Win', 0),
+                components.get('Last Start - Competitive Loss', 0),
+                components.get('Last Start - Close Loss', 0),
+                components.get('Last Start - Beaten Clearly', 0),
+                components.get('Last Start - Well Beaten', 0),
+                components.get('Last Start - Demolished', 0)
+            ]),
+            'days_since_run': components.get('Quick Backup', 0) + components.get('Too Fresh', 0),
+            'form_price': components.get('Form Price - Well Backed', 0) + components.get('Form Price - Neutral', 0) + components.get('Form Price - Negative', 0),
+            'first_second_up': sum([
+                components.get('First Up Winner', 0),
+                components.get('First Up Strong Podium', 0),
+                components.get('Second Up Winner', 0),
+                components.get('Second Up Strong Podium', 0),
+                components.get('First Up Specialist', 0),
+                components.get('Second Up Specialist', 0)
+            ]),
+            'sectional_weighted_avg': components.get('Sectional Weighted Avg', 0),
+            'sectional_best_recent': components.get('Sectional Best Recent', 0),
+            'sectional_consistency': sum([
+                components.get('Sectional Consistency - Excellent', 0),
+                components.get('Sectional Consistency - Good', 0),
+                components.get('Sectional Consistency - Fair', 0),
+                components.get('Sectional Consistency - Poor', 0)
+            ]),
+            'weight_vs_avg': sum([
+                components.get('Weight - Well Below Avg', 0),
+                components.get('Weight - Below Avg', 0),
+                components.get('Weight - Above Avg', 0),
+                components.get('Weight - Well Above Avg', 0)
+            ]),
+            'weight_change': components.get('Weight Drop', 0) + components.get('Weight Rise', 0),
+            'combo_bonus': components.get('Combo Bonus', 0),
+            'specialist_bonus': sum([
+                components.get('Specialist - Track', 0),
+                components.get('Specialist - Distance', 0),
+                components.get('Specialist - Track+Distance', 0),
+                components.get('Specialist - Condition', 0),
+                components.get('Specialist - Perfect Podium', 0)
+            ])
+        }
+        
+        # Build row with safe defaults
+        data_row = [
+            date_str,
+            meeting_name or '',
+            track,
+            race_num or '',
+            distance or '',
+            race_class or '',
+            track_cond or '',
+            horse_name or '',
+            barrier or '',
+            weight or '',
+            jockey or '',
+            trainer or '',
+            form or '',
+            score or 0,
+            pred_odds_clean,
+            win_prob or '',
+            finish_pos or '',
+            sp or '',
+            won,
+            placed,
+            roi
+        ]
+        
+        # Add parsed component values
+        for col in component_columns:
+            data_row.append(component_values.get(col, 0))
+        
+        # Add ALL raw CSV field values (in same order as header)
+        csv_data_dict = csv_data if isinstance(csv_data, dict) else {}
+        for field_name in csv_field_names:
+            data_row.append(csv_data_dict.get(field_name, ''))
+        
+        writer.writerow(data_row)
+    
+    # Create response
+    output = make_response(si.getvalue())
+    filename = f"ml_complete_data_{datetime.now().strftime('%Y%m%d')}"
+    if track_filter:
+        filename += f"_{track_filter}"
+    if min_score_filter:
+        filename += f"_min{int(min_score_filter)}"
+    filename += ".csv"
+    
+    output.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    output.headers["Content-type"] = "text/csv"
+    
+    return output
 # Error handlers
 @app.errorhandler(404)
 def not_found_error(error):
