@@ -1158,8 +1158,7 @@ def data_analytics():
         elif top_score >= 90:
             tier = '90-99'
         else:
-            # Skip races below 90 score
-            continue
+            tier = None  # Don't assign a tier for scores below 90
         
         if score_gap >= 30:
             gap_bucket = '30+'
@@ -1179,10 +1178,11 @@ def data_analytics():
             winner_sps.append(sp)
         total_profit += profit
         
-        score_tiers[tier]['races'] += 1
-        if won:
-            score_tiers[tier]['wins'] += 1
-        score_tiers[tier]['profit'] += profit
+        if tier:  # Only update tiers if score >= 90
+            score_tiers[tier]['races'] += 1
+            if won:
+                score_tiers[tier]['wins'] += 1
+            score_tiers[tier]['profit'] += profit
         
         score_gaps[gap_bucket]['races'] += 1
         if won:
