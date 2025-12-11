@@ -1162,15 +1162,19 @@ def data_analytics():
         else:
             tier = None  # Don't assign a tier for scores below 90
         
-        if score_gap >= 30:
-            gap_bucket = '30+'
+        if score_gap >= 50:
+            gap_bucket = '50+'
+        elif score_gap >= 40:
+            gap_bucket = '40-49'
+        elif score_gap >= 30:
+            gap_bucket = '30-39'
         elif score_gap >= 20:
             gap_bucket = '20-29'
         elif score_gap >= 10:
             gap_bucket = '10-19'
         else:
             gap_bucket = '<10'
-        
+
         won = top_pick['result'].finish_position == 1
         sp = top_pick['result'].sp
         profit = (sp * stake - stake) if won else -stake
