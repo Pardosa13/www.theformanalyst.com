@@ -486,6 +486,113 @@ const FILTER_CRITERIA = {
     noWinsInLast10: {
         label: 'No Wins in Last 10 (Risky)',
         detect: (notes) => notes.includes('No wins in last 10 starts')
+    },
+    
+    // ====== ML FINDINGS: AGE FACTORS ======
+    coltBonus: {
+        label: 'Colt Bonus (ML: 40% SR, +20% ROI)',
+        detect: (notes) => notes.includes('Colt bonus')
+    },
+    age3Bonus: {
+        label: 'Age 3 Bonus (ML: 19% SR)',
+        detect: (notes) => notes.includes('Age 3 bonus')
+    },
+    age4Bonus: {
+        label: 'Age 4 Bonus',
+        detect: (notes) => notes.includes('Age 4 bonus')
+    },
+    age7PlusRisky: {
+        label: 'Age 7+ (ML: 0% SR - AVOID)',
+        detect: (notes) => notes.includes('Age 7+ penalty')
+    },
+    
+    // ====== ML FINDINGS: ELITE SIRES (POSITIVE) ======
+    trapezeArtistSire: {
+        label: 'Trapeze Artist Sire (ML: 40% SR)',
+        detect: (notes) => notes.includes('Trapeze Artist sire')
+    },
+    zoustarSire: {
+        label: 'Zoustar Sire (ML: 33% SR)',
+        detect: (notes) => notes.includes('Zoustar sire')
+    },
+    pierataSire: {
+        label: 'Pierata Sire',
+        detect: (notes) => notes.includes('Pierata sire')
+    },
+    allTooHardSire: {
+        label: 'All Too Hard Sire',
+        detect: (notes) => notes.includes('All Too Hard sire')
+    },
+    
+    // ====== ML FINDINGS: BAD SIRES (NEGATIVE) ======
+    betterThanReadySire: {
+        label: 'Better Than Ready Sire (ML: 0% SR - AVOID)',
+        detect: (notes) => notes.includes('Better Than Ready sire')
+    },
+    dundeelSire: {
+        label: 'Dundeel Sire (ML: 0% SR - AVOID)',
+        detect: (notes) => notes.includes('Dundeel sire')
+    },
+    
+    // ====== ML FINDINGS: WIN RATE FACTORS ======
+    eliteWinRate40Plus: {
+        label: 'Elite Win Rate 40%+ (ML: 30.8% SR)',
+        detect: (notes) => notes.includes('Career win rate 40%+')
+    },
+    strongWinRate30to40: {
+        label: 'Strong Win Rate 30-40%',
+        detect: (notes) => notes.includes('Career win rate 30-40%')
+    },
+    poorWinRateUnder10: {
+        label: 'Poor Win Rate <10% (ML: AVOID)',
+        detect: (notes) => notes.includes('Career win rate <10%')
+    },
+    
+    // ====== ML FINDINGS: BARRIER & MARGIN ======
+    wideBarrier7to9: {
+        label: 'Wide Barrier 7-9 (ML: 19% SR)',
+        detect: (notes) => notes.includes('Barrier 7-9')
+    },
+    closeLossMl: {
+        label: 'Close Loss 0.5-2L (ML: 18.6% SR)',
+        detect: (notes) => notes.includes('Close loss (0.5-2L)')
+    },
+    
+    // ====== ML FINDINGS: ELITE COMBO PATTERNS ======
+    threeYoColtCombo: {
+        label: '3yo Colt Combo (ML: 44.4% SR, +33% ROI - BEST!)',
+        detect: (notes) => notes.includes('3yo Colt combo')
+    },
+    demolishedClassDropCombo: {
+        label: 'Demolished + Major Class Drop 30+',
+        detect: (notes) => notes.includes('Demolished + major class drop')
+    },
+    fastSectionalColtCombo: {
+        label: 'Fast Sectional (<34s) + Colt',
+        detect: (notes) => notes.includes('Fast sectional + Colt')
+    },
+    majorClassDropSlowSectional: {
+        label: 'Major Class Drop 30+ + Slow Sectional (ML: 100% SR, +85% ROI!)',
+        detect: (notes) => notes.includes('Major class drop + slow sectional')
+    },
+    
+    mlElitePattern: {
+        label: 'ML Elite Pattern (Top combos only)',
+        detect: (notes) => {
+            return notes.includes('3yo Colt combo') || 
+                   notes.includes('Major class drop + slow sectional') ||
+                   notes.includes('Trapeze Artist sire') ||
+                   notes.includes('Zoustar sire');
+        }
+    },
+    mlAvoidPattern: {
+        label: 'ML Avoid Pattern (Red flags)',
+        detect: (notes) => {
+            return notes.includes('Age 7+ penalty') ||
+                   notes.includes('Better Than Ready sire') ||
+                   notes.includes('Dundeel sire') ||
+                   notes.includes('Career win rate <10%');
+        }
     }
 };
 
