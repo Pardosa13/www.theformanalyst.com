@@ -368,6 +368,50 @@ def parse_notes_components(notes):
         
         # Combo Bonus
         (r'\+\s*15\.0\s*:\s*COMBO BONUS', 'Combo Bonus'),
+        # NEW PATTERNS - Add after the existing patterns, before the closing bracket ]
+
+        # Colt Bonus
+        (r'\+\s*15\.0\s*:\s*COLT', 'Colt Bonus'),
+
+        # Age Bonuses
+        (r'\+\s*5\.0\s*:\s*Prime age \(3yo', 'Age - 3yo Prime'),
+        (r'\+\s*3\.0\s*:\s*Good age \(4yo', 'Age - 4yo Good'),
+        (r'-\s*10\.0\s*:\s*Old age \(7\+', 'Age - 7+ Old'),
+
+        # Sire Bonuses
+        (r'\+\s*10\.0\s*:\s*Elite sire \(Trapeze Artist', 'Sire - Trapeze Artist'),
+        (r'\+\s*8\.0\s*:\s*Elite sire \(Zoustar', 'Sire - Zoustar'),
+        (r'\+\s*5\.0\s*:\s*Elite sire \(Pierata', 'Sire - Pierata'),
+        (r'\+\s*5\.0\s*:\s*Elite sire \(All Too Hard', 'Sire - All Too Hard'),
+        (r'-\s*5\.0\s*:\s*Poor sire', 'Sire - Poor'),
+
+        # Career Win Rate
+        (r'\+\s*15\.0\s*:\s*Elite career win rate', 'Career Win Rate - Elite 40%+'),
+        (r'\+\s*8\.0\s*:\s*Strong career win rate', 'Career Win Rate - Strong 30-40%'),
+        (r'-\s*10\.0\s*:\s*Poor career win rate', 'Career Win Rate - Poor <10%'),
+
+        # Barrier Bonus
+        (r'\+\s*5\.0\s*:\s*Sweet spot barrier \(7-9', 'Barrier 7-9'),
+
+        # Close Loss Bonus
+        (r'\+\s*5\.0\s*:\s*Close loss last start \(0\.5-2L', 'Close Loss Bonus'),
+
+        # 3yo Colt Combo
+        (r'\+\s*20\.0\s*:\s*3yo COLT combo', '3yo Colt Combo'),
+
+        # Demolished + Class Drop Combo
+        (r'\+\s*15\.0\s*:\s*Demolished in elite company', 'Demolished + Major Class Drop'),
+
+        # Fast Sectional + Colt Combo
+        (r'\+\s*25\.0\s*:\s*Fast sectional \+ COLT combo', 'Fast Sectional + Colt'),
+
+        # Slow Sectional + Class Drop Combo
+        (r'\+\s*30\.0\s*:\s*Major class drop \+ slow sectional combo', 'Major Class Drop + Slow Sectional'),
+
+        # Class Drop Context Bonuses
+        (r'\+\s*10\.0\s*:\s*Demolished.*BUT MAJOR class drop', 'Context - Demolished with Major Drop'),
+        (r'\+\s*5\.0\s*:\s*Well beaten.*BUT major class drop', 'Context - Well Beaten with Drop'),
+        (r'\+\s*0\.0\s*:\s*Beaten clearly.*BUT dropping in class', 'Context - Beaten Clearly with Drop'),
         
         # Specialist Bonuses
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(track\)', 'Specialist - Track'),
