@@ -380,10 +380,7 @@ if (horseSex === 'Colt' && horseAge === 3) {
     notes += '+20.0 : 3yo COLT combo (44.4% SR, +33% ROI)\n';
 }
     // NEW: DEMOLISHED + MAJOR CLASS DROP COMBO
-const todayClassScore = calculateClassScore(horseRow['class restrictions'], horseRow['race prizemoney']);
-const lastClassScore = calculateClassScore(horseRow['form class'], horseRow['prizemoney']);
-const classChange = todayClassScore - lastClassScore;
-
+// todayClassScore, lastClassScore, and classChange are already declared above
 if (lastMargin >= 10 && classChange < -30) {
     score += 15;
     notes += '+15.0 : Demolished in elite company, now dropping significantly\n';
