@@ -223,11 +223,11 @@
     {{ "%.1f"|format(stats.roi) }}%
 </td>
                             <td class="text-center">
-                                {% if stats.strike_rate >= 25 and stats.appearances >= 5 %}
+                                {% if stats.roi >= 25 and stats.appearances >= 5 %}
                                 <span class="badge bg-success">✓ Strong</span>
-                                {% elif stats.strike_rate >= 18 and stats.appearances >= 3 %}
+                                {% elif stats.roi >= 18 and stats.appearances >= 3 %}
                                 <span class="badge bg-info">Promising</span>
-                                {% elif stats.strike_rate < 10 and stats.appearances >= 5 %}
+                                {% elif stats.roi < 10 and stats.appearances >= 5 %}
                                 <span class="badge bg-danger">Weak</span>
                                 {% elif stats.appearances < 5 %}
                                 <span class="badge bg-secondary">Low Data</span>
