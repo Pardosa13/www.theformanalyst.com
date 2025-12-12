@@ -77,17 +77,17 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
 
     // Check if horse has won at this track (ENHANCED WEIGHTED SYSTEM)
     [a, b] = checkTrackForm(horseRow['horse record track']);
-    score += a;
+    score += a * 0.5;
     notes += b;
 
     // Check if horse has won at this track+distance combo (ENHANCED WEIGHTED SYSTEM)
     [a, b] = checkTrackDistanceForm(horseRow['horse record track distance']);
-    score += a;
+    score += a * 0.5;
     notes += b;
 
     // Check if horse has won at this distance (ENHANCED WEIGHTED SYSTEM)
     [a, b] = checkDistanceForm(horseRow['horse record distance']);
-    score += a;
+    score += a * 0.5;
     notes += b;
 
     // Check if the last race the horse ran was longer, same or shorter distance
@@ -289,15 +289,105 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     }
 
     // Check form price (with specialist context)
-    [a, b] = checkFormPrice(averageFormPrice, specialistContext);
-    score += a;
-    notes += b;
+[a, b] = checkFormPrice(averageFormPrice, specialistContext);
+score += a;
+notes += b;
 
-    // Check first up / second up specialist
-    [a, b] = checkFirstUpSecondUp(horseRow);
-    score += a;
-    notes += b;
+// Check first up / second up specialist
+[a, b] = checkFirstUpSecondUp(horseRow);
+score += a;
+notes += b;
 
+// NEW: COLT BONUS (+15 points)
+const horseSex = String(horseRow['horse sex'] || '').trim();
+if (horseSex === 'Colt') {
+    score += 15;
+    notes += '+15.0 : COLT (40% SR, +20% ROI edge)\n';
+}
+
+// NEW: AGE BONUSES
+const horseAge = parseInt(horseRow['horse age']);
+if (!isNaN(horseAge)) {
+    if (horseAge === 3) {
+        score += 5;
+        notes += '+ 5.0 : Prime age (3yo, 19% SR)\n';
+    } else if (horseAge === 4) {
+        score += 3;
+        notes += '+ 3.0 : Good age (4yo)\n';
+    } else if (horseAge >= 7) {
+        score -= 10;
+        notes += '-10.0 : Old age (7+, 0% SR in data)\n';
+    }
+}
+    // NEW: SIRE BONUSES/PENALTIES
+const sire = String(horseRow['horse sire'] || '').trim();
+const eliteSires = {
+    'Trapeze Artist': 10,
+    'Zoustar': 8,
+    'Pierata': 5,
+    'All Too Hard': 5
+};
+const poorSires = {
+    'Better Than Ready': -5,
+    'Dundeel': -5
+};
+
+if (eliteSires[sire]) {
+    score += eliteSires[sire];
+    notes += `+${eliteSires[sire]}.0 : Elite sire (${sire})\n`;
+}
+if (poorSires[sire]) {
+    score += poorSires[sire];
+    notes += `${poorSires[sire]}.0 : Poor sire (${sire})\n`;
+}
+    // NEW: CAREER WIN RATE SCORING
+const careerRecord = horseRow['horse record'];
+if (careerRecord && typeof careerRecord === 'string') {
+    const numbers = careerRecord.split(/[:\-]/).map(s => Number(s.trim()));
+    if (numbers.length === 4) {
+        const [careerStarts, careerWins] = numbers;
+        if (careerStarts >= 5) {
+            const careerWinPct = (careerWins / careerStarts) * 100;
+            if (careerWinPct >= 40) {
+                score += 15;
+                notes += '+15.0 : Elite career win rate (40%+, 30.8% SR)\n';
+            } else if (careerWinPct >= 30) {
+                score += 8;
+                notes += '+ 8.0 : Strong career win rate (30-40%)\n';
+            } else if (careerWinPct < 10) {
+                score -= 10;
+                notes += '-10.0 : Poor career win rate (<10%)\n';
+            }
+        }
+    }
+}
+    // NEW: BARRIER 7-9 BONUS
+const barrier = parseInt(horseRow['horse barrier']);
+if (!isNaN(barrier) && barrier >= 7 && barrier <= 9) {
+    score += 5;
+    notes += '+ 5.0 : Sweet spot barrier (7-9, 19% SR)\n';
+}
+    // NEW: CLOSE LOSS BONUS
+const lastMargin = parseFloat(horseRow['form margin']);
+const lastPosition = parseInt(horseRow['form position']);
+if (!isNaN(lastMargin) && !isNaN(lastPosition) && lastPosition > 1 && lastMargin > 0 && lastMargin <= 2) {
+    score += 5;
+    notes += '+ 5.0 : Close loss last start (0.5-2L, 18.6% SR)\n';
+}
+    // NEW: 3YO COLT COMBO
+if (horseSex === 'Colt' && horseAge === 3) {
+    score += 20;
+    notes += '+20.0 : 3yo COLT combo (44.4% SR, +33% ROI)\n';
+}
+    // NEW: DEMOLISHED + MAJOR CLASS DROP COMBO
+const todayClassScore = calculateClassScore(horseRow['class restrictions'], horseRow['race prizemoney']);
+const lastClassScore = calculateClassScore(horseRow['form class'], horseRow['prizemoney']);
+const classChange = todayClassScore - lastClassScore;
+
+if (lastMargin >= 10 && classChange < -30) {
+    score += 15;
+    notes += '+15.0 : Demolished in elite company, now dropping significantly\n';
+}
     // Check for perfect record specialist bonus
     const perfectRecordResult = calculatePerfectRecordBonus ? calculatePerfectRecordBonus(horseRow, trackCondition) : { bonus: 0, note: '' };
     if (perfectRecordResult && perfectRecordResult.bonus > 0) {
@@ -325,40 +415,29 @@ function checkLast10runs(last10) {
     let count = 0;
     let note2 = '';
     let note = '';
-    let hasWin = last10.includes('1');
 
     for (let i = last10.length - 1; i >= 0; i--) {
-    let char = last10[i];
-    if (char !== 'X' && char !== 'x' && count < 5) {
-        count++;
-        if (char === '1') {
-            addScore += 10;
-            note2 = ' 1st' + note2;  // ← Prepend instead of append
-        }
-        if (char === '2') {
-            addScore += 5;
-            note2 = ' 2nd' + note2;  // ← Prepend instead of append
-        }
-        if (char === '3') {
-            addScore += 2;
-            note2 = ' 3rd' + note2;  // ← Prepend instead of append
+        let char = last10[i];
+        if (char !== 'X' && char !== 'x' && count < 5) {
+            count++;
+            if (char === '1') {
+                addScore += 10;
+                note2 = ' 1st' + note2;
+            }
+            if (char === '2') {
+                addScore += 5;
+                note2 = ' 2nd' + note2;
+            }
+            if (char === '3') {
+                addScore += 2;
+                note2 = ' 3rd' + note2;
+            }
         }
     }
-}
 
-    // FORMAT THE NOTE *BEFORE* APPLYING THE NO-WINS PENALTY
     if (addScore > 0) {
         note = '+' + addScore + '.0 : Ran places:' + note2 + '\n';
     }
-
-    // NOW APPLY THE NO-WINS PENALTY
-    if (!hasWin && last10.length > 0) {
-        addScore -= 15;
-        note += '-15.0 : No wins in last 10 starts - non-winner\n';
-    }
-
-    // Handle the case where we had places but ended negative
-    // (note already formatted above)
 
     return [addScore, note];
 }
@@ -580,20 +659,20 @@ function checkTrackConditionForm(racingForm, trackCondition) {
 
     let undefeatedBonus = 0;
     if (wins === runs && runs >= 2) {
-        if (runs >= 5) {
-            undefeatedBonus = 15;
-            note += '+ 15.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (5+ runs)\n';
-        } else if (runs >= 4) {
-            undefeatedBonus = 14;
-            note += '+ 14.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (4 runs)\n';
-        } else if (runs >= 3) {
-            undefeatedBonus = 12;
-            note += '+ 12.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (3 runs)\n';
-        } else {
-            undefeatedBonus = 8;
-            note += '+ 8.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (2 runs)\n';
-        }
+    if (runs >= 5) {
+        undefeatedBonus = 20;
+        note += '+ 20.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (5+ runs) [+154% ROI]\n';
+    } else if (runs >= 4) {
+        undefeatedBonus = 17;
+        note += '+ 17.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (4 runs)\n';
+    } else if (runs >= 3) {
+        undefeatedBonus = 15;
+        note += '+ 15.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (3 runs)\n';
+    } else {
+        undefeatedBonus = 10;
+        note += '+ 10.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (2 runs)\n';
     }
+}
 
     let subtotal = winScore + podiumScore + undefeatedBonus;
 
@@ -1198,11 +1277,16 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
         } else if (margin <= 3.5) {
             addScore = 0;
         } else {
-            addScore = -5;
-            note += `- 5.0 : Beaten badly (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
-        }
+    // Apply class drop context for place getters beaten badly
+    if (classChange < -10) {
+        addScore = 5;
+        note += `+ 5.0 : Beaten (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L BUT dropping in class significantly\n`;
+    } else {
+        addScore = -5;
+        note += `- 5.0 : Beaten badly (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
     }
-    // MIDFIELD OR BACK (position 4+)
+}
+   // MIDFIELD OR BACK (position 4+)
 else if (position >= 4) {
     if (margin <= 3.0) {
         addScore = 0;
@@ -2225,7 +2309,7 @@ function getLowestSectionalsByRace(data) {
         const avgTimes = weightedAvgData.map(h=>h.averageTime);
         const avgMean = calculateMean(avgTimes);
         const avgStdDev = calculateStdDev(avgTimes, avgMean);
-        weightedAvgData.forEach(h => { h.zScore = calculateZScore(h.averageTime, avgMean, avgStdDev); h.points = h.zScore * -12; });
+        weightedAvgData.forEach(h => { h.zScore = calculateZScore(h.averageTime, avgMean, avgStdDev); h.points = h.zScore * -3.6; }); -12; });
 
         const bestTimes = bestRecentData.map(h=>h.bestTime);
         const bestMean = calculateMean(bestTimes);
@@ -2556,6 +2640,24 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             score += adjustedSectionalScore;
             if (sectionalWeight !== 1.0) notes += `ℹ️  Sectional weight applied: ${originalSectionalScore.toFixed(1)} × ${sectionalWeight.toFixed(2)} = ${adjustedSectionalScore.toFixed(1)}\n`;
             notes += matchingHorse.sectionalNote;
+            // NEW: Fast sectional + Colt combo bonus
+    const horseSex = String(horse['horse sex'] || '').trim();
+    const rawSectional = parseFloat(String(horse['sectional'] || '').match(/(\d+\.?\d*)sec/)?.[1]);
+    
+    if (horseSex === 'Colt' && rawSectional && rawSectional < 34) {
+        score += 25;
+        notes += '+25.0 : Fast sectional + COLT combo (44.4% SR, +33% ROI)\n';
+    }
+
+    // NEW: Major class drop + slow sectional combo
+    const todayClassScore = calculateClassScore(horse['class restrictions'], horse['race prizemoney']);
+    const lastClassScore = calculateClassScore(horse['form class'], horse['prizemoney']);
+    const classChange = todayClassScore - lastClassScore;
+    
+    if (classChange < -30 && rawSectional && rawSectional >= 37) {
+        score += 30;
+        notes += '+30.0 : Major class drop + slow sectional combo (100% SR, +85% ROI - elite to easier)\n';
+    }
 
             if (matchingHorse.hasAverage1st && matchingHorse.hasLastStart1st) {
                 const [classScore] = compareClasses(horse['class restrictions'], horse['form class'], horse['race prizemoney'], horse['prizemoney']);
