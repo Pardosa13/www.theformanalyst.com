@@ -1232,21 +1232,21 @@ function checkDaysSinceLastRun(meetingDate, formMeetingDate) {
 function checkMargin(formPosition, formMargin, classChange = 0, recentForm = null) {
     let addScore = 0;
     let note = '';
-
+    
     // Validate inputs
     if (!formPosition || !formMargin) {
         return [0, ''];
     }
-
+    
     // Parse position and margin
     const position = parseInt(formPosition, 10);
     const margin = parseFloat(formMargin);
-
+    
     // Check if parsing was successful
     if (isNaN(position) || isNaN(margin)) {
         return [0, ''];
     }
-
+    
     // WINNERS (position = 1)
     if (position === 1) {
         if (margin >= 5.0) {
@@ -1274,32 +1274,51 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
         } else if (margin <= 3.5) {
             addScore = 0;
         } else {
-    // Apply class drop context for place getters beaten badly
-    if (classChange < -10) {
-        addScore = 5;
-        note += `+ 5.0 : Beaten (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L BUT dropping in class significantly\n`;
-    } else {
-        addScore = -5;
-        note += `- 5.0 : Beaten badly (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
+            // Apply class drop context for place getters beaten badly
+            if (classChange < -10) {
+                addScore = 5;
+                note += `+ 5.0 : Beaten (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L BUT dropping in class significantly\n`;
+            } else {
+                addScore = -5;
+                note += `- 5.0 : Beaten badly (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
+            }
+        }
     }
-}
-   // MIDFIELD OR BACK (position 4+)
-else if (position >= 4) {
-    if (margin <= 3.0) {
-        addScore = 0;
-        note += `+ 0.0 : Competitive effort (${position}th) by ${margin.toFixed(1)}L\n`;
-    } else if (margin <= 6.0) {
-        addScore = -3;
-        note += `- 3.0 : Beaten clearly (${position}th) by ${margin.toFixed(1)}L\n`;
-    } else if (margin <= 10.0) {
-        addScore = -7;
-        note += `- 7.0 : Well beaten (${position}th) by ${margin.toFixed(1)}L\n`;
-    } else {
-        addScore = -15;
-        note += `-15.0 : Demolished (${position}th) by ${margin.toFixed(1)}L - not competitive\n`;
+    // MIDFIELD OR BACK (position 4+)
+    else if (position >= 4) {
+        if (margin <= 3.0) {
+            addScore = 0;
+            note += `+ 0.0 : Competitive effort (${position}th) by ${margin.toFixed(1)}L\n`;
+        } else if (margin <= 6.0) {
+            // Check for class drop
+            if (classChange < -15) {
+                addScore = 0;
+                note += `+ 0.0 : Beaten clearly (${position}th) by ${margin.toFixed(1)}L BUT dropping in class\n`;
+            } else {
+                addScore = -3;
+                note += `- 3.0 : Beaten clearly (${position}th) by ${margin.toFixed(1)}L\n`;
+            }
+        } else if (margin <= 10.0) {
+            // Check for significant class drop
+            if (classChange < -20) {
+                addScore = 5;
+                note += `+ 5.0 : Well beaten (${position}th) by ${margin.toFixed(1)}L BUT major class drop (+14.5% ROI pattern)\n`;
+            } else {
+                addScore = -7;
+                note += `- 7.0 : Well beaten (${position}th) by ${margin.toFixed(1)}L\n`;
+            }
+        } else {
+            // Demolished horses with major class drops
+            if (classChange < -30) {
+                addScore = 10;
+                note += `+10.0 : Demolished (${position}th) by ${margin.toFixed(1)}L BUT MAJOR class drop (elite to easier)\n`;
+            } else {
+                addScore = -15;
+                note += `-15.0 : Demolished (${position}th) by ${margin.toFixed(1)}L - not competitive\n`;
+            }
+        }
     }
-}
-
+    
     // Apply class drop context if we have a penalty
     if (addScore < 0 && classChange !== 0 && recentForm !== null) {
         const adjustment = adjustLastStartPenaltyForClassDrop(addScore, classChange, recentForm);
@@ -1308,10 +1327,9 @@ else if (position >= 4) {
             note += `  ℹ️  ${adjustment.note}\n`;
         }
     }
-
+    
     return [addScore, note];
 }
-
 // ========================================
 // CLASS SCORING SYSTEM (0-130 Scale)
 // ========================================
