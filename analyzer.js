@@ -403,39 +403,41 @@ function checkWeight(weight, claim) {
 
 function checkLast10runs(last10) {
     last10 = String(last10 || '').trim();
-
     if (last10.length > 99) {
         throw new Error("String must be 99 characters or less.");
     }
-
     let addScore = 0;
     let count = 0;
     let note2 = '';
     let note = '';
-
+    
+    // Recency weights - most recent gets full points, then decays
+    const weights = [1.0, 0.8, 0.6, 0.4, 0.2]; // Index 0 = most recent
+    
     for (let i = last10.length - 1; i >= 0; i--) {
         let char = last10[i];
         if (char !== 'X' && char !== 'x' && count < 5) {
+            let weight = weights[count]; // Apply recency weight
             count++;
+            
             if (char === '1') {
-                addScore += 10;
+                addScore += 10 * weight;
                 note2 = ' 1st' + note2;
             }
             if (char === '2') {
-                addScore += 5;
+                addScore += 5 * weight;
                 note2 = ' 2nd' + note2;
             }
             if (char === '3') {
-                addScore += 2;
+                addScore += 2 * weight;
                 note2 = ' 3rd' + note2;
             }
         }
     }
-
+    
     if (addScore > 0) {
-        note = '+' + addScore + '.0 : Ran places:' + note2 + '\n';
+        note = '+' + addScore.toFixed(1) + ' : Ran places:' + note2 + '\n';
     }
-
     return [addScore, note];
 }
 
