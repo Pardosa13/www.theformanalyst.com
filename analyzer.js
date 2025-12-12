@@ -2694,8 +2694,15 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
         analysisResults.push({ horse, score, notes });
     });
 
-    // De-duplicate by horse name (keep latest)
-    let uniqueResults = Array.from(new Map(analysisResults.map(item => [item.horse['horse name'], item])).values());
+    // De-duplicate by horse name AND race number (preserve dual nominations)
+let uniqueResults = Array.from(
+    new Map(
+        analysisResults.map(item => [
+            `${item.horse['horse name']}-${item.horse['race number']}`, 
+            item
+        ])
+    ).values()
+);
 
     uniqueResults = calculateTrueOdds(uniqueResults, 1, false);
 
