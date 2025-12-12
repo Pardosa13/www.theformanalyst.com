@@ -2324,7 +2324,7 @@ function getLowestSectionalsByRace(data) {
         const avgTimes = weightedAvgData.map(h=>h.averageTime);
         const avgMean = calculateMean(avgTimes);
         const avgStdDev = calculateStdDev(avgTimes, avgMean);
-        weightedAvgData.forEach(h => { h.zScore = calculateZScore(h.averageTime, avgMean, avgStdDev); h.points = h.zScore * -3.6; }); -12; });
+        weightedAvgData.forEach(h => { h.zScore = calculateZScore(h.averageTime, avgMean, avgStdDev); h.points = h.zScore * -3.6; });
 
         const bestTimes = bestRecentData.map(h=>h.bestTime);
         const bestMean = calculateMean(bestTimes);
