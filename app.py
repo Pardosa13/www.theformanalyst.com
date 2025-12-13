@@ -674,6 +674,61 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
         'distances': distances,
         'tracks': tracks
     }
+    
+def analyze_race_classes(races_data, stake=10.0):
+    """
+    Analyze performance by race class (top picks only)
+    Returns dict with stats for each class
+    """
+    class_stats = {}
+    
+    for race_key, horses in races_data.items():
+        if not horses:
+            continue
+        
+        # Sort by score to get top pick
+        horses_sorted = sorted(horses, key=lambda x: x['prediction'].score, reverse=True)
+        top_pick = horses_sorted[0]
+        
+        result = top_pick['result']
+        race = top_pick['race']
+        
+        # Get race class
+        race_class = race.race_class or 'Unknown'
+        
+        won = result.finish_position == 1
+        placed = result.finish_position in [1, 2, 3]
+        sp = result.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        
+        # Initialize class if not seen before
+        if race_class not in class_stats:
+            class_stats[race_class] = {
+                'runs': 0,
+                'wins': 0,
+                'places': 0,
+                'profit': 0
+            }
+        
+        # Update stats
+        class_stats[race_class]['runs'] += 1
+        if won:
+            class_stats[race_class]['wins'] += 1
+        if placed:
+            class_stats[race_class]['places'] += 1
+        class_stats[race_class]['profit'] += profit
+    
+    # Calculate rates
+    for race_class, stats in class_stats.items():
+        stats['strike_rate'] = (stats['wins'] / stats['runs'] * 100) if stats['runs'] > 0 else 0
+        stats['place_rate'] = (stats['places'] / stats['runs'] * 100) if stats['runs'] > 0 else 0
+        stats['roi'] = (stats['profit'] / (stats['runs'] * stake) * 100) if stats['runs'] > 0 else 0
+    
+    # Sort by ROI descending
+    class_stats = dict(sorted(class_stats.items(), key=lambda x: x[1]['roi'], reverse=True))
+    
+    return class_stats
+    
 @app.route("/logout")
 @login_required
 def logout():
@@ -1356,26 +1411,30 @@ def data_analytics():
     # External Factors Analysis
     external_factors = analyze_external_factors(all_results_data, races_data, stake)
     
+    # Race Class Analysis
+    class_performance = analyze_race_classes(races_data, stake)
+    
     return render_template("data.html",
-        total_races=total_races,
-        top_pick_wins=top_pick_wins,
-        strike_rate=strike_rate,
-        roi=roi,
-        total_profit=total_profit,
-        avg_winner_sp=avg_winner_sp,
-        score_tiers=score_tiers,
-        score_gaps=score_gaps,
-        track_list=track_list,
-        component_stats=sorted_components,
-        price_analysis=price_analysis,
-        external_factors=external_factors,
-        filters={
-            'track': track_filter,
-            'min_score': min_score_filter,
-            'date_from': date_from,
-            'date_to': date_to
-        }
-    )
+    total_races=total_races,
+    top_pick_wins=top_pick_wins,
+    strike_rate=strike_rate,
+    roi=roi,
+    total_profit=total_profit,
+    avg_winner_sp=avg_winner_sp,
+    score_tiers=score_tiers,
+    score_gaps=score_gaps,
+    track_list=track_list,
+    component_stats=sorted_components,
+    price_analysis=price_analysis,
+    external_factors=external_factors,
+    class_performance=class_performance,
+    filters={
+        'track': track_filter,
+        'min_score': min_score_filter,
+        'date_from': date_from,
+        'date_to': date_to
+    }
+)
 # ----- ML Data Export Route -----
 @app.route("/data/export")
 @login_required
