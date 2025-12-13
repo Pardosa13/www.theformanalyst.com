@@ -588,12 +588,13 @@ mlElitePattern: {
 mlAvoidPattern: {
     label: 'ML Avoid Pattern (Red flags)',
     detect: (notes) => {
-        return notes.includes('Old age (7+') ||  // ← CHANGED
-               notes.includes('Poor sire (Better Than Ready)') ||  // ← CHANGED
-               notes.includes('Poor sire (Dundeel)') ||  // ← CHANGED
-               notes.includes('Poor career win rate (<10%)');  // ← CHANGED
+        return notes.includes('Old age (7+') ||  
+               notes.includes('Poor sire (Better Than Ready)') ||  
+               notes.includes('Poor sire (Dundeel)') ||  
+               notes.includes('Poor career win rate (<10%)');  
     }
-}
+}  // ← No comma after the last filter
+};  // ← ADD THIS LINE - closes the FILTER_CRITERIA object
 
 let activeFilters = [];
 
