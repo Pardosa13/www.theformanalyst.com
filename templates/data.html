@@ -566,7 +566,51 @@
                 <p class="text-muted">No tracks with 2+ races yet.</p>
                 {% endif %}
             </div>
-            
+            <!-- Race Classes -->
+<div class="mb-4">
+    <h5>🏆 Race Classes</h5>
+    <p class="text-muted small">Performance by race class (top picks only, minimum 2 races).</p>
+    {% if class_performance %}
+    <div class="table-responsive">
+        <table class="table table-sm table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>Class</th>
+                    <th class="text-center">Races</th>
+                    <th class="text-center">Wins</th>
+                    <th class="text-center">Strike %</th>
+                    <th class="text-center">Places</th>
+                    <th class="text-center">Place %</th>
+                    <th class="text-center">ROI %</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for class_name, stats in class_performance.items() %}
+                {% if stats.runs >= 2 %}
+                <tr>
+                    <td><strong>{{ class_name }}</strong></td>
+                    <td class="text-center">{{ stats.runs }}</td>
+                    <td class="text-center">{{ stats.wins }}</td>
+                    <td class="text-center {% if stats.strike_rate >= 20 %}text-success fw-bold{% elif stats.strike_rate >= 12 %}text-success{% elif stats.strike_rate < 8 %}text-danger{% endif %}">
+                        {{ "%.1f"|format(stats.strike_rate) }}%
+                    </td>
+                    <td class="text-center">{{ stats.places }}</td>
+                    <td class="text-center {% if stats.place_rate >= 40 %}text-success{% endif %}">
+                        {{ "%.1f"|format(stats.place_rate) }}%
+                    </td>
+                    <td class="text-center {% if stats.roi >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        {{ "%.1f"|format(stats.roi) }}%
+                    </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-muted">No race class data yet.</p>
+    {% endif %}
+</div>
             {% else %}
             <div class="text-center text-muted py-5">
                 <i class="bi bi-bar-chart display-4"></i>
