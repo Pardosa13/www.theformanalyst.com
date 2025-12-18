@@ -435,106 +435,96 @@ function renderExternalFactors(data) {
     let html = '<div class="card-body">';
     
     // Jockeys
-    html += '<div class="mb-5"><h5>🏇 Jockeys</h5><p class="text-muted small">Strike rates for all horses ridden, not just your top picks.</p>';
+html += '<div class="mb-5"><h5>🏇 Jockeys</h5><p class="text-muted small">Strike rates for all horses ridden, not just your top picks.</p>';
+
+if (data.jockeys_reliable && Object.keys(data.jockeys_reliable).length > 0) {
+    html += '<h6 class="text-success mt-3">Reliable Data (40+ rides)</h6>';
+    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+    html += '<th>Jockey</th><th class="text-center">Rides</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
     
-    if (data.jockeys_reliable && Object.keys(data.jockeys_reliable).length > 0) {
-        html += '<h6 class="text-success mt-3">Reliable Data (25+ rides)</h6>';
-        html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-        html += '<th>Jockey</th><th class="text-center">Rides</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-        html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
+    // Sort by ROI descending
+    const jockeysSorted = Object.entries(data.jockeys_reliable).sort((a, b) => b[1].roi - a[1].roi);
+    
+    for (const [name, stats] of jockeysSorted) {
+        let strikeClass = '';
+        if (stats.strike_rate >= 25) strikeClass = 'text-success fw-bold';
+        else if (stats.strike_rate >= 15) strikeClass = 'text-success';
+        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
         
-        for (const [name, stats] of Object.entries(data.jockeys_reliable)) {
-            let strikeClass = '';
-            if (stats.strike_rate >= 25) strikeClass = 'text-success fw-bold';
-            else if (stats.strike_rate >= 15) strikeClass = 'text-success';
-            else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-            
-            html += `<tr>
-                <td><strong>${name}</strong></td>
-                <td class="text-center">${stats.runs}</td>
-                <td class="text-center">${stats.wins}</td>
-                <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-                <td class="text-center">${stats.places}</td>
-                <td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-                <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-            </tr>`;
-        }
-        html += '</tbody></table></div>';
+        html += `<tr>
+            <td><strong>${name}</strong></td>
+            <td class="text-center">${stats.runs}</td>
+            <td class="text-center">${stats.wins}</td>
+            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
+            <td class="text-center">${stats.places}</td>
+            <td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
+            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
+        </tr>`;
     }
-    html += '</div>';
+    html += '</tbody></table></div>';
+}
+html += '</div>';
     
     // Trainers  
-    html += '<div class="mb-5"><h5>👔 Trainers</h5>';
+html += '<div class="mb-5"><h5>👔 Trainers</h5>';
+
+if (data.trainers_reliable && Object.keys(data.trainers_reliable).length > 0) {
+    html += '<h6 class="text-success mt-3">Reliable Data (40+ runners)</h6>';
+    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+    html += '<th>Trainer</th><th class="text-center">Runners</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
     
-    if (data.trainers_reliable && Object.keys(data.trainers_reliable).length > 0) {
-        html += '<h6 class="text-success mt-3">Reliable Data (25+ runners)</h6>';
-        html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-        html += '<th>Trainer</th><th class="text-center">Runners</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-        html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
+    // Sort by ROI descending
+    const trainersSorted = Object.entries(data.trainers_reliable).sort((a, b) => b[1].roi - a[1].roi);
+    
+    for (const [name, stats] of trainersSorted) {
+        let strikeClass = '';
+        if (stats.strike_rate >= 25) strikeClass = 'text-success fw-bold';
+        else if (stats.strike_rate >= 15) strikeClass = 'text-success';
+        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
         
-        for (const [name, stats] of Object.entries(data.trainers_reliable)) {
-            let strikeClass = '';
-            if (stats.strike_rate >= 25) strikeClass = 'text-success fw-bold';
-            else if (stats.strike_rate >= 15) strikeClass = 'text-success';
-            else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-            
-            html += `<tr>
-                <td><strong>${name}</strong></td>
-                <td class="text-center">${stats.runs}</td>
-                <td class="text-center">${stats.wins}</td>
-                <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-                <td class="text-center">${stats.places}</td>
-                <td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-                <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-            </tr>`;
-        }
-        html += '</tbody></table></div>';
+        html += `<tr>
+            <td><strong>${name}</strong></td>
+            <td class="text-center">${stats.runs}</td>
+            <td class="text-center">${stats.wins}</td>
+            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
+            <td class="text-center">${stats.places}</td>
+            <td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
+            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
+        </tr>`;
     }
-    html += '</div>';
-    
-    // Barriers
-    html += '<div class="mb-5"><h5>🚧 Barriers</h5>';
-    html += '<div class="table-responsive"><table class="table table-sm"><thead class="table-dark"><tr><th>Barrier</th><th class="text-center">Runs</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">ROI</th></tr></thead><tbody>';
-    
-    const barrierOrder = ['1-3', '4-6', '7-9', '10+'];
-    for (const bucket of barrierOrder) {
-        if (data.barriers[bucket] && data.barriers[bucket].runs > 0) {
-            const stats = data.barriers[bucket];
-            html += `<tr><td><strong>${bucket}</strong></td><td class="text-center">${stats.runs}</td><td class="text-center">${stats.wins}</td>`;
-            html += `<td class="text-center">${stats.strike_rate.toFixed(1)}%</td>`;
-            html += `<td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td></tr>`;
-        }
-    }
-    html += '</tbody></table></div></div>';
+    html += '</tbody></table></div>';
+}
+html += '</div>';
     
     // Race Classes
-    if (data.class_performance && Object.keys(data.class_performance).length > 0) {
-        html += '<div class="mb-4"><h5>🏆 Race Classes</h5>';
-        html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-        html += '<th>Class</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-        html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
-        
-        for (const [className, stats] of Object.entries(data.class_performance)) {
-            let strikeClass = '';
-            if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
-            else if (stats.strike_rate >= 12) strikeClass = 'text-success';
-            else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-            
-            html += `<tr>
-                <td><strong>${className}</strong></td>
-                <td class="text-center">${stats.runs}</td>
-                <td class="text-center">${stats.wins}</td>
-                <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-                <td class="text-center">${stats.places}</td>
-                <td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-                <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-            </tr>`;
-        }
-        html += '</tbody></table></div></div>';
-    }
+if (data.class_performance && Object.keys(data.class_performance).length > 0) {
+    html += '<div class="mb-4"><h5>🏆 Race Classes</h5>';
+    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+    html += '<th>Class</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
     
-    html += '</div>';
-    container.innerHTML = html;
+    // Sort by ROI descending
+    const classesSorted = Object.entries(data.class_performance).sort((a, b) => b[1].roi - a[1].roi);
+    
+    for (const [className, stats] of classesSorted) {
+        let strikeClass = '';
+        if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
+        else if (stats.strike_rate >= 12) strikeClass = 'text-success';
+        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
+        
+        html += `<tr>
+            <td><strong>${className}</strong></td>
+            <td class="text-center">${stats.runs}</td>
+            <td class="text-center">${stats.wins}</td>
+            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
+            <td class="text-center">${stats.places}</td>
+            <td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
+            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div></div>';
 }
 
 function renderPriceAnalysis(data) {
