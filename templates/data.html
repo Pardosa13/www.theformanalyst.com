@@ -526,7 +526,9 @@ if (data.class_performance && Object.keys(data.class_performance).length > 0) {
     }
     html += '</tbody></table></div></div>';
 }
-
+ html += '</div>';
+    container.innerHTML = html;
+}
 function renderPriceAnalysis(data) {
     const container = document.getElementById('priceAnalysis');
     
