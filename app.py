@@ -660,9 +660,10 @@ trainers_limited = {k: v for k, v in trainers.items() if 5 <= v['runs'] < 40}
 # Sort by ROI
 trainers_reliable = dict(sorted(trainers_reliable.items(), key=lambda x: x[1]['roi'], reverse=True))
 trainers_limited = dict(sorted(trainers_limited.items(), key=lambda x: x[1]['roi'], reverse=True))
-    # Filter tracks with 2+ races
-    tracks = {k: v for k, v in tracks.items() if v['runs'] >= 2}
-    tracks = dict(sorted(tracks.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
+
+# Filter tracks with 2+ races
+tracks = {k: v for k, v in tracks.items() if v['runs'] >= 2}
+tracks = dict(sorted(tracks.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
     
     return {
         'jockeys_reliable': jockeys_reliable,
