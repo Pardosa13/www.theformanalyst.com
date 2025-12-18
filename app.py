@@ -1137,7 +1137,287 @@ def admin_panel():
 @app.route("/data")
 @login_required
 def data_analytics():
-    """Analytics dashboard showing model performance"""
+    """Analytics dashboard - loads summary only, sections load on demand"""
+    
+    track_filter = request.args.get('track', '')
+    min_score_filter = request.args.get('min_score', type=float)
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    
+    # Quick query for summary cards only
+    base_query = db.session.query(
+        Horse, Prediction, Result, Race, Meeting
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Result.finish_position > 0
+    )
+    
+    if track_filter:
+        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        base_query = base_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
+    
+    all_results = base_query.all()
+    
+    # Group races for summary statistics only
+    races_data = {}
+    for horse, pred, result, race, meeting in all_results:
+        race_key = (meeting.id, race.race_number)
+        if race_key not in races_data:
+            races_data[race_key] = []
+        races_data[race_key].append({
+            'prediction': pred,
+            'result': result
+        })
+    
+    total_races = len(races_data)
+    top_pick_wins = 0
+    total_profit = 0
+    winner_sps = []
+    stake = 10.0
+    
+    # Calculate ONLY summary stats for the top cards
+    for race_key, horses in races_data.items():
+        horses.sort(key=lambda x: x['prediction'].score, reverse=True)
+        
+        if not horses:
+            continue
+            
+        top_pick = horses[0]
+        top_score = top_pick['prediction'].score
+        
+        if min_score_filter and top_score < min_score_filter:
+            continue
+        
+        won = top_pick['result'].finish_position == 1
+        sp = top_pick['result'].sp
+        profit = (sp * stake - stake) if won else -stake
+        
+        if won:
+            top_pick_wins += 1
+            winner_sps.append(sp)
+        total_profit += profit
+    
+    strike_rate = (top_pick_wins / total_races * 100) if total_races > 0 else 0
+    roi = (total_profit / (total_races * stake) * 100) if total_races > 0 else 0
+    avg_winner_sp = sum(winner_sps) / len(winner_sps) if winner_sps else 0
+    
+    # Calculate Top 3 stats
+    top_3_hits = 0
+    top_3_profit = 0
+    
+    for race_key, horses in races_data.items():
+        horses_list = list(horses)
+        horses_list.sort(key=lambda x: x['prediction'].score, reverse=True)
+        
+        if not horses_list:
+            continue
+        
+        # Get top score for filtering
+        if min_score_filter and horses_list[0]['prediction'].score < min_score_filter:
+            continue
+        
+        # Check if winner is in top 3
+        top_3 = horses_list[:3]
+        winner_found = False
+        for pick in top_3:
+            if pick['result'].finish_position == 1:
+                top_3_hits += 1
+                sp = pick['result'].sp
+                top_3_profit += (sp * stake - stake)
+                winner_found = True
+                break
+        
+        if not winner_found:
+            # Winner not in top 3, lose stake
+            top_3_profit -= stake
+    
+    top_3_strike = (top_3_hits / total_races * 100) if total_races > 0 else 0
+    top_3_roi = (top_3_profit / (total_races * stake) * 100) if total_races > 0 else 0
+    
+    # Get track list for filter dropdown
+    tracks = db.session.query(Meeting.meeting_name).distinct().all()
+    track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
+    
+    # Return template with ONLY summary data - sections will load via AJAX
+    return render_template("data.html",
+        total_races=total_races,
+        top_pick_wins=top_pick_wins,
+        strike_rate=strike_rate,
+        roi=roi,
+        total_profit=total_profit,
+        avg_winner_sp=avg_winner_sp,
+        top_3_hits=top_3_hits,
+        top_3_strike=top_3_strike,
+        top_3_roi=top_3_roi,
+        top_3_profit=top_3_profit,
+        track_list=track_list,
+        filters={
+            'track': track_filter,
+            'min_score': min_score_filter,
+            'date_from': date_from,
+            'date_to': date_to
+        }
+    )# ----- API Routes for Lazy Loading Data Sections -----
+
+@app.route("/api/data/score-analysis")
+@login_required
+def api_score_analysis():
+    """API endpoint for score analysis data"""
+    from flask import jsonify
+    
+    # Get filters
+    track_filter = request.args.get('track', '')
+    min_score_filter = request.args.get('min_score', type=float)
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    
+    base_query = db.session.query(
+        Horse, Prediction, Result, Race, Meeting
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Result.finish_position > 0
+    )
+    
+    if track_filter:
+        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        base_query = base_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
+    
+    all_results = base_query.all()
+    
+    # Group races
+    races_data = {}
+    for horse, pred, result, race, meeting in all_results:
+        race_key = (meeting.id, race.race_number)
+        if race_key not in races_data:
+            races_data[race_key] = []
+        races_data[race_key].append({
+            'prediction': pred,
+            'result': result
+        })
+    
+    stake = 10.0
+    score_tiers = {
+        '150+': {'races': 0, 'wins': 0, 'profit': 0},
+        '140-149': {'races': 0, 'wins': 0, 'profit': 0},
+        '130-139': {'races': 0, 'wins': 0, 'profit': 0},
+        '120-129': {'races': 0, 'wins': 0, 'profit': 0},
+        '110-119': {'races': 0, 'wins': 0, 'profit': 0},
+        '100-109': {'races': 0, 'wins': 0, 'profit': 0},
+        '90-99': {'races': 0, 'wins': 0, 'profit': 0},
+    }
+    
+    score_gaps = {
+        '50+': {'races': 0, 'wins': 0, 'profit': 0},
+        '40-49': {'races': 0, 'wins': 0, 'profit': 0},
+        '30-39': {'races': 0, 'wins': 0, 'profit': 0},
+        '20-29': {'races': 0, 'wins': 0, 'profit': 0},
+        '10-19': {'races': 0, 'wins': 0, 'profit': 0},
+        '<10': {'races': 0, 'wins': 0, 'profit': 0},
+    }
+    
+    for race_key, horses in races_data.items():
+        horses.sort(key=lambda x: x['prediction'].score, reverse=True)
+        if not horses:
+            continue
+        
+        top_pick = horses[0]
+        top_score = top_pick['prediction'].score
+        
+        if min_score_filter and top_score < min_score_filter:
+            continue
+        
+        second_score = horses[1]['prediction'].score if len(horses) > 1 else 0
+        score_gap = top_score - second_score
+        
+        # Determine tier
+        if top_score >= 150:
+            tier = '150+'
+        elif top_score >= 140:
+            tier = '140-149'
+        elif top_score >= 130:
+            tier = '130-139'
+        elif top_score >= 120:
+            tier = '120-129'
+        elif top_score >= 110:
+            tier = '110-119'
+        elif top_score >= 100:
+            tier = '100-109'
+        elif top_score >= 90:
+            tier = '90-99'
+        else:
+            tier = None
+        
+        # Determine gap bucket
+        if score_gap >= 50:
+            gap_bucket = '50+'
+        elif score_gap >= 40:
+            gap_bucket = '40-49'
+        elif score_gap >= 30:
+            gap_bucket = '30-39'
+        elif score_gap >= 20:
+            gap_bucket = '20-29'
+        elif score_gap >= 10:
+            gap_bucket = '10-19'
+        else:
+            gap_bucket = '<10'
+        
+        won = top_pick['result'].finish_position == 1
+        sp = top_pick['result'].sp
+        profit = (sp * stake - stake) if won else -stake
+        
+        if tier:
+            score_tiers[tier]['races'] += 1
+            if won:
+                score_tiers[tier]['wins'] += 1
+            score_tiers[tier]['profit'] += profit
+        
+        score_gaps[gap_bucket]['races'] += 1
+        if won:
+            score_gaps[gap_bucket]['wins'] += 1
+        score_gaps[gap_bucket]['profit'] += profit
+    
+    # Calculate rates
+    for tier in score_tiers:
+        t = score_tiers[tier]
+        t['strike_rate'] = (t['wins'] / t['races'] * 100) if t['races'] > 0 else 0
+        t['roi'] = (t['profit'] / (t['races'] * stake) * 100) if t['races'] > 0 else 0
+    
+    for gap in score_gaps:
+        g = score_gaps[gap]
+        g['strike_rate'] = (g['wins'] / g['races'] * 100) if g['races'] > 0 else 0
+        g['roi'] = (g['profit'] / (g['races'] * stake) * 100) if g['races'] > 0 else 0
+    
+    return jsonify({
+        'score_tiers': score_tiers,
+        'score_gaps': score_gaps
+    })
+
+
+@app.route("/api/data/component-analysis")
+@login_required
+def api_component_analysis():
+    """API endpoint for component analysis data"""
+    from flask import jsonify
     
     track_filter = request.args.get('track', '')
     min_score_filter = request.args.get('min_score', type=float)
@@ -1155,7 +1435,7 @@ def data_analytics():
     ).join(
         Meeting, Race.meeting_id == Meeting.id
     ).filter(
-        Result.finish_position > 0  # Exclude scratched horses
+        Result.finish_position > 0
     )
     
     if track_filter:
@@ -1167,7 +1447,6 @@ def data_analytics():
     
     all_results = base_query.all()
     
-    # Build structured data for component analysis
     all_results_data = []
     for horse, pred, result, race, meeting in all_results:
         all_results_data.append({
@@ -1177,23 +1456,78 @@ def data_analytics():
             'race': race,
             'meeting': meeting
         })
-
-    # Define stake for all calculations
-    stake = 10.0
-
-    # Get component stats
-    component_stats = aggregate_component_stats(all_results_data, stake)
-
-    # Sort components by ROI (best value first)
+    
+    component_stats = aggregate_component_stats(all_results_data, stake=10.0)
+    
+    # Sort by ROI (best value first)
     sorted_components = sorted(
         component_stats.items(),
         key=lambda x: x[1]['roi'],
         reverse=True
     )
+    
+    # Convert to serializable format
+    components_list = []
+    for name, stats in sorted_components:
+        if stats['appearances'] >= 2:
+            components_list.append({
+                'name': name,
+                'appearances': stats['appearances'],
+                'wins': stats['wins'],
+                'strike_rate': stats['strike_rate'],
+                'places': stats['places'],
+                'place_rate': stats['place_rate'],
+                'roi': stats['roi']
+            })
+    
+    return jsonify({'components': components_list})
 
-    # Group races for score analysis
+
+@app.route("/api/data/external-factors")
+@login_required
+def api_external_factors():
+    """API endpoint for external factors data"""
+    from flask import jsonify
+    
+    track_filter = request.args.get('track', '')
+    min_score_filter = request.args.get('min_score', type=float)
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    
+    base_query = db.session.query(
+        Horse, Prediction, Result, Race, Meeting
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Result.finish_position > 0
+    )
+    
+    if track_filter:
+        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        base_query = base_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
+    
+    all_results = base_query.all()
+    
+    all_results_data = []
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
+        all_results_data.append({
+            'horse': horse,
+            'prediction': pred,
+            'result': result,
+            'race': race,
+            'meeting': meeting
+        })
+        
         race_key = (meeting.id, race.race_number)
         if race_key not in races_data:
             races_data[race_key] = []
@@ -1205,113 +1539,69 @@ def data_analytics():
             'meeting': meeting
         })
     
-    total_races = len(races_data)
-    top_pick_wins = 0
-    total_profit = 0
-    winner_sps = []
+    external_factors = analyze_external_factors(all_results_data, races_data, stake=10.0)
+    class_performance = analyze_race_classes(races_data, stake=10.0)
     
-    score_tiers = {
-    '150+': {'races': 0, 'wins': 0, 'profit': 0},
-    '140-149': {'races': 0, 'wins': 0, 'profit': 0},
-    '130-139': {'races': 0, 'wins': 0, 'profit': 0},
-    '120-129': {'races': 0, 'wins': 0, 'profit': 0},
-    '110-119': {'races': 0, 'wins': 0, 'profit': 0},
-    '100-109': {'races': 0, 'wins': 0, 'profit': 0},
-    '90-99': {'races': 0, 'wins': 0, 'profit': 0},
-}
+    # Filter class performance
+    class_performance_filtered = {k: v for k, v in class_performance.items() if v['runs'] >= 2}
     
-    score_gaps = {
-        '50+': {'races': 0, 'wins': 0, 'profit': 0},
-        '40-49': {'races': 0, 'wins': 0, 'profit': 0},
-        '30-39': {'races': 0, 'wins': 0, 'profit': 0},
-        '20-29': {'races': 0, 'wins': 0, 'profit': 0},
-        '10-19': {'races': 0, 'wins': 0, 'profit': 0},
-        '<10': {'races': 0, 'wins': 0, 'profit': 0},
-    }
-    
-    for race_key, horses in races_data.items():
-        horses.sort(key=lambda x: x['prediction'].score, reverse=True)
-        
-        if not horses:
-            continue
-            
-        top_pick = horses[0]
-        top_score = top_pick['prediction'].score
-        
-        if min_score_filter and top_score < min_score_filter:
-            continue
-        
-        second_score = horses[1]['prediction'].score if len(horses) > 1 else 0
-        score_gap = top_score - second_score
-        
-        if top_score >= 150:
-            tier = '150+'
-        elif top_score >= 140:
-            tier = '140-149'
-        elif top_score >= 130:
-            tier = '130-139'
-        elif top_score >= 120:
-            tier = '120-129'
-        elif top_score >= 110:
-            tier = '110-119'
-        elif top_score >= 100:
-            tier = '100-109'
-        elif top_score >= 90:
-            tier = '90-99'
-        else:
-            tier = None  # Don't assign a tier for scores below 90
-        
-        if score_gap >= 50:
-            gap_bucket = '50+'
-        elif score_gap >= 40:
-            gap_bucket = '40-49'
-        elif score_gap >= 30:
-            gap_bucket = '30-39'
-        elif score_gap >= 20:
-            gap_bucket = '20-29'
-        elif score_gap >= 10:
-            gap_bucket = '10-19'
-        else:
-            gap_bucket = '<10'
+    return jsonify({
+        'jockeys_reliable': external_factors['jockeys_reliable'],
+        'jockeys_limited': external_factors['jockeys_limited'],
+        'trainers_reliable': external_factors['trainers_reliable'],
+        'trainers_limited': external_factors['trainers_limited'],
+        'barriers': external_factors['barriers'],
+        'distances': external_factors['distances'],
+        'tracks': external_factors['tracks'],
+        'class_performance': class_performance_filtered
+    })
 
-        won = top_pick['result'].finish_position == 1
-        sp = top_pick['result'].sp
-        profit = (sp * stake - stake) if won else -stake
-        
-        if won:
-            top_pick_wins += 1
-            winner_sps.append(sp)
-        total_profit += profit
-        
-        if tier:  # Only update tiers if score >= 90
-            score_tiers[tier]['races'] += 1
-            if won:
-                score_tiers[tier]['wins'] += 1
-            score_tiers[tier]['profit'] += profit
-        
-        score_gaps[gap_bucket]['races'] += 1
-        if won:
-            score_gaps[gap_bucket]['wins'] += 1
-        score_gaps[gap_bucket]['profit'] += profit
+@app.route("/api/data/price-analysis")
+@login_required
+def api_price_analysis():
+    """API endpoint for price analysis data"""
+    from flask import jsonify
     
-    strike_rate = (top_pick_wins / total_races * 100) if total_races > 0 else 0
-    roi = (total_profit / (total_races * stake) * 100) if total_races > 0 else 0
-    avg_winner_sp = sum(winner_sps) / len(winner_sps) if winner_sps else 0
+    track_filter = request.args.get('track', '')
+    min_score_filter = request.args.get('min_score', type=float)
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
     
-    for tier in score_tiers:
-        t = score_tiers[tier]
-        t['strike_rate'] = (t['wins'] / t['races'] * 100) if t['races'] > 0 else 0
-        t['roi'] = (t['profit'] / (t['races'] * stake) * 100) if t['races'] > 0 else 0
+    base_query = db.session.query(
+        Horse, Prediction, Result, Race, Meeting
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Result.finish_position > 0
+    )
     
-    for gap in score_gaps:
-        g = score_gaps[gap]
-        g['strike_rate'] = (g['wins'] / g['races'] * 100) if g['races'] > 0 else 0
-        g['roi'] = (g['profit'] / (g['races'] * stake) * 100) if g['races'] > 0 else 0
+    if track_filter:
+        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        base_query = base_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    tracks = db.session.query(Meeting.meeting_name).distinct().all()
-    track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
+    all_results = base_query.all()
     
-    # Price Analysis
+    races_data = {}
+    for horse, pred, result, race, meeting in all_results:
+        race_key = (meeting.id, race.race_number)
+        if race_key not in races_data:
+            races_data[race_key] = []
+        races_data[race_key].append({
+            'horse': horse,
+            'prediction': pred,
+            'result': result
+        })
+    
+    stake = 10.0
     price_analysis = {
         'overlays': {'count': 0, 'wins': 0, 'profit': 0},
         'underlays': {'count': 0, 'wins': 0, 'profit': 0},
@@ -1332,7 +1622,6 @@ def data_analytics():
         pred = top_pick['prediction']
         result = top_pick['result']
         
-        # Parse predicted odds (remove $ sign)
         predicted_odds_str = pred.predicted_odds or ''
         try:
             predicted_odds = float(predicted_odds_str.replace('$', '').strip())
@@ -1349,17 +1638,12 @@ def data_analytics():
         won = result.finish_position == 1
         profit = (sp * stake - stake) if won else -stake
         
-        # Calculate difference (positive = overlay/value)
-        price_diff = sp - predicted_odds
         price_diff_pct = ((sp - predicted_odds) / predicted_odds) * 100
-        price_analysis['price_diffs']. append(price_diff_pct)
+        price_analysis['price_diffs'].append(price_diff_pct)
         
         horse_name = top_pick['horse'].horse_name
-        meeting_name = top_pick['meeting'].meeting_name
         
-        # Categorize: overlay if SP is 10%+ higher than your price
         if price_diff_pct >= 10:
-            # Overlay - market offering better odds than you assessed
             price_analysis['overlays']['count'] += 1
             if won:
                 price_analysis['overlays']['wins'] += 1
@@ -1368,32 +1652,26 @@ def data_analytics():
             if len(price_analysis['overlay_examples']) < 5:
                 price_analysis['overlay_examples'].append({
                     'horse': horse_name,
-                    'meeting': meeting_name,
                     'your_price': predicted_odds,
                     'sp': sp,
-                    'diff_pct': price_diff_pct,
                     'won': won
                 })
         
         elif price_diff_pct <= -10:
-            # Underlay - market odds shorter than your assessment
             price_analysis['underlays']['count'] += 1
             if won:
                 price_analysis['underlays']['wins'] += 1
             price_analysis['underlays']['profit'] += profit
             
             if len(price_analysis['underlay_examples']) < 5:
-                price_analysis['underlay_examples']. append({
+                price_analysis['underlay_examples'].append({
                     'horse': horse_name,
-                    'meeting': meeting_name,
                     'your_price': predicted_odds,
                     'sp': sp,
-                    'diff_pct': price_diff_pct,
                     'won': won
                 })
         
         else:
-            # Accurate - within 10% either way
             price_analysis['accurate']['count'] += 1
             if won:
                 price_analysis['accurate']['wins'] += 1
@@ -1405,36 +1683,9 @@ def data_analytics():
         cat['strike_rate'] = (cat['wins'] / cat['count'] * 100) if cat['count'] > 0 else 0
         cat['roi'] = (cat['profit'] / (cat['count'] * stake) * 100) if cat['count'] > 0 else 0
     
-    # Average price difference
     price_analysis['avg_diff'] = sum(price_analysis['price_diffs']) / len(price_analysis['price_diffs']) if price_analysis['price_diffs'] else 0
     
-    # External Factors Analysis
-    external_factors = analyze_external_factors(all_results_data, races_data, stake)
-    
-    # Race Class Analysis
-    class_performance = analyze_race_classes(races_data, stake)
-    
-    return render_template("data.html",
-    total_races=total_races,
-    top_pick_wins=top_pick_wins,
-    strike_rate=strike_rate,
-    roi=roi,
-    total_profit=total_profit,
-    avg_winner_sp=avg_winner_sp,
-    score_tiers=score_tiers,
-    score_gaps=score_gaps,
-    track_list=track_list,
-    component_stats=sorted_components,
-    price_analysis=price_analysis,
-    external_factors=external_factors,
-    class_performance=class_performance,
-    filters={
-        'track': track_filter,
-        'min_score': min_score_filter,
-        'date_from': date_from,
-        'date_to': date_to
-    }
-)
+    return jsonify(price_analysis)
 # ----- ML Data Export Route -----
 @app.route("/data/export")
 @login_required
