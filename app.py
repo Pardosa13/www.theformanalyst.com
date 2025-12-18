@@ -836,48 +836,99 @@ def delete_meeting(meeting_id):
 @app.route("/results")
 @login_required
 def results():
-    """Show meetings needing results and completed meetings"""
-    all_meetings = Meeting.query.order_by(Meeting.uploaded_at.desc()).all()
+    """Show meetings needing results - complete ones load via AJAX"""
+    from sqlalchemy import func
+    
+    # ONLY load meetings that need results - SUPER FAST
+    needs_results_query = db.session.query(
+        Meeting.id,
+        Meeting.meeting_name,
+        Meeting.uploaded_at,
+        User.username,
+        func.count(Race.id.distinct()).label('total_races'),
+        func.count(Horse.id).label('total_horses'),
+        func.count(Result.id).label('horses_with_results')
+    ).join(
+        User, Meeting.user_id == User.id
+    ).outerjoin(
+        Race, Meeting.id == Race.meeting_id
+    ).outerjoin(
+        Horse, Race.id == Horse.race_id
+    ).outerjoin(
+        Result, Horse.id == Result.horse_id
+    ).group_by(
+        Meeting.id, Meeting.meeting_name, Meeting.uploaded_at, User.username
+    ).having(
+        func.count(Horse.id) > func.count(Result.id)
+    ).order_by(
+        Meeting.uploaded_at.desc()
+    ).limit(20).all()
     
     needs_results = []
-    results_complete = []
     
-    for meeting in all_meetings:
-        # Count total horses and horses with results
-        total_horses = 0
-        horses_with_results = 0
-        total_races = len(meeting.races)
-        races_complete = 0
+    for row in needs_results_query:
+        meeting = Meeting.query.get(row.id)
+        races_complete = sum(1 for race in meeting.races 
+                           if len(race.horses) > 0 and 
+                           sum(1 for h in race.horses if h.result) == len(race.horses))
         
-        for race in meeting.races:
-            race_horses = len(race.horses)
-            race_results = sum(1 for h in race.horses if h.result is not None)
-            total_horses += race_horses
-            horses_with_results += race_results
-            
-            if race_horses > 0 and race_results == race_horses:
-                races_complete += 1
-        
-        meeting_data = {
-            'id': meeting.id,
-            'meeting_name': meeting.meeting_name,
-            'uploaded_at': meeting.uploaded_at,
-            'user': meeting.user.username,
-            'total_races': total_races,
+        needs_results.append({
+            'id': row.id,
+            'meeting_name': row.meeting_name,
+            'uploaded_at': row.uploaded_at,
+            'user': row.username,
+            'total_races': row.total_races or 0,
             'races_complete': races_complete,
-            'total_horses': total_horses,
-            'horses_with_results': horses_with_results
-        }
-        
-        if total_horses > 0 and horses_with_results == total_horses:
-            results_complete.append(meeting_data)
-        else:
-            needs_results.append(meeting_data)
+            'total_horses': row.total_horses or 0,
+            'horses_with_results': row.horses_with_results or 0
+        })
     
     return render_template("results.html", 
                           needs_results=needs_results, 
-                          results_complete=results_complete)
-
+                          results_complete=[])
+    @app.route("/api/results/complete")
+@login_required
+def api_results_complete():
+    """API endpoint to load completed results"""
+    from flask import jsonify
+    from sqlalchemy import func
+    
+    # Load complete meetings
+    complete_query = db.session.query(
+        Meeting.id,
+        Meeting.meeting_name,
+        Meeting.uploaded_at,
+        User.username,
+        func.count(Race.id.distinct()).label('total_races'),
+        func.count(Horse.id).label('total_horses')
+    ).join(
+        User, Meeting.user_id == User.id
+    ).outerjoin(
+        Race, Meeting.id == Race.meeting_id
+    ).outerjoin(
+        Horse, Race.id == Horse.race_id
+    ).outerjoin(
+        Result, Horse.id == Result.horse_id
+    ).group_by(
+        Meeting.id, Meeting.meeting_name, Meeting.uploaded_at, User.username
+    ).having(
+        func.count(Horse.id) == func.count(Result.id)
+    ).order_by(
+        Meeting.uploaded_at.desc()
+    ).all()
+    
+    results_complete = []
+    for row in complete_query:
+        results_complete.append({
+            'id': row.id,
+            'meeting_name': row.meeting_name,
+            'uploaded_at': row.uploaded_at.isoformat(),
+            'user': row.username,
+            'total_races': row.total_races or 0,
+            'total_horses': row.total_horses or 0
+        })
+    
+    return jsonify(results_complete)
 
 @app.route("/results/<int:meeting_id>")
 @login_required
