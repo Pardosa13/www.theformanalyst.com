@@ -886,7 +886,7 @@ def results():
     return render_template("results.html", 
                           needs_results=needs_results, 
                           results_complete=[])
-    @app.route("/api/results/complete")
+@app.route("/api/results/complete")
 @login_required
 def api_results_complete():
     """API endpoint to load completed results"""
