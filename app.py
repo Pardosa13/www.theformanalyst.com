@@ -1143,17 +1143,22 @@ def data_analytics():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     
-    # Quick query for summary cards only
+    # Optimized query - only get what we need for summary
+    from sqlalchemy import func, case
+    
     base_query = db.session.query(
-        Horse, Prediction, Result, Race, Meeting
+        Meeting.id.label('meeting_id'),
+        Race.race_number,
+        func.max(Prediction.score).label('top_score'),
+        func.count(Horse.id).label('horse_count')
+    ).join(
+        Race, Meeting.id == Race.meeting_id
+    ).join(
+        Horse, Race.id == Horse.race_id
     ).join(
         Prediction, Horse.id == Prediction.horse_id
     ).join(
         Result, Horse.id == Result.horse_id
-    ).join(
-        Race, Horse.race_id == Race.id
-    ).join(
-        Meeting, Race.meeting_id == Meeting.id
     ).filter(
         Result.finish_position > 0
     )
@@ -1165,80 +1170,74 @@ def data_analytics():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    all_results = base_query.all()
+    races = base_query.group_by(Meeting.id, Race.race_number).all()
     
-    # Group races for summary statistics only
-    races_data = {}
-    for horse, pred, result, race, meeting in all_results:
-        race_key = (meeting.id, race.race_number)
-        if race_key not in races_data:
-            races_data[race_key] = []
-        races_data[race_key].append({
-            'prediction': pred,
-            'result': result
-        })
+    total_races = len(races)
     
-    total_races = len(races_data)
+    # Filter by min score if specified
+    if min_score_filter:
+        races = [r for r in races if r.top_score >= min_score_filter]
+        total_races = len(races)
+    
+    # Quick calculation using aggregates
+    stake = 10.0
     top_pick_wins = 0
     total_profit = 0
     winner_sps = []
-    stake = 10.0
+    top_3_hits = 0
+    top_3_profit = 0
     
-    # Calculate ONLY summary stats for the top cards
-    for race_key, horses in races_data.items():
-        horses.sort(key=lambda x: x['prediction'].score, reverse=True)
+    # Get actual results for races that passed filter
+    for race_info in races:
+        # Get horses for this race, sorted by score
+        horses = db.session.query(
+            Prediction.score,
+            Result.finish_position,
+            Result.sp
+        ).join(
+            Horse, Prediction.horse_id == Horse.id
+        ).join(
+            Result, Horse.id == Result.horse_id
+        ).join(
+            Race, Horse.race_id == Race.id
+        ).filter(
+            Race.race_number == race_info.race_number,
+            Race.meeting_id == race_info.meeting_id,
+            Result.finish_position > 0
+        ).order_by(Prediction.score.desc()).all()
         
         if not horses:
             continue
-            
+        
+        # Top pick stats
         top_pick = horses[0]
-        top_score = top_pick['prediction'].score
-        
-        if min_score_filter and top_score < min_score_filter:
-            continue
-        
-        won = top_pick['result'].finish_position == 1
-        sp = top_pick['result'].sp
-        profit = (sp * stake - stake) if won else -stake
+        won = top_pick.finish_position == 1
+        sp = top_pick.sp or 0
         
         if won:
             top_pick_wins += 1
-            winner_sps.append(sp)
-        total_profit += profit
+            if sp:
+                winner_sps.append(sp)
+            total_profit += (sp * stake - stake)
+        else:
+            total_profit -= stake
+        
+        # Top 3 stats
+        top_3 = horses[:3]
+        winner_in_top_3 = False
+        for pick in top_3:
+            if pick.finish_position == 1:
+                top_3_hits += 1
+                top_3_profit += (pick.sp * stake - stake) if pick.sp else -stake
+                winner_in_top_3 = True
+                break
+        
+        if not winner_in_top_3:
+            top_3_profit -= stake
     
     strike_rate = (top_pick_wins / total_races * 100) if total_races > 0 else 0
     roi = (total_profit / (total_races * stake) * 100) if total_races > 0 else 0
     avg_winner_sp = sum(winner_sps) / len(winner_sps) if winner_sps else 0
-    
-    # Calculate Top 3 stats
-    top_3_hits = 0
-    top_3_profit = 0
-    
-    for race_key, horses in races_data.items():
-        horses_list = list(horses)
-        horses_list.sort(key=lambda x: x['prediction'].score, reverse=True)
-        
-        if not horses_list:
-            continue
-        
-        # Get top score for filtering
-        if min_score_filter and horses_list[0]['prediction'].score < min_score_filter:
-            continue
-        
-        # Check if winner is in top 3
-        top_3 = horses_list[:3]
-        winner_found = False
-        for pick in top_3:
-            if pick['result'].finish_position == 1:
-                top_3_hits += 1
-                sp = pick['result'].sp
-                top_3_profit += (sp * stake - stake)
-                winner_found = True
-                break
-        
-        if not winner_found:
-            # Winner not in top 3, lose stake
-            top_3_profit -= stake
     
     top_3_strike = (top_3_hits / total_races * 100) if total_races > 0 else 0
     top_3_roi = (top_3_profit / (total_races * stake) * 100) if total_races > 0 else 0
@@ -1247,7 +1246,7 @@ def data_analytics():
     tracks = db.session.query(Meeting.meeting_name).distinct().all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
     
-    # Return template with ONLY summary data - sections will load via AJAX
+    # Return template with ONLY summary data
     return render_template("data.html",
         total_races=total_races,
         top_pick_wins=top_pick_wins,
@@ -1266,7 +1265,7 @@ def data_analytics():
             'date_from': date_from,
             'date_to': date_to
         }
-    )# ----- API Routes for Lazy Loading Data Sections -----
+    )
 
 @app.route("/api/data/score-analysis")
 @login_required
