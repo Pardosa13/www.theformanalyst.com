@@ -925,5 +925,435 @@ new Chart(document.getElementById('scoreGapChart'), {
         }
     }
 });
+<script>
+// Lazy loading for data sections
+const loadedSections = new Set();
+const filterParams = new URLSearchParams({
+    track: '{{ filters.track }}',
+    min_score: '{{ filters.min_score or "" }}',
+    date_from: '{{ filters.date_from }}',
+    date_to: '{{ filters.date_to }}'
+});
+
+// Listen for section expansions
+document.addEventListener('DOMContentLoaded', function() {
+    // Score Analysis
+    const scoreAnalysis = document.getElementById('scoreAnalysis');
+    if (scoreAnalysis) {
+        scoreAnalysis.addEventListener('show.bs.collapse', function() {
+            if (!loadedSections.has('score-analysis')) {
+                loadScoreAnalysis();
+            }
+        });
+    }
+    
+    // Component Analysis
+    const componentAnalysis = document.getElementById('componentAnalysis');
+    if (componentAnalysis) {
+        componentAnalysis.addEventListener('show.bs.collapse', function() {
+            if (!loadedSections.has('component-analysis')) {
+                loadComponentAnalysis();
+            }
+        });
+    }
+    
+    // External Factors
+    const externalFactors = document.getElementById('externalFactors');
+    if (externalFactors) {
+        externalFactors.addEventListener('show.bs.collapse', function() {
+            if (!loadedSections.has('external-factors')) {
+                loadExternalFactors();
+            }
+        });
+    }
+    
+    // Price Analysis
+    const priceAnalysis = document.getElementById('priceAnalysis');
+    if (priceAnalysis) {
+        priceAnalysis.addEventListener('show.bs.collapse', function() {
+            if (!loadedSections.has('price-analysis')) {
+                loadPriceAnalysis();
+            }
+        });
+    }
+});
+
+function loadScoreAnalysis() {
+    const container = document.getElementById('scoreAnalysis');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading score analysis...</p></div>';
+    
+    fetch(`/api/data/score-analysis?${filterParams}`)
+        .then(response => response.json())
+        .then(data => {
+            renderScoreAnalysis(data);
+            loadedSections.add('score-analysis');
+        })
+        .catch(error => {
+            container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>';
+            console.error('Error:', error);
+        });
+}
+
+function loadComponentAnalysis() {
+    const container = document.getElementById('componentAnalysis');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading component analysis...</p></div>';
+    
+    fetch(`/api/data/component-analysis?${filterParams}`)
+        .then(response => response.json())
+        .then(data => {
+            renderComponentAnalysis(data);
+            loadedSections.add('component-analysis');
+        })
+        .catch(error => {
+            container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>';
+            console.error('Error:', error);
+        });
+}
+
+function loadExternalFactors() {
+    const container = document.getElementById('externalFactors');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading external factors...</p></div>';
+    
+    fetch(`/api/data/external-factors?${filterParams}`)
+        .then(response => response.json())
+        .then(data => {
+            renderExternalFactors(data);
+            loadedSections.add('external-factors');
+        })
+        .catch(error => {
+            container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>';
+            console.error('Error:', error);
+        });
+}
+
+function loadPriceAnalysis() {
+    const container = document.getElementById('priceAnalysis');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading price analysis...</p></div>';
+    
+    fetch(`/api/data/price-analysis?${filterParams}`)
+        .then(response => response.json())
+        .then(data => {
+            renderPriceAnalysis(data);
+            loadedSections.add('price-analysis');
+        })
+        .catch(error => {
+            container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>';
+            console.error('Error:', error);
+        });
+}
+
+// Render functions
+function renderScoreAnalysis(data) {
+    const container = document.getElementById('scoreAnalysis');
+    
+    let html = '<div class="card-body"><div class="row">';
+    
+    // Score Tier Table
+    html += '<div class="col-md-6"><h6>Strike Rate by Score Tier</h6><table class="table table-sm"><thead><tr><th>Score</th><th>Races</th><th>Wins</th><th>Strike %</th><th>ROI</th></tr></thead><tbody>';
+    
+    const tierOrder = ['150+', '140-149', '130-139', '120-129', '110-119', '100-109', '90-99'];
+    for (const tier of tierOrder) {
+        const d = data.score_tiers[tier];
+        html += `<tr>
+            <td><strong>${tier}</strong></td>
+            <td>${d.races}</td>
+            <td>${d.wins}</td>
+            <td>${d.strike_rate.toFixed(1)}%</td>
+            <td class="${d.roi >= 0 ? 'text-success' : 'text-danger'}">${d.roi.toFixed(1)}%</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div>';
+    
+    // Score Tier Chart
+    html += '<div class="col-md-6"><canvas id="scoreTierChart" height="200"></canvas></div></div><hr>';
+    
+    // Score Gap Table
+    html += '<div class="row mt-4"><div class="col-md-6"><h6>Strike Rate by Score Gap (to 2nd place)</h6><table class="table table-sm"><thead><tr><th>Gap</th><th>Races</th><th>Wins</th><th>Strike %</th><th>ROI</th></tr></thead><tbody>';
+    
+    const gapOrder = ['50+', '40-49', '30-39', '20-29', '10-19', '<10'];
+    for (const gap of gapOrder) {
+        const d = data.score_gaps[gap];
+        html += `<tr>
+            <td><strong>${gap}</strong></td>
+            <td>${d.races}</td>
+            <td>${d.wins}</td>
+            <td>${d.strike_rate.toFixed(1)}%</td>
+            <td class="${d.roi >= 0 ? 'text-success' : 'text-danger'}">${d.roi.toFixed(1)}%</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div>';
+    
+    // Score Gap Chart
+    html += '<div class="col-md-6"><canvas id="scoreGapChart" height="200"></canvas></div></div></div>';
+    
+    container.innerHTML = html;
+    
+    // Draw charts
+    const tierLabels = tierOrder;
+    const tierStrikeRates = tierOrder.map(t => data.score_tiers[t].strike_rate);
+    
+    new Chart(document.getElementById('scoreTierChart'), {
+        type: 'bar',
+        data: {
+            labels: tierLabels,
+            datasets: [{
+                label: 'Strike Rate %',
+                data: tierStrikeRates,
+                backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: { y: { beginAtZero: true, max: 100 } },
+            plugins: { legend: { display: false } }
+        }
+    });
+    
+    const gapLabels = gapOrder;
+    const gapStrikeRates = gapOrder.map(g => data.score_gaps[g].strike_rate);
+    
+    new Chart(document.getElementById('scoreGapChart'), {
+        type: 'bar',
+        data: {
+            labels: gapLabels,
+            datasets: [{
+                label: 'Strike Rate %',
+                data: gapStrikeRates,
+                backgroundColor: 'rgba(75, 192, 192, 0.7)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: { y: { beginAtZero: true, max: 100 } },
+            plugins: { legend: { display: false } }
+        }
+    });
+}
+
+function renderComponentAnalysis(data) {
+    const container = document.getElementById('componentAnalysis');
+    
+    if (!data.components || data.components.length === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><i class="bi bi-database display-4"></i><p class="mt-3">No component data yet.</p></div>';
+        return;
+    }
+    
+    let html = '<div class="card-body">';
+    html += '<p class="text-muted mb-3">Which scoring factors actually predict winners? Components sorted by ROI.</p>';
+    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+    html += '<th>Component</th><th class="text-center">Appearances</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th><th class="text-center">Value?</th>';
+    html += '</tr></thead><tbody>';
+    
+    for (const comp of data.components) {
+        let strikeClass = '';
+        if (comp.strike_rate >= 30) strikeClass = 'text-success fw-bold';
+        else if (comp.strike_rate >= 20) strikeClass = 'text-success';
+        else if (comp.strike_rate < 10) strikeClass = 'text-danger';
+        
+        let valueBadge = '';
+        if (comp.roi >= 25 && comp.appearances >= 5) {
+            valueBadge = '<span class="badge bg-success">✓ Strong</span>';
+        } else if (comp.roi >= 18 && comp.appearances >= 3) {
+            valueBadge = '<span class="badge bg-info">Promising</span>';
+        } else if (comp.roi < 10 && comp.appearances >= 5) {
+            valueBadge = '<span class="badge bg-danger">Weak</span>';
+        } else if (comp.appearances < 5) {
+            valueBadge = '<span class="badge bg-secondary">Low Data</span>';
+        } else {
+            valueBadge = '<span class="badge bg-warning text-dark">Neutral</span>';
+        }
+        
+        html += `<tr>
+            <td><strong>${comp.name}</strong></td>
+            <td class="text-center">${comp.appearances}</td>
+            <td class="text-center">${comp.wins}</td>
+            <td class="text-center ${strikeClass}">${comp.strike_rate.toFixed(1)}%</td>
+            <td class="text-center">${comp.places}</td>
+            <td class="text-center${comp.place_rate >= 50 ? ' text-success' : ''}">${comp.place_rate.toFixed(1)}%</td>
+            <td class="text-center ${comp.roi >= 0 ? 'text-success' : 'text-danger'}">${comp.roi.toFixed(1)}%</td>
+            <td class="text-center">${valueBadge}</td>
+        </tr>`;
+    }
+    
+    html += '</tbody></table></div>';
+    html += '<div class="mt-4 p-3 bg-light rounded"><h6>📊 How to read this:</h6><ul class="mb-0 small">';
+    html += '<li><strong>Strike %</strong> - How often horses with this component win</li>';
+    html += '<li><strong>Place %</strong> - How often they finish 1st, 2nd, or 3rd</li>';
+    html += '<li><strong>ROI %</strong> - Return on investment betting $10 on every horse with this component</li>';
+    html += '<li><strong>Value?</strong> - Quick assessment: Strong (25%+ ROI, 5+ appearances), Promising (18%+), Weak (&lt;10%), or needs more data</li>';
+    html += '</ul></div></div>';
+    
+    container.innerHTML = html;
+}
+
+function renderExternalFactors(data) {
+    const container = document.getElementById('externalFactors');
+    
+    let html = '<div class="card-body">';
+    
+    // Jockeys
+    html += '<div class="mb-5"><h5>🏇 Jockeys</h5><p class="text-muted small">Strike rates for all horses ridden, not just your top picks.</p>';
+    
+    if (data.jockeys_reliable && Object.keys(data.jockeys_reliable).length > 0) {
+        html += '<h6 class="text-success mt-3">Reliable Data (25+ rides)</h6>';
+        html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+        html += '<th>Jockey</th><th class="text-center">Rides</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+        html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
+        
+        for (const [name, stats] of Object.entries(data.jockeys_reliable)) {
+            let strikeClass = '';
+            if (stats.strike_rate >= 25) strikeClass = 'text-success fw-bold';
+            else if (stats.strike_rate >= 15) strikeClass = 'text-success';
+            else if (stats.strike_rate < 8) strikeClass = 'text-danger';
+            
+            html += `<tr>
+                <td><strong>${name}</strong></td>
+                <td class="text-center">${stats.runs}</td>
+                <td class="text-center">${stats.wins}</td>
+                <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
+                <td class="text-center">${stats.places}</td>
+                <td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
+                <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
+            </tr>`;
+        }
+        html += '</tbody></table></div>';
+    }
+    html += '</div>';
+    
+    // Trainers  
+    html += '<div class="mb-5"><h5>👔 Trainers</h5>';
+    
+    if (data.trainers_reliable && Object.keys(data.trainers_reliable).length > 0) {
+        html += '<h6 class="text-success mt-3">Reliable Data (25+ runners)</h6>';
+        html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+        html += '<th>Trainer</th><th class="text-center">Runners</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+        html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
+        
+        for (const [name, stats] of Object.entries(data.trainers_reliable)) {
+            let strikeClass = '';
+            if (stats.strike_rate >= 25) strikeClass = 'text-success fw-bold';
+            else if (stats.strike_rate >= 15) strikeClass = 'text-success';
+            else if (stats.strike_rate < 8) strikeClass = 'text-danger';
+            
+            html += `<tr>
+                <td><strong>${name}</strong></td>
+                <td class="text-center">${stats.runs}</td>
+                <td class="text-center">${stats.wins}</td>
+                <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
+                <td class="text-center">${stats.places}</td>
+                <td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
+                <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
+            </tr>`;
+        }
+        html += '</tbody></table></div>';
+    }
+    html += '</div>';
+    
+    // Barriers, Distances, Tracks, Classes - simplified for brevity
+    html += '<div class="mb-5"><h5>🚧 Barriers</h5>';
+    html += '<div class="table-responsive"><table class="table table-sm"><thead class="table-dark"><tr><th>Barrier</th><th class="text-center">Runs</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">ROI</th></tr></thead><tbody>';
+    
+    const barrierOrder = ['1-3', '4-6', '7-9', '10+'];
+    for (const bucket of barrierOrder) {
+        if (data.barriers[bucket] && data.barriers[bucket].runs > 0) {
+            const stats = data.barriers[bucket];
+            html += `<tr><td><strong>${bucket}</strong></td><td class="text-center">${stats.runs}</td><td class="text-center">${stats.wins}</td>`;
+            html += `<td class="text-center">${stats.strike_rate.toFixed(1)}%</td>`;
+            html += `<td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td></tr>`;
+        }
+    }
+    html += '</tbody></table></div></div>';
+    
+    // Race Classes
+    if (data.class_performance && Object.keys(data.class_performance).length > 0) {
+        html += '<div class="mb-4"><h5>🏆 Race Classes</h5>';
+        html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+        html += '<th>Class</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+        html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
+        
+        for (const [className, stats] of Object.entries(data.class_performance)) {
+            let strikeClass = '';
+            if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
+            else if (stats.strike_rate >= 12) strikeClass = 'text-success';
+            else if (stats.strike_rate < 8) strikeClass = 'text-danger';
+            
+            html += `<tr>
+                <td><strong>${className}</strong></td>
+                <td class="text-center">${stats.runs}</td>
+                <td class="text-center">${stats.wins}</td>
+                <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
+                <td class="text-center">${stats.places}</td>
+                <td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
+                <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
+            </tr>`;
+        }
+        html += '</tbody></table></div></div>';
+    }
+    
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function renderPriceAnalysis(data) {
+    const container = document.getElementById('priceAnalysis');
+    
+    if (data.total_compared === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No price comparison data yet.</p></div>';
+        return;
+    }
+    
+    let html = '<div class="card-body">';
+    html += '<p class="text-muted mb-3">Comparing your predicted odds vs actual SP. Are you finding value?</p>';
+    
+    // Summary Cards
+    html += '<div class="row mb-4">';
+    html += `<div class="col-md-4"><div class="card border-success h-100"><div class="card-body text-center">
+        <h6 class="text-success">📈 Overlays (Value)</h6>
+        <p class="small text-muted mb-2">SP was 10%+ higher than your price</p>
+        <h3>${data.overlays.count}</h3>
+        <p class="mb-1">Strike: <strong class="${data.overlays.strike_rate >= 20 ? 'text-success' : ''}">${data.overlays.strike_rate.toFixed(1)}%</strong></p>
+        <p class="mb-0">ROI: <strong class="${data.overlays.roi >= 0 ? 'text-success' : 'text-danger'}">${data.overlays.roi.toFixed(1)}%</strong></p>
+    </div></div></div>`;
+    
+    html += `<div class="col-md-4"><div class="card border-warning h-100"><div class="card-body text-center">
+        <h6 class="text-warning">⚖️ Accurate</h6>
+        <p class="small text-muted mb-2">SP within 10% of your price</p>
+        <h3>${data.accurate.count}</h3>
+        <p class="mb-1">Strike: <strong>${data.accurate.strike_rate.toFixed(1)}%</strong></p>
+        <p class="mb-0">ROI: <strong class="${data.accurate.roi >= 0 ? 'text-success' : 'text-danger'}">${data.accurate.roi.toFixed(1)}%</strong></p>
+    </div></div></div>`;
+    
+    html += `<div class="col-md-4"><div class="card border-danger h-100"><div class="card-body text-center">
+        <h6 class="text-danger">📉 Underlays (No Value)</h6>
+        <p class="small text-muted mb-2">SP was 10%+ lower than your price</p>
+        <h3>${data.underlays.count}</h3>
+        <p class="mb-1">Strike: <strong>${data.underlays.strike_rate.toFixed(1)}%</strong></p>
+        <p class="mb-0">ROI: <strong class="${data.underlays.roi >= 0 ? 'text-success' : 'text-danger'}">${data.underlays.roi.toFixed(1)}%</strong></p>
+    </div></div></div>`;
+    html += '</div>';
+    
+    // Average difference
+    let alertClass = 'alert-info';
+    if (data.avg_diff > 0) alertClass = 'alert-success';
+    else if (data.avg_diff < -5) alertClass = 'alert-danger';
+    
+    html += `<div class="alert ${alertClass}"><strong>Average Price Difference:</strong> `;
+    if (data.avg_diff > 0) {
+        html += `SP is ${data.avg_diff.toFixed(1)}% higher than your predictions on average (you're finding value)`;
+    } else if (data.avg_diff < 0) {
+        html += `SP is ${Math.abs(data.avg_diff).toFixed(1)}% lower than your predictions on average (market is tighter)`;
+    } else {
+        html += `Your prices match the market closely`;
+    }
+    html += '</div></div>';
+    
+    container.innerHTML = html;
+}
+</script>
 </script>
 {% endblock %}
