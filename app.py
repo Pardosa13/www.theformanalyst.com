@@ -664,8 +664,8 @@ trainers_limited = dict(sorted(trainers_limited.items(), key=lambda x: x[1]['roi
 # Filter tracks with 2+ races
 tracks = {k: v for k, v in tracks.items() if v['runs'] >= 2}
 tracks = dict(sorted(tracks.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
-    
-return {
+
+    return {
         'jockeys_reliable': jockeys_reliable,
         'jockeys_limited': jockeys_limited,
         'trainers_reliable': trainers_reliable,
