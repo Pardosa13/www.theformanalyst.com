@@ -102,79 +102,9 @@
             <h5 class="mb-0">📈 Score Analysis</h5>
             <i class="bi bi-chevron-down"></i>
         </div>
-        <div id="scoreAnalysis" class="collapse show">
-            <div class="card-body">
-                <div class="row">
-                    <!-- Score Tier Table -->
-                    <div class="col-md-6">
-                        <h6>Strike Rate by Score Tier</h6>
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>Score</th>
-                                    <th>Races</th>
-                                    <th>Wins</th>
-                                    <th>Strike %</th>
-                                    <th>ROI</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for tier, data in score_tiers.items() %}
-                                <tr>
-                                    <td><strong>{{ tier }}</strong></td>
-                                    <td>{{ data.races }}</td>
-                                    <td>{{ data.wins }}</td>
-                                    <td>{{ "%.1f"|format(data.strike_rate) }}%</td>
-                                    <td class="{% if data.roi >= 0 %}text-success{% else %}text-danger{% endif %}">
-                                        {{ "%.1f"|format(data.roi) }}%
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    <!-- Score Tier Chart -->
-                    <div class="col-md-6">
-                        <canvas id="scoreTierChart" height="200"></canvas>
-                    </div>
-                </div>
-                
-                <hr>
-                
-                <div class="row mt-4">
-                    <!-- Score Gap Table -->
-                    <div class="col-md-6">
-                        <h6>Strike Rate by Score Gap (to 2nd place)</h6>
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>Gap</th>
-                                    <th>Races</th>
-                                    <th>Wins</th>
-                                    <th>Strike %</th>
-                                    <th>ROI</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for gap, data in score_gaps.items() %}
-                                <tr>
-                                    <td><strong>{{ gap }}</strong></td>
-                                    <td>{{ data.races }}</td>
-                                    <td>{{ data.wins }}</td>
-                                    <td>{{ "%.1f"|format(data.strike_rate) }}%</td>
-                                    <td class="{% if data.roi >= 0 %}text-success{% else %}text-danger{% endif %}">
-                                        {{ "%.1f"|format(data.roi) }}%
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    <!-- Score Gap Chart -->
-                    <div class="col-md-6">
-                        <canvas id="scoreGapChart" height="200"></canvas>
-                    </div>
-                </div>
+        <div id="scoreAnalysis" class="collapse">
+            <div class="card-body text-center">
+                <p class="text-muted">Click to expand and load score analysis...</p>
             </div>
         </div>
     </div>
