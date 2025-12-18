@@ -25,7 +25,7 @@
                 <div class="col-md-2">
                     <label class="form-label">Min Score</label>
                     <input type="number" name="min_score" class="form-control" step="0.1" 
-                           value="{{ filters.min_score or '' }}" placeholder="e.g.  60">
+                           value="{{ filters.min_score or '' }}" placeholder="e.g. 60">
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">Date From</label>
@@ -42,21 +42,23 @@
             </form>
         </div>
     </div>
+    
     <!-- ML Export Button -->
-<div class="mb-4">
-    <a href="{{ url_for('export_ml_data', track=filters.track or '', min_score=filters.min_score or '', date_from=filters.date_from or '', date_to=filters.date_to or '') }}" 
-       class="btn btn-success btn-lg">
-        <i class="bi bi-download"></i> Download Complete ML Training Data
-    </a>
-    <p class="text-muted small mt-2">
-        Export all race data with 22 parsed scoring components + complete raw CSV fields for machine learning analysis.
-        {% if total_races > 0 %}
-        Currently showing {{ total_races }} races with complete results.
-        {% else %}
-        No data available yet - enter results to start exporting.
-        {% endif %}
-    </p>
-</div>
+    <div class="mb-4">
+        <a href="{{ url_for('export_ml_data', track=filters.track or '', min_score=filters.min_score or '', date_from=filters.date_from or '', date_to=filters.date_to or '') }}" 
+           class="btn btn-success btn-lg">
+            <i class="bi bi-download"></i> Download Complete ML Training Data
+        </a>
+        <p class="text-muted small mt-2">
+            Export all race data with 22 parsed scoring components + complete raw CSV fields for machine learning analysis.
+            {% if total_races > 0 %}
+            Currently showing {{ total_races }} races with complete results.
+            {% else %}
+            No data available yet - enter results to start exporting.
+            {% endif %}
+        </p>
+    </div>
+    
     <!-- Section 1: Overview Cards -->
     <div class="row mb-4">
         <div class="col-md-3">
@@ -110,271 +112,57 @@
     </div>
     
     <!-- Section 3: Component Analysis -->
-<div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center" 
-         data-bs-toggle="collapse" data-bs-target="#componentAnalysis" style="cursor: pointer;">
-        <h5 class="mb-0">🧩 Component Analysis</h5>
-        <i class="bi bi-chevron-down"></i>
-    </div>
-    <div id="componentAnalysis" class="collapse">
-        <div class="card-body text-center">
-            <p class="text-muted">Click to expand and load component analysis...</p>
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center" 
+             data-bs-toggle="collapse" data-bs-target="#componentAnalysis" style="cursor: pointer;">
+            <h5 class="mb-0">🧩 Component Analysis</h5>
+            <i class="bi bi-chevron-down"></i>
+        </div>
+        <div id="componentAnalysis" class="collapse">
+            <div class="card-body text-center">
+                <p class="text-muted">Click to expand and load component analysis...</p>
+            </div>
         </div>
     </div>
-</div>
     
     <!-- Section 4: External Factors -->
-<!-- Section 4: External Factors -->
-<div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center" 
-         data-bs-toggle="collapse" data-bs-target="#externalFactors" style="cursor: pointer;">
-        <h5 class="mb-0">🏇 External Factors</h5>
-        <i class="bi bi-chevron-down"></i>
-    </div>
-    <div id="externalFactors" class="collapse">
-        <div class="card-body text-center">
-            <p class="text-muted">Click to expand and load external factors...</p>
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center" 
+             data-bs-toggle="collapse" data-bs-target="#externalFactors" style="cursor: pointer;">
+            <h5 class="mb-0">🏇 External Factors</h5>
+            <i class="bi bi-chevron-down"></i>
+        </div>
+        <div id="externalFactors" class="collapse">
+            <div class="card-body text-center">
+                <p class="text-muted">Click to expand and load external factors...</p>
+            </div>
         </div>
     </div>
-</div>
     
-   <!-- Section 5: Price Analysis -->
-<div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center" 
-         data-bs-toggle="collapse" data-bs-target="#priceAnalysis" style="cursor: pointer;">
-        <h5 class="mb-0">💰 Price Analysis</h5>
-        <i class="bi bi-chevron-down"></i>
-    </div>
-    <div id="priceAnalysis" class="collapse">
-        <div class="card-body text-center">
-            <p class="text-muted">Click to expand and load price analysis...</p>
+    <!-- Section 5: Price Analysis -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center" 
+             data-bs-toggle="collapse" data-bs-target="#priceAnalysis" style="cursor: pointer;">
+            <h5 class="mb-0">💰 Price Analysis</h5>
+            <i class="bi bi-chevron-down"></i>
+        </div>
+        <div id="priceAnalysis" class="collapse">
+            <div class="card-body text-center">
+                <p class="text-muted">Click to expand and load price analysis...</p>
+            </div>
         </div>
     </div>
-</div>
-            
-            <p class="text-muted mb-3">Comparing your predicted odds vs actual SP. Are you finding value?</p>
-            
-            <!-- Summary Cards -->
-            <div class="row mb-4">
-                <div class="col-md-4">
-                    <div class="card border-success h-100">
-                        <div class="card-body text-center">
-                            <h6 class="text-success">📈 Overlays (Value)</h6>
-                            <p class="small text-muted mb-2">SP was 10%+ higher than your price</p>
-                            <h3>{{ price_analysis.overlays.count }}</h3>
-                            <p class="mb-1">
-                                Strike: <strong class="{% if price_analysis.overlays.strike_rate >= 20 %}text-success{% endif %}">{{ "%.1f"|format(price_analysis.overlays.strike_rate) }}%</strong>
-                            </p>
-                            <p class="mb-0">
-                                ROI: <strong class="{% if price_analysis.overlays.roi >= 0 %}text-success{% else %}text-danger{% endif %}">{{ "%.1f"|format(price_analysis.overlays.roi) }}%</strong>
-                            </p>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="card border-warning h-100">
-                        <div class="card-body text-center">
-                            <h6 class="text-warning">⚖️ Accurate</h6>
-                            <p class="small text-muted mb-2">SP within 10% of your price</p>
-                            <h3>{{ price_analysis.accurate.count }}</h3>
-                            <p class="mb-1">
-                                Strike: <strong>{{ "%.1f"|format(price_analysis.accurate.strike_rate) }}%</strong>
-                            </p>
-                            <p class="mb-0">
-                                ROI: <strong class="{% if price_analysis.accurate.roi >= 0 %}text-success{% else %}text-danger{% endif %}">{{ "%.1f"|format(price_analysis.accurate.roi) }}%</strong>
-                            </p>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="card border-danger h-100">
-                        <div class="card-body text-center">
-                            <h6 class="text-danger">📉 Underlays (No Value)</h6>
-                            <p class="small text-muted mb-2">SP was 10%+ lower than your price</p>
-                            <h3>{{ price_analysis.underlays.count }}</h3>
-                            <p class="mb-1">
-                                Strike: <strong>{{ "%.1f"|format(price_analysis.underlays.strike_rate) }}%</strong>
-                            </p>
-                            <p class="mb-0">
-                                ROI: <strong class="{% if price_analysis.underlays.roi >= 0 %}text-success{% else %}text-danger{% endif %}">{{ "%.1f"|format(price_analysis.underlays.roi) }}%</strong>
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Average Difference -->
-            <div class="alert {% if price_analysis.avg_diff > 0 %}alert-success{% elif price_analysis.avg_diff < -5 %}alert-danger{% else %}alert-info{% endif %}">
-                <strong>Average Price Difference:</strong> 
-                {% if price_analysis.avg_diff > 0 %}
-                    SP is {{ "%.1f"|format(price_analysis.avg_diff) }}% higher than your predictions on average (you're finding value)
-                {% elif price_analysis.avg_diff < 0 %}
-                    SP is {{ "%.1f"|format(price_analysis.avg_diff|abs) }}% lower than your predictions on average (market is tighter)
-                {% else %}
-                    Your prices match the market closely
-                {% endif %}
-            </div>
-            
-            <!-- Examples -->
-            <div class="row mt-4">
-                {% if price_analysis.overlay_examples %}
-                <div class="col-md-6">
-                    <h6 class="text-success">Recent Overlay Examples</h6>
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Horse</th>
-                                <th>Your Price</th>
-                                <th>SP</th>
-                                <th>Result</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for ex in price_analysis.overlay_examples %}
-                            <tr>
-                                <td>{{ ex.horse }}</td>
-                                <td>${{ "%.2f"|format(ex.your_price) }}</td>
-                                <td>${{ "%.2f"|format(ex.sp) }}</td>
-                                <td>
-                                    {% if ex.won %}
-                                    <span class="badge bg-success">WON ✓</span>
-                                    {% else %}
-                                    <span class="badge bg-secondary">Lost</span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% endif %}
-                
-                {% if price_analysis.underlay_examples %}
-                <div class="col-md-6">
-                    <h6 class="text-danger">Recent Underlay Examples</h6>
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Horse</th>
-                                <th>Your Price</th>
-                                <th>SP</th>
-                                <th>Result</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for ex in price_analysis.underlay_examples %}
-                            <tr>
-                                <td>{{ ex.horse }}</td>
-                                <td>${{ "%.2f"|format(ex.your_price) }}</td>
-                                <td>${{ "%.2f"|format(ex.sp) }}</td>
-                                <td>
-                                    {% if ex.won %}
-                                    <span class="badge bg-success">WON ✓</span>
-                                    {% else %}
-                                    <span class="badge bg-secondary">Lost</span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% endif %}
-            </div>
-            
-            <div class="mt-4 p-3 bg-light rounded">
-                <h6>📊 How to read this:</h6>
-                <ul class="mb-0 small">
-                    <li><strong>Overlays</strong> - Market offered better odds than you assessed. If your strike rate here is solid, you're finding genuine value.</li>
-                    <li><strong>Underlays</strong> - Market was shorter than your price. These are races where the market liked your pick even more than you did.</li>
-                    <li><strong>The key insight:</strong> If overlay ROI is positive and underlay ROI is negative, your pricing model is working - back only when you're getting value.</li>
-                </ul>
-            </div>
-            
-            {% else %}
-            <div class="text-center text-muted py-5">
-                <i class="bi bi-currency-dollar display-4"></i>
-                <p class="mt-3">No price comparison data yet. Enter results with SP to see how your predicted odds compare to market prices.</p>
-                <a href="{{ url_for('results') }}" class="btn btn-primary">Enter Results</a>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-</div>
     
     {% if total_races == 0 %}
     <div class="alert alert-info">
-        <h5>No results data yet! </h5>
-        <p class="mb-0">Go to <a href="{{ url_for('results') }}">Results</a> to start entering race outcomes, then come back here to see your analytics. </p>
+        <h5>No results data yet!</h5>
+        <p class="mb-0">Go to <a href="{{ url_for('results') }}">Results</a> to start entering race outcomes, then come back here to see your analytics.</p>
     </div>
     {% endif %}
 </div>
 
 <!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-// Score Tier Chart
-const tierLabels = {{ score_tiers.keys()|list|tojson }};
-const tierStrikeRates = {{ score_tiers.values()|map(attribute='strike_rate')|list|tojson }};
-const tierROIs = {{ score_tiers.values()|map(attribute='roi')|list|tojson }};
-
-new Chart(document.getElementById('scoreTierChart'), {
-    type: 'bar',
-    data: {
-        labels: tierLabels,
-        datasets: [{
-            label: 'Strike Rate %',
-            data: tierStrikeRates,
-            backgroundColor: 'rgba(54, 162, 235, 0.7)',
-            borderColor: 'rgba(54, 162, 235, 1)',
-            borderWidth: 1
-        }]
-    },
-    options: {
-        responsive: true,
-        scales: {
-            y: {
-                beginAtZero: true,
-                max: 100,
-                title: { display: true, text: 'Strike Rate %' }
-            }
-        },
-        plugins: {
-            legend: { display: false }
-        }
-    }
-});
-
-// Score Gap Chart
-const gapLabels = {{ score_gaps.keys()|list|tojson }};
-const gapStrikeRates = {{ score_gaps.values()|map(attribute='strike_rate')|list|tojson }};
-
-new Chart(document.getElementById('scoreGapChart'), {
-    type: 'bar',
-    data: {
-        labels: gapLabels,
-        datasets: [{
-            label: 'Strike Rate %',
-            data: gapStrikeRates,
-            backgroundColor: 'rgba(75, 192, 192, 0.7)',
-            borderColor: 'rgba(75, 192, 192, 1)',
-            borderWidth: 1
-        }]
-    },
-    options: {
-        responsive: true,
-        scales: {
-            y: {
-                beginAtZero: true,
-                max: 100,
-                title: { display: true, text: 'Strike Rate %' }
-            }
-        },
-        plugins: {
-            legend: { display: false }
-        }
-    }
-});
 <script>
 // Lazy loading for data sections
 const loadedSections = new Set();
@@ -704,7 +492,7 @@ function renderExternalFactors(data) {
     }
     html += '</div>';
     
-    // Barriers, Distances, Tracks, Classes - simplified for brevity
+    // Barriers
     html += '<div class="mb-5"><h5>🚧 Barriers</h5>';
     html += '<div class="table-responsive"><table class="table table-sm"><thead class="table-dark"><tr><th>Barrier</th><th class="text-center">Runs</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">ROI</th></tr></thead><tbody>';
     
@@ -804,6 +592,5 @@ function renderPriceAnalysis(data) {
     
     container.innerHTML = html;
 }
-</script>
 </script>
 {% endblock %}
