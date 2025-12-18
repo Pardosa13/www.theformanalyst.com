@@ -42,31 +42,57 @@
 <!-- Section 2: Results Complete -->
 <div class="card">
     <h2 style="margin: 0 0 20px 0;">✅ Results Complete</h2>
-    
-    {% if results_complete %}
-    <div style="display: flex; flex-direction: column; gap: 15px;">
-        {% for meeting in results_complete %}
-        <div style="background: #d4edda; border-left: 4px solid #28a745; padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-            <div>
-                <div style="font-size: 18px; font-weight: 600;">{{ meeting.meeting_name }}</div>
-                <div style="font-size: 14px; color: #6c757d; margin-top: 5px;">
-                    Uploaded by {{ meeting.user }} • {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
-                </div>
-                <div style="font-size: 14px; color: #155724; margin-top: 5px;">
-                    <strong>{{ meeting.total_races }}</strong> races • <strong>{{ meeting.total_horses }}</strong> horses recorded
-                </div>
-            </div>
-            <a href="{{ url_for('results_entry', meeting_id=meeting.id) }}" 
-               class="btn" 
-               style="background: #6c757d; color: white; white-space: nowrap;">
-                View / Edit
-            </a>
-        </div>
-        {% endfor %}
+    <div id="results-complete-container">
+        <p style="color: #6c757d; text-align: center;">Loading completed results...</p>
     </div>
-    {% else %}
-    <p style="color: #6c757d; margin: 0;">No completed meetings yet. Enter results above to see them here.</p>
-    {% endif %}
 </div>
+
+<script>
+// Load completed results after page loads
+document.addEventListener('DOMContentLoaded', function() {
+    fetch('/api/results/complete')
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('results-complete-container');
+            
+            if (data.length === 0) {
+                container.innerHTML = '<p style="color: #6c757d; margin: 0;">No completed meetings yet.</p>';
+                return;
+            }
+            
+            let html = '<div style="display: flex; flex-direction: column; gap: 15px;">';
+            data.forEach(meeting => {
+                const date = new Date(meeting.uploaded_at);
+                const formattedDate = date.toISOString().slice(0, 16).replace('T', ' ');
+                
+                html += `
+                    <div style="background: #d4edda; border-left: 4px solid #28a745; padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+                        <div>
+                            <div style="font-size: 18px; font-weight: 600;">${meeting.meeting_name}</div>
+                            <div style="font-size: 14px; color: #6c757d; margin-top: 5px;">
+                                Uploaded by ${meeting.user} • ${formattedDate}
+                            </div>
+                            <div style="font-size: 14px; color: #155724; margin-top: 5px;">
+                                <strong>${meeting.total_races}</strong> races • <strong>${meeting.total_horses}</strong> horses recorded
+                            </div>
+                        </div>
+                        <a href="/results/${meeting.id}" 
+                           class="btn" 
+                           style="background: #6c757d; color: white; white-space: nowrap;">
+                            View / Edit
+                        </a>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        })
+        .catch(error => {
+            console.error('Error loading completed results:', error);
+            document.getElementById('results-complete-container').innerHTML = 
+                '<p style="color: #dc3545;">Error loading completed results. Please refresh the page.</p>';
+        });
+});
+</script>
 
 {% endblock %}
