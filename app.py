@@ -645,22 +645,21 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
             tracks[track]['profit'] += profit
     tracks = calc_rates(tracks, stake)
     
-    # Split jockeys into reliable (25+) and limited (5-24)
-    jockeys_reliable = {k: v for k, v in jockeys.items() if v['runs'] >= 25}
-    jockeys_limited = {k: v for k, v in jockeys.items() if 5 <= v['runs'] < 25}
-    
-    # Sort by strike rate
-    jockeys_reliable = dict(sorted(jockeys_reliable.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
-    jockeys_limited = dict(sorted(jockeys_limited.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
-    
-    # Split trainers into reliable (25+) and limited (5-24)
-    trainers_reliable = {k: v for k, v in trainers.items() if v['runs'] >= 25}
-    trainers_limited = {k: v for k, v in trainers.items() if v['runs'] == 25}
-    
-    # Sort by strike rate
-    trainers_reliable = dict(sorted(trainers_reliable.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
-    trainers_limited = dict(sorted(trainers_limited.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
-    
+    # Split jockeys into reliable (40+ runs) and limited (5-39 runs)
+jockeys_reliable = {k: v for k, v in jockeys.items() if v['runs'] >= 40}
+jockeys_limited = {k: v for k, v in jockeys.items() if 5 <= v['runs'] < 40}
+
+# Sort by ROI
+jockeys_reliable = dict(sorted(jockeys_reliable.items(), key=lambda x: x[1]['roi'], reverse=True))
+jockeys_limited = dict(sorted(jockeys_limited.items(), key=lambda x: x[1]['roi'], reverse=True))
+
+# Split trainers into reliable (40+ runs) and limited (5-39 runs)
+trainers_reliable = {k: v for k, v in trainers.items() if v['runs'] >= 40}
+trainers_limited = {k: v for k, v in trainers.items() if 5 <= v['runs'] < 40}
+
+# Sort by ROI
+trainers_reliable = dict(sorted(trainers_reliable.items(), key=lambda x: x[1]['roi'], reverse=True))
+trainers_limited = dict(sorted(trainers_limited.items(), key=lambda x: x[1]['roi'], reverse=True))
     # Filter tracks with 2+ races
     tracks = {k: v for k, v in tracks.items() if v['runs'] >= 2}
     tracks = dict(sorted(tracks.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
