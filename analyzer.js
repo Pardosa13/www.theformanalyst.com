@@ -2438,20 +2438,21 @@ Object.keys(horseData).forEach(hn => {
             
             // BASE RANK BONUS
             if (rank === 1) {
-                raceDayBonus += 30;
-                raceDayNote += '+30.0: Fastest sectional in race (11.6% SR, +17.6% lift)\n';
+                raceDayBonus += 12;
+                raceDayNote += '+12.0: Fastest sectional in race (11.6% SR, +17.6% lift)\n';
             }
+            
             // DISTANCE CATEGORY BONUSES (only for fastest)
             if (rank === 1) {
                 if (todaysRaceDistance <= 1200) {
-                    raceDayBonus += 40;
-                    raceDayNote += '+40.0: Sprint + Fastest sectional (13.7% SR, +39% lift)\n';
+                    raceDayBonus += 20;
+                    raceDayNote += '+20.0: Sprint + Fastest sectional (13.7% SR, +39% lift)\n';
                 } else if (todaysRaceDistance > 1400 && todaysRaceDistance <= 1600) {
-                    raceDayBonus += 35;
-                    raceDayNote += '+35.0: Mile + Fastest sectional (13.3% SR, +34% lift)\n';
+                    raceDayBonus += 18;
+                    raceDayNote += '+18.0: Mile + Fastest sectional (13.3% SR, +34% lift)\n';
                 } else if (todaysRaceDistance > 2000) {
-                    raceDayBonus -= 15;
-                    raceDayNote += '-15.0: Long distance (2000m+) negates sectional advantage\n';
+                    raceDayBonus -= 8;
+                    raceDayNote += '-8.0: Long distance (2000m+) negates sectional advantage\n';
                 }
             }
             
@@ -2472,11 +2473,11 @@ Object.keys(horseData).forEach(hn => {
                         const weightAdvantage = avgWeight - horseWeight;
                         
                         if (weightAdvantage >= 3) {
-                            raceDayBonus += 50;
-                            raceDayNote += '+50.0: Big weight advantage (3kg+) + Fastest (20% SR, +102% lift!)\n';
+                            raceDayBonus += 20;
+                            raceDayNote += '+20.0: Big weight advantage (3kg+) + Fastest (20% SR, +102% lift!)\n';
                         } else if (weightAdvantage >= 1) {
-                            raceDayBonus += 25;
-                            raceDayNote += '+25.0: Weight advantage (1-3kg) + Fastest\n';
+                            raceDayBonus += 10;
+                            raceDayNote += '+10.0: Weight advantage (1-3kg) + Fastest\n';
                         }
                     }
                 }
@@ -2491,8 +2492,8 @@ Object.keys(horseData).forEach(hn => {
                 const horseAge = parseInt(entry['horse age']);
                 
                 if (horseAge === 4) {
-                    raceDayBonus += 15;
-                    raceDayNote += '+15.0: 4yo + Top 20% sectional (13.5% SR, +36.7% lift)\n';
+                    raceDayBonus += 9;
+                    raceDayNote += '+9.0: 4yo + Top 20% sectional (13.5% SR, +36.7% lift)\n';
                 }
             }
             
@@ -2503,8 +2504,8 @@ Object.keys(horseData).forEach(hn => {
                 const horseSex = String(entry['horse sex'] || '').trim();
                 
                 if (horseSex === 'Mare') {
-                    raceDayBonus += 12;
-                    raceDayNote += '+12.0: Mare + Top 20% sectional (11.8% SR, +19.8% lift)\n';
+                    raceDayBonus += 7;
+                    raceDayNote += '+7.0: Mare + Top 20% sectional (11.8% SR, +19.8% lift)\n';
                 }
             }
             
@@ -2515,8 +2516,8 @@ Object.keys(horseData).forEach(hn => {
                 const trackCondition = String(entry['track_condition'] || entry['track condition'] || '').toLowerCase();
                 
                 if (trackCondition === 'soft') {
-                    raceDayBonus += 20;
-                    raceDayNote += '+20.0: Soft track + Fastest (12.4% SR, +25.1% lift)\n';
+                    raceDayBonus += 10;
+                    raceDayNote += '+10.0: Soft track + Fastest (12.4% SR, +25.1% lift)\n';
                 }
             }
             
@@ -2544,26 +2545,26 @@ Object.keys(horseData).forEach(hn => {
                 
                 // 4yo + Soft + Fastest + Weight advantage = 50% SR!
                 if (horseAge === 4 && trackCondition === 'soft' && weightAdvantage >= 1) {
-                    raceDayBonus += 75;
-                    raceDayNote += '+75.0: 🔥🔥🔥 MEGA COMBO: 4yo + Soft + Fastest + Weight adv (50% SR, +405% lift!)\n';
+                    raceDayBonus += 30;
+                    raceDayNote += '+30.0: 🔥🔥🔥 MEGA COMBO: 4yo + Soft + Fastest + Weight adv (50% SR, +405% lift!)\n';
                 }
                 
                 // Sprint + Weight advantage + Fastest = 41.7% SR!
                 else if (todaysRaceDistance <= 1200 && weightAdvantage >= 1) {
-                    raceDayBonus += 60;
-                    raceDayNote += '+60.0: 🔥🔥 Sprint + Weight adv + Fastest (41.7% SR, +321% lift!)\n';
+                    raceDayBonus += 24;
+                    raceDayNote += '+24.0: 🔥🔥 Sprint + Weight adv + Fastest (41.7% SR, +321% lift!)\n';
                 }
                 
                 // Mile + Weight advantage + Fastest = 18.8% SR
                 else if (todaysRaceDistance > 1400 && todaysRaceDistance <= 1600 && weightAdvantage >= 1) {
-                    raceDayBonus += 40;
-                    raceDayNote += '+40.0: 🔥 Mile + Weight adv + Fastest (18.8% SR, +89% lift)\n';
+                    raceDayBonus += 16;
+                    raceDayNote += '+16.0: 🔥 Mile + Weight adv + Fastest (18.8% SR, +89% lift)\n';
                 }
                 
                 // 4yo + Mare + Top 20% = 15.4% SR
                 if (horseAge === 4 && horseSex === 'Mare' && isTop20Percent) {
-                    raceDayBonus += 30;
-                    raceDayNote += '+30.0: 4yo Mare + Top 20% sectional (15.4% SR, +55.7% lift)\n';
+                    raceDayBonus += 12;
+                    raceDayNote += '+12.0: 4yo Mare + Top 20% sectional (15.4% SR, +55.7% lift)\n';
                 }
             }
             
@@ -2571,8 +2572,8 @@ Object.keys(horseData).forEach(hn => {
             horseScores[horseName].score += raceDayBonus;
             if (raceDayNote) {
                 if (!horseScores[horseName].note.includes('--- RACE-DAY SECTIONAL BONUSES ---')) {
-    horseScores[horseName].note += '\n--- RACE-DAY SECTIONAL BONUSES ---\n' + raceDayNote;
-}
+                    horseScores[horseName].note += '\n--- RACE-DAY SECTIONAL BONUSES ---\n' + raceDayNote;
+                }
             }
         });
 
