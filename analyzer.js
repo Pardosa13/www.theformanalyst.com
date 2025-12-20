@@ -2570,7 +2570,9 @@ Object.keys(horseData).forEach(hn => {
             // Add race-day bonus to score
             horseScores[horseName].score += raceDayBonus;
             if (raceDayNote) {
-                horseScores[horseName].note += '\n--- RACE-DAY SECTIONAL BONUSES ---\n' + raceDayNote;
+                if (!horseScores[horseName].note.includes('--- RACE-DAY SECTIONAL BONUSES ---')) {
+    horseScores[horseName].note += '\n--- RACE-DAY SECTIONAL BONUSES ---\n' + raceDayNote;
+}
             }
         });
 
