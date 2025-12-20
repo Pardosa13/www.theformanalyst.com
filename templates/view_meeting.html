@@ -579,22 +579,180 @@ majorClassDropSlowSectional: {
 mlElitePattern: {
     label: 'ML Elite Pattern (Top combos only)',
     detect: (notes) => {
-        return notes.includes('3yo COLT combo') ||  // ← CHANGED (uppercase)
-               notes.includes('Major class drop + slow sectional combo') ||  // ← CHANGED
-               notes.includes('Elite sire (Trapeze Artist)') ||  // ← CHANGED
-               notes.includes('Elite sire (Zoustar)');  // ← CHANGED
+        return notes.includes('3yo COLT combo') ||
+               notes.includes('Major class drop + slow sectional combo') ||
+               notes.includes('Elite sire (Trapeze Artist)') ||
+               notes.includes('Elite sire (Zoustar)');
     }
+},
+
+// ====== NEW: RACE-DAY SECTIONAL BONUSES ======
+fastestInRace: {
+    label: 'Fastest Sectional in Race (NEW: +30pts)',
+    detect: (notes) => notes.includes('Fastest sectional in race')
+},
+sprintFastest: {
+    label: 'Sprint + Fastest (NEW: +40pts, 13.7% SR)',
+    detect: (notes) => notes.includes('Sprint + Fastest sectional')
+},
+mileFastest: {
+    label: 'Mile + Fastest (NEW: +35pts, 13.3% SR)',
+    detect: (notes) => notes.includes('Mile + Fastest sectional')
+},
+bigWeightAdvFastest: {
+    label: 'Big Weight Adv + Fastest (NEW: +50pts, 20% SR!)',
+    detect: (notes) => notes.includes('Big weight advantage (3kg+) + Fastest')
+},
+weightAdvFastest: {
+    label: 'Weight Adv + Fastest (NEW: +25pts)',
+    detect: (notes) => notes.includes('Weight advantage (1-3kg) + Fastest')
+},
+fourYoTopSectional: {
+    label: '4yo + Top 20% Sectional (NEW: +15pts)',
+    detect: (notes) => notes.includes('4yo + Top 20% sectional')
+},
+mareTopSectional: {
+    label: 'Mare + Top 20% Sectional (NEW: +12pts)',
+    detect: (notes) => notes.includes('Mare + Top 20% sectional')
+},
+softTrackFastest: {
+    label: 'Soft Track + Fastest (NEW: +20pts)',
+    detect: (notes) => notes.includes('Soft track + Fastest')
+},
+megaCombo4yoSoft: {
+    label: '🔥🔥🔥 MEGA: 4yo+Soft+Fast+Weight (NEW: +75pts, 50% SR!)',
+    detect: (notes) => notes.includes('🔥🔥🔥 MEGA COMBO: 4yo + Soft + Fastest + Weight adv')
+},
+megaComboSprintWeight: {
+    label: '🔥🔥 Sprint+Weight+Fastest (NEW: +60pts, 41.7% SR!)',
+    detect: (notes) => notes.includes('🔥🔥 Sprint + Weight adv + Fastest')
+},
+megaComboMileWeight: {
+    label: '🔥 Mile+Weight+Fastest (NEW: +40pts, 18.8% SR)',
+    detect: (notes) => notes.includes('🔥 Mile + Weight adv + Fastest')
+},
+fourYoMareTopSectional: {
+    label: '4yo Mare + Top 20% (NEW: +30pts, 15.4% SR)',
+    detect: (notes) => notes.includes('4yo Mare + Top 20% sectional')
+},
+anyMegaCombo: {
+    label: 'ANY Mega Combo (🔥 patterns)',
+    detect: (notes) => {
+        return notes.includes('🔥🔥🔥 MEGA COMBO') ||
+               notes.includes('🔥🔥 Sprint + Weight adv + Fastest') ||
+               notes.includes('🔥 Mile + Weight adv + Fastest');
+    }
+},
+hasRaceDayBonuses: {
+    label: 'Has Race-Day Sectional Bonuses (NEW system)',
+    detect: (notes) => notes.includes('--- RACE-DAY SECTIONAL BONUSES ---')
 },
 mlAvoidPattern: {
     label: 'ML Avoid Pattern (Red flags)',
     detect: (notes) => {
-        return notes.includes('Old age (7+') ||  
-               notes.includes('Poor sire (Better Than Ready)') ||  
-               notes.includes('Poor sire (Dundeel)') ||  
-               notes.includes('Poor career win rate (<10%)');  
+        return notes.includes('Old age (7+') ||
+               notes.includes('Poor sire (Better Than Ready)') ||
+               notes.includes('Poor sire (Dundeel)') ||
+               notes.includes('Poor career win rate (<10%)');
     }
-}  // ← No comma after the last filter
-};  // ← ADD THIS LINE - closes the FILTER_CRITERIA object
+}
+};
+
+let activeFilters = [];
+
+function parseHorseCriteria(notes) {
+    if (!notes || typeof notes !== 'string') return {};
+    const criteria = {};
+    Object.keys(FILTER_CRITERIA).forEach(key => {
+        criteria[key] = FILTER_CRITERIA[key].detect(notes);
+    });
+    return criteria;
+}
+
+function createFilterBar() {
+    const filterBar = document.createElement('div');
+    filterBar.className = 'filter-bar-container';
+    filterBar.id = 'filter-bar';
+
+    const headerDiv = document.createElement('div');
+    headerDiv.className = 'filter-bar-header';
+
+    const title = document.createElement('div');
+    title.className = 'filter-bar-title';
+    title.innerHTML = '🔍 Add Filter:';
+
+    const dropdown = document.createElement('select');
+    dropdown.className = 'filter-dropdown';
+    dropdown.id = 'filter-dropdown';
+
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'Select a filter...';
+    dropdown.appendChild(defaultOption);
+
+    Object.keys(FILTER_CRITERIA).forEach(key => {
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = FILTER_CRITERIA[key].label;
+        dropdown.appendChild(option);
+    });
+
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'clear-filters-btn';
+    clearBtn.textContent = 'Clear All Filters';
+    clearBtn.onclick = clearAllFilters;
+
+    headerDiv.appendChild(title);
+    headerDiv.appendChild(dropdown);
+    headerDiv.appendChild(clearBtn);
+    filterBar.appendChild(headerDiv);
+
+    const activeFiltersDiv = document.createElement('div');
+    activeFiltersDiv.className = 'active-filters-container';
+    activeFiltersDiv.id = 'active-filters-container';
+    filterBar.appendChild(activeFiltersDiv);
+
+    dropdown.addEventListener('change', function() {
+        if (this.value) {
+            addFilter(this.value);
+            this.value = '';
+        }
+    });
+
+    return filterBar;
+}
+
+function updateActiveFiltersDisplay() {
+    const container = document.getElementById('active-filters-container');
+    if (!container) return;
+    container.innerHTML = '';
+    if (activeFilters.length === 0) return;
+
+    const label = document.createElement('span');
+    label.className = 'active-filters-label';
+    label.textContent = 'Active Filters:';
+    container.appendChild(label);
+
+    activeFilters.forEach(filterKey => {
+        const tag = document.createElement('div');
+        tag.className = 'filter-tag';
+        const tagText = document.createElement('span');
+        tagText.textContent = FILTER_CRITERIA[filterKey].label;
+        const removeBtn = document.createElement('span');
+        removeBtn.className = 'filter-tag-remove';
+        removeBtn.textContent = '×';
+        removeBtn.onclick = () => removeFilter(filterKey);
+        tag.appendChild(tagText);
+        tag.appendChild(removeBtn);
+        container.appendChild(tag);
+    });
+
+    const matchCounter = document.createElement('span');
+    matchCounter.className = 'filter-match-counter';
+    matchCounter.id = 'filter-match-counter';
+    container.appendChild(matchCounter);
+    setTimeout(updateMatchCounter, 100);
+}
 
 let activeFilters = [];
 
