@@ -2322,16 +2322,16 @@ function getLowestSectionalsByRace(data) {
             }
         });
 
-        // Z-score and points
+        // Z-score and points (REDUCED 50% - historical scores have weak correlation)
         const avgTimes = weightedAvgData.map(h=>h.averageTime);
         const avgMean = calculateMean(avgTimes);
         const avgStdDev = calculateStdDev(avgTimes, avgMean);
-        weightedAvgData.forEach(h => { h.zScore = calculateZScore(h.averageTime, avgMean, avgStdDev); h.points = h.zScore * -3.6; });
+        weightedAvgData.forEach(h => { h.zScore = calculateZScore(h.averageTime, avgMean, avgStdDev); h.points = h.zScore * -1.8; });  // WAS -3.6
 
         const bestTimes = bestRecentData.map(h=>h.bestTime);
         const bestMean = calculateMean(bestTimes);
         const bestStdDev = calculateStdDev(bestTimes, bestMean);
-        bestRecentData.forEach(h => { h.zScore = calculateZScore(h.bestTime, bestMean, bestStdDev); h.points = h.zScore * -15; });
+        bestRecentData.forEach(h => { h.zScore = calculateZScore(h.bestTime, bestMean, bestStdDev); h.points = h.zScore * -7.5; });  // WAS -15
 
         consistencyData.forEach(h => { h.points = Math.max(0, 10 - (h.stdDev * 8)); });
 
@@ -2366,13 +2366,14 @@ function getLowestSectionalsByRace(data) {
 
         consistencyData.forEach(h => {
             const points = Math.round(h.points*10)/10;
-            horseScores[h.horseName].score += points;
-            horseScores[h.horseName].details.consistency = points;
+            const reducedPoints = points * 0.5;  // 50% reduction like other historical scores
+            horseScores[h.horseName].score += reducedPoints;
+            horseScores[h.horseName].details.consistency = reducedPoints;
             let consistencyRating = 'excellent';
             if (h.stdDev > 0.8) consistencyRating = 'poor';
             else if (h.stdDev > 0.5) consistencyRating = 'fair';
             else if (h.stdDev > 0.3) consistencyRating = 'good';
-            horseScores[h.horseName].note += `+${points.toFixed(1)}: consistency - ${consistencyRating} (SD=${h.stdDev.toFixed(2)}s)\n`;
+            horseScores[h.horseName].note += `+${reducedPoints.toFixed(1)}: consistency - ${consistencyRating} (SD=${h.stdDev.toFixed(2)}s) [50% weight]\n`;
         });
 
         // Data sufficiency penalties
@@ -2401,6 +2402,176 @@ Object.keys(horseData).forEach(hn => {
         horseScores[hn].note += penaltyNote;
     }
 });
+
+        });
+
+        // ============================================
+        // NEW: RACE-DAY SECTIONAL BONUSES
+        // ============================================
+        
+        // Extract today's actual sectional times for ranking
+        const todaySectionals = [];
+        parsedData.forEach(entry => {
+            const horseName = entry['horse name'];
+            const time = entry.time;
+            if (time > 0 && horseScores[horseName]) {
+                todaySectionals.push({
+                    name: horseName,
+                    time: time,
+                    rawEntry: entry
+                });
+            }
+        });
+
+        // Sort by time (fastest first) and assign ranks
+        todaySectionals.sort((a, b) => a.time - b.time);
+        
+        todaySectionals.forEach((horse, index) => {
+            const rank = index + 1;
+            const horseName = horse.name;
+            const entry = horse.rawEntry;
+            
+            // Store rank for later use
+            horseScores[horseName].raceDayRank = rank;
+            horseScores[horseName].raceDayTime = horse.time;
+            
+            let raceDayBonus = 0;
+            let raceDayNote = '';
+            
+            // BASE RANK BONUS
+            if (rank === 1) {
+                raceDayBonus += 30;
+                raceDayNote += '+30.0: Fastest sectional in race (11.6% SR, +17.6% lift)\n';
+            }
+            // DISTANCE CATEGORY BONUSES (only for fastest)
+            if (rank === 1) {
+                if (todaysRaceDistance <= 1200) {
+                    raceDayBonus += 40;
+                    raceDayNote += '+40.0: Sprint + Fastest sectional (13.7% SR, +39% lift)\n';
+                } else if (todaysRaceDistance > 1400 && todaysRaceDistance <= 1600) {
+                    raceDayBonus += 35;
+                    raceDayNote += '+35.0: Mile + Fastest sectional (13.3% SR, +34% lift)\n';
+                } else if (todaysRaceDistance > 2000) {
+                    raceDayBonus -= 15;
+                    raceDayNote += '-15.0: Long distance (2000m+) negates sectional advantage\n';
+                }
+            }
+            
+            // ============================================
+            // WEIGHT ADVANTAGE BONUSES (fastest only)
+            // ============================================
+            if (rank === 1) {
+                // Need to calculate weight vs average for this race
+                const raceWeights = parsedData
+                    .map(e => parseFloat(e['horse weight']))
+                    .filter(w => !isNaN(w) && w >= 49 && w <= 65);
+                
+                if (raceWeights.length > 0) {
+                    const avgWeight = raceWeights.reduce((sum, w) => sum + w, 0) / raceWeights.length;
+                    const horseWeight = parseFloat(entry['horse weight']);
+                    
+                    if (!isNaN(horseWeight)) {
+                        const weightAdvantage = avgWeight - horseWeight;
+                        
+                        if (weightAdvantage >= 3) {
+                            raceDayBonus += 50;
+                            raceDayNote += '+50.0: Big weight advantage (3kg+) + Fastest (20% SR, +102% lift!)\n';
+                        } else if (weightAdvantage >= 1) {
+                            raceDayBonus += 25;
+                            raceDayNote += '+25.0: Weight advantage (1-3kg) + Fastest\n';
+                        }
+                    }
+                }
+            }
+            
+            // ============================================
+            // AGE BONUSES (top 20% sectional = rank 1-5 in typical race)
+            // ============================================
+            const isTop20Percent = rank <= Math.max(1, Math.ceil(todaySectionals.length * 0.2));
+            
+            if (isTop20Percent) {
+                const horseAge = parseInt(entry['horse age']);
+                
+                if (horseAge === 4) {
+                    raceDayBonus += 15;
+                    raceDayNote += '+15.0: 4yo + Top 20% sectional (13.5% SR, +36.7% lift)\n';
+                }
+            }
+            
+            // ============================================
+            // SEX BONUSES (top 20% sectional)
+            // ============================================
+            if (isTop20Percent) {
+                const horseSex = String(entry['horse sex'] || '').trim();
+                
+                if (horseSex === 'Mare') {
+                    raceDayBonus += 12;
+                    raceDayNote += '+12.0: Mare + Top 20% sectional (11.8% SR, +19.8% lift)\n';
+                }
+            }
+            
+            // ============================================
+            // TRACK CONDITION BONUSES (fastest only)
+            // ============================================
+            if (rank === 1) {
+                const trackCondition = String(entry['track_condition'] || entry['track condition'] || '').toLowerCase();
+                
+                if (trackCondition === 'soft') {
+                    raceDayBonus += 20;
+                    raceDayNote += '+20.0: Soft track + Fastest (12.4% SR, +25.1% lift)\n';
+                }
+            }
+            
+            // ============================================
+            // MEGA COMBINATION BONUSES
+            // ============================================
+            if (rank === 1) {
+                const horseAge = parseInt(entry['horse age']);
+                const horseSex = String(entry['horse sex'] || '').trim();
+                const trackCondition = String(entry['track_condition'] || entry['track condition'] || '').toLowerCase();
+                
+                // Calculate weight advantage again for combos
+                const raceWeights = parsedData
+                    .map(e => parseFloat(e['horse weight']))
+                    .filter(w => !isNaN(w) && w >= 49 && w <= 65);
+                
+                let weightAdvantage = 0;
+                if (raceWeights.length > 0) {
+                    const avgWeight = raceWeights.reduce((sum, w) => sum + w, 0) / raceWeights.length;
+                    const horseWeight = parseFloat(entry['horse weight']);
+                    if (!isNaN(horseWeight)) {
+                        weightAdvantage = avgWeight - horseWeight;
+                    }
+                }
+                
+                // 4yo + Soft + Fastest + Weight advantage = 50% SR!
+                if (horseAge === 4 && trackCondition === 'soft' && weightAdvantage >= 1) {
+                    raceDayBonus += 75;
+                    raceDayNote += '+75.0: 🔥🔥🔥 MEGA COMBO: 4yo + Soft + Fastest + Weight adv (50% SR, +405% lift!)\n';
+                }
+                
+                // Sprint + Weight advantage + Fastest = 41.7% SR!
+                else if (todaysRaceDistance <= 1200 && weightAdvantage >= 1) {
+                    raceDayBonus += 60;
+                    raceDayNote += '+60.0: 🔥🔥 Sprint + Weight adv + Fastest (41.7% SR, +321% lift!)\n';
+                }
+                
+                // Mile + Weight advantage + Fastest = 18.8% SR
+                else if (todaysRaceDistance > 1400 && todaysRaceDistance <= 1600 && weightAdvantage >= 1) {
+                    raceDayBonus += 40;
+                    raceDayNote += '+40.0: 🔥 Mile + Weight adv + Fastest (18.8% SR, +89% lift)\n';
+                }
+                
+                // 4yo + Mare + Top 20% = 15.4% SR
+                if (horseAge === 4 && horseSex === 'Mare' && isTop20Percent) {
+                    raceDayBonus += 30;
+                    raceDayNote += '+30.0: 4yo Mare + Top 20% sectional (15.4% SR, +55.7% lift)\n';
+                }
+            }
+            
+            // Add race-day bonus to score
+            horseScores[horseName].score += raceDayBonus;
+        });
 
         // Convert to results with compatibility fields
         Object.keys(horseScores).forEach(hn => {
