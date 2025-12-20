@@ -1836,7 +1836,14 @@ def export_ml_data():
         'last_start_margin', 'days_since_run', 'form_price',
         'first_second_up', 'sectional_weighted_avg', 'sectional_best_recent',
         'sectional_consistency', 'weight_vs_avg', 'weight_change',
-        'combo_bonus', 'specialist_bonus'
+        'combo_bonus', 'specialist_bonus',
+        # NEW: Race-day sectional bonuses
+        'raceday_fastest_in_race', 'raceday_sprint_fastest', 'raceday_mile_fastest',
+        'raceday_long_penalty', 'raceday_big_weight_fastest', 'raceday_weight_fastest',
+        'raceday_4yo_top20', 'raceday_mare_top20', 'raceday_soft_fastest',
+        'mega_4yo_soft_fast_weight', 'mega_sprint_weight_fastest', 
+        'mega_mile_weight_fastest', 'mega_4yo_mare_top20',
+        'raceday_bonus_total'
     ]
     
     # Write header: basic info + predictions + results + parsed components + ALL raw CSV fields
@@ -1950,6 +1957,35 @@ def export_ml_data():
                 components.get('Specialist - Track+Distance', 0),
                 components.get('Specialist - Condition', 0),
                 components.get('Specialist - Perfect Podium', 0)
+            ]),
+            # NEW: Race-day sectional bonuses
+            'raceday_fastest_in_race': components.get('Race-Day - Fastest in Race', 0),
+            'raceday_sprint_fastest': components.get('Race-Day - Sprint + Fastest', 0),
+            'raceday_mile_fastest': components.get('Race-Day - Mile + Fastest', 0),
+            'raceday_long_penalty': components.get('Race-Day - Long Distance Penalty', 0),
+            'raceday_big_weight_fastest': components.get('Race-Day - Big Weight Adv + Fastest', 0),
+            'raceday_weight_fastest': components.get('Race-Day - Weight Adv + Fastest', 0),
+            'raceday_4yo_top20': components.get('Race-Day - 4yo + Top 20%', 0),
+            'raceday_mare_top20': components.get('Race-Day - Mare + Top 20%', 0),
+            'raceday_soft_fastest': components.get('Race-Day - Soft + Fastest', 0),
+            'mega_4yo_soft_fast_weight': components.get('MEGA - 4yo+Soft+Fast+Weight', 0),
+            'mega_sprint_weight_fastest': components.get('MEGA - Sprint+Weight+Fastest', 0),
+            'mega_mile_weight_fastest': components.get('MEGA - Mile+Weight+Fastest', 0),
+            'mega_4yo_mare_top20': components.get('MEGA - 4yo Mare + Top 20%', 0),
+            'raceday_bonus_total': sum([
+                components.get('Race-Day - Fastest in Race', 0),
+                components.get('Race-Day - Sprint + Fastest', 0),
+                components.get('Race-Day - Mile + Fastest', 0),
+                components.get('Race-Day - Long Distance Penalty', 0),
+                components.get('Race-Day - Big Weight Adv + Fastest', 0),
+                components.get('Race-Day - Weight Adv + Fastest', 0),
+                components.get('Race-Day - 4yo + Top 20%', 0),
+                components.get('Race-Day - Mare + Top 20%', 0),
+                components.get('Race-Day - Soft + Fastest', 0),
+                components.get('MEGA - 4yo+Soft+Fast+Weight', 0),
+                components.get('MEGA - Sprint+Weight+Fastest', 0),
+                components.get('MEGA - Mile+Weight+Fastest', 0),
+                components.get('MEGA - 4yo Mare + Top 20%', 0)
             ])
         }
         
