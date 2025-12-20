@@ -754,8 +754,6 @@ function updateActiveFiltersDisplay() {
     setTimeout(updateMatchCounter, 100);
 }
 
-let activeFilters = [];
-
 function parseHorseCriteria(notes) {
     if (!notes || typeof notes !== 'string') return {};
     const criteria = {};
