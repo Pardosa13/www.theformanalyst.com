@@ -3,6 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Apple Touch Icons for iOS home screen -->
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon-180x180.png') }}">
+    <link rel="apple-touch-icon" sizes="152x152" href="{{ url_for('static', filename='apple-touch-icon-152x152.png') }}">
+    <link rel="apple-touch-icon" sizes="120x120" href="{{ url_for('static', filename='apple-touch-icon-120x120.png') }}">
+    <meta name="apple-mobile-web-app-title" content="Form Analyst">
     <title>{% block title %}The Form Analyst{% endblock %}</title>
     
     <!-- Bootstrap 5 CSS -->
