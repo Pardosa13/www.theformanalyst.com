@@ -555,6 +555,38 @@ if (data.tracks && Object.keys(data.tracks).length > 0) {
     }
     html += '</tbody></table></div></div>';
 }
+    // Distances (ROI Breakdown)
+if (data.distances && Object.keys(data.distances).length > 0) {
+    html += '<div class="mb-4"><h5>📏 Distance Performance (Top Picks Only)</h5>';
+    html += '<p class="text-muted small">Performance of your #1 rated horses at different distance ranges.</p>';
+    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+    html += '<th>Distance</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
+    
+    // Define order for distances
+    const distanceOrder = ['Sprint (≤1200m)', 'Short (1300-1500m)', 'Mile (1550-1700m)', 'Middle (1800-2200m)', 'Staying (2400m+)'];
+    
+    for (const distRange of distanceOrder) {
+        if (data.distances[distRange] && data.distances[distRange].runs > 0) {
+            const stats = data.distances[distRange];
+            let strikeClass = '';
+            if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
+            else if (stats.strike_rate >= 12) strikeClass = 'text-success';
+            else if (stats.strike_rate < 8) strikeClass = 'text-danger';
+            
+            html += `<tr>
+                <td><strong>${distRange}</strong></td>
+                <td class="text-center">${stats.runs}</td>
+                <td class="text-center">${stats.wins}</td>
+                <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
+                <td class="text-center">${stats.places}</td>
+                <td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
+                <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
+            </tr>`;
+        }
+    }
+    html += '</tbody></table></div></div>';
+}
  html += '</div>';
     container.innerHTML = html;
 }
