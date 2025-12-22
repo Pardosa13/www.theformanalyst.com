@@ -689,6 +689,34 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
     # Filter tracks with 2+ races
     tracks = {k: v for k, v in tracks.items() if v['runs'] >= 2}
     tracks = dict(sorted(tracks.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
+    # Track conditions
+    track_conditions = {}
+    
+    for entry in all_results_data:
+        race = entry['race']
+        result = entry['result']
+        
+        if not result:
+            continue
+        
+        won = result.finish_position == 1
+        placed = result.finish_position in [1, 2, 3]
+        sp = result.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        
+        condition = race.track_condition or 'Unknown'
+        
+        if condition:
+            if condition not in track_conditions:
+                track_conditions[condition] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
+            track_conditions[condition]['runs'] += 1
+            if won:
+                track_conditions[condition]['wins'] += 1
+            if placed:
+                track_conditions[condition]['places'] += 1
+            track_conditions[condition]['profit'] += profit
+    
+    track_conditions = calc_rates(track_conditions, stake)
     
     return {
         'jockeys_reliable': jockeys_reliable,
@@ -697,7 +725,8 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
         'trainers_limited': trainers_limited,
         'barriers': barriers,
         'distances': distances,
-        'tracks': tracks
+        'tracks': tracks,
+        'track_conditions': track_conditions
     }
     
 def analyze_race_classes(races_data, stake=10.0):
@@ -1628,6 +1657,7 @@ def api_external_factors():
         'barriers': external_factors['barriers'],
         'distances': external_factors['distances'],
         'tracks': external_factors['tracks'],
+        'track_conditions': external_factors['track_conditions'],
         'class_performance': class_performance_filtered
     })
 
