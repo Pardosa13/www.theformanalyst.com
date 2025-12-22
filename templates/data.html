@@ -587,6 +587,36 @@ if (data.distances && Object.keys(data.distances).length > 0) {
     }
     html += '</tbody></table></div></div>';
 }
+    
+// Track Conditions (ROI Breakdown)
+if (data.track_conditions && Object.keys(data.track_conditions).length > 0) {
+    html += '<div class="mb-4"><h5>🌦️ Track Condition Performance (All Horses)</h5>';
+    html += '<p class="text-muted small">Performance across different track conditions.</p>';
+    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+    html += '<th>Condition</th><th class="text-center">Runs</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
+    
+    // Sort by ROI descending
+    const conditionsSorted = Object.entries(data.track_conditions).sort((a, b) => b[1].roi - a[1].roi);
+    
+    for (const [condition, stats] of conditionsSorted) {
+        let strikeClass = '';
+        if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
+        else if (stats.strike_rate >= 12) strikeClass = 'text-success';
+        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
+        
+        html += `<tr>
+            <td><strong>${condition}</strong></td>
+            <td class="text-center">${stats.runs}</td>
+            <td class="text-center">${stats.wins}</td>
+            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
+            <td class="text-center">${stats.places}</td>
+            <td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
+            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div></div>';
+}
  html += '</div>';
     container.innerHTML = html;
 }
