@@ -513,10 +513,26 @@ def aggregate_component_stats(all_results_data, stake=10.0):
         stats['roi'] = (stats['total_profit'] / (stats['appearances'] * stake) * 100) if stats['appearances'] > 0 else 0
     
     return component_stats
+"""
+FIXED analyze_external_factors function for app.py
+
+This replaces the existing function starting around line 630.
+
+KEY FIX: Barriers, Distances, and Track Conditions now count RACES (top picks only)
+instead of counting every horse, matching how Tracks work.
+
+To apply this fix:
+1. Find the analyze_external_factors function in your app.py (around line 630)
+2. Replace the entire function with this code below
+"""
+
 def analyze_external_factors(all_results_data, races_data, stake=10.0):
     """
     Analyze external factors: jockeys, trainers, barriers, distances, tracks
     Returns dict with stats for each factor
+    
+    FIXED: Barriers, Distances, Track Conditions now count RACES (top picks only)
+    just like Tracks do, instead of counting every horse.
     """
     
     jockeys = {}
@@ -531,12 +547,12 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
                  'Middle (1800-2200m)': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0},
                  'Staying (2400m+)': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}}
     tracks = {}
+    track_conditions = {}
     
+    # Process jockeys and trainers (all horses that we picked)
     for entry in all_results_data:
         horse = entry['horse']
         result = entry['result']
-        meeting = entry['meeting']
-        race = entry['race']
         
         if not result:
             continue
@@ -572,10 +588,30 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
             if placed:
                 trainers[trainer]['places'] += 1
             trainers[trainer]['profit'] += profit
+    
+    # Process barriers, distances, track conditions, and tracks (TOP PICKS ONLY - by race)
+    for race_key, horses in races_data.items():
+        if not horses:
+            continue
         
-        # Barrier
+        horses_sorted = sorted(horses, key=lambda x: x['prediction'].score, reverse=True)
+        top_pick = horses_sorted[0]
+        
+        result = top_pick['result']
+        horse = top_pick['horse']
+        race = top_pick['race']
+        meeting = top_pick['meeting']
+        
+        won = result.finish_position == 1
+        placed = result.finish_position in [1, 2, 3]
+        sp = result.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        
+        csv_data = horse.csv_data or {}
+        
+        # Barrier (top pick only)
         try:
-            barrier = int(csv_data.get('horse barrier', 0))
+            barrier = int(csv_data.get('barrier', 0))
             if barrier >= 1:
                 if barrier <= 3:
                     bucket = '1-3'
@@ -594,7 +630,7 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
         except (ValueError, TypeError):
             pass
         
-        # Distance
+        # Distance (top pick only)
         try:
             dist = int(csv_data.get('distance', 0))
             if dist > 0:
@@ -617,8 +653,34 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
         except (ValueError, TypeError):
             pass
         
-        # Track - skip here, handled separately below using top picks only
-        pass
+        # Track Condition (top pick only)
+        condition = race.track_condition or 'Unknown'
+        if condition:
+            if condition not in track_conditions:
+                track_conditions[condition] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
+            track_conditions[condition]['runs'] += 1
+            if won:
+                track_conditions[condition]['wins'] += 1
+            if placed:
+                track_conditions[condition]['places'] += 1
+            track_conditions[condition]['profit'] += profit
+        
+        # Track (top pick only)
+        meeting_name = meeting.meeting_name or ''
+        if '_' in meeting_name:
+            track = meeting_name.split('_')[1]
+        else:
+            track = meeting_name
+        
+        if track:
+            if track not in tracks:
+                tracks[track] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
+            tracks[track]['runs'] += 1
+            if won:
+                tracks[track]['wins'] += 1
+            if placed:
+                tracks[track]['places'] += 1
+            tracks[track]['profit'] += profit
     
     # Calculate rates for all categories
     def calc_rates(data_dict, stake):
@@ -637,38 +699,8 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
     trainers = calc_rates(trainers, stake)
     barriers = calc_rates(barriers, stake)
     distances = calc_rates(distances, stake)
-    # Track analysis - top picks only
-    for race_key, horses in races_data.items():
-        if not horses:
-            continue
-        
-        horses_sorted = sorted(horses, key=lambda x: x['prediction'].score, reverse=True)
-        top_pick = horses_sorted[0]
-        
-        result = top_pick['result']
-        meeting = top_pick['meeting']
-        
-        won = result.finish_position == 1
-        placed = result.finish_position in [1, 2, 3]
-        sp = result.sp or 0
-        profit = (sp * stake - stake) if won else -stake
-        
-        meeting_name = meeting.meeting_name or ''
-        if '_' in meeting_name:
-            track = meeting_name.split('_')[1]
-        else:
-            track = meeting_name
-        
-        if track:
-            if track not in tracks:
-                tracks[track] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
-            tracks[track]['runs'] += 1
-            if won:
-                tracks[track]['wins'] += 1
-            if placed:
-                tracks[track]['places'] += 1
-            tracks[track]['profit'] += profit
     tracks = calc_rates(tracks, stake)
+    track_conditions = calc_rates(track_conditions, stake)
     
     # Split jockeys into reliable (40+ runs) and limited (5-39 runs)
     jockeys_reliable = {k: v for k, v in jockeys.items() if v['runs'] >= 40}
@@ -689,34 +721,6 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
     # Filter tracks with 2+ races
     tracks = {k: v for k, v in tracks.items() if v['runs'] >= 2}
     tracks = dict(sorted(tracks.items(), key=lambda x: x[1]['strike_rate'], reverse=True))
-    # Track conditions
-    track_conditions = {}
-    
-    for entry in all_results_data:
-        race = entry['race']
-        result = entry['result']
-        
-        if not result:
-            continue
-        
-        won = result.finish_position == 1
-        placed = result.finish_position in [1, 2, 3]
-        sp = result.sp or 0
-        profit = (sp * stake - stake) if won else -stake
-        
-        condition = race.track_condition or 'Unknown'
-        
-        if condition:
-            if condition not in track_conditions:
-                track_conditions[condition] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
-            track_conditions[condition]['runs'] += 1
-            if won:
-                track_conditions[condition]['wins'] += 1
-            if placed:
-                track_conditions[condition]['places'] += 1
-            track_conditions[condition]['profit'] += profit
-    
-    track_conditions = calc_rates(track_conditions, stake)
     
     return {
         'jockeys_reliable': jockeys_reliable,
