@@ -611,7 +611,7 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
         
         # Barrier (top pick only)
         try:
-            barrier = int(csv_data.get('barrier', 0))
+            barrier = int(csv_data.get('horse barrier', 0))
             if barrier >= 1:
                 if barrier <= 3:
                     bucket = '1-3'
