@@ -664,31 +664,31 @@ function renderPriceAnalysis(data) {
     html += '<p class="text-muted mb-3">Comparing your predicted odds vs actual SP. Are you finding value?</p>';
     
     // Summary Cards
-    html += '<div class="row mb-4">';
-    html += `<div class="col-md-4"><div class="card border-success h-100"><div class="card-body text-center">
-        <h6 class="text-success">📈 Overlays (Value)</h6>
-        <p class="small text-muted mb-2">SP was 10%+ higher than your price</p>
-        <h3>${data.overlays.count}</h3>
-        <p class="mb-1">Strike: <strong class="${data.overlays.strike_rate >= 20 ? 'text-success' : ''}">${data.overlays.strike_rate.toFixed(1)}%</strong></p>
-        <p class="mb-0">ROI: <strong class="${data.overlays.roi >= 0 ? 'text-success' : 'text-danger'}">${data.overlays.roi.toFixed(1)}%</strong></p>
-    </div></div></div>`;
-    
-    html += `<div class="col-md-4"><div class="card border-warning h-100"><div class="card-body text-center">
-        <h6 class="text-warning">⚖️ Accurate</h6>
-        <p class="small text-muted mb-2">SP within 10% of your price</p>
-        <h3>${data.accurate.count}</h3>
-        <p class="mb-1">Strike: <strong>${data.accurate.strike_rate.toFixed(1)}%</strong></p>
-        <p class="mb-0">ROI: <strong class="${data.accurate.roi >= 0 ? 'text-success' : 'text-danger'}">${data.accurate.roi.toFixed(1)}%</strong></p>
-    </div></div></div>`;
-    
-    html += `<div class="col-md-4"><div class="card border-danger h-100"><div class="card-body text-center">
-        <h6 class="text-danger">📉 Underlays (No Value)</h6>
-        <p class="small text-muted mb-2">SP was 10%+ lower than your price</p>
-        <h3>${data.underlays.count}</h3>
-        <p class="mb-1">Strike: <strong>${data.underlays.strike_rate.toFixed(1)}%</strong></p>
-        <p class="mb-0">ROI: <strong class="${data.underlays.roi >= 0 ? 'text-success' : 'text-danger'}">${data.underlays.roi.toFixed(1)}%</strong></p>
-    </div></div></div>`;
-    html += '</div>';
+html += '<div class="row mb-4">';
+html += `<div class="col-md-4"><div class="card border-success h-100"><div class="card-body text-center">
+    <h6 class="text-success">📈 Overlays (Value)</h6>
+    <p class="small text-muted mb-2">SP was 10%+ higher than your price</p>
+    <h3>${data.overlays.wins}/${data.overlays.count}</h3>
+    <p class="mb-1">Strike: <strong class="${data.overlays.strike_rate >= 20 ? 'text-success' : ''}">${data.overlays.strike_rate.toFixed(1)}%</strong></p>
+    <p class="mb-0">ROI: <strong class="${data.overlays.roi >= 0 ? 'text-success' : 'text-danger'}">${data.overlays.roi.toFixed(1)}%</strong></p>
+</div></div></div>`;
+
+html += `<div class="col-md-4"><div class="card border-warning h-100"><div class="card-body text-center">
+    <h6 class="text-warning">⚖️ Accurate</h6>
+    <p class="small text-muted mb-2">SP within 10% of your price</p>
+    <h3>${data.accurate.wins}/${data.accurate.count}</h3>
+    <p class="mb-1">Strike: <strong>${data.accurate.strike_rate.toFixed(1)}%</strong></p>
+    <p class="mb-0">ROI: <strong class="${data.accurate.roi >= 0 ? 'text-success' : 'text-danger'}">${data.accurate.roi.toFixed(1)}%</strong></p>
+</div></div></div>`;
+
+html += `<div class="col-md-4"><div class="card border-danger h-100"><div class="card-body text-center">
+    <h6 class="text-danger">📉 Underlays (No Value)</h6>
+    <p class="small text-muted mb-2">SP was 10%+ lower than your price</p>
+    <h3>${data.underlays.wins}/${data.underlays.count}</h3>
+    <p class="mb-1">Strike: <strong>${data.underlays.strike_rate.toFixed(1)}%</strong></p>
+    <p class="mb-0">ROI: <strong class="${data.underlays.roi >= 0 ? 'text-success' : 'text-danger'}">${data.underlays.roi.toFixed(1)}%</strong></p>
+</div></div></div>`;
+html += '</div>';
     
     // Average difference
     let alertClass = 'alert-info';
