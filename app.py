@@ -398,6 +398,9 @@ def parse_notes_components(notes):
 
         # 3yo Colt Combo
         (r'\+\s*20\.0\s*:\s*3yo COLT combo', '3yo Colt Combo'),
+        
+        # 4yo Mare Combo
+        (r'\+\s*15\.0\s*:\s*4yo MARE combo', '4yo Mare Combo'),
 
         # Demolished + Class Drop Combo
         (r'\+\s*15\.0\s*:\s*Demolished in elite company', 'Demolished + Major Class Drop'),
@@ -1870,7 +1873,7 @@ def export_ml_data():
         'last_start_margin', 'days_since_run', 'form_price',
         'first_second_up', 'sectional_weighted_avg', 'sectional_best_recent',
         'sectional_consistency', 'weight_vs_avg', 'weight_change',
-        'combo_bonus', 'specialist_bonus',
+        'combo_bonus', 'specialist_bonus','4yo_mare_combo',
         # NEW: Race-day sectional bonuses
         'raceday_fastest_in_race', 'raceday_sprint_fastest', 'raceday_mile_fastest',
         'raceday_long_penalty', 'raceday_big_weight_fastest', 'raceday_weight_fastest',
@@ -1933,6 +1936,7 @@ def export_ml_data():
             'ran_places': components.get('Ran Places', 0),
             'no_wins_last_10': components.get('No Wins Last 10', 0),
             'elite_jockey': components.get('Elite Jockey', 0),
+            '4yo_mare_combo': components.get('4yo Mare Combo', 0),
             'good_jockey': components.get('Good Jockey', 0),
             'negative_jockey': components.get('Negative Jockey', 0),
             'good_trainer': components.get('Good Trainer', 0),
