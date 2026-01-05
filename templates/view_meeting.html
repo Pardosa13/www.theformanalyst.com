@@ -539,6 +539,10 @@ eliteWinRate40Plus: {
     label: 'Elite Win Rate 40%+ (ML: 30.8% SR)',
     detect: (notes) => notes.includes('Elite career win rate (40%+')  // ← CHANGED
 },
+fourYoMareCombo: {
+    label: '4yo Mare Combo (Prime Age)',
+    detect: (notes) => notes.includes('4yo MARE combo')
+},
 strongWinRate30to40: {
     label: 'Strong Win Rate 30-40%',
     detect: (notes) => notes.includes('Strong career win rate (30-40%)')  // ← CHANGED
@@ -548,11 +552,7 @@ poorWinRateUnder10: {
     detect: (notes) => notes.includes('Poor career win rate (<10%)')  // ← CHANGED
 },
 
-// ====== ML FINDINGS: BARRIER & MARGIN ======
-wideBarrier7to9: {
-    label: 'Wide Barrier 7-9 (ML: 19% SR)',
-    detect: (notes) => notes.includes('Sweet spot barrier (7-9')  // ← CHANGED
-},
+// ====== ML FINDINGS: MARGIN ======
 closeLossMl: {
     label: 'Close Loss 0.5-2L (ML: 18.6% SR)',
     detect: (notes) => notes.includes('Close loss last start (0.5-2L')  // ← CHANGED
