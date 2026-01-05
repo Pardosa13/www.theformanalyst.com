@@ -441,6 +441,10 @@ function checkLast10runs(last10) {
     return [addScore, note];
 }
 
+// =============================================================================
+// JOCKEY AND TRAINER FUNCTIONS - UPDATED 2025-01-06
+// =============================================================================
+
 function normalizeJockeyName(jockeyName) {
     // guard against undefined/null
     if (!jockeyName || typeof jockeyName !== 'string') return jockeyName || '';
@@ -457,10 +461,10 @@ function checkJockeys(JockeyName) {
     // Function for checking jockey name against lists
     var addScore = 0;
     var note = '';
-
+    
     // Check for known spelling/name changes
     JockeyName = normalizeJockeyName(JockeyName);
-
+    
     const tenPointJockeys = [
         'Blake Shinn',
         'James McDonald',
@@ -468,8 +472,14 @@ function checkJockeys(JockeyName) {
         'Mark Zahra',
         'Craig Williams',
         'Nash Rawiller',
-        'Tim Clark'
+        'Tim Clark',
+        'Tommy Berry',
+        'Hollie Coffey',
+        'Brenton Avdulla',
+        'Jay Ford',
+        'Rachel King'
     ];
+    
     const fivePointJockeys = [
         'Aaron Bullock',
         'Damian Lane',
@@ -479,24 +489,28 @@ function checkJockeys(JockeyName) {
         'Josh Parr',
         'William Pike',
         'Zac Lloyd',
-        'J Kah'
+        'J Kah',
+        'Hugh Bowman',
+        'Glen Boss'
     ];
+    
     const negativeJockeys = [
         'Kerrin McEvoy'
     ];
-
+    
     if (tenPointJockeys.includes(JockeyName)) {
         addScore += 10;
-        note += '+10.0 : Love the Jockey\n';
+        note += '+10.0: Love the Jockey\n';
     }
     if (fivePointJockeys.includes(JockeyName)) {
         addScore += 5;
-        note += '+ 5.0 : Like the Jockey\n';
+        note += '+5.0: Like the Jockey\n';
     }
     if (negativeJockeys.includes(JockeyName)) {
         addScore -= 5;
-        note += '- 5.0 : Kerrin Useless McEvoy\n';
+        note += '-5.0: Kerrin\n';
     }
+    
     return [addScore, note];
 }
 
@@ -515,27 +529,39 @@ function checkTrainers(trainerName) {
     // Function for checking trainer name against lists
     var addScore = 0;
     var note = '';
-
+    
     // Check for known spelling/name changes
     trainerName = normalizeTrainerName(trainerName);
-
+    
+    const eightPointTrainers = [
+        'Gai Waterhouse & Adrian Bott',
+        'Kris Lees',
+        'James Cummings'
+    ];
+    
     const fivePointTrainers = [
         'Ciaron Maher',
         'Chris Waller',
         'Ben, Will & J.D. Hayes',
         'Annabel & Rob Archibald',
         'Bjorn Baker',
-        'Gai Waterhouse & Adrian Bott',
         'Grahame Begg',
         'Matthew Laurie',
-        'Phillip Stokes'
+        'Phillip Stokes',
+        'Joseph Pride',
+        'John O\'Shea',
+        'Peter Moody'
     ];
-
-    if (fivePointTrainers.includes(trainerName)) {
-        addScore += 5;
-        note += '+ 5.0 : Like the Trainer\n';
+    
+    if (eightPointTrainers.includes(trainerName)) {
+        addScore += 8;
+        note += '+8.0: Elite Trainer\n';
     }
-
+    else if (fivePointTrainers.includes(trainerName)) {
+        addScore += 5;
+        note += '+5.0: Like the Trainer\n';
+    }
+    
     return [addScore, note];
 }
 
