@@ -384,12 +384,12 @@ if (!isNaN(barrier) && barrier >= 7 && barrier <= 9) {
     score += 5;
     notes += '+ 5.0 : Sweet spot barrier (7-9, 19% SR)\n';
 }
-    // NEW: CLOSE LOSS BONUS
+    // CLOSE LOSS BONUS - UPDATED 2025-01-06 (increased from 5 to 7, extended to 2.5L)
 const lastMargin = parseFloat(horseRow['form margin']);
 const lastPosition = parseInt(horseRow['form position']);
-if (!isNaN(lastMargin) && !isNaN(lastPosition) && lastPosition > 1 && lastMargin > 0 && lastMargin <= 2) {
-    score += 5;
-    notes += '+ 5.0 : Close loss last start (0.5-2L, 18.6% SR)\n';
+if (!isNaN(lastMargin) && !isNaN(lastPosition) && lastPosition > 1 && lastMargin > 0 && lastMargin <= 2.5) {
+    score += 7;  // INCREASED from 5
+    notes += '+7.0: Close loss last start (0.5-2.5L) - very competitive\n';
 }
     // NEW: 3YO COLT COMBO
 if (horseSex === 'Colt' && horseAge === 3) {
