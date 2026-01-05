@@ -4,6 +4,7 @@ const jockeyMapping = {
     "A Bullock": "Aaron Bullock",
     "W Pike": "William Pike",
     "N Rawiller": "Nash Rawiller",
+    "J Parr": "Josh Parr",
     "J Part": "Josh Parr",
     "J R Collett": "Jason Collett",
     "M Zahra": "Mark Zahra",
@@ -11,9 +12,14 @@ const jockeyMapping = {
     "C Williams": "Craig Williams",
     "E Brown": "Ethan Brown",
     "D Lane": "Damian Lane",
-    "B Melham": "Ben Melham"
-    // "J Kah": ""  <-- decide whether to map this
-    // Add more mappings as needed
+    "B Melham": "Ben Melham",
+    "T Berry": "Tommy Berry",
+    "H Coffey": "Hollie Coffey",
+    "B Avdulla": "Brenton Avdulla",
+    "J Ford": "Jay Ford",
+    "R King": "Rachel King",
+    "H Bowman": "Hugh Bowman",
+    "G Boss": "Glen Boss"
 };
 
 // Mapping of equivalent trainer names
@@ -24,7 +30,12 @@ const trainerMapping = {
     'G Waterhouse & A Bott': 'Gai Waterhouse & Adrian Bott',
     'G M Begg': 'Grahame Begg',
     'P Stokes': 'Phillip Stokes',
-    'M M Laurie': 'Matthew Laurie'
+    'M M Laurie': 'Matthew Laurie',
+    'K Lees': 'Kris Lees',
+    'J Cummings': 'James Cummings',
+    'J Pride': 'Joseph Pride',
+    'J O\'Shea': 'John O\'Shea',
+    'P Moody': 'Peter Moody'
 };
 
 function convertCSV(data) {
