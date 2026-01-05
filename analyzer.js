@@ -390,6 +390,14 @@ if (horseSex === 'Colt' && horseAge === 3) {
     score += 20;
     notes += '+20.0 : 3yo COLT combo (44.4% SR, +33% ROI)\n';
 }
+    // 4YO MARE COMBO - ADDED 2025-01-06
+const horseSex = String(horseRow['horse sex'] || '').trim();
+const isMare = (horseSex === 'Mare');
+
+if (horseAge === 4 && isMare) {
+    score += 15;
+    notes += '+15.0: 4yo MARE combo (prime age)\n';
+}
     // NEW: DEMOLISHED + MAJOR CLASS DROP COMBO
 // todayClassScore, lastClassScore, and classChange are already declared above
 if (lastMargin >= 10 && classChange < -30) {
