@@ -330,26 +330,32 @@ if (!isNaN(horseAge)) {
         notes += '-10.0 : Old age (7+, 0% SR in data)\n';
     }
 }
-    // NEW: SIRE BONUSES/PENALTIES
+    // SIRE BONUSES/PENALTIES - UPDATED 2025-01-06
 const sire = String(horseRow['horse sire'] || '').trim();
 const eliteSires = {
     'Trapeze Artist': 10,
     'Zoustar': 8,
+    'I Am Invincible': 8,
     'Pierata': 5,
-    'All Too Hard': 5
+    'All Too Hard': 5,
+    'Snitzel': 5,
+    'Written Tycoon': 5,
+    'Not A Single Doubt': 5
 };
 const poorSires = {
     'Better Than Ready': -5,
-    'Dundeel': -5
+    'Dundeel': -5,
+    'Bon Hoffa': -5,
+    'Counterattack': -5,
+    'Palentino': -5
 };
-
 if (eliteSires[sire]) {
     score += eliteSires[sire];
-    notes += `+${eliteSires[sire]}.0 : Elite sire (${sire})\n`;
+    notes += `+${eliteSires[sire]}.0: Elite sire (${sire})\n`;
 }
 if (poorSires[sire]) {
     score += poorSires[sire];
-    notes += `${poorSires[sire]}.0 : Poor sire (${sire})\n`;
+    notes += `${poorSires[sire]}.0: Poor sire (${sire})\n`;
 }
     // NEW: CAREER WIN RATE SCORING
 const careerRecord = horseRow['horse record'];
