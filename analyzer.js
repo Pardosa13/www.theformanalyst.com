@@ -19,7 +19,6 @@ const jockeyMapping = {
     "J Ford": "Jay Ford",
     "R King": "Rachel King",
     "H Bowman": "Hugh Bowman",
-    "G Boss": "Glen Boss"
 };
 
 // Mapping of equivalent trainer names
@@ -510,7 +509,6 @@ function checkJockeys(JockeyName) {
         'Zac Lloyd',
         'J Kah',
         'Hugh Bowman',
-        'Glen Boss'
     ];
     
     const negativeJockeys = [
