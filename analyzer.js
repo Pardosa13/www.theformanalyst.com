@@ -378,12 +378,6 @@ if (careerRecord && typeof careerRecord === 'string') {
         }
     }
 }
-    // NEW: BARRIER 7-9 BONUS
-const barrier = parseInt(horseRow['horse barrier']);
-if (!isNaN(barrier) && barrier >= 7 && barrier <= 9) {
-    score += 5;
-    notes += '+ 5.0 : Sweet spot barrier (7-9, 19% SR)\n';
-}
     // CLOSE LOSS BONUS - UPDATED 2025-01-06 (increased from 5 to 7, extended to 2.5L)
 const lastMargin = parseFloat(horseRow['form margin']);
 const lastPosition = parseInt(horseRow['form position']);
