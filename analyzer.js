@@ -309,11 +309,11 @@ notes += b;
 score += a;
 notes += b;
 
-// NEW: COLT BONUS (+15 points)
+// COLT BONUS - UPDATED 2025-01-06 (+20 points, increased from 15)
 const horseSex = String(horseRow['horse sex'] || '').trim();
 if (horseSex === 'Colt') {
-    score += 15;
-    notes += '+15.0 : COLT (40% SR, +20% ROI edge)\n';
+    score += 20;  // INCREASED from 15
+    notes += '+20.0: COLT\n';
 }
 
 // NEW: AGE BONUSES
