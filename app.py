@@ -46,7 +46,7 @@ with app.app_context():
             with db.engine.connect() as conn:
                 conn.execute(text('ALTER TABLE races ADD COLUMN market_id VARCHAR(255)'))
                 conn.commit()
-            print("✓ Added market_id column to races table")
+            print("Added market_id column to races table")
     except Exception as e:
         print(f"Migration check: {e}")
     
@@ -59,7 +59,7 @@ with app.app_context():
         # Check if we need to seed initial components
         component_count = Component.query.count()
         if component_count == 0:
-            print("✓ Seeding initial components...")
+            print("Seeding initial components...")
             
             # Add some starter components based on your analyzer patterns
             starter_components = [
@@ -76,30 +76,12 @@ with app.app_context():
                 db.session.add(component)
             
             db.session.commit()
-            print(f"✓ Added {len(starter_components)} starter components")
+            print(f"Added {len(starter_components)} starter components")
         else:
-            print(f"✓ Components table already has {component_count} entries")
+            print(f"Components table already has {component_count} entries")
             
     except Exception as e:
         print(f"Component migration check: {e}")
-```
-
-**Action:**
-1. Find the section in app.py around line 35-50
-2. Replace it with the code above
-3. Save the file
-4. Restart your Flask app
-
-**Expected output when you restart:**
-You should see in your terminal:
-```
-✓ Seeding initial components...
-✓ Added 6 starter components
-```
-
-Or if components already exist:
-```
-✓ Components table already has X entries
     
     # Create default admin if doesn't exist
     admin = User.query.filter_by(username='admin').first()
