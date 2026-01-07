@@ -153,6 +153,7 @@
                             <tr>
                                 <th>Horse</th>
                                 <th>Score</th>
+                                <th>Gap to 2nd</th>
                                 <th>Odds</th>
                                 <th>Win %</th>
                                 <th>Barrier</th>
@@ -174,6 +175,14 @@
                                     <span class="badge badge-{% if bet.score >= 130 %}danger{% elif bet.score >= 110 %}warning{% else %}info{% endif %} badge-lg">
                                         {{ bet.score|round(1) }}
                                     </span>
+                                </td>
+                                <td>
+                                    <span class="badge badge-{% if bet.score_gap >= 50 %}success{% elif bet.score_gap >= 30 %}info{% else %}secondary{% endif %} badge-lg">
+                                        +{{ bet.score_gap|round(1) }}
+                                    </span>
+                                    {% if bet.score_gap >= 50 %}
+                                    <br><small class="text-success">🎯 Dominant</small>
+                                    {% endif %}
                                 </td>
                                 <td>{{ bet.predicted_odds }}</td>
                                 <td>{{ bet.win_probability }}</td>
