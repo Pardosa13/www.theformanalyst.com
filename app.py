@@ -2218,7 +2218,7 @@ def best_bets():
     from datetime import timedelta
     
     # Get filter parameters
-    hours_back = request.args.get('hours', default=24, type=int)
+    hours_back = request.args.get('hours', default=80, type=int)
     min_score = request.args.get('min_score', type=float)
     min_gap = request.args.get('min_gap', type=float)  # NEW: Score gap filter
     
