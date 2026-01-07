@@ -167,50 +167,50 @@
                             {% for bet in race_data.horses %}
                             <tr>
                                 <td>
-                                    <strong>{{ bet.horse_name }}</strong>
-                                    <br>
-                                    <small class="text-muted">{{ bet.form }}</small>
-                                </td>
-                                <td>
-                                    <span class="badge bg-{% if bet.score >= 130 %}danger{% elif bet.score >= 110 %}warning{% else %}info{% endif %} badge-lg">
-                                    {{ bet.score|round(1) }}
-                                    </span>
-                                </td>
-                                </td>
-                                    <span class="badge bg-{% if bet.score_gap >= 50 %}success{% elif bet.score_gap >= 30 %}info{% else %}secondary{% endif %} badge-lg">
-                                        +{{ bet.score_gap|round(1) }}
-                                    </span>
-                                    {% if bet.score_gap >= 50 %}
-                                    <br><small class="text-success">🎯 Dominant</small>
-                                    {% endif %}
-                                </td>
-                                <td>{{ bet.predicted_odds }}</td>
-                                <td>{{ bet.win_probability }}</td>
-                                <td>{{ bet.barrier }}</td>
-                                <td>{{ bet.weight }}kg</td>
-                                <td>{{ bet.jockey }}</td>
-                                <td>{{ bet.trainer }}</td>
-                                <td>
-                                    <span class="badge badge-primary">{{ bet.component_count }} matched</span>
-                                    <button class="btn btn-sm btn-outline-info" 
-                                            data-toggle="collapse" 
-                                            data-target="#components-{{ bet.horse_id }}">
-                                        View
-                                    </button>
-                                    <div id="components-{{ bet.horse_id }}" class="collapse mt-2">
-                                        <ul class="list-unstyled mb-0">
-                                            {% for comp in bet.components %}
-                                            <li class="mb-1">
-                                                <span class="badge badge-success">✓</span>
-                                                {{ comp.name }}
-                                                <small class="text-muted">
-                                                    ({{ comp.sr|round(1) }}% SR, {{ comp.roi|round(1) }}% ROI, N={{ comp.appearances }})
-                                                </small>
-                                            </li>
-                                            {% endfor %}
-                                        </ul>
-                                    </div>
-                                </td>
+    <strong>{{ bet.horse_name }}</strong>
+    <br>
+    <small class="text-muted">{{ bet.form }}</small>
+</td>
+<td>
+    <span class="badge bg-{% if bet.score >= 130 %}danger{% elif bet.score >= 110 %}warning{% else %}info{% endif %} badge-lg">
+    {{ bet.score|round(1) }}
+    </span>
+</td>
+<td>
+    <span class="badge bg-{% if bet.score_gap >= 50 %}success{% elif bet.score_gap >= 30 %}info{% else %}secondary{% endif %} badge-lg">
+        +{{ bet.score_gap|round(1) }}
+    </span>
+    {% if bet.score_gap >= 50 %}
+    <br><small class="text-success">🎯 Dominant</small>
+    {% endif %}
+</td>
+<td>{{ bet.predicted_odds }}</td>
+<td>{{ bet.win_probability }}</td>
+<td>{{ bet.barrier }}</td>
+<td>{{ bet.weight }}kg</td>
+<td>{{ bet.jockey }}</td>
+<td>{{ bet.trainer }}</td>
+<td>
+    <span class="badge bg-primary">{{ bet.component_count }} matched</span>
+    <button class="btn btn-sm btn-outline-info" 
+            data-toggle="collapse" 
+            data-target="#components-{{ bet.horse_id }}">
+        View
+    </button>
+    <div id="components-{{ bet.horse_id }}" class="collapse mt-2">
+        <ul class="list-unstyled mb-0">
+            {% for comp in bet.components %}
+            <li class="mb-1">
+                <span class="badge bg-success">✓</span>
+                {{ comp.name }}
+                <small class="text-muted">
+                    ({{ comp.sr|round(1) }}% SR, {{ comp.roi|round(1) }}% ROI, N={{ comp.appearances }})
+                </small>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+</td>
                             </tr>
                             {% endfor %}
                         </tbody>
