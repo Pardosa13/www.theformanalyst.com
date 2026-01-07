@@ -2439,17 +2439,36 @@ def best_bets():
     meetings_with_bets = dict(sorted(meetings_with_bets.items(), key=lambda x: x[0]))
     
     # NEW: Flag all these horses as Best Bets for tracking
-    for bet in best_bets:
-        horse = Horse.query.get(bet['horse_id'])
-        if horse and horse.prediction and not horse.prediction.best_bet_flagged_at:
-            horse.prediction.best_bet_flagged_at = datetime.utcnow()
-    
+flagged_count = 0
+for bet in best_bets:
     try:
-        db.session.commit()
+        horse = Horse.query.get(bet['horse_id'])
+        print(f"DEBUG: Processing horse_id={bet['horse_id']}, horse={horse}")
+        
+        if horse:
+            print(f"DEBUG: Horse found: {horse.horse_name}, prediction={horse.prediction}")
+            if horse.prediction:
+                print(f"DEBUG: Prediction exists, current flag: {horse.prediction.best_bet_flagged_at}")
+                if not horse.prediction.best_bet_flagged_at:
+                    horse.prediction.best_bet_flagged_at = datetime.utcnow()
+                    flagged_count += 1
+                    print(f"DEBUG: Flagged {horse.horse_name}")
+                else:
+                    print(f"DEBUG: {horse.horse_name} already flagged at {horse.prediction.best_bet_flagged_at}")
+            else:
+                print(f"DEBUG: No prediction for {horse.horse_name}")
+        else:
+            print(f"DEBUG: Horse not found for id {bet['horse_id']}")
     except Exception as e:
-        print(f"Error flagging Best Bets: {e}")
-        db.session.rollback()
-    # END NEW
+        print(f"ERROR processing horse {bet.get('horse_id')}: {e}")
+
+try:
+    db.session.commit()
+    print(f"SUCCESS: Flagged {flagged_count} horses as Best Bets")
+except Exception as e:
+    print(f"ERROR committing Best Bets flags: {e}")
+    db.session.rollback()
+# END NEW
     
     return render_template("best_bets.html",
                          best_bets=best_bets,
