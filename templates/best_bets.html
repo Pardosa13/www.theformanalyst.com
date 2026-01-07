@@ -164,7 +164,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for bet in race_data.horses|sort(attribute='score', reverse=True) %}
+                            {% for bet in race_data.horses %}
                             <tr>
                                 <td>
                                     <strong>{{ bet.horse_name }}</strong>
