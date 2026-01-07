@@ -146,3 +146,34 @@ class Result(db.Model):
         if self.finish_position == 0:
             return f'<Result {self.horse_id}: SCRATCHED>'
         return f'<Result {self.horse_id}: P{self.finish_position} @ ${self.sp}>'
+
+
+class Component(db.Model):
+    """Betting components with performance tracking for Best Bets feature"""
+    __tablename__ = 'components'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    component_name = db.Column(db.String(200), unique=True, nullable=False)
+    is_active = db.Column(db.Boolean, default=True)  # Show on Best Bets page
+    min_roi = db.Column(db.Float, default=10.0)  # Minimum ROI threshold
+    min_appearances = db.Column(db.Integer, default=10)  # Minimum sample size
+    
+    # Display stats (manually updated by you from Data page)
+    appearances = db.Column(db.Integer, default=0)
+    wins = db.Column(db.Integer, default=0)
+    strike_rate = db.Column(db.Float, default=0.0)
+    roi_percentage = db.Column(db.Float, default=0.0)
+    
+    notes = db.Column(db.Text)  # Optional notes about this component
+    last_updated = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def __repr__(self):
+        return f'<Component {self.component_name}: {self.roi_percentage}% ROI>'
+    
+    @property
+    def display_label(self):
+        """Formatted label for display"""
+        if self.appearances > 0:
+            return f"{self.component_name} ({self.strike_rate:.1f}% SR, {self.roi_percentage:+.1f}% ROI, N={self.appearances})"
+        return self.component_name
