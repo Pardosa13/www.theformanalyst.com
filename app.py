@@ -1171,6 +1171,8 @@ def admin_panel():
         flash("Access denied", "danger")
         return redirect(url_for("dashboard"))
     
+    from models import Component  # ADD THIS IMPORT
+    
     if request.method == "POST":
         action = request.form.get("action")
         
@@ -1267,6 +1269,84 @@ def admin_panel():
                 db.session.commit()
                 flash("Your password has been changed successfully", "success")
         
+        # NEW COMPONENT ACTIONS START HERE
+        elif action == "create_component":
+            comp_name = request.form.get("component_name")
+            appearances = request.form.get("appearances", type=int, default=0)
+            wins = request.form.get("wins", type=int, default=0)
+            roi = request.form.get("roi", type=float, default=0.0)
+            is_active = bool(request.form.get("is_active"))
+            notes = request.form.get("notes", "")
+            
+            if not comp_name:
+                flash("Component name is required", "danger")
+            elif Component.query.filter_by(component_name=comp_name).first():
+                flash(f"Component '{comp_name}' already exists", "danger")
+            else:
+                strike_rate = (wins / appearances * 100) if appearances > 0 else 0.0
+                
+                new_component = Component(
+                    component_name=comp_name,
+                    appearances=appearances,
+                    wins=wins,
+                    strike_rate=strike_rate,
+                    roi_percentage=roi,
+                    is_active=is_active,
+                    notes=notes
+                )
+                db.session.add(new_component)
+                db.session.commit()
+                flash(f"Component '{comp_name}' created successfully", "success")
+        
+        elif action == "edit_component":
+            comp_id = request.form.get("component_id")
+            component = Component.query.get(comp_id)
+            
+            if not component:
+                flash("Component not found", "danger")
+            else:
+                component.component_name = request.form.get("component_name", component.component_name)
+                component.appearances = request.form.get("appearances", type=int, default=component.appearances)
+                component.wins = request.form.get("wins", type=int, default=component.wins)
+                component.roi_percentage = request.form.get("roi", type=float, default=component.roi_percentage)
+                component.notes = request.form.get("notes", "")
+                
+                # Recalculate strike rate
+                if component.appearances > 0:
+                    component.strike_rate = (component.wins / component.appearances) * 100
+                else:
+                    component.strike_rate = 0.0
+                
+                component.last_updated = datetime.utcnow()
+                db.session.commit()
+                flash(f"Component '{component.component_name}' updated successfully", "success")
+        
+        elif action == "toggle_component":
+            comp_id = request.form.get("component_id")
+            component = Component.query.get(comp_id)
+            
+            if not component:
+                flash("Component not found", "danger")
+            else:
+                component.is_active = not component.is_active
+                component.last_updated = datetime.utcnow()
+                db.session.commit()
+                status = "activated" if component.is_active else "deactivated"
+                flash(f"Component '{component.component_name}' has been {status}", "success")
+        
+        elif action == "delete_component":
+            comp_id = request.form.get("component_id")
+            component = Component.query.get(comp_id)
+            
+            if not component:
+                flash("Component not found", "danger")
+            else:
+                comp_name = component.component_name
+                db.session.delete(component)
+                db.session.commit()
+                flash(f"Component '{comp_name}' deleted", "success")
+        # NEW COMPONENT ACTIONS END HERE
+        
         return redirect(url_for("admin_panel"))
     
     # Get stats
@@ -1292,6 +1372,26 @@ def admin_panel():
         'total_meetings': total_meetings,
         'users': users_data
     }
+    
+    # NEW: Get component stats
+    components = Component.query.order_by(Component.roi_percentage.desc()).all()
+    
+    components_data = []
+    for comp in components:
+        components_data.append({
+            'id': comp.id,
+            'name': comp.component_name,
+            'is_active': comp.is_active,
+            'appearances': comp.appearances,
+            'wins': comp.wins,
+            'strike_rate': comp.strike_rate,
+            'roi': comp.roi_percentage,
+            'notes': comp.notes,
+            'last_updated': comp.last_updated
+        })
+    
+    stats['components'] = components_data
+    # END NEW
     
     return render_template("admin.html", stats=stats)
 
