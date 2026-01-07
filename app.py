@@ -2302,33 +2302,31 @@ def export_ml_data():
     output.headers["Content-type"] = "text/csv"
     
     return output
-    # ----- Best Bets Route -----
-@app.route("/best-bets")
+    @app.route("/best-bets")
 @login_required
 def best_bets():
     """Show today's best bets based on active positive ROI components"""
-    from models import Component
-    from datetime import timedelta
+    from models import Component, Prediction
+    from datetime import datetime, timedelta
     
     # Get filter parameters
     hours_back = request.args.get('hours', default=80, type=int)
     min_score = request.args.get('min_score', type=float)
     min_gap = request.args.get('min_gap', type=float)  # NEW: Score gap filter
-    
+
     # Get all active components
     active_components = Component.query.filter_by(is_active=True).all()
     component_names = {c.component_name for c in active_components}
-    
+
     # Get recent meetings (last X hours)
     cutoff = datetime.utcnow() - timedelta(hours=hours_back)
     recent_meetings = Meeting.query.filter(Meeting.uploaded_at >= cutoff).order_by(Meeting.meeting_name.asc()).all()
-    
+
     best_bets = []
     total_horses_scanned = 0
-    
+
     for meeting in recent_meetings:
         for race in meeting.races:
-            # NEW: Calculate score gap for this race
             horses_in_race = []
             for horse in race.horses:
                 total_horses_scanned += 1
@@ -2337,40 +2335,23 @@ def best_bets():
                         'horse': horse,
                         'score': horse.prediction.score
                     })
-            
-            # Sort by score to find top 2
             horses_in_race.sort(key=lambda x: x['score'], reverse=True)
-            
             if not horses_in_race:
                 continue
-            
-            # Calculate gap to 2nd place
             top_score = horses_in_race[0]['score']
             second_score = horses_in_race[1]['score'] if len(horses_in_race) > 1 else 0
             score_gap = top_score - second_score
-            
-            # Apply gap filter if provided
             if min_gap and score_gap < min_gap:
                 continue
-            
-            # Now process the top horse
             top_horse = horses_in_race[0]['horse']
-            
             if not top_horse.prediction:
                 continue
-            
-            # Apply score filter if provided
             if min_score and top_horse.prediction.score < min_score:
                 continue
-            
-            # Parse components from notes
             components = parse_notes_components(top_horse.prediction.notes)
-            
-            # Check if horse has any active positive ROI components
             matched_components = []
             for comp_name in components.keys():
                 if comp_name in component_names:
-                    # Get the actual component object for display info
                     comp_obj = next((c for c in active_components if c.component_name == comp_name), None)
                     if comp_obj:
                         matched_components.append({
@@ -2379,11 +2360,8 @@ def best_bets():
                             'sr': comp_obj.strike_rate,
                             'appearances': comp_obj.appearances
                         })
-            
             if matched_components:
-                # Sort matched components by ROI descending
                 matched_components.sort(key=lambda x: x['roi'], reverse=True)
-                
                 best_bets.append({
                     'meeting_id': meeting.id,
                     'meeting_name': meeting.meeting_name,
@@ -2396,7 +2374,7 @@ def best_bets():
                     'horse_id': top_horse.id,
                     'horse_name': top_horse.horse_name,
                     'score': top_horse.prediction.score,
-                    'score_gap': score_gap,  # NEW: Include score gap
+                    'score_gap': score_gap,
                     'predicted_odds': top_horse.prediction.predicted_odds,
                     'win_probability': top_horse.prediction.win_probability,
                     'components': matched_components,
@@ -2407,10 +2385,9 @@ def best_bets():
                     'weight': top_horse.weight,
                     'form': top_horse.form
                 })
-    
-    # Sort by score descending (highest scores first)
+
     best_bets.sort(key=lambda x: x['score'], reverse=True)
-    
+
     # Group by meeting for better display
     meetings_with_bets = {}
     for bet in best_bets:
@@ -2422,7 +2399,6 @@ def best_bets():
                 'uploaded_at': bet['uploaded_at'],
                 'races': {}
             }
-        
         race_key = bet['race_number']
         if race_key not in meetings_with_bets[meeting_key]['races']:
             meetings_with_bets[meeting_key]['races'][race_key] = {
@@ -2432,45 +2408,39 @@ def best_bets():
                 'track_condition': bet['track_condition'],
                 'horses': []
             }
-        
         meetings_with_bets[meeting_key]['races'][race_key]['horses'].append(bet)
-    
+
     # Sort meetings by meeting name (which includes date in YYMMDD format)
     meetings_with_bets = dict(sorted(meetings_with_bets.items(), key=lambda x: x[0]))
-    
-    # NEW: Flag all these horses as Best Bets for tracking
-    from models import Prediction
+
+    # === DEBUG/FLAGGING SECTION ===
+    print(f"Number of best bets found: {len(best_bets)}")
     updated = 0
     for bet in best_bets:
         prediction = Prediction.query.filter_by(horse_id=bet['horse_id']).first()
+        print(f"Trying to flag horse_id={bet['horse_id']}, got prediction? {prediction is not None}")
         if prediction and not prediction.best_bet_flagged_at:
             prediction.best_bet_flagged_at = datetime.utcnow()
+            db.session.add(prediction)  # this may help if session issues
+            print(f"Flagged prediction id={prediction.id} at {prediction.best_bet_flagged_at}")
             updated += 1
-    
-    db.session.commit()
-    print(f"Flagged {updated} best bets.")
-    # END NEW
-    
+        elif prediction:
+            print(f"Already flagged, value: {prediction.best_bet_flagged_at}")
+        else:
+            print(f"WARNING: No prediction found for horse_id={bet['horse_id']}!")
+    try:
+        db.session.commit()
+        print(f"Flagged {updated} best bets and committed successfully.")
+    except Exception as e:
+        print("Commit failed!", e)
+
     return render_template("best_bets.html",
-                         best_bets=best_bets,
-                         meetings_with_bets=meetings_with_bets,
-                         total_bets=len(best_bets),
-                         total_horses_scanned=total_horses_scanned,
-                         active_components=active_components,
-                         hours_back=hours_back,
-                         min_score=min_score,
-                         min_gap=min_gap)
-
-# Error handlers
-@app.errorhandler(404)
-def not_found_error(error):
-    return render_template('404.html'), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    db.session.rollback()
-    return render_template('500.html'), 500
-
-# ----- Run -----
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
+        best_bets=best_bets,
+        meetings_with_bets=meetings_with_bets,
+        total_bets=len(best_bets),
+        total_horses_scanned=total_horses_scanned,
+        active_components=active_components,
+        hours_back=hours_back,
+        min_score=min_score,
+        min_gap=min_gap
+    )
