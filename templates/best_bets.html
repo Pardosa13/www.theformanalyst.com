@@ -172,12 +172,12 @@
                                     <small class="text-muted">{{ bet.form }}</small>
                                 </td>
                                 <td>
-                                    <span class="badge badge-{% if bet.score >= 130 %}danger{% elif bet.score >= 110 %}warning{% else %}info{% endif %} badge-lg">
-                                        {{ bet.score|round(1) }}
+                                    <span class="badge bg-{% if bet.score >= 130 %}danger{% elif bet.score >= 110 %}warning{% else %}info{% endif %} badge-lg">
+                                    {{ bet.score|round(1) }}
                                     </span>
                                 </td>
-                                <td>
-                                    <span class="badge badge-{% if bet.score_gap >= 50 %}success{% elif bet.score_gap >= 30 %}info{% else %}secondary{% endif %} badge-lg">
+                                </td>
+                                    <span class="badge bg-{% if bet.score_gap >= 50 %}success{% elif bet.score_gap >= 30 %}info{% else %}secondary{% endif %} badge-lg">
                                         +{{ bet.score_gap|round(1) }}
                                     </span>
                                     {% if bet.score_gap >= 50 %}
