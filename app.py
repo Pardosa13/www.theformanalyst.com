@@ -2438,7 +2438,7 @@ def best_bets():
     # Sort meetings by meeting name (which includes date in YYMMDD format)
     meetings_with_bets = dict(sorted(meetings_with_bets.items(), key=lambda x: x[0]))
     
-    # NEW: Flag all these horses as Best Bets for tracking
+   # NEW: Flag all these horses as Best Bets for tracking
 flagged_count = 0
 for bet in best_bets:
     try:
@@ -2469,32 +2469,26 @@ except Exception as e:
     print(f"ERROR committing Best Bets flags: {e}")
     db.session.rollback()
 # END NEW
-    
-    return render_template("best_bets.html",
-                         best_bets=best_bets,
-                         meetings_with_bets=meetings_with_bets,
-                         total_bets=len(best_bets),
-                         total_horses_scanned=total_horses_scanned,
-                         active_components=active_components,
-                         hours_back=hours_back,
-                         min_score=min_score,
-                         min_gap=min_gap)  # NEW: Pass gap filter to template
+
+return render_template("best_bets.html",
+                     best_bets=best_bets,
+                     meetings_with_bets=meetings_with_bets,
+                     total_bets=len(best_bets),
+                     total_horses_scanned=total_horses_scanned,
+                     active_components=active_components,
+                     hours_back=hours_back,
+                     min_score=min_score,
+                     min_gap=min_gap)
+
 # Error handlers
 @app.errorhandler(404)
 def not_found_error(error):
     return render_template('404.html'), 404
 
-
 @app.errorhandler(500)
 def internal_error(error):
     db.session.rollback()
     return render_template('500.html'), 500
-
-
-# ----- Run -----
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
-
 
 # ----- Run -----
 if __name__ == "__main__":
