@@ -1504,7 +1504,86 @@ def data_analytics():
     # Get track list for filter dropdown
     tracks = db.session.query(Meeting.meeting_name).distinct().all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
-    
+    # NEW: Best Bets Performance Tracking
+    best_bets_stats = None
+    try:
+        # Get all predictions that were flagged as Best Bets and have results
+        best_bet_predictions = db.session.query(Prediction, Result, Horse).join(
+            Horse, Prediction.horse_id == Horse.id
+        ).join(
+            Result, Horse.id == Result.horse_id
+        ).filter(
+            Prediction.best_bet_flagged_at.isnot(None),
+            Result.actually_ran == True  # Only count horses that actually ran
+        ).all()
+        
+        if best_bet_predictions:
+            total_bets = len(best_bet_predictions)
+            wins = sum(1 for pred, res, horse in best_bet_predictions if res.finish_position == 1)
+            places = sum(1 for pred, res, horse in best_bet_predictions if res.finish_position in [1, 2, 3])
+            
+            # Calculate ROI based on $10 win bets
+            stake_per_bet = 10
+            total_staked = total_bets * stake_per_bet
+            total_return = 0
+            
+            for pred, res, horse in best_bet_predictions:
+                if res.finish_position == 1 and res.sp:
+                    # Win: return = stake * SP
+                    total_return += stake_per_bet * res.sp
+            
+            profit = total_return - total_staked
+            roi = (profit / total_staked * 100) if total_staked > 0 else 0
+            strike_rate = (wins / total_bets * 100) if total_bets > 0 else 0
+            place_rate = (places / total_bets * 100) if total_bets > 0 else 0
+            
+            # Component breakdown - which components performed best?
+            component_performance = {}
+            for pred, res, horse in best_bet_predictions:
+                if pred.notes:
+                    components = parse_notes_components(pred.notes)
+                    for comp_name in components.keys():
+                        if comp_name not in component_performance:
+                            component_performance[comp_name] = {
+                                'bets': 0,
+                                'wins': 0,
+                                'staked': 0,
+                                'return': 0
+                            }
+                        
+                        component_performance[comp_name]['bets'] += 1
+                        component_performance[comp_name]['staked'] += stake_per_bet
+                        
+                        if res.finish_position == 1:
+                            component_performance[comp_name]['wins'] += 1
+                            if res.sp:
+                                component_performance[comp_name]['return'] += stake_per_bet * res.sp
+            
+            # Calculate component ROI and SR
+            for comp_name in component_performance:
+                comp = component_performance[comp_name]
+                comp['profit'] = comp['return'] - comp['staked']
+                comp['roi'] = (comp['profit'] / comp['staked'] * 100) if comp['staked'] > 0 else 0
+                comp['sr'] = (comp['wins'] / comp['bets'] * 100) if comp['bets'] > 0 else 0
+            
+            # Sort by ROI descending
+            component_performance = dict(sorted(component_performance.items(), key=lambda x: x[1]['roi'], reverse=True))
+            
+            best_bets_stats = {
+                'total_bets': total_bets,
+                'wins': wins,
+                'places': places,
+                'strike_rate': strike_rate,
+                'place_rate': place_rate,
+                'total_staked': total_staked,
+                'total_return': total_return,
+                'profit': profit,
+                'roi': roi,
+                'component_performance': component_performance
+            }
+    except Exception as e:
+        print(f"Error calculating Best Bets stats: {e}")
+    # END NEW
     # Return template with ONLY summary data
     return render_template("data.html",
         total_races=total_races,
@@ -1518,6 +1597,7 @@ def data_analytics():
         top_3_roi=top_3_roi,
         top_3_profit=top_3_profit,
         track_list=track_list,
+        best_bets_stats=best_bets_stats,
         filters={
             'track': track_filter,
             'min_score': min_score_filter,
