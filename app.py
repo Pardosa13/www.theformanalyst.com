@@ -49,6 +49,19 @@ with app.app_context():
             print("Added market_id column to races table")
     except Exception as e:
         print(f"Migration check: {e}")
+    # Migration: Add best_bet_flagged_at column if it doesn't exist
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        predictions_columns = [col['name'] for col in inspector.get_columns('predictions')]
+        
+        if 'best_bet_flagged_at' not in predictions_columns:
+            with db.engine.connect() as conn:
+                conn.execute(text('ALTER TABLE predictions ADD COLUMN best_bet_flagged_at TIMESTAMP'))
+                conn.commit()
+            print("Added best_bet_flagged_at column to predictions table")
+    except Exception as e:
+        print(f"Best Bet migration check: {e}")
     
     # Migration: Create components table if it doesn't exist
     try:
@@ -2344,6 +2357,21 @@ def best_bets():
     
     # Sort meetings by meeting name (which includes date in YYMMDD format)
     meetings_with_bets = dict(sorted(meetings_with_bets.items(), key=lambda x: x[0]))
+    
+    # NEW: Flag all these horses as Best Bets for tracking
+    for bet in best_bets:
+        horse = Horse.query.get(bet['horse_id'])
+        if horse and horse.prediction and not horse.prediction.best_bet_flagged_at:
+            horse.prediction.best_bet_flagged_at = datetime.utcnow()
+    
+    try:
+        db.session.commit()
+    except Exception as e:
+        print(f"Error flagging Best Bets: {e}")
+        db.session.rollback()
+    # END NEW
+    
+    return render_template("best_bets.html",
     
     return render_template("best_bets.html",
                          best_bets=best_bets,
