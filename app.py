@@ -2238,6 +2238,7 @@ def best_bets():
     # Get filter parameters
     hours_back = request.args.get('hours', default=24, type=int)
     min_score = request.args.get('min_score', type=float)
+    min_gap = request.args.get('min_gap', type=float)  # NEW: Score gap filter
     
     # Get all active components
     active_components = Component.query.filter_by(is_active=True).all()
@@ -2252,59 +2253,85 @@ def best_bets():
     
     for meeting in recent_meetings:
         for race in meeting.races:
+            # NEW: Calculate score gap for this race
+            horses_in_race = []
             for horse in race.horses:
                 total_horses_scanned += 1
-                
-                if not horse.prediction:
-                    continue
-                
-                # Apply score filter if provided
-                if min_score and horse.prediction.score < min_score:
-                    continue
-                
-                # Parse components from notes
-                components = parse_notes_components(horse.prediction.notes)
-                
-                # Check if horse has any active positive ROI components
-                matched_components = []
-                for comp_name in components.keys():
-                    if comp_name in component_names:
-                        # Get the actual component object for display info
-                        comp_obj = next((c for c in active_components if c.component_name == comp_name), None)
-                        if comp_obj:
-                            matched_components.append({
-                                'name': comp_name,
-                                'roi': comp_obj.roi_percentage,
-                                'sr': comp_obj.strike_rate,
-                                'appearances': comp_obj.appearances
-                            })
-                
-                if matched_components:
-                    # Sort matched components by ROI descending
-                    matched_components.sort(key=lambda x: x['roi'], reverse=True)
-                    
-                    best_bets.append({
-                        'meeting_id': meeting.id,
-                        'meeting_name': meeting.meeting_name,
-                        'uploaded_at': meeting.uploaded_at,
-                        'race_id': race.id,
-                        'race_number': race.race_number,
-                        'distance': race.distance,
-                        'race_class': race.race_class,
-                        'track_condition': race.track_condition,
-                        'horse_id': horse.id,
-                        'horse_name': horse.horse_name,
-                        'score': horse.prediction.score,
-                        'predicted_odds': horse.prediction.predicted_odds,
-                        'win_probability': horse.prediction.win_probability,
-                        'components': matched_components,
-                        'component_count': len(matched_components),
-                        'jockey': horse.jockey,
-                        'trainer': horse.trainer,
-                        'barrier': horse.barrier,
-                        'weight': horse.weight,
-                        'form': horse.form
+                if horse.prediction:
+                    horses_in_race.append({
+                        'horse': horse,
+                        'score': horse.prediction.score
                     })
+            
+            # Sort by score to find top 2
+            horses_in_race.sort(key=lambda x: x['score'], reverse=True)
+            
+            if not horses_in_race:
+                continue
+            
+            # Calculate gap to 2nd place
+            top_score = horses_in_race[0]['score']
+            second_score = horses_in_race[1]['score'] if len(horses_in_race) > 1 else 0
+            score_gap = top_score - second_score
+            
+            # Apply gap filter if provided
+            if min_gap and score_gap < min_gap:
+                continue
+            
+            # Now process the top horse
+            top_horse = horses_in_race[0]['horse']
+            
+            if not top_horse.prediction:
+                continue
+            
+            # Apply score filter if provided
+            if min_score and top_horse.prediction.score < min_score:
+                continue
+            
+            # Parse components from notes
+            components = parse_notes_components(top_horse.prediction.notes)
+            
+            # Check if horse has any active positive ROI components
+            matched_components = []
+            for comp_name in components.keys():
+                if comp_name in component_names:
+                    # Get the actual component object for display info
+                    comp_obj = next((c for c in active_components if c.component_name == comp_name), None)
+                    if comp_obj:
+                        matched_components.append({
+                            'name': comp_name,
+                            'roi': comp_obj.roi_percentage,
+                            'sr': comp_obj.strike_rate,
+                            'appearances': comp_obj.appearances
+                        })
+            
+            if matched_components:
+                # Sort matched components by ROI descending
+                matched_components.sort(key=lambda x: x['roi'], reverse=True)
+                
+                best_bets.append({
+                    'meeting_id': meeting.id,
+                    'meeting_name': meeting.meeting_name,
+                    'uploaded_at': meeting.uploaded_at,
+                    'race_id': race.id,
+                    'race_number': race.race_number,
+                    'distance': race.distance,
+                    'race_class': race.race_class,
+                    'track_condition': race.track_condition,
+                    'horse_id': top_horse.id,
+                    'horse_name': top_horse.horse_name,
+                    'score': top_horse.prediction.score,
+                    'score_gap': score_gap,  # NEW: Include score gap
+                    'predicted_odds': top_horse.prediction.predicted_odds,
+                    'win_probability': top_horse.prediction.win_probability,
+                    'components': matched_components,
+                    'component_count': len(matched_components),
+                    'jockey': top_horse.jockey,
+                    'trainer': top_horse.trainer,
+                    'barrier': top_horse.barrier,
+                    'weight': top_horse.weight,
+                    'form': top_horse.form
+                })
     
     # Sort by score descending (highest scores first)
     best_bets.sort(key=lambda x: x['score'], reverse=True)
@@ -2340,7 +2367,8 @@ def best_bets():
                          total_horses_scanned=total_horses_scanned,
                          active_components=active_components,
                          hours_back=hours_back,
-                         min_score=min_score)
+                         min_score=min_score,
+                         min_gap=min_gap)  # NEW: Pass gap filter to template
 # Error handlers
 @app.errorhandler(404)
 def not_found_error(error):
