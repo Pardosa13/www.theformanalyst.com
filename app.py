@@ -2342,6 +2342,9 @@ def best_bets():
         
         meetings_with_bets[meeting_key]['races'][race_key]['horses'].append(bet)
     
+    # Sort meetings by meeting name (which includes date in YYMMDD format)
+    meetings_with_bets = dict(sorted(meetings_with_bets.items(), key=lambda x: x[0]))
+    
     return render_template("best_bets.html",
                          best_bets=best_bets,
                          meetings_with_bets=meetings_with_bets,
