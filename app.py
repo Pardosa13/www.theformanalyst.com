@@ -2452,8 +2452,6 @@ def best_bets():
     # END NEW
     
     return render_template("best_bets.html",
-    
-    return render_template("best_bets.html",
                          best_bets=best_bets,
                          meetings_with_bets=meetings_with_bets,
                          total_bets=len(best_bets),
