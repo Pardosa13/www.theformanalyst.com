@@ -1514,7 +1514,7 @@ def data_analytics():
             Result, Horse.id == Result.horse_id
         ).filter(
             Prediction.best_bet_flagged_at.isnot(None),
-            Result.actually_ran == True  # Only count horses that actually ran
+            Result.finish_position > 0
         ).all()
         
         if best_bet_predictions:
