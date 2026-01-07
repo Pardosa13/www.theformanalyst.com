@@ -2302,7 +2302,8 @@ def export_ml_data():
     output.headers["Content-type"] = "text/csv"
     
     return output
-    @app.route("/best-bets")
+
+@app.route("/best-bets")
 @login_required
 def best_bets():
     """Show today's best bets based on active positive ROI components"""
@@ -2421,7 +2422,7 @@ def best_bets():
         print(f"Trying to flag horse_id={bet['horse_id']}, got prediction? {prediction is not None}")
         if prediction and not prediction.best_bet_flagged_at:
             prediction.best_bet_flagged_at = datetime.utcnow()
-            db.session.add(prediction)  # this may help if session issues
+            db.session.add(prediction)
             print(f"Flagged prediction id={prediction.id} at {prediction.best_bet_flagged_at}")
             updated += 1
         elif prediction:
