@@ -50,6 +50,57 @@ with app.app_context():
     except Exception as e:
         print(f"Migration check: {e}")
     
+    # Migration: Create components table if it doesn't exist
+    try:
+        from models import Component
+        # This will create the components table if it doesn't exist
+        db.create_all()
+        
+        # Check if we need to seed initial components
+        component_count = Component.query.count()
+        if component_count == 0:
+            print("✓ Seeding initial components...")
+            
+            # Add some starter components based on your analyzer patterns
+            starter_components = [
+                {'component_name': '3yo Colt Combo', 'appearances': 38, 'wins': 8, 'strike_rate': 21.1, 'roi_percentage': 109.6, 'is_active': True},
+                {'component_name': 'Major Class Drop + Slow Sectional', 'appearances': 5, 'wins': 2, 'strike_rate': 40.0, 'roi_percentage': 720.0, 'is_active': False, 'notes': 'Sample size too small'},
+                {'component_name': 'Fast Sectional + Colt', 'appearances': 9, 'wins': 4, 'strike_rate': 44.4, 'roi_percentage': 10.6, 'is_active': True},
+                {'component_name': 'Race-Day - Mile + Fastest', 'appearances': 7, 'wins': 3, 'strike_rate': 42.9, 'roi_percentage': 81.4, 'is_active': False, 'notes': 'Borderline sample size'},
+                {'component_name': 'Colt Bonus', 'appearances': 45, 'wins': 9, 'strike_rate': 20.0, 'roi_percentage': 82.7, 'is_active': True},
+                {'component_name': 'Undefeated on Condition', 'appearances': 26, 'wins': 6, 'strike_rate': 23.1, 'roi_percentage': 46.5, 'is_active': True},
+            ]
+            
+            for comp_data in starter_components:
+                component = Component(**comp_data)
+                db.session.add(component)
+            
+            db.session.commit()
+            print(f"✓ Added {len(starter_components)} starter components")
+        else:
+            print(f"✓ Components table already has {component_count} entries")
+            
+    except Exception as e:
+        print(f"Component migration check: {e}")
+```
+
+**Action:**
+1. Find the section in app.py around line 35-50
+2. Replace it with the code above
+3. Save the file
+4. Restart your Flask app
+
+**Expected output when you restart:**
+You should see in your terminal:
+```
+✓ Seeding initial components...
+✓ Added 6 starter components
+```
+
+Or if components already exist:
+```
+✓ Components table already has X entries
+    
     # Create default admin if doesn't exist
     admin = User.query.filter_by(username='admin').first()
     if not admin:
@@ -2076,6 +2127,120 @@ def export_ml_data():
     output.headers["Content-type"] = "text/csv"
     
     return output
+    # ----- Best Bets Route -----
+@app.route("/best-bets")
+@login_required
+def best_bets():
+    """Show today's best bets based on active positive ROI components"""
+    from models import Component
+    from datetime import timedelta
+    
+    # Get filter parameters
+    hours_back = request.args.get('hours', default=24, type=int)
+    min_score = request.args.get('min_score', type=float)
+    
+    # Get all active components
+    active_components = Component.query.filter_by(is_active=True).all()
+    component_names = {c.component_name for c in active_components}
+    
+    # Get recent meetings (last X hours)
+    cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+    recent_meetings = Meeting.query.filter(Meeting.uploaded_at >= cutoff).order_by(Meeting.uploaded_at.desc()).all()
+    
+    best_bets = []
+    total_horses_scanned = 0
+    
+    for meeting in recent_meetings:
+        for race in meeting.races:
+            for horse in race.horses:
+                total_horses_scanned += 1
+                
+                if not horse.prediction:
+                    continue
+                
+                # Apply score filter if provided
+                if min_score and horse.prediction.score < min_score:
+                    continue
+                
+                # Parse components from notes
+                components = parse_notes_components(horse.prediction.notes)
+                
+                # Check if horse has any active positive ROI components
+                matched_components = []
+                for comp_name in components.keys():
+                    if comp_name in component_names:
+                        # Get the actual component object for display info
+                        comp_obj = next((c for c in active_components if c.component_name == comp_name), None)
+                        if comp_obj:
+                            matched_components.append({
+                                'name': comp_name,
+                                'roi': comp_obj.roi_percentage,
+                                'sr': comp_obj.strike_rate,
+                                'appearances': comp_obj.appearances
+                            })
+                
+                if matched_components:
+                    # Sort matched components by ROI descending
+                    matched_components.sort(key=lambda x: x['roi'], reverse=True)
+                    
+                    best_bets.append({
+                        'meeting_id': meeting.id,
+                        'meeting_name': meeting.meeting_name,
+                        'uploaded_at': meeting.uploaded_at,
+                        'race_id': race.id,
+                        'race_number': race.race_number,
+                        'distance': race.distance,
+                        'race_class': race.race_class,
+                        'track_condition': race.track_condition,
+                        'horse_id': horse.id,
+                        'horse_name': horse.horse_name,
+                        'score': horse.prediction.score,
+                        'predicted_odds': horse.prediction.predicted_odds,
+                        'win_probability': horse.prediction.win_probability,
+                        'components': matched_components,
+                        'component_count': len(matched_components),
+                        'jockey': horse.jockey,
+                        'trainer': horse.trainer,
+                        'barrier': horse.barrier,
+                        'weight': horse.weight,
+                        'form': horse.form
+                    })
+    
+    # Sort by score descending (highest scores first)
+    best_bets.sort(key=lambda x: x['score'], reverse=True)
+    
+    # Group by meeting for better display
+    meetings_with_bets = {}
+    for bet in best_bets:
+        meeting_key = bet['meeting_name']
+        if meeting_key not in meetings_with_bets:
+            meetings_with_bets[meeting_key] = {
+                'meeting_id': bet['meeting_id'],
+                'meeting_name': bet['meeting_name'],
+                'uploaded_at': bet['uploaded_at'],
+                'races': {}
+            }
+        
+        race_key = bet['race_number']
+        if race_key not in meetings_with_bets[meeting_key]['races']:
+            meetings_with_bets[meeting_key]['races'][race_key] = {
+                'race_number': bet['race_number'],
+                'distance': bet['distance'],
+                'race_class': bet['race_class'],
+                'track_condition': bet['track_condition'],
+                'horses': []
+            }
+        
+        meetings_with_bets[meeting_key]['races'][race_key]['horses'].append(bet)
+    
+    return render_template("best_bets.html",
+                         best_bets=best_bets,
+                         meetings_with_bets=meetings_with_bets,
+                         total_bets=len(best_bets),
+                         total_horses_scanned=total_horses_scanned,
+                         active_components=active_components,
+                         hours_back=hours_back,
+                         min_score=min_score)
 # Error handlers
 @app.errorhandler(404)
 def not_found_error(error):
