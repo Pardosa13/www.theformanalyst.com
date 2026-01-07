@@ -2228,7 +2228,7 @@ def best_bets():
     
     # Get recent meetings (last X hours)
     cutoff = datetime.utcnow() - timedelta(hours=hours_back)
-    recent_meetings = Meeting.query.filter(Meeting.uploaded_at >= cutoff).order_by(Meeting.uploaded_at.desc()).all()
+    recent_meetings = Meeting.query.filter(Meeting.uploaded_at >= cutoff).order_by(Meeting.date.asc(), Meeting.uploaded_at.desc()).all()
     
     best_bets = []
     total_horses_scanned = 0
