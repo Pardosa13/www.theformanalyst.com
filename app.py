@@ -2439,12 +2439,16 @@ def best_bets():
     meetings_with_bets = dict(sorted(meetings_with_bets.items(), key=lambda x: x[0]))
     
     # NEW: Flag all these horses as Best Bets for tracking
+    from models import Prediction
+    updated = 0
     for bet in best_bets:
-        horse = Horse.query.get(bet['horse_id'])
-        if horse and horse.prediction and not horse.prediction.best_bet_flagged_at:
-            horse.prediction.best_bet_flagged_at = datetime.utcnow()
+        prediction = Prediction.query.filter_by(horse_id=bet['horse_id']).first()
+        if prediction and not prediction.best_bet_flagged_at:
+            prediction.best_bet_flagged_at = datetime.utcnow()
+            updated += 1
     
     db.session.commit()
+    print(f"Flagged {updated} best bets.")
     # END NEW
     
     return render_template("best_bets.html",
