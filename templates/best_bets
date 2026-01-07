@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}Best Bets - The Form Analyst{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <h2>🔥 Today's Best Bets</h2>
+            <p class="text-muted">Horses matching active positive ROI components</p>
+        </div>
+    </div>
+
+    <!-- Summary Stats -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Total Best Bets</h5>
+                    <h2 class="mb-0">{{ total_bets }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Active Components</h5>
+                    <h2 class="mb-0">{{ active_components|length }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Horses Scanned</h5>
+                    <h2 class="mb-0">{{ total_horses_scanned }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Time Window</h5>
+                    <h2 class="mb-0">{{ hours_back }}h</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-body">
+                    <form method="GET" action="{{ url_for('best_bets') }}" class="form-inline">
+                        <label class="mr-2">Filters:</label>
+                        
+                        <label class="mr-2 ml-3">Hours Back:</label>
+                        <select name="hours" class="form-control mr-3">
+                            <option value="6" {% if hours_back == 6 %}selected{% endif %}>6 hours</option>
+                            <option value="12" {% if hours_back == 12 %}selected{% endif %}>12 hours</option>
+                            <option value="24" {% if hours_back == 24 %}selected{% endif %}>24 hours</option>
+                            <option value="48" {% if hours_back == 48 %}selected{% endif %}>48 hours</option>
+                            <option value="72" {% if hours_back == 72 %}selected{% endif %}>3 days</option>
+                        </select>
+                        
+                        <label class="mr-2">Min Score:</label>
+                        <input type="number" name="min_score" class="form-control mr-3" 
+                               placeholder="e.g., 100" step="1" value="{{ min_score if min_score else '' }}">
+                        
+                        <button type="submit" class="btn btn-primary">Apply Filters</button>
+                        <a href="{{ url_for('best_bets') }}" class="btn btn-secondary ml-2">Clear</a>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Components Legend -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Active Components ({{ active_components|length }})</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        {% for component in active_components %}
+                        <div class="col-md-6 mb-2">
+                            <span class="badge badge-success">✓</span>
+                            <strong>{{ component.component_name }}</strong>
+                            <span class="text-muted">
+                                - {{ component.strike_rate|round(1) }}% SR, 
+                                {{ component.roi_percentage|round(1) }}% ROI, 
+                                N={{ component.appearances }}
+                            </span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Best Bets by Meeting -->
+    {% if total_bets == 0 %}
+    <div class="alert alert-info">
+        <h4>No Best Bets Found</h4>
+        <p>No horses in the last {{ hours_back }} hours match your active positive ROI components.</p>
+        <p class="mb-0">Try:</p>
+        <ul>
+            <li>Uploading a new meeting</li>
+            <li>Increasing the time window</li>
+            <li>Activating more components in the Admin panel</li>
+            <li>Lowering the minimum score filter</li>
+        </ul>
+    </div>
+    {% else %}
+    {% for meeting_name, meeting_data in meetings_with_bets.items() %}
+    <div class="card mb-4">
+        <div class="card-header bg-dark text-white">
+            <h4 class="mb-0">
+                📍 {{ meeting_data.meeting_name }}
+                <span class="badge badge-light text-dark ml-2">
+                    Uploaded {{ meeting_data.uploaded_at.strftime('%I:%M %p') }}
+                </span>
+            </h4>
+        </div>
+        <div class="card-body">
+            {% for race_num, race_data in meeting_data.races.items()|sort %}
+            <div class="mb-4">
+                <h5 class="border-bottom pb-2">
+                    Race {{ race_data.race_number }} - 
+                    {{ race_data.distance }} - 
+                    {{ race_data.race_class }} - 
+                    {{ race_data.track_condition|title }}
+                </h5>
+                
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Horse</th>
+                                <th>Score</th>
+                                <th>Odds</th>
+                                <th>Win %</th>
+                                <th>Barrier</th>
+                                <th>Weight</th>
+                                <th>Jockey</th>
+                                <th>Trainer</th>
+                                <th>Matched Components</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for bet in race_data.horses|sort(attribute='score', reverse=True) %}
+                            <tr>
+                                <td>
+                                    <strong>{{ bet.horse_name }}</strong>
+                                    <br>
+                                    <small class="text-muted">{{ bet.form }}</small>
+                                </td>
+                                <td>
+                                    <span class="badge badge-{% if bet.score >= 130 %}danger{% elif bet.score >= 110 %}warning{% else %}info{% endif %} badge-lg">
+                                        {{ bet.score|round(1) }}
+                                    </span>
+                                </td>
+                                <td>{{ bet.predicted_odds }}</td>
+                                <td>{{ bet.win_probability }}</td>
+                                <td>{{ bet.barrier }}</td>
+                                <td>{{ bet.weight }}kg</td>
+                                <td>{{ bet.jockey }}</td>
+                                <td>{{ bet.trainer }}</td>
+                                <td>
+                                    <span class="badge badge-primary">{{ bet.component_count }} matched</span>
+                                    <button class="btn btn-sm btn-outline-info" 
+                                            data-toggle="collapse" 
+                                            data-target="#components-{{ bet.horse_id }}">
+                                        View
+                                    </button>
+                                    <div id="components-{{ bet.horse_id }}" class="collapse mt-2">
+                                        <ul class="list-unstyled mb-0">
+                                            {% for comp in bet.components %}
+                                            <li class="mb-1">
+                                                <span class="badge badge-success">✓</span>
+                                                {{ comp.name }}
+                                                <small class="text-muted">
+                                                    ({{ comp.sr|round(1) }}% SR, {{ comp.roi|round(1) }}% ROI, N={{ comp.appearances }})
+                                                </small>
+                                            </li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+
+</div>
+
+<style>
+.badge-lg {
+    font-size: 1.1em;
+    padding: 0.5em 0.7em;
+}
+</style>
+{% endblock %}
