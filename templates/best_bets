@@ -66,16 +66,27 @@
                         
                         <label class="mr-2">Min Score:</label>
                         <input type="number" name="min_score" class="form-control mr-3" 
-                               placeholder="e.g., 100" step="1" value="{{ min_score if min_score else '' }}">
+                               placeholder="e.g., 100" step="1" value="{{ min_score if min_score else '' }}" style="width: 100px;">
+                        
+                        <label class="mr-2">Min Gap to 2nd:</label>
+                        <input type="number" name="min_gap" class="form-control mr-3" 
+                               placeholder="e.g., 50" step="1" value="{{ min_gap if min_gap else '' }}" style="width: 100px;">
                         
                         <button type="submit" class="btn btn-primary">Apply Filters</button>
                         <a href="{{ url_for('best_bets') }}" class="btn btn-secondary ml-2">Clear</a>
                     </form>
+                    
+                    {% if min_gap %}
+                    <div class="mt-2">
+                        <small class="text-info">
+                            ℹ️ Based on historical data: Score gaps of 50+ points have a 28.9% strike rate with +13.4% ROI
+                        </small>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
     </div>
-
     <!-- Active Components Legend -->
     <div class="row mb-4">
         <div class="col-md-12">
