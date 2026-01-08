@@ -476,7 +476,8 @@ def parse_notes_components(notes):
         (r'\+\s*20\.0\s*:\s*Sprint \+ Fastest sectional', 'Race-Day - Sprint + Fastest'),
         (r'\+\s*18\.0\s*:\s*Mile \+ Fastest sectional', 'Race-Day - Mile + Fastest'),
         (r'-\s*8\.0\s*:\s*Long distance.*negates sectional', 'Race-Day - Long Distance Penalty'),
-
+        # Weight Advantage + Fast Sectional
+        (r'\+\s*50\.0\s*:\s*Big weight advantage \(3kg\+\) \+ Fastest', 'Race-Day - Big Weight Adv + Fastest'),
          # MEGA COMBOS
         (r'\+\s*30\.0\s*:\s*🔥🔥🔥 MEGA COMBO: 4yo \+ Soft \+ Fastest \+ Weight adv', 'MEGA - 4yo+Soft+Fast+Weight'),
         (r'\+\s*24\.0\s*:\s*🔥🔥 Sprint \+ Weight adv \+ Fastest', 'MEGA - Sprint+Weight+Fastest'),
