@@ -2552,17 +2552,25 @@ Object.keys(horseData).forEach(hn => {
             }
             
             // ============================================
-            // TRACK CONDITION BONUSES (fastest only)
-            // ============================================
-            if (rank === 1) {
-                const trackCondition = String(entry['track_condition'] || entry['track condition'] || '').toLowerCase();
-                
-                if (trackCondition === 'soft') {
-                    raceDayBonus += 10;
-                    raceDayNote += '+10.0: Soft track + Fastest (12.4% SR, +25.1% lift)\n';
-                }
-            }
-            
+// TRACK CONDITION BONUSES (fastest only)
+// ============================================
+if (rank === 1) {
+    const trackCondition = String(entry['track_condition'] || entry['track condition'] || '').toLowerCase();
+    
+    if (trackCondition === 'soft') {
+        raceDayBonus += 10;
+        raceDayNote += '+10.0: Soft track + Fastest (12.4% SR, +25.1% lift)\n';
+    }
+}
+
+// ============================================
+// WEIGHT ADVANTAGE + FASTEST
+// ============================================
+// Check for significant weight advantage (3kg+) with fastest sectional
+if (rank === 1 && weightAdvantage >= 3) {
+    raceDayBonus += 50;
+    raceDayNote += '+50.0: Big weight advantage (3kg+) + Fastest sectional\n';
+}
             // ============================================
             // MEGA COMBINATION BONUSES
             // ============================================
