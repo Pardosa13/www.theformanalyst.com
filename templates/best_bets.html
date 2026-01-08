@@ -172,16 +172,20 @@
     <small class="text-muted">{{ bet.form }}</small>
 </td>
 <td>
-    <span class="badge bg-{% if bet.score >= 130 %}danger{% elif bet.score >= 110 %}warning{% else %}info{% endif %} badge-lg">
+    <span class="badge bg-{% if bet.score >= 130 %}success{% elif bet.score >= 100 %}warning{% else %}danger{% endif %} badge-lg">
     {{ bet.score|round(1) }}
     </span>
 </td>
 <td>
-    <span class="badge bg-{% if bet.score_gap >= 50 %}success{% elif bet.score_gap >= 30 %}info{% else %}secondary{% endif %} badge-lg">
+    <span class="badge bg-{% if bet.score_gap >= 50 %}success{% elif bet.score_gap >= 30 %}warning{% else %}danger{% endif %} badge-lg">
         +{{ bet.score_gap|round(1) }}
     </span>
     {% if bet.score_gap >= 50 %}
     <br><small class="text-success">🎯 Dominant</small>
+    {% elif bet.score_gap >= 30 %}
+    <br><small class="text-warning">⚠️ Medium Confidence</small>
+    {% else %}
+    <br><small class="text-danger">⚠️ Lower Confidence</small>
     {% endif %}
 </td>
 <td>{{ bet.predicted_odds }}</td>
