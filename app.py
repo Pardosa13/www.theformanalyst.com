@@ -474,7 +474,7 @@ def parse_notes_components(notes):
         # Base Race-Day Bonuses
         (r'\+\s*30\.0\s*:\s*Fastest sectional in race', 'Race-Day - Fastest in Race'),
         (r'\+\s*40\.0\s*:\s*Sprint \+ Fastest sectional', 'Race-Day - Sprint + Fastest'),
-        (r'\+\s*35\.0\s*:\s*Mile \+ Fastest sectional', 'Race-Day - Mile + Fastest'),
+        (r'\+\s*18\.0\s*:\s*Mile \+ Fastest sectional', 'Race-Day - Mile + Fastest'),
         (r'-\s*15\.0\s*:\s*Long distance.*negates sectional', 'Race-Day - Long Distance Penalty'),
         
         # Weight Advantage + Fast Sectional
