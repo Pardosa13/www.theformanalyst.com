@@ -2562,36 +2562,33 @@ if (rank === 1) {
         raceDayNote += '+10.0: Soft track + Fastest (12.4% SR, +25.1% lift)\n';
     }
 }
-
-// ============================================
-// WEIGHT ADVANTAGE + FASTEST
-// ============================================
-// Check for significant weight advantage (3kg+) with fastest sectional
-if (rank === 1 && weightAdvantage >= 3) {
-    raceDayBonus += 50;
-    raceDayNote += '+50.0: Big weight advantage (3kg+) + Fastest sectional\n';
-}
             // ============================================
-            // MEGA COMBINATION BONUSES
-            // ============================================
-            if (rank === 1) {
-                const horseAge = parseInt(entry['horse age']);
-                const horseSex = String(entry['horse sex'] || '').trim();
-                const trackCondition = String(entry['track_condition'] || entry['track condition'] || '').toLowerCase();
-                
-                // Calculate weight advantage again for combos
-                const raceWeights = parsedData
-                    .map(e => parseFloat(e['horse weight']))
-                    .filter(w => !isNaN(w) && w >= 49 && w <= 65);
-                
-                let weightAdvantage = 0;
-                if (raceWeights.length > 0) {
-                    const avgWeight = raceWeights.reduce((sum, w) => sum + w, 0) / raceWeights.length;
-                    const horseWeight = parseFloat(entry['horse weight']);
-                    if (!isNaN(horseWeight)) {
-                        weightAdvantage = avgWeight - horseWeight;
-                    }
-                }
+// MEGA COMBINATION BONUSES
+// ============================================
+if (rank === 1) {
+    const horseAge = parseInt(entry['horse age']);
+    const horseSex = String(entry['horse sex'] || '').trim();
+    const trackCondition = String(entry['track_condition'] || entry['track condition'] || '').toLowerCase();
+    
+    // Calculate weight advantage again for combos
+    const raceWeights = parsedData
+        .map(e => parseFloat(e['horse weight']))
+        .filter(w => !isNaN(w) && w >= 49 && w <= 65);
+    
+    let weightAdvantage = 0;
+    if (raceWeights.length > 0) {
+        const avgWeight = raceWeights.reduce((sum, w) => sum + w, 0) / raceWeights.length;
+        const horseWeight = parseFloat(entry['horse weight']);
+        if (!isNaN(horseWeight)) {
+            weightAdvantage = avgWeight - horseWeight;
+        }
+    }
+    
+    // BIG WEIGHT ADVANTAGE + FASTEST (standalone bonus)
+    if (weightAdvantage >= 3) {
+        raceDayBonus += 50;
+        raceDayNote += '+50.0: Big weight advantage (3kg+) + Fastest sectional\n';
+    }
                 
                 // 4yo + Soft + Fastest + Weight advantage = 50% SR!
                 if (horseAge === 4 && trackCondition === 'soft' && weightAdvantage >= 1) {
