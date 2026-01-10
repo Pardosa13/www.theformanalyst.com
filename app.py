@@ -1523,9 +1523,9 @@ def data_analytics():
                     total_return += stake_per_bet * res.sp
             
             profit = total_return - total_staked
-            roi = (profit / total_staked * 100) if total_staked > 0 else 0
-            strike_rate = (wins / total_bets * 100) if total_bets > 0 else 0
-            place_rate = (places / total_bets * 100) if total_bets > 0 else 0
+            bb_roi = (profit / total_staked * 100) if total_staked > 0 else 0
+            bb_strike = (wins / total_bets * 100) if total_bets > 0 else 0
+            bb_place = (places / total_bets * 100) if total_bets > 0 else 0
             
             # Component breakdown - which components performed best?
             component_performance = {}
@@ -1563,12 +1563,12 @@ def data_analytics():
                 'total_bets': total_bets,
                 'wins': wins,
                 'places': places,
-                'strike_rate': strike_rate,
-                'place_rate': place_rate,
+                'strike_rate': bb_strike,
+                'place_rate': bb_place,
                 'total_staked': total_staked,
                 'total_return': total_return,
                 'profit': profit,
-                'roi': roi,
+                'roi': bb_roi,
                 'component_performance': component_performance
             }
     except Exception as e:
