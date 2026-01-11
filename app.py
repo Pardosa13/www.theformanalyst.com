@@ -2451,24 +2451,32 @@ def best_bets():
     # Sort meetings by meeting name (which includes date in YYMMDD format)
     meetings_with_bets = dict(sorted(meetings_with_bets.items(), key=lambda x: x[0]))
 
-    # === DEBUG/FLAGGING SECTION ===
+    # Flag new best bets and post to Telegram
     print(f"Number of best bets found: {len(best_bets)}")
     updated = 0
+    newly_flagged_by_meeting = {}
+    
     for bet in best_bets:
         prediction = Prediction.query.filter_by(horse_id=bet['horse_id']).first()
-        print(f"Trying to flag horse_id={bet['horse_id']}, got prediction? {prediction is not None}")
         if prediction and not prediction.best_bet_flagged_at:
             prediction.best_bet_flagged_at = datetime.utcnow()
             db.session.add(prediction)
-            print(f"Flagged prediction id={prediction.id} at {prediction.best_bet_flagged_at}")
             updated += 1
-        elif prediction:
-            print(f"Already flagged, value: {prediction.best_bet_flagged_at}")
-        else:
-            print(f"WARNING: No prediction found for horse_id={bet['horse_id']}!")
+            
+            # Group newly flagged bets by meeting for Telegram posting
+            meeting_name = bet['meeting_name']
+            if meeting_name not in newly_flagged_by_meeting:
+                newly_flagged_by_meeting[meeting_name] = []
+            newly_flagged_by_meeting[meeting_name].append(bet)
+    
     try:
         db.session.commit()
         print(f"Flagged {updated} best bets and committed successfully.")
+        
+        # Post newly flagged bets to Telegram (grouped by meeting)
+        for meeting_name, meeting_bets in newly_flagged_by_meeting.items():
+            post_best_bets_to_telegram(meeting_bets, meeting_name)
+            
     except Exception as e:
         print("Commit failed!", e)
 
