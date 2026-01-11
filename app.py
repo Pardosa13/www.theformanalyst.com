@@ -2490,3 +2490,29 @@ def best_bets():
         min_score=min_score,
         min_gap=min_gap
     )
+@app.route("/test-telegram")
+@login_required
+def test_telegram():
+    """Test Telegram connection"""
+    if not current_user.is_admin:
+        flash("Admin only", "danger")
+        return redirect(url_for("dashboard"))
+    
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            'chat_id': TELEGRAM_CHANNEL,
+            'text': '🧪 Test message from The Form Analyst\n\nIf you see this, the connection works!',
+            'parse_mode': 'Markdown'
+        }
+        
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            flash("✓ Test message sent to Telegram successfully!", "success")
+        else:
+            flash(f"✗ Telegram API error: {response.status_code} - {response.text}", "danger")
+    except Exception as e:
+        flash(f"✗ Error: {e}", "danger")
+    
+    return redirect(url_for("admin_panel"))
