@@ -11,6 +11,17 @@ import requests
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result
 
+import logging
+import sys
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 
 # Configuration
@@ -154,9 +165,12 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
     Post best bets to Telegram channel
     """
     if not best_bets:
+        logger.warning("No bets to post to Telegram")
         return False
     
     try:
+        logger.info(f"Attempting to post {len(best_bets)} bets for {meeting_name} to Telegram")
+        
         # Build message
         message = f"🏇 *{meeting_name.upper()}*\n\n"
         
@@ -183,17 +197,18 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
             'parse_mode': 'Markdown'
         }
         
+        logger.info(f"Sending POST request to Telegram API")
         response = requests.post(url, json=payload, timeout=10)
         
         if response.status_code == 200:
-            print(f"✓ Posted {len(best_bets)} tips for {meeting_name} to Telegram")
+            logger.info(f"✓ Successfully posted {len(best_bets)} tips for {meeting_name} to Telegram")
             return True
         else:
-            print(f"✗ Telegram API error: {response.status_code} - {response.text}")
+            logger.error(f"✗ Telegram API error: {response.status_code} - {response.text}")
             return False
         
     except Exception as e:
-        print(f"✗ Telegram posting error: {e}")
+        logger.error(f"✗ Telegram posting exception: {str(e)}", exc_info=True)
         return False
 
 def process_and_store_results(csv_data, filename, track_condition, user_id, is_advanced=False):
@@ -2452,7 +2467,7 @@ def best_bets():
     meetings_with_bets = dict(sorted(meetings_with_bets.items(), key=lambda x: x[0]))
 
     # Flag new best bets and post to Telegram
-    print(f"Number of best bets found: {len(best_bets)}")
+    logger.info(f"Number of best bets found: {len(best_bets)}")
     updated = 0
     newly_flagged_by_meeting = {}
     
@@ -2471,14 +2486,15 @@ def best_bets():
     
     try:
         db.session.commit()
-        print(f"Flagged {updated} best bets and committed successfully.")
+        logger.info(f"Flagged {updated} best bets and committed successfully.")
+        logger.info(f"About to post {len(newly_flagged_by_meeting)} meetings to Telegram")
         
         # Post newly flagged bets to Telegram (grouped by meeting)
         for meeting_name, meeting_bets in newly_flagged_by_meeting.items():
             post_best_bets_to_telegram(meeting_bets, meeting_name)
             
     except Exception as e:
-        print("Commit failed!", e)
+        logger.error(f"Commit failed: {str(e)}", exc_info=True)
 
     return render_template("best_bets.html",
         best_bets=best_bets,
