@@ -175,9 +175,9 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
         message = f"🏇 *{meeting_name.upper()}*\n\n"
         
         for bet in best_bets:
-            message += f"*R{bet['race_number']}*: #{bet['barrier']} {bet['horse_name']}\n"
+            message += f"*R{bet['race_number']}*: {bet['horse_name']}\n"
             message += f"📊 Score: {bet['score']:.1f}\n"
-            message += f"💎 Predicted: {bet['predicted_odds']}\n"
+            message += f"💎 Predicted Price: {bet['predicted_odds']}\n"
             
             # Add top 2 components
             if bet['components']:
