@@ -7,6 +7,7 @@ from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
 from datetime import datetime
+import requests
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result
 
@@ -20,6 +21,9 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Fix for postgres:// vs postgresql:// (Railway uses postgres://)
 if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
     app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
+# Telegram Bot Configuration
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8533463194:AAGHWamzq_Atz9cxjejKsm-hQlzwpYPSBh0')
+TELEGRAM_CHANNEL = os.environ.get('TELEGRAM_CHANNEL', '@TheFormAnalystPremium')
 
 # Initialize extensions
 db.init_app(app)
@@ -145,7 +149,52 @@ def run_analyzer(csv_data, track_condition, is_advanced=False):
         raise Exception("Node.js not found.  Please ensure Node.js is installed.")
     except Exception as e:
         raise Exception(f"Analysis failed: {str(e)}")
-
+def post_best_bets_to_telegram(best_bets, meeting_name):
+    """
+    Post best bets to Telegram channel
+    """
+    if not best_bets:
+        return False
+    
+    try:
+        # Build message
+        message = f"🏇 *{meeting_name.upper()}*\n\n"
+        
+        for bet in best_bets:
+            message += f"*R{bet['race_number']}*: #{bet['barrier']} {bet['horse_name']}\n"
+            message += f"📊 Score: {bet['score']:.1f}\n"
+            message += f"💎 Predicted: {bet['predicted_odds']}\n"
+            
+            # Add top 2 components
+            if bet['components']:
+                top_comps = bet['components'][:2]
+                comp_str = ", ".join([f"{c['name']} ({c['roi']:.0f}% ROI)" for c in top_comps])
+                message += f"🎯 {comp_str}\n"
+            
+            message += "\n"
+        
+        message += "⚠️ Gamble Responsibly | 1800 858 858"
+        
+        # Send via Telegram Bot API directly
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            'chat_id': TELEGRAM_CHANNEL,
+            'text': message,
+            'parse_mode': 'Markdown'
+        }
+        
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            print(f"✓ Posted {len(best_bets)} tips for {meeting_name} to Telegram")
+            return True
+        else:
+            print(f"✗ Telegram API error: {response.status_code} - {response.text}")
+            return False
+        
+    except Exception as e:
+        print(f"✗ Telegram posting error: {e}")
+        return False
 
 def process_and_store_results(csv_data, filename, track_condition, user_id, is_advanced=False):
     """
