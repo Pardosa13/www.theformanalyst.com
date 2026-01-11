@@ -472,18 +472,17 @@ def parse_notes_components(notes):
        # ====== RACE-DAY SECTIONAL BONUSES ======
         # Base Race-Day Bonuses
         (r'\+\s*12\.0\s*:\s*Fastest sectional in race.*', 'Race-Day - Fastest in Race'),
-        (r'\+\s*20\.0\s*:\s*Sprint \+ Fastest sectional.*', 'Race-Day - Sprint + Fastest'),
+        (r'\+\s*20\.0\s*:\s*Sprint\s*\+\s*Fastest sectional.*', 'Race-Day - Sprint + Fastest'),
         (r'\+\s*18\.0\s*:\s*Mile\s*\+\s*Fastest sectional.*', 'Race-Day - Mile + Fastest'),
         (r'-\s*8\.0\s*:\s*Long distance.*negates sectional.*', 'Race-Day - Long Distance Penalty'),
         # Weight Advantage + Fast Sectional
-        (r'\+\s*50\.0\s*:\s*Big weight advantage \(3kg\+\) \+ Fastest.*', 'Race-Day - Big Weight Adv + Fastest'),
-         # MEGA COMBOS
-        (r'\+\s*30\.0\s*:\s*🔥🔥🔥 MEGA COMBO: 4yo \+ Soft \+ Fastest \+ Weight adv.*', 'MEGA - 4yo+Soft+Fast+Weight'),
-        (r'\+\s*24\.0\s*:\s*🔥🔥 Sprint \+ Weight adv \+ Fastest.*', 'MEGA - Sprint+Weight+Fastest'),
-        (r'\+\s*16\.0\s*:\s*🔥 Mile \+ Weight adv \+ Fastest.*', 'MEGA - Mile+Weight+Fastest'),
-        (r'\+\s*12\.0\s*:\s*4yo Mare \+ Top 20% sectional.*', 'MEGA - 4yo Mare + Top 20%'),
-        ]  # ← Closes patterns list
-    
+        (r'\+\s*50\.0\s*:\s*Big weight advantage \(3kg\+\)\s*\+\s*Fastest.*', 'Race-Day - Big Weight Adv + Fastest'),
+        # MEGA COMBOS
+        (r'\+\s*30\.0\s*:\s*🔥🔥🔥 MEGA COMBO: 4yo\s*\+\s*Soft\s*\+\s*Fastest\s*\+\s*Weight adv.*', 'MEGA - 4yo+Soft+Fast+Weight'),
+        (r'\+\s*24\.0\s*:\s*🔥🔥 Sprint\s*\+\s*Weight adv\s*\+\s*Fastest.*', 'MEGA - Sprint+Weight+Fastest'),
+        (r'\+\s*16\.0\s*:\s*🔥 Mile\s*\+\s*Weight adv\s*\+\s*Fastest.*', 'MEGA - Mile+Weight+Fastest'),
+        (r'\+\s*12\.0\s*:\s*4yo Mare\s*\+\s*Top 20% sectional.*', 'MEGA - 4yo Mare + Top 20%'),
+        ]
     for pattern, name in patterns:
         match = re.search(pattern, notes, re.IGNORECASE)
         if match:
