@@ -187,7 +187,7 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
             
             message += "\n"
         
-        message += "⚠️ Gamble Responsibly | 1800 858 858"
+        message += "⚠️ Think. Is this a bet you really want to place? Gamble Responsibly | 1800 858 858"
         
         # Send via Telegram Bot API directly
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
