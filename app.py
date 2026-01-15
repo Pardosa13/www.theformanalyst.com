@@ -241,15 +241,26 @@ def post_best_bets_to_twitter(best_bets, meeting_name):
     """
     Post best bets to Twitter/X
     """
-    if not best_bets or not twitter_client:
-        if not best_bets:
-            logger.warning("No bets to post to Twitter")
-        if not twitter_client:
-            logger.warning("Twitter client not initialized - skipping Twitter post")
+    logger.info("=" * 50)
+    logger.info("TWITTER POSTING ATTEMPT STARTING")
+    logger.info(f"Number of bets: {len(best_bets) if best_bets else 0}")
+    logger.info(f"Meeting: {meeting_name}")
+    logger.info(f"Twitter client exists: {twitter_client is not None}")
+    
+    if not best_bets:
+        logger.warning("✗ No bets to post to Twitter")
+        return False
+        
+    if not twitter_client:
+        logger.error("✗ Twitter client not initialized - skipping Twitter post")
+        logger.error(f"Twitter API Key set: {bool(TWITTER_API_KEY)}")
+        logger.error(f"Twitter API Secret set: {bool(TWITTER_API_SECRET)}")
+        logger.error(f"Twitter Access Token set: {bool(TWITTER_ACCESS_TOKEN)}")
+        logger.error(f"Twitter Access Token Secret set: {bool(TWITTER_ACCESS_TOKEN_SECRET)}")
         return False
     
     try:
-        logger.info(f"Attempting to post {len(best_bets)} bets for {meeting_name} to Twitter")
+        logger.info(f"Building Twitter message for {len(best_bets)} bets...")
         
         # Build message (Twitter has 280 char limit)
         message = f"🏇 {meeting_name.upper()}\n\n"
@@ -260,23 +271,36 @@ def post_best_bets_to_twitter(best_bets, meeting_name):
         
         message += f"\n📊 theformanalyst.com"
         
+        logger.info(f"Message built. Length: {len(message)} chars")
+        logger.info(f"Message preview: {message[:100]}...")
+        
         # Check length (Twitter limit is 280 chars)
         if len(message) > 280:
-            # Truncate if too long
+            logger.warning(f"Message too long ({len(message)} chars), truncating...")
             message = message[:277] + "..."
         
         # Post to Twitter
+        logger.info("Calling twitter_client.create_tweet()...")
         response = twitter_client.create_tweet(text=message)
+        logger.info(f"Twitter API response received: {response}")
         
         if response.data:
-            logger.info(f"✓ Successfully posted {len(best_bets)} tips for {meeting_name} to Twitter")
+            tweet_id = response.data.get('id', 'unknown')
+            logger.info(f"✓ Successfully posted to Twitter! Tweet ID: {tweet_id}")
+            logger.info(f"✓ Posted {len(best_bets)} tips for {meeting_name} to Twitter")
+            logger.info("=" * 50)
             return True
         else:
             logger.error(f"✗ Twitter posting failed - no response data")
+            logger.error(f"Full response: {response}")
+            logger.info("=" * 50)
             return False
         
     except Exception as e:
-        logger.error(f"✗ Twitter posting exception: {str(e)}", exc_info=True)
+        logger.error(f"✗ Twitter posting EXCEPTION occurred!")
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Exception message: {str(e)}", exc_info=True)
+        logger.info("=" * 50)
         return False
 
 def process_and_store_results(csv_data, filename, track_condition, user_id, is_advanced=False):
