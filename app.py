@@ -262,14 +262,15 @@ def post_best_bets_to_twitter(best_bets, meeting_name):
     try:
         logger.info(f"Building Twitter message for {len(best_bets)} bets...")
         
-        # Build message (Twitter has 280 char limit)
-        message = f"🏇 {meeting_name.upper()}\n\n"
+        # Build message - clean and concise format
+        message = "BET ALERT:\n\n"
+        message += f"🏇 {meeting_name.upper()}\n\n"
         
         for bet in best_bets:
-            # Shorter format for Twitter
-            message += f"R{bet['race_number']}: {bet['horse_name']} ({bet['score']:.0f}pts)\n"
+            message += f"R{bet['race_number']}: {bet['horse_name']}\n"
+            message += f"💰 Predicted Price: {bet['predicted_odds']}\n\n"
         
-        message += f"\n📊 theformanalyst.com"
+        message += "⚠️ Think. Is this a bet you really want to place? Gamble Responsibly | 1800 858 858"
         
         logger.info(f"Message built. Length: {len(message)} chars")
         logger.info(f"Message preview: {message[:100]}...")
@@ -302,7 +303,6 @@ def post_best_bets_to_twitter(best_bets, meeting_name):
         logger.error(f"Exception message: {str(e)}", exc_info=True)
         logger.info("=" * 50)
         return False
-
 def process_and_store_results(csv_data, filename, track_condition, user_id, is_advanced=False):
     """
     Process CSV through analyzer and store results in database
