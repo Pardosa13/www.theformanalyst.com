@@ -8,6 +8,7 @@ from flask_login import LoginManager, login_user, login_required, logout_user, c
 from werkzeug.security import generate_password_hash
 from datetime import datetime
 import requests
+import tweepy
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result
 
@@ -35,6 +36,27 @@ if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
 # Telegram Bot Configuration
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8533463194:AAGHWamzq_Atz9cxjejKsm-hQlzwpYPSBh0')
 TELEGRAM_CHANNEL = os.environ.get('TELEGRAM_CHANNEL', '-1003602052698')
+
+# Twitter API Configuration
+TWITTER_API_KEY = os.environ.get('TWITTER_API_KEY')
+TWITTER_API_SECRET = os.environ.get('TWITTER_API_SECRET')
+TWITTER_ACCESS_TOKEN = os.environ.get('TWITTER_ACCESS_TOKEN')
+TWITTER_ACCESS_TOKEN_SECRET = os.environ.get('TWITTER_ACCESS_TOKEN_SECRET')
+
+# Initialize Twitter client
+twitter_client = None
+if all([TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET]):
+    try:
+        twitter_client = tweepy.Client(
+            consumer_key=TWITTER_API_KEY,
+            consumer_secret=TWITTER_API_SECRET,
+            access_token=TWITTER_ACCESS_TOKEN,
+            access_token_secret=TWITTER_ACCESS_TOKEN_SECRET
+        )
+        print("✓ Twitter client initialized successfully")
+    except Exception as e:
+        print(f"✗ Failed to initialize Twitter client: {e}")
+        twitter_client = None
 
 # Initialize extensions
 db.init_app(app)
@@ -202,6 +224,10 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
         
         if response.status_code == 200:
             logger.info(f"✓ Successfully posted {len(best_bets)} tips for {meeting_name} to Telegram")
+            
+            # ALSO POST TO TWITTER
+            post_best_bets_to_twitter(best_bets, meeting_name)
+            
             return True
         else:
             logger.error(f"✗ Telegram API error: {response.status_code} - {response.text}")
@@ -209,6 +235,48 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
         
     except Exception as e:
         logger.error(f"✗ Telegram posting exception: {str(e)}", exc_info=True)
+        return False
+
+def post_best_bets_to_twitter(best_bets, meeting_name):
+    """
+    Post best bets to Twitter/X
+    """
+    if not best_bets or not twitter_client:
+        if not best_bets:
+            logger.warning("No bets to post to Twitter")
+        if not twitter_client:
+            logger.warning("Twitter client not initialized - skipping Twitter post")
+        return False
+    
+    try:
+        logger.info(f"Attempting to post {len(best_bets)} bets for {meeting_name} to Twitter")
+        
+        # Build message (Twitter has 280 char limit)
+        message = f"🏇 {meeting_name.upper()}\n\n"
+        
+        for bet in best_bets:
+            # Shorter format for Twitter
+            message += f"R{bet['race_number']}: {bet['horse_name']} ({bet['score']:.0f}pts)\n"
+        
+        message += f"\n📊 theformanalyst.com"
+        
+        # Check length (Twitter limit is 280 chars)
+        if len(message) > 280:
+            # Truncate if too long
+            message = message[:277] + "..."
+        
+        # Post to Twitter
+        response = twitter_client.create_tweet(text=message)
+        
+        if response.data:
+            logger.info(f"✓ Successfully posted {len(best_bets)} tips for {meeting_name} to Twitter")
+            return True
+        else:
+            logger.error(f"✗ Twitter posting failed - no response data")
+            return False
+        
+    except Exception as e:
+        logger.error(f"✗ Twitter posting exception: {str(e)}", exc_info=True)
         return False
 
 def process_and_store_results(csv_data, filename, track_condition, user_id, is_advanced=False):
