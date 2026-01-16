@@ -2173,6 +2173,10 @@ def api_price_analysis():
 @login_required
 def export_ml_data():
     """Export all race data with parsed scoring components AND raw CSV data for ML analysis"""
+    # Add admin check at the very top
+    if not current_user.is_admin:
+        flash('Access denied. Admin privileges required to download ML training data.', 'error')
+        return redirect(url_for('analytics'))
     import csv
     from io import StringIO
     from flask import make_response
