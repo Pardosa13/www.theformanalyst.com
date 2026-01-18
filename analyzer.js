@@ -2453,6 +2453,45 @@ Object.keys(horseData).forEach(hn => {
         horseScores[hn].note += penaltyNote;
     }
 });
+// Convert to results with compatibility fields
+        Object.keys(horseScores).forEach(hn => {
+          const finalScore = Math.round(horseScores[hn].score * 10) / 10;  // Allow negative scores
+            results.push({
+                race: raceNum,
+                name: hn,
+                sectionalScore: finalScore,
+                sectionalNote: horseScores[hn].note.trim(),
+                sectionalDetails: horseScores[hn].details,
+                dataSufficiency: horseScores[hn].dataSufficiency,
+                hasAverage1st: false,
+                hasLastStart1st: false
+            });
+        });
+    });
+
+    // Mark winners per race (combo flags)
+    const raceGroupsForCombo = results.reduce((acc, r) => {
+        acc[r.race] = acc[r.race] || [];
+        acc[r.race].push(r);
+        return acc;
+    }, {});
+    Object.values(raceGroupsForCombo).forEach(raceHorses => {
+        let bestWeightedAvg = null, bestWeightedAvgScore = -Infinity;
+        let bestRecent = null, bestRecentScore = -Infinity;
+        raceHorses.forEach(h => {
+            const w = h.sectionalDetails?.weightedAvg || 0;
+            if (w > bestWeightedAvgScore) { bestWeightedAvgScore = w; bestWeightedAvg = h.name; }
+            const rscore = h.sectionalDetails?.bestRecent || 0;
+            if (rscore > bestRecentScore) { bestRecentScore = rscore; bestRecent = h.name; }
+        });
+        raceHorses.forEach(h => {
+            if (h.name === bestWeightedAvg) h.hasAverage1st = true;
+            if (h.name === bestRecent) h.hasLastStart1st = true;
+        });
+    });
+
+    return results;
+}
 
 // Calculate weight-based scores relative to race average
 function calculateWeightScores(data) {
