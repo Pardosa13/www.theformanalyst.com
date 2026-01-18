@@ -385,8 +385,8 @@ if (!isNaN(horseAge)) {
         score += 3;
         notes += '+ 3.0 : Good age (4yo)\n';
     } else if (horseAge >= 7) {
-        score -= 10;
-        notes += '-10.0 : Old age (7+, 0% SR in data)\n';
+        score -= 20;  // CHANGED from -10
+        notes += '-20.0 : Old age (7+, 4.5% SR, -40.2% ROI)\n';
     }
 }
     // SIRE BONUSES/PENALTIES - UPDATED 2025-01-06
@@ -1349,27 +1349,25 @@ function checkDaysSinceLastRun(meetingDate, formMeetingDate) {
         addScore = -30;
         note += `-30.0 : Too fresh - ${daysSinceLastRun} days since last run (over 1 year!)\n`;
     } else if (daysSinceLastRun >= 250) {
-        // 250+ days - very big penalty
-        addScore = -25;
-        note += `-25.0 : Too fresh - ${daysSinceLastRun} days since last run\n`;
+        // 250+ days - MASSIVE penalty
+        addScore = -30;  // WAS -25
+        note += `-30.0 : Too fresh - ${daysSinceLastRun} days since last run (250+ days)\n`;
     } else if (daysSinceLastRun >= 200) {
-        // 200+ days - big penalty
-        addScore = -20;
-        note += `-20.0 : Too fresh - ${daysSinceLastRun} days since last run\n`;
+        // 200+ days - very big penalty
+        addScore = -25;  // WAS -20
+        note += `-25.0 : Too fresh - ${daysSinceLastRun} days since last run\n`;
     } else if (daysSinceLastRun >= 150) {
         // 150+ days - significant penalty
-        addScore = -15;
-        note += `-15.0 : Too fresh - ${daysSinceLastRun} days since last run\n`;
+        addScore = -20;  // WAS -15
+        note += `-20.0 : Too fresh - ${daysSinceLastRun} days since last run\n`;
     } else if (daysSinceLastRun <= 7) {
         // 7 days or less - quick backup, BIG bonus (strongly outperforms market)
         addScore = 15;
         note += `+15.0 : Quick backup - only ${daysSinceLastRun} days since last run (market underrates!)\n`;
     }
     // 8-149 days is the sweet spot - no penalty or bonus
-
     return [addScore, note];
 }
-
 function checkMargin(formPosition, formMargin, classChange = 0, recentForm = null) {
     let addScore = 0;
     let note = '';
@@ -1449,14 +1447,9 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
                 note += `- 7.0 : Well beaten (${position}th) by ${margin.toFixed(1)}L\n`;
             }
         } else {
-            // Demolished horses with major class drops
-            if (classChange < -30) {
-                addScore = 10;
-                note += `+10.0 : Demolished (${position}th) by ${margin.toFixed(1)}L BUT MAJOR class drop (elite to easier)\n`;
-            } else {
-                addScore = -15;
-                note += `-15.0 : Demolished (${position}th) by ${margin.toFixed(1)}L - not competitive\n`;
-            }
+            // Demolished horses - this pattern loses money even with class drops
+            addScore = -25;  // WAS -15, REMOVED the class drop bonus
+            note += `-25.0 : Demolished (${position}th) by ${margin.toFixed(1)}L - very poor form\n`;
         }
     }
     
@@ -2541,225 +2534,6 @@ Object.keys(horseData).forEach(hn => {
         horseScores[hn].note += penaltyNote;
     }
 });
-
-        // ============================================
-        // NEW: RACE-DAY SECTIONAL BONUSES
-        // ============================================
-        
-        // Extract today's actual sectional times for ranking
-        const todaySectionals = [];
-        parsedData.forEach(entry => {
-            const horseName = entry['horse name'];
-            const time = entry.time;
-            if (time > 0 && horseScores[horseName]) {
-                todaySectionals.push({
-                    name: horseName,
-                    time: time,
-                    rawEntry: entry
-                });
-            }
-        });
-
-        // Sort by time (fastest first) and assign ranks
-        todaySectionals.sort((a, b) => a.time - b.time);
-        
-        todaySectionals.forEach((horse, index) => {
-            const rank = index + 1;
-            const horseName = horse.name;
-            const entry = horse.rawEntry;
-            
-            // Store rank for later use
-            horseScores[horseName].raceDayRank = rank;
-            horseScores[horseName].raceDayTime = horse.time;
-            
-            let raceDayBonus = 0;
-            let raceDayNote = '';
-            
-            // BASE RANK BONUS
-            if (rank === 1) {
-                raceDayBonus += 12;
-                raceDayNote += '+12.0: Fastest sectional in race (11.6% SR, +17.6% lift)\n';
-            }
-            
-            // DISTANCE CATEGORY BONUSES (only for fastest)
-            if (rank === 1) {
-                if (todaysRaceDistance <= 1200) {
-                    raceDayBonus += 20;
-                    raceDayNote += '+20.0: Sprint + Fastest sectional (13.7% SR, +39% lift)\n';
-                } else if (todaysRaceDistance > 1400 && todaysRaceDistance <= 1600) {
-                    raceDayBonus += 18;
-                    raceDayNote += '+18.0: Mile + Fastest sectional (13.3% SR, +34% lift)\n';
-                } else if (todaysRaceDistance > 2000) {
-                    raceDayBonus -= 8;
-                    raceDayNote += '-8.0: Long distance (2000m+) negates sectional advantage\n';
-                }
-            }
-            
-            // ============================================
-            // WEIGHT ADVANTAGE BONUSES (fastest only)
-            // ============================================
-            if (rank === 1) {
-                // Need to calculate weight vs average for this race
-                const raceWeights = parsedData
-                    .map(e => parseFloat(e['horse weight']))
-                    .filter(w => !isNaN(w) && w >= 49 && w <= 65);
-                
-                if (raceWeights.length > 0) {
-                    const avgWeight = raceWeights.reduce((sum, w) => sum + w, 0) / raceWeights.length;
-                    const horseWeight = parseFloat(entry['horse weight']);
-                    
-                    if (!isNaN(horseWeight)) {
-                        const weightAdvantage = avgWeight - horseWeight;
-                        
-                        if (weightAdvantage >= 3) {
-                            raceDayBonus += 20;
-                            raceDayNote += '+20.0: Big weight advantage (3kg+) + Fastest (20% SR, +102% lift!)\n';
-                        } else if (weightAdvantage >= 1) {
-                            raceDayBonus += 10;
-                            raceDayNote += '+10.0: Weight advantage (1-3kg) + Fastest\n';
-                        }
-                    }
-                }
-            }
-            
-            // ============================================
-            // AGE BONUSES (top 20% sectional = rank 1-5 in typical race)
-            // ============================================
-            const isTop20Percent = rank <= Math.max(1, Math.ceil(todaySectionals.length * 0.2));
-            
-            if (isTop20Percent) {
-                const horseAge = parseInt(entry['horse age']);
-                
-                if (horseAge === 4) {
-                    raceDayBonus += 9;
-                    raceDayNote += '+9.0: 4yo + Top 20% sectional (13.5% SR, +36.7% lift)\n';
-                }
-            }
-            
-            // ============================================
-            // SEX BONUSES (top 20% sectional)
-            // ============================================
-            if (isTop20Percent) {
-                const horseSex = String(entry['horse sex'] || '').trim();
-                
-                if (horseSex === 'Mare') {
-                    raceDayBonus += 7;
-                    raceDayNote += '+7.0: Mare + Top 20% sectional (11.8% SR, +19.8% lift)\n';
-                }
-            }
-            
-            // ============================================
-// TRACK CONDITION BONUSES (fastest only)
-// ============================================
-if (rank === 1) {
-    const trackCondition = String(entry['track_condition'] || entry['track condition'] || '').toLowerCase();
-    
-    if (trackCondition === 'soft') {
-        raceDayBonus += 10;
-        raceDayNote += '+10.0: Soft track + Fastest (12.4% SR, +25.1% lift)\n';
-    }
-}
-            // ============================================
-// MEGA COMBINATION BONUSES
-// ============================================
-if (rank === 1) {
-    const horseAge = parseInt(entry['horse age']);
-    const horseSex = String(entry['horse sex'] || '').trim();
-    const trackCondition = String(entry['track_condition'] || entry['track condition'] || '').toLowerCase();
-    
-    // Calculate weight advantage again for combos
-    const raceWeights = parsedData
-        .map(e => parseFloat(e['horse weight']))
-        .filter(w => !isNaN(w) && w >= 49 && w <= 65);
-    
-    let weightAdvantage = 0;
-    if (raceWeights.length > 0) {
-        const avgWeight = raceWeights.reduce((sum, w) => sum + w, 0) / raceWeights.length;
-        const horseWeight = parseFloat(entry['horse weight']);
-        if (!isNaN(horseWeight)) {
-            weightAdvantage = avgWeight - horseWeight;
-        }
-    }
-    
-    // BIG WEIGHT ADVANTAGE + FASTEST (standalone bonus)
-    if (weightAdvantage >= 3) {
-        raceDayBonus += 50;
-        raceDayNote += '+50.0: Big weight advantage (3kg+) + Fastest sectional\n';
-    }
-                
-                // 4yo + Soft + Fastest + Weight advantage = 50% SR!
-                if (horseAge === 4 && trackCondition === 'soft' && weightAdvantage >= 1) {
-                    raceDayBonus += 30;
-                    raceDayNote += '+30.0: 🔥🔥🔥 MEGA COMBO: 4yo + Soft + Fastest + Weight adv (50% SR, +405% lift!)\n';
-                }
-                
-                // Sprint + Weight advantage + Fastest = 41.7% SR!
-                else if (todaysRaceDistance <= 1200 && weightAdvantage >= 1) {
-                    raceDayBonus += 24;
-                    raceDayNote += '+24.0: 🔥🔥 Sprint + Weight adv + Fastest (41.7% SR, +321% lift!)\n';
-                }
-                
-                // Mile + Weight advantage + Fastest = 18.8% SR
-                else if (todaysRaceDistance > 1400 && todaysRaceDistance <= 1600 && weightAdvantage >= 1) {
-                    raceDayBonus += 16;
-                    raceDayNote += '+16.0: 🔥 Mile + Weight adv + Fastest (18.8% SR, +89% lift)\n';
-                }
-                
-                // 4yo + Mare + Top 20% = 15.4% SR
-                if (horseAge === 4 && horseSex === 'Mare' && isTop20Percent) {
-                    raceDayBonus += 12;
-                    raceDayNote += '+12.0: 4yo Mare + Top 20% sectional (15.4% SR, +55.7% lift)\n';
-                }
-            }
-            
-            // Add race-day bonus to score
-            horseScores[horseName].score += raceDayBonus;
-            if (raceDayNote) {
-                if (!horseScores[horseName].note.includes('--- RACE-DAY SECTIONAL BONUSES ---')) {
-                    horseScores[horseName].note += '\n--- RACE-DAY SECTIONAL BONUSES ---\n' + raceDayNote;
-                }
-            }
-        });
-
-        // Convert to results with compatibility fields
-        Object.keys(horseScores).forEach(hn => {
-          const finalScore = Math.round(horseScores[hn].score * 10) / 10;  // Allow negative scores
-            results.push({
-                race: raceNum,
-                name: hn,
-                sectionalScore: finalScore,
-                sectionalNote: horseScores[hn].note.trim(),
-                sectionalDetails: horseScores[hn].details,
-                dataSufficiency: horseScores[hn].dataSufficiency,
-                hasAverage1st: false,
-                hasLastStart1st: false
-            });
-        });
-    });
-
-    // Mark winners per race (combo flags)
-    const raceGroupsForCombo = results.reduce((acc, r) => {
-        acc[r.race] = acc[r.race] || [];
-        acc[r.race].push(r);
-        return acc;
-    }, {});
-    Object.values(raceGroupsForCombo).forEach(raceHorses => {
-        let bestWeightedAvg = null, bestWeightedAvgScore = -Infinity;
-        let bestRecent = null, bestRecentScore = -Infinity;
-        raceHorses.forEach(h => {
-            const w = h.sectionalDetails?.weightedAvg || 0;
-            if (w > bestWeightedAvgScore) { bestWeightedAvgScore = w; bestWeightedAvg = h.name; }
-            const rscore = h.sectionalDetails?.bestRecent || 0;
-            if (rscore > bestRecentScore) { bestRecentScore = rscore; bestRecent = h.name; }
-        });
-        raceHorses.forEach(h => {
-            if (h.name === bestWeightedAvg) h.hasAverage1st = true;
-            if (h.name === bestRecent) h.hasLastStart1st = true;
-        });
-    });
-
-    return results;
-}
 
 // Calculate weight-based scores relative to race average
 function calculateWeightScores(data) {
