@@ -637,7 +637,65 @@ if (data.trainers_reliable && Object.keys(data.trainers_reliable).length > 0) {
     html += '</tbody></table></div>';
 }
 html += '</div>';
+    // Sires
+if (data.sires_reliable && Object.keys(data.sires_reliable).length > 0) {
+    html += '<div class="mb-5"><h5>🐴 Sires (30+ Appearances)</h5>';
+    html += '<p class="text-muted small">Performance of horses by their sire (minimum 30 runners).</p>';
+    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+    html += '<th>Sire</th><th class="text-center">Runners</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
     
+    // Sort by ROI descending
+    const siresSorted = Object.entries(data.sires_reliable).sort((a, b) => b[1].roi - a[1].roi);
+    
+    for (const [name, stats] of siresSorted) {
+        let strikeClass = '';
+        if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
+        else if (stats.strike_rate >= 12) strikeClass = 'text-success';
+        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
+        
+        html += `<tr>
+            <td><strong>${name}</strong></td>
+            <td class="text-center">${stats.runs}</td>
+            <td class="text-center">${stats.wins}</td>
+            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
+            <td class="text-center">${stats.places}</td>
+            <td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
+            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div></div>';
+}
+
+// Dams
+if (data.dams_reliable && Object.keys(data.dams_reliable).length > 0) {
+    html += '<div class="mb-5"><h5>🐎 Dams (30+ Appearances)</h5>';
+    html += '<p class="text-muted small">Performance of horses by their dam (minimum 30 runners).</p>';
+    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+    html += '<th>Dam</th><th class="text-center">Runners</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
+    
+    // Sort by ROI descending
+    const damsSorted = Object.entries(data.dams_reliable).sort((a, b) => b[1].roi - a[1].roi);
+    
+    for (const [name, stats] of damsSorted) {
+        let strikeClass = '';
+        if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
+        else if (stats.strike_rate >= 12) strikeClass = 'text-success';
+        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
+        
+        html += `<tr>
+            <td><strong>${name}</strong></td>
+            <td class="text-center">${stats.runs}</td>
+            <td class="text-center">${stats.wins}</td>
+            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
+            <td class="text-center">${stats.places}</td>
+            <td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
+            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div></div>';
+}
     // Race Classes
 if (data.class_performance && Object.keys(data.class_performance).length > 0) {
     html += '<div class="mb-4"><h5>🏆 Race Classes</h5>';
