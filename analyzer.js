@@ -332,11 +332,9 @@ if (!isNaN(horseAge)) {
     // SIRE BONUSES/PENALTIES - UPDATED 2025-01-06
 const sire = String(horseRow['horse sire'] || '').trim();
 const eliteSires = {
-    'Trapeze Artist': 10,
-    'Zoustar': 8,
+    'Trapeze Artist': 20,
     'I Am Invincible': 8,
-    'Pierata': 5,
-    'All Too Hard': 5,
+    'Pierata': 15,
     'Snitzel': 5,
     'Written Tycoon': 5,
     'Not A Single Doubt': 5
