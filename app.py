@@ -781,6 +781,64 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
             if placed:
                 trainers[trainer]['places'] += 1
             trainers[trainer]['profit'] += profit
+
+    # Sires Analysis (30+ appearances)
+    sire_stats = {}
+    for entry in all_results_data:
+        horse = entry['horse']
+        result = entry['result']
+        
+        if not result:
+            continue
+        
+        won = result.finish_position == 1
+        placed = result.finish_position in [1, 2, 3]
+        sp = result.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        
+        # Get CSV data
+        csv_data = horse.csv_data or {}
+        
+        # Sire
+        sire = csv_data.get('horse sire', '').strip()
+        if sire:
+            if sire not in sire_stats:
+                sire_stats[sire] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
+            sire_stats[sire]['runs'] += 1
+            if won:
+                sire_stats[sire]['wins'] += 1
+            if placed:
+                sire_stats[sire]['places'] += 1
+            sire_stats[sire]['profit'] += profit
+
+    # Dams Analysis (30+ appearances)
+    dam_stats = {}
+    for entry in all_results_data:
+        horse = entry['horse']
+        result = entry['result']
+        
+        if not result:
+            continue
+        
+        won = result.finish_position == 1
+        placed = result.finish_position in [1, 2, 3]
+        sp = result.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        
+        # Get CSV data
+        csv_data = horse.csv_data or {}
+        
+        # Dam
+        dam = csv_data.get('horse dam', '').strip()
+        if dam:
+            if dam not in dam_stats:
+                dam_stats[dam] = {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0}
+            dam_stats[dam]['runs'] += 1
+            if won:
+                dam_stats[dam]['wins'] += 1
+            if placed:
+                dam_stats[dam]['places'] += 1
+            dam_stats[dam]['profit'] += profit
     
     # Process barriers, distances, track conditions, and tracks (TOP PICKS ONLY - by race)
     for race_key, horses in races_data.items():
@@ -910,6 +968,14 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
     # Sort by ROI
     trainers_reliable = dict(sorted(trainers_reliable.items(), key=lambda x: x[1]['roi'], reverse=True))
     trainers_limited = dict(sorted(trainers_limited.items(), key=lambda x: x[1]['roi'], reverse=True))
+
+    # Filter and sort sires (30+ runs only)
+    sires_reliable = {k: v for k, v in sire_stats.items() if v['runs'] >= 30}
+    sires_reliable = dict(sorted(sires_reliable.items(), key=lambda x: x[1]['roi'], reverse=True))
+    
+    # Filter and sort dams (30+ runs only)
+    dams_reliable = {k: v for k, v in dam_stats.items() if v['runs'] >= 30}
+    dams_reliable = dict(sorted(dams_reliable.items(), key=lambda x: x[1]['roi'], reverse=True))
     
     # Filter tracks with 2+ races
     tracks = {k: v for k, v in tracks.items() if v['runs'] >= 2}
@@ -920,6 +986,8 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
         'jockeys_limited': jockeys_limited,
         'trainers_reliable': trainers_reliable,
         'trainers_limited': trainers_limited,
+        'sires_reliable': sires_reliable,
+        'dams_reliable': dams_reliable,
         'barriers': barriers,
         'distances': distances,
         'tracks': tracks,
@@ -2031,6 +2099,8 @@ def api_external_factors():
         'jockeys_limited': external_factors['jockeys_limited'],
         'trainers_reliable': external_factors['trainers_reliable'],
         'trainers_limited': external_factors['trainers_limited'],
+        'sires_reliable': external_factors['sires_reliable'],
+        'dams_reliable': external_factors['dams_reliable'],
         'barriers': external_factors['barriers'],
         'distances': external_factors['distances'],
         'tracks': external_factors['tracks'],
