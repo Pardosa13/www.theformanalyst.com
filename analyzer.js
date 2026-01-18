@@ -5,7 +5,6 @@ const jockeyMapping = {
     "W Pike": "William Pike",
     "N Rawiller": "Nash Rawiller",
     "J Parr": "Josh Parr",
-    "J Part": "Josh Parr",
     "J R Collett": "Jason Collett",
     "M Zahra": "Mark Zahra",
     "B Shinn": "Blake Shinn",
@@ -19,6 +18,45 @@ const jockeyMapping = {
     "J Ford": "Jay Ford",
     "R King": "Rachel King",
     "H Bowman": "Hugh Bowman",
+    "K Mc Evoy": "Kerrin McEvoy",
+    "A Livesey": "Alana Livesey",
+    "T Clark": "Tim Clark",
+    "L Cartwright": "Luke Cartwright",
+    "T Schiller": "Tyler Schiller",
+    "A Warren": "Alysha Warren",
+    "C Tootell": "Caitlin Tootell",
+    "B Thompson": "Ben Thompson",
+    "Z Lloyd": "Zac Lloyd",
+    "J McNeil": "Jye McNeil",
+    "R Maloney": "Ryan Maloney",
+    "J Childs": "Jordan Childs",
+    "H Nottle": "Holly Nottle",
+    "D Gibbons": "Dylan Gibbons",
+    "J Radley": "Jackson Radley",
+    "L Neindorf": "Lachlan Neindorf",
+    "J Allen": "John Allen",
+    "L Bates": "Logan Bates",
+    "C Sutherland": "Corey Sutherland",
+    "T Nugent": "Teodore Nugent",
+    "B Allen": "Ben Allen",
+    "R Houston": "Ryan Houston",
+    "K Wilson-Taylor": "Kyle Wilson-Taylor",
+    "E Pozman": "Emily Pozman",
+    "A Roper": "Anna Roper",
+    "T Stockdale": "Thomas Stockdale",
+    "C Parnham": "Chris Parnham",
+    "R Bayliss": "Regan Bayliss",
+    "A Morgan": "Ashley Morgan",
+    "S Grima": "Siena Grima",
+    "C Graham": "Cejay Graham",
+    "T Sherry": "Tom Sherry",
+    "C Hefel": "Carleen Hefel",
+    "K Crowther": "Kayla Crowther",
+    "D Thornton": "Damien Thornton",
+    "B Mertens": "Beau Mertens",
+    "H Watson": "Holly Watson",
+    "W Stanley": "William Stanley",
+    "R Jones": "Reece Jones",
 };
 
 // Mapping of equivalent trainer names
@@ -31,12 +69,34 @@ const trainerMapping = {
     'P Stokes': 'Phillip Stokes',
     'M M Laurie': 'Matthew Laurie',
     'K Lees': 'Kris Lees',
+    'K A Lees': 'Kris Lees',
     'J Cummings': 'James Cummings',
     'J Pride': 'Joseph Pride',
     'J O\'Shea': 'John O\'Shea',
-    'P Moody': 'Peter Moody'
+    'P Moody': 'Peter Moody',
+    'R D Griffiths': 'R D Griffiths',
+    'T Busuttin & N Young': 'T Busuttin & N Young',
+    'S W Kendrick': 'S W Kendrick',
+    'T & C McEvoy': 'T & C McEvoy',
+    'A & S Freedman': 'A & S Freedman',
+    'R L Heathcote': 'R L Heathcote',
+    'D T O\'Brien': 'D T O\'Brien',
+    'Annabel & Rob Archibald': 'Annabel & Rob Archibald',
+    'Matthew Smith': 'Matthew Smith',
+    'Gavin Bedggood': 'Gavin Bedggood',
+    'Chris & Corey Munce': 'Chris & Corey Munce',
+    'P G Moody & Katherine Coleman': 'P G Moody & Katherine Coleman',
+    'T J Gollan': 'T J Gollan',
+    'Ben Brisbourne': 'Ben Brisbourne',
+    'G Ryan & S Alexiou': 'G Ryan & S Alexiou',
+    'Peter Snowden': 'Peter Snowden',
+    'P Snowden': 'Peter Snowden',
+    'M Price & M Kent Jnr': 'M Price & M Kent Jnr',
+    'Bjorn Baker': 'Bjorn Baker',
+    'B Baker': 'Bjorn Baker',
+    'Patrick & Michelle Payne': 'Patrick & Michelle Payne',
+    'N D Parnham': 'N D Parnham',
 };
-
 function convertCSV(data) {
     // Normalize line endings (convert CRLF and CR to LF)
     data = data.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -560,41 +620,60 @@ function normalizeTrainerName(trainerName) {
 }
 
 function checkTrainers(trainerName) {
-    // Function for checking trainer name against lists
     var addScore = 0;
     var note = '';
     
     // Check for known spelling/name changes
     trainerName = normalizeTrainerName(trainerName);
     
-    const eightPointTrainers = [
-        'Gai Waterhouse & Adrian Bott',
-        'Kris Lees',
-        'James Cummings'
+    // TIER 1: Strong Profitable (ROI +10% to +80%)
+    const strongTrainers = [
+        'C Maher',                        // 12.8% SR, +76.1% ROI (Ciaron Maher)
+        'R D Griffiths',                  // 10.0% SR, +38.5% ROI
+        'T Busuttin & N Young',           // 17.1% SR, +15.0% ROI
+        'G Waterhouse & A Bott',          // 21.7% SR, +13.3% ROI
+        'S W Kendrick',                   // 9.5% SR, +12.6% ROI
     ];
     
-    const fivePointTrainers = [
-        'Ciaron Maher',
-        'Chris Waller',
-        'Ben, Will & J.D. Hayes',
-        'Annabel & Rob Archibald',
-        'Bjorn Baker',
-        'Grahame Begg',
-        'Matthew Laurie',
-        'Phillip Stokes',
-        'Joseph Pride',
-        'John O\'Shea',
-        'Peter Moody'
+    // TIER 2: Marginally Profitable (ROI 0% to +10%)
+    const profitableTrainers = [
+        'T & C McEvoy',                   // 12.2% SR, +8.8% ROI
+        'A & S Freedman',                 // 23.1% SR, +6.8% ROI
+        'R L Heathcote',                  // 11.5% SR, +0.9% ROI
     ];
     
-    if (eightPointTrainers.includes(trainerName)) {
-        addScore += 8;
-        note += '+8.0: Elite Trainer\n';
+    // TIER 3: Small Negative (ROI -20% to 0%) - NEUTRAL
+    // D T O'Brien: 19.5% SR, -5.9% ROI
+    // Annabel & Rob Archibald: 16.5% SR, -11.1% ROI
+    // Matthew Smith: 9.8% SR, -19.5% ROI
+    // These get 0 points
+    
+    // TIER 4: Bad Performers (ROI < -40%) - PENALTY
+    const badTrainers = [
+        'T J Gollan',                     // 15.4% SR, -38.4% ROI
+        'Ben Brisbourne',                 // 11.9% SR, -40.7% ROI
+        'G Ryan & S Alexiou',             // 12.5% SR, -45.8% ROI
+        'Peter Snowden',                  // 13.3% SR, -54.9% ROI
+        'M Price & M Kent Jnr',           // 13.8% SR, -58.6% ROI
+        'Ben Will & Jd Hayes',            // 9.5% SR, -62.7% ROI
+        'Bjorn Baker',                    // 11.6% SR, -63.8% ROI
+        'Patrick & Michelle Payne',       // 7.3% SR, -65.2% ROI
+        'N D Parnham',                    // 0.0% SR, -100.0% ROI
+    ];
+    
+    if (strongTrainers.includes(trainerName)) {
+        addScore += 10;
+        note += '+10.0: Strong Trainer (ROI 10%+)\n';
     }
-    else if (fivePointTrainers.includes(trainerName)) {
+    else if (profitableTrainers.includes(trainerName)) {
         addScore += 5;
-        note += '+5.0: Like the Trainer\n';
+        note += '+5.0: Profitable Trainer (ROI 0-10%)\n';
     }
+    else if (badTrainers.includes(trainerName)) {
+        addScore -= 8;
+        note += '-8.0: Poor performing trainer\n';
+    }
+    // All others get 0 (neutral)
     
     return [addScore, note];
 }
