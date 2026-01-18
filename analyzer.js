@@ -584,9 +584,9 @@ function checkJockeys(JockeyName) {
         addScore += 15;
         note += '+15.0: Elite Jockey (ROI 80%+)\n';
     }
-    else if (strongJockeys.includes(JockeyName)) {
-        addScore += 10;
-        note += '+10.0: Strong Jockey (ROI 20-80%)\n';
+    if (strongJockeys.includes(JockeyName)) {
+    addScore += 15;  // WAS 10
+    note += '+15.0: Strong Jockey (ROI 20-80%)\n';
     }
     else if (profitableJockeys.includes(JockeyName)) {
         addScore += 5;
