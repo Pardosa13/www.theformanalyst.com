@@ -480,50 +480,70 @@ function checkJockeys(JockeyName) {
     // Check for known spelling/name changes
     JockeyName = normalizeJockeyName(JockeyName);
     
-    const tenPointJockeys = [
-        'Blake Shinn',
-        'James McDonald',
-        'Jason Collett',
-        'Mark Zahra',
-        'Craig Williams',
-        'Nash Rawiller',
-        'Tim Clark',
-        'Tommy Berry',
-        'Hollie Coffey',
-        'Brenton Avdulla',
-        'Jay Ford',
-        'Rachel King'
+    // TIER 1: Elite performers (ROI > +80%)
+    const eliteJockeys = [
+        'Alana Livesey',    // 13.6% SR, +149.1% ROI
+        'Tim Clark',        // 25.5% SR, +83.5% ROI
     ];
     
-    const fivePointJockeys = [
-        'Aaron Bullock',
-        'Damian Lane',
-        'Ethan Brown',
-        'Ben Melham',
-        'Jamie Melham',
-        'Josh Parr',
-        'William Pike',
-        'Zac Lloyd',
-        'J Kah',
-        'Hugh Bowman',
+    // TIER 2: Strong performers (ROI +20% to +80%)
+    const strongJockeys = [
+        'M R Du Plessis',   // 16.7% SR, +74.8% ROI
+        'R Mc Leod',        // 8.9% SR, +70.9% ROI
+        'Luke Cartwright',  // 12.5% SR, +44.9% ROI
+        'Tyler Schiller',   // 16.1% SR, +38.2% ROI
+        'W Gordon',         // 10.4% SR, +29.2% ROI
+        'Alysha Warren',    // 17.8% SR, +23.6% ROI
+        'G Buckley',        // 18.2% SR, +20.8% ROI
     ];
     
-    const negativeJockeys = [
-        'Kerrin McEvoy'
+    // TIER 3: Profitable performers (ROI 0% to +20%)
+    const profitableJockeys = [
+        'L Currie',         // 15.2% SR, +18.8% ROI
+        'J Mott',           // 18.9% SR, +16.8% ROI
+        'Caitlin Tootell',  // 20.0% SR, +1.5% ROI
+        'H Coffey',         // 16.0% SR, +1.3% ROI
+        'Ben Thompson',     // 12.0% SR, +0.2% ROI
     ];
     
-    if (tenPointJockeys.includes(JockeyName)) {
+    // TIER 4: Small negative performers (-20% to 0%) - NEUTRAL
+    // W Pike: 24.2% SR, -3.5% ROI - good SR, slight negative
+    // Zac Lloyd: 25.4% SR, -4.9% ROI - good SR, slight negative
+    // These get 0 points (neutral)
+    
+    // TIER 5: Bad performers (ROI < -40%) - PENALTY
+    const badJockeys = [
+        'K Mc Evoy',        // 3.8% SR, -88.8% ROI
+        'Craig Williams',   // 7.8% SR, -75.9% ROI
+        'J Ford',           // 6.5% SR, -74.0% ROI
+        'S Parnham',        // 4.8% SR, -71.9% ROI
+        'Holly Watson',     // 7.1% SR, -70.7% ROI
+        'J R Collett',      // 9.2% SR, -68.9% ROI (Jason Collett)
+        'Beau Mertens',     // 8.6% SR, -68.4% ROI
+        'Damien Thornton',  // 9.3% SR, -67.9% ROI
+        'Kayla Crowther',   // 2.3% SR, -65.9% ROI
+        'A B Collett',      // 7.5% SR, -63.1% ROI
+        'Carleen Hefel',    // 11.6% SR, -61.9% ROI
+        'A Mallyon',        // 7.0% SR, -58.1% ROI
+    ];
+    
+    if (eliteJockeys.includes(JockeyName)) {
+        addScore += 15;
+        note += '+15.0: Elite Jockey (ROI 80%+)\n';
+    }
+    else if (strongJockeys.includes(JockeyName)) {
         addScore += 10;
-        note += '+10.0: Love the Jockey\n';
+        note += '+10.0: Strong Jockey (ROI 20-80%)\n';
     }
-    if (fivePointJockeys.includes(JockeyName)) {
+    else if (profitableJockeys.includes(JockeyName)) {
         addScore += 5;
-        note += '+5.0: Like the Jockey\n';
+        note += '+5.0: Profitable Jockey (ROI 0-20%)\n';
     }
-    if (negativeJockeys.includes(JockeyName)) {
-        addScore -= 5;
-        note += '-5.0: Kerrin\n';
+    else if (badJockeys.includes(JockeyName)) {
+        addScore -= 10;
+        note += '-10.0: Poor performing jockey\n';
     }
+    // All others get 0 (neutral)
     
     return [addScore, note];
 }
