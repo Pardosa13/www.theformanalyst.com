@@ -468,7 +468,42 @@ function checkWeight(weight, claim) {
     // This function is kept for compatibility but returns 0
     return [0, ''];
 }
-
+function checkLastDistance(horseRow) {
+    let addScore = 0;
+    let note = '';
+    
+    // Parse current race distance and last race distance
+    const currentDistance = parseInt(horseRow['distance'] || horseRow['race distance'], 10);
+    const lastDistance = parseInt(horseRow['form distance'], 10);
+    
+    // Validate inputs
+    if (isNaN(currentDistance) || isNaN(lastDistance)) {
+        return [0, ''];
+    }
+    
+    const distanceChange = currentDistance - lastDistance;
+    
+    if (distanceChange > 400) {
+        // Stepping up significantly in distance
+        addScore = -5;
+        note += `- 5.0 : Stepping up ${distanceChange}m in distance (${lastDistance}m → ${currentDistance}m)\n`;
+    } else if (distanceChange > 200) {
+        // Moderate step up
+        addScore = -3;
+        note += `- 3.0 : Stepping up ${distanceChange}m in distance (${lastDistance}m → ${currentDistance}m)\n`;
+    } else if (distanceChange < -400) {
+        // Dropping back significantly in distance
+        addScore = 3;
+        note += `+ 3.0 : Dropping back ${Math.abs(distanceChange)}m in distance (${lastDistance}m → ${currentDistance}m)\n`;
+    } else if (distanceChange < -200) {
+        // Moderate drop back
+        addScore = 2;
+        note += `+ 2.0 : Dropping back ${Math.abs(distanceChange)}m in distance (${lastDistance}m → ${currentDistance}m)\n`;
+    }
+    // Else: similar distance (-200 to +200), no bonus/penalty
+    
+    return [addScore, note];
+}
 function checkLast10runs(last10) {
     last10 = String(last10 || '').trim();
     if (last10.length > 99) {
