@@ -389,30 +389,146 @@ if (!isNaN(horseAge)) {
         notes += '-20.0 : Old age (7+, 4.5% SR, -40.2% ROI)\n';
     }
 }
-    // SIRE BONUSES/PENALTIES - UPDATED 2025-01-06
+    
+    // SIRE BONUSES/PENALTIES - UPDATED 2025-01-19 (ROI-BASED)
 const sire = String(horseRow['horse sire'] || '').trim();
-const eliteSires = {
-    'Trapeze Artist': 20,
-    'I Am Invincible': 8,
-    'Pierata': 15,
-    'Snitzel': 5,
-    'Written Tycoon': 5,
-    'Not A Single Doubt': 5
+
+const sireData = {
+    'Wootton Bassett': { runners: 34, roi: 576.5, strikeRate: 20.6 },
+    'Starspangledbanner': { runners: 33, roi: 120.6, strikeRate: 9.1 },
+    'Trapeze Artist': { runners: 70, roi: 80.9, strikeRate: 21.4 },
+    'Lonhro': { runners: 48, roi: 46.8, strikeRate: 20.8 },
+    'Russian Revolution': { runners: 84, roi: 37.0, strikeRate: 13.1 },
+    'Pierata': { runners: 56, roi: 31.3, strikeRate: 17.9 },
+    'Territories': { runners: 46, roi: 31.1, strikeRate: 15.2 },
+    'Epaulette': { runners: 48, roi: 21.1, strikeRate: 12.5 },
+    'Capitalist': { runners: 135, roi: 15.9, strikeRate: 12.6 },
+    'Savabeel': { runners: 64, roi: 15.2, strikeRate: 15.6 },
+    'Palentino': { runners: 35, roi: 13.0, strikeRate: 14.3 },
+    'Tassort': { runners: 32, roi: 12.2, strikeRate: 18.8 },
+    "D'argento": { runners: 39, roi: 12.1, strikeRate: 20.5 },
+    'Frosted': { runners: 76, roi: 10.7, strikeRate: 10.5 },
+    'Magnus': { runners: 66, roi: 9.2, strikeRate: 12.1 },
+    'Star Turn': { runners: 67, roi: 8.9, strikeRate: 10.4 },
+    'Snitzel': { runners: 127, roi: 7.2, strikeRate: 11.0 },
+    'Smart Missile': { runners: 58, roi: 0.3, strikeRate: 12.1 },
+    'Blue Point': { runners: 54, roi: -0.9, strikeRate: 9.3 },
+    'Saxon Warrior': { runners: 35, roi: -5.7, strikeRate: 20.0 },
+    'Grunt': { runners: 34, roi: -6.9, strikeRate: 17.6 },
+    'Hellbent': { runners: 108, roi: -7.8, strikeRate: 13.0 },
+    'Divine Prophet': { runners: 52, roi: -12.9, strikeRate: 23.1 },
+    'Castelvecchio': { runners: 34, roi: -15.0, strikeRate: 20.6 },
+    'Alabama Express': { runners: 34, roi: -18.1, strikeRate: 11.8 },
+    'Astern': { runners: 38, roi: -18.7, strikeRate: 7.9 },
+    'Churchill': { runners: 64, roi: -19.3, strikeRate: 15.6 },
+    'I Am Immortal': { runners: 34, roi: -22.1, strikeRate: 11.8 },
+    'Toronado': { runners: 149, roi: -22.2, strikeRate: 12.8 },
+    'Cable Bay': { runners: 38, roi: -22.4, strikeRate: 13.2 },
+    'Pierro': { runners: 102, roi: -22.5, strikeRate: 11.8 },
+    'Justify': { runners: 41, roi: -23.2, strikeRate: 14.6 },
+    'Extreme Choice': { runners: 31, roi: -24.4, strikeRate: 16.1 },
+    'Harry Angel': { runners: 74, roi: -24.5, strikeRate: 17.6 },
+    'All Too Hard': { runners: 82, roi: -26.1, strikeRate: 9.8 },
+    'Brave Smash': { runners: 32, roi: -26.9, strikeRate: 15.6 },
+    'Sessions': { runners: 52, roi: -28.8, strikeRate: 11.5 },
+    'Maschino': { runners: 41, roi: -32.8, strikeRate: 14.6 },
+    'I Am Invincible': { runners: 117, roi: -35.5, strikeRate: 10.3 },
+    'Zoustar': { runners: 145, roi: -36.2, strikeRate: 11.0 },
+    'Exceed And Excel': { runners: 56, roi: -37.6, strikeRate: 10.7 },
+    'Playing God': { runners: 59, roi: -37.6, strikeRate: 10.2 },
+    'Overshare': { runners: 35, roi: -37.7, strikeRate: 11.4 },
+    'Written By': { runners: 36, roi: -37.8, strikeRate: 8.3 },
+    'Street Boss': { runners: 53, roi: -39.1, strikeRate: 11.3 },
+    'Puissance De Lune': { runners: 54, roi: -39.3, strikeRate: 7.4 },
+    'Yes Yes Yes': { runners: 43, roi: -39.4, strikeRate: 18.6 },
+    'Press Statement': { runners: 46, roi: -39.7, strikeRate: 13.0 },
+    'So You Think': { runners: 130, roi: -40.3, strikeRate: 10.0 },
+    'Flying Artie': { runners: 87, roi: -41.5, strikeRate: 6.9 },
+    'Foxwedge': { runners: 52, roi: -44.8, strikeRate: 9.6 },
+    'Pride Of Dubai': { runners: 61, roi: -44.9, strikeRate: 8.2 },
+    'Sir Prancealot': { runners: 47, roi: -45.3, strikeRate: 6.4 },
+    'Rich Enuff': { runners: 48, roi: -46.0, strikeRate: 12.5 },
+    'Nicconi': { runners: 52, roi: -46.3, strikeRate: 5.8 },
+    'Dundeel': { runners: 121, roi: -46.5, strikeRate: 8.3 },
+    'The Autumn Sun': { runners: 63, roi: -49.0, strikeRate: 9.5 },
+    'Winning Rupert': { runners: 36, roi: -50.0, strikeRate: 5.6 },
+    'Adelaide': { runners: 31, roi: -51.0, strikeRate: 6.5 },
+    'Per Incanto': { runners: 42, roi: -51.2, strikeRate: 9.5 },
+    'Needs Further': { runners: 35, roi: -51.7, strikeRate: 17.1 },
+    'Brazen Beau': { runners: 40, roi: -52.4, strikeRate: 12.5 },
+    'Written Tycoon': { runners: 128, roi: -52.4, strikeRate: 11.7 },
+    'Headwater': { runners: 63, roi: -53.5, strikeRate: 7.9 },
+    'Almanzor': { runners: 45, roi: -53.6, strikeRate: 15.6 },
+    'Too Darn Hot': { runners: 60, roi: -53.7, strikeRate: 10.0 },
+    'Invader': { runners: 35, roi: -54.6, strikeRate: 5.7 },
+    'Better Than Ready': { runners: 94, roi: -55.0, strikeRate: 8.5 },
+    'Universal Ruler': { runners: 39, roi: -55.1, strikeRate: 2.6 },
+    'Alpine Eagle': { runners: 45, roi: -58.9, strikeRate: 8.9 },
+    'Farnan': { runners: 36, roi: -60.4, strikeRate: 13.9 },
+    'Fiorente': { runners: 47, roi: -60.9, strikeRate: 8.5 },
+    'Fastnet Rock': { runners: 33, roi: -60.9, strikeRate: 9.1 },
+    'Shalaa': { runners: 63, roi: -61.2, strikeRate: 9.5 },
+    'Deep Field': { runners: 90, roi: -63.7, strikeRate: 10.0 },
+    'Casino Prince': { runners: 44, roi: -64.1, strikeRate: 6.8 },
+    'Spirit Of Boom': { runners: 71, roi: -67.0, strikeRate: 5.6 },
+    'Shamus Award': { runners: 76, roi: -68.9, strikeRate: 9.2 },
+    'Highland Reel': { runners: 41, roi: -68.9, strikeRate: 4.9 },
+    'Merchant Navy': { runners: 42, roi: -70.6, strikeRate: 9.5 },
+    'American Pharoah': { runners: 35, roi: -71.3, strikeRate: 8.6 },
+    'Ocean Park': { runners: 52, roi: -71.4, strikeRate: 3.8 },
+    'Maurice': { runners: 54, roi: -72.1, strikeRate: 9.3 },
+    'Impending': { runners: 70, roi: -73.7, strikeRate: 5.7 },
+    'Zousain': { runners: 54, roi: -82.3, strikeRate: 9.3 },
+    'Pariah': { runners: 58, roi: -83.8, strikeRate: 3.4 },
+    'Rubick': { runners: 53, roi: -87.3, strikeRate: 3.8 },
+    'Super One': { runners: 39, roi: -87.7, strikeRate: 2.6 },
+    'Star Witness': { runners: 36, roi: -90.3, strikeRate: 2.8 },
+    'Brutal': { runners: 32, roi: -90.3, strikeRate: 3.1 },
+    'Supido': { runners: 41, roi: -94.6, strikeRate: 2.4 },
+    'Outreach': { runners: 31, roi: -100.0, strikeRate: 0.0 },
+    'Shooting To Win': { runners: 46, roi: -100.0, strikeRate: 0.0 }
 };
-const poorSires = {
-    'Better Than Ready': -5,
-    'Dundeel': -5,
-    'Bon Hoffa': -5,
-    'Counterattack': -5,
-    'Palentino': -5
-};
-if (eliteSires[sire]) {
-    score += eliteSires[sire];
-    notes += `+${eliteSires[sire]}.0: Elite sire (${sire})\n`;
-}
-if (poorSires[sire]) {
-    score += poorSires[sire];
-    notes += `${poorSires[sire]}.0: Poor sire (${sire})\n`;
+
+// Calculate sire score
+const data = sireData[sire];
+if (data) {
+    const { runners, roi, strikeRate } = data;
+    let sireScore = 0;
+    
+    // Base ROI scoring
+    if (roi >= 50) sireScore = 10;
+    else if (roi >= 30) sireScore = 8;
+    else if (roi >= 20) sireScore = 6;
+    else if (roi >= 10) sireScore = 4;
+    else if (roi >= 5) sireScore = 2;
+    else if (roi >= -5) sireScore = 0;
+    else if (roi >= -20) sireScore = -2;
+    else if (roi >= -40) sireScore = -5;
+    else if (roi >= -60) sireScore = -8;
+    else sireScore = -12;
+    
+    // Strike rate penalty for chronic underperformers
+    if (strikeRate < 5 && runners >= 40) {
+        sireScore -= 3;
+    }
+    
+    // Sample size weighting
+    if (runners >= 80) {
+        // Full weight
+    } else if (runners >= 50) {
+        sireScore *= 0.9;
+    } else if (runners >= 30) {
+        sireScore *= 0.75;
+    } else {
+        sireScore *= 0.5;
+    }
+    
+    sireScore = Math.round(sireScore);
+    
+    if (sireScore !== 0) {
+        score += sireScore;
+        notes += `${sireScore > 0 ? '+' : ''}${sireScore}.0: Sire ${sire} (${roi.toFixed(1)}% ROI, ${runners} runners)\n`;
+    }
 }
     // NEW: CAREER WIN RATE SCORING
 const careerRecord = horseRow['horse record'];
