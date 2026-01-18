@@ -975,8 +975,8 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
     sires_reliable = {k: v for k, v in sire_stats.items() if v['runs'] >= 30}
     sires_reliable = dict(sorted(sires_reliable.items(), key=lambda x: x[1]['roi'], reverse=True))
     
-    # Filter and sort dams (30+ runs only)
-    dams_reliable = {k: v for k, v in dam_stats.items() if v['runs'] >= 30}
+    # Filter and sort dams (10+ runs only)
+    dams_reliable = {k: v for k, v in dam_stats.items() if v['runs'] >= 10}
     dams_reliable = dict(sorted(dams_reliable.items(), key=lambda x: x[1]['roi'], reverse=True))
     
     # Filter tracks with 2+ races
