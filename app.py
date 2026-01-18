@@ -580,12 +580,9 @@ def parse_notes_components(notes):
         (r'\+\s*3\.0\s*:\s*Good age \(4yo', 'Age - 4yo Good'),
         (r'-\s*10\.0\s*:\s*Old age \(7\+', 'Age - 7+ Old'),
 
-        # Sire Bonuses
-        (r'\+\s*10\.0\s*:\s*Elite sire \(Trapeze Artist', 'Sire - Trapeze Artist'),
-        (r'\+\s*8\.0\s*:\s*Elite sire \(Zoustar', 'Sire - Zoustar'),
-        (r'\+\s*5\.0\s*:\s*Elite sire \(Pierata', 'Sire - Pierata'),
-        (r'\+\s*5\.0\s*:\s*Elite sire \(All Too Hard', 'Sire - All Too Hard'),
-        (r'-\s*5\.0\s*:\s*Poor sire', 'Sire - Poor'),
+        # Sire Bonuses (ROI-Based - Updated 2025-01-19)
+        # Generic pattern captures: "+9.0: Sire Trapeze Artist (80.9% ROI, 70 runners)"
+        (r'([+-]?\s*[\d.]+)\.0:\s*Sire\s+([A-Za-z\'\s]+?)\s+\(', 'Sire - \\2'),
 
         # Career Win Rate
         (r'\+\s*15\.0\s*:\s*Elite career win rate', 'Career Win Rate - Elite 40%+'),
