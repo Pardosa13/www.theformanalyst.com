@@ -971,24 +971,7 @@ function checkDistanceForm(racingForm) {
         note += '+ 0.0 : Poor podium rate (' + (podiumRate * 100).toFixed(0) + '%) at this distance\n';
     }
 
-    let undefeatedBonus = 0;
-    if (wins === runs && runs >= 2) {
-        if (runs >= 5) {
-            undefeatedBonus = 12;
-            note += '+ 12.0 : UNDEFEATED in ' + runs + ' runs at this distance! (5+ runs)\n';
-        } else if (runs >= 4) {
-            undefeatedBonus = 11;
-            note += '+ 11.0 : UNDEFEATED in ' + runs + ' runs at this distance! (4 runs)\n';
-        } else if (runs >= 3) {
-            undefeatedBonus = 9;
-            note += '+ 9.0 : UNDEFEATED in ' + runs + ' runs at this distance! (3 runs)\n';
-        } else {
-            undefeatedBonus = 6;
-            note += '+ 6.0 : UNDEFEATED in ' + runs + ' runs at this distance! (2 runs)\n';
-        }
-    }
-
-    let subtotal = winScore + podiumScore + undefeatedBonus;
+    let subtotal = winScore + podiumScore;
 
     let confidenceMultiplier = 1.0;
     let confidenceNote = '';
@@ -1096,24 +1079,7 @@ function checkTrackForm(racingForm) {
         note += '+ 0.0 : Poor podium rate (' + (podiumRate * 100).toFixed(0) + '%) at this track\n';
     }
 
-    let undefeatedBonus = 0;
-    if (wins === runs && runs >= 2) {
-        if (runs >= 5) {
-            undefeatedBonus = 10;
-            note += '+ 10.0 : UNDEFEATED in ' + runs + ' runs at this track! (5+ runs)\n';
-        } else if (runs >= 4) {
-            undefeatedBonus = 9;
-            note += '+ 9.0 : UNDEFEATED in ' + runs + ' runs at this track! (4 runs)\n';
-        } else if (runs >= 3) {
-            undefeatedBonus = 7;
-            note += '+ 7.0 : UNDEFEATED in ' + runs + ' runs at this track! (3 runs)\n';
-        } else {
-            undefeatedBonus = 5;
-            note += '+ 5.0 : UNDEFEATED in ' + runs + ' runs at this track! (2 runs)\n';
-        }
-    }
-
-    let subtotal = winScore + podiumScore + undefeatedBonus;
+    let subtotal = winScore + podiumScore;
 
     let confidenceMultiplier = 1.0;
     let confidenceNote = '';
@@ -1221,24 +1187,7 @@ function checkTrackDistanceForm(racingForm) {
         note += '+ 0.0 : Poor podium rate (' + (podiumRate * 100).toFixed(0) + '%) at this track+distance\n';
     }
 
-    let undefeatedBonus = 0;
-    if (wins === runs && runs >= 2) {
-        if (runs >= 5) {
-            undefeatedBonus = 12;
-            note += '+ 12.0 : UNDEFEATED in ' + runs + ' runs at this track+distance! (5+ runs)\n';
-        } else if (runs >= 4) {
-            undefeatedBonus = 11;
-            note += '+ 11.0 : UNDEFEATED in ' + runs + ' runs at this track+distance! (4 runs)\n';
-        } else if (runs >= 3) {
-            undefeatedBonus = 9;
-            note += '+ 9.0 : UNDEFEATED in ' + runs + ' runs at this track+distance! (3 runs)\n';
-        } else {
-            undefeatedBonus = 6;
-            note += '+ 6.0 : UNDEFEATED in ' + runs + ' runs at this track+distance! (2 runs)\n';
-        }
-    }
-
-    let subtotal = winScore + podiumScore + undefeatedBonus;
+    let subtotal = winScore + podiumScore;
 
     let confidenceMultiplier = 1.0;
     let confidenceNote = '';
@@ -1266,29 +1215,6 @@ function checkTrackDistanceForm(racingForm) {
 
     note += '= ' + addScore.toFixed(1) + ' : Total track+distance score' + confidenceNote + '\n';
 
-    return [addScore, note];
-}
-
-// analyzer.js — cleaned chunk (checkLastDistance ... adjustSPProfileForSpecialist)
-// This replacement fixes syntax errors, removes duplicated blocks, closes functions properly,
-// and ensures top-level code isn't nested. Paste this block over the corresponding region.
-
-function checkLastDistance(horseToCheck) {
-    const dist = parseFloat(horseToCheck['distance']);
-    const prevDist = parseFloat(horseToCheck['form distance']);
-    let addScore = 0;
-    let note = '';
-    if (!isNaN(prevDist) && prevDist > 0 && !isNaN(dist)) {
-        if (dist > prevDist) {
-            // if current distance longer than previous distance
-            addScore += 1;
-            note += '+ 1.0 : Longer dist than previous\n';
-        } else if (dist < prevDist) {
-            // if current distance shorter than previous distance
-            addScore -= 1;
-            note += '- 1.0 : Shorter dist than previous\n';
-        }
-    }
     return [addScore, note];
 }
 
