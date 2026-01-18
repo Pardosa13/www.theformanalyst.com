@@ -952,6 +952,8 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
     distances = calc_rates(distances, stake)
     tracks = calc_rates(tracks, stake)
     track_conditions = calc_rates(track_conditions, stake)
+    sire_stats = calc_rates(sire_stats, stake)
+    dam_stats = calc_rates(dam_stats, stake)
     
     # Split jockeys into reliable (40+ runs) and limited (5-39 runs)
     jockeys_reliable = {k: v for k, v in jockeys.items() if v['runs'] >= 40}
