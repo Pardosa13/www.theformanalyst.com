@@ -30,6 +30,14 @@ app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-product
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///formanalyst.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Database connection pooling to reduce memory
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_size': int(os.environ.get('SQLALCHEMY_POOL_SIZE', 5)),
+    'max_overflow': int(os.environ.get('SQLALCHEMY_MAX_OVERFLOW', 2)),
+    'pool_recycle': 3600,
+    'pool_pre_ping': True
+}
+
 # Fix for postgres:// vs postgresql:// (Railway uses postgres://)
 if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
     app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
@@ -379,6 +387,14 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
             db.session.add(prediction)
     
     db.session.commit()
+    
+    # CLEANUP - Free memory after processing
+    csv_data = None
+    analysis_results = None
+    races_data = None
+    import gc
+    gc.collect()
+    
     return meeting
 
 
@@ -1602,123 +1618,31 @@ def admin_panel():
     return render_template("admin.html", stats=stats)
 
 
-# ----- Data Analytics Route -----
 @app.route("/data")
 @login_required
 def data_analytics():
-    """Analytics dashboard - loads summary only, sections load on demand"""
+    """Analytics dashboard - ADMIN ONLY, loads summary only"""
+    
+    # ADMIN ONLY - Prevent non-admins from accessing expensive analytics
+    if not current_user.is_admin:
+        flash("Access denied. Analytics page is admin-only.", "danger")
+        return redirect(url_for("dashboard"))
     
     track_filter = request.args.get('track', '')
     min_score_filter = request.args.get('min_score', type=float)
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     
-    # Optimized query - only get what we need for summary
-    from sqlalchemy import func, case
-    
-    base_query = db.session.query(
-        Meeting.id.label('meeting_id'),
-        Race.race_number,
-        func.max(Prediction.score).label('top_score'),
-        func.count(Horse.id).label('horse_count')
-    ).join(
-        Race, Meeting.id == Race.meeting_id
-    ).join(
-        Horse, Race.id == Horse.race_id
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
-        Result, Horse.id == Result.horse_id
-    ).filter(
-        Result.finish_position > 0
-    )
-    
-    if track_filter:
-        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        base_query = base_query.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
-    
-    races = base_query.group_by(Meeting.id, Race.race_number).all()
-    
-    total_races = len(races)
-    
-    # Filter by min score if specified
-    if min_score_filter:
-        races = [r for r in races if r.top_score >= min_score_filter]
-        total_races = len(races)
-    
-    # Quick calculation using aggregates
-    stake = 10.0
-    top_pick_wins = 0
-    total_profit = 0
-    winner_sps = []
-    top_3_hits = 0
-    top_3_profit = 0
-    
-    # Get actual results for races that passed filter
-    for race_info in races:
-        # Get horses for this race, sorted by score
-        horses = db.session.query(
-            Prediction.score,
-            Result.finish_position,
-            Result.sp
-        ).join(
-            Horse, Prediction.horse_id == Horse.id
-        ).join(
-            Result, Horse.id == Result.horse_id
-        ).join(
-            Race, Horse.race_id == Race.id
-        ).filter(
-            Race.race_number == race_info.race_number,
-            Race.meeting_id == race_info.meeting_id,
-            Result.finish_position > 0
-        ).order_by(Prediction.score.desc()).all()
-        
-        if not horses:
-            continue
-        
-        # Top pick stats
-        top_pick = horses[0]
-        won = top_pick.finish_position == 1
-        sp = top_pick.sp or 0
-        
-        if won:
-            top_pick_wins += 1
-            if sp:
-                winner_sps.append(sp)
-            total_profit += (sp * stake - stake)
-        else:
-            total_profit -= stake
-        
-        # Top 3 stats
-        top_3 = horses[:3]
-        winner_in_top_3 = False
-        for pick in top_3:
-            if pick.finish_position == 1:
-                top_3_hits += 1
-                top_3_profit += (pick.sp * stake - stake) if pick.sp else -stake
-                winner_in_top_3 = True
-                break
-        
-        if not winner_in_top_3:
-            top_3_profit -= stake
-    
-    strike_rate = (top_pick_wins / total_races * 100) if total_races > 0 else 0
-    roi = (total_profit / (total_races * stake) * 100) if total_races > 0 else 0
-    avg_winner_sp = sum(winner_sps) / len(winner_sps) if winner_sps else 0
-    
-    top_3_strike = (top_3_hits / total_races * 100) if total_races > 0 else 0
-    top_3_roi = (top_3_profit / (total_races * stake) * 100) if total_races > 0 else 0
-    
-    # Get track list for filter dropdown
-    tracks = db.session.query(Meeting.meeting_name).distinct().all()
+    # Get track list for filter dropdown - LIMIT to 200 most recent
+    tracks = db.session.query(Meeting.meeting_name)\
+        .order_by(Meeting.uploaded_at.desc())\
+        .limit(200)\
+        .all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
-    # NEW: Best Bets Performance Tracking
+    
+    # Best Bets stats - LIMIT to 500 most recent
     best_bets_stats = None
     try:
-        # Get all predictions that were flagged as Best Bets and have results
         best_bet_predictions = db.session.query(Prediction, Result, Horse).join(
             Horse, Prediction.horse_id == Horse.id
         ).join(
@@ -1726,21 +1650,19 @@ def data_analytics():
         ).filter(
             Prediction.best_bet_flagged_at.isnot(None),
             Result.finish_position > 0
-        ).all()
+        ).limit(500).all()
         
         if best_bet_predictions:
             total_bets = len(best_bet_predictions)
             wins = sum(1 for pred, res, horse in best_bet_predictions if res.finish_position == 1)
             places = sum(1 for pred, res, horse in best_bet_predictions if res.finish_position in [1, 2, 3])
             
-            # Calculate ROI based on $10 win bets
             stake_per_bet = 10
             total_staked = total_bets * stake_per_bet
             total_return = 0
             
             for pred, res, horse in best_bet_predictions:
                 if res.finish_position == 1 and res.sp:
-                    # Win: return = stake * SP
                     total_return += stake_per_bet * res.sp
             
             profit = total_return - total_staked
@@ -1748,7 +1670,6 @@ def data_analytics():
             bb_strike = (wins / total_bets * 100) if total_bets > 0 else 0
             bb_place = (places / total_bets * 100) if total_bets > 0 else 0
             
-            # Component breakdown - which components performed best?
             component_performance = {}
             for pred, res, horse in best_bet_predictions:
                 if pred.notes:
@@ -1770,14 +1691,12 @@ def data_analytics():
                             if res.sp:
                                 component_performance[comp_name]['return'] += stake_per_bet * res.sp
             
-            # Calculate component ROI and SR
             for comp_name in component_performance:
                 comp = component_performance[comp_name]
                 comp['profit'] = comp['return'] - comp['staked']
                 comp['roi'] = (comp['profit'] / comp['staked'] * 100) if comp['staked'] > 0 else 0
                 comp['sr'] = (comp['wins'] / comp['bets'] * 100) if comp['bets'] > 0 else 0
             
-            # Sort by ROI descending
             component_performance = dict(sorted(component_performance.items(), key=lambda x: x[1]['roi'], reverse=True))
             
             best_bets_stats = {
@@ -1792,21 +1711,18 @@ def data_analytics():
                 'roi': bb_roi,
                 'component_performance': component_performance
             }
+            
+            # CLEANUP
+            del best_bet_predictions
+            import gc
+            gc.collect()
+            
     except Exception as e:
         print(f"Error calculating Best Bets stats: {e}")
-    # END NEW
-    # Return template with ONLY summary data
+    
+    # Return template with minimal data - API calls will load sections
     return render_template("data.html",
-        total_races=total_races,
-        top_pick_wins=top_pick_wins,
-        strike_rate=strike_rate,
-        roi=roi,
-        total_profit=total_profit,
-        avg_winner_sp=avg_winner_sp,
-        top_3_hits=top_3_hits,
-        top_3_strike=top_3_strike,
-        top_3_roi=top_3_roi,
-        top_3_profit=top_3_profit,
+        total_races=0,
         track_list=track_list,
         best_bets_stats=best_bets_stats,
         filters={
@@ -1820,6 +1736,9 @@ def data_analytics():
 @app.route("/api/data/score-analysis")
 @login_required
 def api_score_analysis():
+    # ADMIN ONLY
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
     """API endpoint for score analysis data"""
     from flask import jsonify
     
@@ -1850,7 +1769,7 @@ def api_score_analysis():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    all_results = base_query.all()
+    all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(1000).all()
     
     # Group races
     races_data = {}
@@ -1955,15 +1874,28 @@ def api_score_analysis():
         g['strike_rate'] = (g['wins'] / g['races'] * 100) if g['races'] > 0 else 0
         g['roi'] = (g['profit'] / (g['races'] * stake) * 100) if g['races'] > 0 else 0
     
-    return jsonify({
+    result = jsonify({
         'score_tiers': score_tiers,
         'score_gaps': score_gaps
     })
+    
+    # CLEANUP
+    del all_results
+    del races_data
+    del score_tiers
+    del score_gaps
+    import gc
+    gc.collect()
+    
+    return result
 
 
 @app.route("/api/data/component-analysis")
 @login_required
 def api_component_analysis():
+    # ADMIN ONLY
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
     """API endpoint for component analysis data"""
     from flask import jsonify
     
@@ -1993,7 +1925,7 @@ def api_component_analysis():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    all_results = base_query.all()
+    all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(1000).all()
     
     all_results_data = []
     for horse, pred, result, race, meeting in all_results:
@@ -2028,12 +1960,25 @@ def api_component_analysis():
                 'roi': stats['roi']
             })
     
-    return jsonify({'components': components_list})
+    result = jsonify({'components': components_list})
+    
+    # CLEANUP
+    del all_results
+    del all_results_data
+    del component_stats
+    del components_list
+    import gc
+    gc.collect()
+    
+    return result
 
 
 @app.route("/api/data/external-factors")
 @login_required
 def api_external_factors():
+    # ADMIN ONLY
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
     """API endpoint for external factors data"""
     from flask import jsonify
     
@@ -2063,7 +2008,7 @@ def api_external_factors():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    all_results = base_query.all()
+    all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(1000).all()
     
     all_results_data = []
     races_data = {}
@@ -2093,7 +2038,7 @@ def api_external_factors():
     # Filter class performance
     class_performance_filtered = {k: v for k, v in class_performance.items() if v['runs'] >= 2}
     
-    return jsonify({
+    result = jsonify({
         'jockeys_reliable': external_factors['jockeys_reliable'],
         'jockeys_limited': external_factors['jockeys_limited'],
         'trainers_reliable': external_factors['trainers_reliable'],
@@ -2106,6 +2051,17 @@ def api_external_factors():
         'track_conditions': external_factors['track_conditions'],
         'class_performance': class_performance_filtered
     })
+    
+    # CLEANUP
+    del all_results
+    del all_results_data
+    del races_data
+    del external_factors
+    del class_performance
+    import gc
+    gc.collect()
+    
+    return result
 
 @app.route("/api/data/price-analysis")
 @login_required
@@ -2139,7 +2095,7 @@ def api_price_analysis():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    all_results = base_query.all()
+    all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(1000).all()
     
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
@@ -2236,7 +2192,16 @@ def api_price_analysis():
     
     price_analysis['avg_diff'] = sum(price_analysis['price_diffs']) / len(price_analysis['price_diffs']) if price_analysis['price_diffs'] else 0
     
-    return jsonify(price_analysis)
+    result = jsonify(price_analysis)
+
+    # CLEANUP
+    del all_results
+    del races_data
+    del price_analysis
+    import gc
+    gc.collect()
+
+    return result
 # ----- ML Data Export Route -----
 @app.route("/data/export")
 @login_required
@@ -2292,7 +2257,7 @@ def export_ml_data():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    query_results = base_query.order_by(Meeting.date.desc(), Race.race_number.asc()).limit(50000).all()
+    query_results = base_query.order_by(Meeting.date.desc(), Race.race_number.asc()).limit(2000).all()
     
     # First pass: collect all unique CSV field names
     all_csv_fields = set()
@@ -2518,7 +2483,14 @@ def export_ml_data():
     output.headers["Content-Disposition"] = f"attachment; filename={filename}"
     output.headers["Content-type"] = "text/csv"
     
-    return output
+    # CLEANUP before return
+    del query_results
+    del si
+    del writer
+    import gc
+    gc.collect()
+
+return output
 
 @app.route("/best-bets")
 @login_required
