@@ -967,30 +967,30 @@ def analyze_external_factors(all_results_data, races_data, stake=10.0):
     sire_stats = calc_rates(sire_stats, stake)
     dam_stats = calc_rates(dam_stats, stake)
     
-    # Split jockeys into reliable (40+ runs) and limited (5-39 runs)
-    jockeys_reliable = {k: v for k, v in jockeys.items() if v['runs'] >= 40}
-    jockeys_limited = {k: v for k, v in jockeys.items() if 5 <= v['runs'] < 40}
-    
+    # Split jockeys into reliable (10+ runs) and limited (3-9 runs)
+    jockeys_reliable = {k: v for k, v in jockeys.items() if v['runs'] >= 10}
+    jockeys_limited = {k: v for k, v in jockeys.items() if 3 <= v['runs'] < 10}
+
     # Sort by ROI
     jockeys_reliable = dict(sorted(jockeys_reliable.items(), key=lambda x: x[1]['roi'], reverse=True))
     jockeys_limited = dict(sorted(jockeys_limited.items(), key=lambda x: x[1]['roi'], reverse=True))
-    
-    # Split trainers into reliable (40+ runs) and limited (5-39 runs)
-    trainers_reliable = {k: v for k, v in trainers.items() if v['runs'] >= 40}
-    trainers_limited = {k: v for k, v in trainers.items() if 5 <= v['runs'] < 40}
-    
+
+    # Split trainers into reliable (10+ runs) and limited (3-9 runs)
+    trainers_reliable = {k: v for k, v in trainers.items() if v['runs'] >= 10}
+    trainers_limited = {k: v for k, v in trainers.items() if 5 <= v['runs'] < 10}
+
     # Sort by ROI
     trainers_reliable = dict(sorted(trainers_reliable.items(), key=lambda x: x[1]['roi'], reverse=True))
     trainers_limited = dict(sorted(trainers_limited.items(), key=lambda x: x[1]['roi'], reverse=True))
 
-    # Filter and sort sires (30+ runs only)
-    sires_reliable = {k: v for k, v in sire_stats.items() if v['runs'] >= 30}
+    # Filter and sort sires (10+ runs only)
+    sires_reliable = {k: v for k, v in sire_stats.items() if v['runs'] >= 10}
     sires_reliable = dict(sorted(sires_reliable.items(), key=lambda x: x[1]['roi'], reverse=True))
-    
-    # Filter and sort dams (5+ runs only)
-    dams_reliable = {k: v for k, v in dam_stats.items() if v['runs'] >= 5}
+
+    # Filter and sort dams (3+ runs only)
+    dams_reliable = {k: v for k, v in dam_stats.items() if v['runs'] >= 3}
     dams_reliable = dict(sorted(dams_reliable.items(), key=lambda x: x[1]['roi'], reverse=True))
-    print(f"DEBUG: Found {len(dams_reliable)} dams with 5+ runs")
+    print(f"DEBUG: Found {len(dams_reliable)} dams with 3+ runs")
     
     # Filter tracks with 2+ races
     tracks = {k: v for k, v in tracks.items() if v['runs'] >= 2}
