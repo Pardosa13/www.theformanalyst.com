@@ -2190,7 +2190,7 @@ def api_price_analysis():
         cat['strike_rate'] = (cat['wins'] / cat['count'] * 100) if cat['count'] > 0 else 0
         cat['roi'] = (cat['profit'] / (cat['count'] * stake) * 100) if cat['count'] > 0 else 0
     
-   price_analysis['avg_diff'] = sum(price_analysis['price_diffs']) / len(price_analysis['price_diffs']) if price_analysis['price_diffs'] else 0
+    price_analysis['avg_diff'] = sum(price_analysis['price_diffs']) / len(price_analysis['price_diffs']) if price_analysis['price_diffs'] else 0
     
     result = jsonify(price_analysis)
     
@@ -2200,6 +2200,8 @@ def api_price_analysis():
     del price_analysis
     import gc
     gc.collect()
+    
+    return result
     
     return result
 # ----- ML Data Export Route -----
