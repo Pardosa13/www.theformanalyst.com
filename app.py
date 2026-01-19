@@ -1723,6 +1723,11 @@ def data_analytics():
     # Return template with minimal data - API calls will load sections
     return render_template("data.html",
         total_races=0,
+        strike_rate=0,
+        top_pick_wins=0,
+        roi=0,
+        total_profit=0,
+        avg_winner_sp=0,
         track_list=track_list,
         best_bets_stats=best_bets_stats,
         filters={
