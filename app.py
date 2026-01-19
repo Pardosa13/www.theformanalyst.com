@@ -1640,6 +1640,74 @@ def data_analytics():
         .all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
     
+    # QUICK SUMMARY STATS ONLY - Limit to 1000 most recent
+    base_query = db.session.query(
+        Horse, Prediction, Result, Race, Meeting
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Result.finish_position > 0
+    )
+    
+    if track_filter:
+        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        base_query = base_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
+    
+    all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(1000).all()
+    
+    # Group by race for top pick stats
+    races_data = {}
+    for horse, pred, result, race, meeting in all_results:
+        race_key = (meeting.id, race.race_number)
+        if race_key not in races_data:
+            races_data[race_key] = []
+        races_data[race_key].append({
+            'prediction': pred,
+            'result': result
+        })
+    
+    # Calculate summary stats (top picks only)
+    total_races = len(races_data)
+    top_pick_wins = 0
+    total_profit = 0
+    winner_sps = []
+    stake = 10.0
+    
+    for race_key, horses in races_data.items():
+        if not horses:
+            continue
+        horses_sorted = sorted(horses, key=lambda x: x['prediction'].score, reverse=True)
+        top_pick = horses_sorted[0]
+        
+        if min_score_filter and top_pick['prediction'].score < min_score_filter:
+            total_races -= 1
+            continue
+        
+        result = top_pick['result']
+        won = result.finish_position == 1
+        sp = result.sp or 0
+        
+        if won:
+            top_pick_wins += 1
+            total_profit += (sp * stake - stake)
+            if sp > 0:
+                winner_sps.append(sp)
+        else:
+            total_profit -= stake
+    
+    strike_rate = (top_pick_wins / total_races * 100) if total_races > 0 else 0
+    roi = (total_profit / (total_races * stake) * 100) if total_races > 0 else 0
+    avg_winner_sp = sum(winner_sps) / len(winner_sps) if winner_sps else 0
+    
     # Best Bets stats - LIMIT to 500 most recent
     best_bets_stats = None
     try:
@@ -1719,6 +1787,30 @@ def data_analytics():
             
     except Exception as e:
         print(f"Error calculating Best Bets stats: {e}")
+    
+    # CLEANUP
+    del all_results
+    del races_data
+    import gc
+    gc.collect()
+    
+    # Return template with summary data
+    return render_template("data.html",
+        total_races=total_races,
+        strike_rate=strike_rate,
+        top_pick_wins=top_pick_wins,
+        roi=roi,
+        total_profit=total_profit,
+        avg_winner_sp=avg_winner_sp,
+        track_list=track_list,
+        best_bets_stats=best_bets_stats,
+        filters={
+            'track': track_filter,
+            'min_score': min_score_filter,
+            'date_from': date_from,
+            'date_to': date_to
+        }
+    )
     
     # Return template with minimal data - API calls will load sections
     return render_template("data.html",
