@@ -1662,7 +1662,20 @@ def data_analytics():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(1000).all()
+    # Get limit from filter (default 100)
+    limit_param = request.args.get('limit', '100')
+    if limit_param == 'all':
+        if current_user.is_admin:
+            all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+        else:
+            limit_param = '100'  # Non-admins can't use 'all'
+            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
+    else:
+        try:
+            limit = int(limit_param)
+            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+        except ValueError:
+            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
     
     # Group by race for top pick stats
     races_data = {}
@@ -1796,21 +1809,22 @@ def data_analytics():
     
     # Return template with summary data
     return render_template("data.html",
-        total_races=total_races,
-        strike_rate=strike_rate,
-        top_pick_wins=top_pick_wins,
-        roi=roi,
-        total_profit=total_profit,
-        avg_winner_sp=avg_winner_sp,
-        track_list=track_list,
-        best_bets_stats=best_bets_stats,
-        filters={
-            'track': track_filter,
-            'min_score': min_score_filter,
-            'date_from': date_from,
-            'date_to': date_to
-        }
-    )
+    total_races=total_races,
+    strike_rate=strike_rate,
+    top_pick_wins=top_pick_wins,
+    roi=roi,
+    total_profit=total_profit,
+    avg_winner_sp=avg_winner_sp,
+    track_list=track_list,
+    best_bets_stats=best_bets_stats,
+    filters={
+        'track': track_filter,
+        'min_score': min_score_filter,
+        'date_from': date_from,
+        'date_to': date_to,
+        'limit': int(limit_param) if limit_param != 'all' else 'all'
+    }
+)
     
     # Return template with minimal data - API calls will load sections
     return render_template("data.html",
@@ -1866,7 +1880,19 @@ def api_score_analysis():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(1000).all()
+    # Get limit from filter
+limit_param = request.args.get('limit', '100')
+if limit_param == 'all':
+    if current_user.is_admin:
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+    else:
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
+else:
+    try:
+        limit = int(limit_param)
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+    except ValueError:
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
     
     # Group races
     races_data = {}
@@ -2022,7 +2048,19 @@ def api_component_analysis():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(1000).all()
+    # Get limit from filter
+limit_param = request.args.get('limit', '100')
+if limit_param == 'all':
+    if current_user.is_admin:
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+    else:
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
+else:
+    try:
+        limit = int(limit_param)
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+    except ValueError:
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
     
     all_results_data = []
     for horse, pred, result, race, meeting in all_results:
@@ -2105,7 +2143,19 @@ def api_external_factors():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(1000).all()
+    # Get limit from filter
+limit_param = request.args.get('limit', '100')
+if limit_param == 'all':
+    if current_user.is_admin:
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+    else:
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
+else:
+    try:
+        limit = int(limit_param)
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+    except ValueError:
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
     
     all_results_data = []
     races_data = {}
@@ -2192,7 +2242,19 @@ def api_price_analysis():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(1000).all()
+    # Get limit from filter
+limit_param = request.args.get('limit', '100')
+if limit_param == 'all':
+    if current_user.is_admin:
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+    else:
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
+else:
+    try:
+        limit = int(limit_param)
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+    except ValueError:
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
     
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
