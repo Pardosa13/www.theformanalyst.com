@@ -1672,7 +1672,7 @@ def data_analytics():
             all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
         except ValueError:
             all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(200).all()
-    
+    print(f"LIMIT DEBUG: limit_param={limit_param}, total_results={len(all_results)}")
     # Group by race for top pick stats
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
