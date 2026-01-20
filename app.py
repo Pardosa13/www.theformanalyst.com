@@ -2362,7 +2362,6 @@ else:
     
     return result
     
-    return result
 # ----- ML Data Export Route -----
 @app.route("/data/export")
 @login_required
