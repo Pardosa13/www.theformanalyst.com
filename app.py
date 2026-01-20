@@ -1665,13 +1665,13 @@ def data_analytics():
     # Get limit from filter
     limit_param = request.args.get('limit', '200')
     if limit_param == 'all':
-        all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+        all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).all()
     else:
         try:
             limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(limit).all()
         except ValueError:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(200).all()
+            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(200).all()
     print(f"LIMIT DEBUG: limit_param={limit_param}, total_results={len(all_results)}")
     # Group by race for top pick stats
     races_data = {}
