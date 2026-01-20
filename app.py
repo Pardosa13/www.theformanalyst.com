@@ -1825,13 +1825,11 @@ def data_analytics():
 @app.route("/api/data/score-analysis")
 @login_required
 def api_score_analysis():
-    # ADMIN ONLY
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
-    """API endpoint for score analysis data"""
+    
     from flask import jsonify
     
-    # Get filters
     track_filter = request.args.get('track', '')
     min_score_filter = request.args.get('min_score', type=float)
     date_from = request.args.get('date_from', '')
@@ -1858,18 +1856,16 @@ def api_score_analysis():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-            # Get limit from filter
     limit_param = request.args.get('limit', '200')
     if limit_param == 'all':
-        all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+        all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).all()
     else:
         try:
             limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(limit).all()
         except ValueError:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(200).all()
+            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(200).all()
     
-    # Group races
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
         race_key = (meeting.id, race.race_number)
@@ -1914,7 +1910,6 @@ def api_score_analysis():
         second_score = horses[1]['prediction'].score if len(horses) > 1 else 0
         score_gap = top_score - second_score
         
-        # Determine tier
         if top_score >= 150:
             tier = '150+'
         elif top_score >= 140:
@@ -1932,7 +1927,6 @@ def api_score_analysis():
         else:
             tier = None
         
-        # Determine gap bucket
         if score_gap >= 50:
             gap_bucket = '50+'
         elif score_gap >= 40:
@@ -1961,7 +1955,6 @@ def api_score_analysis():
             score_gaps[gap_bucket]['wins'] += 1
         score_gaps[gap_bucket]['profit'] += profit
     
-    # Calculate rates
     for tier in score_tiers:
         t = score_tiers[tier]
         t['strike_rate'] = (t['wins'] / t['races'] * 100) if t['races'] > 0 else 0
@@ -1977,7 +1970,6 @@ def api_score_analysis():
         'score_gaps': score_gaps
     })
     
-    # CLEANUP
     del all_results
     del races_data
     del score_tiers
@@ -1991,10 +1983,9 @@ def api_score_analysis():
 @app.route("/api/data/component-analysis")
 @login_required
 def api_component_analysis():
-    # ADMIN ONLY
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
-    """API endpoint for component analysis data"""
+    
     from flask import jsonify
     
     track_filter = request.args.get('track', '')
@@ -2023,16 +2014,15 @@ def api_component_analysis():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-        # Get limit from filter
     limit_param = request.args.get('limit', '200')
     if limit_param == 'all':
-        all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+        all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).all()
     else:
         try:
             limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(limit).all()
         except ValueError:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(200).all()
+            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(200).all()
     
     all_results_data = []
     for horse, pred, result, race, meeting in all_results:
@@ -2046,14 +2036,12 @@ def api_component_analysis():
     
     component_stats = aggregate_component_stats(all_results_data, stake=10.0)
     
-    # Sort by ROI (best value first)
     sorted_components = sorted(
         component_stats.items(),
         key=lambda x: x[1]['roi'],
         reverse=True
     )
     
-    # Convert to serializable format
     components_list = []
     for name, stats in sorted_components:
         if stats['appearances'] >= 2:
@@ -2069,7 +2057,6 @@ def api_component_analysis():
     
     result = jsonify({'components': components_list})
     
-    # CLEANUP
     del all_results
     del all_results_data
     del component_stats
@@ -2083,10 +2070,9 @@ def api_component_analysis():
 @app.route("/api/data/external-factors")
 @login_required
 def api_external_factors():
-    # ADMIN ONLY
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
-    """API endpoint for external factors data"""
+    
     from flask import jsonify
     
     track_filter = request.args.get('track', '')
@@ -2115,16 +2101,15 @@ def api_external_factors():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-            # Get limit from filter
     limit_param = request.args.get('limit', '200')
     if limit_param == 'all':
-        all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+        all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).all()
     else:
         try:
             limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(limit).all()
         except ValueError:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(200).all()
+            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(200).all()
     
     all_results_data = []
     races_data = {}
@@ -2151,7 +2136,6 @@ def api_external_factors():
     external_factors = analyze_external_factors(all_results_data, races_data, stake=10.0)
     class_performance = analyze_race_classes(races_data, stake=10.0)
     
-    # Filter class performance
     class_performance_filtered = {k: v for k, v in class_performance.items() if v['runs'] >= 2}
     
     result = jsonify({
@@ -2168,7 +2152,6 @@ def api_external_factors():
         'class_performance': class_performance_filtered
     })
     
-    # CLEANUP
     del all_results
     del all_results_data
     del races_data
@@ -2179,10 +2162,10 @@ def api_external_factors():
     
     return result
 
+
 @app.route("/api/data/price-analysis")
 @login_required
 def api_price_analysis():
-    """API endpoint for price analysis data"""
     from flask import jsonify
     
     track_filter = request.args.get('track', '')
@@ -2211,16 +2194,15 @@ def api_price_analysis():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-        # Get limit from filter
     limit_param = request.args.get('limit', '200')
     if limit_param == 'all':
-        all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+        all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).all()
     else:
         try:
             limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(limit).all()
         except ValueError:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(200).all()
+            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(200).all()
     
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
@@ -2309,7 +2291,6 @@ def api_price_analysis():
                 price_analysis['accurate']['wins'] += 1
             price_analysis['accurate']['profit'] += profit
     
-    # Calculate rates
     for category in ['overlays', 'underlays', 'accurate']:
         cat = price_analysis[category]
         cat['strike_rate'] = (cat['wins'] / cat['count'] * 100) if cat['count'] > 0 else 0
@@ -2319,7 +2300,6 @@ def api_price_analysis():
     
     result = jsonify(price_analysis)
     
-    # CLEANUP
     del all_results
     del races_data
     del price_analysis
