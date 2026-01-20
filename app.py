@@ -1640,7 +1640,7 @@ def data_analytics():
         .all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
     
-    # QUICK SUMMARY STATS ONLY - Limit to 1000 most recent
+    # QUICK SUMMARY STATS ONLY
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
     ).join(
@@ -1662,8 +1662,10 @@ def data_analytics():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    # Get limit from filter - FIXED INDENTATION
-    limit_param = request.args.get('limit', '200')  # Changed default to 200
+    # Get limit from filter - PROPERLY INDENTED
+    limit_param = request.args.get('limit', '200')
+    print(f"DEBUG: limit_param received = {limit_param}")  # Debug line
+    
     if limit_param == 'all':
         if current_user.is_admin:
             all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
@@ -1672,9 +1674,13 @@ def data_analytics():
     else:
         try:
             limit = int(limit_param)
+            print(f"DEBUG: Using limit = {limit}")  # Debug line
             all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
         except ValueError: 
+            print(f"DEBUG: ValueError, defaulting to 200")  # Debug line
             all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(200).all()
+    
+    print(f"DEBUG: Total results fetched = {len(all_results)}")  # Debug line
     
     # Group by race for top pick stats
     races_data = {}
@@ -1806,7 +1812,7 @@ def data_analytics():
     import gc
     gc.collect()
     
-    # SINGLE RETURN STATEMENT - Return template with summary data
+    # SINGLE RETURN - Return template with summary data
     return render_template("data.html",
         total_races=total_races,
         strike_rate=strike_rate,
@@ -1824,6 +1830,7 @@ def data_analytics():
             'limit': int(limit_param) if limit_param != 'all' else 'all'
         }
     )
+
 @app.route("/api/data/score-analysis")
 @login_required
 def api_score_analysis():
