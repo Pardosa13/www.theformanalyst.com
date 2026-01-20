@@ -1662,19 +1662,19 @@ def data_analytics():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-            # Get limit from filter
-    limit_param = request.args.get('limit', '100')
+    # Get limit from filter - FIXED INDENTATION
+    limit_param = request.args.get('limit', '200')  # Changed default to 200
     if limit_param == 'all':
-        if current_user. is_admin:
-            all_results = base_query.order_by(Meeting.uploaded_at. desc()).all()
+        if current_user.is_admin:
+            all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
         else:
-            all_results = base_query.order_by(Meeting. uploaded_at.desc()).limit(100).all()
+            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(200).all()
     else:
         try:
             limit = int(limit_param)
-            all_results = base_query. order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
         except ValueError: 
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
+            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(200).all()
     
     # Group by race for top pick stats
     races_data = {}
@@ -1806,43 +1806,24 @@ def data_analytics():
     import gc
     gc.collect()
     
-    # Return template with summary data
+    # SINGLE RETURN STATEMENT - Return template with summary data
     return render_template("data.html",
-    total_races=total_races,
-    strike_rate=strike_rate,
-    top_pick_wins=top_pick_wins,
-    roi=roi,
-    total_profit=total_profit,
-    avg_winner_sp=avg_winner_sp,
-    track_list=track_list,
-    best_bets_stats=best_bets_stats,
-    filters={
-        'track': track_filter,
-        'min_score': min_score_filter,
-        'date_from': date_from,
-        'date_to': date_to,
-        'limit': int(limit_param) if limit_param != 'all' else 'all'
-    }
-)
-    
-    # Return template with minimal data - API calls will load sections
-    return render_template("data.html",
-        total_races=0,
-        strike_rate=0,
-        top_pick_wins=0,
-        roi=0,
-        total_profit=0,
-        avg_winner_sp=0,
+        total_races=total_races,
+        strike_rate=strike_rate,
+        top_pick_wins=top_pick_wins,
+        roi=roi,
+        total_profit=total_profit,
+        avg_winner_sp=avg_winner_sp,
         track_list=track_list,
         best_bets_stats=best_bets_stats,
         filters={
             'track': track_filter,
             'min_score': min_score_filter,
             'date_from': date_from,
-            'date_to': date_to
+            'date_to': date_to,
+            'limit': int(limit_param) if limit_param != 'all' else 'all'
         }
     )
-
 @app.route("/api/data/score-analysis")
 @login_required
 def api_score_analysis():
