@@ -32,13 +32,25 @@
                     <input type="date" name="date_from" class="form-control" value="{{ filters.date_from }}">
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label">Date To</label>
-                    <input type="date" name="date_to" class="form-control" value="{{ filters.date_to }}">
-                </div>
-                <div class="col-md-3 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary me-2">Apply Filters</button>
-                    <a href="{{ url_for('data_analytics') }}" class="btn btn-outline-secondary">Reset</a>
-                </div>
+    <label class="form-label">Date To</label>
+    <input type="date" name="date_to" class="form-control" value="{{ filters.date_to }}">
+</div>
+<div class="col-md-2">
+    <label class="form-label">Show Last</label>
+    <select name="limit" class="form-select">
+        <option value="50" {% if filters.limit == 50 %}selected{% endif %}>50 Races (Fast)</option>
+        <option value="100" {% if filters.limit == 100 or not filters.limit %}selected{% endif %}>100 Races (Balanced)</option>
+        <option value="200" {% if filters.limit == 200 %}selected{% endif %}>200 Races (More Data)</option>
+        <option value="500" {% if filters.limit == 500 %}selected{% endif %}>500 Races (Slow)</option>
+        {% if current_user.is_admin %}
+        <option value="all" {% if filters.limit == 'all' %}selected{% endif %}>All Races (Admin)</option>
+        {% endif %}
+    </select>
+</div>
+<div class="col-md-3 d-flex align-items-end">
+    <button type="submit" class="btn btn-primary me-2">Apply Filters</button>
+    <a href="{{ url_for('data_analytics') }}" class="btn btn-outline-secondary">Reset</a>
+</div>
             </form>
         </div>
     </div>
