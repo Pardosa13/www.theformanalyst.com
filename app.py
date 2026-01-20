@@ -1652,7 +1652,7 @@ def data_analytics():
     
     limit_param = request.args.get('limit', '200')
     if limit_param == 'all':
-        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).all()]
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id, Meeting.date).order_by(Meeting.date.desc()).all()]
     else:
         try:
             limit = int(limit_param)
@@ -1853,7 +1853,7 @@ def api_score_analysis():
     
     limit_param = request.args.get('limit', '200')
     if limit_param == 'all':
-        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).all()]
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id, Meeting.date).order_by(Meeting.date.desc()).all()]
     else:
         try:
             limit = int(limit_param)
@@ -2024,7 +2024,7 @@ def api_component_analysis():
     
     limit_param = request.args.get('limit', '200')
     if limit_param == 'all':
-        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).all()]
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id, Meeting.date).order_by(Meeting.date.desc()).all()]
     else:
         try:
             limit = int(limit_param)
@@ -2124,7 +2124,7 @@ def api_external_factors():
     
     limit_param = request.args.get('limit', '200')
     if limit_param == 'all':
-        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).all()]
+       recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id, Meeting.date).order_by(Meeting.date.desc()).all()]
     else:
         try:
             limit = int(limit_param)
@@ -2230,7 +2230,7 @@ def api_price_analysis():
     
     limit_param = request.args.get('limit', '200')
     if limit_param == 'all':
-        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).all()]
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id, Meeting.date).order_by(Meeting.date.desc()).all()]
     else:
         try:
             limit = int(limit_param)
