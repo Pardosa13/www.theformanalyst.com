@@ -1802,8 +1802,7 @@ def data_analytics():
     import gc
     gc.collect()
     
-    db.session.expunge_all()
-    db.session.close()
+    db.session.remove()
     
     return render_template("data.html",
         total_races=total_races,
@@ -1992,8 +1991,7 @@ def api_score_analysis():
     import gc
     gc.collect()
     
-    db.session.expunge_all()
-    db.session.close()
+    db.session.remove()
     
     return result
 
@@ -2095,8 +2093,7 @@ def api_component_analysis():
     import gc
     gc.collect()
     
-    db.session.expunge_all()
-    db.session.close()
+    db.session.remove()
     
     return result
 
@@ -2207,8 +2204,7 @@ def api_external_factors():
     import gc
     gc.collect()
     
-    db.session.expunge_all()
-    db.session.close()
+    db.session.remove()
     
     return result
 
@@ -2369,8 +2365,7 @@ def api_price_analysis():
     import gc
     gc.collect()
     
-    db.session.expunge_all()
-    db.session.close()
+    db.session.remove()
     
     return result
     
