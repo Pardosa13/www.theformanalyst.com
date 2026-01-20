@@ -1658,7 +1658,7 @@ def data_analytics():
             limit = int(limit_param)
         except ValueError:
             limit = 200
-        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).limit(limit).all()]
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id, Meeting.date).order_by(Meeting.date.desc()).limit(limit).all()
     
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
@@ -1859,7 +1859,7 @@ def api_score_analysis():
             limit = int(limit_param)
         except ValueError:
             limit = 200
-        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).limit(limit).all()]
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id, Meeting.date).order_by(Meeting.date.desc()).limit(limit).all()
     
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
@@ -2030,7 +2030,7 @@ def api_component_analysis():
             limit = int(limit_param)
         except ValueError:
             limit = 200
-        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).limit(limit).all()]
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id, Meeting.date).order_by(Meeting.date.desc()).limit(limit).all()
     
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
@@ -2130,7 +2130,7 @@ def api_external_factors():
             limit = int(limit_param)
         except ValueError:
             limit = 200
-        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).limit(limit).all()]
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id, Meeting.date).order_by(Meeting.date.desc()).limit(limit).all()
     
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
@@ -2236,7 +2236,7 @@ def api_price_analysis():
             limit = int(limit_param)
         except ValueError:
             limit = 200
-        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).limit(limit).all()]
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id, Meeting.date).order_by(Meeting.date.desc()).limit(limit).all()
     
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
