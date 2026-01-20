@@ -1621,9 +1621,6 @@ def admin_panel():
 @app.route("/data")
 @login_required
 def data_analytics():
-    """Analytics dashboard - ADMIN ONLY, loads summary only"""
-    
-    # ADMIN ONLY - Prevent non-admins from accessing expensive analytics
     if not current_user.is_admin:
         flash("Access denied. Analytics page is admin-only.", "danger")
         return redirect(url_for("dashboard"))
@@ -1633,14 +1630,36 @@ def data_analytics():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     
-    # Get track list for filter dropdown - LIMIT to 200 most recent
-    tracks = db.session.query(Meeting.meeting_name)\
-        .order_by(Meeting.uploaded_at.desc())\
-        .limit(200)\
-        .all()
+    tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
     
-    # QUICK SUMMARY STATS ONLY
+    race_id_query = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(
+        Horse, Horse.race_id == Race.id
+    ).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(
+        Result.finish_position > 0
+    )
+    
+    if track_filter:
+        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+    
+    limit_param = request.args.get('limit', '200')
+    if limit_param == 'all':
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).all()]
+    else:
+        try:
+            limit = int(limit_param)
+        except ValueError:
+            limit = 200
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).limit(limit).all()]
+    
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
     ).join(
@@ -1652,28 +1671,12 @@ def data_analytics():
     ).join(
         Meeting, Race.meeting_id == Meeting.id
     ).filter(
-        Result.finish_position > 0
+        Result.finish_position > 0,
+        Race.id.in_(recent_race_ids)
     )
     
-    if track_filter:
-        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        base_query = base_query.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
+    all_results = base_query.all()
     
-    # Get limit from filter
-    limit_param = request.args.get('limit', '200')
-    if limit_param == 'all':
-        all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).all()
-    else:
-        try:
-            limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(limit).all()
-        except ValueError:
-            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(200).all()
-    print(f"LIMIT DEBUG: limit_param={limit_param}, total_results={len(all_results)}")
-    # Group by race for top pick stats
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
         race_key = (meeting.id, race.race_number)
@@ -1684,7 +1687,6 @@ def data_analytics():
             'result': result
         })
     
-    # Calculate summary stats (top picks only)
     total_races = len(races_data)
     top_pick_wins = 0
     total_profit = 0
@@ -1717,7 +1719,6 @@ def data_analytics():
     roi = (total_profit / (total_races * stake) * 100) if total_races > 0 else 0
     avg_winner_sp = sum(winner_sps) / len(winner_sps) if winner_sps else 0
     
-    # Best Bets stats - LIMIT to 500 most recent
     best_bets_stats = None
     try:
         best_bet_predictions = db.session.query(Prediction, Result, Horse).join(
@@ -1789,7 +1790,6 @@ def data_analytics():
                 'component_performance': component_performance
             }
             
-            # CLEANUP
             del best_bet_predictions
             import gc
             gc.collect()
@@ -1797,13 +1797,11 @@ def data_analytics():
     except Exception as e:
         print(f"Error calculating Best Bets stats: {e}")
     
-    # CLEANUP
     del all_results
     del races_data
     import gc
     gc.collect()
     
-    # SINGLE RETURN - Return template with summary data
     return render_template("data.html",
         total_races=total_races,
         strike_rate=strike_rate,
@@ -1822,6 +1820,7 @@ def data_analytics():
         }
     )
 
+
 @app.route("/api/data/score-analysis")
 @login_required
 def api_score_analysis():
@@ -1835,6 +1834,33 @@ def api_score_analysis():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     
+    race_id_query = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(
+        Horse, Horse.race_id == Race.id
+    ).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(
+        Result.finish_position > 0
+    )
+    
+    if track_filter:
+        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+    
+    limit_param = request.args.get('limit', '200')
+    if limit_param == 'all':
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).all()]
+    else:
+        try:
+            limit = int(limit_param)
+        except ValueError:
+            limit = 200
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).limit(limit).all()]
+    
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
     ).join(
@@ -1846,25 +1872,11 @@ def api_score_analysis():
     ).join(
         Meeting, Race.meeting_id == Meeting.id
     ).filter(
-        Result.finish_position > 0
+        Result.finish_position > 0,
+        Race.id.in_(recent_race_ids)
     )
     
-    if track_filter:
-        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        base_query = base_query.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
-    
-    limit_param = request.args.get('limit', '200')
-    if limit_param == 'all':
-        all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).all()
-    else:
-        try:
-            limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(limit).all()
-        except ValueError:
-            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(200).all()
+    all_results = base_query.all()
     
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
@@ -1993,6 +2005,33 @@ def api_component_analysis():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     
+    race_id_query = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(
+        Horse, Horse.race_id == Race.id
+    ).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(
+        Result.finish_position > 0
+    )
+    
+    if track_filter:
+        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+    
+    limit_param = request.args.get('limit', '200')
+    if limit_param == 'all':
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).all()]
+    else:
+        try:
+            limit = int(limit_param)
+        except ValueError:
+            limit = 200
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).limit(limit).all()]
+    
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
     ).join(
@@ -2004,25 +2043,11 @@ def api_component_analysis():
     ).join(
         Meeting, Race.meeting_id == Meeting.id
     ).filter(
-        Result.finish_position > 0
+        Result.finish_position > 0,
+        Race.id.in_(recent_race_ids)
     )
     
-    if track_filter:
-        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        base_query = base_query.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
-    
-    limit_param = request.args.get('limit', '200')
-    if limit_param == 'all':
-        all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).all()
-    else:
-        try:
-            limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(limit).all()
-        except ValueError:
-            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(200).all()
+    all_results = base_query.all()
     
     all_results_data = []
     for horse, pred, result, race, meeting in all_results:
@@ -2080,6 +2105,33 @@ def api_external_factors():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     
+    race_id_query = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(
+        Horse, Horse.race_id == Race.id
+    ).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(
+        Result.finish_position > 0
+    )
+    
+    if track_filter:
+        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+    
+    limit_param = request.args.get('limit', '200')
+    if limit_param == 'all':
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).all()]
+    else:
+        try:
+            limit = int(limit_param)
+        except ValueError:
+            limit = 200
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).limit(limit).all()]
+    
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
     ).join(
@@ -2091,25 +2143,11 @@ def api_external_factors():
     ).join(
         Meeting, Race.meeting_id == Meeting.id
     ).filter(
-        Result.finish_position > 0
+        Result.finish_position > 0,
+        Race.id.in_(recent_race_ids)
     )
     
-    if track_filter:
-        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        base_query = base_query.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
-    
-    limit_param = request.args.get('limit', '200')
-    if limit_param == 'all':
-        all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).all()
-    else:
-        try:
-            limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(limit).all()
-        except ValueError:
-            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(200).all()
+    all_results = base_query.all()
     
     all_results_data = []
     races_data = {}
@@ -2173,6 +2211,33 @@ def api_price_analysis():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     
+    race_id_query = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(
+        Horse, Horse.race_id == Race.id
+    ).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(
+        Result.finish_position > 0
+    )
+    
+    if track_filter:
+        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+    
+    limit_param = request.args.get('limit', '200')
+    if limit_param == 'all':
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).all()]
+    else:
+        try:
+            limit = int(limit_param)
+        except ValueError:
+            limit = 200
+        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id).order_by(Meeting.date.desc()).limit(limit).all()]
+    
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
     ).join(
@@ -2184,25 +2249,11 @@ def api_price_analysis():
     ).join(
         Meeting, Race.meeting_id == Meeting.id
     ).filter(
-        Result.finish_position > 0
+        Result.finish_position > 0,
+        Race.id.in_(recent_race_ids)
     )
     
-    if track_filter:
-        base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        base_query = base_query.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        base_query = base_query.filter(Meeting.uploaded_at <= date_to)
-    
-    limit_param = request.args.get('limit', '200')
-    if limit_param == 'all':
-        all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).all()
-    else:
-        try:
-            limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(limit).all()
-        except ValueError:
-            all_results = base_query.order_by(Meeting.date.desc(), Meeting.meeting_name.desc()).limit(200).all()
+    all_results = base_query.all()
     
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
