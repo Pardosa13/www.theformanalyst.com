@@ -1662,19 +1662,19 @@ def data_analytics():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-        # Get limit from filter (default 100)
+            # Get limit from filter
     limit_param = request.args.get('limit', '100')
     if limit_param == 'all':
-        if current_user.is_admin:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+        if current_user. is_admin:
+            all_results = base_query.order_by(Meeting.uploaded_at. desc()).all()
         else:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
+            all_results = base_query.order_by(Meeting. uploaded_at.desc()).limit(100).all()
     else:
         try:
             limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
-        except ValueError:
-            all_results = base_query.order_by(Meeting.uploaded_at. desc()).limit(100).all()
+            all_results = base_query. order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+        except ValueError: 
+            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
     
     # Group by race for top pick stats
     races_data = {}
@@ -1879,19 +1879,19 @@ def api_score_analysis():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-        # Get limit from filter
-        limit_param = request.args.get('limit', '100')
-    if limit_param == 'all': 
-        if current_user.is_admin:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+            # Get limit from filter
+    limit_param = request.args.get('limit', '100')
+    if limit_param == 'all':
+        if current_user. is_admin:
+            all_results = base_query.order_by(Meeting.uploaded_at. desc()).all()
         else:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
+            all_results = base_query.order_by(Meeting. uploaded_at.desc()).limit(100).all()
     else:
         try:
             limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
-        except ValueError:
-            all_results = base_query. order_by(Meeting.uploaded_at.desc()).limit(100).all()
+            all_results = base_query. order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+        except ValueError: 
+            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
     
     # Group races
     races_data = {}
@@ -2047,19 +2047,19 @@ def api_component_analysis():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    # Get limit from filter
-        limit_param = request.args.get('limit', '100')
-    if limit_param == 'all': 
-        if current_user.is_admin:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+        # Get limit from filter
+    limit_param = request.args.get('limit', '100')
+    if limit_param == 'all':
+        if current_user. is_admin:
+            all_results = base_query.order_by(Meeting.uploaded_at. desc()).all()
         else:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
+            all_results = base_query.order_by(Meeting. uploaded_at.desc()).limit(100).all()
     else:
         try:
             limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
-        except ValueError:
-            all_results = base_query. order_by(Meeting.uploaded_at.desc()).limit(100).all()
+            all_results = base_query. order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+        except ValueError: 
+            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
     
     all_results_data = []
     for horse, pred, result, race, meeting in all_results:
@@ -2142,7 +2142,7 @@ def api_external_factors():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-        # Get limit from filter
+            # Get limit from filter
     limit_param = request.args.get('limit', '100')
     if limit_param == 'all':
         if current_user. is_admin:
@@ -2241,19 +2241,19 @@ def api_price_analysis():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    # Get limit from filter
-        limit_param = request.args.get('limit', '100')
-    if limit_param == 'all': 
-        if current_user.is_admin:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
+        # Get limit from filter
+    limit_param = request.args.get('limit', '100')
+    if limit_param == 'all':
+        if current_user. is_admin:
+            all_results = base_query.order_by(Meeting.uploaded_at. desc()).all()
         else:
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
+            all_results = base_query.order_by(Meeting. uploaded_at.desc()).limit(100).all()
     else:
         try:
             limit = int(limit_param)
-            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
-        except ValueError:
-            all_results = base_query. order_by(Meeting.uploaded_at.desc()).limit(100).all()
+            all_results = base_query. order_by(Meeting.uploaded_at.desc()).limit(limit).all()
+        except ValueError: 
+            all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
     
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
