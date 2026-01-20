@@ -1662,26 +1662,16 @@ def data_analytics():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    # Get limit from filter - PROPERLY INDENTED
-   limit_param = request.args.get('limit', '200')
-if limit_param == 'all':
-    all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
-else:
-    try:
-        limit = int(limit_param)
-        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
-    except ValueError:
-        all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(200).all()
+    # Get limit from filter
+    limit_param = request.args.get('limit', '200')
+    if limit_param == 'all':
+        all_results = base_query.order_by(Meeting.uploaded_at.desc()).all()
     else:
         try:
             limit = int(limit_param)
-            print(f"DEBUG: Using limit = {limit}")  # Debug line
             all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(limit).all()
-        except ValueError: 
-            print(f"DEBUG: ValueError, defaulting to 200")  # Debug line
+        except ValueError:
             all_results = base_query.order_by(Meeting.uploaded_at.desc()).limit(200).all()
-    
-    print(f"DEBUG: Total results fetched = {len(all_results)}")  # Debug line
     
     # Group by race for top pick stats
     races_data = {}
