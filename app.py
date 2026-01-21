@@ -76,6 +76,12 @@ login_manager.init_app(app)
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
+    
+@app.teardown_appcontext
+def shutdown_session(exception=None):
+    db.session.remove()
+    import gc
+    gc.collect()
 
 # Create tables and default admin user
 with app.app_context():
