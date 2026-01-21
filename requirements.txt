@@ -7,3 +7,4 @@ psycopg2-binary==2.9.9
 gunicorn==21.2.0
 requests
 tweepy
+gevent==24.2.1
