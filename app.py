@@ -1659,7 +1659,7 @@ def data_analytics():
     limit_param = request.args.get('limit', '200')
     
     # Get distinct race IDs ordered by most recent
-    all_race_ids = race_id_query.distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
+    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
     
     # Apply limit
     if limit_param == 'all':
