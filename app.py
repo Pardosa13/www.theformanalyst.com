@@ -1861,17 +1861,15 @@ def api_score_analysis():
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
     
-    limit_param = request.args.get('limit', '200')
-
+   limit_param = request.args.get('limit', '200')
     # Get distinct race IDs ordered by most recent
     all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
-
     # Apply limit
     if limit_param == 'all':
-    recent_race_ids = [r[0] for r in all_race_ids]
+        recent_race_ids = [r[0] for r in all_race_ids]
     else:
-    limit = int(limit_param) if limit_param.isdigit() else 200
-    recent_race_ids = [r[0] for r in all_race_ids[:limit]]
+        limit = int(limit_param) if limit_param.isdigit() else 200
+        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
     
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
@@ -2037,16 +2035,14 @@ def api_component_analysis():
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
     
     limit_param = request.args.get('limit', '200')
-
     # Get distinct race IDs ordered by most recent
-     all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
-
+    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
     # Apply limit
     if limit_param == 'all':
-    recent_race_ids = [r[0] for r in all_race_ids]
+        recent_race_ids = [r[0] for r in all_race_ids]
     else:
-    limit = int(limit_param) if limit_param.isdigit() else 200
-    recent_race_ids = [r[0] for r in all_race_ids[:limit]]
+        limit = int(limit_param) if limit_param.isdigit() else 200
+        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
     
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
@@ -2141,16 +2137,14 @@ def api_external_factors():
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
     
     limit_param = request.args.get('limit', '200')
-
     # Get distinct race IDs ordered by most recent
     all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
-
     # Apply limit
     if limit_param == 'all':
-    recent_race_ids = [r[0] for r in all_race_ids]
+        recent_race_ids = [r[0] for r in all_race_ids]
     else:
-    limit = int(limit_param) if limit_param.isdigit() else 200
-    recent_race_ids = [r[0] for r in all_race_ids[:limit]]
+        limit = int(limit_param) if limit_param.isdigit() else 200
+        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
     
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
@@ -2251,16 +2245,14 @@ def api_price_analysis():
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
     
     limit_param = request.args.get('limit', '200')
-
     # Get distinct race IDs ordered by most recent
     all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
-
     # Apply limit
     if limit_param == 'all':
-    recent_race_ids = [r[0] for r in all_race_ids]
+        recent_race_ids = [r[0] for r in all_race_ids]
     else:
-    limit = int(limit_param) if limit_param.isdigit() else 200
-    recent_race_ids = [r[0] for r in all_race_ids[:limit]]
+        limit = int(limit_param) if limit_param.isdigit() else 200
+        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
     
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
