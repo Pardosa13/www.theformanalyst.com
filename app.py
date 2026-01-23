@@ -1861,7 +1861,7 @@ def api_score_analysis():
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
     
-   limit_param = request.args.get('limit', '200')
+    limit_param = request.args.get('limit', '200')
     # Get distinct race IDs ordered by most recent
     all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
     # Apply limit
