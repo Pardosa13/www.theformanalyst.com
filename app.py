@@ -1657,14 +1657,16 @@ def data_analytics():
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
     
     limit_param = request.args.get('limit', '200')
+    
+    # Get distinct race IDs ordered by most recent
+    all_race_ids = race_id_query.distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
+    
+    # Apply limit
     if limit_param == 'all':
-        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id, Meeting.date).order_by(Meeting.date.desc()).all()]
+        recent_race_ids = [r[0] for r in all_race_ids]
     else:
-        try:
-            limit = int(limit_param)
-        except ValueError:
-            limit = 200
-        recent_race_ids = [r[0] for r in race_id_query.group_by(Race.id, Meeting.date).order_by(Meeting.date.desc()).limit(limit).all()]
+        limit = int(limit_param) if limit_param.isdigit() else 200
+        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
     
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
