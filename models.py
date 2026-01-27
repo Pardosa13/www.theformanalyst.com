@@ -172,7 +172,7 @@ class Component(db.Model):
     def __repr__(self):
         return f'<Component {self.component_name}: {self.roi_percentage}% ROI>'
     
-   @property
+    @property
     def display_label(self):
         """Formatted label for display"""
         if self.appearances > 0:
