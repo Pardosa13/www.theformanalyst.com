@@ -2960,7 +2960,7 @@ def chat():
 
 @app.route('/api/chat/history', methods=['GET'])
 def get_chat_history():
-    if 'user_id' not in session:
+    if not current_user.is_authenticated:
         return jsonify({'error': 'Please log in'}), 401
     
     user_id = session['user_id']
