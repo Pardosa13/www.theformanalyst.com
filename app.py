@@ -2882,7 +2882,7 @@ Keep responses under 200 words unless detailed analysis is requested."""
 @app.route('/api/chat', methods=['POST'])
 @limiter.limit("10 per minute")
 def chat():
-    if 'user_id' not in session:
+    if not current_user.is_authenticated:
         return jsonify({'error': 'Please log in to use chat'}), 401
     
     try:
