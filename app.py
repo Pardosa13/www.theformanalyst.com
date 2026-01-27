@@ -2894,7 +2894,7 @@ def chat():
         if len(user_message) > 500:
             return jsonify({'error': 'Message too long (max 500 characters)'}), 400
         
-        user_id = session['user_id']
+        user_id = current_user.id
         
         # Get or create session ID
         if 'chat_session_id' not in session:
@@ -2963,7 +2963,7 @@ def get_chat_history():
     if not current_user.is_authenticated:
         return jsonify({'error': 'Please log in'}), 401
     
-    user_id = session['user_id']
+    user_id = current_user.id
     chat_session_id = session.get('chat_session_id')
     
     if not chat_session_id:
