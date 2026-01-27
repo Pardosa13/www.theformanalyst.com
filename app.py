@@ -9,6 +9,10 @@ from werkzeug.security import generate_password_hash
 from datetime import datetime
 import requests
 import tweepy
+from anthropic import Anthropic
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+import uuid
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result
 
@@ -24,6 +28,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# Initialize Claude API client
+client = Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+
+# Initialize rate limiter
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
 
 # Configuration
 app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
@@ -2844,3 +2858,135 @@ def test_telegram():
         flash(f"✗ Error: {e}", "danger")
     
     return redirect(url_for("admin_panel"))
+    
+    # ----- CHAT SYSTEM ROUTES -----
+
+RACING_SYSTEM_PROMPT = """You are an expert horse racing analyst assistant for The Form Analyst platform. 
+
+Your role:
+- Help users understand racing form, statistics, and betting strategies
+- Explain how sectional times, track conditions, and class changes affect performance
+- Interpret probability ratings and recommended bets
+- Answer questions about specific horses, jockeys, trainers, and race conditions
+- Provide insights on form analysis techniques
+
+Guidelines:
+- Be concise and data-driven in your responses
+- Use Australian racing terminology
+- Focus on educational content, not guaranteed tips
+- Remind users that gambling involves risk
+- If asked about specific current races, acknowledge you need live data from the platform
+
+Keep responses under 200 words unless detailed analysis is requested."""
+
+@app.route('/api/chat', methods=['POST'])
+@limiter.limit("10 per minute")
+def chat():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Please log in to use chat'}), 401
+    
+    try:
+        user_message = request.json.get('message', '').strip()
+        
+        if not user_message:
+            return jsonify({'error': 'Message cannot be empty'}), 400
+        
+        if len(user_message) > 500:
+            return jsonify({'error': 'Message too long (max 500 characters)'}), 400
+        
+        user_id = session['user_id']
+        
+        # Get or create session ID
+        if 'chat_session_id' not in session:
+            session['chat_session_id'] = str(uuid.uuid4())
+        
+        chat_session_id = session['chat_session_id']
+        
+        # Save user message
+        from models import ChatMessage
+        user_msg = ChatMessage(
+            user_id=user_id,
+            role='user',
+            content=user_message,
+            session_id=chat_session_id
+        )
+        db.session.add(user_msg)
+        db.session.commit()
+        
+        # Get history (last 10 messages)
+        history = ChatMessage.query.filter_by(
+            user_id=user_id,
+            session_id=chat_session_id
+        ).order_by(ChatMessage.timestamp.desc()).limit(10).all()
+        
+        history = list(reversed(history))
+        
+        # Build messages for Claude
+        messages = []
+        for msg in history:
+            messages.append({
+                "role": msg.role,
+                "content": msg.content
+            })
+        
+        # Call Claude API
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            system=RACING_SYSTEM_PROMPT,
+            messages=messages
+        )
+        
+        assistant_response = response.content[0].text
+        
+        # Save assistant response
+        assistant_msg = ChatMessage(
+            user_id=user_id,
+            role='assistant',
+            content=assistant_response,
+            session_id=chat_session_id
+        )
+        db.session.add(assistant_msg)
+        db.session.commit()
+        
+        return jsonify({
+            'response': assistant_response,
+            'message_count': len(messages)
+        })
+    
+    except Exception as e:
+        print(f"Chat error: {str(e)}")
+        return jsonify({'error': 'Failed to process message'}), 500
+
+@app.route('/api/chat/history', methods=['GET'])
+def get_chat_history():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Please log in'}), 401
+    
+    user_id = session['user_id']
+    chat_session_id = session.get('chat_session_id')
+    
+    if not chat_session_id:
+        return jsonify({'messages': []})
+    
+    from models import ChatMessage
+    messages = ChatMessage.query.filter_by(
+        user_id=user_id,
+        session_id=chat_session_id
+    ).order_by(ChatMessage.timestamp.asc()).limit(20).all()
+    
+    return jsonify({
+        'messages': [{
+            'role': msg.role,
+            'content': msg.content,
+            'timestamp': msg.timestamp.isoformat()
+        } for msg in messages]
+    })
+
+@app.route('/api/chat/new', methods=['POST'])
+def new_chat_session():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Please log in'}), 401
+    
+    session['chat_session_id'] = str(uuid.uuid4())
+    return jsonify({'message': 'New conversation started'})
