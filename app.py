@@ -2896,26 +2896,26 @@ Example queries you can answer:
 
 def get_database_context_for_query(user_query, user_id):
     """
-    Analyze user query and fetch relevant database context with full CSV data
+    Analyze user query and fetch relevant database context from ALL users' data
     """
     query_lower = user_query.lower()
     context_parts = []
     
     # Check if asking about uploaded meetings/horses
-    if any(word in query_lower for word in ['meeting', 'uploaded', 'sandown', 'flemington', 'caulfield', 'today', 'analyse', 'analyze', '3yo', 'horse', 'race']):
-        # Get recent meetings
-        recent_meetings = Meeting.query.filter_by(user_id=user_id)\
+    if any(word in query_lower for word in ['meeting', 'uploaded', 'sandown', 'flemington', 'caulfield', 'today', 'analyse', 'analyze', '3yo', 'horse', 'race', 'kembla', 'randwick', 'cranbourne']):
+        # Get ALL meetings (removed user_id filter)
+        recent_meetings = Meeting.query\
             .order_by(Meeting.uploaded_at.desc())\
-            .limit(10)\
+            .limit(500)\
             .all()
         
         if recent_meetings:
-            meetings_info = "Your uploaded meetings:\n"
+            meetings_info = "Available uploaded meetings:\n"
             for m in recent_meetings:
                 meetings_info += f"\n{m.meeting_name} (uploaded {m.uploaded_at.strftime('%Y-%m-%d')})\n"
                 
                 # If asking about specific meeting or track, include full race data
-                meeting_name_parts = m.meeting_name.lower().split()
+                meeting_name_parts = m.meeting_name.lower().split('_')
                 if any(part in query_lower for part in meeting_name_parts) or 'all' in query_lower:
                     for race in m.races:
                         meetings_info += f"\n  Race {race.race_number}: {race.distance}m, {race.race_class}, {race.track_condition}\n"
@@ -2947,23 +2947,22 @@ def get_database_context_for_query(user_query, user_id):
             
             context_parts.append(meetings_info)
     
-    # Check if asking about results/statistics
+    # Check if asking about results/statistics (ALL users)
     if any(word in query_lower for word in ['result', 'win', 'strike', 'roi', 'performance', 'stat', 'how did', 'winner']):
         from models import Result, Prediction
         
-        # Get recent results with predictions
+        # Get recent results from ALL users
         results_query = db.session.query(Result, Horse, Race, Meeting, Prediction)\
             .join(Horse, Result.horse_id == Horse.id)\
             .outerjoin(Prediction, Horse.id == Prediction.horse_id)\
             .join(Race, Horse.race_id == Race.id)\
             .join(Meeting, Race.meeting_id == Meeting.id)\
-            .filter(Meeting.user_id == user_id)\
             .order_by(Result.recorded_at.desc())\
-            .limit(50)\
+            .limit(500)\
             .all()
         
         if results_query:
-            results_info = "Recent race results:\n"
+            results_info = "Recent race results (all users):\n"
             wins = 0
             total = 0
             
@@ -2981,7 +2980,7 @@ def get_database_context_for_query(user_query, user_id):
                         results_info += f"finished {result.finish_position} at ${result.sp}"
                     
                     if prediction:
-                        results_info += f" (Your score: {prediction.score}, Predicted: {prediction.predicted_odds})"
+                        results_info += f" (Score: {prediction.score}, Predicted: {prediction.predicted_odds})"
                     results_info += "\n"
             
             if total > 0:
@@ -2990,19 +2989,18 @@ def get_database_context_for_query(user_query, user_id):
             
             context_parts.append(results_info)
     
-    # Check if asking about specific factors (jockeys, trainers, etc)
+    # Check if asking about specific factors (jockeys, trainers, etc) - ALL data
     if any(word in query_lower for word in ['jockey', 'trainer', 'sire', 'dam', 'class', 'distance', 'track']):
         # Get all horses with their CSV data for analysis
         all_horses = db.session.query(Horse, Race, Meeting)\
             .join(Race, Horse.race_id == Race.id)\
             .join(Meeting, Race.meeting_id == Meeting.id)\
-            .filter(Meeting.user_id == user_id)\
             .order_by(Meeting.uploaded_at.desc())\
-            .limit(100)\
+            .limit(1000)\
             .all()
         
         if all_horses:
-            context_parts.append(f"You have {len(all_horses)} horses in your recent data for analysis")
+            context_parts.append(f"Database contains {len(all_horses)} horses across all meetings for analysis")
     
     # Combine all context
     if context_parts:
