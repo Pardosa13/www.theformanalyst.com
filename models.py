@@ -172,9 +172,26 @@ class Component(db.Model):
     def __repr__(self):
         return f'<Component {self.component_name}: {self.roi_percentage}% ROI>'
     
-    @property
+   @property
     def display_label(self):
         """Formatted label for display"""
         if self.appearances > 0:
             return f"{self.component_name} ({self.strike_rate:.1f}% SR, {self.roi_percentage:+.1f}% ROI, N={self.appearances})"
         return self.component_name
+
+
+class ChatMessage(db.Model):
+    """Chat messages between users and Claude AI assistant"""
+    __tablename__ = 'chat_messages'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    role = db.Column(db.String(20), nullable=False)  # 'user' or 'assistant'
+    content = db.Column(db.Text, nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    session_id = db.Column(db.String(50))
+    
+    user = db.relationship('User', backref='chat_messages')
+    
+    def __repr__(self):
+        return f'<ChatMessage {self.role}: {self.content[:30]}...>'
