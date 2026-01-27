@@ -2985,7 +2985,7 @@ def get_chat_history():
 
 @app.route('/api/chat/new', methods=['POST'])
 def new_chat_session():
-    if 'user_id' not in session:
+    if not current_user.is_authenticated:
         return jsonify({'error': 'Please log in'}), 401
     
     session['chat_session_id'] = str(uuid.uuid4())
