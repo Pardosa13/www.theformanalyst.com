@@ -2879,6 +2879,76 @@ Guidelines:
 
 Keep responses under 200 words unless detailed analysis is requested."""
 
+def get_database_context_for_query(user_query, user_id):
+    """
+    Analyze user query and fetch relevant database context
+    """
+    query_lower = user_query.lower()
+    context_parts = []
+    
+    # Check if asking about uploaded meetings
+    if any(word in query_lower for word in ['meeting', 'uploaded', 'sandown', 'flemington', 'caulfield', 'today', 'analyse', 'analyze']):
+        # Get recent meetings
+        recent_meetings = Meeting.query.filter_by(user_id=user_id)\
+            .order_by(Meeting.uploaded_at.desc())\
+            .limit(5)\
+            .all()
+        
+        if recent_meetings:
+            meetings_info = "Recent uploaded meetings:\n"
+            for m in recent_meetings:
+                meetings_info += f"- {m.meeting_name} ({m.uploaded_at.strftime('%Y-%m-%d')})\n"
+                
+                # If asking about specific meeting, include full race data
+                if m.meeting_name.lower() in query_lower:
+                    for race in m.races:
+                        meetings_info += f"  Race {race.race_number}: {race.distance}m, {race.race_class}, {race.track_condition}\n"
+                        for horse in race.horses:
+                            csv_data = horse.csv_data or {}
+                            meetings_info += f"    - {horse.horse_name}: Age {csv_data.get('horse age', 'N/A')}, "
+                            meetings_info += f"Jockey: {horse.jockey}, Barrier: {horse.barrier}, "
+                            if horse.prediction:
+                                meetings_info += f"Score: {horse.prediction.score}, Odds: {horse.prediction.predicted_odds}\n"
+                            else:
+                                meetings_info += f"No prediction yet\n"
+            
+            context_parts.append(meetings_info)
+    
+    # Check if asking about results/statistics
+    if any(word in query_lower for word in ['result', 'win', 'strike', 'roi', 'performance', 'stat']):
+        from models import Result, Prediction
+        
+        # Get recent results with predictions
+        results_query = db.session.query(Result, Horse, Prediction)\
+            .join(Horse, Result.horse_id == Horse.id)\
+            .join(Prediction, Horse.id == Prediction.horse_id)\
+            .join(Race, Horse.race_id == Race.id)\
+            .join(Meeting, Race.meeting_id == Meeting.id)\
+            .filter(Meeting.user_id == user_id)\
+            .order_by(Result.recorded_at.desc())\
+            .limit(20)\
+            .all()
+        
+        if results_query:
+            results_info = "Recent race results:\n"
+            for result, horse, prediction in results_query:
+                results_info += f"- {horse.horse_name}: "
+                if result.finish_position == 0:
+                    results_info += "SCRATCHED"
+                elif result.finish_position == 1:
+                    results_info += f"WON at ${result.sp}"
+                else:
+                    results_info += f"Finished {result.finish_position} at ${result.sp}"
+                results_info += f" (Predicted score: {prediction.score})\n"
+            
+            context_parts.append(results_info)
+    
+    # Combine all context
+    if context_parts:
+        return "\n\n".join(context_parts)
+    
+    return None
+
 @app.route('/api/chat', methods=['POST'])
 @limiter.limit("10 per minute")
 def chat():
@@ -2901,6 +2971,9 @@ def chat():
             session['chat_session_id'] = str(uuid.uuid4())
         
         chat_session_id = session['chat_session_id']
+        
+        # NEW: Check if user is asking about their data
+        database_context = get_database_context_for_query(user_message, user_id)
         
         # Save user message
         from models import ChatMessage
@@ -2928,6 +3001,10 @@ def chat():
                 "role": msg.role,
                 "content": msg.content
             })
+        
+        # NEW: Inject database context if relevant
+        if database_context:
+            messages[-1]['content'] = f"{user_message}\n\n<database_context>\n{database_context}\n</database_context>"
         
         # Call Claude API
         response = client.messages.create(
