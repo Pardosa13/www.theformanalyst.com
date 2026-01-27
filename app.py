@@ -2881,74 +2881,119 @@ Keep responses under 200 words unless detailed analysis is requested."""
 
 def get_database_context_for_query(user_query, user_id):
     """
-    Analyze user query and fetch relevant database context
+    Analyze user query and fetch relevant database context with full CSV data
     """
     query_lower = user_query.lower()
     context_parts = []
     
-    # Check if asking about uploaded meetings
-    if any(word in query_lower for word in ['meeting', 'uploaded', 'sandown', 'flemington', 'caulfield', 'today', 'analyse', 'analyze']):
+    # Check if asking about uploaded meetings/horses
+    if any(word in query_lower for word in ['meeting', 'uploaded', 'sandown', 'flemington', 'caulfield', 'today', 'analyse', 'analyze', '3yo', 'horse', 'race']):
         # Get recent meetings
         recent_meetings = Meeting.query.filter_by(user_id=user_id)\
             .order_by(Meeting.uploaded_at.desc())\
-            .limit(5)\
+            .limit(10)\
             .all()
         
         if recent_meetings:
-            meetings_info = "Recent uploaded meetings:\n"
+            meetings_info = "Your uploaded meetings:\n"
             for m in recent_meetings:
-                meetings_info += f"- {m.meeting_name} ({m.uploaded_at.strftime('%Y-%m-%d')})\n"
+                meetings_info += f"\n{m.meeting_name} (uploaded {m.uploaded_at.strftime('%Y-%m-%d')})\n"
                 
-                # If asking about specific meeting, include full race data
-                if m.meeting_name.lower() in query_lower:
+                # If asking about specific meeting or track, include full race data
+                meeting_name_parts = m.meeting_name.lower().split()
+                if any(part in query_lower for part in meeting_name_parts) or 'all' in query_lower:
                     for race in m.races:
-                        meetings_info += f"  Race {race.race_number}: {race.distance}m, {race.race_class}, {race.track_condition}\n"
-                        for horse in race.horses:
+                        meetings_info += f"\n  Race {race.race_number}: {race.distance}m, {race.race_class}, {race.track_condition}\n"
+                        
+                        # Sort horses by score
+                        sorted_horses = sorted(race.horses, 
+                                             key=lambda h: h.prediction.score if h.prediction else 0, 
+                                             reverse=True)
+                        
+                        for horse in sorted_horses:
                             csv_data = horse.csv_data or {}
-                            meetings_info += f"    - {horse.horse_name}: Age {csv_data.get('horse age', 'N/A')}, "
-                            meetings_info += f"Jockey: {horse.jockey}, Barrier: {horse.barrier}, "
+                            meetings_info += f"    {horse.horse_name}:\n"
+                            meetings_info += f"      Age: {csv_data.get('horse age', 'N/A')}, Sex: {csv_data.get('horse sex', 'N/A')}\n"
+                            meetings_info += f"      Jockey: {horse.jockey}, Trainer: {horse.trainer}\n"
+                            meetings_info += f"      Barrier: {horse.barrier}, Weight: {horse.weight}kg\n"
+                            meetings_info += f"      Sire: {csv_data.get('horse sire', 'N/A')}, Dam: {csv_data.get('horse dam', 'N/A')}\n"
+                            meetings_info += f"      Last 10: {csv_data.get('horse last10', 'N/A')}\n"
+                            meetings_info += f"      Record: {csv_data.get('horse record', 'N/A')}\n"
+                            meetings_info += f"      Distance record: {csv_data.get('horse record distance', 'N/A')}\n"
+                            meetings_info += f"      Track record: {csv_data.get('horse record track', 'N/A')}\n"
+                            meetings_info += f"      Form price: {csv_data.get('form price', 'N/A')}\n"
+                            meetings_info += f"      Form position: {csv_data.get('form position', 'N/A')}\n"
+                            meetings_info += f"      Form margin: {csv_data.get('form margin', 'N/A')}\n"
+                            meetings_info += f"      Sectional: {csv_data.get('sectional', 'N/A')}\n"
                             if horse.prediction:
-                                meetings_info += f"Score: {horse.prediction.score}, Odds: {horse.prediction.predicted_odds}\n"
+                                meetings_info += f"      PREDICTION - Score: {horse.prediction.score}, Odds: {horse.prediction.predicted_odds}\n"
                             else:
-                                meetings_info += f"No prediction yet\n"
+                                meetings_info += f"      No prediction calculated yet\n"
             
             context_parts.append(meetings_info)
     
     # Check if asking about results/statistics
-    if any(word in query_lower for word in ['result', 'win', 'strike', 'roi', 'performance', 'stat']):
+    if any(word in query_lower for word in ['result', 'win', 'strike', 'roi', 'performance', 'stat', 'how did', 'winner']):
         from models import Result, Prediction
         
         # Get recent results with predictions
-        results_query = db.session.query(Result, Horse, Prediction)\
+        results_query = db.session.query(Result, Horse, Race, Meeting, Prediction)\
             .join(Horse, Result.horse_id == Horse.id)\
-            .join(Prediction, Horse.id == Prediction.horse_id)\
+            .outerjoin(Prediction, Horse.id == Prediction.horse_id)\
             .join(Race, Horse.race_id == Race.id)\
             .join(Meeting, Race.meeting_id == Meeting.id)\
             .filter(Meeting.user_id == user_id)\
             .order_by(Result.recorded_at.desc())\
-            .limit(20)\
+            .limit(50)\
             .all()
         
         if results_query:
             results_info = "Recent race results:\n"
-            for result, horse, prediction in results_query:
-                results_info += f"- {horse.horse_name}: "
-                if result.finish_position == 0:
-                    results_info += "SCRATCHED"
-                elif result.finish_position == 1:
-                    results_info += f"WON at ${result.sp}"
-                else:
-                    results_info += f"Finished {result.finish_position} at ${result.sp}"
-                results_info += f" (Predicted score: {prediction.score})\n"
+            wins = 0
+            total = 0
+            
+            for result, horse, race, meeting, prediction in results_query:
+                if result.actually_ran:
+                    total += 1
+                    if result.finish_position == 1:
+                        wins += 1
+                    
+                    results_info += f"- {meeting.meeting_name} R{race.race_number}: {horse.horse_name} "
+                    
+                    if result.finish_position == 1:
+                        results_info += f"WON at ${result.sp}"
+                    else:
+                        results_info += f"finished {result.finish_position} at ${result.sp}"
+                    
+                    if prediction:
+                        results_info += f" (Your score: {prediction.score}, Predicted: {prediction.predicted_odds})"
+                    results_info += "\n"
+            
+            if total > 0:
+                strike_rate = (wins / total) * 100
+                results_info += f"\nOverall: {wins} wins from {total} races ({strike_rate:.1f}% strike rate)\n"
             
             context_parts.append(results_info)
+    
+    # Check if asking about specific factors (jockeys, trainers, etc)
+    if any(word in query_lower for word in ['jockey', 'trainer', 'sire', 'dam', 'class', 'distance', 'track']):
+        # Get all horses with their CSV data for analysis
+        all_horses = db.session.query(Horse, Race, Meeting)\
+            .join(Race, Horse.race_id == Race.id)\
+            .join(Meeting, Race.meeting_id == Meeting.id)\
+            .filter(Meeting.user_id == user_id)\
+            .order_by(Meeting.uploaded_at.desc())\
+            .limit(100)\
+            .all()
+        
+        if all_horses:
+            context_parts.append(f"You have {len(all_horses)} horses in your recent data for analysis")
     
     # Combine all context
     if context_parts:
         return "\n\n".join(context_parts)
     
     return None
-
 @app.route('/api/chat', methods=['POST'])
 @limiter.limit("10 per minute")
 def chat():
