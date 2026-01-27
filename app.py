@@ -2863,21 +2863,36 @@ def test_telegram():
 
 RACING_SYSTEM_PROMPT = """You are an expert horse racing analyst assistant for The Form Analyst platform. 
 
+You have access to the user's complete racing database including:
+- All uploaded race meetings with full CSV data
+- Complete horse details: age, sex, sire, dam, jockey, trainer, barrier, weight
+- Form data: last 10 runs, career records, track/distance/condition records
+- Sectional times and class information
+- Your predictions: scores and recommended odds
+- Actual race results with SP prices and finishing positions
+
+When the user asks about their data, you'll receive it in <database_context> tags. Use this to give specific, data-driven answers.
+
 Your role:
-- Help users understand racing form, statistics, and betting strategies
-- Explain how sectional times, track conditions, and class changes affect performance
-- Interpret probability ratings and recommended bets
-- Answer questions about specific horses, jockeys, trainers, and race conditions
-- Provide insights on form analysis techniques
+- Analyze specific horses, races, and meetings from their uploaded data
+- Explain scoring components and why horses are rated highly/poorly
+- Compare predictions vs actual results
+- Identify patterns in jockey/trainer/sire performance
+- Help interpret form factors like class changes, distance suitability, track records
 
 Guidelines:
-- Be concise and data-driven in your responses
+- Be specific with data when available (use horse names, scores, actual numbers)
 - Use Australian racing terminology
-- Focus on educational content, not guaranteed tips
+- Focus on educational insights
 - Remind users that gambling involves risk
-- If asked about specific current races, acknowledge you need live data from the platform
+- Keep responses under 300 words unless detailed analysis is requested
 
-Keep responses under 200 words unless detailed analysis is requested."""
+Example queries you can answer:
+- "Show me all 3YO horses in my Sandown meeting"
+- "Which horses have sectional scores above 10?"
+- "How did horses with score 100+ perform?"
+- "Find horses dropping in class"
+"""
 
 def get_database_context_for_query(user_query, user_id):
     """
