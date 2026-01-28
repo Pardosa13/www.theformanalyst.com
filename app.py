@@ -2991,6 +2991,92 @@ def get_database_context_for_query(user_query, user_id):
     if context_parts:
         return "\n\n".join(context_parts)
     return None
+    
+@app.route('/api/chat', methods=['POST'])
+@limiter.limit("10 per minute")
+def chat():
+    if not current_user.is_authenticated:
+        return jsonify({'error': 'Please log in to use chat'}), 401
+    
+    try:
+        user_message = request.json.get('message', '').strip()
+        
+        if not user_message:
+            return jsonify({'error': 'Message cannot be empty'}), 400
+        
+        if len(user_message) > 500:
+            return jsonify({'error': 'Message too long (max 500 characters)'}), 400
+        
+        user_id = current_user.id
+        
+        # Get or create session ID
+        if 'chat_session_id' not in session:
+            session['chat_session_id'] = str(uuid.uuid4())
+        
+        chat_session_id = session['chat_session_id']
+        
+        # Check if user is asking about their data
+        database_context = get_database_context_for_query(user_message, user_id)
+        
+        # Save user message
+        from models import ChatMessage
+        user_msg = ChatMessage(
+            user_id=user_id,
+            role='user',
+            content=user_message,
+            session_id=chat_session_id
+        )
+        db.session.add(user_msg)
+        db.session.commit()
+        
+        # Get history (last 10 messages)
+        history = ChatMessage.query.filter_by(
+            user_id=user_id,
+            session_id=chat_session_id
+        ).order_by(ChatMessage.timestamp.desc()).limit(10).all()
+        
+        history = list(reversed(history))
+        
+        # Build messages for Claude
+        messages = []
+        for msg in history:
+            messages.append({
+                "role": msg.role,
+                "content": msg.content
+            })
+        
+        # Inject database context if relevant
+        if database_context:
+            messages[-1]['content'] = f"{user_message}\n\n<database_context>\n{database_context}\n</database_context>"
+        
+        # Call Claude API
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            system=RACING_SYSTEM_PROMPT,
+            messages=messages
+        )
+        
+        assistant_response = response.content[0].text
+        
+        # Save assistant response
+        assistant_msg = ChatMessage(
+            user_id=user_id,
+            role='assistant',
+            content=assistant_response,
+            session_id=chat_session_id
+        )
+        db.session.add(assistant_msg)
+        db.session.commit()
+        
+        return jsonify({
+            'response': assistant_response,
+            'message_count': len(messages)
+        })
+    
+    except Exception as e:
+        print(f"Chat error: {str(e)}")
+        return jsonify({'error': 'Failed to process message'}), 500
 
 @app.route('/api/chat/history', methods=['GET'])
 def get_chat_history():
