@@ -2901,29 +2901,45 @@ def get_database_context_for_query(user_query, user_id):
     query_lower = user_query.lower()
     context_parts = []
     
-    # Check if asking about uploaded meetings/horses
-    if any(word in query_lower for word in ['meeting', 'uploaded', 'sandown', 'flemington', 'caulfield', 'today', 'analyse', 'analyze', '3yo', 'horse', 'race', 'kembla', 'randwick', 'cranbourne']):
-        # Get ALL meetings (removed user_id filter)
-        recent_meetings = Meeting.query\
-            .order_by(Meeting.uploaded_at.desc())\
-            .limit(500)\
-            .all()
+    # Extract possible track names from ALL meetings
+    all_meeting_names = db.session.query(Meeting.meeting_name).all()
+    track_names = set()
+    for (name,) in all_meeting_names:
+        if '_' in name:
+            track = name.split('_', 1)[1].lower().replace('-', ' ')
+            track_names.add(track)
+    
+    # Check if query mentions any known track
+    mentions_track = any(track in query_lower for track in track_names)
+    
+    # Extract date code from query (e.g., "260128")
+    date_match = None
+    for word in query_lower.split():
+        if word.isdigit() and len(word) == 6:
+            date_match = word
+            break
+    
+    # Load data if: racing terms mentioned OR track name mentioned OR date code present
+    if mentions_track or date_match or any(word in query_lower for word in ['meeting', 'race', 'horse', 'jockey', 'trainer', 'today', 'analyse', 'analyze', 'winner', 'score', 'prediction', 'odds']):
+        meetings_query = Meeting.query.order_by(Meeting.uploaded_at.desc())
+        
+        if date_match:
+            meetings_query = meetings_query.filter(Meeting.meeting_name.like(f'{date_match}%'))
+            recent_meetings = meetings_query.limit(20).all()
+        else:
+            recent_meetings = meetings_query.limit(500).all()
         
         if recent_meetings:
             meetings_info = "Available uploaded meetings:\n"
             for m in recent_meetings:
                 meetings_info += f"\n{m.meeting_name} (uploaded {m.uploaded_at.strftime('%Y-%m-%d')})\n"
+                meeting_name_lower = m.meeting_name.lower()
+                should_show_details = (meeting_name_lower in query_lower or len(recent_meetings) <= 5 or 'all' in query_lower or 'analyse' in query_lower or 'analyze' in query_lower)
                 
-                # If asking about specific meeting or track, include full race data
-                meeting_name_parts = m.meeting_name.lower().split('_')
-                if any(part in query_lower for part in meeting_name_parts) or 'all' in query_lower:
+                if should_show_details:
                     for race in m.races:
                         meetings_info += f"\n  Race {race.race_number}: {race.distance}m, {race.race_class}, {race.track_condition}\n"
-                        
-                        # Sort horses by score
-                        sorted_horses = sorted(race.horses, 
-                                             key=lambda h: h.prediction.score if h.prediction else 0, 
-                                             reverse=True)
+                        sorted_horses = sorted(race.horses, key=lambda h: h.prediction.score if h.prediction else 0, reverse=True)
                         
                         for horse in sorted_horses:
                             csv_data = horse.csv_data or {}
@@ -2936,162 +2952,45 @@ def get_database_context_for_query(user_query, user_id):
                             meetings_info += f"      Record: {csv_data.get('horse record', 'N/A')}\n"
                             meetings_info += f"      Distance record: {csv_data.get('horse record distance', 'N/A')}\n"
                             meetings_info += f"      Track record: {csv_data.get('horse record track', 'N/A')}\n"
-                            meetings_info += f"      Form price: {csv_data.get('form price', 'N/A')}\n"
-                            meetings_info += f"      Form position: {csv_data.get('form position', 'N/A')}\n"
-                            meetings_info += f"      Form margin: {csv_data.get('form margin', 'N/A')}\n"
                             meetings_info += f"      Sectional: {csv_data.get('sectional', 'N/A')}\n"
                             if horse.prediction:
                                 meetings_info += f"      PREDICTION - Score: {horse.prediction.score}, Odds: {horse.prediction.predicted_odds}\n"
-                            else:
-                                meetings_info += f"      No prediction calculated yet\n"
-            
             context_parts.append(meetings_info)
     
-    # Check if asking about results/statistics (ALL users)
     if any(word in query_lower for word in ['result', 'win', 'strike', 'roi', 'performance', 'stat', 'how did', 'winner']):
         from models import Result, Prediction
-        
-        # Get recent results from ALL users
-        results_query = db.session.query(Result, Horse, Race, Meeting, Prediction)\
-            .join(Horse, Result.horse_id == Horse.id)\
-            .outerjoin(Prediction, Horse.id == Prediction.horse_id)\
-            .join(Race, Horse.race_id == Race.id)\
-            .join(Meeting, Race.meeting_id == Meeting.id)\
-            .order_by(Result.recorded_at.desc())\
-            .limit(500)\
-            .all()
+        results_query = db.session.query(Result, Horse, Race, Meeting, Prediction).join(Horse, Result.horse_id == Horse.id).outerjoin(Prediction, Horse.id == Prediction.horse_id).join(Race, Horse.race_id == Race.id).join(Meeting, Race.meeting_id == Meeting.id).order_by(Result.recorded_at.desc()).limit(500).all()
         
         if results_query:
-            results_info = "Recent race results (all users):\n"
+            results_info = "Recent race results:\n"
             wins = 0
             total = 0
-            
             for result, horse, race, meeting, prediction in results_query:
                 if result.actually_ran:
                     total += 1
                     if result.finish_position == 1:
                         wins += 1
-                    
                     results_info += f"- {meeting.meeting_name} R{race.race_number}: {horse.horse_name} "
-                    
                     if result.finish_position == 1:
                         results_info += f"WON at ${result.sp}"
                     else:
                         results_info += f"finished {result.finish_position} at ${result.sp}"
-                    
                     if prediction:
                         results_info += f" (Score: {prediction.score}, Predicted: {prediction.predicted_odds})"
                     results_info += "\n"
-            
             if total > 0:
                 strike_rate = (wins / total) * 100
                 results_info += f"\nOverall: {wins} wins from {total} races ({strike_rate:.1f}% strike rate)\n"
-            
             context_parts.append(results_info)
     
-    # Check if asking about specific factors (jockeys, trainers, etc) - ALL data
     if any(word in query_lower for word in ['jockey', 'trainer', 'sire', 'dam', 'class', 'distance', 'track']):
-        # Get all horses with their CSV data for analysis
-        all_horses = db.session.query(Horse, Race, Meeting)\
-            .join(Race, Horse.race_id == Race.id)\
-            .join(Meeting, Race.meeting_id == Meeting.id)\
-            .order_by(Meeting.uploaded_at.desc())\
-            .limit(1000)\
-            .all()
-        
+        all_horses = db.session.query(Horse, Race, Meeting).join(Race, Horse.race_id == Race.id).join(Meeting, Race.meeting_id == Meeting.id).order_by(Meeting.uploaded_at.desc()).limit(1000).all()
         if all_horses:
-            context_parts.append(f"Database contains {len(all_horses)} horses across all meetings for analysis")
+            context_parts.append(f"Database contains {len(all_horses)} horses for analysis")
     
-    # Combine all context
     if context_parts:
         return "\n\n".join(context_parts)
-    
     return None
-@app.route('/api/chat', methods=['POST'])
-@limiter.limit("10 per minute")
-def chat():
-    if not current_user.is_authenticated:
-        return jsonify({'error': 'Please log in to use chat'}), 401
-    
-    try:
-        user_message = request.json.get('message', '').strip()
-        
-        if not user_message:
-            return jsonify({'error': 'Message cannot be empty'}), 400
-        
-        if len(user_message) > 500:
-            return jsonify({'error': 'Message too long (max 500 characters)'}), 400
-        
-        user_id = current_user.id
-        
-        # Get or create session ID
-        if 'chat_session_id' not in session:
-            session['chat_session_id'] = str(uuid.uuid4())
-        
-        chat_session_id = session['chat_session_id']
-        
-        # NEW: Check if user is asking about their data
-        database_context = get_database_context_for_query(user_message, user_id)
-        
-        # Save user message
-        from models import ChatMessage
-        user_msg = ChatMessage(
-            user_id=user_id,
-            role='user',
-            content=user_message,
-            session_id=chat_session_id
-        )
-        db.session.add(user_msg)
-        db.session.commit()
-        
-        # Get history (last 10 messages)
-        history = ChatMessage.query.filter_by(
-            user_id=user_id,
-            session_id=chat_session_id
-        ).order_by(ChatMessage.timestamp.desc()).limit(10).all()
-        
-        history = list(reversed(history))
-        
-        # Build messages for Claude
-        messages = []
-        for msg in history:
-            messages.append({
-                "role": msg.role,
-                "content": msg.content
-            })
-        
-        # NEW: Inject database context if relevant
-        if database_context:
-            messages[-1]['content'] = f"{user_message}\n\n<database_context>\n{database_context}\n</database_context>"
-        
-        # Call Claude API
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1024,
-            system=RACING_SYSTEM_PROMPT,
-            messages=messages
-        )
-        
-        assistant_response = response.content[0].text
-        
-        # Save assistant response
-        assistant_msg = ChatMessage(
-            user_id=user_id,
-            role='assistant',
-            content=assistant_response,
-            session_id=chat_session_id
-        )
-        db.session.add(assistant_msg)
-        db.session.commit()
-        
-        return jsonify({
-            'response': assistant_response,
-            'message_count': len(messages)
-        })
-    
-    except Exception as e:
-        print(f"Chat error: {str(e)}")
-        return jsonify({'error': 'Failed to process message'}), 500
 
 @app.route('/api/chat/history', methods=['GET'])
 def get_chat_history():
