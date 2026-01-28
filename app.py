@@ -2919,43 +2919,56 @@ def get_database_context_for_query(user_query, user_id):
             date_match = word
             break
     
-    # Load data if: racing terms mentioned OR track name mentioned OR date code present
-    if mentions_track or date_match or any(word in query_lower for word in ['meeting', 'race', 'horse', 'jockey', 'trainer', 'today', 'analyse', 'analyze', 'winner', 'score', 'prediction', 'odds']):
-        meetings_query = Meeting.query.order_by(Meeting.uploaded_at.desc())
-        
-        if date_match:
-            meetings_query = meetings_query.filter(Meeting.meeting_name.like(f'{date_match}%'))
-            recent_meetings = meetings_query.limit(20).all()
-        else:
-            recent_meetings = meetings_query.limit(500).all()
-        
-        if recent_meetings:
-            meetings_info = "Available uploaded meetings:\n"
-            for m in recent_meetings:
-                meetings_info += f"\n{m.meeting_name} (uploaded {m.uploaded_at.strftime('%Y-%m-%d')})\n"
-                meeting_name_lower = m.meeting_name.lower()
-                should_show_details = (meeting_name_lower in query_lower or len(recent_meetings) <= 5 or 'all' in query_lower or 'analyse' in query_lower or 'analyze' in query_lower)
-                
-                if should_show_details:
-                    for race in m.races:
-                        meetings_info += f"\n  Race {race.race_number}: {race.distance}m, {race.race_class}, {race.track_condition}\n"
-                        sorted_horses = sorted(race.horses, key=lambda h: h.prediction.score if h.prediction else 0, reverse=True)
-                        
-                        for horse in sorted_horses:
-                            csv_data = horse.csv_data or {}
-                            meetings_info += f"    {horse.horse_name}:\n"
-                            meetings_info += f"      Age: {csv_data.get('horse age', 'N/A')}, Sex: {csv_data.get('horse sex', 'N/A')}\n"
-                            meetings_info += f"      Jockey: {horse.jockey}, Trainer: {horse.trainer}\n"
-                            meetings_info += f"      Barrier: {horse.barrier}, Weight: {horse.weight}kg\n"
-                            meetings_info += f"      Sire: {csv_data.get('horse sire', 'N/A')}, Dam: {csv_data.get('horse dam', 'N/A')}\n"
-                            meetings_info += f"      Last 10: {csv_data.get('horse last10', 'N/A')}\n"
-                            meetings_info += f"      Record: {csv_data.get('horse record', 'N/A')}\n"
-                            meetings_info += f"      Distance record: {csv_data.get('horse record distance', 'N/A')}\n"
-                            meetings_info += f"      Track record: {csv_data.get('horse record track', 'N/A')}\n"
-                            meetings_info += f"      Sectional: {csv_data.get('sectional', 'N/A')}\n"
-                            if horse.prediction:
-                                meetings_info += f"      PREDICTION - Score: {horse.prediction.score}, Odds: {horse.prediction.predicted_odds}\n"
-            context_parts.append(meetings_info)
+   # Check if specific meeting name mentioned (e.g., "260128_kembla")
+    specific_meeting = None
+    for (name,) in all_meeting_names:
+    if name.lower() in query_lower.replace(' ', '').replace('-', ''):
+        specific_meeting = name
+        break
+
+# Load data if: racing terms mentioned OR track name mentioned OR date code present
+if mentions_track or date_match or specific_meeting or any(word in query_lower for word in ['meeting', 'race', 'horse', 'jockey', 'trainer', 'today', 'analyse', 'analyze', 'winner', 'score', 'prediction', 'odds']):
+    meetings_query = Meeting.query.order_by(Meeting.uploaded_at.desc())
+    
+    # If specific meeting name mentioned, get ONLY that one
+    if specific_meeting:
+        meetings_query = meetings_query.filter(Meeting.meeting_name == specific_meeting)
+        recent_meetings = meetings_query.limit(1).all()
+    # Else if date code mentioned, get all from that date
+    elif date_match:
+        meetings_query = meetings_query.filter(Meeting.meeting_name.like(f'{date_match}%'))
+        recent_meetings = meetings_query.limit(20).all()
+    # Else get recent meetings
+    else:
+        recent_meetings = meetings_query.limit(10).all()
+    
+    if recent_meetings:
+        meetings_info = "Available uploaded meetings:\n"
+        for m in recent_meetings:
+            meetings_info += f"\n{m.meeting_name} (uploaded {m.uploaded_at.strftime('%Y-%m-%d')})\n"
+            meeting_name_lower = m.meeting_name.lower()
+            should_show_details = (meeting_name_lower in query_lower or len(recent_meetings) <= 5 or 'all' in query_lower or 'analyse' in query_lower or 'analyze' in query_lower)
+            
+            if should_show_details:
+                for race in m.races:
+                    meetings_info += f"\n  Race {race.race_number}: {race.distance}m, {race.race_class}, {race.track_condition}\n"
+                    sorted_horses = sorted(race.horses, key=lambda h: h.prediction.score if h.prediction else 0, reverse=True)
+                    
+                    for horse in sorted_horses:
+                        csv_data = horse.csv_data or {}
+                        meetings_info += f"    {horse.horse_name}:\n"
+                        meetings_info += f"      Age: {csv_data.get('horse age', 'N/A')}, Sex: {csv_data.get('horse sex', 'N/A')}\n"
+                        meetings_info += f"      Jockey: {horse.jockey}, Trainer: {horse.trainer}\n"
+                        meetings_info += f"      Barrier: {horse.barrier}, Weight: {horse.weight}kg\n"
+                        meetings_info += f"      Sire: {csv_data.get('horse sire', 'N/A')}, Dam: {csv_data.get('horse dam', 'N/A')}\n"
+                        meetings_info += f"      Last 10: {csv_data.get('horse last10', 'N/A')}\n"
+                        meetings_info += f"      Record: {csv_data.get('horse record', 'N/A')}\n"
+                        meetings_info += f"      Distance record: {csv_data.get('horse record distance', 'N/A')}\n"
+                        meetings_info += f"      Track record: {csv_data.get('horse record track', 'N/A')}\n"
+                        meetings_info += f"      Sectional: {csv_data.get('sectional', 'N/A')}\n"
+                        if horse.prediction:
+                            meetings_info += f"      PREDICTION - Score: {horse.prediction.score}, Odds: {horse.prediction.predicted_odds}\n"
+        context_parts.append(meetings_info)
     
     if any(word in query_lower for word in ['result', 'win', 'strike', 'roi', 'performance', 'stat', 'how did', 'winner']):
         from models import Result, Prediction
