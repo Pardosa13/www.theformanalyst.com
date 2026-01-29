@@ -3204,69 +3204,6 @@ def execute_tool(tool_name, tool_input, user_id):
             
             return sorted(specialists, key=lambda x: x["strike_rate"], reverse=True)[:20]
         
-        elif analysis_type == "horse_characteristics":
-            results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
-                Horse, Result.horse_id == Horse.id
-            ).join(
-                Race, Horse.race_id == Race.id
-            ).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).join(
-                Prediction, Horse.id == Prediction.horse_id
-            ).filter(Result.finish_position > 0).all()
-            
-            patterns = {}
-            races_seen = {}
-            
-            for r, h, race, m, p in results:
-                csv_data = h.csv_data or {}
-                age = csv_data.get('horse age')
-                sex = csv_data.get('horse sex')
-                
-                if not age or not sex:
-                    continue
-                
-                pattern_key = f"{age}yo {sex}"
-                race_key = f"{m.id}_{race.race_number}"
-                
-                if pattern_key not in patterns:
-                    patterns[pattern_key] = {
-                        "wins": 0,
-                        "total": 0,
-                        "total_profit": 0,
-                        "stake": 0
-                    }
-                    races_seen[pattern_key] = set()
-                
-                if race_key not in races_seen[pattern_key]:
-                    races_seen[pattern_key].add(race_key)
-                    patterns[pattern_key]["total"] += 1
-                    patterns[pattern_key]["stake"] += 10
-                    
-                    if r.finish_position == 1:
-                        patterns[pattern_key]["wins"] += 1
-                        if r.sp:
-                            patterns[pattern_key]["total_profit"] += (r.sp * 10 - 10)
-                    else:
-                        patterns[pattern_key]["total_profit"] -= 10
-            
-            pattern_list = []
-            for pattern, stats in patterns.items():
-                if stats["total"] >= 10:
-                    strike_rate = (stats["wins"] / stats["total"]) * 100
-                    roi = (stats["total_profit"] / stats["stake"]) * 100
-                    
-                    pattern_list.append({
-                        "pattern": pattern,
-                        "wins": stats["wins"],
-                        "total": stats["total"],
-                        "strike_rate": round(strike_rate, 1),
-                        "roi": round(roi, 1),
-                        "profit": round(stats["total_profit"], 2)
-                    })
-            
-            return sorted(pattern_list, key=lambda x: x["roi"], reverse=True)[:30]
-        
         elif analysis_type == "component_performance":
             results = db.session.query(Result, Horse, Prediction).join(
                 Horse, Result.horse_id == Horse.id
