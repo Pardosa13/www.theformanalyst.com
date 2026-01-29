@@ -2893,7 +2893,7 @@ Keep responses concise unless detailed analysis is requested.
 Always remind users that gambling involves risk."""
 
 def execute_tool(tool_name, tool_input, user_id):
-    """Execute tool calls from Claude - COMPLETE REWRITE"""
+    """Execute tool calls from Claude"""
     
     if tool_name == "query_database":
         query_type = tool_input.get("query_type")
@@ -2967,47 +2967,47 @@ def execute_tool(tool_name, tool_input, user_id):
             } for res, h, r, m, p in results]
         
         elif query_type == "statistics":
-    results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
-        Horse, Result.horse_id == Horse.id
-    ).join(
-        Race, Horse.race_id == Race.id
-    ).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).outerjoin(
-        Prediction, Horse.id == Prediction.horse_id
-    ).filter(Result.finish_position > 0).all()
-    
-    unique_races = set()
-    wins = 0
-    places = 0
-    high_score_wins = 0
-    high_score_total = 0
-    
-    for res, h, race, m, p in results:
-        race_key = f"{m.id}_{race.race_number}"
-        
-        if race_key not in unique_races:
-            unique_races.add(race_key)
+            results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
+                Horse, Result.horse_id == Horse.id
+            ).join(
+                Race, Horse.race_id == Race.id
+            ).join(
+                Meeting, Race.meeting_id == Meeting.id
+            ).outerjoin(
+                Prediction, Horse.id == Prediction.horse_id
+            ).filter(Result.finish_position > 0).all()
             
-            if res.finish_position == 1:
-                wins += 1
-            if res.finish_position <= 3:
-                places += 1
+            unique_races = set()
+            wins = 0
+            places = 0
+            high_score_wins = 0
+            high_score_total = 0
             
-            if p and p.score >= 80:
-                high_score_total += 1
-                if res.finish_position == 1:
-                    high_score_wins += 1
-    
-    total = len(unique_races)
-    
-    return {
-        "total_races": total,
-        "wins": wins,
-        "strike_rate": round(wins / total * 100, 1) if total > 0 else 0,
-        "place_rate": round(places / total * 100, 1) if total > 0 else 0,
-        "high_score_strike": round(high_score_wins / high_score_total * 100, 1) if high_score_total > 0 else 0
-    }
+            for res, h, race, m, p in results:
+                race_key = f"{m.id}_{race.race_number}"
+                
+                if race_key not in unique_races:
+                    unique_races.add(race_key)
+                    
+                    if res.finish_position == 1:
+                        wins += 1
+                    if res.finish_position <= 3:
+                        places += 1
+                    
+                    if p and p.score >= 80:
+                        high_score_total += 1
+                        if res.finish_position == 1:
+                            high_score_wins += 1
+            
+            total = len(unique_races)
+            
+            return {
+                "total_races": total,
+                "wins": wins,
+                "strike_rate": round(wins / total * 100, 1) if total > 0 else 0,
+                "place_rate": round(places / total * 100, 1) if total > 0 else 0,
+                "high_score_strike": round(high_score_wins / high_score_total * 100, 1) if high_score_total > 0 else 0
+            }
     
     elif tool_name == "calculate_quaddie":
         meeting_name = tool_input.get("meeting_name")
@@ -3181,6 +3181,70 @@ def execute_tool(tool_name, tool_input, user_id):
                     })
             
             return sorted(pattern_list, key=lambda x: x["roi"], reverse=True)[:30]
+        
+        elif analysis_type == "trainer_stats":
+            results = db.session.query(Result, Horse, Prediction).join(
+                Horse, Result.horse_id == Horse.id
+            ).outerjoin(
+                Prediction, Horse.id == Prediction.horse_id
+            ).filter(Result.finish_position > 0).all()
+            
+            trainer_stats = {}
+            for r, h, p in results:
+                trainer = h.trainer
+                if trainer not in trainer_stats:
+                    trainer_stats[trainer] = {"wins": 0, "total": 0, "places": 0}
+                
+                trainer_stats[trainer]["total"] += 1
+                if r.finish_position == 1:
+                    trainer_stats[trainer]["wins"] += 1
+                if r.finish_position <= 3:
+                    trainer_stats[trainer]["places"] += 1
+            
+            trainer_list = []
+            for trainer, stats in trainer_stats.items():
+                if stats["total"] >= 10:
+                    trainer_list.append({
+                        "trainer": trainer,
+                        "wins": stats["wins"],
+                        "total": stats["total"],
+                        "strike_rate": round(stats["wins"] / stats["total"] * 100, 1),
+                        "place_rate": round(stats["places"] / stats["total"] * 100, 1)
+                    })
+            
+            return sorted(trainer_list, key=lambda x: x["strike_rate"], reverse=True)[:20]
+        
+        elif analysis_type == "jockey_stats":
+            results = db.session.query(Result, Horse, Prediction).join(
+                Horse, Result.horse_id == Horse.id
+            ).outerjoin(
+                Prediction, Horse.id == Prediction.horse_id
+            ).filter(Result.finish_position > 0).all()
+            
+            jockey_stats = {}
+            for r, h, p in results:
+                jockey = h.jockey
+                if jockey not in jockey_stats:
+                    jockey_stats[jockey] = {"wins": 0, "total": 0, "places": 0}
+                
+                jockey_stats[jockey]["total"] += 1
+                if r.finish_position == 1:
+                    jockey_stats[jockey]["wins"] += 1
+                if r.finish_position <= 3:
+                    jockey_stats[jockey]["places"] += 1
+            
+            jockey_list = []
+            for jockey, stats in jockey_stats.items():
+                if stats["total"] >= 10:
+                    jockey_list.append({
+                        "jockey": jockey,
+                        "wins": stats["wins"],
+                        "total": stats["total"],
+                        "strike_rate": round(stats["wins"] / stats["total"] * 100, 1),
+                        "place_rate": round(stats["places"] / stats["total"] * 100, 1)
+                    })
+            
+            return sorted(jockey_list, key=lambda x: x["strike_rate"], reverse=True)[:20]
         
         elif analysis_type == "track_specialists":
             results = db.session.query(Result, Horse, Meeting, Prediction).join(
