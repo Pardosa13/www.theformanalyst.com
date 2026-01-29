@@ -3098,69 +3098,68 @@ def execute_tool(tool_name, tool_input, user_id):
             
             return sorted(overlays, key=lambda x: x["overlay"], reverse=True)[:20]
         
-        elif analysis_type == "trainer_stats":
-            results = db.session.query(Result, Horse, Prediction).join(
+        elif analysis_type == "horse_characteristics":
+            results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
                 Horse, Result.horse_id == Horse.id
-            ).outerjoin(
+            ).join(
+                Race, Horse.race_id == Race.id
+            ).join(
+                Meeting, Race.meeting_id == Meeting.id
+            ).join(
                 Prediction, Horse.id == Prediction.horse_id
             ).filter(Result.finish_position > 0).all()
             
-            trainer_stats = {}
-            for r, h, p in results:
-                trainer = h.trainer
-                if trainer not in trainer_stats:
-                    trainer_stats[trainer] = {"wins": 0, "total": 0, "places": 0}
-                
-                trainer_stats[trainer]["total"] += 1
-                if r.finish_position == 1:
-                    trainer_stats[trainer]["wins"] += 1
-                if r.finish_position <= 3:
-                    trainer_stats[trainer]["places"] += 1
+            patterns = {}
+            races_seen = {}
             
-            trainer_list = []
-            for trainer, stats in trainer_stats.items():
+            for r, h, race, m, p in results:
+                csv_data = h.csv_data or {}
+                age = csv_data.get('horse age')
+                sex = csv_data.get('horse sex')
+                
+                if not age or not sex:
+                    continue
+                
+                pattern_key = f"{age}yo {sex}"
+                race_key = f"{m.id}_{race.race_number}"
+                
+                if pattern_key not in patterns:
+                    patterns[pattern_key] = {
+                        "wins": 0,
+                        "total": 0,
+                        "total_profit": 0,
+                        "stake": 0
+                    }
+                    races_seen[pattern_key] = set()
+                
+                if race_key not in races_seen[pattern_key]:
+                    races_seen[pattern_key].add(race_key)
+                    patterns[pattern_key]["total"] += 1
+                    patterns[pattern_key]["stake"] += 10
+                    
+                    if r.finish_position == 1:
+                        patterns[pattern_key]["wins"] += 1
+                        if r.sp:
+                            patterns[pattern_key]["total_profit"] += (r.sp * 10 - 10)
+                    else:
+                        patterns[pattern_key]["total_profit"] -= 10
+            
+            pattern_list = []
+            for pattern, stats in patterns.items():
                 if stats["total"] >= 10:
-                    trainer_list.append({
-                        "trainer": trainer,
+                    strike_rate = (stats["wins"] / stats["total"]) * 100
+                    roi = (stats["total_profit"] / stats["stake"]) * 100
+                    
+                    pattern_list.append({
+                        "pattern": pattern,
                         "wins": stats["wins"],
                         "total": stats["total"],
-                        "strike_rate": round(stats["wins"] / stats["total"] * 100, 1),
-                        "place_rate": round(stats["places"] / stats["total"] * 100, 1)
+                        "strike_rate": round(strike_rate, 1),
+                        "roi": round(roi, 1),
+                        "profit": round(stats["total_profit"], 2)
                     })
             
-            return sorted(trainer_list, key=lambda x: x["strike_rate"], reverse=True)[:20]
-        
-        elif analysis_type == "jockey_stats":
-            results = db.session.query(Result, Horse, Prediction).join(
-                Horse, Result.horse_id == Horse.id
-            ).outerjoin(
-                Prediction, Horse.id == Prediction.horse_id
-            ).filter(Result.finish_position > 0).all()
-            
-            jockey_stats = {}
-            for r, h, p in results:
-                jockey = h.jockey
-                if jockey not in jockey_stats:
-                    jockey_stats[jockey] = {"wins": 0, "total": 0, "places": 0}
-                
-                jockey_stats[jockey]["total"] += 1
-                if r.finish_position == 1:
-                    jockey_stats[jockey]["wins"] += 1
-                if r.finish_position <= 3:
-                    jockey_stats[jockey]["places"] += 1
-            
-            jockey_list = []
-            for jockey, stats in jockey_stats.items():
-                if stats["total"] >= 10:
-                    jockey_list.append({
-                        "jockey": jockey,
-                        "wins": stats["wins"],
-                        "total": stats["total"],
-                        "strike_rate": round(stats["wins"] / stats["total"] * 100, 1),
-                        "place_rate": round(stats["places"] / stats["total"] * 100, 1)
-                    })
-            
-            return sorted(jockey_list, key=lambda x: x["strike_rate"], reverse=True)[:20]
+            return sorted(pattern_list, key=lambda x: x["roi"], reverse=True)[:30]
         
         elif analysis_type == "track_specialists":
             results = db.session.query(Result, Horse, Meeting, Prediction).join(
@@ -3212,11 +3211,12 @@ def execute_tool(tool_name, tool_input, user_id):
                 Race, Horse.race_id == Race.id
             ).join(
                 Meeting, Race.meeting_id == Meeting.id
-            ).outerjoin(
+            ).join(
                 Prediction, Horse.id == Prediction.horse_id
             ).filter(Result.finish_position > 0).all()
             
             patterns = {}
+            races_seen = {}
             
             for r, h, race, m, p in results:
                 csv_data = h.csv_data or {}
@@ -3227,6 +3227,7 @@ def execute_tool(tool_name, tool_input, user_id):
                     continue
                 
                 pattern_key = f"{age}yo {sex}"
+                race_key = f"{m.id}_{race.race_number}"
                 
                 if pattern_key not in patterns:
                     patterns[pattern_key] = {
@@ -3235,16 +3236,19 @@ def execute_tool(tool_name, tool_input, user_id):
                         "total_profit": 0,
                         "stake": 0
                     }
+                    races_seen[pattern_key] = set()
                 
-                patterns[pattern_key]["total"] += 1
-                patterns[pattern_key]["stake"] += 10
-                
-                if r.finish_position == 1:
-                    patterns[pattern_key]["wins"] += 1
-                    if r.sp:
-                        patterns[pattern_key]["total_profit"] += (r.sp * 10 - 10)
-                else:
-                    patterns[pattern_key]["total_profit"] -= 10
+                if race_key not in races_seen[pattern_key]:
+                    races_seen[pattern_key].add(race_key)
+                    patterns[pattern_key]["total"] += 1
+                    patterns[pattern_key]["stake"] += 10
+                    
+                    if r.finish_position == 1:
+                        patterns[pattern_key]["wins"] += 1
+                        if r.sp:
+                            patterns[pattern_key]["total_profit"] += (r.sp * 10 - 10)
+                    else:
+                        patterns[pattern_key]["total_profit"] -= 10
             
             pattern_list = []
             for pattern, stats in patterns.items():
