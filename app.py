@@ -14,7 +14,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import uuid
 
-from models import db, User, Meeting, Race, Horse, Prediction, Result
+from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage
 
 import logging
 import sys
@@ -2861,150 +2861,354 @@ def test_telegram():
     
     # ----- CHAT SYSTEM ROUTES -----
 
-RACING_SYSTEM_PROMPT = """You are an expert horse racing analyst assistant for The Form Analyst platform. 
+RACING_SYSTEM_PROMPT = """You are an expert horse racing analyst with direct access to The Form Analyst database through tools.
 
-You have access to the user's complete racing database including:
-- All uploaded race meetings with full CSV data
-- Complete horse details: age, sex, sire, dam, jockey, trainer, barrier, weight
-- Form data: last 10 runs, career records, track/distance/condition records
-- Sectional times and class information
-- Your predictions: scores and recommended odds
-- Actual race results with SP prices and finishing positions
+You can call these tools to answer user questions:
+1. query_database - Find meetings, horses, results, or calculate statistics
+2. calculate_quaddie - Generate optimal quaddie combinations based on scores
+3. analyze_patterns - Discover patterns in historical performance data
 
-When the user asks about their data, you'll receive it in <database_context> tags. Use this to give specific, data-driven answers.
+When users ask questions:
+- Call the appropriate tools to get data
+- Analyze the results intelligently
+- Provide specific, actionable recommendations
+- Explain your reasoning
 
-Your role:
-- Analyze specific horses, races, and meetings from their uploaded data
-- Explain scoring components and why horses are rated highly/poorly
-- Compare predictions vs actual results
-- Identify patterns in jockey/trainer/sire performance
-- Help interpret form factors like class changes, distance suitability, track records
+For quaddie questions: Use calculate_quaddie to get top selections, explain why they're chosen
+For pattern analysis: Use analyze_patterns to find what's working/not working
+For specific data: Use query_database with appropriate filters
 
-Guidelines:
-- Be specific with data when available (use horse names, scores, actual numbers)
-- Use Australian racing terminology
-- Focus on educational insights
-- Remind users that gambling involves risk
-- Keep responses under 300 words unless detailed analysis is requested
+Be proactive - if you need more data to answer properly, call multiple tools.
+Keep responses concise unless detailed analysis is requested.
+Always remind users that gambling involves risk."""
 
-Example queries you can answer:
-- "Show me all 3YO horses in my Sandown meeting"
-- "Which horses have sectional scores above 10?"
-- "How did horses with score 100+ perform?"
-- "Find horses dropping in class"
-"""
-
-def get_database_context_for_query(user_query, user_id):
-    """
-    Analyze user query and fetch relevant database context from ALL users' data
-    """
-    query_lower = user_query.lower()
-    context_parts = []
+def execute_tool(tool_name, tool_input, user_id):
+    """Execute tool calls from Claude"""
     
-    # Extract possible track names from ALL meetings
-    all_meeting_names = db.session.query(Meeting.meeting_name).all()
-    track_names = set()
-    for (name,) in all_meeting_names:
-        if '_' in name:
-            track = name.split('_', 1)[1].lower().replace('-', ' ')
-            track_names.add(track)
-    
-    # Check if query mentions any known track
-    mentions_track = any(track in query_lower for track in track_names)
-    
-    # Extract date code from query (e.g., "260128")
-    date_match = None
-    for word in query_lower.split():
-        if word.isdigit() and len(word) == 6:
-            date_match = word
-            break
-    
-    # Check if specific meeting name mentioned (e.g., "260128_kembla")
-    specific_meeting = None
-    for (name,) in all_meeting_names:
-        if name.lower() in query_lower.replace(' ', '').replace('-', ''):
-            specific_meeting = name
-            break
-    
-    # Load data if: racing terms mentioned OR track name mentioned OR date code present
-    if mentions_track or date_match or specific_meeting or any(word in query_lower for word in ['meeting', 'race', 'horse', 'jockey', 'trainer', 'today', 'analyse', 'analyze', 'winner', 'score', 'prediction', 'odds']):
-        meetings_query = Meeting.query.order_by(Meeting.uploaded_at.desc())
+    if tool_name == "query_database":
+        query_type = tool_input.get("query_type")
+        filters = tool_input.get("filters", {})
         
-        # If specific meeting name mentioned, get ONLY that one
-        if specific_meeting:
-            meetings_query = meetings_query.filter(Meeting.meeting_name == specific_meeting)
-            recent_meetings = meetings_query.limit(1).all()
-        # Else if date code mentioned, get all from that date
-        elif date_match:
-            meetings_query = meetings_query.filter(Meeting.meeting_name.like(f'{date_match}%'))
-            recent_meetings = meetings_query.limit(20).all()
-        # Else get recent meetings
-        else:
-            recent_meetings = meetings_query.limit(10).all()
+        if query_type == "meetings":
+            # Get meetings based on filters
+            query = Meeting.query
+            if filters.get("meeting_name"):
+                query = query.filter(Meeting.meeting_name.like(f"%{filters['meeting_name']}%"))
+            if filters.get("date"):
+                query = query.filter(Meeting.meeting_name.like(f"{filters['date']}%"))
+            meetings = query.order_by(Meeting.uploaded_at.desc()).limit(50).all()
+            return [{"name": m.meeting_name, "race_count": len(m.races)} for m in meetings]
         
-        if recent_meetings:
-            meetings_info = "Available uploaded meetings:\n"
-            for m in recent_meetings:
-                meetings_info += f"\n{m.meeting_name} (uploaded {m.uploaded_at.strftime('%Y-%m-%d')})\n"
-                meeting_name_lower = m.meeting_name.lower()
-                should_show_details = (meeting_name_lower in query_lower or len(recent_meetings) <= 5 or 'all' in query_lower or 'analyse' in query_lower or 'analyze' in query_lower)
+        elif query_type == "horses":
+            # Get horses with predictions
+            query = db.session.query(Horse, Race, Meeting, Prediction).join(
+                Race, Horse.race_id == Race.id
+            ).join(
+                Meeting, Race.meeting_id == Meeting.id
+            ).outerjoin(
+                Prediction, Horse.id == Prediction.horse_id
+            )
+            
+            if filters.get("meeting_name"):
+                query = query.filter(Meeting.meeting_name == filters["meeting_name"])
+            if filters.get("min_score"):
+                query = query.filter(Prediction.score >= filters["min_score"])
+            if filters.get("race_number"):
+                query = query.filter(Race.race_number == filters["race_number"])
                 
-                if should_show_details:
-                    for race in m.races:
-                        meetings_info += f"\n  Race {race.race_number}: {race.distance}m, {race.race_class}, {race.track_condition}\n"
-                        sorted_horses = sorted(race.horses, key=lambda h: h.prediction.score if h.prediction else 0, reverse=True)
-                        
-                        for horse in sorted_horses:
-                            csv_data = horse.csv_data or {}
-                            meetings_info += f"    {horse.horse_name}:\n"
-                            meetings_info += f"      Age: {csv_data.get('horse age', 'N/A')}, Sex: {csv_data.get('horse sex', 'N/A')}\n"
-                            meetings_info += f"      Jockey: {horse.jockey}, Trainer: {horse.trainer}\n"
-                            meetings_info += f"      Barrier: {horse.barrier}, Weight: {horse.weight}kg\n"
-                            meetings_info += f"      Sire: {csv_data.get('horse sire', 'N/A')}, Dam: {csv_data.get('horse dam', 'N/A')}\n"
-                            meetings_info += f"      Last 10: {csv_data.get('horse last10', 'N/A')}\n"
-                            meetings_info += f"      Record: {csv_data.get('horse record', 'N/A')}\n"
-                            meetings_info += f"      Distance record: {csv_data.get('horse record distance', 'N/A')}\n"
-                            meetings_info += f"      Track record: {csv_data.get('horse record track', 'N/A')}\n"
-                            meetings_info += f"      Sectional: {csv_data.get('sectional', 'N/A')}\n"
-                            if horse.prediction:
-                                meetings_info += f"      PREDICTION - Score: {horse.prediction.score}, Odds: {horse.prediction.predicted_odds}\n"
-            context_parts.append(meetings_info)
-    
-    if any(word in query_lower for word in ['result', 'win', 'strike', 'roi', 'performance', 'stat', 'how did', 'winner']):
-        from models import Result, Prediction
-        results_query = db.session.query(Result, Horse, Race, Meeting, Prediction).join(Horse, Result.horse_id == Horse.id).outerjoin(Prediction, Horse.id == Prediction.horse_id).join(Race, Horse.race_id == Race.id).join(Meeting, Race.meeting_id == Meeting.id).order_by(Result.recorded_at.desc()).limit(500).all()
+            horses = query.limit(100).all()
+            return [{
+                "horse": h.horse_name,
+                "race": r.race_number,
+                "meeting": m.meeting_name,
+                "score": p.score if p else None,
+                "predicted_odds": p.predicted_odds if p else None,
+                "jockey": h.jockey,
+                "trainer": h.trainer,
+                "barrier": h.barrier
+            } for h, r, m, p in horses]
         
-        if results_query:
-            results_info = "Recent race results:\n"
-            wins = 0
-            total = 0
-            for result, horse, race, meeting, prediction in results_query:
-                if result.actually_ran:
-                    total += 1
-                    if result.finish_position == 1:
-                        wins += 1
-                    results_info += f"- {meeting.meeting_name} R{race.race_number}: {horse.horse_name} "
-                    if result.finish_position == 1:
-                        results_info += f"WON at ${result.sp}"
-                    else:
-                        results_info += f"finished {result.finish_position} at ${result.sp}"
-                    if prediction:
-                        results_info += f" (Score: {prediction.score}, Predicted: {prediction.predicted_odds})"
-                    results_info += "\n"
-            if total > 0:
-                strike_rate = (wins / total) * 100
-                results_info += f"\nOverall: {wins} wins from {total} races ({strike_rate:.1f}% strike rate)\n"
-            context_parts.append(results_info)
+        elif query_type == "results":
+            # Query actual results
+            results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
+                Horse, Result.horse_id == Horse.id
+            ).outerjoin(
+                Prediction, Horse.id == Prediction.horse_id
+            ).join(
+                Race, Horse.race_id == Race.id
+            ).join(
+                Meeting, Race.meeting_id == Meeting.id
+            ).filter(Result.actually_ran == True)
+            
+            if filters.get("won_only"):
+                results = results.filter(Result.finish_position == 1)
+            if filters.get("min_score"):
+                results = results.filter(Prediction.score >= filters["min_score"])
+            if filters.get("meeting_name"):
+                results = results.filter(Meeting.meeting_name.like(f"%{filters['meeting_name']}%"))
+                
+            results = results.order_by(Result.recorded_at.desc()).limit(1000).all()
+            
+            return [{
+                "meeting": m.meeting_name,
+                "race": r.race_number,
+                "horse": h.horse_name,
+                "position": res.finish_position,
+                "sp": res.sp,
+                "score": p.score if p else None,
+                "predicted_odds": p.predicted_odds if p else None
+            } for res, h, r, m, p in results]
+        
+        elif query_type == "statistics":
+            # Calculate overall stats
+            results = db.session.query(Result, Prediction).join(
+                Horse, Result.horse_id == Horse.id
+            ).outerjoin(
+                Prediction, Horse.id == Prediction.horse_id
+            ).filter(Result.actually_ran == True).all()
+            
+            total = len(results)
+            wins = sum(1 for r, p in results if r.finish_position == 1)
+            places = sum(1 for r, p in results if r.finish_position <= 3)
+            
+            # Stats by score range
+            high_score_wins = sum(1 for r, p in results if p and p.score >= 80 and r.finish_position == 1)
+            high_score_total = sum(1 for r, p in results if p and p.score >= 80)
+            
+            return {
+                "total_races": total,
+                "wins": wins,
+                "strike_rate": round(wins / total * 100, 1) if total > 0 else 0,
+                "place_rate": round(places / total * 100, 1) if total > 0 else 0,
+                "high_score_strike": round(high_score_wins / high_score_total * 100, 1) if high_score_total > 0 else 0
+            }
     
-    if any(word in query_lower for word in ['jockey', 'trainer', 'sire', 'dam', 'class', 'distance', 'track']):
-        all_horses = db.session.query(Horse, Race, Meeting).join(Race, Horse.race_id == Race.id).join(Meeting, Race.meeting_id == Meeting.id).order_by(Meeting.uploaded_at.desc()).limit(1000).all()
-        if all_horses:
-            context_parts.append(f"Database contains {len(all_horses)} horses for analysis")
+    elif tool_name == "calculate_quaddie":
+        meeting_name = tool_input.get("meeting_name")
+        min_score = tool_input.get("min_score", 70)
+        max_combinations = tool_input.get("max_combinations", 10)
+        
+        # Get races 5-8 (typical quaddie races)
+        meeting = Meeting.query.filter_by(meeting_name=meeting_name).first()
+        if not meeting:
+            return {"error": "Meeting not found"}
+        
+        quaddie_races = [r for r in meeting.races if 5 <= r.race_number <= 8]
+        
+        if len(quaddie_races) < 4:
+            return {"error": "Not enough races for quaddie (need races 5-8)"}
+        
+        # Get top horses by score in each race
+        combinations = []
+        for race in quaddie_races[:4]:
+            top_horses = sorted(
+                [h for h in race.horses if h.prediction and h.prediction.score >= min_score],
+                key=lambda h: h.prediction.score,
+                reverse=True
+            )[:3]  # Top 3 in each leg
+            
+            combinations.append([{
+                "horse": h.horse_name,
+                "score": h.prediction.score,
+                "odds": h.prediction.predicted_odds,
+                "barrier": h.barrier
+            } for h in top_horses])
+        
+        return {
+            "meeting": meeting_name,
+            "races": [r.race_number for r in quaddie_races[:4]],
+            "selections": combinations
+        }
     
-    if context_parts:
-        return "\n\n".join(context_parts)
-    return None
+    elif tool_name == "analyze_patterns":
+        analysis_type = tool_input.get("analysis_type")
+        
+        if analysis_type == "score_performance":
+            # Analyze how different score ranges perform
+            results = db.session.query(Result, Prediction).join(
+                Horse, Result.horse_id == Horse.id
+            ).outerjoin(
+                Prediction, Horse.id == Prediction.horse_id
+            ).filter(Result.actually_ran == True).all()
+            
+            score_ranges = {
+                "100+": {"wins": 0, "total": 0},
+                "80-99": {"wins": 0, "total": 0},
+                "60-79": {"wins": 0, "total": 0},
+                "40-59": {"wins": 0, "total": 0},
+                "<40": {"wins": 0, "total": 0}
+            }
+            
+            for r, p in results:
+                if not p:
+                    continue
+                score = p.score
+                if score >= 100:
+                    key = "100+"
+                elif score >= 80:
+                    key = "80-99"
+                elif score >= 60:
+                    key = "60-79"
+                elif score >= 40:
+                    key = "40-59"
+                else:
+                    key = "<40"
+                
+                score_ranges[key]["total"] += 1
+                if r.finish_position == 1:
+                    score_ranges[key]["wins"] += 1
+            
+            # Calculate strike rates
+            for key in score_ranges:
+                total = score_ranges[key]["total"]
+                wins = score_ranges[key]["wins"]
+                score_ranges[key]["strike_rate"] = round(wins / total * 100, 1) if total > 0 else 0
+            
+            return score_ranges
+        
+        elif analysis_type == "overlays":
+            # Find where predicted odds were better than SP
+            results = db.session.query(Result, Prediction, Horse, Meeting, Race).join(
+                Horse, Result.horse_id == Horse.id
+            ).join(
+                Prediction, Horse.id == Prediction.horse_id
+            ).join(
+                Race, Horse.race_id == Race.id
+            ).join(
+                Meeting, Race.meeting_id == Meeting.id
+            ).filter(Result.actually_ran == True).filter(Result.finish_position == 1).all()
+            
+            overlays = []
+            for r, p, h, m, race in results:
+                if p.predicted_odds and r.sp and p.predicted_odds < r.sp:
+                    overlay_percent = ((r.sp - p.predicted_odds) / p.predicted_odds) * 100
+                    overlays.append({
+                        "horse": h.horse_name,
+                        "meeting": m.meeting_name,
+                        "race": race.race_number,
+                        "predicted": p.predicted_odds,
+                        "sp": r.sp,
+                        "overlay": round(overlay_percent, 1),
+                        "score": p.score
+                    })
+            
+            return sorted(overlays, key=lambda x: x["overlay"], reverse=True)[:20]
+        
+        elif analysis_type == "trainer_stats":
+            # Analyze trainer performance
+            results = db.session.query(Result, Horse, Prediction).join(
+                Horse, Result.horse_id == Horse.id
+            ).outerjoin(
+                Prediction, Horse.id == Prediction.horse_id
+            ).filter(Result.actually_ran == True).all()
+            
+            trainer_stats = {}
+            for r, h, p in results:
+                trainer = h.trainer
+                if trainer not in trainer_stats:
+                    trainer_stats[trainer] = {"wins": 0, "total": 0, "places": 0}
+                
+                trainer_stats[trainer]["total"] += 1
+                if r.finish_position == 1:
+                    trainer_stats[trainer]["wins"] += 1
+                if r.finish_position <= 3:
+                    trainer_stats[trainer]["places"] += 1
+            
+            # Calculate rates and filter to trainers with 10+ runs
+            trainer_list = []
+            for trainer, stats in trainer_stats.items():
+                if stats["total"] >= 10:
+                    trainer_list.append({
+                        "trainer": trainer,
+                        "wins": stats["wins"],
+                        "total": stats["total"],
+                        "strike_rate": round(stats["wins"] / stats["total"] * 100, 1),
+                        "place_rate": round(stats["places"] / stats["total"] * 100, 1)
+                    })
+            
+            return sorted(trainer_list, key=lambda x: x["strike_rate"], reverse=True)[:20]
+        
+        elif analysis_type == "jockey_stats":
+            # Analyze jockey performance
+            results = db.session.query(Result, Horse, Prediction).join(
+                Horse, Result.horse_id == Horse.id
+            ).outerjoin(
+                Prediction, Horse.id == Prediction.horse_id
+            ).filter(Result.actually_ran == True).all()
+            
+            jockey_stats = {}
+            for r, h, p in results:
+                jockey = h.jockey
+                if jockey not in jockey_stats:
+                    jockey_stats[jockey] = {"wins": 0, "total": 0, "places": 0}
+                
+                jockey_stats[jockey]["total"] += 1
+                if r.finish_position == 1:
+                    jockey_stats[jockey]["wins"] += 1
+                if r.finish_position <= 3:
+                    jockey_stats[jockey]["places"] += 1
+            
+            # Calculate rates and filter to jockeys with 10+ rides
+            jockey_list = []
+            for jockey, stats in jockey_stats.items():
+                if stats["total"] >= 10:
+                    jockey_list.append({
+                        "jockey": jockey,
+                        "wins": stats["wins"],
+                        "total": stats["total"],
+                        "strike_rate": round(stats["wins"] / stats["total"] * 100, 1),
+                        "place_rate": round(stats["places"] / stats["total"] * 100, 1)
+                    })
+            
+            return sorted(jockey_list, key=lambda x: x["strike_rate"], reverse=True)[:20]
+        
+        elif analysis_type == "track_specialists":
+            # Find horses that perform well at specific tracks
+            results = db.session.query(Result, Horse, Meeting, Prediction).join(
+                Horse, Result.horse_id == Horse.id
+            ).join(
+                Race, Horse.race_id == Race.id
+            ).join(
+                Meeting, Race.meeting_id == Meeting.id
+            ).outerjoin(
+                Prediction, Horse.id == Prediction.horse_id
+            ).filter(Result.actually_ran == True).all()
+            
+            horse_track_stats = {}
+            for r, h, m, p in results:
+                track = m.meeting_name.split('_')[1] if '_' in m.meeting_name else 'Unknown'
+                key = f"{h.horse_name}_{track}"
+                
+                if key not in horse_track_stats:
+                    horse_track_stats[key] = {
+                        "horse": h.horse_name,
+                        "track": track,
+                        "wins": 0,
+                        "total": 0
+                    }
+                
+                horse_track_stats[key]["total"] += 1
+                if r.finish_position == 1:
+                    horse_track_stats[key]["wins"] += 1
+            
+            # Filter to horses with 3+ runs at track and 50%+ strike rate
+            specialists = []
+            for stats in horse_track_stats.values():
+                if stats["total"] >= 3:
+                    strike_rate = stats["wins"] / stats["total"] * 100
+                    if strike_rate >= 50:
+                        specialists.append({
+                            "horse": stats["horse"],
+                            "track": stats["track"],
+                            "wins": stats["wins"],
+                            "total": stats["total"],
+                            "strike_rate": round(strike_rate, 1)
+                        })
+            
+            return sorted(specialists, key=lambda x: x["strike_rate"], reverse=True)[:20]
     
+    return {"error": "Unknown tool or analysis type"}
+
 @app.route('/api/chat', methods=['POST'])
 @limiter.limit("10 per minute")
 def chat():
@@ -3027,9 +3231,6 @@ def chat():
             session['chat_session_id'] = str(uuid.uuid4())
         
         chat_session_id = session['chat_session_id']
-        
-        # Check if user is asking about their data
-        database_context = get_database_context_for_query(user_message, user_id)
         
         # Save user message
         from models import ChatMessage
@@ -3058,19 +3259,121 @@ def chat():
                 "content": msg.content
             })
         
-        # Inject database context if relevant
-        if database_context:
-            messages[-1]['content'] = f"{user_message}\n\n<database_context>\n{database_context}\n</database_context>"
+        # Define tools Claude can call
+        tools = [
+            {
+                "name": "query_database",
+                "description": "Execute SQL query on the racing database to find specific horses, races, results, or statistics",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query_type": {
+                            "type": "string",
+                            "enum": ["meetings", "horses", "results", "statistics"],
+                            "description": "Type of query to run"
+                        },
+                        "filters": {
+                            "type": "object",
+                            "description": "Filters like meeting_name, date, track, min_score, race_number, won_only"
+                        }
+                    },
+                    "required": ["query_type"]
+                }
+            },
+            {
+                "name": "calculate_quaddie",
+                "description": "Calculate best quaddie combinations for a meeting (races 5-8) based on scores and overlays",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "meeting_name": {
+                            "type": "string",
+                            "description": "Full meeting name like '260131_Caulfield'"
+                        },
+                        "min_score": {
+                            "type": "number",
+                            "description": "Minimum score threshold for selections",
+                            "default": 70
+                        },
+                        "max_combinations": {
+                            "type": "integer",
+                            "description": "Maximum number of combinations to return",
+                            "default": 10
+                        }
+                    },
+                    "required": ["meeting_name"]
+                }
+            },
+            {
+                "name": "analyze_patterns",
+                "description": "Analyze historical results to find patterns in performance",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "analysis_type": {
+                            "type": "string",
+                            "enum": ["score_performance", "trainer_stats", "jockey_stats", "track_specialists", "overlays"],
+                            "description": "Type of pattern analysis to perform"
+                        }
+                    },
+                    "required": ["analysis_type"]
+                }
+            }
+        ]
         
-        # Call Claude API
+        # Initial API call with tools
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=1024,
+            max_tokens=4096,
             system=RACING_SYSTEM_PROMPT,
+            tools=tools,
             messages=messages
         )
         
-        assistant_response = response.content[0].text
+        # Handle tool calls in a loop
+        assistant_response = ""
+        conversation_messages = messages.copy()
+        
+        while response.stop_reason == "tool_use":
+            # Extract tool calls
+            tool_results = []
+            
+            for content_block in response.content:
+                if content_block.type == "tool_use":
+                    tool_name = content_block.name
+                    tool_input = content_block.input
+                    tool_use_id = content_block.id
+                    
+                    print(f"Tool called: {tool_name} with input: {tool_input}")
+                    
+                    # Execute the tool
+                    result = execute_tool(tool_name, tool_input, user_id)
+                    
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": str(result)
+                    })
+            
+            # Add assistant's tool use to conversation
+            conversation_messages.append({"role": "assistant", "content": response.content})
+            
+            # Add tool results to conversation
+            conversation_messages.append({"role": "user", "content": tool_results})
+            
+            # Continue conversation with tool results
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=4096,
+                system=RACING_SYSTEM_PROMPT,
+                tools=tools,
+                messages=conversation_messages
+            )
+        
+        # Extract final text response
+        for content_block in response.content:
+            if hasattr(content_block, 'text'):
+                assistant_response += content_block.text
         
         # Save assistant response
         assistant_msg = ChatMessage(
@@ -3084,11 +3387,13 @@ def chat():
         
         return jsonify({
             'response': assistant_response,
-            'message_count': len(messages)
+            'message_count': len(conversation_messages)
         })
     
     except Exception as e:
         print(f"Chat error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': 'Failed to process message'}), 500
 
 @app.route('/api/chat/history', methods=['GET'])
