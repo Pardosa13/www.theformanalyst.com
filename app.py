@@ -2967,26 +2967,47 @@ def execute_tool(tool_name, tool_input, user_id):
             } for res, h, r, m, p in results]
         
         elif query_type == "statistics":
-            results = db.session.query(Result, Prediction).join(
-                Horse, Result.horse_id == Horse.id
-            ).outerjoin(
-                Prediction, Horse.id == Prediction.horse_id
-            ).filter(Result.finish_position > 0).all()
+    results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
+        Horse, Result.horse_id == Horse.id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).outerjoin(
+        Prediction, Horse.id == Prediction.horse_id
+    ).filter(Result.finish_position > 0).all()
+    
+    unique_races = set()
+    wins = 0
+    places = 0
+    high_score_wins = 0
+    high_score_total = 0
+    
+    for res, h, race, m, p in results:
+        race_key = f"{m.id}_{race.race_number}"
+        
+        if race_key not in unique_races:
+            unique_races.add(race_key)
             
-            total = len(results)
-            wins = sum(1 for r, p in results if r.finish_position == 1)
-            places = sum(1 for r, p in results if r.finish_position <= 3)
+            if res.finish_position == 1:
+                wins += 1
+            if res.finish_position <= 3:
+                places += 1
             
-            high_score_wins = sum(1 for r, p in results if p and p.score >= 80 and r.finish_position == 1)
-            high_score_total = sum(1 for r, p in results if p and p.score >= 80)
-            
-            return {
-                "total_races": total,
-                "wins": wins,
-                "strike_rate": round(wins / total * 100, 1) if total > 0 else 0,
-                "place_rate": round(places / total * 100, 1) if total > 0 else 0,
-                "high_score_strike": round(high_score_wins / high_score_total * 100, 1) if high_score_total > 0 else 0
-            }
+            if p and p.score >= 80:
+                high_score_total += 1
+                if res.finish_position == 1:
+                    high_score_wins += 1
+    
+    total = len(unique_races)
+    
+    return {
+        "total_races": total,
+        "wins": wins,
+        "strike_rate": round(wins / total * 100, 1) if total > 0 else 0,
+        "place_rate": round(places / total * 100, 1) if total > 0 else 0,
+        "high_score_strike": round(high_score_wins / high_score_total * 100, 1) if high_score_total > 0 else 0
+    }
     
     elif tool_name == "calculate_quaddie":
         meeting_name = tool_input.get("meeting_name")
