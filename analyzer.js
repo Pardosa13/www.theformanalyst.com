@@ -850,7 +850,7 @@ function normalizeJockeyName(jockeyName) {
 function checkJockeys(JockeyName) {
     // ==========================================
     // JOCKEY SCORING - UPDATED 2025-01-30
-    // Based on 1203 race analysis
+    // Based on 1203 race analysis - COMPLETE DATA
     // ==========================================
     var addScore = 0;
     var note = '';
@@ -860,51 +860,204 @@ function checkJockeys(JockeyName) {
     
     // TIER 1: Elite Value (50%+ ROI) - MASSIVE EDGE
     const eliteValueJockeys = [
-        'Ethan Brown',        // 498% ROI, 22% SR - EXTRAORDINARY
-        'Tim Clark',          // 61% ROI, 24.2% SR
-        'R Mc Leod',          // 70.9% ROI, 8.9% SR
-        'C J Hillier',        // 73.4% ROI, 27.6% SR
-        'Robert Whearty',     // 72.9% ROI, 29.4% SR
-        'Codi Jordan',        // 67.1% ROI, 33.3% SR
+        'Ethan Brown',        // 498.3% ROI, 22% SR, 41 rides - EXTRAORDINARY
+        'B P Ward',           // 408.3% ROI, 8.3% SR, 12 rides
+        'Teaghan Martin',     // 247.4% ROI, 10.5% SR, 19 rides
+        'Sam Kennedy',        // 231.3% ROI, 12.5% SR, 24 rides
+        'Brooke King',        // 200% ROI, 11.1% SR, 27 rides
+        'Rocky Cheung',       // 188.2% ROI, 5.9% SR, 17 rides
+        'L Magorrian',        // 151.5% ROI, 14.8% SR, 27 rides
+        'Ms D Keane',         // 119.5% ROI, 18.2% SR, 22 rides
+        'Alana Livesey',      // 119.2% ROI, 12% SR, 50 rides
+        'Ms K Adams',         // 106.3% ROI, 18.8% SR, 16 rides
+        'Zac Wadick',         // 105% ROI, 5% SR, 20 rides
+        'A Adkins',           // 102% ROI, 16.3% SR, 43 rides
+        'S Clipperton',       // 96.8% ROI, 20.6% SR, 34 rides
+        'J Whiting',          // 89.3% ROI, 7.1% SR, 42 rides
+        'Jade Mc Naught',     // 86.4% ROI, 4.5% SR, 22 rides
+        'Jordan Turner',      // 84.6% ROI, 15.4% SR, 13 rides
+        'Claire Ramsbotham',  // 80% ROI, 20% SR, 15 rides
+        'Zoe Hunt',           // 77% ROI, 10% SR, 20 rides
+        'E J Walsh',          // 76.9% ROI, 11.5% SR, 26 rides
+        'C J Hillier',        // 73.4% ROI, 27.6% SR, 29 rides
+        'Robert Whearty',     // 72.9% ROI, 29.4% SR, 17 rides
+        'R Mc Leod',          // 70.9% ROI, 8.9% SR, 45 rides
+        'S Tsaikos',          // 67.5% ROI, 10% SR, 20 rides
+        'Codi Jordan',        // 67.1% ROI, 33.3% SR, 21 rides
+        'Madeline Owen',      // 66.7% ROI, 8.3% SR, 12 rides
+        'Zephen Johnston-Porter', // 62.9% ROI, 5.7% SR, 35 rides
+        'Tim Clark',          // 61% ROI, 24.2% SR, 62 rides
+        'Boris Thornton',     // 59.5% ROI, 19% SR, 21 rides
+        'Martin Harley',      // 58.6% ROI, 14.3% SR, 42 rides
+        'Adin Thompson',      // 57.6% ROI, 17.6% SR, 17 rides
+        'Cassidy Hill',       // 57.3% ROI, 13.3% SR, 15 rides
     ];
     
     // TIER 2: Strong Value (20-50% ROI) - PROVEN EDGE
     const strongValueJockeys = [
-        'L Magorrian',        // 151% ROI, 14.8% SR
-        'Alana Livesey',      // 119% ROI, 12% SR
-        'A Adkins',           // 102% ROI, 16.3% SR
-        'S Clipperton',       // 96.8% ROI, 20.6% SR
-        'Luke Cartwright',    // 31.1% ROI, 12.9% SR
-        'Caitlin Tootell',    // 26.6% ROI, 23.4% SR
-        'Tyler Schiller',     // 23.6% ROI, 14.3% SR
-        'M R Du Plessis',     // 38.5% ROI, 13.2% SR
-        'M Rodd',             // 31.1% ROI, 15.9% SR
+        'Natasha Faithfull',  // 49.7% ROI, 12.9% SR, 31 rides
+        'Victoria Corver',    // 49.1% ROI, 18.2% SR, 11 rides
+        'Ms C Jones',         // 44.7% ROI, 20% SR, 15 rides
+        'A Farragher',        // 43.3% ROI, 11.1% SR, 18 rides
+        'V Duric',            // 41.7% ROI, 16.7% SR, 12 rides
+        'W G Satherley',      // 40.5% ROI, 40% SR, 10 rides
+        'M R Du Plessis',     // 38.5% ROI, 13.2% SR, 53 rides
+        'M Rodd',             // 31.1% ROI, 15.9% SR, 44 rides
+        'Luke Cartwright',    // 31.1% ROI, 12.9% SR, 116 rides - BIG SAMPLE
+        'Jack Callan',        // 30% ROI, 13.3% SR, 15 rides
+        'Shayleigh Ingelse',  // 30% ROI, 18.2% SR, 11 rides
+        'Caitlin Tootell',    // 26.6% ROI, 23.4% SR, 47 rides
+        'Tyler Schiller',     // 23.6% ROI, 14.3% SR, 77 rides
+        'J Noonan',           // 23.3% ROI, 15.4% SR, 52 rides
+        'A C Goindasamy',     // 20.6% ROI, 18.8% SR, 16 rides
     ];
     
     // TIER 3: Profitable (0-20% ROI) - SMALL EDGE
     const profitableJockeys = [
-        'J Mott',             // 19.5% ROI, 20.2% SR
-        'W Gordon',           // 19.2% ROI, 9.6% SR
-        'Alysha Warren',      // 18.3% ROI, 17% SR
-        'G Buckley',          // 10.4% ROI, 17.6% SR
-        'Ben Thompson',       // 5% ROI, 16.4% SR
-        'H Coffey',           // 4.9% ROI, 16.5% SR
-        'L Currie',           // 3.7% ROI, 14.1% SR
+        'J Mott',             // 19.5% ROI, 20.2% SR, 94 rides
+        'W Gordon',           // 19.2% ROI, 9.6% SR, 52 rides
+        'Alysha Warren',      // 18.3% ROI, 17% SR, 47 rides
+        'Izzy Neale',         // 17.9% ROI, 21.4% SR, 14 rides
+        'Adam Sewell',        // 16.7% ROI, 5.6% SR, 18 rides
+        'Natika Riordan',     // 16.4% ROI, 18.2% SR, 22 rides
+        'Deon Le Roux',       // 15.6% ROI, 18.8% SR, 16 rides
+        'W Egan',             // 15.4% ROI, 15.4% SR, 39 rides
+        'C J Parish',         // 14.5% ROI, 18.4% SR, 38 rides
+        'Mollie Fitzgerald',  // 13.2% ROI, 12.8% SR, 47 rides
+        'Jordyn Weatherley',  // 13% ROI, 20% SR, 10 rides
+        'Emma Ly',            // 11% ROI, 20% SR, 10 rides
+        'G Buckley',          // 10.4% ROI, 17.6% SR, 68 rides
+        'L P Rolls',          // 8.9% ROI, 13% SR, 46 rides
+        'Sophie Potter',      // 7.5% ROI, 18.8% SR, 16 rides
+        'N Thomas',           // 7.1% ROI, 7.1% SR, 14 rides
+        'Logan McNeil',       // 7% ROI, 7.4% SR, 27 rides
+        'Cody Collis',        // 6.3% ROI, 14.3% SR, 35 rides
+        'Jett Stanley',       // 5.7% ROI, 12.2% SR, 41 rides
+        'Keshaw Dhurun',      // 5.3% ROI, 10.5% SR, 19 rides
+        'Ben Thompson',       // 5% ROI, 16.4% SR, 67 rides
+        'H Coffey',           // 4.9% ROI, 16.5% SR, 85 rides
+        'L Currie',           // 3.7% ROI, 14.1% SR, 78 rides
+        'S Foley',            // 3.6% ROI, 14.3% SR, 14 rides
+        'Ms W Costin',        // 1.9% ROI, 13.9% SR, 36 rides
+        'B Melham',           // 1.9% ROI, 11.1% SR, 27 rides
+        'Teagan Voorham',     // 0.9% ROI, 13.2% SR, 38 rides
     ];
     
     // TIER 4: Value Destroyers (-40%+ ROI) - AVOID
     const badJockeys = [
-        'K Mc Evoy',          // -88.8% ROI, 3.8% SR - DISASTER
-        'Craig Williams',     // -76.2% ROI, 7.7% SR
-        'J Ford',             // -73.3% ROI, 7.1% SR
-        'S Parnham',          // -73.2% ROI, 4.5% SR
-        'A B Collett',        // -72.6% ROI, 5.6% SR
-        'Damien Thornton',    // -64.7% ROI, 8.7% SR
-        'J R Collett',        // -63.3% ROI, 12.3% SR - Jason Collett
-        'Beau Mertens',       // -62.2% ROI, 8.2% SR
-        'Carleen Hefel',      // -61.9% ROI, 11.6% SR
-        'Kayla Crowther',     // -55% ROI, 4% SR
-        'Holly Watson',       // -52.4% ROI, 8.2% SR
+        'K Mc Evoy',          // -88.8% ROI, 3.8% SR, 52 rides - DISASTER
+        'Chloe Wells',        // -90.4% ROI, 7.7% SR, 13 rides
+        'R Dolan',            // -93.4% ROI, 2.7% SR, 37 rides
+        'Olivia Chambers',    // -93.5% ROI, 5% SR, 20 rides
+        'Liam Riordan',       // -94.2% ROI, 3.8% SR, 26 rides
+        'Nadia Daniels',      // -89.5% ROI, 5% SR, 20 rides
+        'Christopher Pang',   // -86.1% ROI, 4.3% SR, 23 rides
+        'Jack Hill',          // -85.8% ROI, 5.3% SR, 19 rides
+        'Tala Hutchinson',    // -85.3% ROI, 5.9% SR, 17 rides
+        'Ms M Weir',          // -84.1% ROI, 4.5% SR, 44 rides
+        'Brayden Gaerth',     // -84.2% ROI, 4.2% SR, 24 rides
+        'S Guymer',           // -83.6% ROI, 3.6% SR, 28 rides
+        'B Mc Dougall',       // -83.5% ROI, 7.4% SR, 27 rides
+        'J Holder',           // -83.1% ROI, 5% SR, 40 rides
+        'R Wiggins',          // -83.1% ROI, 3.8% SR, 26 rides
+        'D L Turner',         // -82.9% ROI, 4.8% SR, 21 rides
+        'Caitlyn Munro',      // -82.7% ROI, 6.7% SR, 15 rides
+        'Reece Jones',        // -81.3% ROI, 5.3% SR, 76 rides
+        'Jacob Stiff',        // -79.5% ROI, 2.6% SR, 39 rides
+        'Ms T Johnstone',     // -79.3% ROI, 3.4% SR, 29 rides
+        'Alana Kelly',        // -79.3% ROI, 3.4% SR, 29 rides
+        'Jag Guthmann-Chester', // -79% ROI, 6.9% SR, 29 rides
+        'Jenny Duggan',       // -78.9% ROI, 5.7% SR, 35 rides
+        'Sarah Field',        // -78.5% ROI, 8.3% SR, 24 rides
+        'B Looker',           // -77.6% ROI, 9.3% SR, 43 rides
+        'Leslie Tilley',      // -76.8% ROI, 5.3% SR, 19 rides
+        'Craig Williams',     // -76.2% ROI, 7.7% SR, 65 rides
+        'Celine Gaudray',     // -75.9% ROI, 3.7% SR, 27 rides
+        'Patrick Moloney',    // -75.8% ROI, 3% SR, 33 rides
+        'Leeshelle Small',    // -75.3% ROI, 5.6% SR, 36 rides
+        'V Le Boeuf',         // -75% ROI, 5% SR, 20 rides
+        'A Gibbons',          // -74.4% ROI, 2.6% SR, 39 rides
+        'Connor Murtagh',     // -74.4% ROI, 5.6% SR, 18 rides
+        'Chelsea Baker',      // -74.3% ROI, 7.1% SR, 14 rides
+        'Bailey Kinninmont',  // -74.2% ROI, 3% SR, 33 rides
+        'Lauryn Bingley',     // -74.2% ROI, 8.3% SR, 12 rides
+        'J Ford',             // -73.3% ROI, 7.1% SR, 56 rides
+        'S Parnham',          // -73.2% ROI, 4.5% SR, 44 rides
+        'Dylan Dunn',         // -73.1% ROI, 3.8% SR, 26 rides
+        'A B Collett',        // -72.6% ROI, 5.6% SR, 90 rides
+        'Rochelle Milnes',    // -71.6% ROI, 5.4% SR, 37 rides
+        'Sairyn Fawke',       // -71.1% ROI, 2.6% SR, 38 rides
+        'Ron Stewart',        // -70.9% ROI, 9.1% SR, 11 rides
+        'Austin Galati',      // -70.9% ROI, 10.9% SR, 46 rides
+        'Rose Hammond',       // -70.8% ROI, 4.2% SR, 24 rides
+        'Jefferson Tsang',    // -70.6% ROI, 5.9% SR, 17 rides
+        'Justin Huxtable',    // -70% ROI, 5% SR, 20 rides
+        'J Penza',            // -70% ROI, 3.3% SR, 30 rides
+        'Jack Martin',        // -69.6% ROI, 4.3% SR, 23 rides
+        'Tom Madden',         // -69.4% ROI, 6.1% SR, 33 rides
+        'C Mc Iver',          // -69% ROI, 10% SR, 10 rides
+        'Jean Van Overmeire', // -68.5% ROI, 3.7% SR, 27 rides
+        'Amy Mc Lucas',       // -66.7% ROI, 3.3% SR, 30 rides
+        'Damien Thornton',    // -64.7% ROI, 8.7% SR, 69 rides
+        'Madi Derrick',       // -64.7% ROI, 5.9% SR, 17 rides
+        'Milos Bunjevac',     // -64.3% ROI, 4.8% SR, 21 rides
+        'Declan Bates',       // -64.3% ROI, 7.1% SR, 14 rides
+        'Grace Palmer',       // -63.6% ROI, 9.1% SR, 11 rides
+        'Campbell Rawiller',  // -63.6% ROI, 6.1% SR, 33 rides
+        'Donovan Dillon',     // -63.5% ROI, 15.4% SR, 13 rides
+        'J R Collett',        // -63.3% ROI, 12.3% SR, 81 rides - Jason Collett
+        'Olivia Webb',        // -62.5% ROI, 3.1% SR, 32 rides
+        'Beau Mertens',       // -62.2% ROI, 8.2% SR, 85 rides
+        'Tiffani Brooker',    // -61.9% ROI, 4.8% SR, 21 rides
+        'Carleen Hefel',      // -61.9% ROI, 11.6% SR, 43 rides
+        'R J Hurdle',         // -61.5% ROI, 7.7% SR, 13 rides
+        'B Muhcu',            // -61.5% ROI, 7.7% SR, 13 rides
+        'Ms T Chambers',      // -60.7% ROI, 7.1% SR, 14 rides
+        'William Stanley',    // -60.6% ROI, 7.8% SR, 51 rides
+        'Benjamin Osmond',    // -60% ROI, 4% SR, 25 rides
+        'Anna Roper',         // -59.4% ROI, 6.9% SR, 101 rides
+        'A Darmanin',         // -57.8% ROI, 16.7% SR, 18 rides
+        'Tom Sherry',         // -57.2% ROI, 7.8% SR, 64 rides
+        'A Mallyon',          // -57.1% ROI, 9.1% SR, 55 rides
+        'Caitlin Hollowood',  // -55.9% ROI, 5.9% SR, 17 rides
+        'D Pires',            // -55.6% ROI, 12.5% SR, 16 rides
+        'Todd Pannell',       // -55.6% ROI, 14.3% SR, 35 rides
+        'Ms J Beriman',       // -55.3% ROI, 10.5% SR, 19 rides
+        'Shannen Llewellyn',  // -55.2% ROI, 9.4% SR, 53 rides
+        'Kayla Crowther',     // -55% ROI, 4% SR, 50 rides
+        'J B Mc Donald',      // -55% ROI, 16.7% SR, 30 rides
+        'Ella Drew',          // -54.5% ROI, 15% SR, 20 rides
+        'A J Calder',         // -54.2% ROI, 8.3% SR, 12 rides
+        'Brock Ryan',         // -54.1% ROI, 10.7% SR, 28 rides
+        'S H Sit',            // -53.8% ROI, 7.7% SR, 13 rides
+        'Regan Bayliss',      // -53.2% ROI, 9.6% SR, 52 rides
+        'P Gatt',             // -52.8% ROI, 5.6% SR, 18 rides
+        'Ashley Morgan',      // -52.7% ROI, 9.9% SR, 71 rides
+        'Holly Watson',       // -52.4% ROI, 8.2% SR, 49 rides
+        'Corey Sutherland',   // -52% ROI, 4% SR, 50 rides
+        'Ms J Taylor',        // -51.7% ROI, 8.3% SR, 24 rides
+        'B Rawiller',         // -50.7% ROI, 7.1% SR, 42 rides
+        'S O\'Donnell',       // -50% ROI, 10.8% SR, 37 rides
+        'K Jennings',         // -48.4% ROI, 6.3% SR, 32 rides
+        'Ben Price',          // -48.1% ROI, 7.7% SR, 26 rides
+        'J Pracey-Holmes',    // -47.7% ROI, 8.3% SR, 48 rides
+        'D Caboche',          // -47% ROI, 7.4% SR, 27 rides
+        'Chris Parnham',      // -47% ROI, 8.7% SR, 46 rides
+        'M Zahra',            // -46.4% ROI, 16.7% SR, 18 rides
+        'Ryan Houston',       // -46.1% ROI, 13.2% SR, 76 rides
+        'Jabez Johnstone',    // -46.1% ROI, 14.3% SR, 28 rides
+        'K S Latham',         // -45.2% ROI, 14.3% SR, 21 rides
+        'Brittany Button',    // -44.6% ROI, 12.5% SR, 24 rides
+        'Jett Newman',        // -44.1% ROI, 17.6% SR, 17 rides
+        'Jake Toeroek',       // -44.1% ROI, 14.7% SR, 34 rides
+        'Rachel King',        // -43.8% ROI, 9.6% SR, 52 rides
+        'Raul Silvera Olivera', // -42.9% ROI, 11.8% SR, 17 rides
+        'M J Dee',            // -42.6% ROI, 3.7% SR, 82 rides
+        'J Grisedale',        // -41.8% ROI, 18.2% SR, 11 rides
+        'T Turner',           // -41.5% ROI, 4.9% SR, 41 rides
+        'Kristy Bennett',     // -41.2% ROI, 5.9% SR, 17 rides
+        'Ms G Cartwright',    // -40.8% ROI, 8% SR, 25 rides
+        'Rebecca Bronett Prag', // -40% ROI, 5% SR, 20 rides
     ];
     
     // Apply scoring
