@@ -1096,7 +1096,7 @@ function normalizeTrainerName(trainerName) {
 function checkTrainers(trainerName) {
     // ==========================================
     // TRAINER SCORING - UPDATED 2025-01-30
-    // Based on 1203 race analysis
+    // Based on 1203 race analysis - COMPLETE DATA
     // ==========================================
     var addScore = 0;
     var note = '';
@@ -1108,12 +1108,14 @@ function checkTrainers(trainerName) {
     const eliteValueTrainers = [
         'C Maher', 'Ciaron Maher',              // 59.4% ROI, 14.2% SR, 225 runners - THE KING
         'Richard & Will Freedman',              // 55.1% ROI, 16.2% SR, 37 runners
-        'D R Harrison',                         // 51.1% ROI, 22.2% SR
-        'G J Stevenson',                        // 49.4% ROI, 35.3% SR
+        'D R Harrison',                         // 51.1% ROI, 22.2% SR, 18 runners
     ];
     
     // TIER 2: Strong Value (20-50% ROI) - PROVEN EDGE
     const strongValueTrainers = [
+        'G J Stevenson',                        // 49.4% ROI, 35.3% SR, 17 runners
+        'Matthew Dale',                         // 48.7% ROI, 16.7% SR, 30 runners
+        'P Messara & L Gavranich',              // 46.9% ROI, 31.3% SR, 16 runners
         'T Busuttin & N Young',                 // 26.4% ROI, 17.4% SR, 46 runners
         'M A Currie',                           // 18.5% ROI, 18.2% SR, 44 runners
         'S I Singleton',                        // 18.3% ROI, 15.8% SR, 38 runners
@@ -1121,7 +1123,7 @@ function checkTrainers(trainerName) {
     
     // TIER 3: Profitable (5-20% ROI) - SMALL EDGE
     const profitableTrainers = [
-        'Craig Weeding',                        // 12.4% ROI, 10.3% SR
+        'Craig Weeding',                        // 12.4% ROI, 10.3% SR, 29 runners
         'G Portelli',                           // 12% ROI, 20% SR, 40 runners
         'R D Griffiths',                        // 11.3% ROI, 9.6% SR, 52 runners
         'John O\'Shea & Tom Charlton',         // 8.9% ROI, 20.5% SR, 44 runners
@@ -1134,13 +1136,101 @@ function checkTrainers(trainerName) {
     
     // TIER 4: Value Destroyers (-40%+ ROI) - AVOID
     const badTrainers = [
-        'N D Parnham',                          // -100% ROI, 0% SR, 53 runners - DISASTER
+        'N D Parnham',                          // -100% ROI, 0% SR, 53 runners - DISASTER (0 WINS!)
+        'Peter Snowden', 'P Snowden',          // -59.3% ROI, 12.5% SR, 56 runners
+        'Ben Will & Jd Hayes',                  // -59.3% ROI, 9.5% SR, 189 runners - BIG SAMPLE
         'Patrick & Michelle Payne',             // -67.6% ROI, 6.8% SR, 44 runners
         'Bjorn Baker', 'B Baker',              // -64.5% ROI, 11.9% SR, 101 runners
-        'Ben Will & Jd Hayes',                  // -59.3% ROI, 9.5% SR, 189 runners
-        'Peter Snowden', 'P Snowden',          // -59.3% ROI, 12.5% SR, 56 runners
         'G Ryan & S Alexiou',                   // -49.5% ROI, 11.6% SR, 43 runners
         'Ben Brisbourne',                       // -43.5% ROI, 11.3% SR, 62 runners
+        'C I Brown',                            // -45.5% ROI, 13.6% SR, 22 runners
+        'John Thompson',                        // -46% ROI, 11.1% SR, 45 runners
+        'Brett & Georgie Cavanough',            // -48.9% ROI, 13.2% SR, 38 runners
+        'L Smith',                              // -48.8% ROI, 16% SR, 25 runners
+        'Brett Robb',                           // -48.4% ROI, 8% SR, 25 runners
+        'M J Williams',                         // -46.9% ROI, 12.5% SR, 16 runners
+        'Adam Trinder',                         // -46.7% ROI, 13.3% SR, 15 runners
+        'Aaron Purcell',                        // -46.4% ROI, 7.1% SR, 14 runners
+        'L F Birchley',                         // -46.2% ROI, 9.5% SR, 21 runners
+        'C & M Gangemi',                        // -46.2% ROI, 7.7% SR, 13 runners
+        'Allan Kehoe',                          // -45.8% ROI, 8.3% SR, 12 runners
+        'W T Wilkes',                           // -43.2% ROI, 8% SR, 25 runners
+        'S & J Casey',                          // -42.5% ROI, 12.5% SR, 24 runners
+        'Nacim Dilmi',                          // -42.3% ROI, 19.2% SR, 26 runners
+        'Ms K Gavenlock',                       // -42.3% ROI, 7.7% SR, 13 riders
+        'A G Durrant',                          // -41.8% ROI, 14.7% SR, 34 runners
+        'Justin Pickering',                     // -41.7% ROI, 8.3% SR, 12 runners
+        'Brad Widdup',                          // -41.2% ROI, 12.2% SR, 41 runners
+        'Rob Potter',                           // -41.1% ROI, 16.7% SR, 18 runners
+        'Fabio Martino',                        // -40.9% ROI, 9.1% SR, 11 runners
+        'G & A Williams',                       // -40.3% ROI, 13.8% SR, 29 runners
+        'G P Vella',                            // -40% ROI, 10% SR, 10 runners
+        'Marc & Mitchell Conners',              // -40% ROI, 10% SR, 10 runners
+        'K M Schweida',                         // -54.5% ROI, 10.4% SR, 48 runners
+        'G M Begg',                             // -51.4% ROI, 11.1% SR, 36 runners
+        'G Eurell',                             // -52% ROI, 4% SR, 25 runners
+        'Reece Goodwin',                        // -55.2% ROI, 6.9% SR, 29 runners
+        'Garret Lynch',                         // -55.4% ROI, 5.4% SR, 37 runners
+        'Ms T Bateup',                          // -55.9% ROI, 9.1% SR, 22 runners
+        'Aaron Bain & Ned Taylor',              // -56% ROI, 10% SR, 10 runners
+        'G R Nickson',                          // -56.4% ROI, 9.1% SR, 11 runners
+        'D L Morton',                           // -56.7% ROI, 12.5% SR, 32 runners
+        'Pat Murphy',                           // -57.3% ROI, 9.1% SR, 11 runners
+        'S Gandy',                              // -57.6% ROI, 14.3% SR, 21 runners
+        'Jessie Bazan',                         // -58.3% ROI, 8.3% SR, 12 runners
+        'T M Andrews',                          // -58.3% ROI, 16.7% SR, 12 runners
+        'K & K Keys',                           // -59.2% ROI, 16.7% SR, 12 runners
+        'Grant Young',                          // -59.2% ROI, 10.5% SR, 19 runners
+        'R K Cowl',                             // -60% ROI, 15.4% SR, 13 runners
+        'Brett Pope',                           // -60.5% ROI, 9.1% SR, 22 runners
+        'K J Parker',                           // -61.1% ROI, 5.7% SR, 35 runners
+        'Cameron Crockett',                     // -61.7% ROI, 8.3% SR, 12 runners
+        'P Koumis',                             // -61.7% ROI, 8.3% SR, 12 runners
+        'W F Francis & G Kent',                 // -61.7% ROI, 8.3% SR, 12 runners
+        'Jack Bruce',                           // -61.9% ROI, 10.4% SR, 48 runners
+        'R J Quinton',                          // -62.2% ROI, 18.8% SR, 16 runners
+        'A J Gluyas',                           // -62.5% ROI, 6.3% SR, 16 runners
+        'J A Sprague',                          // -63% ROI, 10% SR, 10 runners
+        'Simon Miller',                         // -63% ROI, 10% SR, 30 runners
+        'Luke Oliver',                          // -63.9% ROI, 5.6% SR, 18 runners
+        'Lloyd Kennewell',                      // -64.1% ROI, 11.8% SR, 17 runners
+        'P P Jenkins',                          // -64.5% ROI, 9.1% SR, 11 runners
+        'Sarah Rutten',                         // -65.6% ROI, 6.3% SR, 16 runners
+        'Ms S Grills',                          // -65.7% ROI, 7.1% SR, 14 runners
+        'Edward Cummings',                      // -66.3% ROI, 12.5% SR, 16 runners
+        'G W Egan',                             // -66.4% ROI, 9.1% SR, 11 runners
+        'D & B Pearce',                         // -66.7% ROI, 3% SR, 33 runners
+        'Ms K Waugh',                           // -66.7% ROI, 8.3% SR, 12 runners
+        'T S Howlett',                          // -67.8% ROI, 11.1% SR, 18 runners
+        'Georgie Holt',                         // -67.9% ROI, 7.1% SR, 14 runners
+        'M M Laurie',                           // -67.9% ROI, 11.1% SR, 36 runners
+        'Joseph Ible',                          // -68% ROI, 10% SR, 10 runners
+        'S B Laming',                           // -68.3% ROI, 8.3% SR, 12 runners
+        'S J Morrisey',                         // -70% ROI, 8.3% SR, 12 runners
+        'D A Williams',                         // -74.4% ROI, 7.4% SR, 27 runners
+        'B Joseph & P & M Jones',               // -75% ROI, 3.8% SR, 26 runners
+        'Stirling Osland',                      // -75% ROI, 6.3% SR, 16 runners
+        'Clayton Douglas',                      // -75.4% ROI, 7.7% SR, 13 runners
+        'Troy O\'Neile',                        // -76.4% ROI, 9.1% SR, 11 runners
+        'S V Vahala',                           // -76.7% ROI, 8.3% SR, 12 runners
+        'C Lundholm',                           // -77.3% ROI, 6.7% SR, 15 runners
+        'J K Blacker',                          // -77.4% ROI, 7.7% SR, 39 runners
+        'R G Lipp',                             // -77.5% ROI, 6.3% SR, 16 runners
+        'Jason Warren',                         // -77.8% ROI, 3.7% SR, 27 runners
+        'Ms K Buchanan',                        // -77.8% ROI, 5.6% SR, 18 runners
+        'Todd Smart',                           // -79.2% ROI, 8.3% SR, 12 runners
+        'Charlotte Littlefield',                // -80% ROI, 8.3% SR, 24 runners
+        'Andrew Dale',                          // -80.3% ROI, 5.3% SR, 38 runners
+        'L J Gough',                            // -80.4% ROI, 8.3% SR, 12 runners
+        'R & L Price',                          // -80.6% ROI, 7.4% SR, 27 runners
+        'J L Keys',                             // -83.7% ROI, 5.3% SR, 19 runners
+        'Jake Hull',                            // -84.5% ROI, 9.1% SR, 11 runners
+        'M W Walker',                           // -86% ROI, 3.3% SR, 30 runners
+        'G J Colvin',                           // -86.1% ROI, 5.6% SR, 18 runners
+        'Brendan McShane',                      // -86.4% ROI, 9.1% SR, 11 runners
+        'Danielle Seib',                        // -88.5% ROI, 9.1% SR, 11 runners
+        'David Vandyke',                        // -88.9% ROI, 5.3% SR, 19 runners
+        'Peter Gelagotis',                      // -91.1% ROI, 5.3% SR, 19 runners
     ];
     
     // Apply scoring
@@ -1164,7 +1254,6 @@ function checkTrainers(trainerName) {
     
     return [addScore, note];
 }
-
 function checkRacingForm(racingForm, runType) {
     // Check if horse has won, or got 5th or better twice, in the past 3 runs at this distance
     let addScore = 0; // Initialize score
