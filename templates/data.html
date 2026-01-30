@@ -566,8 +566,14 @@ function renderComponentAnalysis(data) {
             valueBadge = '<span class="badge bg-warning text-dark">Neutral</span>';
         }
         
+        // NEW: Detect age/sex demographics and add emoji
+        let displayName = comp.name;
+        if (/^\d+yo\s+(Mare|Gelding|Colt|Horse|Filly)$/i.test(comp.name)) {
+            displayName = `🐴 ${comp.name}`;
+        }
+        
         html += `<tr>
-            <td><strong>${comp.name}</strong></td>
+            <td><strong>${displayName}</strong></td>
             <td class="text-center">${comp.appearances}</td>
             <td class="text-center">${comp.wins}</td>
             <td class="text-center ${strikeClass}">${comp.strike_rate.toFixed(1)}%</td>
@@ -584,11 +590,11 @@ function renderComponentAnalysis(data) {
     html += '<li><strong>Place %</strong> - How often they finish 1st, 2nd, or 3rd</li>';
     html += '<li><strong>ROI %</strong> - Return on investment betting $10 on every horse with this component</li>';
     html += '<li><strong>Value?</strong> - Quick assessment: Strong (25%+ ROI, 5+ appearances), Promising (18%+), Weak (&lt;10%), or needs more data</li>';
+    html += '<li><strong>🐴 Icon</strong> - Age/sex demographics (e.g., 3yo Colt, 4yo Mare)</li>';
     html += '</ul></div></div>';
     
     container.innerHTML = html;
 }
-
 function renderExternalFactors(data) {
     const container = document.getElementById('externalFactors');
     
