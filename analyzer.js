@@ -368,13 +368,6 @@ notes += b;
 score += a;
 notes += b;
 
-// COLT BONUS - UPDATED 2025-01-06 (+20 points, increased from 15)
-const horseSex = String(horseRow['horse sex'] || '').trim();
-if (horseSex === 'Colt') {
-    score += 20;  // INCREASED from 15
-    notes += '+20.0: COLT\n';
-}
-
 // ==========================================
 // AGE/SEX SCORING - UPDATED 2025-01-30
 // Based on 1203 race analysis
@@ -397,6 +390,13 @@ if (!isNaN(horseAge)) {
     if (horseAge === 8 && horseSex === 'Mare') {
         score += 20;
         notes += '+20.0 : 8yo Mare (118% ROI - specialist)\n';
+    }
+    
+    // === COLT BONUS ===
+    // 82.7% ROI, 20% SR - Proven edge
+    if (horseSex === 'Colt') {
+        score += 20;
+        notes += '+20.0 : COLT (82.7% ROI)\n';
     }
     
     // === STANDARD AGE BONUSES (REDUCED) ===
