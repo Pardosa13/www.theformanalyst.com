@@ -428,15 +428,41 @@ if (!isNaN(horseAge)) {
     
     // === OLD AGE PENALTY (INCREASED) ===
     // 7+: -40.2% ROI confirmed - increased from -20 to -25
-    if (horseAge >= 7) {
+    if (horseAge >= 7 && horseAge < 9) {
         score -= 25;
-        notes += '-25.0 : Old age (7+, 4.5% SR, -40.2% ROI)\n';
+        notes += '-25.0 : Old age (7-8yo, 4.5% SR, -40.2% ROI)\n';
     }
     
-    // 9+ horses: Even worse
-    if (horseAge >= 9) {
-        score -= 5;  // Additional penalty on top of age 7+ penalty
-        notes += '- 5.0 : Very old (9+, -59% to -100% ROI)\n';
+    // === EXTREME AGE PENALTIES - ZERO WINNERS ===
+    
+    // 9yo: 17 runners, 0 wins, -100% ROI
+    if (horseAge === 9) {
+        score -= 35;
+        notes += '-35.0 : 9yo - ZERO WINS from 17 runners (-100% ROI)\n';
+    }
+    
+    // 10yo: 4 runners, 0 wins, -100% ROI  
+    if (horseAge === 10) {
+        score -= 40;
+        notes += '-40.0 : 10yo - ZERO WINS from 4 runners (-100% ROI)\n';
+    }
+    
+    // 11yo: 10 runners, 0 wins, -100% ROI
+    if (horseAge === 11) {
+        score -= 45;
+        notes += '-45.0 : 11yo - ZERO WINS from 10 runners (-100% ROI)\n';
+    }
+    
+    // 12yo: 6 runners, 0 wins, -100% ROI
+    if (horseAge === 12) {
+        score -= 50;
+        notes += '-50.0 : 12yo - ZERO WINS from 6 runners (-100% ROI)\n';
+    }
+    
+    // 13+yo: Extremely rare, assume disaster
+    if (horseAge >= 13) {
+        score -= 60;
+        notes += '-60.0 : 13+yo - Ancient, virtually no chance\n';
     }
 }
     
