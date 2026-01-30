@@ -223,7 +223,8 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
         
         # Build message - clean and concise format
         message = "BET ALERT:\n\n"
-        message += f"🏇 {meeting_name.upper()}\n\n"
+        safe_meeting_name = meeting_name.replace('_', '\\_')
+        message += f"🏇 {safe_meeting_name.upper()}\n\n"
         
         for bet in best_bets:
             message += f"R{bet['race_number']}: {bet['horse_name']}\n"
