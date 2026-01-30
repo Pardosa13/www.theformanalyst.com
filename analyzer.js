@@ -375,18 +375,68 @@ if (horseSex === 'Colt') {
     notes += '+20.0: COLT\n';
 }
 
-// NEW: AGE BONUSES
+// ==========================================
+// AGE/SEX SCORING - UPDATED 2025-01-30
+// Based on 1203 race analysis
+// ==========================================
+
 const horseAge = parseInt(horseRow['horse age']);
+const horseSex = String(horseRow['horse sex'] || '').trim();
+
 if (!isNaN(horseAge)) {
+    
+    // === MAJOR EDGE: 5YO HORSES (NOT MARES) ===
+    // 236% ROI, 36.4% SR - HUGE DISCOVERY
+    if (horseAge === 5 && horseSex !== 'Mare') {
+        score += 25;
+        notes += '+25.0 : 5yo horse (236% ROI, 36.4% SR - elite age)\n';
+    }
+    
+    // === MAJOR EDGE: 8YO MARES ===
+    // 118% ROI, 7.7% SR - Specialist pattern
+    if (horseAge === 8 && horseSex === 'Mare') {
+        score += 20;
+        notes += '+20.0 : 8yo Mare (118% ROI - specialist)\n';
+    }
+    
+    // === STANDARD AGE BONUSES (REDUCED) ===
+    // 3yo: Only -4.6% ROI - reduced from +5 to +3
     if (horseAge === 3) {
-        score += 5;
-        notes += '+ 5.0 : Prime age (3yo, 19% SR)\n';
-    } else if (horseAge === 4) {
         score += 3;
-        notes += '+ 3.0 : Good age (4yo)\n';
-    } else if (horseAge >= 7) {
-        score -= 20;  // CHANGED from -10
-        notes += '-20.0 : Old age (7+, 4.5% SR, -40.2% ROI)\n';
+        notes += '+ 3.0 : Prime age (3yo)\n';
+    }
+    
+    // 4yo: -26.6% ROI - reduced from +3 to +2
+    if (horseAge === 4) {
+        score += 2;
+        notes += '+ 2.0 : Good age (4yo)\n';
+    }
+    
+    // === NEW: MARE AGE PENALTIES ===
+    
+    // 5yo Mares: -51.3% ROI - MAJOR VALUE DESTROYER
+    if (horseAge === 5 && horseSex === 'Mare') {
+        score -= 15;
+        notes += '-15.0 : 5yo Mare (-51.3% ROI)\n';
+    }
+    
+    // 6-7yo Mares: -33% to -69% ROI
+    if ((horseAge === 6 || horseAge === 7) && horseSex === 'Mare') {
+        score -= 10;
+        notes += '-10.0 : 6-7yo Mare (consistent value destroyer)\n';
+    }
+    
+    // === OLD AGE PENALTY (INCREASED) ===
+    // 7+: -40.2% ROI confirmed - increased from -20 to -25
+    if (horseAge >= 7) {
+        score -= 25;
+        notes += '-25.0 : Old age (7+, 4.5% SR, -40.2% ROI)\n';
+    }
+    
+    // 9+ horses: Even worse
+    if (horseAge >= 9) {
+        score -= 5;  // Additional penalty on top of age 7+ penalty
+        notes += '- 5.0 : Very old (9+, -59% to -100% ROI)\n';
     }
 }
     
@@ -677,77 +727,83 @@ function normalizeJockeyName(jockeyName) {
 }
 
 function checkJockeys(JockeyName) {
-    // Function for checking jockey name against lists
+    // ==========================================
+    // JOCKEY SCORING - UPDATED 2025-01-30
+    // Based on 1203 race analysis
+    // ==========================================
     var addScore = 0;
     var note = '';
     
-    // Check for known spelling/name changes
+    // Normalize name for mapping
     JockeyName = normalizeJockeyName(JockeyName);
     
-    // TIER 1: Elite performers (ROI > +80%)
-    const eliteJockeys = [
-        'Alana Livesey',    // 13.6% SR, +149.1% ROI
-        'Tim Clark',        // 25.5% SR, +83.5% ROI
+    // TIER 1: Elite Value (50%+ ROI) - MASSIVE EDGE
+    const eliteValueJockeys = [
+        'Ethan Brown',        // 498% ROI, 22% SR - EXTRAORDINARY
+        'Tim Clark',          // 61% ROI, 24.2% SR
+        'R Mc Leod',          // 70.9% ROI, 8.9% SR
+        'C J Hillier',        // 73.4% ROI, 27.6% SR
+        'Robert Whearty',     // 72.9% ROI, 29.4% SR
+        'Codi Jordan',        // 67.1% ROI, 33.3% SR
     ];
     
-    // TIER 2: Strong performers (ROI +20% to +80%)
-    const strongJockeys = [
-        'M R Du Plessis',   // 16.7% SR, +74.8% ROI
-        'R Mc Leod',        // 8.9% SR, +70.9% ROI
-        'Luke Cartwright',  // 12.5% SR, +44.9% ROI
-        'Tyler Schiller',   // 16.1% SR, +38.2% ROI
-        'W Gordon',         // 10.4% SR, +29.2% ROI
-        'Alysha Warren',    // 17.8% SR, +23.6% ROI
-        'G Buckley',        // 18.2% SR, +20.8% ROI
+    // TIER 2: Strong Value (20-50% ROI) - PROVEN EDGE
+    const strongValueJockeys = [
+        'L Magorrian',        // 151% ROI, 14.8% SR
+        'Alana Livesey',      // 119% ROI, 12% SR
+        'A Adkins',           // 102% ROI, 16.3% SR
+        'S Clipperton',       // 96.8% ROI, 20.6% SR
+        'Luke Cartwright',    // 31.1% ROI, 12.9% SR
+        'Caitlin Tootell',    // 26.6% ROI, 23.4% SR
+        'Tyler Schiller',     // 23.6% ROI, 14.3% SR
+        'M R Du Plessis',     // 38.5% ROI, 13.2% SR
+        'M Rodd',             // 31.1% ROI, 15.9% SR
     ];
     
-    // TIER 3: Profitable performers (ROI 0% to +20%)
+    // TIER 3: Profitable (0-20% ROI) - SMALL EDGE
     const profitableJockeys = [
-        'L Currie',         // 15.2% SR, +18.8% ROI
-        'J Mott',           // 18.9% SR, +16.8% ROI
-        'Caitlin Tootell',  // 20.0% SR, +1.5% ROI
-        'H Coffey',         // 16.0% SR, +1.3% ROI
-        'Ben Thompson',     // 12.0% SR, +0.2% ROI
+        'J Mott',             // 19.5% ROI, 20.2% SR
+        'W Gordon',           // 19.2% ROI, 9.6% SR
+        'Alysha Warren',      // 18.3% ROI, 17% SR
+        'G Buckley',          // 10.4% ROI, 17.6% SR
+        'Ben Thompson',       // 5% ROI, 16.4% SR
+        'H Coffey',           // 4.9% ROI, 16.5% SR
+        'L Currie',           // 3.7% ROI, 14.1% SR
     ];
     
-    // TIER 4: Small negative performers (-20% to 0%) - NEUTRAL
-    // W Pike: 24.2% SR, -3.5% ROI - good SR, slight negative
-    // Zac Lloyd: 25.4% SR, -4.9% ROI - good SR, slight negative
-    // These get 0 points (neutral)
-    
-    // TIER 5: Bad performers (ROI < -40%) - PENALTY
+    // TIER 4: Value Destroyers (-40%+ ROI) - AVOID
     const badJockeys = [
-        'K Mc Evoy',        // 3.8% SR, -88.8% ROI
-        'Craig Williams',   // 7.8% SR, -75.9% ROI
-        'J Ford',           // 6.5% SR, -74.0% ROI
-        'S Parnham',        // 4.8% SR, -71.9% ROI
-        'Holly Watson',     // 7.1% SR, -70.7% ROI
-        'J R Collett',      // 9.2% SR, -68.9% ROI (Jason Collett)
-        'Beau Mertens',     // 8.6% SR, -68.4% ROI
-        'Damien Thornton',  // 9.3% SR, -67.9% ROI
-        'Kayla Crowther',   // 2.3% SR, -65.9% ROI
-        'A B Collett',      // 7.5% SR, -63.1% ROI
-        'Carleen Hefel',    // 11.6% SR, -61.9% ROI
-        'A Mallyon',        // 7.0% SR, -58.1% ROI
+        'K Mc Evoy',          // -88.8% ROI, 3.8% SR - DISASTER
+        'Craig Williams',     // -76.2% ROI, 7.7% SR
+        'J Ford',             // -73.3% ROI, 7.1% SR
+        'S Parnham',          // -73.2% ROI, 4.5% SR
+        'A B Collett',        // -72.6% ROI, 5.6% SR
+        'Damien Thornton',    // -64.7% ROI, 8.7% SR
+        'J R Collett',        // -63.3% ROI, 12.3% SR - Jason Collett
+        'Beau Mertens',       // -62.2% ROI, 8.2% SR
+        'Carleen Hefel',      // -61.9% ROI, 11.6% SR
+        'Kayla Crowther',     // -55% ROI, 4% SR
+        'Holly Watson',       // -52.4% ROI, 8.2% SR
     ];
     
-    if (eliteJockeys.includes(JockeyName)) {
-        addScore += 15;
-        note += '+15.0: Elite Jockey (ROI 80%+)\n';
+    // Apply scoring
+    if (eliteValueJockeys.includes(JockeyName)) {
+        addScore += 25;
+        note += '+25.0: Elite value jockey (50%+ ROI proven)\n';
     }
-    if (strongJockeys.includes(JockeyName)) {
-    addScore += 15;  // WAS 10
-    note += '+15.0: Strong Jockey (ROI 20-80%)\n';
+    else if (strongValueJockeys.includes(JockeyName)) {
+        addScore += 20;
+        note += '+20.0: Strong value jockey (20-50% ROI)\n';
     }
     else if (profitableJockeys.includes(JockeyName)) {
-        addScore += 5;
-        note += '+5.0: Profitable Jockey (ROI 0-20%)\n';
+        addScore += 10;
+        note += '+10.0: Profitable jockey (0-20% ROI)\n';
     }
     else if (badJockeys.includes(JockeyName)) {
-        addScore -= 10;
-        note += '-10.0: Poor performing jockey\n';
+        addScore -= 15;
+        note += '-15.0: Poor value jockey (destroys ROI)\n';
     }
-    // All others get 0 (neutral)
+    // All others get 0 points (market efficient)
     
     return [addScore, note];
 }
@@ -764,60 +820,73 @@ function normalizeTrainerName(trainerName) {
 }
 
 function checkTrainers(trainerName) {
+    // ==========================================
+    // TRAINER SCORING - UPDATED 2025-01-30
+    // Based on 1203 race analysis
+    // ==========================================
     var addScore = 0;
     var note = '';
     
-    // Check for known spelling/name changes
+    // Normalize name for mapping
     trainerName = normalizeTrainerName(trainerName);
     
-    // TIER 1: Strong Profitable (ROI +10% to +80%)
-    const strongTrainers = [
-        'C Maher',                        // 12.8% SR, +76.1% ROI (Ciaron Maher)
-        'R D Griffiths',                  // 10.0% SR, +38.5% ROI
-        'T Busuttin & N Young',           // 17.1% SR, +15.0% ROI
-        'G Waterhouse & A Bott',          // 21.7% SR, +13.3% ROI
-        'S W Kendrick',                   // 9.5% SR, +12.6% ROI
+    // TIER 1: Elite Value (50%+ ROI) - MASSIVE EDGE
+    const eliteValueTrainers = [
+        'C Maher', 'Ciaron Maher',              // 59.4% ROI, 14.2% SR, 225 runners - THE KING
+        'Richard & Will Freedman',              // 55.1% ROI, 16.2% SR, 37 runners
+        'D R Harrison',                         // 51.1% ROI, 22.2% SR
+        'G J Stevenson',                        // 49.4% ROI, 35.3% SR
     ];
     
-    // TIER 2: Marginally Profitable (ROI 0% to +10%)
+    // TIER 2: Strong Value (20-50% ROI) - PROVEN EDGE
+    const strongValueTrainers = [
+        'T Busuttin & N Young',                 // 26.4% ROI, 17.4% SR, 46 runners
+        'M A Currie',                           // 18.5% ROI, 18.2% SR, 44 runners
+        'S I Singleton',                        // 18.3% ROI, 15.8% SR, 38 runners
+    ];
+    
+    // TIER 3: Profitable (5-20% ROI) - SMALL EDGE
     const profitableTrainers = [
-        'T & C McEvoy',                   // 12.2% SR, +8.8% ROI
-        'A & S Freedman',                 // 23.1% SR, +6.8% ROI
-        'R L Heathcote',                  // 11.5% SR, +0.9% ROI
+        'Craig Weeding',                        // 12.4% ROI, 10.3% SR
+        'G Portelli',                           // 12% ROI, 20% SR, 40 runners
+        'R D Griffiths',                        // 11.3% ROI, 9.6% SR, 52 runners
+        'John O\'Shea & Tom Charlton',         // 8.9% ROI, 20.5% SR, 44 runners
+        'S W Kendrick',                         // 8.7% ROI, 10.9% SR, 55 runners
+        'G Waterhouse & A Bott',                // 7.2% ROI, 23% SR, 74 runners
+        'Gai Waterhouse & Adrian Bott',        // 7.2% ROI, 23% SR, 74 runners
+        'R L Heathcote',                        // 6.2% ROI, 12.5% SR, 64 runners
+        'Tom Dabernig',                         // 6.1% ROI, 28.6% SR, 35 runners
     ];
     
-    // TIER 3: Small Negative (ROI -20% to 0%) - NEUTRAL
-    // D T O'Brien: 19.5% SR, -5.9% ROI
-    // Annabel & Rob Archibald: 16.5% SR, -11.1% ROI
-    // Matthew Smith: 9.8% SR, -19.5% ROI
-    // These get 0 points
-    
-    // TIER 4: Bad Performers (ROI < -40%) - PENALTY
+    // TIER 4: Value Destroyers (-40%+ ROI) - AVOID
     const badTrainers = [
-        'T J Gollan',                     // 15.4% SR, -38.4% ROI
-        'Ben Brisbourne',                 // 11.9% SR, -40.7% ROI
-        'G Ryan & S Alexiou',             // 12.5% SR, -45.8% ROI
-        'Peter Snowden',                  // 13.3% SR, -54.9% ROI
-        'M Price & M Kent Jnr',           // 13.8% SR, -58.6% ROI
-        'Ben Will & Jd Hayes',            // 9.5% SR, -62.7% ROI
-        'Bjorn Baker',                    // 11.6% SR, -63.8% ROI
-        'Patrick & Michelle Payne',       // 7.3% SR, -65.2% ROI
-        'N D Parnham',                    // 0.0% SR, -100.0% ROI
+        'N D Parnham',                          // -100% ROI, 0% SR, 53 runners - DISASTER
+        'Patrick & Michelle Payne',             // -67.6% ROI, 6.8% SR, 44 runners
+        'Bjorn Baker', 'B Baker',              // -64.5% ROI, 11.9% SR, 101 runners
+        'Ben Will & Jd Hayes',                  // -59.3% ROI, 9.5% SR, 189 runners
+        'Peter Snowden', 'P Snowden',          // -59.3% ROI, 12.5% SR, 56 runners
+        'G Ryan & S Alexiou',                   // -49.5% ROI, 11.6% SR, 43 runners
+        'Ben Brisbourne',                       // -43.5% ROI, 11.3% SR, 62 runners
     ];
     
-    if (strongTrainers.includes(trainerName)) {
-        addScore += 10;
-        note += '+10.0: Strong Trainer (ROI 10%+)\n';
+    // Apply scoring
+    if (eliteValueTrainers.includes(trainerName)) {
+        addScore += 20;
+        note += '+20.0: Elite value trainer (50%+ ROI proven)\n';
+    }
+    else if (strongValueTrainers.includes(trainerName)) {
+        addScore += 15;
+        note += '+15.0: Strong value trainer (20-50% ROI)\n';
     }
     else if (profitableTrainers.includes(trainerName)) {
-        addScore += 5;
-        note += '+5.0: Profitable Trainer (ROI 0-10%)\n';
+        addScore += 10;
+        note += '+10.0: Profitable trainer (5-20% ROI)\n';
     }
     else if (badTrainers.includes(trainerName)) {
-        addScore -= 8;
-        note += '-8.0: Poor performing trainer\n';
+        addScore -= 15;
+        note += '-15.0: Poor value trainer (destroys ROI)\n';
     }
-    // All others get 0 (neutral)
+    // All others get 0 points (market efficient)
     
     return [addScore, note];
 }
