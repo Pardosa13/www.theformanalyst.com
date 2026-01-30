@@ -686,6 +686,7 @@ def aggregate_component_stats(all_results_data, stake=10.0):
     for entry in all_results_data:
         prediction = entry['prediction']
         result = entry['result']
+        horse = entry['horse']  # We now use the horse object too!
         
         if not prediction or not result:
             continue
@@ -698,6 +699,17 @@ def aggregate_component_stats(all_results_data, stake=10.0):
         
         # Calculate profit for this horse
         profit = (sp * stake - stake) if won else -stake
+        
+        # ===== NEW: Extract age/sex demographics =====
+        if horse.csv_data:
+            horse_age = horse.csv_data.get('horse age')
+            horse_sex = horse.csv_data.get('horse sex')
+            
+            # Add age/sex combination as a component
+            if horse_age and horse_sex:
+                age_sex_combo = f"{horse_age}yo {horse_sex}"
+                components[age_sex_combo] = 1.0  # Use 1.0 as the score value
+        # ===== END NEW CODE =====
         
         for component_name, score_value in components.items():
             if component_name not in component_stats:
