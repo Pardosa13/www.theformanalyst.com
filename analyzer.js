@@ -440,122 +440,106 @@ if (!isNaN(horseAge)) {
     }
 }
     
-    // SIRE BONUSES/PENALTIES - UPDATED 2025-01-19 (ROI-BASED)
+    // ==========================================
+// SIRE BONUSES/PENALTIES - UPDATED 2025-01-30
+// Based on 1203 race analysis
+// ==========================================
 const sire = String(horseRow['horse sire'] || '').trim();
 
 const sireData = {
-    'Wootton Bassett': { runners: 34, roi: 576.5, strikeRate: 20.6 },
-    'Starspangledbanner': { runners: 33, roi: 120.6, strikeRate: 9.1 },
-    'Trapeze Artist': { runners: 70, roi: 80.9, strikeRate: 21.4 },
-    'Lonhro': { runners: 48, roi: 46.8, strikeRate: 20.8 },
-    'Russian Revolution': { runners: 84, roi: 37.0, strikeRate: 13.1 },
-    'Pierata': { runners: 56, roi: 31.3, strikeRate: 17.9 },
-    'Territories': { runners: 46, roi: 31.1, strikeRate: 15.2 },
-    'Epaulette': { runners: 48, roi: 21.1, strikeRate: 12.5 },
-    'Capitalist': { runners: 135, roi: 15.9, strikeRate: 12.6 },
-    'Savabeel': { runners: 64, roi: 15.2, strikeRate: 15.6 },
-    'Palentino': { runners: 35, roi: 13.0, strikeRate: 14.3 },
-    'Tassort': { runners: 32, roi: 12.2, strikeRate: 18.8 },
-    "D'argento": { runners: 39, roi: 12.1, strikeRate: 20.5 },
-    'Frosted': { runners: 76, roi: 10.7, strikeRate: 10.5 },
-    'Magnus': { runners: 66, roi: 9.2, strikeRate: 12.1 },
-    'Star Turn': { runners: 67, roi: 8.9, strikeRate: 10.4 },
-    'Snitzel': { runners: 127, roi: 7.2, strikeRate: 11.0 },
-    'Smart Missile': { runners: 58, roi: 0.3, strikeRate: 12.1 },
-    'Blue Point': { runners: 54, roi: -0.9, strikeRate: 9.3 },
-    'Saxon Warrior': { runners: 35, roi: -5.7, strikeRate: 20.0 },
-    'Grunt': { runners: 34, roi: -6.9, strikeRate: 17.6 },
-    'Hellbent': { runners: 108, roi: -7.8, strikeRate: 13.0 },
-    'Divine Prophet': { runners: 52, roi: -12.9, strikeRate: 23.1 },
-    'Castelvecchio': { runners: 34, roi: -15.0, strikeRate: 20.6 },
-    'Alabama Express': { runners: 34, roi: -18.1, strikeRate: 11.8 },
-    'Astern': { runners: 38, roi: -18.7, strikeRate: 7.9 },
-    'Churchill': { runners: 64, roi: -19.3, strikeRate: 15.6 },
-    'I Am Immortal': { runners: 34, roi: -22.1, strikeRate: 11.8 },
-    'Toronado': { runners: 149, roi: -22.2, strikeRate: 12.8 },
-    'Cable Bay': { runners: 38, roi: -22.4, strikeRate: 13.2 },
-    'Pierro': { runners: 102, roi: -22.5, strikeRate: 11.8 },
-    'Justify': { runners: 41, roi: -23.2, strikeRate: 14.6 },
-    'Extreme Choice': { runners: 31, roi: -24.4, strikeRate: 16.1 },
-    'Harry Angel': { runners: 74, roi: -24.5, strikeRate: 17.6 },
-    'All Too Hard': { runners: 82, roi: -26.1, strikeRate: 9.8 },
-    'Brave Smash': { runners: 32, roi: -26.9, strikeRate: 15.6 },
-    'Sessions': { runners: 52, roi: -28.8, strikeRate: 11.5 },
-    'Maschino': { runners: 41, roi: -32.8, strikeRate: 14.6 },
-    'I Am Invincible': { runners: 117, roi: -35.5, strikeRate: 10.3 },
-    'Zoustar': { runners: 145, roi: -36.2, strikeRate: 11.0 },
-    'Exceed And Excel': { runners: 56, roi: -37.6, strikeRate: 10.7 },
-    'Playing God': { runners: 59, roi: -37.6, strikeRate: 10.2 },
-    'Overshare': { runners: 35, roi: -37.7, strikeRate: 11.4 },
-    'Written By': { runners: 36, roi: -37.8, strikeRate: 8.3 },
-    'Street Boss': { runners: 53, roi: -39.1, strikeRate: 11.3 },
-    'Puissance De Lune': { runners: 54, roi: -39.3, strikeRate: 7.4 },
-    'Yes Yes Yes': { runners: 43, roi: -39.4, strikeRate: 18.6 },
-    'Press Statement': { runners: 46, roi: -39.7, strikeRate: 13.0 },
-    'So You Think': { runners: 130, roi: -40.3, strikeRate: 10.0 },
-    'Flying Artie': { runners: 87, roi: -41.5, strikeRate: 6.9 },
-    'Foxwedge': { runners: 52, roi: -44.8, strikeRate: 9.6 },
-    'Pride Of Dubai': { runners: 61, roi: -44.9, strikeRate: 8.2 },
-    'Sir Prancealot': { runners: 47, roi: -45.3, strikeRate: 6.4 },
-    'Rich Enuff': { runners: 48, roi: -46.0, strikeRate: 12.5 },
-    'Nicconi': { runners: 52, roi: -46.3, strikeRate: 5.8 },
-    'Dundeel': { runners: 121, roi: -46.5, strikeRate: 8.3 },
-    'The Autumn Sun': { runners: 63, roi: -49.0, strikeRate: 9.5 },
-    'Winning Rupert': { runners: 36, roi: -50.0, strikeRate: 5.6 },
-    'Adelaide': { runners: 31, roi: -51.0, strikeRate: 6.5 },
-    'Per Incanto': { runners: 42, roi: -51.2, strikeRate: 9.5 },
-    'Needs Further': { runners: 35, roi: -51.7, strikeRate: 17.1 },
-    'Brazen Beau': { runners: 40, roi: -52.4, strikeRate: 12.5 },
-    'Written Tycoon': { runners: 128, roi: -52.4, strikeRate: 11.7 },
-    'Headwater': { runners: 63, roi: -53.5, strikeRate: 7.9 },
-    'Almanzor': { runners: 45, roi: -53.6, strikeRate: 15.6 },
-    'Too Darn Hot': { runners: 60, roi: -53.7, strikeRate: 10.0 },
-    'Invader': { runners: 35, roi: -54.6, strikeRate: 5.7 },
-    'Better Than Ready': { runners: 94, roi: -55.0, strikeRate: 8.5 },
-    'Universal Ruler': { runners: 39, roi: -55.1, strikeRate: 2.6 },
-    'Alpine Eagle': { runners: 45, roi: -58.9, strikeRate: 8.9 },
-    'Farnan': { runners: 36, roi: -60.4, strikeRate: 13.9 },
-    'Fiorente': { runners: 47, roi: -60.9, strikeRate: 8.5 },
-    'Fastnet Rock': { runners: 33, roi: -60.9, strikeRate: 9.1 },
-    'Shalaa': { runners: 63, roi: -61.2, strikeRate: 9.5 },
-    'Deep Field': { runners: 90, roi: -63.7, strikeRate: 10.0 },
-    'Casino Prince': { runners: 44, roi: -64.1, strikeRate: 6.8 },
-    'Spirit Of Boom': { runners: 71, roi: -67.0, strikeRate: 5.6 },
-    'Shamus Award': { runners: 76, roi: -68.9, strikeRate: 9.2 },
-    'Highland Reel': { runners: 41, roi: -68.9, strikeRate: 4.9 },
-    'Merchant Navy': { runners: 42, roi: -70.6, strikeRate: 9.5 },
-    'American Pharoah': { runners: 35, roi: -71.3, strikeRate: 8.6 },
-    'Ocean Park': { runners: 52, roi: -71.4, strikeRate: 3.8 },
-    'Maurice': { runners: 54, roi: -72.1, strikeRate: 9.3 },
-    'Impending': { runners: 70, roi: -73.7, strikeRate: 5.7 },
-    'Zousain': { runners: 54, roi: -82.3, strikeRate: 9.3 },
-    'Pariah': { runners: 58, roi: -83.8, strikeRate: 3.4 },
-    'Rubick': { runners: 53, roi: -87.3, strikeRate: 3.8 },
-    'Super One': { runners: 39, roi: -87.7, strikeRate: 2.6 },
-    'Star Witness': { runners: 36, roi: -90.3, strikeRate: 2.8 },
-    'Brutal': { runners: 32, roi: -90.3, strikeRate: 3.1 },
-    'Supido': { runners: 41, roi: -94.6, strikeRate: 2.4 },
-    'Outreach': { runners: 31, roi: -100.0, strikeRate: 0.0 },
-    'Shooting To Win': { runners: 46, roi: -100.0, strikeRate: 0.0 }
+    // ELITE PERFORMERS (50%+ ROI)
+    'Wootton Bassett': { runners: 38, roi: 508.4, strikeRate: 21.1 },
+    'Rommel': { runners: 31, roi: 221.9, strikeRate: 19.4 },
+    'The Mission': { runners: 20, roi: 156.5, strikeRate: 30.0 },
+    'I\'m All The Talk': { runners: 27, roi: 139.3, strikeRate: 18.5 },
+    'Night Of Thunder': { runners: 17, roi: 129.7, strikeRate: 41.2 },
+    'Starspangledbanner': { runners: 42, roi: 90.0, strikeRate: 9.5 },
+    'Tagaloa': { runners: 28, roi: 89.8, strikeRate: 21.4 },
+    'Trapeze Artist': { runners: 86, roi: 47.2, strikeRate: 17.4 },
+    'Reward For Effort': { runners: 33, roi: 52.4, strikeRate: 18.2 },
+    'Stratum Star': { runners: 35, roi: 47.4, strikeRate: 20.0 },
+    
+    // STRONG VALUE (20-50% ROI)
+    'Pierata': { runners: 70, roi: 36.9, strikeRate: 18.6 },
+    'Proisir': { runners: 32, roi: 36.7, strikeRate: 28.1 },
+    'Lonhro': { runners: 56, roi: 30.3, strikeRate: 19.6 },
+    'Rothesay': { runners: 38, roi: 30.8, strikeRate: 18.4 },
+    'Super Seth': { runners: 31, roi: 29.8, strikeRate: 29.0 },
+    'Russian Revolution': { runners: 106, roi: 26.0, strikeRate: 15.1 },
+    
+    // GOOD VALUE (10-20% ROI)
+    'Epaulette': { runners: 55, roi: 17.8, strikeRate: 14.5 },
+    'Territories': { runners: 55, roi: 14.2, strikeRate: 14.5 },
+    'Star Turn': { runners: 90, roi: 13.7, strikeRate: 11.1 },
+    'Divine Prophet': { runners: 62, roi: 11.3, strikeRate: 24.2 },
+    
+    // MODERATE VALUE (5-10% ROI)
+    'Capitalist': { runners: 165, roi: 8.6, strikeRate: 13.3 },
+    'Frosted': { runners: 87, roi: 8.2, strikeRate: 11.5 },
+    'Tassort': { runners: 39, roi: 6.4, strikeRate: 20.5 },
+    
+    // MARKET EFFICIENT (-5 to +5% ROI)
+    'Savabeel': { runners: 78, roi: -1.0, strikeRate: 14.1 },
+    'Snitzel': { runners: 156, roi: 0.5, strikeRate: 11.5 },
+    'Churchill': { runners: 80, roi: 0.3, strikeRate: 17.5 },
+    "D'argento": { runners: 44, roi: -0.7, strikeRate: 18.2 },
+    
+    // MODERATE NEGATIVE (-20 to -40% ROI)
+    'Pierro': { runners: 128, roi: -12.7, strikeRate: 14.1 },
+    'Hellbent': { runners: 129, roi: -18.2, strikeRate: 11.6 },
+    'Toronado': { runners: 184, roi: -18.2, strikeRate: 13.0 },
+    'All Too Hard': { runners: 103, roi: -18.6, strikeRate: 11.7 },
+    'Zoustar': { runners: 180, roi: -31.6, strikeRate: 10.6 },
+    'I Am Invincible': { runners: 142, roi: -39.5, strikeRate: 10.6 },
+    'So You Think': { runners: 155, roi: -30.5, strikeRate: 10.3 },
+    
+    // SEVERE DESTROYERS (-40 to -60% ROI)
+    'Dundeel': { runners: 144, roi: -45.4, strikeRate: 9.0 },
+    'The Autumn Sun': { runners: 75, roi: -48.3, strikeRate: 10.7 },
+    'Maurice': { runners: 64, roi: -49.7, strikeRate: 12.5 },
+    'Deep Field': { runners: 113, roi: -51.1, strikeRate: 12.4 },
+    'Spirit Of Boom': { runners: 89, roi: -52.9, strikeRate: 6.7 },
+    'Written Tycoon': { runners: 159, roi: -53.4, strikeRate: 11.3 },
+    'Sir Prancealot': { runners: 57, roi: -54.9, strikeRate: 5.3 },
+    'Farnan': { runners: 42, roi: -55.7, strikeRate: 16.7 },
+    'Better Than Ready': { runners: 111, roi: -59.8, strikeRate: 8.1 },
+    
+    // DISASTER SIRES (-60%+ ROI)
+    'Too Darn Hot': { runners: 78, roi: -61.8, strikeRate: 9.0 },
+    'Almanzor': { runners: 58, roi: -64.0, strikeRate: 12.1 },
+    'Bjorn Baker': { runners: 101, roi: -64.5, strikeRate: 11.9 },
+    'Shamus Award': { runners: 95, roi: -65.8, strikeRate: 11.6 },
+    'Shalaa': { runners: 81, roi: -67.0, strikeRate: 8.6 },
+    'Alpine Eagle': { runners: 56, roi: -67.0, strikeRate: 7.1 },
+    'Ocean Park': { runners: 67, roi: -70.4, strikeRate: 4.5 },
+    'Pariah': { runners: 82, roi: -75.1, strikeRate: 3.7 },
+    'Zousain': { runners: 71, roi: -76.7, strikeRate: 9.9 },
+    'Impending': { runners: 86, roi: -78.6, strikeRate: 4.7 },
+    'Star Witness': { runners: 48, roi: -80.2, strikeRate: 4.2 },
+    'Rubick': { runners: 70, roi: -90.4, strikeRate: 2.9 },
+    'Super One': { runners: 58, roi: -91.7, strikeRate: 1.7 },
+    'Shooting To Win': { runners: 60, roi: -94.3, strikeRate: 1.7 },
+    'Outreach': { runners: 39, roi: -100.0, strikeRate: 0.0 }
 };
 
-// Calculate sire score
+// Calculate sire score - UPDATED THRESHOLDS
 const data = sireData[sire];
 if (data) {
     const { runners, roi, strikeRate } = data;
     let sireScore = 0;
     
-    // Base ROI scoring
-    if (roi >= 50) sireScore = 10;
-    else if (roi >= 30) sireScore = 8;
-    else if (roi >= 20) sireScore = 6;
-    else if (roi >= 10) sireScore = 4;
-    else if (roi >= 5) sireScore = 2;
-    else if (roi >= -5) sireScore = 0;
-    else if (roi >= -20) sireScore = -2;
-    else if (roi >= -40) sireScore = -5;
-    else if (roi >= -60) sireScore = -8;
-    else sireScore = -12;
+    // Base ROI scoring - UPDATED 2025-01-30
+    if (roi >= 100) sireScore = 15;        // Elite tier (Wootton Bassett, Rommel)
+    else if (roi >= 50) sireScore = 12;    // Super elite
+    else if (roi >= 30) sireScore = 10;    // Elite
+    else if (roi >= 20) sireScore = 8;     // Strong
+    else if (roi >= 10) sireScore = 6;     // Good
+    else if (roi >= 5) sireScore = 3;      // Moderate
+    else if (roi >= -5) sireScore = 0;     // Neutral
+    else if (roi >= -20) sireScore = -2;   // Slight negative
+    else if (roi >= -40) sireScore = -5;   // Bad
+    else if (roi >= -60) sireScore = -10;  // Severe
+    else sireScore = -15;                  // Disaster
     
     // Strike rate penalty for chronic underperformers
     if (strikeRate < 5 && runners >= 40) {
