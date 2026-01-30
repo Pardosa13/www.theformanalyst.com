@@ -221,23 +221,13 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
     try:
         logger.info(f"Attempting to post {len(best_bets)} bets for {meeting_name} to Telegram")
         
-        # Build message
-        message = f"🏇 *{meeting_name.upper()}*\n\n"
+        # Build message - clean and concise format
+        message = "BET ALERT:\n\n"
+        message += f"🏇 {meeting_name.upper()}\n\n"
         
         for bet in best_bets:
-            message += f"*R{bet['race_number']}*: {bet['horse_name']}\n"
-            message += f"📊 Score: {bet['score']:.1f}\n"
-            message += f"💎 Predicted Price: {bet['predicted_odds']}\n"
-            
-            # Add top 2 components
-            if bet['components']:
-                top_comps = bet['components'][:2]
-                comp_str = ", ".join([f"{c['name']} ({c['roi']:.0f}% ROI)" for c in top_comps])
-                message += f"🎯 {comp_str}\n"
-            
-            message += "\n"
-        
-        message += "⚠️ Think. Is this a bet you really want to place? Gamble Responsibly | 1800 858 858"
+            message += f"R{bet['race_number']}: {bet['horse_name']}\n"
+            message += f"💰 Predicted Price: {bet['predicted_odds']}\n\n"
         
         # Send via Telegram Bot API directly
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
