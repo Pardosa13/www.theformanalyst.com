@@ -613,12 +613,6 @@ if (horseSex === 'Colt' && horseAge === 3) {
     score += 20;
     notes += '+20.0 : 3yo COLT combo (44.4% SR, +33% ROI)\n';
 }
-    // NEW: DEMOLISHED + MAJOR CLASS DROP COMBO
-// todayClassScore, lastClassScore, and classChange are already declared above
-if (lastMargin >= 10 && classChange < -30) {
-    score += 15;
-    notes += '+15.0 : Demolished in elite company, now dropping significantly\n';
-}
     // Check for perfect record specialist bonus
     const perfectRecordResult = calculatePerfectRecordBonus ? calculatePerfectRecordBonus(horseRow, trackCondition) : { bonus: 0, note: '' };
     if (perfectRecordResult && perfectRecordResult.bonus > 0) {
