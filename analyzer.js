@@ -378,11 +378,11 @@ const horseSex = String(horseRow['horse sex'] || '').trim();
 
 if (!isNaN(horseAge)) {
     
-    // === MAJOR EDGE: 5YO HORSES (NOT MARES) ===
-    // 236% ROI, 36.4% SR - HUGE DISCOVERY
-    if (horseAge === 5 && horseSex !== 'Mare') {
-        score += 25;
-        notes += '+25.0 : 5yo horse (236% ROI, 36.4% SR - elite age)\n';
+    // === MAJOR EDGE: 5YO HORSES (ENTIRE MALES ONLY) ===
+    // 164% ROI, 40% SR - HUGE DISCOVERY (geldings destroy value at -61.5% ROI)
+    if (horseAge === 5 && horseSex === 'Horse') {
+    score += 25;
+    notes += '+25.0 : 5yo horse (164% ROI, 40% SR - elite age)\n';
     }
     
     // === MAJOR EDGE: 8YO MARES ===
