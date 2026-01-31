@@ -519,10 +519,11 @@ def parse_notes_components(notes):
         (r'([+-]?\s*[\d.]+)\s*:\s*Ran places:', 'Ran Places'),
         (r'(-15\.0)\s*:\s*No wins in last 10', 'No Wins Last 10'),
         
-        # Jockeys
-        (r'\+\s*10\.0\s*:\s*Love the Jockey', 'Elite Jockey'),
-        (r'\+\s*5\.0\s*:\s*Like the Jockey', 'Good Jockey'),
-        (r'-\s*5\.0\s*:\s*Kerrin', 'Negative Jockey'),
+        # Jockeys - FIXED to match analyzer.js output
+        (r'\+\s*25\.0\s*:\s*Elite value jockey', 'Elite Jockey'),
+        (r'\+\s*20\.0\s*:\s*Strong value jockey', 'Strong Value Jockey'),
+        (r'\+\s*10\.0\s*:\s*Profitable jockey', 'Good Jockey'),
+        (r'-\s*15\.0\s*:\s*Poor value jockey', 'Negative Jockey'),
         
         # Trainers
         (r'\+\s*5\.0\s*:\s*Like the Trainer', 'Good Trainer'),
@@ -605,15 +606,25 @@ def parse_notes_components(notes):
         (r'\+\s*15\.0\s*:\s*COMBO BONUS', 'Combo Bonus'),
         # NEW PATTERNS - Add after the existing patterns, before the closing bracket ]
 
-        # Colt Bonus
-        (r'\+\s*15\.0\s*:\s*COLT', 'Colt Bonus'),
+        # Colt Bonus - FIXED to match analyzer.js output
+        (r'\+\s*20\.0\s*:\s*COLT\s*\(', 'Colt Bonus'),
+
+        # 5yo horse - NEW PATTERN
+        (r'\+\s*25\.0\s*:\s*5yo horse', '5yo horse (236% ROI, 36.4% SR - elite age)'),
 
         # Age Bonuses
         (r'\+\s*5\.0\s*:\s*Prime age \(3yo', 'Age - 3yo Prime'),
         (r'\+\s*3\.0\s*:\s*Good age \(4yo', 'Age - 4yo Good'),
         (r'-\s*10\.0\s*:\s*Old age \(7\+', 'Age - 7+ Old'),
 
-        # Sire Bonuses (ROI-Based - Updated 2025-01-19)
+        # Sire Bonuses - SPECIFIC SIRES FIRST, THEN GENERIC
+        (r'([+-]?\s*[\d.]+)\.0\s*:\s*Sire\s+Wootton Bassett\s*\(', 'Sire - Wootton Bassett'),
+        (r'([+-]?\s*[\d.]+)\.0\s*:\s*Sire\s+Trapeze Artist\s*\(', 'Sire - Trapeze Artist'),
+        (r'([+-]?\s*[\d.]+)\.0\s*:\s*Sire\s+Starspangledbanner\s*\(', 'Sire - Starspangledbanner'),
+        (r'([+-]?\s*[\d.]+)\.0\s*:\s*Sire\s+Pierata\s*\(', 'Sire - Pierata'),
+        (r'([+-]?\s*[\d.]+)\.0\s*:\s*Sire\s+Lohnro\s*\(', 'Sire - Lohnro'),
+        (r'([+-]?\s*[\d.]+)\.0\s*:\s*Sire\s+Russian Revolution\s*\(', 'Sire - Russian Revolution'),
+        # Generic sire pattern LAST
         (r'([+-]?\s*[\d.]+)\s*:\s*Sire\s+([A-Za-z\'\s]+?)\s+\(', 'Sire - \\2'),
 
         # Career Win Rate
