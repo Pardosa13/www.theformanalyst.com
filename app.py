@@ -220,7 +220,9 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
     
     try:
         logger.info(f"Attempting to post {len(best_bets)} bets for {meeting_name} to Telegram")
-        safe_meeting_name = meeting_name.replace('_', '\\_')
+        
+        # Don't escape underscores - let them display naturally
+        safe_meeting_name = meeting_name.replace('_', ' ')  # Convert to space instead
         
         # Build message with bold formatting
         message = "*BET ALERT:*\n\n"
@@ -231,6 +233,8 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
             message += f"💰 *Predicted Price: {bet['predicted_odds']}*\n\n"
         
         message += "⚠️ Think. Is this a bet you really want to place? Gamble Responsibly | 1800 858 858"
+        
+        # ... rest of your function code to actually send it
         
         # Send via Telegram Bot API directly
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
