@@ -2466,7 +2466,7 @@ def export_ml_data():
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
     
-    query_results = base_query.order_by(Meeting.date.desc(), Race.race_number.asc()).limit(10000).all()
+    query_results = base_query.order_by(Meeting.date.desc(), Race.race_number.asc()).limit(20000).all()
     
     # First pass: collect all unique CSV field names
     all_csv_fields = set()
