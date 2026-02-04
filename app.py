@@ -2153,36 +2153,49 @@ def get_meeting_sectionals(meeting_id):
     Parses the HISTORY arrays from notes.
     """
     try:
-        # Get all predictions for this meeting
-        predictions = Prediction.query.filter_by(meeting_id=meeting_id).all()
+        # Get the meeting first
+        meeting = Meeting.query.get_or_404(meeting_id)
         
-        if not predictions:
+        # Get all races for this meeting
+        races = Race.query.filter_by(meeting_id=meeting_id).all()
+        
+        if not races:
             return jsonify({}), 200
         
         # Group by race
         races_data = {}
         
-        for pred in predictions:
-            race_key = f"race_{pred.race_number}"
+        for race in races:
+            race_key = f"race_{race.race_number}"
             
             if race_key not in races_data:
                 races_data[race_key] = []
             
-            # Extract ACTUAL sectional times from notes
-            sectional_data = extract_sectional_history(pred.notes)
+            # Get all horses in this race
+            horses = Horse.query.filter_by(race_id=race.id).all()
             
-            horse_data = {
-                'horse_name': pred.horse_name,
-                'score': pred.score,
-                'best_recent': sectional_data.get('best_recent'),
-                'weighted_avg': sectional_data.get('weighted_avg'),
-                'consistency': sectional_data.get('consistency'),
-                'history_adjusted': sectional_data.get('history_adjusted', []),
-                'history_raw': sectional_data.get('history_raw', []),
-                'has_data': len(sectional_data.get('history_adjusted', [])) > 0
-            }
-            
-            races_data[race_key].append(horse_data)
+            for horse in horses:
+                # Get the prediction for this horse
+                prediction = Prediction.query.filter_by(horse_id=horse.id).first()
+                
+                if not prediction:
+                    continue
+                
+                # Extract ACTUAL sectional times from notes
+                sectional_data = extract_sectional_history(prediction.notes)
+                
+                horse_data = {
+                    'horse_name': horse.horse_name,
+                    'score': prediction.score,
+                    'best_recent': sectional_data.get('best_recent'),
+                    'weighted_avg': sectional_data.get('weighted_avg'),
+                    'consistency': sectional_data.get('consistency'),
+                    'history_adjusted': sectional_data.get('history_adjusted', []),
+                    'history_raw': sectional_data.get('history_raw', []),
+                    'has_data': len(sectional_data.get('history_adjusted', [])) > 0
+                }
+                
+                races_data[race_key].append(horse_data)
         
         # Sort horses by score within each race
         for race_key in races_data:
