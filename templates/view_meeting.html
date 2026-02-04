@@ -2,11 +2,6 @@
 
 {% block title %}{{ meeting.meeting_name }} - Analysis Results{% endblock %}
 
-{% block head %}
-<!-- Chart.js CDN - Load synchronously -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" type="text/javascript"></script>
-{% endblock %}
-
 {% block content %}
 <h1>{{ meeting.meeting_name }}</h1>
 
@@ -1113,4 +1108,7 @@ function calculateRaceConfidence(horses) {
     return { confidence: finalConfidence, rating: rating, description: description, style: style, emoji: emoji };
 }
 </script>
+<!-- Chart.js must load BEFORE our scripts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
 {% endblock %}
