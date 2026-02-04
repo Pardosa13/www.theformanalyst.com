@@ -1102,6 +1102,114 @@ def analyze_race_classes(races_data, stake=10.0):
     class_stats = dict(sorted(class_stats.items(), key=lambda x: x[1]['roi'], reverse=True))
     
     return class_stats
+def analyze_class_drops(races_data, stake=10.0):
+    """
+    Analyze performance by class drop magnitude (top picks only)
+    Returns dict with stats for each class drop range
+    """
+    class_drop_stats = {}
+    
+    # Initialize all buckets from 100+ down to 0, in 10-point increments
+    # Also include class rises
+    buckets = ['100+', '90-99', '80-89', '70-79', '60-69', '50-59', '40-49', '30-39', 
+               '20-29', '10-19', '0-9', 'Same Class', 'Rise 0-9', 'Rise 10-19', 
+               'Rise 20-29', 'Rise 30+']
+    
+    for bucket in buckets:
+        class_drop_stats[bucket] = {
+            'runs': 0,
+            'wins': 0,
+            'places': 0,
+            'profit': 0
+        }
+    
+    for race_key, horses in races_data.items():
+        if not horses:
+            continue
+        
+        # Sort by score to get top pick
+        horses_sorted = sorted(horses, key=lambda x: x['prediction'].score, reverse=True)
+        top_pick = horses_sorted[0]
+        
+        result = top_pick['result']
+        prediction = top_pick['prediction']
+        
+        won = result.finish_position == 1
+        placed = result.finish_position in [1, 2, 3]
+        sp = result.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        
+        # Parse class drop from notes
+        notes = prediction.notes or ''
+        class_points = None
+        direction = None
+        
+        if 'Stepping DOWN' in notes or 'Stepping UP' in notes:
+            import re
+            match = re.search(r'Stepping (DOWN|UP) ([\d.]+) class points', notes)
+            if match:
+                direction = match.group(1)
+                class_points = float(match.group(2))
+        
+        # Determine bucket
+        if class_points is None:
+            bucket = 'Same Class'
+        elif direction == 'DOWN':
+            if class_points >= 100:
+                bucket = '100+'
+            elif class_points >= 90:
+                bucket = '90-99'
+            elif class_points >= 80:
+                bucket = '80-89'
+            elif class_points >= 70:
+                bucket = '70-79'
+            elif class_points >= 60:
+                bucket = '60-69'
+            elif class_points >= 50:
+                bucket = '50-59'
+            elif class_points >= 40:
+                bucket = '40-49'
+            elif class_points >= 30:
+                bucket = '30-39'
+            elif class_points >= 20:
+                bucket = '20-29'
+            elif class_points >= 10:
+                bucket = '10-19'
+            else:
+                bucket = '0-9'
+        else:  # UP
+            if class_points >= 30:
+                bucket = 'Rise 30+'
+            elif class_points >= 20:
+                bucket = 'Rise 20-29'
+            elif class_points >= 10:
+                bucket = 'Rise 10-19'
+            else:
+                bucket = 'Rise 0-9'
+        
+        # Update stats
+        class_drop_stats[bucket]['runs'] += 1
+        if won:
+            class_drop_stats[bucket]['wins'] += 1
+        if placed:
+            class_drop_stats[bucket]['places'] += 1
+        class_drop_stats[bucket]['profit'] += profit
+    
+    # Calculate rates
+    for bucket, stats in class_drop_stats.items():
+        if stats['runs'] > 0:
+            stats['strike_rate'] = (stats['wins'] / stats['runs']) * 100
+            stats['place_rate'] = (stats['places'] / stats['runs']) * 100
+            stats['roi'] = (stats['profit'] / (stats['runs'] * stake)) * 100
+        else:
+            stats['strike_rate'] = 0
+            stats['place_rate'] = 0
+            stats['roi'] = 0
+    
+    # Filter out buckets with no data
+    class_drop_stats = {k: v for k, v in class_drop_stats.items() if v['runs'] > 0}
+    
+    return class_drop_stats
     
 @app.route("/logout")
 @login_required
@@ -2299,6 +2407,8 @@ def api_external_factors():
     class_performance = analyze_race_classes(races_data, stake=10.0)
     
     class_performance_filtered = {k: v for k, v in class_performance.items() if v['runs'] >= 2}
+
+    class_drops = analyze_class_drops(races_data, stake=10.0)  # <-- ADD THIS LINE!
     
     result = jsonify({
         'jockeys_reliable': external_factors['jockeys_reliable'],
@@ -2311,7 +2421,8 @@ def api_external_factors():
         'distances': external_factors['distances'],
         'tracks': external_factors['tracks'],
         'track_conditions': external_factors['track_conditions'],
-        'class_performance': class_performance_filtered
+        'class_performance': class_performance_filtered,
+        'class_drops': class_drops
     })
     
     del all_results
