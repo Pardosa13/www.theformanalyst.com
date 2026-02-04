@@ -3,8 +3,8 @@
 {% block title %}{{ meeting.meeting_name }} - Analysis Results{% endblock %}
 
 {% block head %}
-<!-- Chart.js CDN -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- Chart.js CDN - Load synchronously -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" type="text/javascript"></script>
 {% endblock %}
 
 {% block content %}
@@ -471,7 +471,13 @@ details summary {
 const chartInstances = {};
 const meetingId = {{ meeting.id }};
 
-document.addEventListener('DOMContentLoaded', function() {
+// Wait for both DOM and Chart.js to be ready
+function initializeSectionalCharts() {
+    if (typeof Chart === 'undefined') {
+        setTimeout(initializeSectionalCharts, 100);
+        return;
+    }
+    
     // Load sectional charts
     fetch('/api/meeting/' + meetingId + '/sectionals')
         .then(function(response) { return response.json(); })
@@ -488,6 +494,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 container.innerHTML = '<div class="no-sectionals">Failed to load sectional data</div>';
             });
         });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize sectional charts with Chart.js check
+    initializeSectionalCharts();
     
     // Initialize filter bar
     const placeholder = document.getElementById('filter-bar-placeholder');
