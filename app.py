@@ -2037,7 +2037,83 @@ def api_score_analysis():
     
     return result
 
-
+@app.route("/api/meeting/<int:meeting_id>/sectionals")
+@login_required
+def get_meeting_sectionals(meeting_id):
+    """API endpoint to get sectional data for charting"""
+    from flask import jsonify
+    import re
+    
+    meeting = Meeting.query.get_or_404(meeting_id)
+    races = Race.query.filter_by(meeting_id=meeting_id).order_by(Race.race_number).all()
+    
+    sectional_data = {}
+    
+    for race in races:
+        horses_data = []
+        
+        for horse in race.horses:
+            if not horse.prediction or not horse.prediction.notes:
+                continue
+            
+            notes = horse.prediction.notes
+            horse_sectionals = {
+                'horse_name': horse.horse_name,
+                'score': horse.prediction.score,
+                'weighted_avg': None,
+                'best_recent': None,
+                'consistency': None
+            }
+            
+            # Parse weighted average data
+            weighted_match = re.search(
+                r'([+-]?[\d.]+):\s*weighted avg \(z=([-\d.]+),\s*(\d+)\s*runs?\)',
+                notes
+            )
+            if weighted_match:
+                horse_sectionals['weighted_avg'] = {
+                    'score': float(weighted_match.group(1)),
+                    'zscore': float(weighted_match.group(2)),
+                    'run_count': int(weighted_match.group(3))
+                }
+            
+            # Parse best of last 5
+            best_match = re.search(
+                r'([+-]?[\d.]+):\s*best of last (\d+) \(z=([-\d.]+)\)\s*└─\s*([\d.]+)s\s*→\s*([\d.]+)s',
+                notes,
+                re.DOTALL
+            )
+            if best_match:
+                horse_sectionals['best_recent'] = {
+                    'score': float(best_match.group(1)),
+                    'from_last': int(best_match.group(2)),
+                    'zscore': float(best_match.group(3)),
+                    'raw_time': float(best_match.group(4)),
+                    'adjusted_time': float(best_match.group(5))
+                }
+            
+            # Parse consistency
+            consist_match = re.search(
+                r'([+-]?[\d.]+):\s*consistency - (\w+) \(SD=([\d.]+)s\)',
+                notes
+            )
+            if consist_match:
+                horse_sectionals['consistency'] = {
+                    'score': float(consist_match.group(1)),
+                    'rating': consist_match.group(2),
+                    'std_dev': float(consist_match.group(3))
+                }
+            
+            # Only include horses with sectional data
+            if horse_sectionals['weighted_avg'] or horse_sectionals['best_recent']:
+                horses_data.append(horse_sectionals)
+        
+        # Sort by score descending
+        horses_data.sort(key=lambda x: x['score'], reverse=True)
+        sectional_data[f'race_{race.race_number}'] = horses_data
+    
+    return jsonify(sectional_data)
+    
 @app.route("/api/data/component-analysis")
 @login_required
 def api_component_analysis():
