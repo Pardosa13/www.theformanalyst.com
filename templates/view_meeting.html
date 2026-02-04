@@ -574,7 +574,6 @@ function renderSectionalChart(raceNum, horsesData) {
 
 function prepareChartData(horses) {
     const colors = ['#FFD700', '#C0C0C0', '#CD7F32', '#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b'];
-    const labels = ['5 runs ago', '4 runs ago', '3 runs ago', '2 runs ago', 'Last run'];
     
     const datasets = {
         adjusted: [],
@@ -584,11 +583,44 @@ function prepareChartData(horses) {
     
     horses.forEach(function(horse, index) {
         const color = colors[index % colors.length];
-        const history = generateHistoricalTrend(horse);
+        
+        // Use REAL historical data if available
+        const historyAdj = horse.history_adjusted || [];
+        const historyRaw = horse.history_raw || [];
+        
+        if (historyAdj.length === 0) {
+            // No sectional data for this horse
+            return;
+        }
+        
+        // Create labels based on actual number of runs
+        const runCount = historyAdj.length;
+        const labels = [];
+        for (let i = runCount; i >= 1; i--) {
+            if (i === 1) {
+                labels.push('Last run');
+            } else {
+                labels.push(i + ' runs ago');
+            }
+        }
+        
+        // Calculate z-scores for the actual data
+        const mean = historyAdj.reduce(function(sum, val) { return sum + val; }, 0) / historyAdj.length;
+        const variance = historyAdj.reduce(function(sum, val) { return sum + Math.pow(val - mean, 2); }, 0) / historyAdj.length;
+        const stdDev = Math.sqrt(variance);
+        
+        const zscores = historyAdj.map(function(time) {
+            if (stdDev === 0) return 0;
+            return -1 * (time - mean) / stdDev;  // Negative because lower time = better = positive z-score
+        });
+        
+        // Best time for label
+        const bestTime = horse.best_recent ? horse.best_recent.adjusted_time.toFixed(2) + 's' : 'N/A';
+        const bestRawTime = horse.best_recent ? horse.best_recent.raw_time.toFixed(2) + 's' : 'N/A';
         
         datasets.adjusted.push({
-            label: horse.horse_name + ' (' + (horse.best_recent ? horse.best_recent.adjusted_time.toFixed(2) + 's' : 'N/A') + ')',
-            data: history.adjusted,
+            label: horse.horse_name + ' (' + bestTime + ')',
+            data: historyAdj,
             borderColor: color,
             backgroundColor: color + '33',
             tension: 0.3,
@@ -598,8 +630,8 @@ function prepareChartData(horses) {
         });
         
         datasets.raw.push({
-            label: horse.horse_name + ' (' + (horse.best_recent ? horse.best_recent.raw_time.toFixed(2) + 's' : 'N/A') + ')',
-            data: history.raw,
+            label: horse.horse_name + ' (' + bestRawTime + ')',
+            data: historyRaw,
             borderColor: color,
             backgroundColor: color + '33',
             tension: 0.3,
@@ -610,7 +642,7 @@ function prepareChartData(horses) {
         
         datasets.zscore.push({
             label: horse.horse_name + ' (z=' + (horse.best_recent ? horse.best_recent.zscore.toFixed(2) : 'N/A') + ')',
-            data: history.zscore,
+            data: zscores,
             borderColor: color,
             backgroundColor: color + '33',
             tension: 0.3,
@@ -620,34 +652,27 @@ function prepareChartData(horses) {
         });
     });
     
+    // Use the longest history to create labels
+    let maxRuns = 0;
+    horses.forEach(function(horse) {
+        const runCount = (horse.history_adjusted || []).length;
+        if (runCount > maxRuns) maxRuns = runCount;
+    });
+    
+    const labels = [];
+    for (let i = maxRuns; i >= 1; i--) {
+        if (i === 1) {
+            labels.push('Last run');
+        } else {
+            labels.push(i + ' runs ago');
+        }
+    }
+    
     return {
         adjusted: { labels: labels, datasets: datasets.adjusted },
         raw: { labels: labels, datasets: datasets.raw },
         zscore: { labels: labels, datasets: datasets.zscore }
     };
-}
-
-function generateHistoricalTrend(horse) {
-    const bestTime = horse.best_recent ? horse.best_recent.adjusted_time : 33;
-    const rawBest = horse.best_recent ? horse.best_recent.raw_time : 33.3;
-    const variance = horse.consistency ? horse.consistency.std_dev : 0.5;
-    const zscore = horse.best_recent ? horse.best_recent.zscore : 0;
-    
-    const adjusted = [];
-    const raw = [];
-    const zscores = [];
-    
-    for (let i = 0; i < 5; i++) {
-        const position = (4 - i) / 4;
-        const trend = position * variance * 1.5;
-        const noise = (Math.random() - 0.5) * variance;
-        
-        adjusted.push(bestTime + trend + noise);
-        raw.push(rawBest + trend + noise + 0.3);
-        zscores.push(zscore - (position * 0.3) + (Math.random() - 0.5) * 0.2);
-    }
-    
-    return { adjusted: adjusted, raw: raw, zscore: zscores };
 }
 
 function getChartOptions(viewType) {
