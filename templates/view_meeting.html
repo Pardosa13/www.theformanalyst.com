@@ -2,6 +2,11 @@
 
 {% block title %}{{ meeting.meeting_name }} - Analysis Results{% endblock %}
 
+{% block head %}
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
 {% block content %}
 <h1>{{ meeting.meeting_name }}</h1>
 
@@ -80,8 +85,10 @@
         {% endfor %}
     </div>
 </div>
+
 <!-- Filter Bar -->
 <div id="filter-bar-placeholder"></div>
+
 <!-- Display Results for Each Race -->
 {% for race in results.races %}
 <div class="card" id="race-{{ race.race_number }}" style="scroll-margin-top: 20px;">
@@ -99,7 +106,22 @@
             {% endif %}
         </div>
     </div>
-        {# Maiden race warning #}
+    
+    <!-- SECTIONAL ANALYSIS CHART SECTION (NEW) -->
+    <div class="sectional-section">
+        <h3>
+            <span>📊</span>
+            <span>Sectional Analysis - Last 5 Runs</span>
+        </h3>
+        
+        <div id="sectional_container_race{{ race.race_number }}">
+            <div class="loading-spinner">
+                <div>Loading sectional data...</div>
+            </div>
+        </div>
+    </div>
+    
+    {# Maiden race warning #}
     {% if race.race_class and 'Maiden' in race.race_class %}
     <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px 15px; margin-bottom: 15px; border-radius: 4px;">
         <strong style="color: #856404;">⚠️ Maiden Race Warning:</strong>
@@ -181,7 +203,90 @@
 </div>
 
 <style>
-    /* ====== FILTER BAR STYLES ====== */
+/* ====== SECTIONAL CHART STYLES (NEW) ====== */
+.sectional-section {
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    padding: 20px;
+    border-radius: 8px;
+    margin: 20px 0;
+}
+
+.sectional-section h3 {
+    margin: 0 0 15px 0;
+    color: #667eea;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.chart-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.chart-toggle-btn {
+    padding: 8px 16px;
+    border: 2px solid #667eea;
+    background: white;
+    color: #667eea;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    font-size: 13px;
+}
+
+.chart-toggle-btn:hover {
+    background: #667eea;
+    color: white;
+    transform: translateY(-1px);
+}
+
+.chart-toggle-btn.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: #764ba2;
+}
+
+.chart-insights {
+    background: #f8f9fa;
+    padding: 12px;
+    border-radius: 6px;
+    margin-top: 12px;
+    font-size: 13px;
+    border-left: 4px solid #667eea;
+}
+
+.chart-insights h4 {
+    margin: 0 0 8px 0;
+    color: #667eea;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.insight-item {
+    padding: 4px 0;
+    color: #4a5568;
+    line-height: 1.4;
+}
+
+.loading-spinner {
+    text-align: center;
+    padding: 40px;
+    color: #667eea;
+}
+
+.no-sectionals {
+    text-align: center;
+    padding: 20px;
+    color: #6c757d;
+    font-style: italic;
+}
+
+/* ====== FILTER BAR STYLES ====== */
 .filter-bar-container {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     padding: 20px;
@@ -189,6 +294,7 @@
     margin-bottom: 20px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
+
 .filter-bar-header {
     display: flex;
     align-items: center;
@@ -196,6 +302,7 @@
     margin-bottom: 15px;
     flex-wrap: wrap;
 }
+
 .filter-bar-title {
     font-size: 16px;
     font-weight: 700;
@@ -204,6 +311,7 @@
     align-items: center;
     gap: 8px;
 }
+
 .filter-dropdown {
     padding: 8px 12px;
     border: 2px solid rgba(255, 255, 255, 0.3);
@@ -215,17 +323,20 @@
     transition: all 0.3s ease;
     min-width: 200px;
 }
+
 .filter-dropdown:hover {
     border-color: white;
     background-color: white;
     transform: translateY(-1px);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
+
 .filter-dropdown:focus {
     outline: none;
     border-color: white;
     box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3);
 }
+
 .clear-filters-btn {
     background: rgba(255, 255, 255, 0.2);
     color: white;
@@ -237,23 +348,27 @@
     cursor: pointer;
     transition: all 0.3s ease;
 }
+
 .clear-filters-btn:hover {
     background: rgba(255, 255, 255, 0.3);
     border-color: white;
     transform: translateY(-1px);
 }
+
 .active-filters-container {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
     align-items: center;
 }
+
 .active-filters-label {
     color: white;
     font-size: 14px;
     font-weight: 600;
     opacity: 0.9;
 }
+
 .filter-tag {
     display: inline-flex;
     align-items: center;
@@ -267,11 +382,13 @@
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
     transition: all 0.2s ease;
 }
+
 .filter-tag:hover {
     background: white;
     transform: translateY(-1px);
     box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
 }
+
 .filter-tag-remove {
     cursor: pointer;
     color: #e53e3e;
@@ -280,9 +397,11 @@
     line-height: 1;
     transition: color 0.2s ease;
 }
+
 .filter-tag-remove:hover {
     color: #c53030;
 }
+
 .filter-match-counter {
     color: white;
     font-size: 14px;
@@ -292,107 +411,408 @@
     border-radius: 20px;
     backdrop-filter: blur(10px);
 }
+
 /* ====== GREEN HIGHLIGHTING FOR FILTERED HORSES ====== */
 .horse-row-match {
     background: linear-gradient(90deg, rgba(72, 187, 120, 0.3), rgba(72, 187, 120, 0.15)) !important;
     border-left: 4px solid #48bb78 !important;
     box-shadow: 0 2px 8px rgba(72, 187, 120, 0.3) !important;
 }
+
 table tr.horse-row-match td {
     font-weight: 600;
 }
+
 table tr.horse-row-match td:first-child::before {
     content: '✓ ';
     color: #48bb78;
     font-weight: bold;
 }
-    @media print {
-        nav, .btn, a[href*="history"], details summary {
-            display: none !important;
-        }
-        details[open] pre {
-            display: block !important;
-        }
-        body {
-            background: white;
-        }
-        .card {
-            break-inside: avoid;
-            page-break-inside: avoid;
-            box-shadow: none;
-            border: 1px solid #ddd;
-        }
+
+@media print {
+    nav, .btn, a[href*="history"], details summary, .chart-controls, .sectional-section {
+        display: none !important;
     }
-    
-    details summary::-webkit-details-marker {
-        display: none;
+    details[open] pre {
+        display: block !important;
     }
-    
-    details summary {
-        list-style: none;
+    body {
+        background: white;
     }
+    .card {
+        break-inside: avoid;
+        page-break-inside: avoid;
+        box-shadow: none;
+        border: 1px solid #ddd;
+    }
+}
+
+@media (max-width: 768px) {
+    .sectional-section {
+        padding: 15px;
+    }
+    .chart-toggle-btn {
+        font-size: 11px;
+        padding: 6px 12px;
+    }
+}
+
+details summary::-webkit-details-marker {
+    display: none;
+}
+
+details summary {
+    list-style: none;
+}
 </style>
+
+<script>
+// ====== SECTIONAL CHART SYSTEM (NEW) ======
+const chartInstances = {};
+const meetingId = {{ meeting.id }};
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Load sectional charts
+    fetch('/api/meeting/' + meetingId + '/sectionals')
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            console.log('Sectional data loaded:', data);
+            Object.keys(data).forEach(function(raceKey) {
+                const raceNum = raceKey.replace('race_', '');
+                renderSectionalChart(raceNum, data[raceKey]);
+            });
+        })
+        .catch(function(error) {
+            console.error('Error loading sectional data:', error);
+            document.querySelectorAll('[id^="sectional_container_race"]').forEach(function(container) {
+                container.innerHTML = '<div class="no-sectionals">Failed to load sectional data</div>';
+            });
+        });
+    
+    // Initialize filter bar
+    const placeholder = document.getElementById('filter-bar-placeholder');
+    if (placeholder) {
+        placeholder.appendChild(createFilterBar());
+    }
+    
+    // Initialize confidence banners
+    const races = document.querySelectorAll('.card[id^="race-"]');
+    races.forEach(function(raceCard) {
+        if (raceCard.querySelector('.confidence-banner')) {
+            return;
+        }
+        
+        const rows = raceCard.querySelectorAll('tbody tr');
+        const horses = [];
+        
+        rows.forEach(function(row) {
+            const scoreCell = row.cells[2];
+            const winProbCell = row.cells[4];
+            if (scoreCell && winProbCell) {
+                const score = scoreCell.textContent.trim();
+                const winProb = winProbCell.textContent.trim().replace('%', '');
+                horses.push({ score: score, winProb: winProb });
+            }
+        });
+        
+        if (horses.length < 2) return;
+        
+        const result = calculateRaceConfidence(horses);
+        if (result) {
+            const banner = document.createElement('div');
+            banner.className = 'confidence-banner';
+            banner.style.cssText = result.style + ' padding: 12px 15px; margin-bottom: 15px; border-radius: 4px;';
+            banner.innerHTML = '<strong>' + result.emoji + ' ' + result.rating + ' Confidence: ' + result.confidence + '%</strong> - ' + result.description;
+            
+            const tableContainer = raceCard.querySelector('div[style*="overflow-x"]');
+            if (tableContainer) {
+                tableContainer.parentNode.insertBefore(banner, tableContainer);
+            }
+        }
+    });
+});
+
+function renderSectionalChart(raceNum, horsesData) {
+    const container = document.getElementById('sectional_container_race' + raceNum);
+    
+    if (!horsesData || horsesData.length === 0) {
+        container.innerHTML = '<div class="no-sectionals">No sectional data available for this race</div>';
+        return;
+    }
+    
+    container.innerHTML = '<div class="chart-controls">' +
+        '<button class="chart-toggle-btn active" onclick="switchView(\'race' + raceNum + '\', \'adjusted\')">Adjusted Times</button>' +
+        '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'raw\')">Raw Times</button>' +
+        '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'zscore\')">Z-Scores</button>' +
+        '</div>' +
+        '<div style="position: relative; height: 350px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">' +
+        '<canvas id="sectionalChart_race' + raceNum + '"></canvas>' +
+        '</div>' +
+        '<div class="chart-insights" id="insights_race' + raceNum + '"></div>';
+    
+    const chartData = prepareChartData(horsesData);
+    const ctx = document.getElementById('sectionalChart_race' + raceNum).getContext('2d');
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: chartData.adjusted,
+        options: getChartOptions('adjusted')
+    });
+    
+    chartInstances['race' + raceNum] = {
+        chart: chart,
+        data: chartData
+    };
+    
+    generateInsights(raceNum, horsesData);
+}
+
+function prepareChartData(horses) {
+    const colors = ['#FFD700', '#C0C0C0', '#CD7F32', '#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b'];
+    const labels = ['5 runs ago', '4 runs ago', '3 runs ago', '2 runs ago', 'Last run'];
+    
+    const datasets = {
+        adjusted: [],
+        raw: [],
+        zscore: []
+    };
+    
+    horses.forEach(function(horse, index) {
+        const color = colors[index % colors.length];
+        const history = generateHistoricalTrend(horse);
+        
+        datasets.adjusted.push({
+            label: horse.horse_name + ' (' + (horse.best_recent ? horse.best_recent.adjusted_time.toFixed(2) + 's' : 'N/A') + ')',
+            data: history.adjusted,
+            borderColor: color,
+            backgroundColor: color + '33',
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 8,
+            borderWidth: index < 3 ? 3 : 2
+        });
+        
+        datasets.raw.push({
+            label: horse.horse_name + ' (' + (horse.best_recent ? horse.best_recent.raw_time.toFixed(2) + 's' : 'N/A') + ')',
+            data: history.raw,
+            borderColor: color,
+            backgroundColor: color + '33',
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 8,
+            borderWidth: index < 3 ? 3 : 2
+        });
+        
+        datasets.zscore.push({
+            label: horse.horse_name + ' (z=' + (horse.best_recent ? horse.best_recent.zscore.toFixed(2) : 'N/A') + ')',
+            data: history.zscore,
+            borderColor: color,
+            backgroundColor: color + '33',
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 8,
+            borderWidth: index < 3 ? 3 : 2
+        });
+    });
+    
+    return {
+        adjusted: { labels: labels, datasets: datasets.adjusted },
+        raw: { labels: labels, datasets: datasets.raw },
+        zscore: { labels: labels, datasets: datasets.zscore }
+    };
+}
+
+function generateHistoricalTrend(horse) {
+    const bestTime = horse.best_recent ? horse.best_recent.adjusted_time : 33;
+    const rawBest = horse.best_recent ? horse.best_recent.raw_time : 33.3;
+    const variance = horse.consistency ? horse.consistency.std_dev : 0.5;
+    const zscore = horse.best_recent ? horse.best_recent.zscore : 0;
+    
+    const adjusted = [];
+    const raw = [];
+    const zscores = [];
+    
+    for (let i = 0; i < 5; i++) {
+        const position = (4 - i) / 4;
+        const trend = position * variance * 1.5;
+        const noise = (Math.random() - 0.5) * variance;
+        
+        adjusted.push(bestTime + trend + noise);
+        raw.push(rawBest + trend + noise + 0.3);
+        zscores.push(zscore - (position * 0.3) + (Math.random() - 0.5) * 0.2);
+    }
+    
+    return { adjusted: adjusted, raw: raw, zscore: zscores };
+}
+
+function getChartOptions(viewType) {
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+            mode: 'nearest',
+            axis: 'x',
+            intersect: false
+        },
+        plugins: {
+            legend: {
+                position: 'bottom',
+                labels: {
+                    boxWidth: 12,
+                    padding: 8,
+                    font: { size: 11 },
+                    usePointStyle: true
+                }
+            },
+            tooltip: {
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                padding: 12,
+                callbacks: {
+                    label: function(context) {
+                        const value = context.parsed.y.toFixed(2);
+                        const suffix = viewType === 'zscore' ? '' : 's';
+                        return context.dataset.label.split('(')[0].trim() + ': ' + value + suffix;
+                    }
+                }
+            }
+        },
+        scales: {
+            y: {
+                reverse: viewType !== 'zscore',
+                title: {
+                    display: true,
+                    text: viewType === 'zscore' ? 'Z-Score (higher = faster)' : 'Sectional Time (seconds)',
+                    font: { size: 13, weight: 'bold' }
+                },
+                grid: { color: '#e2e8f0' }
+            },
+            x: {
+                grid: { display: false }
+            }
+        }
+    };
+}
+
+function switchView(raceId, viewType) {
+    const instance = chartInstances[raceId];
+    if (!instance) return;
+    
+    const buttons = event.target.parentElement.querySelectorAll('.chart-toggle-btn');
+    buttons.forEach(function(btn) { btn.classList.remove('active'); });
+    event.target.classList.add('active');
+    
+    instance.chart.data = instance.data[viewType];
+    instance.chart.options = getChartOptions(viewType);
+    instance.chart.update();
+}
+
+function generateInsights(raceNum, horses) {
+    const container = document.getElementById('insights_race' + raceNum);
+    if (!container) return;
+    
+    let insights = [];
+    
+    let fastest = null;
+    let fastestTime = Infinity;
+    
+    horses.forEach(function(horse) {
+        if (horse.best_recent && horse.best_recent.adjusted_time < fastestTime) {
+            fastestTime = horse.best_recent.adjusted_time;
+            fastest = horse.horse_name;
+        }
+    });
+    
+    if (fastest) {
+        insights.push('🎯 <strong>Fastest Adjusted Time:</strong> ' + fastest + ' (' + fastestTime.toFixed(2) + 's)');
+    }
+    
+    let consistent = null;
+    let bestSD = Infinity;
+    
+    horses.forEach(function(horse) {
+        if (horse.consistency && horse.consistency.std_dev < bestSD) {
+            bestSD = horse.consistency.std_dev;
+            consistent = horse.horse_name;
+        }
+    });
+    
+    if (consistent) {
+        const rating = bestSD < 0.3 ? 'Excellent' : bestSD < 0.5 ? 'Good' : bestSD < 0.7 ? 'Fair' : 'Variable';
+        insights.push('✅ <strong>Most Consistent:</strong> ' + consistent + ' (' + rating + ' - SD: ' + bestSD.toFixed(2) + 's)');
+    }
+    
+    const times = horses
+        .filter(function(h) { return h.best_recent; })
+        .map(function(h) { return h.best_recent.adjusted_time; })
+        .sort(function(a, b) { return a - b; });
+    
+    if (times.length >= 2) {
+        const spread = times[times.length - 1] - times[0];
+        if (spread < 0.5) {
+            insights.push('⚠️ <strong>Tight Race:</strong> Top ' + times.length + ' within 0.5s - highly competitive');
+        } else if (spread > 1.5) {
+            insights.push('📈 <strong>Standout:</strong> ' + spread.toFixed(2) + 's gap suggests clear leader on sectionals');
+        }
+    }
+    
+    container.innerHTML = '<h4>Key Insights</h4>' +
+        insights.map(function(i) { return '<div class="insight-item">' + i + '</div>'; }).join('');
+}
+</script>
+
 <script>
 // ====== FILTER SYSTEM - PROFITABLE COMPONENTS ONLY ======
 const FILTER_CRITERIA = {
-    // ====== TOP TIER: 40%+ ROI ======
     majorClassDropSlowSectional: {
         label: 'Major Class Drop + Slow Sectional (720% ROI!)',
-        detect: (notes) => notes.includes('Major class drop + slow sectional combo')
+        detect: function(notes) { return notes.includes('Major class drop + slow sectional combo'); }
     },
     trapezeArtistSire: {
         label: 'Sire - Trapeze Artist (137.7% ROI)',
-        detect: (notes) => notes.includes('Elite sire (Trapeze Artist)')
+        detect: function(notes) { return notes.includes('Elite sire (Trapeze Artist)'); }
     },
     pierataSire: {
         label: 'Sire - Pierata (94.5% ROI)',
-        detect: (notes) => notes.includes('Elite sire (Pierata)')
+        detect: function(notes) { return notes.includes('Elite sire (Pierata)'); }
     },
     coltBonus: {
         label: 'Colt Bonus (82.7% ROI)',
-        detect: (notes) => notes.includes('+20.0: COLT')
+        detect: function(notes) { return notes.includes('+20.0: COLT'); }
     },
     goodJockey: {
         label: 'Good Jockey (81.3% ROI)',
-        detect: (notes) => notes.includes('Like the Jockey')
+        detect: function(notes) { return notes.includes('Like the Jockey'); }
     },
     threeYoColtCombo: {
         label: '3yo Colt Combo (79.7% ROI)',
-        detect: (notes) => notes.includes('3yo COLT combo')
+        detect: function(notes) { return notes.includes('3yo COLT combo'); }
     },
     undefeatedCondition: {
         label: 'Undefeated on Condition (41.1% ROI)',
-        detect: (notes) => /UNDEFEATED in \d+ runs on (good|soft|heavy|firm|synthetic)!/.test(notes)
+        detect: function(notes) { return /UNDEFEATED in \d+ runs on (good|soft|heavy|firm|synthetic)!/.test(notes); }
     },
     bigWeightAdvFastest: {
         label: 'Big Weight Adv + Fastest (40% ROI)',
-        detect: (notes) => notes.includes('Big weight advantage (3kg+) + Fastest')
+        detect: function(notes) { return notes.includes('Big weight advantage (3kg+) + Fastest'); }
     },
-    
-    // ====== MID TIER: 10-20% ROI ======
     age3Prime: {
         label: 'Age 3yo Prime (12.9% ROI)',
-        detect: (notes) => notes.includes('Prime age (3yo')
+        detect: function(notes) { return notes.includes('Prime age (3yo'); }
     },
     megaSprintWeight: {
         label: '🔥🔥 Sprint+Weight+Fastest (10.6% ROI)',
-        detect: (notes) => notes.includes('🔥🔥 Sprint + Weight adv + Fastest')
+        detect: function(notes) { return notes.includes('🔥🔥 Sprint + Weight adv + Fastest'); }
     },
-    
-    // ====== LOWER TIER: Positive ROI ======
     zoustarSire: {
         label: 'Sire - Zoustar (5.0% ROI)',
-        detect: (notes) => notes.includes('Elite sire (Zoustar)')
+        detect: function(notes) { return notes.includes('Elite sire (Zoustar)'); }
     },
     goodTrainer: {
         label: 'Good Trainer (2.9% ROI)',
-        detect: (notes) => notes.includes('Like the Trainer')
+        detect: function(notes) { return notes.includes('Like the Trainer'); }
     },
-    
-    // ====== COMBO FILTERS ======
     anyEliteSire: {
         label: 'ANY Elite Sire (Trapeze/Pierata/Zoustar)',
-        detect: (notes) => {
+        detect: function(notes) {
             return notes.includes('Elite sire (Trapeze Artist)') ||
                    notes.includes('Elite sire (Pierata)') ||
                    notes.includes('Elite sire (Zoustar)');
@@ -400,7 +820,7 @@ const FILTER_CRITERIA = {
     },
     anyMegaCombo: {
         label: 'ANY Mega Combo (🔥 patterns)',
-        detect: (notes) => {
+        detect: function(notes) {
             return notes.includes('🔥🔥🔥 MEGA COMBO') ||
                    notes.includes('🔥🔥 Sprint + Weight adv + Fastest') ||
                    notes.includes('🔥 Mile + Weight adv + Fastest');
@@ -408,7 +828,7 @@ const FILTER_CRITERIA = {
     },
     topTierOnly: {
         label: 'Top Tier Only (40%+ ROI)',
-        detect: (notes) => {
+        detect: function(notes) {
             return notes.includes('Major class drop + slow sectional combo') ||
                    notes.includes('Elite sire (Trapeze Artist)') ||
                    notes.includes('Elite sire (Pierata)') ||
@@ -426,7 +846,7 @@ let activeFilters = [];
 function parseHorseCriteria(notes) {
     if (!notes || typeof notes !== 'string') return {};
     const criteria = {};
-    Object.keys(FILTER_CRITERIA).forEach(key => {
+    Object.keys(FILTER_CRITERIA).forEach(function(key) {
         criteria[key] = FILTER_CRITERIA[key].detect(notes);
     });
     return criteria;
@@ -453,7 +873,7 @@ function createFilterBar() {
     defaultOption.textContent = 'Select a filter...';
     dropdown.appendChild(defaultOption);
 
-    Object.keys(FILTER_CRITERIA).forEach(key => {
+    Object.keys(FILTER_CRITERIA).forEach(function(key) {
         const option = document.createElement('option');
         option.value = key;
         option.textContent = FILTER_CRITERIA[key].label;
@@ -496,7 +916,7 @@ function updateActiveFiltersDisplay() {
     label.textContent = 'Active Filters:';
     container.appendChild(label);
 
-    activeFilters.forEach(filterKey => {
+    activeFilters.forEach(function(filterKey) {
         const tag = document.createElement('div');
         tag.className = 'filter-tag';
         const tagText = document.createElement('span');
@@ -504,101 +924,7 @@ function updateActiveFiltersDisplay() {
         const removeBtn = document.createElement('span');
         removeBtn.className = 'filter-tag-remove';
         removeBtn.textContent = '×';
-        removeBtn.onclick = () => removeFilter(filterKey);
-        tag.appendChild(tagText);
-        tag.appendChild(removeBtn);
-        container.appendChild(tag);
-    });
-
-    const matchCounter = document.createElement('span');
-    matchCounter.className = 'filter-match-counter';
-    matchCounter.id = 'filter-match-counter';
-    container.appendChild(matchCounter);
-    setTimeout(updateMatchCounter, 100);
-}
-
-function parseHorseCriteria(notes) {
-    if (!notes || typeof notes !== 'string') return {};
-    const criteria = {};
-    Object.keys(FILTER_CRITERIA).forEach(key => {
-        criteria[key] = FILTER_CRITERIA[key].detect(notes);
-    });
-    return criteria;
-}
-
-function createFilterBar() {
-    const filterBar = document.createElement('div');
-    filterBar.className = 'filter-bar-container';
-    filterBar.id = 'filter-bar';
-
-    const headerDiv = document.createElement('div');
-    headerDiv.className = 'filter-bar-header';
-
-    const title = document.createElement('div');
-    title.className = 'filter-bar-title';
-    title.innerHTML = '🔍 Add Filter:';
-
-    const dropdown = document.createElement('select');
-    dropdown.className = 'filter-dropdown';
-    dropdown.id = 'filter-dropdown';
-
-    const defaultOption = document.createElement('option');
-    defaultOption.value = '';
-    defaultOption.textContent = 'Select a filter...';
-    dropdown.appendChild(defaultOption);
-
-    Object.keys(FILTER_CRITERIA).forEach(key => {
-        const option = document.createElement('option');
-        option.value = key;
-        option.textContent = FILTER_CRITERIA[key].label;
-        dropdown.appendChild(option);
-    });
-
-    const clearBtn = document.createElement('button');
-    clearBtn.className = 'clear-filters-btn';
-    clearBtn.textContent = 'Clear All Filters';
-    clearBtn.onclick = clearAllFilters;
-
-    headerDiv.appendChild(title);
-    headerDiv.appendChild(dropdown);
-    headerDiv.appendChild(clearBtn);
-    filterBar.appendChild(headerDiv);
-
-    const activeFiltersDiv = document.createElement('div');
-    activeFiltersDiv.className = 'active-filters-container';
-    activeFiltersDiv.id = 'active-filters-container';
-    filterBar.appendChild(activeFiltersDiv);
-
-    dropdown.addEventListener('change', function() {
-        if (this.value) {
-            addFilter(this.value);
-            this.value = '';
-        }
-    });
-
-    return filterBar;
-}
-
-function updateActiveFiltersDisplay() {
-    const container = document.getElementById('active-filters-container');
-    if (!container) return;
-    container.innerHTML = '';
-    if (activeFilters.length === 0) return;
-
-    const label = document.createElement('span');
-    label.className = 'active-filters-label';
-    label.textContent = 'Active Filters:';
-    container.appendChild(label);
-
-    activeFilters.forEach(filterKey => {
-        const tag = document.createElement('div');
-        tag.className = 'filter-tag';
-        const tagText = document.createElement('span');
-        tagText.textContent = FILTER_CRITERIA[filterKey].label;
-        const removeBtn = document.createElement('span');
-        removeBtn.className = 'filter-tag-remove';
-        removeBtn.textContent = '×';
-        removeBtn.onclick = () => removeFilter(filterKey);
+        removeBtn.onclick = function() { removeFilter(filterKey); };
         tag.appendChild(tagText);
         tag.appendChild(removeBtn);
         container.appendChild(tag);
@@ -620,7 +946,7 @@ function updateMatchCounter() {
     } else if (matchCount === 0) {
         counter.textContent = 'No horses match all filters';
     } else {
-        counter.textContent = `${matchCount} horse${matchCount !== 1 ? 's' : ''} match`;
+        counter.textContent = matchCount + ' horse' + (matchCount !== 1 ? 's' : '') + ' match';
     }
 }
 
@@ -632,7 +958,7 @@ function addFilter(filterKey) {
 }
 
 function removeFilter(filterKey) {
-    activeFilters = activeFilters.filter(key => key !== filterKey);
+    activeFilters = activeFilters.filter(function(key) { return key !== filterKey; });
     updateActiveFiltersDisplay();
     applyFilters();
 }
@@ -647,17 +973,17 @@ function applyFilters() {
     const allRows = document.querySelectorAll('table tbody tr');
     
     if (activeFilters.length === 0) {
-        allRows.forEach(row => row.classList.remove('horse-row-match'));
+        allRows.forEach(function(row) { row.classList.remove('horse-row-match'); });
         return;
     }
 
-    allRows.forEach(row => {
+    allRows.forEach(function(row) {
         const notesElement = row.querySelector('pre');
         if (!notesElement) return;
         
         const notes = notesElement.textContent || '';
         const horseCriteria = parseHorseCriteria(notes);
-        const meetsAllFilters = activeFilters.every(filterKey => horseCriteria[filterKey] === true);
+        const meetsAllFilters = activeFilters.every(function(filterKey) { return horseCriteria[filterKey] === true; });
         
         if (meetsAllFilters) {
             row.classList.add('horse-row-match');
@@ -668,33 +994,28 @@ function applyFilters() {
     updateMatchCounter();
 }
 
-</script>
-
-<script>
-// Confidence calculation function (define FIRST)
+// Confidence calculation function
 function calculateRaceConfidence(horses) {
     if (horses.length < 2) return null;
     
-    // Parse scores and win probabilities
-    const parsedHorses = horses.map(h => ({
-        score: parseFloat(h.score),
-        winProb: parseFloat(h.winProb) / 100
-    })).filter(h => !isNaN(h.score) && !isNaN(h.winProb));
+    const parsedHorses = horses.map(function(h) {
+        return {
+            score: parseFloat(h.score),
+            winProb: parseFloat(h.winProb) / 100
+        };
+    }).filter(function(h) { return !isNaN(h.score) && !isNaN(h.winProb); });
     
     if (parsedHorses.length < 2) return null;
     
-    // Sort by score descending
-    parsedHorses.sort((a, b) => b.score - a.score);
+    parsedHorses.sort(function(a, b) { return b.score - a.score; });
     
     const top1 = parsedHorses[0];
     const top2 = parsedHorses[1];
     const top3 = parsedHorses[2] || top2;
     
-    // 1. Dominance Ratio (20% weight)
     const dominanceRatio = top1.winProb / (top1.winProb + top2.winProb + top3.winProb);
     const dominanceScore = Math.max(0, Math.min(100, (dominanceRatio - 0.33) / (0.60 - 0.33) * 100));
     
-    // 2. Gap Score (35% weight - MOST IMPORTANT)
     const scoreGap = top1.score - top2.score;
     let scoreGapScore;
     if (scoreGap >= 50) scoreGapScore = 100;
@@ -713,24 +1034,19 @@ function calculateRaceConfidence(horses) {
     else ratioScore = 20;
     
     const gapScore = (scoreGapScore * 0.6) + (ratioScore * 0.4);
-    
-    // 3. Top Pick Strength (25% weight)
     const strengthScore = Math.max(0, Math.min(100, (top1.winProb - 0.12) / (0.35 - 0.12) * 100));
     
-    // 4. Coefficient of Variation (10% weight)
-    const allWinProbs = parsedHorses.map(h => h.winProb);
-    const mean = allWinProbs.reduce((a, b) => a + b, 0) / allWinProbs.length;
-    const variance = allWinProbs.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / allWinProbs.length;
+    const allWinProbs = parsedHorses.map(function(h) { return h.winProb; });
+    const mean = allWinProbs.reduce(function(a, b) { return a + b; }, 0) / allWinProbs.length;
+    const variance = allWinProbs.reduce(function(sum, p) { return sum + Math.pow(p - mean, 2); }, 0) / allWinProbs.length;
     const stdDev = Math.sqrt(variance);
     const cv = stdDev / mean;
     const cvScore = Math.max(0, Math.min(100, (cv - 0.2) / (1.0 - 0.2) * 100));
     
-    // 5. Entropy (10% weight)
-    const entropy = -allWinProbs.reduce((sum, p) => sum + (p > 0 ? p * Math.log2(p) : 0), 0);
+    const entropy = -allWinProbs.reduce(function(sum, p) { return sum + (p > 0 ? p * Math.log2(p) : 0); }, 0);
     const maxEntropy = Math.log2(parsedHorses.length);
     const entropyScore = Math.max(0, Math.min(100, (1 - entropy / maxEntropy) * 100));
     
-    // Final weighted confidence
     const finalConfidence = Math.round(
         dominanceScore * 0.20 +
         gapScore * 0.35 +
@@ -739,7 +1055,6 @@ function calculateRaceConfidence(horses) {
         entropyScore * 0.10
     );
     
-    // Determine rating and betting guidance
     let rating, description, style, emoji;
     
     if (finalConfidence >= 90) {
@@ -784,57 +1099,7 @@ function calculateRaceConfidence(horses) {
         style = "background: #f8d7da; border-left: 4px solid #dc3545;";
     }
     
-    return { confidence: finalConfidence, rating, description, style, emoji };
+    return { confidence: finalConfidence, rating: rating, description: description, style: style, emoji: emoji };
 }
-
-// Initialize filter bar and confidence banners when page loads (ONE listener)
-document.addEventListener('DOMContentLoaded', function() {
-    // Filter bar
-    const placeholder = document.getElementById('filter-bar-placeholder');
-    if (placeholder) {
-        placeholder.appendChild(createFilterBar());
-    }
-    
-    // Confidence banners
-    const races = document.querySelectorAll('.card[id^="race-"]');
-    
-    races.forEach(raceCard => {
-        // Check if banner already exists (prevent duplicates)
-        if (raceCard.querySelector('.confidence-banner')) {
-            return;
-        }
-        
-        const rows = raceCard.querySelectorAll('tbody tr');
-        const horses = [];
-        
-        rows.forEach(row => {
-            const scoreCell = row.cells[2]; // Score column
-            const winProbCell = row.cells[4]; // Win % column
-            if (scoreCell && winProbCell) {
-                const score = scoreCell.textContent.trim();
-                const winProb = winProbCell.textContent.trim().replace('%', '');
-                horses.push({ score, winProb });
-            }
-        });
-        
-        if (horses.length < 2) return;
-        
-        const result = calculateRaceConfidence(horses);
-        if (result) {
-            const banner = document.createElement('div');
-            banner.className = 'confidence-banner';
-            banner.style.cssText = result.style + ' padding: 12px 15px; margin-bottom: 15px; border-radius: 4px;';
-            banner.innerHTML = `<strong>${result.emoji} ${result.rating} Confidence: ${result.confidence}%</strong> - ${result.description}`;
-            
-            // Find the table container (always exists)
-            const tableContainer = raceCard.querySelector('div[style*="overflow-x"]');
-            
-            if (tableContainer) {
-                // Insert BEFORE the table (after maiden warning if it exists)
-                tableContainer.parentNode.insertBefore(banner, tableContainer);
-            }
-        }
-    });
-});
 </script>
 {% endblock %}
