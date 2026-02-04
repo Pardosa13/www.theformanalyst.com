@@ -750,6 +750,50 @@ if (data.class_performance && Object.keys(data.class_performance).length > 0) {
     }
     html += '</tbody></table></div></div>';
     }
+    // Class Drops Analysis - NEW SECTION
+if (data.class_drops && Object.keys(data.class_drops).length > 0) {
+    html += '<div class="mb-4"><h5>📉 Class Drop Analysis (Top Picks Only)</h5>';
+    html += '<p class="text-muted small">Performance based on class point changes. Higher drops = bigger class advantages.</p>';
+    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+    html += '<th>Class Change</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
+    
+    // Define display order (drops first, then rises)
+    const dropOrder = ['100+', '90-99', '80-89', '70-79', '60-69', '50-59', '40-49', 
+                       '30-39', '20-29', '10-19', '0-9', 'Same Class', 
+                       'Rise 0-9', 'Rise 10-19', 'Rise 20-29', 'Rise 30+'];
+    
+    for (const dropRange of dropOrder) {
+        if (data.class_drops[dropRange] && data.class_drops[dropRange].runs > 0) {
+            const stats = data.class_drops[dropRange];
+            let strikeClass = '';
+            if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
+            else if (stats.strike_rate >= 12) strikeClass = 'text-success';
+            else if (stats.strike_rate < 8) strikeClass = 'text-danger';
+            
+            // Format display name
+            let displayName = dropRange;
+            if (dropRange === 'Same Class') {
+                displayName = '⚖️ Same Class (0 pts)';
+            } else if (dropRange.startsWith('Rise')) {
+                displayName = '🔺 Class Rise: ' + dropRange.replace('Rise ', '') + ' pts';
+            } else {
+                displayName = '🔻 Class Drop: ' + dropRange + ' pts';
+            }
+            
+            html += `<tr>
+                <td><strong>${displayName}</strong></td>
+                <td class="text-center">${stats.runs}</td>
+                <td class="text-center">${stats.wins}</td>
+                <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
+                <td class="text-center">${stats.places}</td>
+                <td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
+                <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
+            </tr>`;
+        }
+    }
+    html += '</tbody></table></div></div>';
+}
     // Tracks (ROI Breakdown)
 if (data.tracks && Object.keys(data.tracks).length > 0) {
     html += '<div class="mb-4"><h5>🏁 Track Performance (Top Picks Only)</h5>';
