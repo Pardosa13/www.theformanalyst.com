@@ -2985,18 +2985,26 @@ function getLowestSectionalsByRace(data) {
         });
 
         bestRecentData.forEach(h => {
-            const points = Math.round(h.points*10)/10;
-            horseScores[h.horseName].score += points;
-            horseScores[h.horseName].details.bestRecent = points;
-            const zScoreText = (h.zScore * -1).toFixed(2);
-            const rawVsAdj = `${h.rawBestTime.toFixed(2)}s → ${h.bestTime.toFixed(2)}s`;
-            const classInfo = h.formClass || 'unknown';
-            const classScore = h.adjustments.classScore || 0;
-            const weightCarried = h.weight.toFixed(1);
-            const typicalWeight = h.typicalWeight.toFixed(1);
-            const adjText = `wgt:${h.adjustments.weight >= 0 ? '+' : ''}${h.adjustments.weight.toFixed(2)}s (carried ${weightCarried}kg vs ~${typicalWeight}kg typical), class:${h.adjustments.class >= 0 ? '+' : ''}${h.adjustments.class.toFixed(2)}s`;
-            horseScores[h.horseName].note += `+${points.toFixed(1)}: best of last ${h.fromLast} (z=${zScoreText})\n  └─ ${rawVsAdj} (${adjText}) in ${classInfo} (${classScore.toFixed(0)} pts)\n`;
-        });
+    const points = Math.round(h.points*10)/10;
+    horseScores[h.horseName].score += points;
+    horseScores[h.horseName].details.bestRecent = points;
+    const zScoreText = (h.zScore * -1).toFixed(2);
+    const rawVsAdj = `${h.rawBestTime.toFixed(2)}s → ${h.bestTime.toFixed(2)}s`;
+    const classInfo = h.formClass || 'unknown';
+    const classScore = h.adjustments.classScore || 0;
+    const weightCarried = h.weight.toFixed(1);
+    const typicalWeight = h.typicalWeight.toFixed(1);
+    const adjText = `wgt:${h.adjustments.weight >= 0 ? '+' : ''}${h.adjustments.weight.toFixed(2)}s (carried ${weightCarried}kg vs ~${typicalWeight}kg typical), class:${h.adjustments.class >= 0 ? '+' : ''}${h.adjustments.class.toFixed(2)}s`;
+    
+    // NEW: Get actual historical times for this horse (oldest to newest)
+    const horseTimes = horseData[h.horseName] || [];
+    const last5 = horseTimes.slice(0, 5);
+    const adjustedTimesArray = last5.map(entry => entry.time.toFixed(2)).reverse();  // Reverse: oldest first
+    const rawTimesArray = last5.map(entry => entry.rawTime.toFixed(2)).reverse();
+    
+    // Add the history arrays to the notes
+    horseScores[h.horseName].note += `+${points.toFixed(1)}: best of last ${h.fromLast} (z=${zScoreText})\n  └─ ${rawVsAdj} (${adjText}) in ${classInfo} (${classScore.toFixed(0)} pts)\n  └─ HISTORY_ADJ: [${adjustedTimesArray.join(', ')}]\n  └─ HISTORY_RAW: [${rawTimesArray.join(', ')}]\n`;
+});
 
         consistencyData.forEach(h => {
             const points = Math.round(h.points*10)/10;
