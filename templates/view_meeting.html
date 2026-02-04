@@ -653,20 +653,20 @@ function prepareChartData(horses) {
     });
     
     // Use the longest history to create labels
-    let maxRuns = 0;
-    horses.forEach(function(horse) {
-        const runCount = (horse.history_adjusted || []).length;
-        if (runCount > maxRuns) maxRuns = runCount;
-    });
-    
-    const labels = [];
-    for (let i = maxRuns; i >= 1; i--) {
-        if (i === 1) {
-            labels.push('Last run');
-        } else {
-            labels.push(i + ' runs ago');
-        }
+var maxRuns = 0;
+horses.forEach(function(horse) {
+    var runCount = (horse.history_adjusted || []).length;
+    if (runCount > maxRuns) maxRuns = runCount;
+});
+
+var labels = [];
+for (var i = maxRuns; i >= 1; i--) {
+    if (i === 1) {
+        labels.push('Last run');
+    } else {
+        labels.push(i + ' runs ago');
     }
+}
     
     return {
         adjusted: { labels: labels, datasets: datasets.adjusted },
