@@ -2148,79 +2148,110 @@ def api_score_analysis():
 @app.route("/api/meeting/<int:meeting_id>/sectionals")
 @login_required
 def get_meeting_sectionals(meeting_id):
-    """API endpoint to get sectional data for charting"""
-    from flask import jsonify
-    import re
-    
-    meeting = Meeting.query.get_or_404(meeting_id)
-    races = Race.query.filter_by(meeting_id=meeting_id).order_by(Race.race_number).all()
-    
-    sectional_data = {}
-    
-    for race in races:
-        horses_data = []
+    """
+    Returns ACTUAL sectional times for each horse's last runs.
+    Parses the HISTORY arrays from notes.
+    """
+    try:
+        # Get all predictions for this meeting
+        predictions = Prediction.query.filter_by(meeting_id=meeting_id).all()
         
-        for horse in race.horses:
-            if not horse.prediction or not horse.prediction.notes:
-                continue
+        if not predictions:
+            return jsonify({}), 200
+        
+        # Group by race
+        races_data = {}
+        
+        for pred in predictions:
+            race_key = f"race_{pred.race_number}"
             
-            notes = horse.prediction.notes
-            horse_sectionals = {
-                'horse_name': horse.horse_name,
-                'score': horse.prediction.score,
-                'weighted_avg': None,
-                'best_recent': None,
-                'consistency': None
+            if race_key not in races_data:
+                races_data[race_key] = []
+            
+            # Extract ACTUAL sectional times from notes
+            sectional_data = extract_sectional_history(pred.notes)
+            
+            horse_data = {
+                'horse_name': pred.horse_name,
+                'score': pred.score,
+                'best_recent': sectional_data.get('best_recent'),
+                'weighted_avg': sectional_data.get('weighted_avg'),
+                'consistency': sectional_data.get('consistency'),
+                'history_adjusted': sectional_data.get('history_adjusted', []),
+                'history_raw': sectional_data.get('history_raw', []),
+                'has_data': len(sectional_data.get('history_adjusted', [])) > 0
             }
             
-            # Parse weighted average data
-            weighted_match = re.search(
-                r'([+-]?[\d.]+):\s*weighted avg \(z=([-\d.]+),\s*(\d+)\s*runs?\)',
-                notes
-            )
-            if weighted_match:
-                horse_sectionals['weighted_avg'] = {
-                    'score': float(weighted_match.group(1)),
-                    'zscore': float(weighted_match.group(2)),
-                    'run_count': int(weighted_match.group(3))
-                }
-            
-            # Parse best of last 5
-            best_match = re.search(
-                r'([+-]?[\d.]+):\s*best of last (\d+) \(z=([-\d.]+)\)\s*└─\s*([\d.]+)s\s*→\s*([\d.]+)s',
-                notes,
-                re.DOTALL
-            )
-            if best_match:
-                horse_sectionals['best_recent'] = {
-                    'score': float(best_match.group(1)),
-                    'from_last': int(best_match.group(2)),
-                    'zscore': float(best_match.group(3)),
-                    'raw_time': float(best_match.group(4)),
-                    'adjusted_time': float(best_match.group(5))
-                }
-            
-            # Parse consistency
-            consist_match = re.search(
-                r'([+-]?[\d.]+):\s*consistency - (\w+) \(SD=([\d.]+)s\)',
-                notes
-            )
-            if consist_match:
-                horse_sectionals['consistency'] = {
-                    'score': float(consist_match.group(1)),
-                    'rating': consist_match.group(2),
-                    'std_dev': float(consist_match.group(3))
-                }
-            
-            # Only include horses with sectional data
-            if horse_sectionals['weighted_avg'] or horse_sectionals['best_recent']:
-                horses_data.append(horse_sectionals)
+            races_data[race_key].append(horse_data)
         
-        # Sort by score descending
-        horses_data.sort(key=lambda x: x['score'], reverse=True)
-        sectional_data[f'race_{race.race_number}'] = horses_data
+        # Sort horses by score within each race
+        for race_key in races_data:
+            races_data[race_key].sort(key=lambda x: x['score'], reverse=True)
+        
+        return jsonify(races_data)
     
-    return jsonify(sectional_data)
+    except Exception as e:
+        print(f"Error in get_meeting_sectionals: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def extract_sectional_history(notes):
+    """
+    Extract actual sectional history arrays from notes.
+    
+    Returns dict with:
+    - history_adjusted: [float, ...] (oldest to newest)
+    - history_raw: [float, ...]
+    - best_recent: {adjusted_time, raw_time, zscore}
+    - weighted_avg: {zscore, run_count}
+    - consistency: {rating, std_dev}
+    """
+    import re
+    
+    result = {}
+    
+    if not notes:
+        return result
+    
+    # Extract HISTORY_ADJ array
+    adj_match = re.search(r'HISTORY_ADJ:\s*\[([\d.,\s]+)\]', notes)
+    if adj_match:
+        result['history_adjusted'] = [float(x.strip()) for x in adj_match.group(1).split(',')]
+    
+    # Extract HISTORY_RAW array
+    raw_match = re.search(r'HISTORY_RAW:\s*\[([\d.,\s]+)\]', notes)
+    if raw_match:
+        result['history_raw'] = [float(x.strip()) for x in raw_match.group(1).split(',')]
+    
+    # Extract best recent info: "best of last 5 (z=-0.54)" then "33.77s → 33.02s"
+    best_match = re.search(r'best of last (\d+) \(z=([-\d.]+)\)\s+└─\s+([\d.]+)s\s*→\s*([\d.]+)s', notes)
+    if best_match:
+        result['best_recent'] = {
+            'from_last': int(best_match.group(1)),
+            'zscore': float(best_match.group(2)),
+            'raw_time': float(best_match.group(3)),
+            'adjusted_time': float(best_match.group(4))
+        }
+    
+    # Extract weighted avg: "weighted avg (z=0.86, 3 runs)"
+    wavg_match = re.search(r'weighted avg \(z=([-\d.]+),\s*(\d+)\s*runs?\)', notes)
+    if wavg_match:
+        result['weighted_avg'] = {
+            'zscore': float(wavg_match.group(1)),
+            'run_count': int(wavg_match.group(2))
+        }
+    
+    # Extract consistency: "consistency - good (SD=0.44s)"
+    cons_match = re.search(r'consistency - (\w+) \(SD=([\d.]+)s\)', notes)
+    if cons_match:
+        result['consistency'] = {
+            'rating': cons_match.group(1),
+            'std_dev': float(cons_match.group(2))
+        }
+    
+    return result
     
 @app.route("/api/data/component-analysis")
 @login_required
