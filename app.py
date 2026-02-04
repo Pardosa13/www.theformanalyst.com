@@ -1102,9 +1102,10 @@ def analyze_race_classes(races_data, stake=10.0):
     class_stats = dict(sorted(class_stats.items(), key=lambda x: x[1]['roi'], reverse=True))
     
     return class_stats
-def analyze_class_drops(races_data, stake=10.0):
+    
+def analyze_class_drops(stake=10.0):
     """
-    Analyze performance by class drop magnitude (top picks only)
+    Analyze performance by class drop magnitude (ALL horses with results)
     Returns dict with stats for each class drop range
     """
     class_drop_stats = {}
@@ -1123,17 +1124,16 @@ def analyze_class_drops(races_data, stake=10.0):
             'profit': 0
         }
     
-    for race_key, horses in races_data.items():
-        if not horses:
-            continue
-        
-        # Sort by score to get top pick
-        horses_sorted = sorted(horses, key=lambda x: x['prediction'].score, reverse=True)
-        top_pick = horses_sorted[0]
-        
-        result = top_pick['result']
-        prediction = top_pick['prediction']
-        
+    # Query ALL horses with predictions AND results (regardless of if you backed them)
+    all_horses = db.session.query(Horse, Prediction, Result).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).filter(
+        Result.finish_position > 0
+    ).all()
+    
+    for horse, prediction, result in all_horses:
         won = result.finish_position == 1
         placed = result.finish_position in [1, 2, 3]
         sp = result.sp or 0
@@ -1195,7 +1195,7 @@ def analyze_class_drops(races_data, stake=10.0):
             class_drop_stats[bucket]['places'] += 1
         class_drop_stats[bucket]['profit'] += profit
     
-    # Calculate rates
+    # Calculate rates (OUTSIDE the loop - only run once after all horses processed)
     for bucket, stats in class_drop_stats.items():
         if stats['runs'] > 0:
             stats['strike_rate'] = (stats['wins'] / stats['runs']) * 100
@@ -2408,7 +2408,7 @@ def api_external_factors():
     
     class_performance_filtered = {k: v for k, v in class_performance.items() if v['runs'] >= 2}
 
-    class_drops = analyze_class_drops(races_data, stake=10.0)  # <-- ADD THIS LINE!
+    class_drops = analyze_class_drops(stake=10.0)
     
     result = jsonify({
         'jockeys_reliable': external_factors['jockeys_reliable'],
