@@ -1132,6 +1132,124 @@ function calculateRaceConfidence(horses) {
     
     return { confidence: finalConfidence, rating: rating, description: description, style: style, emoji: emoji };
 }
+    <script>
+// ====== HORSE SCRATCHING SYSTEM ======
+const STORAGE_KEY = 'scratched_horses_{{ meeting.id }}';
+
+// Load scratched horses from localStorage
+function loadScratchedHorses() {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+}
+
+// Save scratched horses to localStorage
+function saveScratchedHorses(scratchedList) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(scratchedList));
+}
+
+// Toggle scratch status for a horse
+function toggleScratch(horseName, raceNumber) {
+    let scratched = loadScratchedHorses();
+    const horseKey = `R${raceNumber}_${horseName}`;
+    
+    const index = scratched.indexOf(horseKey);
+    if (index > -1) {
+        // Unscratched
+        scratched.splice(index, 1);
+    } else {
+        // Scratched
+        scratched.push(horseKey);
+    }
+    
+    saveScratchedHorses(scratched);
+    updateScratchedDisplay();
+}
+
+// Update the visual display of scratched horses
+function updateScratchedDisplay() {
+    const scratched = loadScratchedHorses();
+    
+    document.querySelectorAll('table tbody tr').forEach(function(row) {
+        const horseNameDiv = row.querySelector('td:nth-child(2) div');
+        if (!horseNameDiv) return;
+        
+        const horseName = horseNameDiv.textContent.trim();
+        const raceCard = row.closest('.card[id^="race-"]');
+        const raceNumber = raceCard ? raceCard.id.replace('race-', '') : '';
+        const horseKey = `R${raceNumber}_${horseName}`;
+        
+        // Remove existing scratch badge and button
+        const existingBadge = horseNameDiv.querySelector('.scratch-badge');
+        if (existingBadge) existingBadge.remove();
+        
+        const existingBtn = horseNameDiv.querySelector('.scratch-btn');
+        if (existingBtn) existingBtn.remove();
+        
+        if (scratched.includes(horseKey)) {
+            // Apply scratched styling
+            row.style.backgroundColor = '#e9ecef';
+            row.style.opacity = '0.6';
+            row.style.textDecoration = 'line-through';
+            
+            // Add scratch badge
+            const badge = document.createElement('span');
+            badge.className = 'scratch-badge';
+            badge.style.cssText = 'background: #6c757d; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-left: 8px;';
+            badge.textContent = 'SCRATCHED';
+            horseNameDiv.appendChild(badge);
+            
+            // Add unscratch button
+            const btn = document.createElement('button');
+            btn.className = 'scratch-btn';
+            btn.style.cssText = 'background: #28a745; color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 10px; margin-left: 8px; cursor: pointer;';
+            btn.textContent = 'Unscratch';
+            btn.onclick = function(e) {
+                e.preventDefault();
+                toggleScratch(horseName, raceNumber);
+            };
+            horseNameDiv.appendChild(btn);
+            
+        } else {
+            // Remove scratched styling
+            const isTopPick = row.style.backgroundColor === 'rgb(212, 237, 218)';
+            const isSecond = row.style.backgroundColor === 'rgb(255, 243, 205)';
+            const isThird = row.style.backgroundColor === 'rgb(255, 228, 179)';
+            
+            if (isTopPick) {
+                row.style.backgroundColor = '#d4edda';
+            } else if (isSecond) {
+                row.style.backgroundColor = '#fff3cd';
+            } else if (isThird) {
+                row.style.backgroundColor = '#ffe4b3';
+            } else {
+                // Restore original zebra striping
+                const rowIndex = Array.from(row.parentElement.children).indexOf(row);
+                row.style.backgroundColor = rowIndex % 2 === 0 ? '#f8f9fa' : '#ffffff';
+            }
+            
+            row.style.opacity = '1';
+            row.style.textDecoration = 'none';
+            
+            // Add scratch button
+            const btn = document.createElement('button');
+            btn.className = 'scratch-btn';
+            btn.style.cssText = 'background: #6c757d; color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 10px; margin-left: 8px; cursor: pointer;';
+            btn.textContent = 'Scratch';
+            btn.onclick = function(e) {
+                e.preventDefault();
+                toggleScratch(horseName, raceNumber);
+            };
+            horseNameDiv.appendChild(btn);
+        }
+    });
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Wait a bit for other scripts to finish
+    setTimeout(updateScratchedDisplay, 500);
+});
+</script>
 </script>
 <!-- Chart.js must load BEFORE our scripts -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
