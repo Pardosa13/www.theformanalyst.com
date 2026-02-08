@@ -127,6 +127,19 @@ with app.app_context():
             print("Added best_bet_flagged_at column to predictions table")
     except Exception as e:
         print(f"Best Bet migration check: {e}")
+        # Migration: Add is_scratched column to horses table if it doesn't exist
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        horses_columns = [col['name'] for col in inspector.get_columns('horses')]
+        
+        if 'is_scratched' not in horses_columns:
+            with db.engine.connect() as conn:
+                conn.execute(text('ALTER TABLE horses ADD COLUMN is_scratched BOOLEAN DEFAULT FALSE'))
+                conn.commit()
+            print("Added is_scratched column to horses table")
+    except Exception as e:
+        print(f"Scratched migration check: {e}")
     
     # Migration: Create components table if it doesn't exist
     try:
