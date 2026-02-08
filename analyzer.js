@@ -3300,9 +3300,6 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             score += adjustedSectionalScore;
             if (sectionalWeight !== 1.0) notes += `ℹ️  Sectional weight applied: ${originalSectionalScore.toFixed(1)} × ${sectionalWeight.toFixed(2)} = ${adjustedSectionalScore.toFixed(1)}\n`;
             notes += matchingHorse.sectionalNote;
-            
-// Define sectional for later use (Colt bonus now in calculateScore)
-const rawSectional = parseFloat(String(horse['sectional'] || '').match(/(\d+\.?\d*)sec/)?.[1]);
 
 // NEW: Major class drop + slow sectional combo
 const todayClassScore = calculateClassScore(horse['class restrictions'], horse['race prizemoney']);
