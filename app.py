@@ -3043,36 +3043,6 @@ def best_bets():
     # Sort meetings by meeting name (which includes date in YYMMDD format)
     meetings_with_bets = dict(sorted(meetings_with_bets.items(), key=lambda x: x[0]))
 
-    # Flag new best bets and post to Telegram
-    logger.info(f"Number of best bets found: {len(best_bets)}")
-    updated = 0
-    newly_flagged_by_meeting = {}
-    
-    for bet in best_bets:
-        prediction = Prediction.query.filter_by(horse_id=bet['horse_id']).first()
-        if prediction and not prediction.best_bet_flagged_at:
-            prediction.best_bet_flagged_at = datetime.utcnow()
-            db.session.add(prediction)
-            updated += 1
-            
-            # Group newly flagged bets by meeting for Telegram posting
-            meeting_name = bet['meeting_name']
-            if meeting_name not in newly_flagged_by_meeting:
-                newly_flagged_by_meeting[meeting_name] = []
-            newly_flagged_by_meeting[meeting_name].append(bet)
-    
-    try:
-        db.session.commit()
-        logger.info(f"Flagged {updated} best bets and committed successfully.")
-        logger.info(f"About to post {len(newly_flagged_by_meeting)} meetings to Telegram")
-        
-        # Post newly flagged bets to Telegram (grouped by meeting)
-        for meeting_name, meeting_bets in newly_flagged_by_meeting.items():
-            post_best_bets_to_telegram(meeting_bets, meeting_name)
-            
-    except Exception as e:
-        logger.error(f"Commit failed: {str(e)}", exc_info=True)
-
     return render_template("best_bets.html",
         best_bets=best_bets,
         meetings_with_bets=meetings_with_bets,
@@ -3083,6 +3053,65 @@ def best_bets():
         min_score=min_score,
         min_gap=min_gap
     )
+@app.route("/best-bets/post", methods=["POST"])
+@login_required
+def post_best_bets_manual():
+    """Manually post selected best bets to Telegram and Twitter"""
+    if not current_user.is_admin:
+        flash("Admin only", "danger")
+        return redirect(url_for("best_bets"))
+    
+    try:
+        # Get the selected horse IDs from the form
+        horse_ids = request.form.getlist('bet_ids[]')
+        
+        if not horse_ids:
+            flash("No bets selected", "warning")
+            return redirect(url_for("best_bets"))
+        
+        # Group selected bets by meeting
+        bets_by_meeting = {}
+        
+        for horse_id in horse_ids:
+            horse = Horse.query.get(int(horse_id))
+            if not horse or not horse.prediction:
+                continue
+            
+            race = Race.query.get(horse.race_id)
+            meeting = Meeting.query.get(race.meeting_id)
+            
+            # Mark as flagged
+            if not horse.prediction.best_bet_flagged_at:
+                horse.prediction.best_bet_flagged_at = datetime.utcnow()
+                db.session.add(horse.prediction)
+            
+            # Build bet data structure matching what Telegram expects
+            meeting_name = meeting.meeting_name
+            if meeting_name not in bets_by_meeting:
+                bets_by_meeting[meeting_name] = []
+            
+            bets_by_meeting[meeting_name].append({
+                'race_number': race.race_number,
+                'horse_name': horse.horse_name,
+                'predicted_odds': horse.prediction.predicted_odds
+            })
+        
+        db.session.commit()
+        
+        # Post to Telegram and Twitter
+        posted_count = 0
+        for meeting_name, meeting_bets in bets_by_meeting.items():
+            success = post_best_bets_to_telegram(meeting_bets, meeting_name)
+            if success:
+                posted_count += 1
+        
+        flash(f"✓ Posted {posted_count} meeting(s) to Telegram and Twitter", "success")
+        
+    except Exception as e:
+        logger.error(f"Failed to post best bets: {str(e)}", exc_info=True)
+        flash(f"✗ Failed to post: {str(e)}", "danger")
+    
+    return redirect(url_for("best_bets"))
 @app.route("/test-telegram")
 @login_required
 def test_telegram():
