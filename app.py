@@ -1307,7 +1307,22 @@ def view_meeting(meeting_id):
     # All logged-in users can view all meetings
     results = get_meeting_results(meeting_id)
     return render_template("view_meeting.html", meeting=meeting, results=results)
-
+@app.route("/api/horse/<int:horse_id>/toggle-scratch", methods=["POST"])
+@login_required
+def toggle_horse_scratch(horse_id):
+    """Toggle scratch status for a horse"""
+    horse = Horse.query.get_or_404(horse_id)
+    
+    # Toggle the scratched status
+    horse.is_scratched = not horse.is_scratched
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'horse_id': horse_id,
+        'is_scratched': horse.is_scratched,
+        'horse_name': horse.horse_name
+    })
 
 @app.route("/meeting/<int:meeting_id>/delete", methods=["POST"])
 @login_required
