@@ -735,7 +735,7 @@ if (horseSex === 'Colt') {
     // Priority 1: Fast sectional Colt (most valuable)
     if (rawSectional && rawSectional < 34) {
         score += 25;
-        notes += '+25.0 : Fast sectional + COLT combo (elite speed)\n';
+        notes += '+25.0 : Fast sectional + COLT combo (44.4% SR, +33% ROI)\n';  // ← KEEP ORIGINAL TEXT
     }
     // Priority 2: 3yo Colt (age advantage)
     else if (horseAge === 3) {
