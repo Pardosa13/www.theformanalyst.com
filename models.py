@@ -86,6 +86,7 @@ class Horse(db.Model):
     
     # Store all CSV data as JSON for flexibility
     csv_data = db.Column(db.JSON)
+    is_scratched = db.Column(db.Boolean, default=False)  # NEW LINE
     
     # Relationships
     prediction = db.relationship('Prediction', backref='horse', uselist=False, cascade='all, delete-orphan')
