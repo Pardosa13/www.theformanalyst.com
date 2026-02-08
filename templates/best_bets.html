@@ -139,7 +139,8 @@
         </div>
         <div class="card-body">
             {% for race_num, race_data in meeting_data.races.items()|sort %}
-            <div class="mb-4">
+            <form method="POST" action="{{ url_for('post_best_bets_manual') }}" id="post-best-bets-form">
+                <div class="table-responsive">
                 <h5 class="border-bottom pb-2">
                     Race {{ race_data.race_number }} - 
                     {{ race_data.distance }} - 
@@ -151,6 +152,7 @@
                     <table class="table table-hover">
                         <thead>
                             <tr>
+                                <th><input type="checkbox" id="select-all"></th>
                                 <th>Horse</th>
                                 <th>Score</th>
                                 <th>Gap to 2nd</th>
@@ -166,6 +168,9 @@
                         <tbody>
                             {% for bet in race_data.horses %}
                             <tr>
+                                <td>
+                                    <input type="checkbox" name="bet_ids[]" value="{{ bet.horse_id }}" class="bet-checkbox">
+                                </td>
                                 <td>
     <strong>{{ bet.horse_name }}</strong>
     <br>
@@ -220,8 +225,9 @@
                             {% endfor %}
                         </tbody>
                     </table>
+                    </div>
+                </form>
                 </div>
-            </div>
             {% endfor %}
         </div>
     </div>
@@ -236,4 +242,38 @@
     padding: 0.5em 0.7em;
 }
 </style>
+
+<!-- Approval Button -->
+{% if total_bets > 0 %}
+<div class="row mt-4 mb-5">
+    <div class="col-md-12 text-center">
+        <button type="submit" form="post-best-bets-form" class="btn btn-success btn-lg" id="post-btn">
+            📤 Post Selected Bets to Telegram & Twitter
+        </button>
+        <p class="text-muted mt-2">
+            <small>Select bets using checkboxes, then click to post publicly</small>
+        </p>
+    </div>
+</div>
+{% endif %}
+
+<script>
+document.getElementById('select-all').addEventListener('change', function() {
+    const checkboxes = document.querySelectorAll('.bet-checkbox');
+    checkboxes.forEach(cb => cb.checked = this.checked);
+});
+
+document.getElementById('post-btn').addEventListener('click', function(e) {
+    const selected = document.querySelectorAll('.bet-checkbox:checked').length;
+    if (selected === 0) {
+        e.preventDefault();
+        alert('Please select at least one bet to post');
+        return;
+    }
+    if (!confirm(`Post ${selected} bet(s) to Telegram and Twitter?\n\nThis will publicly share these selections.`)) {
+        e.preventDefault();
+    }
+});
+</script>
+
 {% endblock %}
