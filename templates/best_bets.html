@@ -127,6 +127,9 @@
         </ul>
     </div>
     {% else %}
+    
+    <form method="POST" action="{{ url_for('post_best_bets_manual') }}" id="post-best-bets-form">
+    
     {% for meeting_name, meeting_data in meetings_with_bets.items() %}
     <div class="card mb-4">
         <div class="card-header bg-dark text-white">
@@ -139,8 +142,7 @@
         </div>
         <div class="card-body">
             {% for race_num, race_data in meeting_data.races.items()|sort %}
-            <form method="POST" action="{{ url_for('post_best_bets_manual') }}" id="post-best-bets-form">
-                <div class="table-responsive">
+    <div class="mb-4">
                 <h5 class="border-bottom pb-2">
                     Race {{ race_data.race_number }} - 
                     {{ race_data.distance }} - 
@@ -232,7 +234,11 @@
         </div>
     </div>
     {% endfor %}
+    
+    </form>
     {% endif %}
+
+</div>
 
 </div>
 
