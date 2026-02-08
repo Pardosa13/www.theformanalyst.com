@@ -137,23 +137,44 @@
                 </tr>
             </thead>
             <tbody>
-                {% for horse in race.horses %}
-                <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
-                    {% if loop.index == 1 %}style="background-color: #d4edda;"
-                    {% elif loop.index == 2 %}style="background-color: #fff3cd;"
-                    {% elif loop.index == 3 %}style="background-color: #ffe4b3;"
-                    {% else %}style="background-color: {% if loop.index is odd %}#f8f9fa{% else %}#ffffff{% endif %};"
-                    {% endif %}>
-                    <td style="padding: 12px; text-align: center; font-weight: bold; border-bottom: 1px solid #e2e8f0;">
-                        {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
-                    </td>
-                    <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">
-                        <div style="font-weight: 600;">{{ horse.horse_name }}</div>
-                        <div style="font-size: 12px; color: #6c757d;">
-                            {% if horse.jockey %}J: {{ horse.jockey }}{% endif %}
-                            {% if horse.trainer %} | T: {{ horse.trainer }}{% endif %}
-                        </div>
-                    </td>
+    {% for horse in race.horses %}
+    <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
+        data-horse-id="{{ horse.horse_id }}"
+        {% if horse.is_scratched %}
+            style="background-color: #e9ecef; opacity: 0.6; text-decoration: line-through;"
+        {% elif loop.index == 1 %}
+            style="background-color: #d4edda;"
+        {% elif loop.index == 2 %}
+            style="background-color: #fff3cd;"
+        {% elif loop.index == 3 %}
+            style="background-color: #ffe4b3;"
+        {% else %}
+            style="background-color: {% if loop.index is odd %}#f8f9fa{% else %}#ffffff{% endif %};"
+        {% endif %}>
+        <td style="padding: 12px; text-align: center; font-weight: bold; border-bottom: 1px solid #e2e8f0;">
+            {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
+        </td>
+        <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">
+            <div style="font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                <span>{{ horse.horse_name }}</span>
+                {% if horse.is_scratched %}
+                    <span style="background: #6c757d; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">SCRATCHED</span>
+                    <button onclick="toggleScratch({{ horse.horse_id }}, false)" 
+                            style="background: #28a745; color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 10px; cursor: pointer;">
+                        Unscratch
+                    </button>
+                {% else %}
+                    <button onclick="toggleScratch({{ horse.horse_id }}, true)" 
+                            style="background: #6c757d; color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 10px; cursor: pointer;">
+                        Scratch
+                    </button>
+                {% endif %}
+            </div>
+            <div style="font-size: 12px; color: #6c757d;">
+                {% if horse.jockey %}J: {{ horse.jockey }}{% endif %}
+                {% if horse.trainer %} | T: {{ horse.trainer }}{% endif %}
+            </div>
+        </td>
                     <td style="padding: 12px; text-align: center; font-weight: bold; font-size: 18px; border-bottom: 1px solid #e2e8f0;">
                         {{ "%.1f"|format(horse.score) }}
                     </td>
