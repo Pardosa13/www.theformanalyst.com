@@ -3303,6 +3303,9 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             // Define sectional for later use (Colt bonus now in calculateScore)
 const rawSectional = parseFloat(String(horse['sectional'] || '').match(/(\d+\.?\d*)sec/)?.[1]);
 
+// Define sectional for later use (Colt bonus now in calculateScore)
+const rawSectional = parseFloat(String(horse['sectional'] || '').match(/(\d+\.?\d*)sec/)?.[1]);
+
 // NEW: Major class drop + slow sectional combo
 const todayClassScore = calculateClassScore(horse['class restrictions'], horse['race prizemoney']);
 const lastClassScore = calculateClassScore(horse['form class'], horse['prizemoney']);
