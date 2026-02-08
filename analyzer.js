@@ -3301,25 +3301,20 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             if (sectionalWeight !== 1.0) notes += `ℹ️  Sectional weight applied: ${originalSectionalScore.toFixed(1)} × ${sectionalWeight.toFixed(2)} = ${adjustedSectionalScore.toFixed(1)}\n`;
             notes += matchingHorse.sectionalNote;
 
-// NEW: Major class drop + slow sectional combo
-const todayClassScore = calculateClassScore(horse['class restrictions'], horse['race prizemoney']);
-const lastClassScore = calculateClassScore(horse['form class'], horse['prizemoney']);
-const classChange = todayClassScore - lastClassScore;
-
-if (classChange < -30 && rawSectional && rawSectional >= 37) {
-    score += 30;
-    notes += '+30.0 : Major class drop + slow sectional combo (100% SR, +85% ROI - elite to easier)\n';
-}
             // NEW: Major class drop + slow sectional combo
             const todayClassScore = calculateClassScore(horse['class restrictions'], horse['race prizemoney']);
             const lastClassScore = calculateClassScore(horse['form class'], horse['prizemoney']);
             const classChange = todayClassScore - lastClassScore;
             
+            // Parse raw sectional for the combo detection
+            const sectionalMatch = String(horse['sectional'] || '').match(/(\d+\.?\d*)sec/);
+            const rawSectional = sectionalMatch ? parseFloat(sectionalMatch[1]) : null;
+            
             if (classChange < -30 && rawSectional && rawSectional >= 37) {
                 score += 30;
                 notes += '+30.0 : Major class drop + slow sectional combo (100% SR, +85% ROI - elite to easier)\n';
             }
-        }  // CLOSE if (matchingHorse)
+        }
         
         const matchingWeight = weightScores.find(w => parseInt(w.race) === parseInt(raceNumber) && w.name.toLowerCase().trim() === horseName.toLowerCase().trim());
         if (matchingWeight) {
