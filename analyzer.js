@@ -730,7 +730,7 @@ if (!isNaN(lastMargin) && !isNaN(lastPosition) && lastPosition > 1 && lastMargin
 }
     // === COLT BONUS SYSTEM (MUTUALLY EXCLUSIVE) ===
 if (horseSex === 'Colt') {
-    const rawSectional = parseFloat(String(horseRow['sectional'] || '').match(/(\d+\.?\d*)sec/)?.[1]);
+    const rawSectional = horseRow['sectional'] ? parseFloat(String(horseRow['sectional']).match(/(\d+\.?\d*)sec/)?.[1]) : null;
     
     // Priority 1: Fast sectional Colt (most valuable)
     if (rawSectional && rawSectional < 34) {
