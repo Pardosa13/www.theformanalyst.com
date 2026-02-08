@@ -1274,5 +1274,28 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 <!-- Chart.js must load BEFORE our scripts -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-
+<script>
+// ====== DATABASE-BACKED SCRATCH SYSTEM ======
+function toggleScratch(horseId, shouldScratch) {
+    fetch('/api/horse/' + horseId + '/toggle-scratch', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Reload page to show updated status
+            location.reload();
+        } else {
+            alert('Failed to update scratch status');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to update scratch status');
+    });
+}
+</script>
 {% endblock %}
