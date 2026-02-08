@@ -392,13 +392,6 @@ if (!isNaN(horseAge)) {
         notes += '+20.0 : 8yo Mare (118% ROI - specialist)\n';
     }
     
-    // === COLT BONUS ===
-    // 82.7% ROI, 20% SR - Proven edge
-    if (horseSex === 'Colt') {
-        score += 20;
-        notes += '+20.0 : COLT (82.7% ROI)\n';
-    }
-    
     // === STANDARD AGE BONUSES (REDUCED) ===
     // 3yo: Only -4.6% ROI - reduced from +5 to +3
     if (horseAge === 3) {
@@ -735,10 +728,25 @@ if (!isNaN(lastMargin) && !isNaN(lastPosition) && lastPosition > 1 && lastMargin
     score += 7;  // INCREASED from 5
     notes += '+7.0: Close loss last start (0.5-2.5L) - very competitive\n';
 }
-    // NEW: 3YO COLT COMBO
-if (horseSex === 'Colt' && horseAge === 3) {
-    score += 20;
-    notes += '+20.0 : 3yo COLT combo (44.4% SR, +33% ROI)\n';
+    // === COLT BONUS SYSTEM (MUTUALLY EXCLUSIVE) ===
+if (horseSex === 'Colt') {
+    const rawSectional = parseFloat(String(horseRow['sectional'] || '').match(/(\d+\.?\d*)sec/)?.[1]);
+    
+    // Priority 1: Fast sectional Colt (most valuable)
+    if (rawSectional && rawSectional < 34) {
+        score += 25;
+        notes += '+25.0 : Fast sectional + COLT combo (elite speed)\n';
+    }
+    // Priority 2: 3yo Colt (age advantage)
+    else if (horseAge === 3) {
+        score += 20;
+        notes += '+20.0 : 3yo COLT combo (44.4% SR, +33% ROI)\n';
+    }
+    // Priority 3: Base Colt bonus
+    else {
+        score += 20;
+        notes += '+20.0 : COLT (82.7% ROI)\n';
+    }
 }
     // Check for perfect record specialist bonus
     const perfectRecordResult = calculatePerfectRecordBonus ? calculatePerfectRecordBonus(horseRow, trackCondition) : { bonus: 0, note: '' };
@@ -3291,14 +3299,7 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             score += adjustedSectionalScore;
             if (sectionalWeight !== 1.0) notes += `ℹ️  Sectional weight applied: ${originalSectionalScore.toFixed(1)} × ${sectionalWeight.toFixed(2)} = ${adjustedSectionalScore.toFixed(1)}\n`;
             notes += matchingHorse.sectionalNote;
-            // NEW: Fast sectional + Colt combo bonus
-            const horseSex = String(horse['horse sex'] || '').trim();
-            const rawSectional = parseFloat(String(horse['sectional'] || '').match(/(\d+\.?\d*)sec/)?.[1]);
             
-            if (horseSex === 'Colt' && rawSectional && rawSectional < 34) {
-                score += 25;
-                notes += '+25.0 : Fast sectional + COLT combo (44.4% SR, +33% ROI)\n';
-            }
             // NEW: Major class drop + slow sectional combo
             const todayClassScore = calculateClassScore(horse['class restrictions'], horse['race prizemoney']);
             const lastClassScore = calculateClassScore(horse['form class'], horse['prizemoney']);
