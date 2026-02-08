@@ -87,6 +87,7 @@
             </div>
         </div>
     </div>
+
     <!-- Active Components Legend -->
     <div class="row mb-4">
         <div class="col-md-12">
@@ -129,111 +130,108 @@
     {% else %}
     
     <form method="POST" action="{{ url_for('post_best_bets_manual') }}" id="post-best-bets-form">
-    
-    {% for meeting_name, meeting_data in meetings_with_bets.items() %}
-    <div class="card mb-4">
-        <div class="card-header bg-dark text-white">
-            <h4 class="mb-0">
-                📍 {{ meeting_data.meeting_name }}
-                <span class="badge badge-light text-dark ml-2">
-                    Uploaded {{ meeting_data.uploaded_at.strftime('%I:%M %p') }}
-                </span>
-            </h4>
-        </div>
-        <div class="card-body">
-            {% for race_num, race_data in meeting_data.races.items()|sort %}
-    <div class="mb-4">
-                <h5 class="border-bottom pb-2">
-                    Race {{ race_data.race_number }} - 
-                    {{ race_data.distance }} - 
-                    {{ race_data.race_class }} - 
-                    {{ race_data.track_condition|title }}
-                </h5>
-                
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th><input type="checkbox" id="select-all"></th>
-                                <th>Horse</th>
-                                <th>Score</th>
-                                <th>Gap to 2nd</th>
-                                <th>Odds</th>
-                                <th>Win %</th>
-                                <th>Barrier</th>
-                                <th>Weight</th>
-                                <th>Jockey</th>
-                                <th>Trainer</th>
-                                <th>Matched Components</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for bet in race_data.horses %}
-                            <tr>
-                                <td>
-                                    <input type="checkbox" name="bet_ids[]" value="{{ bet.horse_id }}" class="bet-checkbox">
-                                </td>
-                                <td>
-    <strong>{{ bet.horse_name }}</strong>
-    <br>
-    <small class="text-muted">{{ bet.form }}</small>
-</td>
-<td>
-    <span class="badge bg-{% if bet.score >= 130 %}success{% elif bet.score >= 100 %}warning{% else %}danger{% endif %} badge-lg">
-    {{ bet.score|round(1) }}
-    </span>
-</td>
-<td>
-    <span class="badge bg-{% if bet.score_gap >= 50 %}success{% elif bet.score_gap >= 30 %}warning{% else %}danger{% endif %} badge-lg">
-        +{{ bet.score_gap|round(1) }}
-    </span>
-    {% if bet.score_gap >= 50 %}
-    <br><small class="text-success">🎯 Dominant</small>
-    {% elif bet.score_gap >= 30 %}
-    <br><small class="text-warning">⚠️ Medium Confidence</small>
-    {% else %}
-    <br><small class="text-danger">⚠️ Lower Confidence</small>
-    {% endif %}
-</td>
-<td>{{ bet.predicted_odds }}</td>
-<td>{{ bet.win_probability }}</td>
-<td>{{ bet.barrier }}</td>
-<td>{{ bet.weight }}kg</td>
-<td>{{ bet.jockey }}</td>
-<td>{{ bet.trainer }}</td>
-<td>
-    <span class="badge bg-primary">{{ bet.component_count }} matched</span>
-    <button class="btn btn-sm btn-outline-info" 
-        data-bs-toggle="collapse" 
-        data-bs-target="#components-{{ bet.horse_id }}">
-    View
-</button>
-    </button>
-    <div id="components-{{ bet.horse_id }}" class="collapse mt-2">
-        <ul class="list-unstyled mb-0">
-            {% for comp in bet.components %}
-            <li class="mb-1">
-                <span class="badge bg-success">✓</span>
-                {{ comp.name }}
-                <small class="text-muted">
-                    ({{ comp.sr|round(1) }}% SR, {{ comp.roi|round(1) }}% ROI, N={{ comp.appearances }})
-                </small>
-            </li>
-            {% endfor %}
-        </ul>
-    </div>
-</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+        {% for meeting_name, meeting_data in meetings_with_bets.items() %}
+        <div class="card mb-4">
+            <div class="card-header bg-dark text-white">
+                <h4 class="mb-0">
+                    📍 {{ meeting_data.meeting_name }}
+                    <span class="badge badge-light text-dark ml-2">
+                        Uploaded {{ meeting_data.uploaded_at.strftime('%I:%M %p') }}
+                    </span>
+                </h4>
+            </div>
+            <div class="card-body">
+                {% for race_num, race_data in meeting_data.races.items()|sort %}
+                <div class="mb-4">
+                    <h5 class="border-bottom pb-2">
+                        Race {{ race_data.race_number }} - 
+                        {{ race_data.distance }} - 
+                        {{ race_data.race_class }} - 
+                        {{ race_data.track_condition|title }}
+                    </h5>
+                    
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" id="select-all"></th>
+                                    <th>Horse</th>
+                                    <th>Score</th>
+                                    <th>Gap to 2nd</th>
+                                    <th>Odds</th>
+                                    <th>Win %</th>
+                                    <th>Barrier</th>
+                                    <th>Weight</th>
+                                    <th>Jockey</th>
+                                    <th>Trainer</th>
+                                    <th>Matched Components</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for bet in race_data.horses %}
+                                <tr>
+                                    <td>
+                                        <input type="checkbox" name="bet_ids[]" value="{{ bet.horse_id }}" class="bet-checkbox">
+                                    </td>
+                                    <td>
+                                        <strong>{{ bet.horse_name }}</strong>
+                                        <br>
+                                        <small class="text-muted">{{ bet.form }}</small>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-{% if bet.score >= 130 %}success{% elif bet.score >= 100 %}warning{% else %}danger{% endif %} badge-lg">
+                                            {{ bet.score|round(1) }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-{% if bet.score_gap >= 50 %}success{% elif bet.score_gap >= 30 %}warning{% else %}danger{% endif %} badge-lg">
+                                            +{{ bet.score_gap|round(1) }}
+                                        </span>
+                                        {% if bet.score_gap >= 50 %}
+                                        <br><small class="text-success">🎯 Dominant</small>
+                                        {% elif bet.score_gap >= 30 %}
+                                        <br><small class="text-warning">⚠️ Medium Confidence</small>
+                                        {% else %}
+                                        <br><small class="text-danger">⚠️ Lower Confidence</small>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ bet.predicted_odds }}</td>
+                                    <td>{{ bet.win_probability }}</td>
+                                    <td>{{ bet.barrier }}</td>
+                                    <td>{{ bet.weight }}kg</td>
+                                    <td>{{ bet.jockey }}</td>
+                                    <td>{{ bet.trainer }}</td>
+                                    <td>
+                                        <span class="badge bg-primary">{{ bet.component_count }} matched</span>
+                                        <button class="btn btn-sm btn-outline-info" 
+                                                data-bs-toggle="collapse" 
+                                                data-bs-target="#components-{{ bet.horse_id }}">
+                                            View
+                                        </button>
+                                        <div id="components-{{ bet.horse_id }}" class="collapse mt-2">
+                                            <ul class="list-unstyled mb-0">
+                                                {% for comp in bet.components %}
+                                                <li class="mb-1">
+                                                    <span class="badge bg-success">✓</span>
+                                                    {{ comp.name }}
+                                                    <small class="text-muted">
+                                                        ({{ comp.sr|round(1) }}% SR, {{ comp.roi|round(1) }}% ROI, N={{ comp.appearances }})
+                                                    </small>
+                                                </li>
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-            {% endfor %}
+                {% endfor %}
+            </div>
         </div>
-    </div>
-    {% endfor %}
-    
+        {% endfor %}
     </form>
     {% endif %}
 
