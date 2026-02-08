@@ -453,24 +453,24 @@ def get_meeting_results(meeting_id):
         }
         
         for horse in horses:
-    pred = horse.prediction
-    horse_data = {
-        'horse_id': horse.id,  # NEW LINE
-        'horse_name': horse.horse_name,
-        'barrier': horse.barrier,
-        'weight': horse.weight,
-        'jockey': horse.jockey,
-        'trainer': horse.trainer,
-        'form': horse.form,
-        'score': pred.score if pred else 0,
-        'odds': pred.predicted_odds if pred else '',
-        'win_probability': pred.win_probability if pred else '',
-        'performance_component': pred.performance_component if pred else '',
-        'base_probability': pred.base_probability if pred else '',
-        'notes': pred.notes if pred else '',
-        'is_scratched': horse.is_scratched  # NEW LINE
-    }
-    race_data['horses'].append(horse_data)
+            pred = horse.prediction
+            horse_data = {
+                'horse_id': horse.id,
+                'horse_name': horse.horse_name,
+                'barrier': horse.barrier,
+                'weight': horse.weight,
+                'jockey': horse.jockey,
+                'trainer': horse.trainer,
+                'form': horse.form,
+                'score': pred.score if pred else 0,
+                'odds': pred.predicted_odds if pred else '',
+                'win_probability': pred.win_probability if pred else '',
+                'performance_component': pred.performance_component if pred else '',
+                'base_probability': pred.base_probability if pred else '',
+                'notes': pred.notes if pred else '',
+                'is_scratched': horse.is_scratched
+            }
+            race_data['horses'].append(horse_data)
         
         # Sort horses by score descending
         race_data['horses'].sort(key=lambda x: x['score'], reverse=True)
