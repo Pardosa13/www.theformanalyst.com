@@ -730,12 +730,13 @@ if (!isNaN(lastMargin) && !isNaN(lastPosition) && lastPosition > 1 && lastMargin
 }
     // === COLT BONUS SYSTEM (MUTUALLY EXCLUSIVE) ===
 if (horseSex === 'Colt') {
-    const rawSectional = horseRow['sectional'] ? parseFloat(String(horseRow['sectional']).match(/(\d+\.?\d*)sec/)?.[1]) : null;
+    const sectionalMatch = String(horseRow['sectional'] || '').match(/(\d+\.?\d*)sec/);
+    const rawSectional = sectionalMatch ? parseFloat(sectionalMatch[1]) : null;
     
     // Priority 1: Fast sectional Colt (most valuable)
     if (rawSectional && rawSectional < 34) {
         score += 25;
-        notes += '+25.0 : Fast sectional + COLT combo (44.4% SR, +33% ROI)\n';  // ← KEEP ORIGINAL TEXT
+        notes += '+25.0 : Fast sectional + COLT combo (44.4% SR, +33% ROI)\n';
     }
     // Priority 2: 3yo Colt (age advantage)
     else if (horseAge === 3) {
