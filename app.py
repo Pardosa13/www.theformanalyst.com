@@ -3196,7 +3196,7 @@ def test_telegram():
     
     return redirect(url_for("admin_panel"))
     
-    @app.route("/results/<int:meeting_id>/fetch-betfair", methods=["POST"])
+@app.route("/results/<int:meeting_id>/fetch-betfair", methods=["POST"])
 @login_required
 def fetch_betfair_results(meeting_id):
     """Fetch and auto-populate results from Betfair"""
