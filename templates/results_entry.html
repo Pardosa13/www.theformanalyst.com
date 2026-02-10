@@ -5,9 +5,36 @@
 {% block content %}
 <h1>{{ meeting.meeting_name }}</h1>
 
+<!-- ADD THIS BETFAIR BUTTON -->
+{% if current_user.is_admin %}
+<div style="margin: 20px 0;">
+    <form method="POST" action="{{ url_for('fetch_betfair_results', meeting_id=meeting.id) }}" style="display: inline;">
+        <button type="submit" class="btn" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);">
+            🔄 Auto-Fill Results from Betfair
+        </button>
+    </form>
+    <span style="color: #6c757d; margin-left: 15px; font-size: 14px;">
+        Automatically fetch finish positions and SPs from Betfair API
+    </span>
+</div>
+{% endif %}
+
 <div style="margin-bottom: 20px;">
     <a href="{{ url_for('results') }}" style="color: #667eea; text-decoration: none;">← Back to Results</a>
 </div>
+```
+
+**✅ What this does:** Adds a big purple "Auto-Fill Results from Betfair" button that only admins can see.
+
+---
+
+## **STEP 7: Add Environment Variables to Railway**
+
+Go to your Railway dashboard and add these **3 environment variables**:
+```
+BETFAIR_USERNAME=your_betfair_username_here
+BETFAIR_PASSWORD=your_betfair_password_here
+BETFAIR_APP_KEY=amyMWFeTpLAxmSyo
 
 <div class="card">
     <div style="margin-bottom: 20px;">
