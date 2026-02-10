@@ -135,6 +135,9 @@ class BetfairService:
         """Login to Betfair and get session token"""
         try:
             logger.info("Attempting Betfair login...")
+            logger.info(f"Username: {BETFAIR_USERNAME}")
+            logger.info(f"App Key: {BETFAIR_APP_KEY}")
+            logger.info(f"Endpoint: {IDENTITY_URL}")
             
             headers = {
                 'X-Application': BETFAIR_APP_KEY,
@@ -148,17 +151,23 @@ class BetfairService:
             
             response = requests.post(IDENTITY_URL, data=payload, headers=headers, timeout=10)
             
+            logger.info(f"Response Status: {response.status_code}")
+            logger.info(f"Response Body: {response.text}")
+            
             if response.status_code == 200:
                 data = response.json()
+                logger.info(f"Login Status: {data.get('loginStatus')}")
                 if data.get('loginStatus') == 'SUCCESS':
                     self.session_token = data.get('sessionToken')
                     logger.info("✓ Betfair login successful")
                     return True
                 else:
                     logger.error(f"Login failed: {data.get('loginStatus')}")
+                    logger.error(f"Full response: {data}")
                     return False
             else:
                 logger.error(f"Login HTTP error: {response.status_code}")
+                logger.error(f"Response text: {response.text}")
                 return False
                 
         except Exception as e:
