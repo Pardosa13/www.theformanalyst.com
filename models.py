@@ -62,6 +62,7 @@ class Race(db.Model):
     distance = db.Column(db.String(50))
     race_class = db.Column(db.String(50))
     track_condition = db.Column(db.String(50))
+    market_id = db.Column(db.String(255))  # ADD THIS LINE - Betfair market ID
 
     
     # Relationships
