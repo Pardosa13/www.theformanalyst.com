@@ -17,7 +17,7 @@ BETFAIR_PASSWORD = os.environ.get('BETFAIR_PASSWORD')
 BETFAIR_APP_KEY = os.environ.get('BETFAIR_APP_KEY', 'amyMWFeTpLAxmSyo')
 
 # API endpoints
-IDENTITY_URL = "https://identitysso.betfair.com/api/login"
+IDENTITY_URL = "https://identitysso-api.betfair.com.au/api/login"
 BETTING_URL = "https://api.betfair.com/exchange/betting/json-rpc/v1"
 
 # Track name mapping (Your CSV names -> Betfair API names)
