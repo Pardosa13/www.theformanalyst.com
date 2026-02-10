@@ -111,7 +111,7 @@ with app.app_context():
             with db.engine.connect() as conn:
                 conn.execute(text('ALTER TABLE races ADD COLUMN market_id VARCHAR(255)'))
                 conn.commit()
-            print("Added market_id column to races table")
+            print("✓ Added market_id column to races table")
     except Exception as e:
         print(f"Migration check: {e}")
     # Migration: Add best_bet_flagged_at column if it doesn't exist
@@ -424,6 +424,33 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
     races_data = None
     import gc
     gc.collect()
+    
+    # NEW: Store Betfair market IDs in background
+    try:
+        from betfair_service import BetfairService, parse_meeting_name
+        
+        meeting_date, track_name = parse_meeting_name(meeting.meeting_name)
+        
+        if meeting_date and track_name:
+            betfair = BetfairService()
+            markets = betfair.find_markets_for_meeting(meeting_date, track_name)
+            
+            if markets:
+                matched = 0
+                for race in meeting.races:
+                    market_id = betfair.match_race_to_market(race.race_number, markets)
+                    if market_id:
+                        race.market_id = market_id
+                        matched += 1
+                
+                db.session.commit()
+                logger.info(f"✓ Stored {matched} Betfair market IDs for {meeting.meeting_name}")
+            else:
+                logger.warning(f"⚠️ No Betfair markets found for {meeting.meeting_name}")
+    except Exception as e:
+        logger.warning(f"Could not store Betfair market IDs: {str(e)}")
+        # Don't fail the upload if Betfair is unavailable
+        pass
     
     return meeting
 
@@ -3169,6 +3196,144 @@ def test_telegram():
     
     return redirect(url_for("admin_panel"))
     
+    @app.route("/results/<int:meeting_id>/fetch-betfair", methods=["POST"])
+@login_required
+def fetch_betfair_results(meeting_id):
+    """Fetch and auto-populate results from Betfair"""
+    if not current_user.is_admin:
+        flash("Admin access required", "danger")
+        return redirect(url_for('results_entry', meeting_id=meeting_id))
+    
+    from betfair_service import BetfairService, parse_meeting_name
+    
+    meeting = Meeting.query.get_or_404(meeting_id)
+    
+    try:
+        betfair = BetfairService()
+        
+        # Parse meeting name to get date and track
+        meeting_date, track_name = parse_meeting_name(meeting.meeting_name)
+        
+        if not meeting_date or not track_name:
+            flash(f"Could not parse meeting name: {meeting.meeting_name}", "danger")
+            return redirect(url_for('results_entry', meeting_id=meeting_id))
+        
+        races_updated = 0
+        horses_updated = 0
+        errors = []
+        
+        for race in meeting.races:
+            # Skip if no market ID stored
+            if not race.market_id:
+                errors.append(f"Race {race.race_number}: No Betfair market ID stored")
+                continue
+            
+            # Fetch results from Betfair
+            results = betfair.get_race_results(race.market_id)
+            
+            if not results:
+                errors.append(f"Race {race.race_number}: No results available yet")
+                continue
+            
+            # Get runner names
+            runner_names = betfair.get_runner_names(race.market_id)
+            
+            # Match horses to results
+            for horse in race.horses:
+                # Match horse name to Betfair runner
+                selection_id = betfair.match_horse_to_runner(horse.horse_name, runner_names)
+                
+                if not selection_id:
+                    errors.append(f"Race {race.race_number}: Could not match horse '{horse.horse_name}'")
+                    continue
+                
+                # Find result for this selection
+                horse_result = next((r for r in results if r['selection_id'] == selection_id), None)
+                
+                if not horse_result:
+                    continue
+                
+                # Update or create result
+                if horse.result:
+                    horse.result.finish_position = horse_result['position']
+                    horse.result.sp = horse_result['sp']
+                    horse.result.recorded_at = datetime.utcnow()
+                    horse.result.recorded_by = current_user.id
+                else:
+                    result = Result(
+                        horse_id=horse.id,
+                        finish_position=horse_result['position'],
+                        sp=horse_result['sp'],
+                        recorded_by=current_user.id
+                    )
+                    db.session.add(result)
+                
+                horses_updated += 1
+            
+            races_updated += 1
+        
+        db.session.commit()
+        
+        if horses_updated > 0:
+            flash(f"✓ Updated {horses_updated} horses across {races_updated} races from Betfair", "success")
+        else:
+            flash("⚠️ No results could be fetched. Races may not be settled yet.", "warning")
+        
+        if errors:
+            flash(f"Some issues: {len(errors)} warnings", "warning")
+            for error in errors[:5]:  # Show first 5 errors
+                logger.warning(error)
+    
+    except Exception as e:
+        logger.error(f"Betfair fetch error: {str(e)}", exc_info=True)
+        flash(f"Betfair error: {str(e)}", "danger")
+    
+    return redirect(url_for('results_entry', meeting_id=meeting_id))
+
+
+@app.route("/meeting/<int:meeting_id>/store-market-ids", methods=["POST"])
+@login_required
+def store_betfair_market_ids(meeting_id):
+    """Store Betfair market IDs for a meeting (called after CSV upload)"""
+    from betfair_service import BetfairService, parse_meeting_name
+    
+    meeting = Meeting.query.get_or_404(meeting_id)
+    
+    try:
+        betfair = BetfairService()
+        
+        # Parse meeting name
+        meeting_date, track_name = parse_meeting_name(meeting.meeting_name)
+        
+        if not meeting_date or not track_name:
+            logger.warning(f"Could not parse meeting name: {meeting.meeting_name}")
+            return jsonify({'success': False, 'error': 'Invalid meeting name format'})
+        
+        # Find markets on Betfair
+        markets = betfair.find_markets_for_meeting(meeting_date, track_name)
+        
+        if not markets:
+            logger.warning(f"No Betfair markets found for {meeting.meeting_name}")
+            return jsonify({'success': False, 'error': 'No markets found on Betfair'})
+        
+        # Match each race to a market
+        matched = 0
+        for race in meeting.races:
+            market_id = betfair.match_race_to_market(race.race_number, markets)
+            
+            if market_id:
+                race.market_id = market_id
+                matched += 1
+        
+        db.session.commit()
+        
+        logger.info(f"Stored {matched} market IDs for {meeting.meeting_name}")
+        return jsonify({'success': True, 'matched': matched, 'total': len(meeting.races)})
+    
+    except Exception as e:
+        logger.error(f"Error storing market IDs: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)})
+        
     # ----- CHAT SYSTEM ROUTES -----
 
 RACING_SYSTEM_PROMPT = """You are an expert horse racing analyst with direct access to The Form Analyst database through tools.
