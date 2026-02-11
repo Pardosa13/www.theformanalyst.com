@@ -1,5 +1,4 @@
 import os
-import betfairlightweight
 import requests
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -11,7 +10,7 @@ BETFAIR_USERNAME = os.environ.get('BETFAIR_USERNAME')
 BETFAIR_PASSWORD = os.environ.get('BETFAIR_PASSWORD')
 BETFAIR_APP_KEY = os.environ.get('BETFAIR_APP_KEY', 'amyMWFeTpLAxmSyo')
 
-# SmartProxy Configuration
+# SmartProxy Configuration (Optional - will try without first)
 PROXY_HOST = os.environ.get('PROXY_HOST')
 PROXY_USER = os.environ.get('PROXY_USER')
 PROXY_PASS = os.environ.get('PROXY_PASS')
@@ -59,76 +58,129 @@ TRACK_MAPPING = {
 
 class BetfairService:
     def __init__(self):
-        self.trading = None
+        self.session_token = None
         self.logged_in = False
         
         if not BETFAIR_USERNAME or not BETFAIR_PASSWORD or not BETFAIR_APP_KEY:
             logger.error("❌ Missing Betfair credentials")
             return
         
-        # Create a custom requests session with proxy
-        session = requests.Session()
-        
-        if PROXY_HOST and PROXY_USER and PROXY_PASS:
-            # Configure proxy
-            proxy_url = f'http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}'
-            session.proxies = {
-                'http': proxy_url,
-                'https': proxy_url
-            }
-            logger.info(f"✓ Proxy configured: {PROXY_HOST}")
-        else:
-            logger.warning("⚠️ No proxy configured - Betfair may block requests")
-        
-        # Set timeouts to prevent hanging
-        session.request = self._timeout_wrapper(session.request)
-        
-        # Initialize the betfairlightweight client with custom session
-        self.trading = betfairlightweight.APIClient(
-            username=BETFAIR_USERNAME,
-            password=BETFAIR_PASSWORD,
-            app_key=BETFAIR_APP_KEY,
-            session=session  # Pass custom session with proxy
-        )
-        
-        logger.info("✓ Betfair client initialized")
-    
-    def _timeout_wrapper(self, original_request):
-        """Wrap requests with timeout to prevent hanging"""
-        def request_with_timeout(*args, **kwargs):
-            if 'timeout' not in kwargs:
-                kwargs['timeout'] = 10  # 10 second timeout
-            return original_request(*args, **kwargs)
-        return request_with_timeout
+        logger.info("✓ Betfair service initialized")
     
     def login(self):
-        """Login to Betfair using interactive login (no certs needed)"""
-        if not self.trading:
-            logger.error("❌ Betfair client not initialized")
-            return False
-        
-        if self.logged_in:
+        """
+        Login to Betfair using Interactive Login endpoint
+        Tries direct connection first, then proxy if that fails
+        """
+        if self.logged_in and self.session_token:
             return True
+        
+        logger.info("=" * 60)
+        logger.info("Attempting Betfair login...")
+        logger.info(f"Username: {BETFAIR_USERNAME}")
+        logger.info(f"App Key: {BETFAIR_APP_KEY}")
+        
+        # Try direct connection first (no proxy)
+        if self._try_login(use_proxy=False):
+            return True
+        
+        # If direct fails and proxy is configured, try with proxy
+        if PROXY_HOST and PROXY_USER and PROXY_PASS:
+            logger.info("Direct connection failed, trying proxy...")
+            if self._try_login(use_proxy=True):
+                return True
+        
+        logger.error("❌ All login attempts failed")
+        logger.info("=" * 60)
+        return False
+    
+    def _try_login(self, use_proxy=False):
+        """Attempt login with or without proxy"""
+        try:
+            headers = {
+                'X-Application': BETFAIR_APP_KEY,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json'
+            }
+            
+            data = {
+                'username': BETFAIR_USERNAME,
+                'password': BETFAIR_PASSWORD
+            }
+            
+            proxies = None
+            if use_proxy:
+                proxy_url = f'http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}'
+                proxies = {
+                    'http': proxy_url,
+                    'https': proxy_url
+                }
+                logger.info(f"Using proxy: {PROXY_HOST}")
+            else:
+                logger.info("Trying direct connection (no proxy)")
+            
+            # Interactive login endpoint
+            url = 'https://identitysso.betfair.com/api/login'
+            
+            response = requests.post(
+                url,
+                headers=headers,
+                data=data,
+                proxies=proxies,
+                timeout=10
+            )
+            
+            logger.info(f"Response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                if result.get('status') == 'SUCCESS':
+                    self.session_token = result.get('token')
+                    self.logged_in = True
+                    logger.info("✅ Betfair login successful!")
+                    logger.info(f"Session token: {self.session_token[:20]}...")
+                    logger.info("=" * 60)
+                    return True
+                else:
+                    logger.error(f"❌ Login failed: {result.get('error', 'Unknown error')}")
+                    return False
+            else:
+                logger.error(f"❌ HTTP {response.status_code}: {response.text[:200]}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Login exception: {str(e)}")
+            return False
+    
+    def _make_request(self, method, url, data=None):
+        """Make authenticated API request"""
+        if not self.session_token:
+            if not self.login():
+                return None
+        
+        headers = {
+            'X-Application': BETFAIR_APP_KEY,
+            'X-Authentication': self.session_token,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
         
         try:
-            logger.info("=" * 60)
-            logger.info("Attempting Betfair login...")
-            logger.info(f"Username: {BETFAIR_USERNAME}")
-            logger.info(f"App Key: {BETFAIR_APP_KEY}")
+            if method == 'POST':
+                response = requests.post(url, headers=headers, json=data, timeout=15)
+            else:
+                response = requests.get(url, headers=headers, timeout=15)
             
-            # Use interactive login (no SSL certificates required)
-            self.trading.login_interactive()
-            
-            self.logged_in = True
-            logger.info("✅ Betfair login successful!")
-            logger.info(f"Session token: {self.trading.session_token[:20]}...")
-            logger.info("=" * 60)
-            return True
-            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"API request failed: {response.status_code}")
+                return None
+                
         except Exception as e:
-            logger.error(f"❌ Betfair login failed: {str(e)}")
-            logger.error("=" * 60)
-            return False
+            logger.error(f"API request exception: {str(e)}")
+            return None
     
     def find_markets_for_meeting(self, meeting_date, track_name):
         """Find Betfair markets for a specific meeting"""
@@ -141,49 +193,43 @@ class BetfairService:
         betfair_track = TRACK_MAPPING.get(track_name, track_name)
         logger.info(f"Mapped to Betfair track: {betfair_track}")
         
-        try:
-            # Create market filter using betfairlightweight's filter system
-            market_filter = betfairlightweight.filters.market_filter(
-                event_type_ids=['7'],  # Horse Racing
-                market_countries=['AU'],
-                market_type_codes=['WIN'],
-                market_start_time={
+        # Build filter
+        filter_data = {
+            'filter': {
+                'eventTypeIds': ['7'],  # Horse Racing
+                'marketCountries': ['AU'],
+                'marketTypeCodes': ['WIN'],
+                'marketStartTime': {
                     'from': f"{meeting_date}T00:00:00Z",
                     'to': f"{meeting_date}T23:59:59Z"
                 }
-            )
-            
-            # List market catalogue
-            markets = self.trading.betting.list_market_catalogue(
-                filter=market_filter,
-                market_projection=['EVENT', 'MARKET_START_TIME', 'RUNNER_DESCRIPTION'],
-                max_results=200
-            )
-            
-            if not markets:
-                logger.warning(f"⚠️ No markets found for {track_name} on {meeting_date}")
-                logger.info("=" * 60)
-                return []
-            
-            logger.info(f"Found {len(markets)} total markets on {meeting_date}")
-            
-            # Filter markets by track name
-            matching_markets = []
-            for market in markets:
-                event_name = market.event.name if hasattr(market, 'event') else ''
-                
-                if self._track_match(betfair_track, event_name):
-                    logger.info(f"  ✓ Matched: {event_name}")
-                    matching_markets.append(market)
-            
-            logger.info(f"✅ Found {len(matching_markets)} markets for {track_name}")
-            logger.info("=" * 60)
-            return matching_markets
-            
-        except Exception as e:
-            logger.error(f"❌ Error finding markets: {str(e)}")
+            },
+            'marketProjection': ['EVENT', 'MARKET_START_TIME', 'RUNNER_DESCRIPTION'],
+            'maxResults': 200
+        }
+        
+        url = 'https://api.betfair.com/exchange/betting/rest/v1.0/listMarketCatalogue/'
+        result = self._make_request('POST', url, filter_data)
+        
+        if not result:
+            logger.warning(f"⚠️ No markets found for {track_name} on {meeting_date}")
             logger.info("=" * 60)
             return []
+        
+        logger.info(f"Found {len(result)} total markets on {meeting_date}")
+        
+        # Filter markets by track name
+        matching_markets = []
+        for market in result:
+            event_name = market.get('event', {}).get('name', '')
+            
+            if self._track_match(betfair_track, event_name):
+                logger.info(f"  ✓ Matched: {event_name}")
+                matching_markets.append(market)
+        
+        logger.info(f"✅ Found {len(matching_markets)} markets for {track_name}")
+        logger.info("=" * 60)
+        return matching_markets
     
     def _track_match(self, track_name, event_name):
         """Enhanced fuzzy matching for track names"""
@@ -215,8 +261,8 @@ class BetfairService:
         logger.info(f"Matching race {race_number}...")
         
         for market in markets:
-            market_name = market.market_name if hasattr(market, 'market_name') else ''
-            market_id = market.market_id if hasattr(market, 'market_id') else ''
+            market_name = market.get('marketName', '')
+            market_id = market.get('marketId', '')
             
             # Common race number patterns
             patterns = [
@@ -242,99 +288,90 @@ class BetfairService:
         
         logger.info(f"Fetching results for market {market_id}...")
         
-        try:
-            # Get market book with SP prices
-            price_projection = betfairlightweight.filters.price_projection(
-                price_data=['SP_AVAILABLE', 'SP_TRADED']
-            )
-            
-            market_books = self.trading.betting.list_market_book(
-                market_ids=[market_id],
-                price_projection=price_projection
-            )
-            
-            if not market_books or len(market_books) == 0:
-                logger.warning(f"⚠️ No results for market {market_id}")
-                return None
-            
-            market_book = market_books[0]
-            status = market_book.status
-            
-            logger.info(f"Market status: {status}")
-            
-            if status != 'CLOSED':
-                logger.warning(f"⚠️ Market not settled (status: {status})")
-                return None
-            
-            runners = market_book.runners
-            logger.info(f"Found {len(runners)} runners")
-            
-            results = []
-            for runner in runners:
-                selection_id = runner.selection_id
-                runner_status = runner.status
-                
-                # Get SP price
-                sp = None
-                if hasattr(runner, 'sp') and runner.sp:
-                    sp = runner.sp.near_price or runner.sp.far_price
-                
-                # Determine position based on status
-                if runner_status == 'WINNER':
-                    position = 1
-                elif runner_status == 'PLACED':
-                    position = 2
-                elif runner_status == 'LOSER':
-                    position = 5
-                else:
-                    position = 0
-                
-                results.append({
-                    'selection_id': selection_id,
-                    'status': runner_status,
-                    'position': position,
-                    'sp': sp
-                })
-            
-            logger.info(f"✅ Processed {len(results)} results")
-            return results
-            
-        except Exception as e:
-            logger.error(f"❌ Error fetching results: {str(e)}")
+        request_data = {
+            'marketIds': [market_id],
+            'priceProjection': {
+                'priceData': ['SP_AVAILABLE', 'SP_TRADED']
+            }
+        }
+        
+        url = 'https://api.betfair.com/exchange/betting/rest/v1.0/listMarketBook/'
+        result = self._make_request('POST', url, request_data)
+        
+        if not result or len(result) == 0:
+            logger.warning(f"⚠️ No results for market {market_id}")
             return None
+        
+        market_book = result[0]
+        status = market_book.get('status')
+        
+        logger.info(f"Market status: {status}")
+        
+        if status != 'CLOSED':
+            logger.warning(f"⚠️ Market not settled (status: {status})")
+            return None
+        
+        runners = market_book.get('runners', [])
+        logger.info(f"Found {len(runners)} runners")
+        
+        results = []
+        for runner in runners:
+            selection_id = runner.get('selectionId')
+            runner_status = runner.get('status')
+            
+            # Get SP price
+            sp = None
+            if 'sp' in runner and runner['sp']:
+                sp = runner['sp'].get('nearPrice') or runner['sp'].get('farPrice')
+            
+            # Determine position based on status
+            if runner_status == 'WINNER':
+                position = 1
+            elif runner_status == 'PLACED':
+                position = 2
+            elif runner_status == 'LOSER':
+                position = 5
+            else:
+                position = 0
+            
+            results.append({
+                'selection_id': selection_id,
+                'status': runner_status,
+                'position': position,
+                'sp': sp
+            })
+        
+        logger.info(f"✅ Processed {len(results)} results")
+        return results
     
     def get_runner_names(self, market_id):
         """Get runner names for a market"""
         if not self.login():
             return {}
         
-        try:
-            market_filter = betfairlightweight.filters.market_filter(
-                market_ids=[market_id]
-            )
-            
-            markets = self.trading.betting.list_market_catalogue(
-                filter=market_filter,
-                market_projection=['RUNNER_DESCRIPTION']
-            )
-            
-            if not markets or len(markets) == 0:
-                return {}
-            
-            market = markets[0]
-            runners = market.runners if hasattr(market, 'runners') else []
-            
-            runner_map = {}
-            for runner in runners:
-                selection_id = runner.selection_id
-                horse_name = runner.runner_name if hasattr(runner, 'runner_name') else ''
-                runner_map[selection_id] = horse_name
-            
-            return runner_map
-            
-        except Exception as e:
-            logger.error(f"❌ Error getting runner names: {str(e)}")
+        filter_data = {
+            'filter': {
+                'marketIds': [market_id]
+            },
+            'marketProjection': ['RUNNER_DESCRIPTION']
+        }
+        
+        url = 'https://api.betfair.com/exchange/betting/rest/v1.0/listMarketCatalogue/'
+        result = self._make_request('POST', url, filter_data)
+        
+        if not result or len(result) == 0:
             return {}
+        
+        market = result[0]
+        runners = market.get('runners', [])
+        
+        runner_map = {}
+        for runner in runners:
+            selection_id = runner.get('selectionId')
+            horse_name = runner.get('runnerName', '')
+            runner_map[selection_id] = horse_name
+        
+        return runner_map
     
     def match_horse_to_runner(self, horse_name, runner_names):
         """Fuzzy match horse name to Betfair runner"""
