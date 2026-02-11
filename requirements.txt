@@ -11,3 +11,4 @@ tweepy
 gevent==24.2.1
 anthropic
 Flask-Limiter
+betfairlightweight
