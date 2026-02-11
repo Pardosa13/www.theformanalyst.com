@@ -1298,6 +1298,13 @@ def api_import_meeting(meeting_id):
             is_advanced=False,
             puntingform_id=meeting_id
         )
+        # Set the meeting date from API data
+        try:
+            from datetime import datetime
+            meeting.date = datetime.strptime(meeting_info['date'], '%Y-%m-%d').date()
+            db.session.commit()
+        except (ValueError, KeyError) as e:
+            logger.warning(f"Could not set meeting date: {e}")
         
         logger.info(f"✓ Imported {meeting_name} from PuntingForm")
         
