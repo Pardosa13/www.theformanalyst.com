@@ -433,23 +433,3 @@ def parse_meeting_name(meeting_name):
     except Exception as e:
         logger.error(f"Error parsing meeting name '{meeting_name}': {e}")
         return None, None
-```
-
----
-
-## **STEP 3: Commit and Deploy**
-
-1. **Save the updated `betfair_service.py`**
-2. **Commit to GitHub**
-3. **Railway will auto-deploy**
-
----
-
-## **STEP 4: Test!**
-
-1. **Upload a NEW CSV** (for any meeting)
-2. **Check Railway logs** for:
-```
-✓ Proxy configured: proxy.smartproxy.net:3120 (Melbourne, AU)
-✓ Betfair login successful
-✓ Stored X Betfair market IDs
