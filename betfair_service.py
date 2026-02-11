@@ -1,6 +1,7 @@
 """
 Betfair API Service for The Form Analyst
 Handles authentication, market matching, and results fetching
+WITH PROXY SUPPORT
 """
 
 import os
@@ -15,6 +16,11 @@ logger = logging.getLogger(__name__)
 BETFAIR_USERNAME = os.environ.get('BETFAIR_USERNAME')
 BETFAIR_PASSWORD = os.environ.get('BETFAIR_PASSWORD')
 BETFAIR_APP_KEY = os.environ.get('BETFAIR_APP_KEY', 'amyMWFeTpLAxmSyo')
+
+# Proxy settings from environment variables
+PROXY_HOST = os.environ.get('PROXY_HOST')  # proxy.smartproxy.net:3120
+PROXY_USER = os.environ.get('PROXY_USER')
+PROXY_PASS = os.environ.get('PROXY_PASS')
 
 # API endpoints
 IDENTITY_URL = "https://identitysso.betfair.com/api/login"
@@ -130,6 +136,17 @@ TRACK_MAPPING = {
 class BetfairService:
     def __init__(self):
         self.session_token = None
+        self.proxies = None
+        
+        # Setup proxy if credentials available
+        if PROXY_HOST and PROXY_USER and PROXY_PASS:
+            self.proxies = {
+                'http': f'http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}',
+                'https': f'http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}'
+            }
+            logger.info(f"✓ Proxy configured: {PROXY_HOST} (Melbourne, AU)")
+        else:
+            logger.warning("⚠️ No proxy configured - may be blocked by Betfair")
         
     def login(self):
         """Login to Betfair and get session token"""
@@ -138,6 +155,7 @@ class BetfairService:
             logger.info(f"Username: {BETFAIR_USERNAME}")
             logger.info(f"App Key: {BETFAIR_APP_KEY}")
             logger.info(f"Endpoint: {IDENTITY_URL}")
+            logger.info(f"Using Proxy: {bool(self.proxies)}")
             
             headers = {
                 'X-Application': BETFAIR_APP_KEY,
@@ -149,10 +167,14 @@ class BetfairService:
                 'password': BETFAIR_PASSWORD
             }
             
-            response = requests.post(IDENTITY_URL, data=payload, headers=headers, timeout=10)
+            # Make request with or without proxy
+            if self.proxies:
+                response = requests.post(IDENTITY_URL, data=payload, headers=headers, 
+                                       proxies=self.proxies, timeout=30)
+            else:
+                response = requests.post(IDENTITY_URL, data=payload, headers=headers, timeout=10)
             
             logger.info(f"Response Status: {response.status_code}")
-            logger.info(f"Response Body: {response.text}")
             
             if response.status_code == 200:
                 data = response.json()
@@ -167,7 +189,7 @@ class BetfairService:
                     return False
             else:
                 logger.error(f"Login HTTP error: {response.status_code}")
-                logger.error(f"Response text: {response.text}")
+                logger.error(f"Response text: {response.text[:500]}")  # First 500 chars
                 return False
                 
         except Exception as e:
@@ -194,7 +216,12 @@ class BetfairService:
         }
         
         try:
-            response = requests.post(BETTING_URL, json=payload, headers=headers, timeout=30)
+            # Make request with or without proxy
+            if self.proxies:
+                response = requests.post(BETTING_URL, json=payload, headers=headers, 
+                                       proxies=self.proxies, timeout=30)
+            else:
+                response = requests.post(BETTING_URL, json=payload, headers=headers, timeout=30)
             
             if response.status_code == 200:
                 data = response.json()
@@ -406,3 +433,23 @@ def parse_meeting_name(meeting_name):
     except Exception as e:
         logger.error(f"Error parsing meeting name '{meeting_name}': {e}")
         return None, None
+```
+
+---
+
+## **STEP 3: Commit and Deploy**
+
+1. **Save the updated `betfair_service.py`**
+2. **Commit to GitHub**
+3. **Railway will auto-deploy**
+
+---
+
+## **STEP 4: Test!**
+
+1. **Upload a NEW CSV** (for any meeting)
+2. **Check Railway logs** for:
+```
+✓ Proxy configured: proxy.smartproxy.net:3120 (Melbourne, AU)
+✓ Betfair login successful
+✓ Stored X Betfair market IDs
