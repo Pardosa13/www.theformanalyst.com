@@ -425,33 +425,6 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
     import gc
     gc.collect()
     
-    # NEW: Store Betfair market IDs in background
-    try:
-        from betfair_service import BetfairService, parse_meeting_name
-        
-        meeting_date, track_name = parse_meeting_name(meeting.meeting_name)
-        
-        if meeting_date and track_name:
-            betfair = BetfairService()
-            markets = betfair.find_markets_for_meeting(meeting_date, track_name)
-            
-            if markets:
-                matched = 0
-                for race in meeting.races:
-                    market_id = betfair.match_race_to_market(race.race_number, markets)
-                    if market_id:
-                        race.market_id = market_id
-                        matched += 1
-                
-                db.session.commit()
-                logger.info(f"✓ Stored {matched} Betfair market IDs for {meeting.meeting_name}")
-            else:
-                logger.warning(f"⚠️ No Betfair markets found for {meeting.meeting_name}")
-    except Exception as e:
-        logger.warning(f"Could not store Betfair market IDs: {str(e)}")
-        # Don't fail the upload if Betfair is unavailable
-        pass
-    
     return meeting
 
 
