@@ -15,6 +15,7 @@ from flask_limiter.util import get_remote_address
 import uuid
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage
+from puntingform_service import PuntingFormService
 
 import logging
 import sys
@@ -101,19 +102,26 @@ def shutdown_session(exception=None):
 with app.app_context():
     db.create_all()
     
-    # Migration: Add market_id column if it doesn't exist
+    # Migration: Add PuntingForm integration columns
     try:
         from sqlalchemy import inspect, text
         inspector = inspect(db.engine)
-        races_columns = [col['name'] for col in inspector.get_columns('races')]
+        meetings_columns = [col['name'] for col in inspector.get_columns('meetings')]
         
-        if 'market_id' not in races_columns:
+        if 'puntingform_id' not in meetings_columns:
             with db.engine.connect() as conn:
-                conn.execute(text('ALTER TABLE races ADD COLUMN market_id VARCHAR(255)'))
+                conn.execute(text('ALTER TABLE meetings ADD COLUMN puntingform_id VARCHAR(255)'))
                 conn.commit()
-            print("✓ Added market_id column to races table")
+            print("✓ Added puntingform_id column to meetings table")
+            
+        if 'auto_imported' not in meetings_columns:
+            with db.engine.connect() as conn:
+                conn.execute(text('ALTER TABLE meetings ADD COLUMN auto_imported BOOLEAN DEFAULT FALSE'))
+                conn.commit()
+            print("✓ Added auto_imported column to meetings table")
+            
     except Exception as e:
-        print(f"Migration check: {e}")
+        print(f"PuntingForm migration check: {e}")
     # Migration: Add best_bet_flagged_at column if it doesn't exist
     try:
         from sqlalchemy import inspect, text
@@ -341,7 +349,7 @@ def post_best_bets_to_twitter(best_bets, meeting_name):
         logger.error(f"Exception message: {str(e)}", exc_info=True)
         logger.info("=" * 50)
         return False
-def process_and_store_results(csv_data, filename, track_condition, user_id, is_advanced=False):
+def process_and_store_results(csv_data, filename, track_condition, user_id, is_advanced=False, puntingform_id=None):
     """
     Process CSV through analyzer and store results in database
     """
@@ -355,7 +363,9 @@ def process_and_store_results(csv_data, filename, track_condition, user_id, is_a
     meeting = Meeting(
         user_id=user_id,
         meeting_name=filename.replace('.csv', ''),
-        csv_data=csv_data
+        csv_data=csv_data,
+        puntingform_id=puntingform_id,
+        auto_imported=puntingform_id is not None
     )
     db.session.add(meeting)
     db.session.flush()  # Get meeting ID
@@ -1243,7 +1253,135 @@ def dashboard():
         .limit(5)\
         .all()
     return render_template("dashboard.html", recent_meetings=recent_meetings)
+# ----- PuntingForm API Routes -----
 
+@app.route("/api/meetings/today")
+@login_required
+def api_get_todays_meetings():
+    """Get list of today's meetings from PuntingForm API"""
+    try:
+        pf = PuntingFormService()
+        meetings = pf.get_meetings()
+        return jsonify({'success': True, 'meetings': meetings})
+    except Exception as e:
+        logger.error(f"Failed to fetch meetings: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route("/api/meetings/<meeting_id>/import", methods=["POST"])
+@login_required
+def api_import_meeting(meeting_id):
+    """Import meeting from PuntingForm API"""
+    try:
+        pf = PuntingFormService()
+        csv_data = pf.get_meeting_data_csv(meeting_id)
+        
+        if not csv_data:
+            return jsonify({'success': False, 'error': 'Failed to fetch data'}), 400
+        
+        meetings = pf.get_meetings()
+        meeting_info = next((m for m in meetings if m['meeting_id'] == meeting_id), None)
+        
+        if not meeting_info:
+            return jsonify({'success': False, 'error': 'Meeting not found'}), 404
+        
+        meeting_name = pf.parse_meeting_name(
+            meeting_info['track_name'],
+            meeting_info['date']
+        )
+        
+        meeting = process_and_store_results(
+            csv_data=csv_data,
+            filename=meeting_name,
+            track_condition=meeting_info.get('track_condition', 'good'),
+            user_id=current_user.id,
+            is_advanced=False,
+            puntingform_id=meeting_id
+        )
+        
+        logger.info(f"✓ Imported {meeting_name} from PuntingForm")
+        
+        return jsonify({
+            'success': True,
+            'meeting_id': meeting.id,
+            'redirect_url': url_for('view_meeting', meeting_id=meeting.id)
+        })
+        
+    except Exception as e:
+        logger.error(f"Import failed: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route("/import-from-api")
+@login_required
+def import_from_api():
+    """Page to import meetings from PuntingForm API"""
+    return render_template("import_from_api.html")
+
+
+@app.route("/results/<int:meeting_id>/fetch-auto", methods=["POST"])
+@login_required
+def fetch_automatic_results(meeting_id):
+    """Auto-fetch results from PuntingForm API"""
+    meeting = Meeting.query.get_or_404(meeting_id)
+    
+    if not meeting.puntingform_id:
+        flash("⚠️ Meeting not imported from PuntingForm", "warning")
+        return redirect(url_for('results_entry', meeting_id=meeting_id))
+    
+    try:
+        pf = PuntingFormService()
+        
+        if not pf.check_results_available(meeting.puntingform_id):
+            flash("⚠️ Results not yet available", "warning")
+            return redirect(url_for('results_entry', meeting_id=meeting_id))
+        
+        results_data = pf.get_race_results(meeting.puntingform_id)
+        
+        horses_updated = 0
+        
+        for race_num, race_results in results_data.items():
+            race = Race.query.filter_by(
+                meeting_id=meeting_id,
+                race_number=race_num
+            ).first()
+            
+            if not race:
+                continue
+            
+            for result_data in race_results:
+                horse = Horse.query.filter(
+                    Horse.race_id == race.id,
+                    db.func.lower(Horse.horse_name) == result_data['horse_name'].lower()
+                ).first()
+                
+                if not horse:
+                    continue
+                
+                if horse.result:
+                    horse.result.finish_position = result_data['finish_position']
+                    horse.result.sp = result_data['starting_price']
+                    horse.result.recorded_at = datetime.utcnow()
+                    horse.result.recorded_by = current_user.id
+                else:
+                    result = Result(
+                        horse_id=horse.id,
+                        finish_position=result_data['finish_position'],
+                        sp=result_data['starting_price'],
+                        recorded_by=current_user.id
+                    )
+                    db.session.add(result)
+                
+                horses_updated += 1
+        
+        db.session.commit()
+        flash(f"✓ Auto-fetched results for {horses_updated} horses", "success")
+        
+    except Exception as e:
+        logger.error(f"Auto-fetch error: {str(e)}", exc_info=True)
+        flash(f"✗ Failed: {str(e)}", "danger")
+    
+    return redirect(url_for('results_entry', meeting_id=meeting_id))
 
 @app.route("/analyze", methods=["POST"])
 @login_required
@@ -3168,144 +3306,6 @@ def test_telegram():
         flash(f"✗ Error: {e}", "danger")
     
     return redirect(url_for("admin_panel"))
-
-@app.route("/results/<int:meeting_id>/fetch-betfair", methods=["POST"])
-@login_required
-def fetch_betfair_results(meeting_id):
-    """Fetch and auto-populate results from Betfair"""
-    if not current_user.is_admin:
-        flash("Admin access required", "danger")
-        return redirect(url_for('results_entry', meeting_id=meeting_id))
-    
-    from betfair_service import BetfairService, parse_meeting_name
-    
-    meeting = Meeting.query.get_or_404(meeting_id)
-    
-    try:
-        betfair = BetfairService()
-        
-        # Parse meeting name to get date and track
-        meeting_date, track_name = parse_meeting_name(meeting.meeting_name)
-        
-        if not meeting_date or not track_name:
-            flash(f"Could not parse meeting name: {meeting.meeting_name}", "danger")
-            return redirect(url_for('results_entry', meeting_id=meeting_id))
-        
-        races_updated = 0
-        horses_updated = 0
-        errors = []
-        
-        for race in meeting.races:
-            # Skip if no market ID stored
-            if not race.market_id:
-                errors.append(f"Race {race.race_number}: No Betfair market ID stored")
-                continue
-            
-            # Fetch results from Betfair
-            results = betfair.get_race_results(race.market_id)
-            
-            if not results:
-                errors.append(f"Race {race.race_number}: No results available yet")
-                continue
-            
-            # Get runner names
-            runner_names = betfair.get_runner_names(race.market_id)
-            
-            # Match horses to results
-            for horse in race.horses:
-                # Match horse name to Betfair runner
-                selection_id = betfair.match_horse_to_runner(horse.horse_name, runner_names)
-                
-                if not selection_id:
-                    errors.append(f"Race {race.race_number}: Could not match horse '{horse.horse_name}'")
-                    continue
-                
-                # Find result for this selection
-                horse_result = next((r for r in results if r['selection_id'] == selection_id), None)
-                
-                if not horse_result:
-                    continue
-                
-                # Update or create result
-                if horse.result:
-                    horse.result.finish_position = horse_result['position']
-                    horse.result.sp = horse_result['sp']
-                    horse.result.recorded_at = datetime.utcnow()
-                    horse.result.recorded_by = current_user.id
-                else:
-                    result = Result(
-                        horse_id=horse.id,
-                        finish_position=horse_result['position'],
-                        sp=horse_result['sp'],
-                        recorded_by=current_user.id
-                    )
-                    db.session.add(result)
-                
-                horses_updated += 1
-            
-            races_updated += 1
-        
-        db.session.commit()
-        
-        if horses_updated > 0:
-            flash(f"✓ Updated {horses_updated} horses across {races_updated} races from Betfair", "success")
-        else:
-            flash("⚠️ No results could be fetched. Races may not be settled yet.", "warning")
-        
-        if errors:
-            flash(f"Some issues: {len(errors)} warnings", "warning")
-            for error in errors[:5]:  # Show first 5 errors
-                logger.warning(error)
-    
-    except Exception as e:
-        logger.error(f"Betfair fetch error: {str(e)}", exc_info=True)
-        flash(f"Betfair error: {str(e)}", "danger")
-    
-    return redirect(url_for('results_entry', meeting_id=meeting_id))
-
-
-@app.route("/meeting/<int:meeting_id>/store-market-ids", methods=["POST"])
-@login_required
-def store_betfair_market_ids(meeting_id):
-    """Store Betfair market IDs for a meeting (called after CSV upload)"""
-    from betfair_service import BetfairService, parse_meeting_name
-    
-    meeting = Meeting.query.get_or_404(meeting_id)
-    
-    try:
-        betfair = BetfairService()
-        
-        # Parse meeting name
-        meeting_date, track_name = parse_meeting_name(meeting.meeting_name)
-        
-        if not meeting_date or not track_name:
-            logger.warning(f"Could not parse meeting name: {meeting.meeting_name}")
-            return jsonify({'success': False, 'error': 'Invalid meeting name format'})
-        
-        # Find markets on Betfair
-        markets = betfair.find_markets_for_meeting(meeting_date, track_name)
-        
-        if not markets:
-            logger.warning(f"No Betfair markets found for {meeting.meeting_name}")
-            return jsonify({'success': False, 'error': 'No markets found on Betfair'})
-        
-        # Match each race to a market
-        matched = 0
-        for race in meeting.races:
-            market_id = betfair.match_race_to_market(race.race_number, markets)
-            
-            if market_id:
-                race.market_id = market_id
-                matched += 1
-        
-        db.session.commit()
-        
-        logger.info(f"Stored {matched} market IDs for {meeting.meeting_name}")
-        return jsonify({'success': True, 'matched': matched, 'total': len(meeting.races)})
-    
-    except Exception as e:
-        logger.error(f"Error storing market IDs: {str(e)}", exc_info=True)
-        return jsonify({'success': False, 'error': str(e)})
         
     # ----- CHAT SYSTEM ROUTES -----
 
