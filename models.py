@@ -44,6 +44,8 @@ class Meeting(db.Model):
     date = db.Column(db.Date)
     csv_data = db.Column(db.Text)  # Store original CSV
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    puntingform_id = db.Column(db.String(255))  # PuntingForm API meeting ID
+    auto_imported = db.Column(db.Boolean, default=False)  # True if imported from API
     
     # Relationships
     races = db.relationship('Race', backref='meeting', lazy=True, cascade='all, delete-orphan')
@@ -62,7 +64,6 @@ class Race(db.Model):
     distance = db.Column(db.String(50))
     race_class = db.Column(db.String(50))
     track_condition = db.Column(db.String(50))
-    market_id = db.Column(db.String(255))  # ADD THIS LINE - Betfair market ID
 
     
     # Relationships
