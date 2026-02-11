@@ -1,5 +1,6 @@
 import os
 import betfairlightweight
+import requests
 from datetime import datetime
 from difflib import SequenceMatcher
 import logging
@@ -9,6 +10,11 @@ logger = logging.getLogger(__name__)
 BETFAIR_USERNAME = os.environ.get('BETFAIR_USERNAME')
 BETFAIR_PASSWORD = os.environ.get('BETFAIR_PASSWORD')
 BETFAIR_APP_KEY = os.environ.get('BETFAIR_APP_KEY', 'amyMWFeTpLAxmSyo')
+
+# SmartProxy Configuration
+PROXY_HOST = os.environ.get('PROXY_HOST')
+PROXY_USER = os.environ.get('PROXY_USER')
+PROXY_PASS = os.environ.get('PROXY_PASS')
 
 TRACK_MAPPING = {
     'Randwick': 'Randwick',
@@ -60,14 +66,40 @@ class BetfairService:
             logger.error("❌ Missing Betfair credentials")
             return
         
-        # Initialize the betfairlightweight client
+        # Create a custom requests session with proxy
+        session = requests.Session()
+        
+        if PROXY_HOST and PROXY_USER and PROXY_PASS:
+            # Configure proxy
+            proxy_url = f'http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}'
+            session.proxies = {
+                'http': proxy_url,
+                'https': proxy_url
+            }
+            logger.info(f"✓ Proxy configured: {PROXY_HOST}")
+        else:
+            logger.warning("⚠️ No proxy configured - Betfair may block requests")
+        
+        # Set timeouts to prevent hanging
+        session.request = self._timeout_wrapper(session.request)
+        
+        # Initialize the betfairlightweight client with custom session
         self.trading = betfairlightweight.APIClient(
             username=BETFAIR_USERNAME,
             password=BETFAIR_PASSWORD,
-            app_key=BETFAIR_APP_KEY
+            app_key=BETFAIR_APP_KEY,
+            session=session  # Pass custom session with proxy
         )
         
         logger.info("✓ Betfair client initialized")
+    
+    def _timeout_wrapper(self, original_request):
+        """Wrap requests with timeout to prevent hanging"""
+        def request_with_timeout(*args, **kwargs):
+            if 'timeout' not in kwargs:
+                kwargs['timeout'] = 10  # 10 second timeout
+            return original_request(*args, **kwargs)
+        return request_with_timeout
     
     def login(self):
         """Login to Betfair using interactive login (no certs needed)"""
