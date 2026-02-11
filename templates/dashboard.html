@@ -4,7 +4,23 @@
 
 {% block content %}
 <h1>Racing Analysis Dashboard</h1>
+<!-- PuntingForm API Import -->
+<div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; margin-bottom: 20px;">
+    <div style="text-align: center;">
+        <h2 style="margin: 0 0 15px 0; color: white;">🌐 Import from PuntingForm API</h2>
+        <p style="margin: 0 0 20px 0; opacity: 0.9;">Automatically fetch and analyze today's racing meetings</p>
+        <a href="{{ url_for('import_from_api') }}" 
+           class="btn" 
+           style="background: white; color: #667eea; font-weight: 600; padding: 14px 28px; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+            📊 Browse Today's Meetings
+        </a>
+    </div>
+</div>
 
+<!-- Manual CSV Upload -->
+<div style="text-align: center; margin: 20px 0; color: #6c757d; font-weight: 600;">
+    — OR UPLOAD MANUALLY —
+</div>
 <div class="card">
     <h2>Upload & Analyze Meeting</h2>
     
