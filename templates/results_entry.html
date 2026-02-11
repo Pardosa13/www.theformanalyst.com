@@ -5,56 +5,30 @@
 {% block content %}
 <h1>{{ meeting.meeting_name }}</h1>
 
-<!-- ADD THIS BETFAIR BUTTON -->
-{% if current_user.is_admin %}
-<div style="margin: 20px 0;">
-    <button onclick="fetchBetfairResults({{ meeting.id }})" class="btn" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);">
-        🔄 Auto-Fill Results from Betfair
-    </button>
-    <span id="betfair-status" style="color: #6c757d; margin-left: 15px; font-size: 14px;">
-        Automatically fetch finish positions and SPs from Betfair API
-    </span>
+<!-- PuntingForm Auto-Fetch -->
+{% if meeting.puntingform_id %}
+<div style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; padding: 20px; border-radius: 12px; margin: 20px 0;">
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
+        <div>
+            <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px;">
+                🪄 Auto-Fetch Available
+            </div>
+            <div style="font-size: 14px; opacity: 0.95;">
+                This meeting was imported from PuntingForm API. Click to automatically populate all results.
+            </div>
+        </div>
+        <form action="{{ url_for('fetch_automatic_results', meeting_id=meeting.id) }}" 
+              method="POST" 
+              style="margin: 0;"
+              onsubmit="return confirm('Fetch all race results automatically from PuntingForm?');">
+            <button type="submit" 
+                    class="btn" 
+                    style="background: white; color: #28a745; font-weight: 600; padding: 12px 24px; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); border: none;">
+                🔄 Auto-Fetch All Results
+            </button>
+        </form>
+    </div>
 </div>
-
-<script>
-async function fetchBetfairResults(meetingId) {
-    const statusEl = document.getElementById('betfair-status');
-    const btn = event.target;
-    btn.disabled = true;
-    
-    try {
-        // Step 1: Store market IDs
-        statusEl.textContent = '📊 Finding Betfair markets...';
-        statusEl.style.color = '#667eea';
-        
-        const storeResponse = await fetch(`/meeting/${meetingId}/store-market-ids`, {
-            method: 'POST'
-        });
-        const storeData = await storeResponse.json();
-        
-        if (!storeData.success) {
-            statusEl.textContent = `❌ Error: ${storeData.error}`;
-            statusEl.style.color = '#dc3545';
-            btn.disabled = false;
-            return;
-        }
-        
-        statusEl.textContent = `✓ Stored ${storeData.matched} market IDs. Fetching results...`;
-        
-        // Step 2: Fetch results (using the form submission)
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = `/results/${meetingId}/fetch-betfair`;
-        document.body.appendChild(form);
-        form.submit();
-        
-    } catch (error) {
-        statusEl.textContent = `❌ Error: ${error.message}`;
-        statusEl.style.color = '#dc3545';
-        btn.disabled = false;
-    }
-}
-</script>
 {% endif %}
 
 <div style="margin-bottom: 20px;">
