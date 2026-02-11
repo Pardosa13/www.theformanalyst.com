@@ -89,6 +89,7 @@ class BetfairService:
         headers = {
             'X-Application': BETFAIR_APP_KEY,
             'Content-Type': 'application/x-www-form-urlencoded'
+            'Accept': 'application/json'
         }
         
         payload = {
