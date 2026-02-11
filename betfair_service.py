@@ -1,9 +1,3 @@
-"""
-Betfair API Service for The Form Analyst
-Handles authentication, market matching, and results fetching
-WITH PROXY SUPPORT
-"""
-
 import os
 import requests
 from datetime import datetime
