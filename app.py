@@ -1264,7 +1264,7 @@ def api_get_todays_meetings():
     """Get list of today's meetings from PuntingForm API"""
     try:
         pf = PuntingFormService()
-        meetings = pf.get_meetings()
+        meetings = pf.get_meetings_list()
         return jsonify({'success': True, 'meetings': meetings})
     except Exception as e:
         logger.error(f"Failed to fetch meetings: {str(e)}", exc_info=True)
@@ -1283,7 +1283,7 @@ def api_import_meeting(meeting_id):
             return jsonify({'success': False, 'error': 'Failed to fetch data from PuntingForm'}), 400
         
         # Get meeting info to extract track name and condition
-        meetings = pf_service.get_meetings()
+        meetings = pf_service.get_meetings_list()
         meeting_info = next((m for m in meetings if m['meeting_id'] == meeting_id), None)
         
         if not meeting_info:
