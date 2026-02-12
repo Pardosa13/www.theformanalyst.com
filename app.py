@@ -1274,45 +1274,49 @@ def api_get_todays_meetings():
 @app.route("/api/meetings/<meeting_id>/import", methods=["POST"])
 @login_required
 def api_import_meeting(meeting_id):
-    """Import meeting from PuntingForm API"""
+    """Import meeting from PuntingForm V1 API"""
     try:
-        # Fetch CSV data using the corrected service
-        csv_data = pf_service.get_meeting_data_csv(meeting_id)
+        # Get today's meetings to find this specific meeting
+        meetings_response = pf_service.get_meetings_list()
+        meetings = meetings_response.get('meetings', [])
         
-        if not csv_data:
-            return jsonify({'success': False, 'error': 'Failed to fetch data from PuntingForm'}), 400
-        
-        # Get meeting info to extract track name and condition
-        meetings = pf_service.get_meetings_list()
+        # Find the meeting by ID
         meeting_info = next((m for m in meetings if m['meeting_id'] == meeting_id), None)
         
         if not meeting_info:
             return jsonify({'success': False, 'error': 'Meeting not found'}), 404
         
-        # Generate meeting name
-        meeting_name = pf_service.parse_meeting_name(
-            meeting_info['track_name'],
-            meeting_info['date']
-        )
+        track_name = meeting_info['track_name']
+        date_str = meeting_info['date']  # Already in YYYY-MM-DD from our service
         
-        # Process through your existing analyzer
+        # Fetch CSV using track name and date (V1 API method)
+        csv_data = pf_service.get_fields_csv(track_name, date_str)
+        
+        if not csv_data:
+            return jsonify({'success': False, 'error': 'No data available for this meeting'}), 400
+        
+        # Get track condition from form
+        track_condition = request.form.get('track_condition', 'good')
+        
+        # Generate meeting name (YYMMDD_Track format)
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+        meeting_name = f"{date_obj.strftime('%y%m%d')}_{track_name}"
+        
+        # Process through analyzer
         meeting = process_and_store_results(
             csv_data=csv_data,
             filename=meeting_name,
-            track_condition=meeting_info.get('track_condition', 'good'),
+            track_condition=track_condition,
             user_id=current_user.id,
             is_advanced=False,
-            puntingform_id=meeting_id  # Store the API meeting ID
+            puntingform_id=track_name  # Store track name for results fetching later
         )
         
-        # Set the meeting date from API data
-        try:
-            meeting.date = datetime.strptime(meeting_info['date'], '%Y-%m-%d').date()
-            db.session.commit()
-        except (ValueError, KeyError) as e:
-            logger.warning(f"Could not set meeting date: {e}")
+        # Set meeting date
+        meeting.date = date_obj.date()
+        db.session.commit()
         
-        logger.info(f"✓ Imported {meeting_name} from PuntingForm API")
+        logger.info(f"✓ Imported {meeting_name} from PuntingForm V1 API")
         
         return jsonify({
             'success': True,
@@ -1335,26 +1339,52 @@ def import_from_api():
 @app.route("/results/<int:meeting_id>/fetch-auto", methods=["POST"])
 @login_required
 def fetch_automatic_results(meeting_id):
-    """Auto-fetch results from PuntingForm API"""
+    """Auto-fetch results from PuntingForm V1 API"""
     meeting = Meeting.query.get_or_404(meeting_id)
     
+    # V1 API: We stored track name in puntingform_id
     if not meeting.puntingform_id:
         flash("⚠️ Meeting not imported from PuntingForm API", "warning")
         return redirect(url_for('results_entry', meeting_id=meeting_id))
     
     try:
-        # Check if results are available
-        if not pf_service.check_results_available(meeting.puntingform_id):
+        track_name = meeting.puntingform_id  # This is the track name we stored
+        
+        # Get date from meeting name (format: YYMMDD_Track)
+        if meeting.meeting_name and '_' in meeting.meeting_name:
+            date_part = meeting.meeting_name.split('_')[0]
+            # Convert YYMMDD to YYYY-MM-DD
+            year = '20' + date_part[:2]
+            month = date_part[2:4]
+            day = date_part[4:6]
+            date_str = f"{year}-{month}-{day}"
+        else:
+            flash("⚠️ Could not determine meeting date", "warning")
+            return redirect(url_for('results_entry', meeting_id=meeting_id))
+        
+        # Fetch results using V1 method
+        results_response = pf_service.get_results(track_name, date_str)
+        
+        # Check for errors
+        if results_response.get('IsError'):
             flash("⚠️ Results not yet available for this meeting", "warning")
             return redirect(url_for('results_entry', meeting_id=meeting_id))
         
-        # Fetch results using the API meeting ID
-        results_data = pf_service.get_race_results(meeting.puntingform_id)
+        # V1 API returns format: {"Result": [{"RaceNumber": 1, "Runners": [...]}]}
+        races_results = results_response.get('Result', [])
+        
+        if not races_results:
+            flash("⚠️ No results available yet", "warning")
+            return redirect(url_for('results_entry', meeting_id=meeting_id))
         
         horses_updated = 0
         
-        # Process results by race number
-        for race_num, race_results in results_data.items():
+        # Process each race's results
+        for race_result in races_results:
+            race_num = race_result.get('RaceNumber')
+            runners = race_result.get('Runners', [])
+            
+            # Find the race in our database
             race = Race.query.filter_by(
                 meeting_id=meeting_id,
                 race_number=race_num
@@ -1363,11 +1393,19 @@ def fetch_automatic_results(meeting_id):
             if not race:
                 continue
             
-            # Match horses by name
-            for result_data in race_results:
+            # Process each runner
+            for runner in runners:
+                horse_name = runner.get('HorseName', '').strip()
+                finish_pos = runner.get('Position', 0)
+                sp = runner.get('StartingPrice', 0)
+                
+                if not horse_name or finish_pos == 0:
+                    continue
+                
+                # Find horse by name (case-insensitive)
                 horse = Horse.query.filter(
                     Horse.race_id == race.id,
-                    db.func.lower(Horse.horse_name) == result_data['horse_name'].lower()
+                    db.func.lower(Horse.horse_name) == horse_name.lower()
                 ).first()
                 
                 if not horse:
@@ -1375,15 +1413,15 @@ def fetch_automatic_results(meeting_id):
                 
                 # Create or update result
                 if horse.result:
-                    horse.result.finish_position = result_data['finish_position']
-                    horse.result.sp = result_data['starting_price']
+                    horse.result.finish_position = finish_pos
+                    horse.result.sp = sp
                     horse.result.recorded_at = datetime.utcnow()
                     horse.result.recorded_by = current_user.id
                 else:
                     result = Result(
                         horse_id=horse.id,
-                        finish_position=result_data['finish_position'],
-                        sp=result_data['starting_price'],
+                        finish_position=finish_pos,
+                        sp=sp,
                         recorded_by=current_user.id
                     )
                     db.session.add(result)
