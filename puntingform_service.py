@@ -16,21 +16,26 @@ class PuntingFormService:
         self.base_url = 'https://api.puntingform.com.au/v2'
     
     def _make_request(self, endpoint, params=None):
-        """Make authenticated request to PuntingForm API"""
-        url = f"{self.base_url}/{endpoint}"
-        
-        # CORRECT authentication header
-        headers = {
-            'Authorization': f'Bearer {self.api_key}',
-            'Accept': 'application/json'
-        }
-        
-        try:
-            response = requests.get(url, headers=headers, params=params, timeout=30)
-            response.raise_for_status()
-            return response
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"PuntingForm API error: {str(e)}")
+    """Make authenticated request to PuntingForm API"""
+    url = f"{self.base_url}/{endpoint}"
+    
+    # Initialize params if None
+    if params is None:
+        params = {}
+    
+    # PuntingForm uses API key as query parameter
+    params['apikey'] = self.api_key
+    
+    headers = {
+        'Accept': 'application/json'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        response.raise_for_status()
+        return response
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"PuntingForm API error: {str(e)}")
     
     def get_meetings_list(self, date=None, jurisdiction='AU'):
         """
