@@ -1,126 +1,158 @@
 """
 PuntingForm API Service
-Handles all interactions with PuntingForm API for automated data fetching
+
+Handles all interactions with the PuntingForm API using documented endpoints
+and parameters.
+
+Key notes:
+- meetingslist does NOT accept 'AU' as a jurisdiction
+- fields/csv REQUIRES meetingId (not date/track)
+- raceNumber = 0 returns all races
 """
+
 import os
 import requests
 from datetime import datetime
+from typing import Optional, Dict, List
+
 
 class PuntingFormService:
-    def __init__(self, api_key=None):
-        self.api_key = api_key or os.environ.get('PUNTINGFORM_API_KEY')
+    BASE_URL = "https://api.puntingform.com.au/v2"
+
+    # Valid Australian jurisdictions for meetingslist
+    AU_JURISDICTIONS = ["NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT"]
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or os.environ.get("PUNTINGFORM_API_KEY")
         if not self.api_key:
-            raise ValueError("PuntingForm API key not found in environment variables")
-        
-        self.base_url = 'https://api.puntingform.com.au/v2'
-    
-    def _make_request(self, endpoint, params=None):
-        """Make authenticated request to PuntingForm API"""
-        url = f"{self.base_url}/{endpoint}"
-        
-        # Initialize params if None
-        if params is None:
-            params = {}
-        
-        # PuntingForm uses API key as query parameter
-        params['apikey'] = self.api_key
-        
-        headers = {
-            'Accept': 'application/json'
-        }
-        
-        try:
-            response = requests.get(url, headers=headers, params=params, timeout=30)
-            response.raise_for_status()
-            return response
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"PuntingForm API error: {str(e)}")
-    
-    def get_meetings_list(self, date=None, jurisdiction='AU'):
+            raise ValueError("PUNTINGFORM_API_KEY is not set")
+
+    # ------------------------------------------------------------------
+    # Internal request helper
+    # ------------------------------------------------------------------
+    def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> requests.Response:
+        url = f"{self.BASE_URL}/{endpoint}"
+        params = params or {}
+        params["apikey"] = self.api_key
+
+        response = requests.get(url, params=params, timeout=30)
+
+        if not response.ok:
+            raise Exception(
+                f"PuntingForm API error {response.status_code}: {response.text}"
+            )
+
+        return response
+
+    # ------------------------------------------------------------------
+    # Meetings
+    # ------------------------------------------------------------------
+    def get_meetings_list(
+        self,
+        date: Optional[str] = None,
+        jurisdiction: Optional[str] = None
+    ) -> Dict:
         """
-        Get list of meetings for a specific date
-        
+        Get meetings for a given date.
+
         Args:
-            date: Date string in YYYY-MM-DD format (defaults to today)
-            jurisdiction: 'AU', 'NZ', 'HK', 'SG'
-        
+            date: YYYY-MM-DD (defaults to today)
+            jurisdiction: State code (NSW, VIC, QLD, etc). If None, returns all.
+
         Returns:
-            Dict with meetings list
+            JSON response containing meetings
         """
         if date is None:
-            date = datetime.now().strftime('%Y-%m-%d')
-        
-        params = {
-            'date': date,
-            'jurisdiction': jurisdiction
-        }
-        
-        # CORRECT endpoint
-        response = self._make_request('form/meetingslist', params)
+            date = datetime.now().strftime("%Y-%m-%d")
+
+        params = {"date": date}
+
+        if jurisdiction:
+            params["jurisdiction"] = jurisdiction
+
+        response = self._make_request("form/meetingslist", params)
         return response.json()
-    
-    def get_fields_csv(self, date, track, race=None):
+
+    def get_all_au_meetings(self, date: Optional[str] = None) -> List[Dict]:
         """
-        Get fields/runners data in CSV format
-        This returns the SAME format as your manual CSV uploads
-        
+        Get meetings for all Australian jurisdictions and merge results.
+        """
+        all_meetings = []
+
+        for state in self.AU_JURISDICTIONS:
+            data = self.get_meetings_list(date=date, jurisdiction=state)
+            all_meetings.extend(data.get("meetings", []))
+
+        return all_meetings
+
+    # ------------------------------------------------------------------
+    # Fields (CSV)
+    # ------------------------------------------------------------------
+    def get_fields_csv(
+        self,
+        meeting_id: int,
+        race_number: Optional[int] = None
+    ) -> str:
+        """
+        Get runner fields in CSV format.
+
         Args:
-            date: Date string in YYYY-MM-DD format
-            track: Track name (e.g., 'Flemingham', 'Randwick')
-            race: Optional race number
-        
+            meeting_id: PuntingForm meetingId
+            race_number: Race number (0 or None = all races)
+
         Returns:
-            CSV string ready for your analyzer
+            CSV string
         """
-        params = {
-            'date': date,
-            'track': track
-        }
-        
-        if race:
-            params['race'] = race
-        
-        # CORRECT endpoint - returns CSV directly
-        response = self._make_request('form/fields/csv', params)
-        return response.text  # Returns CSV string
-    
-    def get_results(self, date, track, race=None):
+        params = {"meetingId": meeting_id}
+
+        if race_number is not None:
+            params["raceNumber"] = race_number
+
+        response = self._make_request("form/fields/csv", params)
+        return response.text
+
+    # ------------------------------------------------------------------
+    # Results
+    # ------------------------------------------------------------------
+    def get_results(
+        self,
+        meeting_id: int,
+        race_number: Optional[int] = None
+    ) -> Dict:
         """
-        Get race results
-        
+        Get race results for a meeting.
+
         Args:
-            date: Date string in YYYY-MM-DD format
-            track: Track name
-            race: Optional race number
-        
+            meeting_id: PuntingForm meetingId
+            race_number: Optional race number
+
         Returns:
-            Dict with results
+            JSON response with results
         """
-        params = {
-            'date': date,
-            'track': track
-        }
-        
-        if race:
-            params['race'] = race
-        
-        # CORRECT endpoint
-        response = self._make_request('form/results', params)
+        params = {"meetingId": meeting_id}
+
+        if race_number is not None:
+            params["raceNumber"] = race_number
+
+        response = self._make_request("form/results", params)
         return response.json()
-    
-    def get_scratchings(self, date=None):
+
+    # ------------------------------------------------------------------
+    # Scratchings
+    # ------------------------------------------------------------------
+    def get_scratchings(self, date: Optional[str] = None) -> Dict:
         """
-        Get scratchings (late withdrawals) for a date
-        
+        Get scratchings (late withdrawals).
+
         Args:
-            date: Date string in YYYY-MM-DD format (defaults to today)
-        
+            date: YYYY-MM-DD (defaults to today)
+
         Returns:
-            Dict with scratchings
+            JSON response
         """
         if date is None:
-            date = datetime.now().strftime('%Y-%m-%d')
-        
-        params = {'date': date}
-        response = self._make_request('updates/scratchings', params)
+            date = datetime.now().strftime("%Y-%m-%d")
+
+        params = {"date": date}
+        response = self._make_request("updates/scratchings", params)
         return response.json()
