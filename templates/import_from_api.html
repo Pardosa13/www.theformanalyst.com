@@ -145,26 +145,26 @@ async function loadMeetings() {
 function displayMeetings(meetings) {
     const grouped = {};
     
-    // Group by jurisdiction
+    // Group by state (V1 API uses 'state' not 'jurisdiction')
     meetings.forEach(meeting => {
-        const jurisdiction = meeting.jurisdiction || 'OTHER';
-        if (!grouped[jurisdiction]) {
-            grouped[jurisdiction] = [];
+        const state = meeting.state || 'OTHER';  // ✅ Changed from jurisdiction to state
+        if (!grouped[state]) {
+            grouped[state] = [];
         }
-        grouped[jurisdiction].push(meeting);
+        grouped[state].push(meeting);
     });
     
     let html = '';
     
-    // Sort jurisdictions
-    const sortedJurisdictions = Object.keys(grouped).sort();
+    // Sort states
+    const sortedStates = Object.keys(grouped).sort();
     
-    sortedJurisdictions.forEach(jurisdiction => {
-        const color = JURISDICTION_COLORS[jurisdiction] || '#6c757d';
+    sortedStates.forEach(state => {
+        const color = JURISDICTION_COLORS[state] || '#6c757d';
         
-        html += `<div class="jurisdiction-header" style="color: ${color};">${jurisdiction}</div>`;
+        html += `<div class="jurisdiction-header" style="color: ${color};">${state}</div>`;
         
-        grouped[jurisdiction].forEach(meeting => {
+        grouped[state].forEach(meeting => {
             html += createMeetingCard(meeting);
         });
     });
@@ -189,14 +189,14 @@ function createMeetingCard(meeting) {
         <div class="meeting-card" onclick="importMeeting('${meeting.meeting_id}', this)">
             <div class="meeting-header">
                 <div class="meeting-title">${meeting.track_name}</div>
-                <div class="meeting-badge" style="background: ${conditionColor}; color: white;">
-                    ${meeting.track_condition || 'N/A'}
+                <div class="meeting-badge" style="background: #6c757d; color: white;">
+                    ${meeting.state}
                 </div>
             </div>
             <div class="meeting-details">
                 <span>📅 ${meeting.date}</span>
                 <span>🏇 ${meeting.race_count} races</span>
-                ${meeting.rail_position ? `<span>🛤️ Rail: ${meeting.rail_position}</span>` : ''}
+                <span>📍 ${meeting.track_code}</span>
             </div>
         </div>
     `;
