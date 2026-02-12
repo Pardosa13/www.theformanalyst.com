@@ -1300,8 +1300,15 @@ def api_get_meetings_by_date(date_str):
 def api_import_meeting(meeting_id):
     """Import meeting from PuntingForm V1 API"""
     try:
-        # Get today's meetings to find this specific meeting
-        meetings_response = pf_service.get_meetings_list()
+        # Get the date from the request (passed from frontend)
+        date_str = request.form.get('date')
+        
+        if not date_str:
+            # Fallback to today if no date provided
+            date_str = datetime.now().strftime('%Y-%m-%d')
+        
+        # Get meetings for the specified date
+        meetings_response = pf_service.get_meetings_list(date=date_str)
         meetings = meetings_response.get('meetings', [])
         
         # Find the meeting by ID
@@ -1311,7 +1318,6 @@ def api_import_meeting(meeting_id):
             return jsonify({'success': False, 'error': 'Meeting not found'}), 404
         
         track_name = meeting_info['track_name']
-        date_str = meeting_info['date']  # Already in YYYY-MM-DD from our service
         
         # Fetch CSV using track name and date (V1 API method)
         csv_data = pf_service.get_fields_csv(track_name, date_str)
