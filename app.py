@@ -1263,9 +1263,13 @@ def dashboard():
 def api_get_todays_meetings():
     """Get list of today's meetings from PuntingForm API"""
     try:
-        pf = PuntingFormService()
-        meetings = pf.get_meetings_list()
-        return jsonify({'success': True, 'meetings': meetings})
+        meetings_data = pf_service.get_meetings_list()
+        # meetings_data is already {'meetings': [...]}
+        
+        return jsonify({
+            'success': True, 
+            'meetings': meetings_data['meetings']  # Extract the array directly
+        })
     except Exception as e:
         logger.error(f"Failed to fetch meetings: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
