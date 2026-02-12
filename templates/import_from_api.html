@@ -252,8 +252,16 @@ async function importMeeting(meetingId, cardElement) {
     `;
     
     try {
+        // Get the selected date from the input field
+        const selectedDate = document.getElementById('meeting-date').value;
+        
+        // Create form data and add the date
+        const formData = new FormData();
+        formData.append('date', selectedDate);
+        
         const response = await fetch(`/api/meetings/${meetingId}/import`, {
-            method: 'POST'
+            method: 'POST',
+            body: formData
         });
         
         const data = await response.json();
@@ -273,7 +281,6 @@ async function importMeeting(meetingId, cardElement) {
         location.reload();
     }
 }
-
 function showError(message) {
     document.getElementById('loading').style.display = 'none';
     document.getElementById('error-message').textContent = message;
