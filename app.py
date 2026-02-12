@@ -1496,6 +1496,43 @@ def fetch_automatic_results(meeting_id):
     
     return redirect(url_for('results_entry', meeting_id=meeting_id))
 
+@app.route("/results/<int:meeting_id>/mark-scratched-and-complete", methods=["POST"])
+@login_required
+def mark_scratched_and_complete(meeting_id):
+    """Mark all remaining horses as scratched and complete the meeting"""
+    meeting = Meeting.query.get_or_404(meeting_id)
+    
+    try:
+        scratched_count = 0
+        
+        # Get all races in this meeting
+        races = Race.query.filter_by(meeting_id=meeting_id).all()
+        
+        for race in races:
+            # Get all horses in this race
+            horses = Horse.query.filter_by(race_id=race.id).all()
+            
+            for horse in horses:
+                # If horse has no result, mark as scratched
+                if not horse.result:
+                    result = Result(
+                        horse_id=horse.id,
+                        finish_position=0,  # 0 = scratched
+                        sp=None,
+                        recorded_by=current_user.id
+                    )
+                    db.session.add(result)
+                    scratched_count += 1
+        
+        db.session.commit()
+        flash(f"✓ Marked {scratched_count} horses as scratched and completed meeting", "success")
+        
+    except Exception as e:
+        logger.error(f"Mark scratched error: {str(e)}", exc_info=True)
+        flash(f"✗ Failed to complete meeting: {str(e)}", "danger")
+    
+    return redirect(url_for('view_meeting', meeting_id=meeting_id))
+
 @app.route("/analyze", methods=["POST"])
 @login_required
 def analyze():
