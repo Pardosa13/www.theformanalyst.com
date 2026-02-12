@@ -1437,7 +1437,7 @@ def fetch_automatic_results(meeting_id):
             race_num = race_result.get('RaceNumber')
             runners = race_result.get('Runners', [])
             
-            # Find the race in our database
+           # Find the race in our database
             race = Race.query.filter_by(
                 meeting_id=meeting_id,
                 race_number=race_num
@@ -1452,8 +1452,12 @@ def fetch_automatic_results(meeting_id):
                 finish_pos = runner.get('Position', 0)
                 sp = runner.get('Price_SP', 0)
                 
-                if not horse_name or finish_pos == 0:
+                if not horse_name:
                     continue
+                
+                # ✅ Handle unplaced horses (5th or worse)
+                if finish_pos > 4:
+                    finish_pos = 999  # Your system uses 999 for "Unplaced"
                 
                 # Find horse by name (case-insensitive)
                 horse = Horse.query.filter(
