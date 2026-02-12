@@ -1388,16 +1388,12 @@ def fetch_automatic_results(meeting_id):
             month = date_part[2:4]
             day = date_part[4:6]
             date_str = f"{year}-{month}-{day}"
-            
-            # ✅ NEW: Convert to V1 API format (dd-MMM-yyyy)
-            date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-            date_str_v1 = date_obj.strftime('%d-%b-%Y')  # "11-Feb-2026"
         else:
             flash("⚠️ Could not determine meeting date", "warning")
             return redirect(url_for('results_entry', meeting_id=meeting_id))
         
-        # Fetch results using V1 method with correct date format
-        results_response = pf_service.get_results(track_name, date_str_v1)
+        # Fetch results using V1 method
+        results_response = pf_service.get_results(track_name, date_str)
         
         # Check for errors
         if results_response.get('IsError'):
