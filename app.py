@@ -1273,7 +1273,27 @@ def api_get_todays_meetings():
     except Exception as e:
         logger.error(f"Failed to fetch meetings: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
-
+        
+@app.route("/api/meetings/date/<date_str>")
+@login_required
+def api_get_meetings_by_date(date_str):
+    """Get list of meetings for a specific date from PuntingForm API"""
+    try:
+        # Validate date format
+        try:
+            datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'success': False, 'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+        
+        meetings_data = pf_service.get_meetings_list(date=date_str)
+        
+        return jsonify({
+            'success': True, 
+            'meetings': meetings_data['meetings']
+        })
+    except Exception as e:
+        logger.error(f"Failed to fetch meetings for {date_str}: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route("/api/meetings/<meeting_id>/import", methods=["POST"])
 @login_required
