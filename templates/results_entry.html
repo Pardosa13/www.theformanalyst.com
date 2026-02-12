@@ -17,16 +17,28 @@
                 This meeting was imported from PuntingForm API. Click to automatically populate all results.
             </div>
         </div>
-        <form action="{{ url_for('fetch_automatic_results', meeting_id=meeting.id) }}" 
-              method="POST" 
-              style="margin: 0;"
-              onsubmit="return confirm('Fetch all race results automatically from PuntingForm?');">
-            <button type="submit" 
-                    class="btn" 
-                    style="background: white; color: #28a745; font-weight: 600; padding: 12px 24px; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); border: none;">
-                🔄 Auto-Fetch All Results
-            </button>
-        </form>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <form action="{{ url_for('fetch_automatic_results', meeting_id=meeting.id) }}" 
+                  method="POST" 
+                  style="margin: 0;"
+                  onsubmit="return confirm('Fetch all race results automatically from PuntingForm?');">
+                <button type="submit" 
+                        class="btn" 
+                        style="background: white; color: #28a745; font-weight: 600; padding: 12px 24px; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); border: none;">
+                    🔄 Auto-Fetch All Results
+                </button>
+            </form>
+            <form action="{{ url_for('mark_scratched_and_complete', meeting_id=meeting.id) }}" 
+                  method="POST" 
+                  style="margin: 0;"
+                  onsubmit="return confirm('Mark all remaining horses as scratched and complete this meeting?');">
+                <button type="submit" 
+                        class="btn" 
+                        style="background: white; color: #20c997; font-weight: 600; padding: 12px 24px; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); border: none;">
+                    ✅ Mark Scratched & Complete
+                </button>
+            </form>
+        </div>
     </div>
 </div>
 {% endif %}
