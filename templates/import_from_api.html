@@ -3,16 +3,39 @@
 {% block title %}Import from PuntingForm API{% endblock %}
 
 {% block content %}
-<h1>🌐 Import Today's Meetings</h1>
+<h1>🌐 Import Meetings from PuntingForm</h1>
 
 <div style="margin-bottom: 20px;">
     <a href="{{ url_for('dashboard') }}" style="color: #667eea; text-decoration: none;">← Back to Dashboard</a>
 </div>
 
+<!-- Date Selection Card -->
+<div class="card" style="margin-bottom: 20px;">
+    <h3 style="margin: 0 0 15px 0;">Select Meeting Date</h3>
+    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+        <input 
+            type="date" 
+            id="meeting-date" 
+            style="padding: 10px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 16px;"
+        >
+        <button 
+            onclick="loadMeetings()" 
+            class="btn btn-primary"
+            style="padding: 10px 30px; font-size: 16px;"
+        >
+            📅 Get Meetings
+        </button>
+    </div>
+    <p style="color: #6c757d; margin: 15px 0 0 0; font-size: 14px;">
+        💡 Select a date to view all available meetings for that day
+    </p>
+</div>
+
+<!-- Meetings Display -->
 <div class="card">
-    <div id="loading" style="text-align: center; padding: 40px;">
+    <div id="loading" style="display: none; text-align: center; padding: 40px;">
         <div style="font-size: 48px; margin-bottom: 20px;">⏳</div>
-        <p style="color: #6c757d; font-size: 18px;">Loading today's meetings from PuntingForm...</p>
+        <p style="color: #6c757d; font-size: 18px;">Loading meetings from PuntingForm...</p>
     </div>
     
     <div id="meetings-container" style="display: none;">
@@ -28,9 +51,15 @@
         <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
         <p style="color: #dc3545; font-size: 18px; margin-bottom: 10px;">Failed to load meetings</p>
         <p id="error-message" style="color: #6c757d;"></p>
-        <button onclick="location.reload()" class="btn btn-primary" style="margin-top: 20px;">
+        <button onclick="loadMeetings()" class="btn btn-primary" style="margin-top: 20px;">
             Retry
         </button>
+    </div>
+    
+    <div id="initial-state" style="text-align: center; padding: 60px 20px;">
+        <div style="font-size: 64px; margin-bottom: 20px;">🏇</div>
+        <h3 style="color: #2d3748; margin-bottom: 10px;">Ready to Import Meetings</h3>
+        <p style="color: #6c757d; font-size: 16px;">Select a date above and click "Get Meetings" to start</p>
     </div>
 </div>
 
@@ -119,9 +148,30 @@ const JURISDICTION_COLORS = {
     'NT': '#d4581e'
 };
 
+// Set default date to today on page load
+document.addEventListener('DOMContentLoaded', function() {
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('meeting-date').value = today;
+});
+
 async function loadMeetings() {
+    const dateInput = document.getElementById('meeting-date').value;
+    
+    if (!dateInput) {
+        alert('Please select a date');
+        return;
+    }
+    
+    // Hide all containers
+    document.getElementById('initial-state').style.display = 'none';
+    document.getElementById('meetings-container').style.display = 'none';
+    document.getElementById('error-container').style.display = 'none';
+    
+    // Show loading
+    document.getElementById('loading').style.display = 'block';
+    
     try {
-        const response = await fetch('/api/meetings/today');
+        const response = await fetch(`/api/meetings/date/${dateInput}`);
         const data = await response.json();
         
         if (!data.success) {
@@ -130,7 +180,7 @@ async function loadMeetings() {
         }
         
         if (data.meetings.length === 0) {
-            showError('No meetings available for today');
+            showError('No meetings available for this date');
             return;
         }
         
@@ -145,9 +195,9 @@ async function loadMeetings() {
 function displayMeetings(meetings) {
     const grouped = {};
     
-    // Group by state (V1 API uses 'state' not 'jurisdiction')
+    // Group by state
     meetings.forEach(meeting => {
-        const state = meeting.state || 'OTHER';  // ✅ Changed from jurisdiction to state
+        const state = meeting.state || 'OTHER';
         if (!grouped[state]) {
             grouped[state] = [];
         }
@@ -175,16 +225,6 @@ function displayMeetings(meetings) {
 }
 
 function createMeetingCard(meeting) {
-    const trackConditionColors = {
-        'good': '#28a745',
-        'soft': '#ffc107',
-        'heavy': '#dc3545',
-        'firm': '#17a2b8',
-        'synthetic': '#6f42c1'
-    };
-    
-    const conditionColor = trackConditionColors[meeting.track_condition?.toLowerCase()] || '#6c757d';
-    
     return `
         <div class="meeting-card" onclick="importMeeting('${meeting.meeting_id}', this)">
             <div class="meeting-header">
@@ -239,9 +279,6 @@ function showError(message) {
     document.getElementById('error-message').textContent = message;
     document.getElementById('error-container').style.display = 'block';
 }
-
-// Load meetings when page loads
-document.addEventListener('DOMContentLoaded', loadMeetings);
 </script>
 
 {% endblock %}
