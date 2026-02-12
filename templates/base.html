@@ -292,64 +292,61 @@
             </button>
             
             <div class="collapse navbar-collapse" id="navbarNav">
-    <ul class="navbar-nav ms-auto">
-        {% if current_user.is_authenticated %}
-            <!-- Everyone sees Race Meetings -->
-            <li class="nav-item">
-                <a class="nav-link {{ 'active' if request.endpoint == 'history' }}" href="{{ url_for('history') }}">
-                    <i class="bi bi-clock-history"></i> Race Meetings
-                </a>
-            </li>
-            
-            <!-- Admin-only links -->
-            {% if current_user.is_admin %}
-                <li class="nav-item">
-                    <a class="nav-link {{ 'active' if request.endpoint == 'dashboard' }}" href="{{ url_for('dashboard') }}">
-                        <i class="bi bi-speedometer2"></i> Dashboard
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {{ 'active' if request.endpoint in ['results', 'results_entry'] }}" href="{{ url_for('results') }}">
-                        <i class="bi bi-check2-square"></i> Results
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {{ 'active' if request.endpoint == 'data_analytics' }}" href="{{ url_for('data_analytics') }}">
-                        <i class="bi bi-bar-chart-line"></i> Data
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {{ 'active' if request.endpoint == 'best_bets' }}" href="{{ url_for('best_bets') }}">
-                        <i class="bi bi-fire"></i> Best Bets
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {{ 'active' if request.endpoint == 'admin_panel' }}" href="{{ url_for('admin_panel') }}">
-                        <i class="bi bi-shield-lock"></i> Admin
-                    </a>
-                </li>
-            {% endif %}
-            
-            <li class="nav-item">
-                <span class="nav-link">
-                    <i class="bi bi-person-circle"></i> {{ current_user.username }}
-                </span>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" href="{{ url_for('logout') }}">
-                    <i class="bi bi-box-arrow-right"></i> Logout
-                </a>
-            </li>
-        {% else %}
-            <li class="nav-item">
-                <a class="nav-link {{ 'active' if request.endpoint == 'login' }}" href="{{ url_for('login') }}">
-                    <i class="bi bi-box-arrow-in-right"></i> Login
-                </a>
-            </li>
-        {% endif %}
-    </ul>
-</div>
-
+                <ul class="navbar-nav ms-auto">
+                    {% if current_user.is_authenticated %}
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if request.endpoint == 'dashboard' }}" href="{{ url_for('dashboard') }}">
+                                <i class="bi bi-speedometer2"></i> Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if request.endpoint == 'history' }}" href="{{ url_for('history') }}">
+                                <i class="bi bi-clock-history"></i> Race Meetings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if request.endpoint in ['results', 'results_entry'] }}" href="{{ url_for('results') }}">
+                                <i class="bi bi-check2-square"></i> Results
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if request.endpoint == 'data_analytics' }}" href="{{ url_for('data_analytics') }}">
+                                <i class="bi bi-bar-chart-line"></i> Data
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if request.endpoint == 'best_bets' }}" href="{{ url_for('best_bets') }}">
+                                <i class="bi bi-fire"></i> Best Bets
+                            </a>
+                        </li>
+                        {% if current_user.is_admin %}
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if request.endpoint == 'admin_panel' }}" href="{{ url_for('admin_panel') }}">
+                                <i class="bi bi-shield-lock"></i> Admin
+                            </a>
+                        </li>
+                        {% endif %}
+                        <li class="nav-item">
+                            <span class="nav-link">
+                                <i class="bi bi-person-circle"></i> {{ current_user.username }}
+                            </span>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('logout') }}">
+                                <i class="bi bi-box-arrow-right"></i> Logout
+                            </a>
+                        </li>
+                    {% else %}
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if request.endpoint == 'login' }}" href="{{ url_for('login') }}">
+                                <i class="bi bi-box-arrow-in-right"></i> Login
+                            </a>
+                        </li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </nav>
     <!-- Main Content -->
     <div class="main-container">
         <!-- Flash Messages -->
