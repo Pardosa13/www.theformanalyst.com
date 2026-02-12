@@ -2,7 +2,6 @@
 PuntingForm API Service
 Handles all interactions with PuntingForm API for automated data fetching
 """
-
 import os
 import requests
 from datetime import datetime
@@ -15,27 +14,27 @@ class PuntingFormService:
         
         self.base_url = 'https://api.puntingform.com.au/v2'
     
-def _make_request(self, endpoint, params=None):
-    """Make authenticated request to PuntingForm API"""
-    url = f"{self.base_url}/{endpoint}"
-    
-    # Initialize params if None
-    if params is None:
-        params = {}
-    
-    # PuntingForm uses API key as query parameter
-    params['apikey'] = self.api_key
-    
-    headers = {
-        'Accept': 'application/json'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, params=params, timeout=30)
-        response.raise_for_status()
-        return response
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"PuntingForm API error: {str(e)}")
+    def _make_request(self, endpoint, params=None):
+        """Make authenticated request to PuntingForm API"""
+        url = f"{self.base_url}/{endpoint}"
+        
+        # Initialize params if None
+        if params is None:
+            params = {}
+        
+        # PuntingForm uses API key as query parameter
+        params['apikey'] = self.api_key
+        
+        headers = {
+            'Accept': 'application/json'
+        }
+        
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=30)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"PuntingForm API error: {str(e)}")
     
     def get_meetings_list(self, date=None, jurisdiction='AU'):
         """
@@ -67,7 +66,7 @@ def _make_request(self, endpoint, params=None):
         
         Args:
             date: Date string in YYYY-MM-DD format
-            track: Track name (e.g., 'Flemington', 'Randwick')
+            track: Track name (e.g., 'Flemingham', 'Randwick')
             race: Optional race number
         
         Returns:
