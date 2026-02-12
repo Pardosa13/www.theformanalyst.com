@@ -1364,7 +1364,30 @@ def api_import_meeting(meeting_id):
 def import_from_api():
     """Page to import meetings from PuntingForm API"""
     return render_template("import_from_api.html")
-
+    
+@app.route("/test-results-api")
+@login_required
+def test_results_api():
+    """Test results API call"""
+    try:
+        # Test with Gosford Feb 11
+        track = "Gosford"
+        date = "2026-02-11"
+        
+        results = pf_service.get_results(track, date)
+        
+        return jsonify({
+            'success': True,
+            'track': track,
+            'date': date,
+            'response': results
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        })
 
 @app.route("/results/<int:meeting_id>/fetch-auto", methods=["POST"])
 @login_required
