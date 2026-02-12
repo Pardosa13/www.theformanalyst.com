@@ -1424,7 +1424,7 @@ def fetch_automatic_results(meeting_id):
             return redirect(url_for('results_entry', meeting_id=meeting_id))
         
         # V1 API returns format: {"Result": [{"RaceNumber": 1, "Runners": [...]}]}
-        races_results = results_response.get('Result', [])
+        races_results = results_response.get('RaceDetails', [])
         
         if not races_results:
             flash("⚠️ No results available yet", "warning")
@@ -1448,9 +1448,9 @@ def fetch_automatic_results(meeting_id):
             
             # Process each runner
             for runner in runners:
-                horse_name = runner.get('HorseName', '').strip()
+                horse_name = runner.get('Name', '').strip()
                 finish_pos = runner.get('Position', 0)
-                sp = runner.get('StartingPrice', 0)
+                sp = runner.get('Price_SP', 0)
                 
                 if not horse_name or finish_pos == 0:
                     continue
