@@ -15,7 +15,7 @@ class PuntingFormService:
         
         self.base_url = 'https://api.puntingform.com.au/v2'
     
-    def _make_request(self, endpoint, params=None):
+def _make_request(self, endpoint, params=None):
     """Make authenticated request to PuntingForm API"""
     url = f"{self.base_url}/{endpoint}"
     
