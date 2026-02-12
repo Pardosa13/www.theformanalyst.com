@@ -1250,6 +1250,9 @@ def logout():
 @app.route("/dashboard")
 @login_required
 def dashboard():
+    if not current_user.is_admin:
+        flash("Access denied. Admin privileges required.", "danger")
+        return redirect(url_for("history"))
     # Get all recent meetings (shared across all users)
     recent_meetings = Meeting.query\
         .order_by(Meeting.uploaded_at.desc())\
@@ -1612,6 +1615,9 @@ def delete_meeting(meeting_id):
 @app.route("/results")
 @login_required
 def results():
+    if not current_user.is_admin:
+        flash("Access denied. Admin privileges required.", "danger")
+        return redirect(url_for("history"))
     """Show meetings needing results - complete ones load via AJAX"""
     from sqlalchemy import func
     
@@ -2064,8 +2070,8 @@ def admin_panel():
 @login_required
 def data_analytics():
     if not current_user.is_admin:
-        flash("Access denied. Analytics page is admin-only.", "danger")
-        return redirect(url_for("dashboard"))
+        flash("Access denied. Admin privileges required.", "danger")
+        return redirect(url_for("history"))  # Change from dashboard to history
     
     track_filter = request.args.get('track', '')
     min_score_filter = request.args.get('min_score', type=float)
@@ -3229,6 +3235,9 @@ def export_ml_data():
 @app.route("/best-bets")
 @login_required
 def best_bets():
+    if not current_user.is_admin:
+        flash("Access denied. Admin privileges required.", "danger")
+        return redirect(url_for("history"))
     """Show today's best bets based on active positive ROI components"""
     from models import Component, Prediction
     from datetime import datetime, timedelta
