@@ -370,7 +370,10 @@ def post_best_bets_to_twitter(best_bets, meeting_name):
         logger.error(f"Exception message: {str(e)}", exc_info=True)
         logger.info("=" * 50)
         return False
-def process_and_store_results(csv_data, filename, track_condition, user_id, is_advanced=False, puntingform_id=None):
+    def process_and_store_results(csv_data, filename, track_condition, user_id, 
+                                   is_advanced=False, puntingform_id=None,
+                                   speed_maps_data=None, ratings_data=None, 
+                                   sectionals_data=None):
     """
     Process CSV through analyzer and store results in database
     """
@@ -1340,8 +1343,14 @@ def api_import_meeting(meeting_id):
         
         track_name = meeting_info['track_name']
         
-        # Fetch CSV using meeting_id (V2 API method)
-        csv_data = pf_service.get_fields_csv(meeting_id)
+        # Fetch ALL data from V2 API
+        complete_data = pf_service.get_complete_meeting_data(meeting_id)
+
+        csv_data = complete_data['csv_data']
+        speed_maps_data = complete_data['speed_maps']
+        ratings_data = complete_data['ratings']
+        # Sectionals only if you have Pro/Modeller subscription
+        sectionals_data = complete_data.get('sectionals')
         
         if not csv_data:
             return jsonify({'success': False, 'error': 'No data available for this meeting'}), 400
