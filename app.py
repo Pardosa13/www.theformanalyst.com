@@ -2792,48 +2792,6 @@ def api_price_analysis():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     
-    # First, find meetings where ALL horses have SP data
-    # Subquery: Count total horses per meeting
-    total_horses = db.session.query(
-        Meeting.id.label('meeting_id'),
-        func.count(Horse.id).label('total_count')
-    ).join(Race, Race.meeting_id == Meeting.id)\
-     .join(Horse, Horse.race_id == Race.id)\
-     .join(Result, Result.horse_id == Horse.id)\
-     .filter(Result.finish_position > 0)\
-     .group_by(Meeting.id)\
-     .subquery()
-    
-    # Subquery: Count horses WITH SP per meeting
-    horses_with_sp = db.session.query(
-        Meeting.id.label('meeting_id'),
-        func.count(Horse.id).label('sp_count')
-    ).join(Race, Race.meeting_id == Meeting.id)\
-     .join(Horse, Horse.race_id == Race.id)\
-     .join(Result, Result.horse_id == Horse.id)\
-     .filter(
-         Result.finish_position > 0,
-         Result.sp.isnot(None),
-         Result.sp > 0
-     )\
-     .group_by(Meeting.id)\
-     .subquery()
-    
-    # Get meetings where total_count == sp_count (all horses have SP)
-    complete_meetings = db.session.query(total_horses.c.meeting_id)\
-        .join(
-            horses_with_sp,
-            total_horses.c.meeting_id == horses_with_sp.c.meeting_id
-        )\
-        .filter(total_horses.c.total_count == horses_with_sp.c.sp_count)\
-        .all()
-    
-    complete_meeting_ids = [m[0] for m in complete_meetings]
-    
-    if not complete_meeting_ids:
-        return jsonify({'error': 'No meetings with complete SP data found'})
-    
-    # Now use these meeting IDs in your existing query
     race_id_query = db.session.query(Race.id).join(
         Meeting, Race.meeting_id == Meeting.id
     ).join(
@@ -2842,7 +2800,7 @@ def api_price_analysis():
         Result, Result.horse_id == Horse.id
     ).filter(
         Result.finish_position > 0,
-        Meeting.id.in_(complete_meeting_ids)  # ADD THIS FILTER
+        Meeting.uploaded_at >= '2026-02-13'  # Only analyze data from when complete SP tracking started
     )
     
     if track_filter:
@@ -2852,7 +2810,138 @@ def api_price_analysis():
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
     
-    # ... rest of your existing code stays the same
+    limit_param = request.args.get('limit', '200')
+    # Get distinct race IDs ordered by most recent
+    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
+    # Apply limit
+    if limit_param == 'all':
+        recent_race_ids = [r[0] for r in all_race_ids]
+    else:
+        limit = int(limit_param) if limit_param.isdigit() else 200
+        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
+    
+    base_query = db.session.query(
+        Horse, Prediction, Result, Race, Meeting
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Result.finish_position > 0,
+        Race.id.in_(recent_race_ids)
+    )
+    
+    all_results = base_query.all()
+    
+    races_data = {}
+    for horse, pred, result, race, meeting in all_results:
+        race_key = (meeting.id, race.race_number)
+        if race_key not in races_data:
+            races_data[race_key] = []
+        races_data[race_key].append({
+            'horse': horse,
+            'prediction': pred,
+            'result': result
+        })
+    
+    stake = 10.0
+    price_analysis = {
+        'overlays': {'count': 0, 'wins': 0, 'profit': 0},
+        'underlays': {'count': 0, 'wins': 0, 'profit': 0},
+        'accurate': {'count': 0, 'wins': 0, 'profit': 0},
+        'total_compared': 0,
+        'price_diffs': [],
+        'overlay_examples': [],
+        'underlay_examples': []
+    }
+    
+    for race_key, horses in races_data.items():
+        horses.sort(key=lambda x: x['prediction'].score, reverse=True)
+        
+        if not horses:
+            continue
+        
+        top_pick = horses[0]
+        pred = top_pick['prediction']
+        result = top_pick['result']
+        
+        predicted_odds_str = pred.predicted_odds or ''
+        try:
+            predicted_odds = float(predicted_odds_str.replace('$', '').strip())
+        except (ValueError, AttributeError):
+            continue
+        
+        sp = result.sp
+        
+        if not sp or sp <= 0 or not predicted_odds or predicted_odds <= 0:
+            continue
+        
+        price_analysis['total_compared'] += 1
+        
+        won = result.finish_position == 1
+        profit = (sp * stake - stake) if won else -stake
+        
+        price_diff_pct = ((sp - predicted_odds) / predicted_odds) * 100
+        price_analysis['price_diffs'].append(price_diff_pct)
+        
+        horse_name = top_pick['horse'].horse_name
+        
+        if price_diff_pct >= 10:
+            price_analysis['overlays']['count'] += 1
+            if won:
+                price_analysis['overlays']['wins'] += 1
+            price_analysis['overlays']['profit'] += profit
+            
+            if len(price_analysis['overlay_examples']) < 5:
+                price_analysis['overlay_examples'].append({
+                    'horse': horse_name,
+                    'your_price': predicted_odds,
+                    'sp': sp,
+                    'won': won
+                })
+        
+        elif price_diff_pct <= -10:
+            price_analysis['underlays']['count'] += 1
+            if won:
+                price_analysis['underlays']['wins'] += 1
+            price_analysis['underlays']['profit'] += profit
+            
+            if len(price_analysis['underlay_examples']) < 5:
+                price_analysis['underlay_examples'].append({
+                    'horse': horse_name,
+                    'your_price': predicted_odds,
+                    'sp': sp,
+                    'won': won
+                })
+        
+        else:
+            price_analysis['accurate']['count'] += 1
+            if won:
+                price_analysis['accurate']['wins'] += 1
+            price_analysis['accurate']['profit'] += profit
+    
+    for category in ['overlays', 'underlays', 'accurate']:
+        cat = price_analysis[category]
+        cat['strike_rate'] = (cat['wins'] / cat['count'] * 100) if cat['count'] > 0 else 0
+        cat['roi'] = (cat['profit'] / (cat['count'] * stake) * 100) if cat['count'] > 0 else 0
+    
+    price_analysis['avg_diff'] = sum(price_analysis['price_diffs']) / len(price_analysis['price_diffs']) if price_analysis['price_diffs'] else 0
+    
+    result = jsonify(price_analysis)
+    
+    del all_results
+    del races_data
+    del price_analysis
+    import gc
+    gc.collect()
+    
+    db.session.remove()
+    
+    return result
     
 # ----- ML Data Export Route -----
 @app.route("/data/export")
