@@ -127,7 +127,7 @@ with app.app_context():
         print(f"PuntingForm migration check: {e}")
 
     # Migration: Add V2 API JSON columns to races table
-try:
+    try:
     from sqlalchemy import inspect, text
     inspector = inspect(db.engine)
     races_columns = [col['name'] for col in inspector.get_columns('races')]
