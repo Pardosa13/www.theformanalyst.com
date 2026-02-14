@@ -126,7 +126,7 @@ with app.app_context():
     except Exception as e:
         print(f"PuntingForm migration check: {e}")
     
-    # Migration: Add V2 API JSON columns to races table
+   # Migration: Add V2 API JSON columns to races table
     try:
         from sqlalchemy import inspect, text
         inspector = inspect(db.engine)
