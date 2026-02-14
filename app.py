@@ -2850,13 +2850,13 @@ def api_price_analysis():
     
     stake = 10.0
     price_analysis = {
-        'overlays': {'count': 0, 'wins': 0, 'profit': 0},
-        'underlays': {'count': 0, 'wins': 0, 'profit': 0},
-        'accurate': {'count': 0, 'wins': 0, 'profit': 0},
+        'overlay_10_20': {'count': 0, 'wins': 0, 'profit': 0},
+        'overlay_20_30': {'count': 0, 'wins': 0, 'profit': 0},
+        'overlay_30_50': {'count': 0, 'wins': 0, 'profit': 0},
+        'overlay_50_plus': {'count': 0, 'wins': 0, 'profit': 0},
+        'total_overlays': {'count': 0, 'wins': 0, 'profit': 0},
         'total_compared': 0,
-        'price_diffs': [],
-        'overlay_examples': [],
-        'underlay_examples': []
+        'overlay_examples': []
     }
     
     for race_key, horses in races_data.items():
@@ -2886,50 +2886,51 @@ def api_price_analysis():
         profit = (sp * stake - stake) if won else -stake
         
         price_diff_pct = ((sp - predicted_odds) / predicted_odds) * 100
-        price_analysis['price_diffs'].append(price_diff_pct)
         
         horse_name = top_pick['horse'].horse_name
+        score = pred.score
         
+        # Only track overlays (10%+ better value)
         if price_diff_pct >= 10:
-            price_analysis['overlays']['count'] += 1
-            if won:
-                price_analysis['overlays']['wins'] += 1
-            price_analysis['overlays']['profit'] += profit
+            # Determine tier
+            if price_diff_pct >= 50:
+                tier = 'overlay_50_plus'
+            elif price_diff_pct >= 30:
+                tier = 'overlay_30_50'
+            elif price_diff_pct >= 20:
+                tier = 'overlay_20_30'
+            else:
+                tier = 'overlay_10_20'
             
-            if len(price_analysis['overlay_examples']) < 5:
+            # Update tier stats
+            price_analysis[tier]['count'] += 1
+            if won:
+                price_analysis[tier]['wins'] += 1
+            price_analysis[tier]['profit'] += profit
+            
+            # Update total overlays
+            price_analysis['total_overlays']['count'] += 1
+            if won:
+                price_analysis['total_overlays']['wins'] += 1
+            price_analysis['total_overlays']['profit'] += profit
+            
+            # Add to examples (limit 10)
+            if len(price_analysis['overlay_examples']) < 10:
                 price_analysis['overlay_examples'].append({
                     'horse': horse_name,
+                    'score': score,
                     'your_price': predicted_odds,
                     'sp': sp,
-                    'won': won
+                    'overlay_pct': price_diff_pct,
+                    'won': won,
+                    'profit': profit
                 })
-        
-        elif price_diff_pct <= -10:
-            price_analysis['underlays']['count'] += 1
-            if won:
-                price_analysis['underlays']['wins'] += 1
-            price_analysis['underlays']['profit'] += profit
-            
-            if len(price_analysis['underlay_examples']) < 5:
-                price_analysis['underlay_examples'].append({
-                    'horse': horse_name,
-                    'your_price': predicted_odds,
-                    'sp': sp,
-                    'won': won
-                })
-        
-        else:
-            price_analysis['accurate']['count'] += 1
-            if won:
-                price_analysis['accurate']['wins'] += 1
-            price_analysis['accurate']['profit'] += profit
     
-    for category in ['overlays', 'underlays', 'accurate']:
-        cat = price_analysis[category]
+    # Calculate strike rates and ROI for each tier
+    for tier in ['overlay_10_20', 'overlay_20_30', 'overlay_30_50', 'overlay_50_plus', 'total_overlays']:
+        cat = price_analysis[tier]
         cat['strike_rate'] = (cat['wins'] / cat['count'] * 100) if cat['count'] > 0 else 0
         cat['roi'] = (cat['profit'] / (cat['count'] * stake) * 100) if cat['count'] > 0 else 0
-    
-    price_analysis['avg_diff'] = sum(price_analysis['price_diffs']) / len(price_analysis['price_diffs']) if price_analysis['price_diffs'] else 0
     
     result = jsonify(price_analysis)
     
