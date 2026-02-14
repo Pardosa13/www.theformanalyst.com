@@ -408,7 +408,7 @@ def extract_race_sectionals(sectionals_data, race_number):
     
     return race_sectionals if race_sectionals else None
 
-    def process_and_store_results(csv_data, filename, track_condition, user_id, 
+def process_and_store_results(csv_data, filename, track_condition, user_id, 
                                    is_advanced=False, puntingform_id=None,
                                    speed_maps_data=None, ratings_data=None, 
                                    sectionals_data=None):
