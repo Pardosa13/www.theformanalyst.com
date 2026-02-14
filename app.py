@@ -1416,7 +1416,10 @@ def api_import_meeting(meeting_id):
             track_condition=track_condition,
             user_id=current_user.id,
             is_advanced=False,
-            puntingform_id=track_name  # Store track name for results fetching later
+            puntingform_id=meeting_id,  # Store meeting_id instead of track_name
+            speed_maps_data=speed_maps_data,
+            ratings_data=ratings_data,
+            sectionals_data=sectionals_data
         )
         
         # Set meeting date
