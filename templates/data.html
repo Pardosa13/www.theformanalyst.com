@@ -926,49 +926,73 @@ function renderPriceAnalysis(data) {
     }
     
     let html = '<div class="card-body">';
-    html += '<p class="text-muted mb-3">Comparing your predicted odds vs actual SP. Are you finding value?</p>';
+    html += '<p class="text-muted mb-3">Overlay analysis: When SP is better than your predicted price, are you finding winners?</p>';
     
-    // Summary Cards
-html += '<div class="row mb-4">';
-html += `<div class="col-md-4"><div class="card border-success h-100"><div class="card-body text-center">
-    <h6 class="text-success">📈 Overlays (Value)</h6>
-    <p class="small text-muted mb-2">SP was 10%+ higher than your price</p>
-    <h3>${data.overlays.wins}/${data.overlays.count}</h3>
-    <p class="mb-1">Strike: <strong class="${data.overlays.strike_rate >= 20 ? 'text-success' : ''}">${data.overlays.strike_rate.toFixed(1)}%</strong></p>
-    <p class="mb-0">ROI: <strong class="${data.overlays.roi >= 0 ? 'text-success' : 'text-danger'}">${data.overlays.roi.toFixed(1)}%</strong></p>
-</div></div></div>`;
-
-html += `<div class="col-md-4"><div class="card border-warning h-100"><div class="card-body text-center">
-    <h6 class="text-warning">⚖️ Accurate</h6>
-    <p class="small text-muted mb-2">SP within 10% of your price</p>
-    <h3>${data.accurate.wins}/${data.accurate.count}</h3>
-    <p class="mb-1">Strike: <strong>${data.accurate.strike_rate.toFixed(1)}%</strong></p>
-    <p class="mb-0">ROI: <strong class="${data.accurate.roi >= 0 ? 'text-success' : 'text-danger'}">${data.accurate.roi.toFixed(1)}%</strong></p>
-</div></div></div>`;
-
-html += `<div class="col-md-4"><div class="card border-danger h-100"><div class="card-body text-center">
-    <h6 class="text-danger">📉 Underlays (No Value)</h6>
-    <p class="small text-muted mb-2">SP was 10%+ lower than your price</p>
-    <h3>${data.underlays.wins}/${data.underlays.count}</h3>
-    <p class="mb-1">Strike: <strong>${data.underlays.strike_rate.toFixed(1)}%</strong></p>
-    <p class="mb-0">ROI: <strong class="${data.underlays.roi >= 0 ? 'text-success' : 'text-danger'}">${data.underlays.roi.toFixed(1)}%</strong></p>
-</div></div></div>`;
-html += '</div>';
+    // Total Overlays Summary
+    html += '<div class="row mb-4">';
+    html += `<div class="col-md-12"><div class="card border-primary"><div class="card-body text-center">
+        <h5>📊 Total Overlays Found</h5>
+        <h2>${data.total_overlays.wins}/${data.total_overlays.count}</h2>
+        <p class="mb-1">Strike Rate: <strong class="${data.total_overlays.strike_rate >= 20 ? 'text-success' : 'text-danger'}">${data.total_overlays.strike_rate.toFixed(1)}%</strong></p>
+        <p class="mb-0">ROI: <strong class="${data.total_overlays.roi >= 0 ? 'text-success' : 'text-danger'}">${data.total_overlays.roi.toFixed(1)}%</strong></p>
+        <small class="text-muted">${data.total_overlays.count} out of ${data.total_compared} races analyzed (${((data.total_overlays.count / data.total_compared) * 100).toFixed(1)}%)</small>
+    </div></div></div>`;
+    html += '</div>';
     
-    // Average difference
-    let alertClass = 'alert-info';
-    if (data.avg_diff > 0) alertClass = 'alert-success';
-    else if (data.avg_diff < -5) alertClass = 'alert-danger';
+    // Tiered Overlay Breakdown
+    html += '<div class="row mb-4">';
     
-    html += `<div class="alert ${alertClass}"><strong>Average Price Difference:</strong> `;
-    if (data.avg_diff > 0) {
-        html += `SP is ${data.avg_diff.toFixed(1)}% higher than your predictions on average (you're finding value)`;
-    } else if (data.avg_diff < 0) {
-        html += `SP is ${Math.abs(data.avg_diff).toFixed(1)}% lower than your predictions on average (market is tighter)`;
-    } else {
-        html += `Your prices match the market closely`;
+    const tiers = [
+        {key: 'overlay_10_20', label: '10-20% Overlay', desc: 'SP 10-20% better than your price'},
+        {key: 'overlay_20_30', label: '20-30% Overlay', desc: 'SP 20-30% better than your price'},
+        {key: 'overlay_30_50', label: '30-50% Overlay', desc: 'SP 30-50% better than your price'},
+        {key: 'overlay_50_plus', label: '50%+ Overlay', desc: 'SP 50%+ better than your price'}
+    ];
+    
+    for (const tier of tiers) {
+        const stats = data[tier.key];
+        if (stats.count > 0) {
+            html += `<div class="col-md-6 mb-3"><div class="card h-100 ${stats.roi >= 0 ? 'border-success' : 'border-warning'}"><div class="card-body">
+                <h6>${tier.label}</h6>
+                <p class="small text-muted mb-2">${tier.desc}</p>
+                <h4>${stats.wins}/${stats.count}</h4>
+                <p class="mb-1">Strike: <strong class="${stats.strike_rate >= 20 ? 'text-success' : ''}">${stats.strike_rate.toFixed(1)}%</strong></p>
+                <p class="mb-0">ROI: <strong class="${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</strong></p>
+                <small class="text-muted">Profit: $${stats.profit.toFixed(2)}</small>
+            </div></div></div>`;
+        }
     }
-    html += '</div></div>';
+    
+    html += '</div>';
+    
+    // Examples Table
+    if (data.overlay_examples && data.overlay_examples.length > 0) {
+        html += '<div class="card mb-3"><div class="card-header"><h6 class="mb-0">Recent Overlay Examples</h6></div>';
+        html += '<div class="card-body"><div class="table-responsive"><table class="table table-sm table-hover">';
+        html += '<thead><tr><th>Horse</th><th>Score</th><th>Your Price</th><th>SP</th><th>Overlay %</th><th>Result</th><th>Profit</th></tr></thead><tbody>';
+        
+        for (const ex of data.overlay_examples) {
+            html += `<tr class="${ex.won ? 'table-success' : ''}">
+                <td><strong>${ex.horse}</strong></td>
+                <td>${ex.score.toFixed(1)}</td>
+                <td>$${ex.your_price.toFixed(2)}</td>
+                <td>$${ex.sp.toFixed(2)}</td>
+                <td class="text-success">+${ex.overlay_pct.toFixed(1)}%</td>
+                <td>${ex.won ? '✅ WON' : '❌'}</td>
+                <td class="${ex.profit >= 0 ? 'text-success' : 'text-danger'}">$${ex.profit.toFixed(2)}</td>
+            </tr>`;
+        }
+        
+        html += '</tbody></table></div></div></div>';
+    }
+    
+    html += '<div class="alert alert-info mt-3">';
+    html += '<strong>💡 What to look for:</strong> ';
+    html += 'Positive ROI in any tier means you\'re finding genuine value in that overlay range. ';
+    html += 'If larger overlays (50%+) have worse ROI, it may indicate your model is too aggressive on those selections.';
+    html += '</div>';
+    
+    html += '</div>';
     
     container.innerHTML = html;
 }
