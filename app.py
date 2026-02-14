@@ -127,21 +127,28 @@ with app.app_context():
         print(f"PuntingForm migration check: {e}")
     
    # Migration: Add V2 API JSON columns to races table
+    print("DEBUG: Starting V2 API migration check...")
     try:
         from sqlalchemy import inspect, text
         inspector = inspect(db.engine)
         races_columns = [col['name'] for col in inspector.get_columns('races')]
+        print(f"DEBUG: Found races columns: {races_columns}")
         
         if 'speed_maps_json' not in races_columns:
+            print("DEBUG: speed_maps_json not found, adding columns...")
             with db.engine.connect() as conn:
                 conn.execute(text('ALTER TABLE races ADD COLUMN speed_maps_json JSON'))
                 conn.execute(text('ALTER TABLE races ADD COLUMN ratings_json JSON'))
                 conn.execute(text('ALTER TABLE races ADD COLUMN sectionals_json JSON'))
                 conn.commit()
             print("✓ Added V2 API JSON columns to races table")
+        else:
+            print("DEBUG: V2 columns already exist, skipping")
             
     except Exception as e:
-        print(f"V2 API migration check: {e}")
+        print(f"V2 API migration ERROR: {e}")
+        import traceback
+        traceback.print_exc()
     
     # Migration: Add best_bet_flagged_at column if it doesn't exist
     try:
