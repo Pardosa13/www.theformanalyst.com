@@ -192,3 +192,55 @@ class PuntingFormService:
             'ratings': self.get_ratings(meeting_id),
             'strike_rates': self.get_strike_rates(meeting_id)
         }
+    def get_complete_meeting_data(self, meeting_id, race_number=None):
+        """
+        Get ALL data for a meeting from V2 API:
+        - CSV form data
+        - Speed maps
+        - Ratings
+        - Sectionals (if available)
+        
+        Returns dict with all data
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        result = {
+            'csv_data': None,
+            'speed_maps': None,
+            'ratings': None,
+            'sectionals': None
+        }
+        
+        try:
+            # Get CSV data
+            csv_data = self.get_fields_csv(meeting_id, race_number)
+            result['csv_data'] = csv_data
+            
+            # Get speed maps
+            try:
+                speed_maps = self.get_speed_maps(meeting_id, race_number)
+                result['speed_maps'] = speed_maps
+            except Exception as e:
+                logger.warning(f"Could not fetch speed maps: {e}")
+            
+            # Get ratings
+            try:
+                ratings = self.get_ratings(meeting_id)
+                result['ratings'] = ratings
+            except Exception as e:
+                logger.warning(f"Could not fetch ratings: {e}")
+            
+            # Get sectionals (only available with Pro/Modeller subscription)
+            # Uncomment this when you upgrade subscription
+            # try:
+            #     sectionals = self.get_sectionals(meeting_id, race_number)
+            #     result['sectionals'] = sectionals
+            # except Exception as e:
+            #     logger.warning(f"Could not fetch sectionals: {e}")
+            
+        except Exception as e:
+            logger.error(f"Error fetching complete meeting data: {e}")
+            raise
+        
+        return result
