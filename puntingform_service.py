@@ -1,6 +1,7 @@
 """
-PuntingForm API V1 Service
-Handles all interactions with PuntingForm V1 API for automated data fetching
+PuntingForm API Service
+Handles all interactions with PuntingForm API for automated data fetching
+Now uses V2 API with access to Speed Maps, Ratings, and more
 """
 import os
 import requests
@@ -12,137 +13,92 @@ class PuntingFormService:
         if not self.api_key:
             raise ValueError("PuntingForm API key not found in environment variables")
         
-        # V1 API base URL
-        self.base_url = 'https://www.puntingform.com.au/api/formdataservice'
+        # V2 API base URL
+        self.base_url = 'https://api.puntingform.com.au/v2'
     
-    def _make_request(self, url):
-        """Make authenticated request to PuntingForm V1 API"""
+    def _make_request(self, endpoint, params=None):
+        """Make authenticated request to PuntingForm V2 API"""
+        if params is None:
+            params = {}
+        
+        # Add API key to all requests
+        params['apiKey'] = self.api_key
+        
         try:
-            response = requests.get(url, timeout=30)
+            url = f"{self.base_url}{endpoint}"
+            response = requests.get(url, params=params, timeout=30)
             
             if not response.ok:
                 raise Exception(
                     f"PuntingForm API error {response.status_code}: {response.text}"
                 )
             
-            return response
+            # Return CSV or JSON based on endpoint
+            if 'CSV' in endpoint:
+                return response.text
+            return response.json()
+            
         except requests.exceptions.RequestException as e:
             raise Exception(f"PuntingForm API error: {str(e)}")
     
     def get_meetings_list(self, date=None):
         """
-        Get list of meetings for a specific date using V1 API
-        
-        Args:
-            date: Date string in YYYY-MM-DD format (defaults to today)
+        Get list of meetings (uses V2 API - no date param needed for today)
         
         Returns:
-            Dict with meetings list
+            Dict with meetings list including meeting_id for V2 API calls
         """
-        if date is None:
-            date_obj = datetime.now()
-        else:
-            # Parse YYYY-MM-DD to datetime
-            date_obj = datetime.strptime(date, '%Y-%m-%d')
+        response = self._make_request('/form/MeetingsList')
         
-        # V1 API expects DD-MMM-YYYY format (e.g., "12-Feb-2026")
-        date_str = date_obj.strftime('%d-%b-%Y')
-        
-        # V1 endpoint format
-        url = f"{self.base_url}/GetMeetingListExt/{date_str}?apikey={self.api_key}"
-        
-        response = self._make_request(url)
-        data = response.json()
-        
-        # V1 API returns data in 'Result' field
-        if data.get('IsError'):
-            raise Exception(f"PuntingForm API returned error: {data}")
-        
-        # Convert V1 format to something easier to work with
+        # Convert V2 format to match your existing code expectations
         meetings = []
-        for meeting in data.get('Result', []):
-            # Skip barrier trials
-            if meeting.get('IsBarrierTrial', False):
-                continue
-                
-            meetings.append({
-                'meeting_id': str(meeting['MeetingId']),
-                'track_name': meeting['Track'],
-                'track_code': meeting['TrackCode'],
-                'state': meeting['State'],
-                'race_count': meeting['RaceCount'],
-                'date': date_str,
-                'resulted': meeting.get('Resulted', False)
-            })
+        if response.get('statusCode') == 200:
+            for meeting in response.get('meetings', []):
+                meetings.append({
+                    'meeting_id': meeting['id'],
+                    'track_name': meeting['track'],
+                    'track_code': meeting.get('trackCode', ''),
+                    'state': meeting.get('state', ''),
+                    'race_count': meeting.get('raceCount', 0),
+                    'date': meeting.get('date', ''),
+                    'resulted': meeting.get('resulted', False)
+                })
         
         return {'meetings': meetings}
     
-    def get_fields_csv(self, track, date, race_number=None):
+    def get_fields_csv(self, meeting_id, race_number=None):
         """
-        Get fields/runners data in CSV format from V1 API
+        Get fields/runners data in CSV format (V2 API uses meeting_id)
         
         Args:
-            track: Track name (e.g., 'Flemington', 'Randwick')
-            date: Date string in YYYY-MM-DD format
+            meeting_id: Meeting ID from get_meetings_list()
             race_number: Optional race number (if None, gets all races)
         
         Returns:
             CSV string ready for your analyzer
         """
-        # Parse date to correct format
-        date_obj = datetime.strptime(date, '%Y-%m-%d')
-        date_str = date_obj.strftime('%d-%b-%Y')
-        
+        params = {'meetingId': meeting_id}
         if race_number:
-            # Get specific race in CSV format
-            url = f"{self.base_url}/GetFormText/{track}/{race_number}/{date_str}?apikey={self.api_key}"
-        else:
-            # Get all races - need to loop through them
-            # First get the meeting to find how many races
-            meeting_url = f"{self.base_url}/GetMeetingListExt/{date_str}?apikey={self.api_key}"
-            meeting_response = self._make_request(meeting_url)
-            meeting_data = meeting_response.json()
-            
-            # Find this track's meeting
-            target_meeting = None
-            for meeting in meeting_data.get('Result', []):
-                if meeting['Track'].lower() == track.lower():
-                    target_meeting = meeting
-                    break
-            
-            if not target_meeting:
-                raise Exception(f"No meeting found for track {track} on {date_str}")
-            
-            # Get CSV for each race and combine
-            all_csv = []
-            for race_num in target_meeting['RaceNumbers']:
-                race_url = f"{self.base_url}/GetFormText/{track}/{race_num}/{date_str}?apikey={self.api_key}"
-                race_response = self._make_request(race_url)
-                all_csv.append(race_response.text)
-            
-            return '\n'.join(all_csv)
+            params['raceNumber'] = race_number
         
-        response = self._make_request(url)
-        return response.text
+        return self._make_request('/form/FieldsCSV', params)
     
-    def get_results(self, track, date):
+    def get_results(self, meeting_id, race_number=None):
         """
-        Get race results from V1 API
+        Get race results (V2 API uses meeting_id)
         
         Args:
-            track: Track name
-            date: Date string in YYYY-MM-DD format
+            meeting_id: Meeting ID
+            race_number: Optional race number
         
         Returns:
             Dict with results
         """
-        date_obj = datetime.strptime(date, '%Y-%m-%d')
-        date_str = date_obj.strftime('%d-%b-%Y')
+        params = {'meetingId': meeting_id}
+        if race_number:
+            params['raceNumber'] = race_number
         
-        url = f"{self.base_url}/GetResults/{track}/{date_str}?apikey={self.api_key}"
-        
-        response = self._make_request(url)
-        return response.json()
+        return self._make_request('/form/Results', params)
     
     def get_scratchings(self):
         """
@@ -151,7 +107,88 @@ class PuntingFormService:
         Returns:
             List of scratchings
         """
-        url = f"https://www.puntingform.com.au/api/ScratchingsService/GetAllScratchings?apikey={self.api_key}"
+        return self._make_request('/updates/Scratchings')
+    
+    # ========== NEW V2 API METHODS ==========
+    
+    def get_speed_maps(self, meeting_id, race_number=None):
+        """
+        Get speed maps with position advantages
         
-        response = self._make_request(url)
-        return response.json()
+        Args:
+            meeting_id: Meeting ID
+            race_number: Optional race number
+        
+        Returns:
+            Speed map data with mapA2E, jockeyA2E, settle positions, etc.
+        """
+        params = {'meetingId': meeting_id}
+        if race_number:
+            params['raceNumber'] = race_number
+        
+        return self._make_request('/User/Speedmaps', params)
+    
+    def get_ratings(self, meeting_id):
+        """
+        Get PuntingForm ratings for entire meeting
+        
+        Args:
+            meeting_id: Meeting ID
+        
+        Returns:
+            Ratings data with sectionals, class changes, PFAI predictions
+        """
+        return self._make_request('/Ratings/MeetingRatings', {'meetingId': meeting_id})
+    
+    def get_strike_rates(self, meeting_id=None):
+        """
+        Get jockey/trainer strike rates
+        
+        Args:
+            meeting_id: Optional meeting ID
+        
+        Returns:
+            Strike rate statistics
+        """
+        params = {}
+        if meeting_id:
+            params['meetingId'] = meeting_id
+        
+        return self._make_request('/form/StrikeRates', params)
+    
+    def get_conditions(self, meeting_id=None):
+        """
+        Get track conditions
+        
+        Args:
+            meeting_id: Optional meeting ID
+        
+        Returns:
+            Track condition data
+        """
+        params = {}
+        if meeting_id:
+            params['meetingId'] = meeting_id
+        
+        return self._make_request('/updates/Conditions', params)
+    
+    # ========== HELPER METHODS ==========
+    
+    def get_complete_race_data(self, meeting_id, race_number):
+        """
+        Get EVERYTHING for a specific race
+        Perfect for feeding into your Partington Engine
+        
+        Args:
+            meeting_id: Meeting ID
+            race_number: Race number
+        
+        Returns:
+            Dict with csv_data, speed_maps, ratings, strike_rates
+        """
+        return {
+            'csv_data': self.get_fields_csv(meeting_id, race_number),
+            'speed_maps': self.get_speed_maps(meeting_id, race_number),
+            'ratings': self.get_ratings(meeting_id),
+            'strike_rates': self.get_strike_rates(meeting_id)
+        }
