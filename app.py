@@ -370,6 +370,50 @@ def post_best_bets_to_twitter(best_bets, meeting_name):
         logger.error(f"Exception message: {str(e)}", exc_info=True)
         logger.info("=" * 50)
         return False
+    # ----- PuntingForm V2 Data Extraction Helpers -----
+def extract_race_speed_maps(speed_maps_data, race_number):
+    """Extract speed map data for a specific race"""
+    if not speed_maps_data:
+        return None
+    
+    payload = speed_maps_data.get('payLoad', [])
+    for race in payload:
+        if race.get('raceNo') == int(race_number):
+            return race  # Return the whole race speed map
+    return None
+
+def extract_race_ratings(ratings_data, race_number):
+    """Extract ratings for a specific race"""
+    if not ratings_data:
+        return None
+    
+    payload = ratings_data.get('payLoad', [])
+    race_ratings = []
+    for runner in payload:
+        if runner.get('raceNo') == int(race_number):
+            race_ratings.append(runner)
+    
+    return race_ratings if race_ratings else None
+
+def extract_race_sectionals(sectionals_data, race_number):
+    """Extract sectionals for a specific race"""
+    if not sectionals_data:
+        return None
+    
+    payload = sectionals_data.get('payLoad', [])
+    race_sectionals = []
+    for runner in payload:
+        if runner.get('raceNo') == int(race_number):
+            race_sectionals.append(runner)
+    
+    return race_sectionals if race_sectionals else None
+
+
+def process_and_store_results(csv_data, filename, track_condition, user_id, is_advanced=False, puntingform_id=None):
+    """
+    Process CSV through analyzer and store results in database
+    """
+    # ... rest of your existing code
     def process_and_store_results(csv_data, filename, track_condition, user_id, 
                                    is_advanced=False, puntingform_id=None,
                                    speed_maps_data=None, ratings_data=None, 
