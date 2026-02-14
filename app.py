@@ -417,7 +417,10 @@ def post_best_bets_to_twitter(best_bets, meeting_name):
             race_number=int(race_num) if race_num else 0,
             distance=first_horse.get('distance', ''),
             race_class=first_horse.get('class restrictions', ''),
-            track_condition=track_condition
+            track_condition=track_condition,
+            speed_maps_json=extract_race_speed_maps(speed_maps_data, race_num),
+            ratings_json=extract_race_ratings(ratings_data, race_num),
+            sectionals_json=extract_race_sectionals(sectionals_data, race_num) if sectionals_data else None
         )
         db.session.add(race)
         db.session.flush()
