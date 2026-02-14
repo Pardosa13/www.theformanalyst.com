@@ -1322,8 +1322,8 @@ def api_import_meeting(meeting_id):
         
         track_name = meeting_info['track_name']
         
-        # Fetch CSV using track name and date (V1 API method)
-        csv_data = pf_service.get_fields_csv(track_name, date_str)
+        # Fetch CSV using meeting_id (V2 API method)
+        csv_data = pf_service.get_fields_csv(meeting_id)
         
         if not csv_data:
             return jsonify({'success': False, 'error': 'No data available for this meeting'}), 400
@@ -1394,16 +1394,20 @@ def fetch_automatic_results(meeting_id):
             flash("⚠️ Could not determine meeting date", "warning")
             return redirect(url_for('results_entry', meeting_id=meeting_id))
         
-        # Fetch results using V1 method
-        results_response = pf_service.get_results(track_name, date_str)
+        # Fetch results using V2 method (meeting_id based)
+        results_response = pf_service.get_results(meeting_id)
         
         # Check for errors
         if results_response.get('IsError'):
             flash("⚠️ Results not yet available for this meeting", "warning")
             return redirect(url_for('results_entry', meeting_id=meeting_id))
         
-        # V1 API returns format: {"Result": [{"RaceNumber": 1, "Runners": [...]}]}
-        races_results = results_response.get('RaceDetails', [])
+        # V2 API returns format with statusCode and payLoad
+        if results_response.get('statusCode') != 200:
+            flash("⚠️ Results not yet available for this meeting", "warning")
+            return redirect(url_for('results_entry', meeting_id=meeting_id))
+
+        races_results = results_response.get('payLoad', [])
         
         if not races_results:
             flash("⚠️ No results available yet", "warning")
@@ -1427,9 +1431,10 @@ def fetch_automatic_results(meeting_id):
             
             # Process each runner
             for runner in runners:
-                horse_name = runner.get('Name', '').strip()
-                finish_pos = runner.get('Position', 0)
-                sp = runner.get('Price_SP', 0)
+                # V2 API uses different field names - check actual response structure
+                horse_name = runner.get('runnerName', '').strip()
+                finish_pos = runner.get('finishPosition', 0)
+                sp = runner.get('sp', 0)
                 
                 if not horse_name:
                     continue
