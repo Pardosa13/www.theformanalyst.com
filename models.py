@@ -64,9 +64,12 @@ class Race(db.Model):
     distance = db.Column(db.String(50))
     race_class = db.Column(db.String(50))
     track_condition = db.Column(db.String(50))
-
     
-    # Relationships
+    # NEW: PuntingForm V2 API data (richer than CSV)
+    speed_maps_json = db.Column(db.JSON, nullable=True)
+    ratings_json = db.Column(db.JSON, nullable=True)
+    sectionals_json = db.Column(db.JSON, nullable=True)
+    
     horses = db.relationship('Horse', backref='race', lazy=True, cascade='all, delete-orphan')
     
     def __repr__(self):
