@@ -1356,22 +1356,19 @@ function toggleSpeedMap(raceNumber) {
     const container = document.getElementById(`speedmap-${raceNumber}`);
     const toggle = document.getElementById(`speedmap-toggle-${raceNumber}`);
     
-    if (container.style.display === 'none') {
+    if (container.style.display === 'none' || container.style.display === '') {
         // Show speed map
         container.style.display = 'block';
         toggle.textContent = '▲ Hide';
         
-        // Render speed map if not already rendered
-        if (container.querySelector('.speedmap-container').innerHTML === '') {
-            renderSpeedMap(raceNumber);
-        }
+        // ALWAYS render - removed the empty check that was causing issues
+        renderSpeedMap(raceNumber);
     } else {
         // Hide speed map
         container.style.display = 'none';
         toggle.textContent = '▼ Show';
     }
 }
-
 function renderSpeedMap(raceNumber) {
     const data = window[`speedMapData_${raceNumber}`];
     
