@@ -1411,7 +1411,7 @@ def api_import_meeting(meeting_id):
             track_condition=track_condition,
             user_id=current_user.id,
             is_advanced=False,
-            puntingform_id=meeting_id,
+            puntingform_id=track_name,
             speed_maps_data=None,
             ratings_data=None,
             sectionals_data=None
