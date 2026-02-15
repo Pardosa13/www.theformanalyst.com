@@ -43,19 +43,19 @@ class PuntingFormService:
     
     def get_meetings_list(self, date=None):
         """
-        Get list of meetings (V2 API)
+    Get list of meetings (V2 API)
         
-        Returns:
-            Dict with meetings list including meeting_id for V2 API calls
+    Returns:
+        Dict with meetings list including meeting_id for V2 API calls
         """
-        params = {}
-        if date:
-            params['date'] = date
+    params = {}
+    if date:
+        params['date'] = date
         
-        response = self._make_request('/form/MeetingsList', params)
+    response = self._make_request('/form/MeetingsList', params)
         
-        # Return as-is - the API already returns the correct format
-        return response
+    # Return as-is - the API already returns the correct format
+    return response
     
     def get_fields_csv(self, meeting_id, race_number=None):
         """
