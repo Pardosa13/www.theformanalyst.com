@@ -1471,7 +1471,7 @@ def api_import_meeting(meeting_id):
         
         for race in races:
             try:
-                speed_url = f"https://api.puntingform.com.au/v2/User/Speedmaps?meetingId={meeting_id}&raceNumber={race.race_number}"
+                speed_url = f"https://api.puntingform.com.au/v2/User/Speedmaps?meetingId={meeting_id}&raceNo={race.race_number}&apiKey={pf_service.api_key}"
                 
                 logger.info(f"📡 Fetching speed map for Race {race.race_number}")
                 logger.info(f"   URL: {speed_url}")
@@ -1497,7 +1497,7 @@ def api_import_meeting(meeting_id):
         
         # FETCH RATINGS FOR THE MEETING
         try:
-            ratings_url = f"https://api.puntingform.com.au/v2/Ratings/MeetingRatings?meetingId={meeting_id}"
+            ratings_url = f"https://api.puntingform.com.au/v2/Ratings/MeetingRatings?meetingId={meeting_id}&apiKey={pf_service.api_key}"
             
             logger.info(f"📡 Fetching ratings for meeting {meeting_id}")
             
