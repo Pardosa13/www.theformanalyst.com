@@ -1370,13 +1370,12 @@ def api_get_meetings_by_date(date_str):
 @app.route("/api/meetings/<meeting_id>/import", methods=["POST"])
 @login_required
 def api_import_meeting(meeting_id):
-    """Import meeting from PuntingForm API"""
+    """Import meeting from PuntingForm API with speed maps and ratings"""
     try:
-        # Get the date from the request (passed from frontend)
+        # Get the date from the request
         date_str = request.form.get('date')
         
         if not date_str:
-            # Fallback to today if no date provided
             date_str = datetime.now().strftime('%Y-%m-%d')
         
         # Get meetings for the specified date
@@ -1391,7 +1390,7 @@ def api_import_meeting(meeting_id):
         
         track_name = meeting_info['track_name']
         
-        # Fetch CSV using track name and date (V1 API method - works with Beginner)
+        # Fetch CSV data
         csv_data = pf_service.get_fields_csv(track_name, date_str)
         
         if not csv_data:
@@ -1400,28 +1399,61 @@ def api_import_meeting(meeting_id):
         # Get track condition from form
         track_condition = request.form.get('track_condition', 'good')
         
-        # Generate meeting name (YYMMDD_Track format)
+        # Generate meeting name
         date_obj = datetime.strptime(date_str, '%Y-%m-%d')
         meeting_name = f"{date_obj.strftime('%y%m%d')}_{track_name}"
         
-        # Process through analyzer (V2 data will be None for Beginner subscription)
+        # Process through analyzer
         meeting = process_and_store_results(
             csv_data=csv_data,
             filename=meeting_name,
             track_condition=track_condition,
             user_id=current_user.id,
             is_advanced=False,
-            puntingform_id=track_name,
-            speed_maps_data=None,
-            ratings_data=None,
-            sectionals_data=None
+            puntingform_id=track_name
         )
         
         # Set meeting date
         meeting.date = date_obj.date()
         db.session.commit()
         
-        logger.info(f"✓ Imported {meeting_name} from PuntingForm API")
+        # 🆕 FETCH AND STORE SPEED MAPS FOR EACH RACE
+        races = Race.query.filter_by(meeting_id=meeting.id).order_by(Race.race_number).all()
+        
+        for race in races:
+            try:
+                speed_url = f"https://www.puntingform.com.au/api/SpeedMaps/GetSpeedMaps/{meeting_id}/{race.race_number}?apikey={pf_service.api_key}"
+                speed_response = requests.get(speed_url, timeout=30)
+                
+                if speed_response.ok:
+                    speed_data = speed_response.json()
+                    # Store as JSON in the race
+                    race.speed_maps_json = json.dumps(speed_data)
+                    logger.info(f"✓ Stored speed map for Race {race.race_number}")
+                else:
+                    logger.warning(f"Speed map unavailable for Race {race.race_number}")
+                    
+            except Exception as e:
+                logger.warning(f"Could not fetch speed map for race {race.race_number}: {e}")
+        
+        # 🆕 FETCH AND STORE RATINGS
+        try:
+            ratings_url = f"https://www.puntingform.com.au/api/Ratings/GetRatings/{meeting_id}?apikey={pf_service.api_key}"
+            ratings_response = requests.get(ratings_url, timeout=30)
+            
+            if ratings_response.ok:
+                ratings_data = ratings_response.json()
+                # Store ratings in first race (you could add meeting-level field later)
+                if races:
+                    races[0].ratings_json = json.dumps(ratings_data)
+                logger.info(f"✓ Stored ratings data")
+                
+        except Exception as e:
+            logger.warning(f"Could not fetch ratings: {e}")
+        
+        db.session.commit()
+        
+        logger.info(f"✓ Imported {meeting_name} with speed maps and ratings")
         
         return jsonify({
             'success': True,
