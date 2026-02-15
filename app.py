@@ -531,6 +531,8 @@ def get_meeting_results(meeting_id):
             'distance': race.distance,
             'race_class': race.race_class,
             'track_condition': race.track_condition,
+            'speed_maps_json': race.speed_maps_json,
+            'ratings_json': race.ratings_json,
             'horses': []
         }
         
