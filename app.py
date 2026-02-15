@@ -1370,7 +1370,7 @@ def api_get_meetings_by_date(date_str):
 @app.route("/api/meetings/<meeting_id>/import", methods=["POST"])
 @login_required
 def api_import_meeting(meeting_id):
-    """Import meeting from PuntingForm V1 API"""
+    """Import meeting from PuntingForm API"""
     try:
         # Get the date from the request (passed from frontend)
         date_str = request.form.get('date')
@@ -1391,14 +1391,8 @@ def api_import_meeting(meeting_id):
         
         track_name = meeting_info['track_name']
         
-        # Fetch ALL data from V2 API
-        complete_data = pf_service.get_complete_meeting_data(meeting_id)
-
-        csv_data = complete_data['csv_data']
-        speed_maps_data = complete_data['speed_maps']
-        ratings_data = complete_data['ratings']
-        # Sectionals only if you have Pro/Modeller subscription
-        sectionals_data = complete_data.get('sectionals')
+        # Fetch CSV using track name and date (V1 API method - works with Beginner)
+        csv_data = pf_service.get_fields_csv(track_name, date_str)
         
         if not csv_data:
             return jsonify({'success': False, 'error': 'No data available for this meeting'}), 400
@@ -1410,24 +1404,24 @@ def api_import_meeting(meeting_id):
         date_obj = datetime.strptime(date_str, '%Y-%m-%d')
         meeting_name = f"{date_obj.strftime('%y%m%d')}_{track_name}"
         
-        # Process through analyzer
+        # Process through analyzer (V2 data will be None for Beginner subscription)
         meeting = process_and_store_results(
             csv_data=csv_data,
             filename=meeting_name,
             track_condition=track_condition,
             user_id=current_user.id,
             is_advanced=False,
-            puntingform_id=meeting_id,  # Store meeting_id instead of track_name
-            speed_maps_data=speed_maps_data,
-            ratings_data=ratings_data,
-            sectionals_data=sectionals_data
+            puntingform_id=meeting_id,
+            speed_maps_data=None,
+            ratings_data=None,
+            sectionals_data=None
         )
         
         # Set meeting date
         meeting.date = date_obj.date()
         db.session.commit()
         
-        logger.info(f"✓ Imported {meeting_name} from PuntingForm V1 API")
+        logger.info(f"✓ Imported {meeting_name} from PuntingForm API")
         
         return jsonify({
             'success': True,
@@ -1451,16 +1445,15 @@ def import_from_api():
 @app.route("/results/<int:meeting_id>/fetch-auto", methods=["POST"])
 @login_required
 def fetch_automatic_results(meeting_id):
-    """Auto-fetch results from PuntingForm V1 API"""
+    """Auto-fetch results from PuntingForm API"""
     meeting = Meeting.query.get_or_404(meeting_id)
     
-    # V1 API: We stored track name in puntingform_id
     if not meeting.puntingform_id:
         flash("⚠️ Meeting not imported from PuntingForm API", "warning")
         return redirect(url_for('results_entry', meeting_id=meeting_id))
     
     try:
-        track_name = meeting.puntingform_id  # This is the track name we stored
+        track_name = meeting.puntingform_id
         
         # Get date from meeting name (format: YYMMDD_Track)
         if meeting.meeting_name and '_' in meeting.meeting_name:
@@ -1474,20 +1467,16 @@ def fetch_automatic_results(meeting_id):
             flash("⚠️ Could not determine meeting date", "warning")
             return redirect(url_for('results_entry', meeting_id=meeting_id))
         
-        # Fetch results using V2 method (meeting_id based)
-        results_response = pf_service.get_results(meeting_id)
+        # Fetch results using V1 method (track_name + date)
+        results_response = pf_service.get_results(track_name, date_str)
         
         # Check for errors
         if results_response.get('IsError'):
             flash("⚠️ Results not yet available for this meeting", "warning")
             return redirect(url_for('results_entry', meeting_id=meeting_id))
         
-        # V2 API returns format with statusCode and payLoad
-        if results_response.get('statusCode') != 200:
-            flash("⚠️ Results not yet available for this meeting", "warning")
-            return redirect(url_for('results_entry', meeting_id=meeting_id))
-
-        races_results = results_response.get('payLoad', [])
+        # V1 API returns format: {"Result": [{"RaceNumber": 1, "Runners": [...]}]}
+        races_results = results_response.get('RaceDetails', [])
         
         if not races_results:
             flash("⚠️ No results available yet", "warning")
@@ -1500,7 +1489,7 @@ def fetch_automatic_results(meeting_id):
             race_num = race_result.get('RaceNumber')
             runners = race_result.get('Runners', [])
             
-          # Find the race in our database
+            # Find the race in our database
             race = Race.query.filter_by(
                 meeting_id=meeting_id,
                 race_number=race_num
@@ -1511,19 +1500,18 @@ def fetch_automatic_results(meeting_id):
             
             # Process each runner
             for runner in runners:
-                # V2 API uses different field names - check actual response structure
-                horse_name = runner.get('runnerName', '').strip()
-                finish_pos = runner.get('finishPosition', 0)
-                sp = runner.get('sp', 0)
+                horse_name = runner.get('Name', '').strip()
+                finish_pos = runner.get('Position', 0)
+                sp = runner.get('Price_SP', 0)
                 
                 if not horse_name:
                     continue
                 
-                # ✅ Handle unplaced horses (5th or worse)
+                # Handle unplaced horses (5th or worse)
                 if finish_pos > 4:
-                    finish_pos = 5  # Mark as unplaced
+                    finish_pos = 5
                 elif finish_pos == 0:
-                    finish_pos = 0  # Mark as scratched (though API usually doesn't return scratched horses)
+                    finish_pos = 0
                 
                 # Find horse by name (case-insensitive)
                 horse = Horse.query.filter(
