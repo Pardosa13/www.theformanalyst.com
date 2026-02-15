@@ -1366,7 +1366,39 @@ def api_get_meetings_by_date(date_str):
     except Exception as e:
         logger.error(f"Failed to fetch meetings for {date_str}: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
+@app.route("/api/meetings/<meeting_id>/speedmaps/<int:race_number>")
+@login_required
+def api_get_speedmaps(meeting_id, race_number):
+    """Get speed maps for a specific race"""
+    try:
+        url = f"https://www.puntingform.com.au/api/SpeedMaps/GetSpeedMaps/{meeting_id}/{race_number}?apikey={pf_service.api_key}"
+        response = requests.get(url, timeout=30)
+        
+        if not response.ok:
+            return jsonify({'success': False, 'error': f'API error {response.status_code}'}), response.status_code
+        
+        return jsonify(response.json())
+    except Exception as e:
+        logger.error(f"Speed maps fetch failed: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@app.route("/api/meetings/<meeting_id>/ratings")
+@login_required
+def api_get_ratings(meeting_id):
+    """Get ratings for a meeting"""
+    try:
+        url = f"https://www.puntingform.com.au/api/Ratings/GetRatings/{meeting_id}?apikey={pf_service.api_key}"
+        response = requests.get(url, timeout=30)
+        
+        if not response.ok:
+            return jsonify({'success': False, 'error': f'API error {response.status_code}'}), response.status_code
+        
+        return jsonify(response.json())
+    except Exception as e:
+        logger.error(f"Ratings fetch failed: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+        
 @app.route("/api/meetings/<meeting_id>/import", methods=["POST"])
 @login_required
 def api_import_meeting(meeting_id):
@@ -1464,7 +1496,6 @@ def api_import_meeting(meeting_id):
     except Exception as e:
         logger.error(f"Import failed: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
-
 
 @app.route("/import-from-api")
 @login_required
