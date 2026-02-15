@@ -24,8 +24,7 @@
             <input type="date" 
                    id="meeting-date" 
                    class="form-control" 
-                   style="max-width: 200px; font-size: 16px; padding: 10px;"
-                   value="{{ today }}">
+                   style="max-width: 200px; font-size: 16px; padding: 10px;">
             
             <button onclick="loadMeetings()" 
                     class="btn btn-primary" 
@@ -51,23 +50,27 @@
 </div>
 
 <script>
-// Set today's date as default
 document.addEventListener('DOMContentLoaded', function() {
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('meeting-date').value = today;
+    // Set today's date as default - server time
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${yyyy}-${mm}-${dd}`;
+    
+    document.getElementById('meeting-date').value = todayStr;
 });
 
 async function loadMeetings() {
     const dateInput = document.getElementById('meeting-date').value;
     const container = document.getElementById('meetings-container');
     
-    // Show loading state
     container.innerHTML = `
         <div style="background: white; border-radius: 12px; padding: 40px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
             <div class="spinner-border text-primary" role="status">
                 <span class="visually-hidden">Loading...</span>
             </div>
-            <p style="margin-top: 15px; color: #718096;">Loading meetings...</p>
+            <p style="margin-top: 15px; color: #718096;">Loading meetings for ${dateInput}...</p>
         </div>
     `;
     
@@ -80,23 +83,23 @@ async function loadMeetings() {
                 <div style="background: white; border-radius: 12px; padding: 40px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                     <div style="font-size: 48px; margin-bottom: 15px;">📭</div>
                     <h3 style="color: #718096; font-size: 18px; font-weight: 500;">
-                        No meetings available for this date
+                        No meetings available for ${dateInput}
                     </h3>
+                    <p style="color: #a0aec0; margin-top: 10px;">Try selecting today's date or a recent date</p>
                 </div>
             `;
             return;
         }
         
-        // Group meetings by state
         const groupedMeetings = {};
         data.meetings.forEach(meeting => {
-            if (!groupedMeetings[meeting.state]) {
-                groupedMeetings[meeting.state] = [];
+            const state = meeting.state || 'Unknown';
+            if (!groupedMeetings[state]) {
+                groupedMeetings[state] = [];
             }
-            groupedMeetings[meeting.state].push(meeting);
+            groupedMeetings[state].push(meeting);
         });
         
-        // Render grouped meetings
         let html = '<div style="background: white; border-radius: 12px; padding: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">';
         html += '<h3 style="font-size: 22px; font-weight: 600; margin-bottom: 25px; color: #2d3748;">Available Meetings</h3>';
         html += '<p style="color: #718096; font-size: 14px; margin-bottom: 25px;">Click any meeting to import and analyze</p>';
@@ -185,7 +188,7 @@ async function loadMeetings() {
                 <h3 style="color: #e53e3e; font-size: 18px; font-weight: 500;">
                     Error loading meetings
                 </h3>
-                <p style="color: #718096; margin-top: 10px;">Please try again</p>
+                <p style="color: #718096; margin-top: 10px;">${error.message}</p>
             </div>
         `;
     }
@@ -200,6 +203,7 @@ async function importMeeting(meetingId) {
     
     const formData = new FormData();
     formData.append('date', selectedDate);
+    formData.append('track_condition', 'good');
     
     try {
         const response = await fetch(`/api/meetings/${meetingId}/import`, {
