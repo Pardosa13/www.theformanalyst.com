@@ -1444,7 +1444,9 @@ def api_import_meeting(meeting_id):
 @login_required
 def import_from_api():
     """Page to import meetings from PuntingForm API"""
-    return render_template("import_from_api.html")
+    from datetime import date
+    today = date.today().strftime('%Y-%m-%d')
+    return render_template("import_from_api.html", today=today)
     
 @app.route("/results/<int:meeting_id>/fetch-auto", methods=["POST"])
 @login_required
