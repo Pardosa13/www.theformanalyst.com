@@ -1373,11 +1373,10 @@ def api_get_meetings_by_date(date_str):
 def api_get_speedmaps(meeting_id, race_number):
     """Get speed maps for a specific race"""
     try:
-        url = f"https://api.puntingform.com.au/v2/User/Speedmaps?meetingId={meeting_id}&raceNumber={race_number}"
+        url = f"https://api.puntingform.com.au/v2/User/Speedmaps?meetingId={meeting_id}&raceNo={race_number}&apiKey={pf_service.api_key}"
         
         headers = {
-            'Authorization': f'Bearer {pf_service.api_key}',
-            'Content-Type': 'application/json'
+            'accept': 'application/json'
         }
         
         response = requests.get(url, headers=headers, timeout=30)
