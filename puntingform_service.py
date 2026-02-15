@@ -42,13 +42,20 @@ class PuntingFormService:
             raise Exception(f"PuntingForm API error: {str(e)}")
     
     def get_meetings_list(self, date=None):
-        """
-        Get list of meetings (uses V2 API - no date param needed for today)
-        
-        Returns:
-            Dict with meetings list including meeting_id for V2 API calls
-        """
-        response = self._make_request('/form/MeetingsList')
+    """
+    Get list of meetings for a specific date (V2 API)
+    
+    Args:
+        date: Date string in YYYY-MM-DD format (optional, defaults to today)
+    
+    Returns:
+        Dict with meetings list including meeting_id for V2 API calls
+    """
+    params = {}
+    if date:
+        params['date'] = date
+    
+    response = self._make_request('/form/MeetingsList', params)
         
         # Convert V2 format to match your existing code expectations
         meetings = []
