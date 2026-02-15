@@ -1,227 +1,284 @@
 {% extends "base.html" %}
 
-{% block title %}Import from PuntingForm{% endblock %}
+{% block title %}Import from PuntingForm API{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
-    <!-- Page Header -->
-    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px; border-radius: 16px; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
-        <h1 style="font-size: 36px; font-weight: 700; margin-bottom: 10px;">
-            🌐 Import Meetings from PuntingForm
-        </h1>
-        <p style="font-size: 16px; opacity: 0.9; margin: 0;">
-            Select a date to view and import available race meetings
-        </p>
-    </div>
+<h1>🌐 Import Meetings from PuntingForm</h1>
 
-    <!-- Date Selection Card -->
-    <div style="background: white; border-radius: 12px; padding: 30px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-        <h3 style="font-size: 20px; font-weight: 600; margin-bottom: 20px; color: #2d3748;">
-            Select Meeting Date
-        </h3>
-        
-        <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-            <input type="date" 
-                   id="meeting-date" 
-                   class="form-control" 
-                   style="max-width: 200px; font-size: 16px; padding: 10px;">
-            
-            <button onclick="loadMeetings()" 
-                    class="btn btn-primary" 
-                    style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; padding: 10px 30px; font-size: 16px; font-weight: 600; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);">
-                📅 Get Meetings
-            </button>
+<div style="margin-bottom: 20px;">
+    <a href="{{ url_for('dashboard') }}" style="color: #667eea; text-decoration: none;">← Back to Dashboard</a>
+</div>
+
+<!-- Date Selection Card -->
+<div class="card" style="margin-bottom: 20px;">
+    <h3 style="margin: 0 0 15px 0;">Select Meeting Date</h3>
+    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+        <input 
+            type="date" 
+            id="meeting-date" 
+            style="padding: 10px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 16px;"
+        >
+        <button 
+            onclick="loadMeetings()" 
+            class="btn btn-primary"
+            style="padding: 10px 30px; font-size: 16px;"
+        >
+            📅 Get Meetings
+        </button>
+    </div>
+    <p style="color: #6c757d; margin: 15px 0 0 0; font-size: 14px;">
+        💡 Select a date to view all available meetings for that day
+    </p>
+</div>
+
+<!-- Meetings Display -->
+<div class="card">
+    <div id="loading" style="display: none; text-align: center; padding: 40px;">
+        <div style="font-size: 48px; margin-bottom: 20px;">⏳</div>
+        <p style="color: #6c757d; font-size: 18px;">Loading meetings from PuntingForm...</p>
+    </div>
+    
+    <div id="meetings-container" style="display: none;">
+        <div style="margin-bottom: 25px;">
+            <h2 style="margin: 0 0 10px 0;">Available Meetings</h2>
+            <p style="color: #6c757d; margin: 0;">Click any meeting to import and analyze</p>
         </div>
         
-        <p style="color: #718096; font-size: 14px; margin-top: 15px; margin-bottom: 0;">
-            💡 Select a date to view all available meetings for that day
-        </p>
+        <div id="meetings-list"></div>
     </div>
-
-    <!-- Available Meetings Section -->
-    <div id="meetings-container">
-        <div style="background: white; border-radius: 12px; padding: 40px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-            <div style="font-size: 48px; margin-bottom: 15px; opacity: 0.3;">🏇</div>
-            <h3 style="color: #718096; font-size: 18px; font-weight: 500;">
-                Click "Get Meetings" to view available race meetings
-            </h3>
-        </div>
+    
+    <div id="error-container" style="display: none; text-align: center; padding: 40px;">
+        <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
+        <p style="color: #dc3545; font-size: 18px; margin-bottom: 10px;">Failed to load meetings</p>
+        <p id="error-message" style="color: #6c757d;"></p>
+        <button onclick="loadMeetings()" class="btn btn-primary" style="margin-top: 20px;">
+            Retry
+        </button>
+    </div>
+    
+    <div id="initial-state" style="text-align: center; padding: 60px 20px;">
+        <div style="font-size: 64px; margin-bottom: 20px;">🏇</div>
+        <h3 style="color: #2d3748; margin-bottom: 10px;">Ready to Import Meetings</h3>
+        <p style="color: #6c757d; font-size: 16px;">Select a date above and click "Get Meetings" to start</p>
     </div>
 </div>
 
+<style>
+.meeting-card {
+    background: white;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 15px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.meeting-card:hover {
+    border-color: #667eea;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+    transform: translateY(-2px);
+}
+
+.meeting-card.importing {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.meeting-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-bottom: 12px;
+}
+
+.meeting-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #2d3748;
+}
+
+.meeting-badge {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.meeting-details {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    color: #6c757d;
+    font-size: 14px;
+}
+
+.meeting-details span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.jurisdiction-header {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 30px 0 15px 0;
+    color: #2d3748;
+    padding-bottom: 10px;
+    border-bottom: 3px solid #667eea;
+}
+
+.jurisdiction-header:first-child {
+    margin-top: 0;
+}
+</style>
+
 <script>
+const JURISDICTION_COLORS = {
+    'VIC': '#003f87',
+    'NSW': '#00a8e1',
+    'QLD': '#8b0000',
+    'SA': '#e03c31',
+    'WA': '#ffd700',
+    'TAS': '#006747',
+    'ACT': '#00539f',
+    'NT': '#d4581e'
+};
+
+// Set default date to today on page load
 document.addEventListener('DOMContentLoaded', function() {
-    // Set today's date as default - server time
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    const todayStr = `${yyyy}-${mm}-${dd}`;
-    
-    document.getElementById('meeting-date').value = todayStr;
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('meeting-date').value = today;
 });
 
 async function loadMeetings() {
     const dateInput = document.getElementById('meeting-date').value;
-    const container = document.getElementById('meetings-container');
     
-    container.innerHTML = `
-        <div style="background: white; border-radius: 12px; padding: 40px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-            <p style="margin-top: 15px; color: #718096;">Loading meetings for ${dateInput}...</p>
-        </div>
-    `;
+    if (!dateInput) {
+        alert('Please select a date');
+        return;
+    }
+    
+    // Hide all containers
+    document.getElementById('initial-state').style.display = 'none';
+    document.getElementById('meetings-container').style.display = 'none';
+    document.getElementById('error-container').style.display = 'none';
+    
+    // Show loading
+    document.getElementById('loading').style.display = 'block';
     
     try {
         const response = await fetch(`/api/meetings/date/${dateInput}`);
         const data = await response.json();
         
-        if (!data.success || !data.meetings || data.meetings.length === 0) {
-            container.innerHTML = `
-                <div style="background: white; border-radius: 12px; padding: 40px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                    <div style="font-size: 48px; margin-bottom: 15px;">📭</div>
-                    <h3 style="color: #718096; font-size: 18px; font-weight: 500;">
-                        No meetings available for ${dateInput}
-                    </h3>
-                    <p style="color: #a0aec0; margin-top: 10px;">Try selecting today's date or a recent date</p>
-                </div>
-            `;
+        if (!data.success) {
+            showError(data.error || 'Unknown error');
             return;
         }
         
-        const groupedMeetings = {};
-        data.meetings.forEach(meeting => {
-            const state = meeting.state || 'Unknown';
-            if (!groupedMeetings[state]) {
-                groupedMeetings[state] = [];
-            }
-            groupedMeetings[state].push(meeting);
-        });
-        
-        let html = '<div style="background: white; border-radius: 12px; padding: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">';
-        html += '<h3 style="font-size: 22px; font-weight: 600; margin-bottom: 25px; color: #2d3748;">Available Meetings</h3>';
-        html += '<p style="color: #718096; font-size: 14px; margin-bottom: 25px;">Click any meeting to import and analyze</p>';
-        
-        const stateColors = {
-            'NSW': '#0066cc',
-            'VIC': '#009933',
-            'QLD': '#cc0000',
-            'SA': '#ff6600',
-            'WA': '#ffcc00',
-            'TAS': '#6600cc',
-            'NT': '#cc6600',
-            'ACT': '#0099cc'
-        };
-        
-        for (const [state, meetings] of Object.entries(groupedMeetings)) {
-            const color = stateColors[state] || '#667eea';
-            
-            html += `
-                <div style="margin-bottom: 30px;">
-                    <h4 style="color: ${color}; font-size: 18px; font-weight: 700; margin-bottom: 15px; padding-bottom: 8px; border-bottom: 3px solid ${color};">
-                        ${state}
-                    </h4>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px;">
-            `;
-            
-            meetings.forEach(meeting => {
-                const resultBadge = meeting.resulted ? 
-                    '<span style="background: #48bb78; color: white; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;">✓ Results Available</span>' : 
-                    '<span style="background: #cbd5e0; color: #4a5568; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;">Upcoming</span>';
-                
-                html += `
-                    <div onclick="importMeeting('${meeting.meeting_id}')" 
-                         style="background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%); 
-                                border: 2px solid #e2e8f0; 
-                                border-radius: 12px; 
-                                padding: 20px; 
-                                cursor: pointer; 
-                                transition: all 0.3s ease;
-                                box-shadow: 0 2px 4px rgba(0,0,0,0.05);"
-                         onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 16px rgba(0,0,0,0.15)'; this.style.borderColor='${color}';"
-                         onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.05)'; this.style.borderColor='#e2e8f0';">
-                        
-                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
-                            <h5 style="font-size: 18px; font-weight: 700; color: #2d3748; margin: 0;">
-                                ${meeting.track_name}
-                            </h5>
-                            <span style="background: ${color}; color: white; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;">
-                                ${state}
-                            </span>
-                        </div>
-                        
-                        <div style="display: flex; gap: 15px; margin-bottom: 12px; flex-wrap: wrap;">
-                            <div style="display: flex; align-items: center; gap: 6px; color: #4a5568; font-size: 14px;">
-                                <span>📅</span>
-                                <span>${meeting.date}</span>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 6px; color: #4a5568; font-size: 14px;">
-                                <span>🏇</span>
-                                <span>${meeting.race_count} races</span>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 6px; color: #4a5568; font-size: 14px;">
-                                <span>📍</span>
-                                <span>${meeting.track_code}</span>
-                            </div>
-                        </div>
-                        
-                        <div style="margin-top: 12px;">
-                            ${resultBadge}
-                        </div>
-                    </div>
-                `;
-            });
-            
-            html += '</div></div>';
+        if (data.meetings.length === 0) {
+            showError('No meetings available for this date');
+            return;
         }
         
-        html += '</div>';
-        container.innerHTML = html;
+        displayMeetings(data.meetings);
         
     } catch (error) {
         console.error('Error loading meetings:', error);
-        container.innerHTML = `
-            <div style="background: white; border-radius: 12px; padding: 40px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                <div style="font-size: 48px; margin-bottom: 15px;">⚠️</div>
-                <h3 style="color: #e53e3e; font-size: 18px; font-weight: 500;">
-                    Error loading meetings
-                </h3>
-                <p style="color: #718096; margin-top: 10px;">${error.message}</p>
-            </div>
-        `;
+        showError(error.message);
     }
 }
 
-async function importMeeting(meetingId) {
-    const selectedDate = document.getElementById('meeting-date').value;
+function displayMeetings(meetings) {
+    const grouped = {};
     
-    if (!confirm('Import this meeting and run the Partington Probability Engine analysis?')) {
-        return;
-    }
+    // Group by state
+    meetings.forEach(meeting => {
+        const state = meeting.state || 'OTHER';
+        if (!grouped[state]) {
+            grouped[state] = [];
+        }
+        grouped[state].push(meeting);
+    });
     
-    const formData = new FormData();
-    formData.append('date', selectedDate);
-    formData.append('track_condition', 'good');
+    let html = '';
+    
+    // Sort states
+    const sortedStates = Object.keys(grouped).sort();
+    
+    sortedStates.forEach(state => {
+        const color = JURISDICTION_COLORS[state] || '#6c757d';
+        
+        html += `<div class="jurisdiction-header" style="color: ${color};">${state}</div>`;
+        
+        grouped[state].forEach(meeting => {
+            html += createMeetingCard(meeting);
+        });
+    });
+    
+    document.getElementById('meetings-list').innerHTML = html;
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('meetings-container').style.display = 'block';
+}
+
+function createMeetingCard(meeting) {
+    return `
+        <div class="meeting-card" onclick="importMeeting('${meeting.meeting_id}', this)">
+            <div class="meeting-header">
+                <div class="meeting-title">${meeting.track_name}</div>
+                <div class="meeting-badge" style="background: #6c757d; color: white;">
+                    ${meeting.state}
+                </div>
+            </div>
+            <div class="meeting-details">
+                <span>📅 ${meeting.date}</span>
+                <span>🏇 ${meeting.race_count} races</span>
+                <span>📍 ${meeting.track_code}</span>
+            </div>
+        </div>
+    `;
+}
+
+async function importMeeting(meetingId, cardElement) {
+    cardElement.classList.add('importing');
+    cardElement.innerHTML = `
+        <div style="text-align: center; padding: 20px;">
+            <div style="font-size: 32px; margin-bottom: 10px;">⏳</div>
+            <p style="color: #6c757d; margin: 0;">Importing meeting...</p>
+        </div>
+    `;
     
     try {
         const response = await fetch(`/api/meetings/${meetingId}/import`, {
-            method: 'POST',
-            body: formData
+            method: 'POST'
         });
         
         const data = await response.json();
         
-        if (data.success && data.redirect_url) {
-            window.location.href = data.redirect_url;
-        } else {
-            alert('Error importing meeting: ' + (data.error || 'Unknown error'));
+        if (!data.success) {
+            alert('Import failed: ' + (data.error || 'Unknown error'));
+            location.reload();
+            return;
         }
+        
+        // Redirect to meeting view
+        window.location.href = data.redirect_url;
+        
     } catch (error) {
         console.error('Import error:', error);
-        alert('Failed to import meeting. Please try again.');
+        alert('Import failed: ' + error.message);
+        location.reload();
     }
 }
+
+function showError(message) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error-message').textContent = message;
+    document.getElementById('error-container').style.display = 'block';
+}
 </script>
+
 {% endblock %}
