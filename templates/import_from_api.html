@@ -258,7 +258,13 @@ function createMeetingCard(meeting) {
         </div>
     `;
 }
-async function importMeeting(meetingId, cardElement) {
+async function importMeetingWithCondition(buttonElement) {
+    const cardElement = buttonElement.closest('.meeting-card');
+    const meetingId = cardElement.dataset.meetingId;
+    const dateStr = cardElement.dataset.date;
+    const trackConditionSelect = cardElement.querySelector('.track-condition-select');
+    const trackCondition = trackConditionSelect.value;
+    
     cardElement.classList.add('importing');
     cardElement.innerHTML = `
         <div style="text-align: center; padding: 20px;">
@@ -268,8 +274,13 @@ async function importMeeting(meetingId, cardElement) {
     `;
     
     try {
+        const formData = new FormData();
+        formData.append('date', dateStr);
+        formData.append('track_condition', trackCondition);
+        
         const response = await fetch(`/api/meetings/${meetingId}/import`, {
-            method: 'POST'
+            method: 'POST',
+            body: formData
         });
         
         const data = await response.json();
