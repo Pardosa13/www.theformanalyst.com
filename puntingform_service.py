@@ -41,7 +41,7 @@ class PuntingFormService:
         except requests.exceptions.RequestException as e:
             raise Exception(f"PuntingForm API error: {str(e)}")
     
-    def get_meetings_list(self, date=None):
+def get_meetings_list(self, date=None):
     """
     Get list of meetings for a specific date (V2 API)
     
