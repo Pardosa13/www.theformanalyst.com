@@ -1,8 +1,3 @@
-"""
-PuntingForm API Service
-Handles all interactions with PuntingForm API for automated data fetching
-Now uses V2 API with access to Speed Maps, Ratings, and more
-"""
 import os
 import requests
 from datetime import datetime
@@ -43,19 +38,19 @@ class PuntingFormService:
     
     def get_meetings_list(self, date=None):
         """
-    Get list of meetings (V2 API)
+        Get list of meetings (V2 API)
         
-    Returns:
-        Dict with meetings list including meeting_id for V2 API calls
+        Returns:
+            Dict with meetings list including meeting_id for V2 API calls
         """
-    params = {}
-    if date:
-        params['date'] = date
+        params = {}
+        if date:
+            params['date'] = date
         
-    response = self._make_request('/form/MeetingsList', params)
+        response = self._make_request('/form/MeetingsList', params)
         
-    # Return as-is - the API already returns the correct format
-    return response
+        # Return as-is - the API already returns the correct format
+        return response
     
     def get_fields_csv(self, meeting_id, race_number=None):
         """
@@ -99,8 +94,6 @@ class PuntingFormService:
             List of scratchings
         """
         return self._make_request('/updates/Scratchings')
-    
-    # ========== NEW V2 API METHODS ==========
     
     def get_speed_maps(self, meeting_id, race_number=None):
         """
@@ -163,8 +156,6 @@ class PuntingFormService:
         
         return self._make_request('/updates/Conditions', params)
     
-    # ========== HELPER METHODS ==========
-    
     def get_complete_race_data(self, meeting_id, race_number):
         """
         Get EVERYTHING for a specific race
@@ -222,14 +213,6 @@ class PuntingFormService:
                 result['ratings'] = ratings
             except Exception as e:
                 logger.warning(f"Could not fetch ratings: {e}")
-            
-            # Get sectionals (only available with Pro/Modeller subscription)
-            # Uncomment this when you upgrade subscription
-            # try:
-            #     sectionals = self.get_sectionals(meeting_id, race_number)
-            #     result['sectionals'] = sectionals
-            # except Exception as e:
-            #     logger.warning(f"Could not fetch sectionals: {e}")
             
         except Exception as e:
             logger.error(f"Error fetching complete meeting data: {e}")
