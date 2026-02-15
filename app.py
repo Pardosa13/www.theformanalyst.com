@@ -1366,21 +1366,30 @@ def api_get_meetings_by_date(date_str):
     except Exception as e:
         logger.error(f"Failed to fetch meetings for {date_str}: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
+        
 @app.route("/api/meetings/<meeting_id>/speedmaps/<int:race_number>")
 @login_required
 def api_get_speedmaps(meeting_id, race_number):
     """Get speed maps for a specific race"""
     try:
-        url = f"https://www.puntingform.com.au/api/SpeedMaps/GetSpeedMaps/{meeting_id}/{race_number}?apikey={pf_service.api_key}"
+        url = (
+            f"https://www.puntingform.com.au/api/SpeedMaps/"
+            f"GetSpeedMaps/{meeting_id}/{race_number}"
+            f"?apikey={pf_service.api_key}"
+        )
+
         response = requests.get(url, timeout=30)
-        
+
         if not response.ok:
-            return jsonify({'success': False, 'error': f'API error {response.status_code}'}), response.status_code
-        
+            return jsonify(
+                {"success": False, "error": f"API error {response.status_code}"}
+            ), response.status_code
+
         return jsonify(response.json())
+
     except Exception as e:
         logger.error(f"Speed maps fetch failed: {str(e)}", exc_info=True)
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/api/meetings/<meeting_id>/ratings")
@@ -1388,142 +1397,195 @@ def api_get_speedmaps(meeting_id, race_number):
 def api_get_ratings(meeting_id):
     """Get ratings for a meeting"""
     try:
-        url = f"https://www.puntingform.com.au/api/Ratings/GetRatings/{meeting_id}?apikey={pf_service.api_key}"
+        url = (
+            f"https://www.puntingform.com.au/api/Ratings/"
+            f"GetRatings/{meeting_id}"
+            f"?apikey={pf_service.api_key}"
+        )
+
         response = requests.get(url, timeout=30)
-        
+
         if not response.ok:
-            return jsonify({'success': False, 'error': f'API error {response.status_code}'}), response.status_code
-        
+            return jsonify(
+                {"success": False, "error": f"API error {response.status_code}"}
+            ), response.status_code
+
         return jsonify(response.json())
+
     except Exception as e:
         logger.error(f"Ratings fetch failed: {str(e)}", exc_info=True)
-        return jsonify({'success': False, 'error': str(e)}), 500
-        
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/meetings/<meeting_id>/import", methods=["POST"])
 @login_required
 def api_import_meeting(meeting_id):
     """Import meeting from PuntingForm API with speed maps and ratings"""
     try:
-        # Get the date from the request
-        date_str = request.form.get('date')
-        
+        # Get date from request
+        date_str = request.form.get("date")
         if not date_str:
-            date_str = datetime.now().strftime('%Y-%m-%d')
-        
+            date_str = datetime.now().strftime("%Y-%m-%d")
+
         # Get meetings for the specified date
         meetings_response = pf_service.get_meetings_list(date=date_str)
-        meetings = meetings_response.get('meetings', [])
-        
+        meetings = meetings_response.get("meetings", [])
+
         # Find the meeting by ID
-        meeting_info = next((m for m in meetings if m['meeting_id'] == meeting_id), None)
-        
+        meeting_info = next(
+            (m for m in meetings if m["meeting_id"] == meeting_id),
+            None,
+        )
+
         if not meeting_info:
-            return jsonify({'success': False, 'error': 'Meeting not found'}), 404
-        
-        track_name = meeting_info['track_name']
-        
+            return jsonify(
+                {"success": False, "error": "Meeting not found"}
+            ), 404
+
+        track_name = meeting_info["track_name"]
+
         # Fetch CSV data
         csv_data = pf_service.get_fields_csv(track_name, date_str)
-        
         if not csv_data:
-            return jsonify({'success': False, 'error': 'No data available for this meeting'}), 400
-        
-        # Get track condition from form
-        track_condition = request.form.get('track_condition', 'good')
-        
+            return jsonify(
+                {"success": False, "error": "No data available for this meeting"}
+            ), 400
+
+        # Track condition
+        track_condition = request.form.get("track_condition", "good")
+
         # Generate meeting name
-        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
         meeting_name = f"{date_obj.strftime('%y%m%d')}_{track_name}"
-        
-        # Process through analyzer
+
+        # Process and store
         meeting = process_and_store_results(
             csv_data=csv_data,
             filename=meeting_name,
             track_condition=track_condition,
             user_id=current_user.id,
             is_advanced=False,
-            puntingform_id=track_name
+            puntingform_id=track_name,
         )
-        
-        # Set meeting date
+
         meeting.date = date_obj.date()
         db.session.commit()
-        
-        # 🆕 FETCH AND STORE SPEED MAPS FOR EACH RACE
-        races = Race.query.filter_by(meeting_id=meeting.id).order_by(Race.race_number).all()
-        
+
+        # -----------------------------
+        # FETCH AND STORE SPEED MAPS
+        # -----------------------------
+        races = (
+            Race.query.filter_by(meeting_id=meeting.id)
+            .order_by(Race.race_number)
+            .all()
+        )
+
         for race in races:
             try:
-                speed_url = f"https://www.puntingform.com.au/api/SpeedMaps/GetSpeedMaps/{meeting_id}/{race.race_number}?apikey={pf_service.api_key}"
-                
-                logger.info(f"📡 Fetching speed map for Race {race.race_number}")
-                logger.info(f"   URL: {speed_url}")
-                
+                speed_url = (
+                    f"https://www.puntingform.com.au/api/SpeedMaps/"
+                    f"GetSpeedMaps/{meeting_id}/{race.race_number}"
+                    f"?apikey={pf_service.api_key}"
+                )
+
+                logger.info(f"Fetching speed map for Race {race.race_number}")
+
                 speed_response = requests.get(speed_url, timeout=30)
-                
-                logger.info(f"   Status Code: {speed_response.status_code}")
-                logger.info(f"   Response Headers: {dict(speed_response.headers)}")
-                
+
                 if speed_response.ok:
                     speed_data = speed_response.json()
-                    logger.info(f"   Response Keys: {list(speed_data.keys()) if isinstance(speed_data, dict) else 'Not a dict'}")
-                    
-                    # Check if there's actual data
+
                     if isinstance(speed_data, dict):
-                        if speed_data.get('statusCode') == 200 and speed_data.get('payLoad'):
+                        if (
+                            speed_data.get("statusCode") == 200
+                            and speed_data.get("payLoad")
+                        ):
                             race.speed_maps_json = json.dumps(speed_data)
-                            logger.info(f"   ✅ SUCCESS: Stored speed map with {len(speed_data.get('payLoad', []))} items")
-                        elif speed_data.get('error'):
-                            logger.warning(f"   ⚠️  API returned error: {speed_data.get('error')}")
-                            logger.warning(f"   Full response: {json.dumps(speed_data, indent=2)}")
+                            logger.info(
+                                f"Stored speed map for race {race.race_number}"
+                            )
+                        elif speed_data.get("error"):
+                            logger.warning(
+                                f"API returned error: {speed_data.get('error')}"
+                            )
                         else:
-                            logger.warning(f"   ⚠️  Unexpected response structure: {json.dumps(speed_data, indent=2)[:500]}")
+                            logger.warning(
+                                "Unexpected speed map response structure"
+                            )
                     else:
-                        logger.warning(f"   ⚠️  Response is not JSON dict: {str(speed_data)[:200]}")
+                        logger.warning("Speed map response not a JSON dict")
+
                 else:
-                    logger.error(f"   ❌ HTTP Error {speed_response.status_code}")
-                    logger.error(f"   Response Text: {speed_response.text[:500]}")
-                    logger.error(f"   Response Headers: {dict(speed_response.headers)}")
-                    
+                    logger.error(
+                        f"HTTP error {speed_response.status_code} "
+                        f"for race {race.race_number}"
+                    )
+
             except requests.exceptions.Timeout:
-                logger.error(f"   ❌ TIMEOUT fetching speed map for race {race.race_number}")
+                logger.error(
+                    f"Timeout fetching speed map for race {race.race_number}"
+                )
+
             except requests.exceptions.ConnectionError as e:
-                logger.error(f"   ❌ CONNECTION ERROR for race {race.race_number}: {str(e)}")
+                logger.error(
+                    f"Connection error for race {race.race_number}: {str(e)}"
+                )
+
             except json.JSONDecodeError as e:
-                logger.error(f"   ❌ JSON DECODE ERROR for race {race.race_number}: {str(e)}")
-                logger.error(f"   Raw response text: {speed_response.text[:500]}")
+                logger.error(
+                    f"JSON decode error for race {race.race_number}: {str(e)}"
+                )
+
             except Exception as e:
-                logger.error(f"   ❌ UNEXPECTED ERROR for race {race.race_number}: {type(e).__name__}: {str(e)}")
-                import traceback
-                logger.error(f"   Stack trace: {traceback.format_exc()}")
-        
-        # ✅ RATINGS FETCH - OUTSIDE the for loop!
+                logger.error(
+                    f"Unexpected error for race {race.race_number}: {str(e)}",
+                    exc_info=True,
+                )
+
+        # -----------------------------
+        # FETCH RATINGS (outside loop)
+        # -----------------------------
         try:
-            ratings_url = f"https://www.puntingform.com.au/api/Ratings/GetRatings/{meeting_id}?apikey={pf_service.api_key}"
+            ratings_url = (
+                f"https://www.puntingform.com.au/api/Ratings/"
+                f"GetRatings/{meeting_id}"
+                f"?apikey={pf_service.api_key}"
+            )
+
             ratings_response = requests.get(ratings_url, timeout=30)
-            
+
             if ratings_response.ok:
                 ratings_data = ratings_response.json()
+
                 if races:
                     races[0].ratings_json = json.dumps(ratings_data)
-                logger.info(f"✓ Stored ratings data")
-                
+
+                logger.info("Stored ratings data")
+
         except Exception as e:
-            logger.warning(f"Could not fetch ratings: {e}")
-        
+            logger.warning(f"Could not fetch ratings: {str(e)}")
+
         db.session.commit()
-        
-        logger.info(f"✓ Imported {meeting_name} with speed maps and ratings")
-        
-        return jsonify({
-            'success': True,
-            'meeting_id': meeting.id,
-            'redirect_url': url_for('view_meeting', meeting_id=meeting.id)
-        })
-        
+
+        logger.info(
+            f"Imported {meeting_name} with speed maps and ratings"
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "meeting_id": meeting.id,
+                "redirect_url": url_for(
+                    "view_meeting",
+                    meeting_id=meeting.id,
+                ),
+            }
+        )
+
     except Exception as e:
         logger.error(f"Import failed: {str(e)}", exc_info=True)
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route("/import-from-api")
 @login_required
