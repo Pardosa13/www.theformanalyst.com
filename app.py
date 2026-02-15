@@ -1450,61 +1450,60 @@ def api_import_meeting(meeting_id):
         db.session.commit()
         
         # 🆕 FETCH AND STORE SPEED MAPS FOR EACH RACE
-races = Race.query.filter_by(meeting_id=meeting.id).order_by(Race.race_number).all()
-
-for race in races:
-    try:
-        speed_url = f"https://www.puntingform.com.au/api/SpeedMaps/GetSpeedMaps/{meeting_id}/{race.race_number}?apikey={pf_service.api_key}"
+        races = Race.query.filter_by(meeting_id=meeting.id).order_by(Race.race_number).all()
         
-        logger.info(f"📡 Fetching speed map for Race {race.race_number}")
-        logger.info(f"   URL: {speed_url}")
-        
-        speed_response = requests.get(speed_url, timeout=30)
-        
-        logger.info(f"   Status Code: {speed_response.status_code}")
-        logger.info(f"   Response Headers: {dict(speed_response.headers)}")
-        
-        if speed_response.ok:
-            speed_data = speed_response.json()
-            logger.info(f"   Response Keys: {list(speed_data.keys()) if isinstance(speed_data, dict) else 'Not a dict'}")
-            
-            # Check if there's actual data
-            if isinstance(speed_data, dict):
-                if speed_data.get('statusCode') == 200 and speed_data.get('payLoad'):
-                    race.speed_maps_json = json.dumps(speed_data)
-                    logger.info(f"   ✅ SUCCESS: Stored speed map with {len(speed_data.get('payLoad', []))} items")
-                elif speed_data.get('error'):
-                    logger.warning(f"   ⚠️  API returned error: {speed_data.get('error')}")
-                    logger.warning(f"   Full response: {json.dumps(speed_data, indent=2)}")
+        for race in races:
+            try:
+                speed_url = f"https://www.puntingform.com.au/api/SpeedMaps/GetSpeedMaps/{meeting_id}/{race.race_number}?apikey={pf_service.api_key}"
+                
+                logger.info(f"📡 Fetching speed map for Race {race.race_number}")
+                logger.info(f"   URL: {speed_url}")
+                
+                speed_response = requests.get(speed_url, timeout=30)
+                
+                logger.info(f"   Status Code: {speed_response.status_code}")
+                logger.info(f"   Response Headers: {dict(speed_response.headers)}")
+                
+                if speed_response.ok:
+                    speed_data = speed_response.json()
+                    logger.info(f"   Response Keys: {list(speed_data.keys()) if isinstance(speed_data, dict) else 'Not a dict'}")
+                    
+                    # Check if there's actual data
+                    if isinstance(speed_data, dict):
+                        if speed_data.get('statusCode') == 200 and speed_data.get('payLoad'):
+                            race.speed_maps_json = json.dumps(speed_data)
+                            logger.info(f"   ✅ SUCCESS: Stored speed map with {len(speed_data.get('payLoad', []))} items")
+                        elif speed_data.get('error'):
+                            logger.warning(f"   ⚠️  API returned error: {speed_data.get('error')}")
+                            logger.warning(f"   Full response: {json.dumps(speed_data, indent=2)}")
+                        else:
+                            logger.warning(f"   ⚠️  Unexpected response structure: {json.dumps(speed_data, indent=2)[:500]}")
+                    else:
+                        logger.warning(f"   ⚠️  Response is not JSON dict: {str(speed_data)[:200]}")
                 else:
-                    logger.warning(f"   ⚠️  Unexpected response structure: {json.dumps(speed_data, indent=2)[:500]}")
-            else:
-                logger.warning(f"   ⚠️  Response is not JSON dict: {str(speed_data)[:200]}")
-        else:
-            logger.error(f"   ❌ HTTP Error {speed_response.status_code}")
-            logger.error(f"   Response Text: {speed_response.text[:500]}")
-            logger.error(f"   Response Headers: {dict(speed_response.headers)}")
-            
-    except requests.exceptions.Timeout:
-        logger.error(f"   ❌ TIMEOUT fetching speed map for race {race.race_number}")
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f"   ❌ CONNECTION ERROR for race {race.race_number}: {str(e)}")
-    except json.JSONDecodeError as e:
-        logger.error(f"   ❌ JSON DECODE ERROR for race {race.race_number}: {str(e)}")
-        logger.error(f"   Raw response text: {speed_response.text[:500]}")
-    except Exception as e:
-        logger.error(f"   ❌ UNEXPECTED ERROR for race {race.race_number}: {type(e).__name__}: {str(e)}")
-        import traceback
-        logger.error(f"   Stack trace: {traceback.format_exc()}")
+                    logger.error(f"   ❌ HTTP Error {speed_response.status_code}")
+                    logger.error(f"   Response Text: {speed_response.text[:500]}")
+                    logger.error(f"   Response Headers: {dict(speed_response.headers)}")
+                    
+            except requests.exceptions.Timeout:
+                logger.error(f"   ❌ TIMEOUT fetching speed map for race {race.race_number}")
+            except requests.exceptions.ConnectionError as e:
+                logger.error(f"   ❌ CONNECTION ERROR for race {race.race_number}: {str(e)}")
+            except json.JSONDecodeError as e:
+                logger.error(f"   ❌ JSON DECODE ERROR for race {race.race_number}: {str(e)}")
+                logger.error(f"   Raw response text: {speed_response.text[:500]}")
+            except Exception as e:
+                logger.error(f"   ❌ UNEXPECTED ERROR for race {race.race_number}: {type(e).__name__}: {str(e)}")
+                import traceback
+                logger.error(f"   Stack trace: {traceback.format_exc()}")
         
-        # 🆕 FETCH AND STORE RATINGS
+        # ✅ RATINGS FETCH - OUTSIDE the for loop!
         try:
             ratings_url = f"https://www.puntingform.com.au/api/Ratings/GetRatings/{meeting_id}?apikey={pf_service.api_key}"
             ratings_response = requests.get(ratings_url, timeout=30)
             
             if ratings_response.ok:
                 ratings_data = ratings_response.json()
-                # Store ratings in first race (you could add meeting-level field later)
                 if races:
                     races[0].ratings_json = json.dumps(ratings_data)
                 logger.info(f"✓ Stored ratings data")
