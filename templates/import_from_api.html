@@ -226,7 +226,7 @@ function displayMeetings(meetings) {
 
 function createMeetingCard(meeting) {
     return `
-        <div class="meeting-card" onclick="importMeeting('${meeting.meeting_id}', this)">
+        <div class="meeting-card" data-meeting-id="${meeting.meeting_id}" data-date="${meeting.date}">
             <div class="meeting-header">
                 <div class="meeting-title">${meeting.track_name}</div>
                 <div class="meeting-badge" style="background: #6c757d; color: white;">
@@ -238,10 +238,26 @@ function createMeetingCard(meeting) {
                 <span>🏇 ${meeting.race_count} races</span>
                 <span>📍 ${meeting.track_code}</span>
             </div>
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600; font-size: 14px; color: #4a5568;">
+                    Track Condition:
+                </label>
+                <select class="track-condition-select" style="padding: 8px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; width: 100%; margin-bottom: 10px;">
+                    <option value="firm">Firm</option>
+                    <option value="good" selected>Good</option>
+                    <option value="soft">Soft</option>
+                    <option value="heavy">Heavy</option>
+                    <option value="synthetic">Synthetic</option>
+                </select>
+            </div>
+            <button onclick="importMeetingWithCondition(this); event.stopPropagation();" 
+                    class="btn btn-primary" 
+                    style="width: 100%; padding: 12px; font-size: 14px; font-weight: 600;">
+                📥 Import Meeting
+            </button>
         </div>
     `;
 }
-
 async function importMeeting(meetingId, cardElement) {
     cardElement.classList.add('importing');
     cardElement.innerHTML = `
