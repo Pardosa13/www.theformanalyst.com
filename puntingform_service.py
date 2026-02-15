@@ -42,36 +42,20 @@ class PuntingFormService:
             raise Exception(f"PuntingForm API error: {str(e)}")
     
     def get_meetings_list(self, date=None):
-        """
-        Get list of meetings for a specific date (V2 API)
-        
-        Args:
-            date: Date string in YYYY-MM-DD format (optional, defaults to today)
-        
-        Returns:
-            Dict with meetings list including meeting_id for V2 API calls
-        """
-        params = {}
-        if date:
-            params['date'] = date
-        
-        response = self._make_request('/form/MeetingsList', params)
-        
-        # Convert V2 format to match your existing code expectations
-        meetings = []
-        if response.get('statusCode') == 200:
-            for meeting in response.get('payLoad', []):
-                meetings.append({
-                    'meeting_id': meeting['meetingId'],
-                    'track_name': meeting['trackName'],
-                    'track_code': meeting.get('trackCode', ''),
-                    'state': meeting.get('state', ''),
-                    'race_count': meeting.get('races', 0),
-                    'date': meeting.get('meetingDate', ''),
-                    'resulted': meeting.get('resulted', False)
-                })
-        
-        return {'meetings': meetings}
+    """
+    Get list of meetings (V2 API)
+    
+    Returns:
+        Dict with meetings list including meeting_id for V2 API calls
+    """
+    params = {}
+    if date:
+        params['date'] = date
+    
+    response = self._make_request('/form/MeetingsList', params)
+    
+    # Return as-is - the API already returns the correct format
+    return response
     
     def get_fields_csv(self, meeting_id, race_number=None):
         """
