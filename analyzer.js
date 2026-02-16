@@ -749,12 +749,6 @@ if (horseSex === 'Colt') {
         notes += '+20.0 : COLT (82.7% ROI)\n';
     }
 }
-    // Check for perfect record specialist bonus
-    const perfectRecordResult = calculatePerfectRecordBonus ? calculatePerfectRecordBonus(horseRow, trackCondition) : { bonus: 0, note: '' };
-    if (perfectRecordResult && perfectRecordResult.bonus > 0) {
-        score += perfectRecordResult.bonus;
-        notes += perfectRecordResult.note;
-    }
 
     return [score, notes]; // Return the score and notes
 }
