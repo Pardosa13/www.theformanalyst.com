@@ -818,6 +818,44 @@ function generateInsights(raceNum, horses) {
         const rating = bestSD < 0.3 ? 'Excellent' : bestSD < 0.5 ? 'Good' : bestSD < 0.7 ? 'Fair' : 'Variable';
         insights.push('✅ <strong>Most Consistent:</strong> ' + consistent + ' (' + rating + ' - SD: ' + bestSD.toFixed(2) + 's)');
     }
+    // ✨ NEW: PFAI Sectional Insights
+    let pfaiCount = 0;
+    let bestPfaiHorse = null;
+    let bestPfaiScore = Infinity;
+    
+    horses.forEach(function(horse) {
+        if (horse.pfai_sectionals) {
+            pfaiCount++;
+            
+            // Calculate average PFAI rank (lower is better)
+            const ranks = [];
+            if (horse.pfai_sectionals.last200_rank && horse.pfai_sectionals.last200_rank < 25) {
+                ranks.push(horse.pfai_sectionals.last200_rank);
+            }
+            if (horse.pfai_sectionals.last400_rank && horse.pfai_sectionals.last400_rank < 25) {
+                ranks.push(horse.pfai_sectionals.last400_rank);
+            }
+            if (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < 25) {
+                ranks.push(horse.pfai_sectionals.last600_rank);
+            }
+            
+            if (ranks.length > 0) {
+                const avgRank = ranks.reduce((a, b) => a + b, 0) / ranks.length;
+                if (avgRank < bestPfaiScore) {
+                    bestPfaiScore = avgRank;
+                    bestPfaiHorse = horse.horse_name;
+                }
+            }
+        }
+    });
+    
+    if (bestPfaiHorse) {
+        insights.push('🎯 <strong>Best PFAI Sectionals:</strong> ' + bestPfaiHorse + ' (Avg Rank: ' + bestPfaiScore.toFixed(1) + ')');
+    }
+    
+    if (pfaiCount > 0) {
+        insights.push('📊 <strong>PFAI Data Available:</strong> ' + pfaiCount + ' horses have API sectional rankings');
+    }
     
     const times = horses
         .filter(function(h) { return h.best_recent; })
