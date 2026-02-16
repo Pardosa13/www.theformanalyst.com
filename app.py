@@ -1622,7 +1622,7 @@ def api_import_meeting(meeting_id):
         if sectionals_data and races:
             for race in races:
                 race.sectionals_json = json.dumps(sectionals_data)
-                race.ratings_json = json.dumps(ratings_data)
+                race.ratings_json = json.dumps(sectionals_data)
             logger.info("✅ Stored sectionals/ratings data on all races")
         
         db.session.commit()
