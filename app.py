@@ -1618,11 +1618,12 @@ def api_import_meeting(meeting_id):
             except Exception as e:
                 logger.error(f"   ❌ Error for race {race.race_number}: {str(e)}")
         
-        # Store sectionals data on first race (meeting-level data)
+        # Store sectionals data on ALL races
         if sectionals_data and races:
-            races[0].sectionals_json = json.dumps(sectionals_data)
-            races[0].ratings_json = json.dumps(sectionals_data)
-            logger.info("✅ Stored sectionals/ratings data")
+            for race in races:
+                race.sectionals_json = json.dumps(sectionals_data)
+                race.ratings_json = json.dumps(ratings_data)
+            logger.info("✅ Stored sectionals/ratings data on all races")
         
         db.session.commit()
         
