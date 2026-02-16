@@ -28,6 +28,38 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ===== CSV HELPER FUNCTIONS FOR API SECTIONAL INJECTION =====
+def parseCSV(csv_string):
+    """Parse CSV string into list of dicts"""
+    lines = csv_string.strip().split('\n')
+    if not lines:
+        return []
+    
+    headers = [h.strip() for h in lines[0].split(',')]
+    rows = []
+    
+    for line in lines[1:]:
+        values = [v.strip() for v in line.split(',')]
+        if len(values) == len(headers):
+            row = dict(zip(headers, values))
+            rows.append(row)
+    
+    return rows
+
+def rebuildCSV(rows):
+    """Rebuild CSV string from list of dicts"""
+    if not rows:
+        return ""
+    
+    headers = list(rows[0].keys())
+    csv_lines = [','.join(headers)]
+    
+    for row in rows:
+        csv_lines.append(','.join(str(row.get(h, '')) for h in headers))
+    
+    return '\n'.join(csv_lines)
+# ===== END CSV HELPERS =====
+
 app = Flask(__name__)
 
 # Initialize Claude API client
