@@ -448,48 +448,48 @@ def extract_race_sectionals(sectionals_data, race_number):
     return race_sectionals if race_sectionals else None
 
 def process_and_store_results(csv_data, filename, track_condition, user_id, 
-                                   is_advanced=False, puntingform_id=None,
-                                   speed_maps_data=None, ratings_data=None, 
-                                   sectionals_data=None):
+                              is_advanced=False, puntingform_id=None,
+                              speed_maps_data=None, ratings_data=None, 
+                              sectionals_data=None):
     """
     Process CSV through analyzer and store results in database
     """
-import json  # ← INDENTED INSIDE THE FUNCTION
-    
-    # ===== INJECT API SECTIONAL DATA INTO CSV =====
-# Parse the CSV first
-parsed_csv = parseCSV(csv_data)
+    import json  # ✅ properly indented
 
-# If we have sectionals data, inject it
-if sectionals_data:
-    sectionals_payload = sectionals_data.get('payLoad', [])
-    logger.info(f"Injecting API data for {len(sectionals_payload)} runners")
-    
-    for row in parsed_csv:
-        horse_name = row.get('horse name', '').strip()
-        race_num = row.get('race number', '').strip()
+    # ===== INJECT API SECTIONAL DATA INTO CSV =====
+    # Parse the CSV first
+    parsed_csv = parseCSV(csv_data)
+
+    # If we have sectionals data, inject it
+    if sectionals_data:
+        sectionals_payload = sectionals_data.get('payLoad', [])
+        logger.info(f"Injecting API data for {len(sectionals_payload)} runners")
         
-        # Find matching runner in API data
-        for runner in sectionals_payload:
-            runner_name = runner.get('runnerName', '') or runner.get('name', '')
+        for row in parsed_csv:
+            horse_name = row.get('horse name', '').strip()
+            race_num = row.get('race number', '').strip()
             
-            if (str(runner.get('raceNo')) == str(race_num) and 
-                runner_name.strip().lower() == horse_name.lower()):
+            # Find matching runner in API data
+            for runner in sectionals_payload:
+                runner_name = runner.get('runnerName', '') or runner.get('name', '')
                 
-                # Inject sectional times
-                row['last200TimePrice'] = str(runner.get('last200TimePrice', ''))
-                row['last200TimeRank'] = str(runner.get('last200TimeRank', ''))
-                row['last400TimePrice'] = str(runner.get('last400TimePrice', ''))
-                row['last400TimeRank'] = str(runner.get('last400TimeRank', ''))
-                row['last600TimePrice'] = str(runner.get('last600TimePrice', ''))
-                row['last600TimeRank'] = str(runner.get('last600TimeRank', ''))
-                
-                # ✨ INJECT PFAI SCORE (this is the key!)
-                row['pfaiScore'] = str(runner.get('pfaiScore', ''))
-                
-                logger.debug(f"Injected API data for {horse_name} (R{race_num}): PFAI={runner.get('pfaiScore', 'N/A')}")
-                break
-    
+                if (str(runner.get('raceNo')) == str(race_num) and 
+                    runner_name.strip().lower() == horse_name.lower()):
+                    
+                    # Inject sectional times
+                    row['last200TimePrice'] = str(runner.get('last200TimePrice', ''))
+                    row['last200TimeRank'] = str(runner.get('last200TimeRank', ''))
+                    row['last400TimePrice'] = str(runner.get('last400TimePrice', ''))
+                    row['last400TimeRank'] = str(runner.get('last400TimeRank', ''))
+                    row['last600TimePrice'] = str(runner.get('last600TimePrice', ''))
+                    row['last600TimeRank'] = str(runner.get('last600TimeRank', ''))
+                    
+                    # ✨ INJECT PFAI SCORE (this is the key!)
+                    row['pfaiScore'] = str(runner.get('pfaiScore', ''))
+                    
+                    logger.debug(f"Injected API data for {horse_name} (R{race_num}): PFAI={runner.get('pfaiScore', 'N/A')}")
+                    break
+
     # Rebuild CSV with injected data
     csv_data = rebuildCSV(parsed_csv)
     logger.info("✅ Rebuilt CSV with API data injection")
