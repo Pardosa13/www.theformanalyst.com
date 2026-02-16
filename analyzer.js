@@ -3425,13 +3425,18 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
         const hasApiSectionalData = horse['last200TimePrice'] !== undefined;
         
         if (hasApiSectionalData) {
-            // USE API SECTIONAL PRICE/RANK SCORING
-            const raceDistance = parseInt(horse['distance'] || horse['race distance'], 10) || 1400;
-            const apiSectionalResult = calculateApiSectionalScore(horse, raceDistance);
-            
-            score += apiSectionalResult.score;
-            notes += '\n=== SECTIONAL ANALYSIS (API) ===\n';
-            notes += apiSectionalResult.note;
+        // USE API SECTIONAL PRICE/RANK SCORING
+        const raceDistance = parseInt(horse['distance'] || horse['race distance'], 10) || 1400;
+        const apiSectionalResult = calculateApiSectionalScore(horse, raceDistance);
+    
+        score += apiSectionalResult.score;
+    
+        // ENSURE notes exist and append API sectionals
+        if (!notes) notes = '';
+        notes += '\n=== SECTIONAL ANALYSIS (API) ===\n';
+        notes += apiSectionalResult.note || '';
+    
+        console.error(`DEBUG API SECTIONALS: ${horse['horse name']}: score=${apiSectionalResult.score}, note length=${apiSectionalResult.note?.length || 0}`);
             
         } else {
             // FALLBACK TO CSV SECTIONAL TIME SCORING
