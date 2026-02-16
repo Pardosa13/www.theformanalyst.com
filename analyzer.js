@@ -3399,7 +3399,7 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
     const uniqueHorses = getUniqueHorsesOnly(data);
     
     uniqueHorses.forEach(horse => {
-        if (!horse['meeting date'] || !horse['horse name']) return;
+        if (!horse['horse name']) return;
         
         const compositeKey = `${horse['horse name']}-${horse['race number']}`;
         const avgFormPrice = averageFormPrices[compositeKey];
