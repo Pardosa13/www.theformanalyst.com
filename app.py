@@ -280,7 +280,14 @@ def run_analyzer(csv_data, track_condition, is_advanced=False):
         
         if result.returncode != 0:
             raise Exception(f"Analyzer error: {result.stderr}")
-        
+        # ✨ ADD THIS DEBUG LOGGING
+        parsed_results = json.loads(result.stdout)
+        if parsed_results:
+            print("=== FIRST RESULT FROM ANALYZER ===")
+            print(json.dumps(parsed_results[0], indent=2))
+            print("===================================")
+
+        return parsed_results
         return json.loads(result.stdout)
         
     except subprocess.TimeoutExpired:
