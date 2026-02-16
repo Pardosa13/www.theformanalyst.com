@@ -2750,6 +2750,136 @@ const SECTIONAL_BASELINE_CLASS_SCORE = 70;
 const SECTIONAL_RECENCY_WEIGHTS = [1.0, 0.7, 0.5];
 // SECTIONAL_DEFAULT_RACE_DISTANCE removed - now throws error if distance missing
 
+// ==========================================
+// API SECTIONAL PRICE/RANK SCORING
+// ==========================================
+function calculateApiSectionalScore(runner, raceDistance) {
+    let score = 0;
+    let notes = '';
+    
+    // Extract API data
+    const last200Price = parseFloat(runner['last200TimePrice']) || 900;
+    const last200Rank = parseInt(runner['last200TimeRank']) || 25;
+    const last400Price = parseFloat(runner['last400TimePrice']) || 900;
+    const last400Rank = parseInt(runner['last400TimeRank']) || 25;
+    const last600Price = parseFloat(runner['last600TimePrice']) || 900;
+    const last600Rank = parseInt(runner['last600TimeRank']) || 25;
+    
+    // Check if we have any valid data
+    const hasData = (last200Price < 900 || last400Price < 900 || last600Price < 900);
+    if (!hasData) {
+        return { score: 0, note: '' };
+    }
+    
+    // Determine race type and sectional weights
+    let raceType = 'MILE';
+    let last200Weight = 0.3;
+    let last400Weight = 0.4;
+    let last600Weight = 0.3;
+    
+    if (raceDistance <= 1200) {
+        raceType = 'SPRINT';
+        last200Weight = 0.5;
+        last400Weight = 0.3;
+        last600Weight = 0.2;
+    } else if (raceDistance > 1600) {
+        raceType = 'STAYING';
+        last200Weight = 0.2;
+        last400Weight = 0.3;
+        last600Weight = 0.5;
+    }
+    
+    notes += `📏 ${raceType} (${raceDistance}m)\n`;
+    
+    // Scoring function based on rank (primary) and price (secondary)
+    function scoreFromRankAndPrice(rank, price, maxScore) {
+        if (price >= 900 || rank >= 25) return 0;
+        
+        // Rank-based scoring (more reliable)
+        let rankScore = 0;
+        if (rank === 1) rankScore = maxScore;
+        else if (rank <= 3) rankScore = maxScore * 0.85;
+        else if (rank <= 5) rankScore = maxScore * 0.65;
+        else if (rank <= 8) rankScore = maxScore * 0.4;
+        else if (rank <= 12) rankScore = maxScore * 0.15;
+        else rankScore = maxScore * -0.1; // Slight penalty for poor ranks
+        
+        // Price bonus/penalty (adds nuance)
+        let priceModifier = 0;
+        if (price < 3) priceModifier = 0.2; // Elite price
+        else if (price < 5) priceModifier = 0.15;
+        else if (price < 10) priceModifier = 0.1;
+        else if (price > 50) priceModifier = -0.15; // Poor price
+        else if (price > 30) priceModifier = -0.1;
+        
+        return rankScore * (1 + priceModifier);
+    }
+    
+    // Score each sectional
+    if (last200Price < 900) {
+        const sectionalScore = scoreFromRankAndPrice(last200Rank, last200Price, 20 * last200Weight);
+        score += sectionalScore;
+        
+        let rating = 'ELITE';
+        if (last200Rank > 12) rating = 'POOR';
+        else if (last200Rank > 8) rating = 'AVERAGE';
+        else if (last200Rank > 5) rating = 'GOOD';
+        else if (last200Rank > 3) rating = 'VERY GOOD';
+        
+        notes += `${sectionalScore >= 0 ? '+' : ''}${sectionalScore.toFixed(1)}: Last 200m (Rank ${last200Rank}, $${last200Price.toFixed(2)}) - ${rating} [${(last200Weight*100).toFixed(0)}%]\n`;
+    }
+    
+    if (last400Price < 900) {
+        const sectionalScore = scoreFromRankAndPrice(last400Rank, last400Price, 20 * last400Weight);
+        score += sectionalScore;
+        
+        let rating = 'ELITE';
+        if (last400Rank > 12) rating = 'POOR';
+        else if (last400Rank > 8) rating = 'AVERAGE';
+        else if (last400Rank > 5) rating = 'GOOD';
+        else if (last400Rank > 3) rating = 'VERY GOOD';
+        
+        notes += `${sectionalScore >= 0 ? '+' : ''}${sectionalScore.toFixed(1)}: Last 400m (Rank ${last400Rank}, $${last400Price.toFixed(2)}) - ${rating} [${(last400Weight*100).toFixed(0)}%]\n`;
+    }
+    
+    if (last600Price < 900) {
+        const sectionalScore = scoreFromRankAndPrice(last600Rank, last600Price, 20 * last600Weight);
+        score += sectionalScore;
+        
+        let rating = 'ELITE';
+        if (last600Rank > 12) rating = 'POOR';
+        else if (last600Rank > 8) rating = 'AVERAGE';
+        else if (last600Rank > 5) rating = 'GOOD';
+        else if (last600Rank > 3) rating = 'VERY GOOD';
+        
+        notes += `${sectionalScore >= 0 ? '+' : ''}${sectionalScore.toFixed(1)}: Last 600m (Rank ${last600Rank}, $${last600Price.toFixed(2)}) - ${rating} [${(last600Weight*100).toFixed(0)}%]\n`;
+    }
+    
+    // Improving trend bonus
+    if (last200Rank < 900 && last400Rank < 900 && last600Rank < 900) {
+        if (last200Rank < last400Rank && last400Rank < last600Rank) {
+            const trendBonus = 5;
+            score += trendBonus;
+            notes += `+${trendBonus.toFixed(1)}: IMPROVING TREND (Ranks: ${last600Rank} → ${last400Rank} → ${last200Rank})\n`;
+        }
+    }
+    
+    // Data sufficiency
+    const validSectionals = [last200Price, last400Price, last600Price].filter(p => p < 900).length;
+    if (validSectionals === 1) {
+        score *= 0.6;
+        notes += `⚠️  Only 1 valid sectional - score reduced 40%\n`;
+    } else if (validSectionals === 2) {
+        score *= 0.8;
+        notes += `⚠️  Only 2 valid sectionals - score reduced 20%\n`;
+    }
+    
+    return { score: Math.round(score * 10) / 10, note: notes };
+}
+
+// SECTIONAL HELPERS
+function calculateMean(values) {
+
 // SECTIONAL HELPERS
 function calculateMean(values) {
     if (!values || values.length === 0) return 0;
@@ -3158,7 +3288,132 @@ function calculateWeightScores(data) {
 
     return results;
 }
-
+// ==========================================
+// API SECTIONAL PRICE/RANK SCORING
+// ==========================================
+function calculateApiSectionalScore(runner, raceDistance) {
+    let score = 0;
+    let notes = '';
+    
+    // Extract API data
+    const last200Price = parseFloat(runner['last200TimePrice']) || 900;
+    const last200Rank = parseInt(runner['last200TimeRank']) || 25;
+    const last400Price = parseFloat(runner['last400TimePrice']) || 900;
+    const last400Rank = parseInt(runner['last400TimeRank']) || 25;
+    const last600Price = parseFloat(runner['last600TimePrice']) || 900;
+    const last600Rank = parseInt(runner['last600TimeRank']) || 25;
+    
+    // Check if we have any valid data
+    const hasData = (last200Price < 900 || last400Price < 900 || last600Price < 900);
+    if (!hasData) {
+        return { score: 0, note: '' };
+    }
+    
+    // Determine race type and sectional weights
+    let raceType = 'MILE';
+    let last200Weight = 0.3;
+    let last400Weight = 0.4;
+    let last600Weight = 0.3;
+    
+    if (raceDistance <= 1200) {
+        raceType = 'SPRINT';
+        last200Weight = 0.5;
+        last400Weight = 0.3;
+        last600Weight = 0.2;
+    } else if (raceDistance > 1600) {
+        raceType = 'STAYING';
+        last200Weight = 0.2;
+        last400Weight = 0.3;
+        last600Weight = 0.5;
+    }
+    
+    notes += `📏 ${raceType} (${raceDistance}m)\n`;
+    
+    // Scoring function based on rank (primary) and price (secondary)
+    function scoreFromRankAndPrice(rank, price, maxScore) {
+        if (price >= 900 || rank >= 25) return 0;
+        
+        // Rank-based scoring (more reliable)
+        let rankScore = 0;
+        if (rank === 1) rankScore = maxScore;
+        else if (rank <= 3) rankScore = maxScore * 0.85;
+        else if (rank <= 5) rankScore = maxScore * 0.65;
+        else if (rank <= 8) rankScore = maxScore * 0.4;
+        else if (rank <= 12) rankScore = maxScore * 0.15;
+        else rankScore = maxScore * -0.1; // Slight penalty for poor ranks
+        
+        // Price bonus/penalty (adds nuance)
+        let priceModifier = 0;
+        if (price < 3) priceModifier = 0.2; // Elite price
+        else if (price < 5) priceModifier = 0.15;
+        else if (price < 10) priceModifier = 0.1;
+        else if (price > 50) priceModifier = -0.15; // Poor price
+        else if (price > 30) priceModifier = -0.1;
+        
+        return rankScore * (1 + priceModifier);
+    }
+    
+    // Score each sectional
+    if (last200Price < 900) {
+        const sectionalScore = scoreFromRankAndPrice(last200Rank, last200Price, 20 * last200Weight);
+        score += sectionalScore;
+        
+        let rating = 'ELITE';
+        if (last200Rank > 12) rating = 'POOR';
+        else if (last200Rank > 8) rating = 'AVERAGE';
+        else if (last200Rank > 5) rating = 'GOOD';
+        else if (last200Rank > 3) rating = 'VERY GOOD';
+        
+        notes += `${sectionalScore >= 0 ? '+' : ''}${sectionalScore.toFixed(1)}: Last 200m (Rank ${last200Rank}, $${last200Price.toFixed(2)}) - ${rating} [${(last200Weight*100).toFixed(0)}%]\n`;
+    }
+    
+    if (last400Price < 900) {
+        const sectionalScore = scoreFromRankAndPrice(last400Rank, last400Price, 20 * last400Weight);
+        score += sectionalScore;
+        
+        let rating = 'ELITE';
+        if (last400Rank > 12) rating = 'POOR';
+        else if (last400Rank > 8) rating = 'AVERAGE';
+        else if (last400Rank > 5) rating = 'GOOD';
+        else if (last400Rank > 3) rating = 'VERY GOOD';
+        
+        notes += `${sectionalScore >= 0 ? '+' : ''}${sectionalScore.toFixed(1)}: Last 400m (Rank ${last400Rank}, $${last400Price.toFixed(2)}) - ${rating} [${(last400Weight*100).toFixed(0)}%]\n`;
+    }
+    
+    if (last600Price < 900) {
+        const sectionalScore = scoreFromRankAndPrice(last600Rank, last600Price, 20 * last600Weight);
+        score += sectionalScore;
+        
+        let rating = 'ELITE';
+        if (last600Rank > 12) rating = 'POOR';
+        else if (last600Rank > 8) rating = 'AVERAGE';
+        else if (last600Rank > 5) rating = 'GOOD';
+        else if (last600Rank > 3) rating = 'VERY GOOD';
+        
+        notes += `${sectionalScore >= 0 ? '+' : ''}${sectionalScore.toFixed(1)}: Last 600m (Rank ${last600Rank}, $${last600Price.toFixed(2)}) - ${rating} [${(last600Weight*100).toFixed(0)}%]\n`;
+    }
+    
+    // Improving trend bonus
+    if (last200Rank < 900 && last400Rank < 900 && last600Rank < 900) {
+        if (last200Rank < last400Rank && last400Rank < last600Rank) {
+            const trendBonus = 5;
+            score += trendBonus;
+            notes += `+${trendBonus.toFixed(1)}: IMPROVING TREND (Ranks: ${last600Rank} → ${last400Rank} → ${last200Rank})\n`;
+        }
+    }
+    
+    // Data sufficiency
+    const validSectionals = [last200Price, last400Price, last600Price].filter(p => p < 900).length;
+    if (validSectionals === 1) {
+        score *= 0.6;
+        notes += `⚠️  Only 1 valid sectional - score reduced 40%\n`;
+    } else if (validSectionals === 2) {
+        score *= 0.8;
+        notes += `⚠️  Only 2 valid sectionals - score reduced 20%\n`;
+    }
+    
+    return { score: Math.round(score * 10) / 10, note: notes };
+}
 // Calculate "true" odds from scores (Dirichlet-ish approach)
 function calculateTrueOdds(results, priorStrength = 0.05, troubleshooting = false, maxRatio = 300.0) {
     const raceGroups = results.reduce((acc, obj) => {
@@ -3281,17 +3536,35 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
     const weightScores = calculateWeightScores(data);
     const uniqueHorses = getUniqueHorsesOnly(data);
     uniqueHorses.forEach(horse => {
-        if (!horse['meeting date'] || !horse['horse name']) return;
-        const compositeKey = `${horse['horse name']}-${horse['race number']}`;
-        const avgFormPrice = averageFormPrices[compositeKey];
-        const raceNumber = horse['race number'];
-        const horseName = horse['horse name'];
-        const matchingHorseForContext = filteredDataSectional.find(h => parseInt(h.race) === parseInt(raceNumber) && h.name.toLowerCase().trim() === horseName.toLowerCase().trim());
-        const sectionalDetailsForContext = matchingHorseForContext ? {
-            bestRecent: matchingHorseForContext.sectionalDetails?.bestRecent || 0,
-            weightedAvg: matchingHorseForContext.sectionalDetails?.weightedAvg || 0
-        } : null;
-        let [score, notes] = calculateScore(horse, trackCondition, false, avgFormPrice, sectionalDetailsForContext);
+    if (!horse['meeting date'] || !horse['horse name']) return;
+    const compositeKey = `${horse['horse name']}-${horse['race number']}`;
+    const avgFormPrice = averageFormPrices[compositeKey];
+    const raceNumber = horse['race number'];
+    const horseName = horse['horse name'];
+    const matchingHorseForContext = filteredDataSectional.find(h => parseInt(h.race) === parseInt(raceNumber) && h.name.toLowerCase().trim() === horseName.toLowerCase().trim());
+    const sectionalDetailsForContext = matchingHorseForContext ? {
+        bestRecent: matchingHorseForContext.sectionalDetails?.bestRecent || 0,
+        weightedAvg: matchingHorseForContext.sectionalDetails?.weightedAvg || 0
+    } : null;
+    let [score, notes] = calculateScore(horse, trackCondition, false, avgFormPrice, sectionalDetailsForContext);
+    
+    // ==========================================
+    // SECTIONAL SCORING - API PRIMARY, CSV FALLBACK
+    // ==========================================
+    
+    const hasApiSectionalData = horse['last200TimePrice'] !== undefined;
+    
+    if (hasApiSectionalData) {
+        // USE API SECTIONAL PRICE/RANK SCORING
+        const raceDistance = parseInt(horse['distance'] || horse['race distance'], 10) || 1400;
+        const apiSectionalResult = calculateApiSectionalScore(horse, raceDistance);
+        
+        score += apiSectionalResult.score;
+        notes += '\n=== SECTIONAL ANALYSIS (API) ===\n';
+        notes += apiSectionalResult.note;
+        
+    } else {
+        // FALLBACK TO CSV SECTIONAL TIME SCORING
         const matchingHorse = filteredDataSectional.find(h => parseInt(h.race) === parseInt(raceNumber) && h.name.toLowerCase().trim() === horseName.toLowerCase().trim());
         if (matchingHorse) {
             const sectionalWeight = horse._sectionalWeight || 1.0;
@@ -3300,72 +3573,29 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             score += adjustedSectionalScore;
             if (sectionalWeight !== 1.0) notes += `ℹ️  Sectional weight applied: ${originalSectionalScore.toFixed(1)} × ${sectionalWeight.toFixed(2)} = ${adjustedSectionalScore.toFixed(1)}\n`;
             notes += matchingHorse.sectionalNote;
-
-            // NEW: Major class drop + slow sectional combo
-            const todayClassScore = calculateClassScore(horse['class restrictions'], horse['race prizemoney']);
-            const lastClassScore = calculateClassScore(horse['form class'], horse['prizemoney']);
-            const classChange = todayClassScore - lastClassScore;
-            
-            // Parse raw sectional for the combo detection
-            const sectionalMatch = String(horse['sectional'] || '').match(/(\d+\.?\d*)sec/);
-            const rawSectional = sectionalMatch ? parseFloat(sectionalMatch[1]) : null;
-            
-            if (classChange < -30 && rawSectional && rawSectional >= 37) {
-                score += 30;
-                notes += '+30.0 : Major class drop + slow sectional combo (100% SR, +85% ROI - elite to easier)\n';
-            }
         }
-        
-        const matchingWeight = weightScores.find(w => parseInt(w.race) === parseInt(raceNumber) && w.name.toLowerCase().trim() === horseName.toLowerCase().trim());
-        if (matchingWeight) {
-            score += matchingWeight.weightScore;
-            notes += matchingWeight.weightNote;
-        }
-        analysisResults.push({ horse, score, notes });
-    });
-
-    // De-duplicate by horse name AND race number (preserve dual nominations)
-let uniqueResults = Array.from(
-    new Map(
-        analysisResults.map(item => [
-            `${item.horse['horse name']}-${item.horse['race number']}`, 
-            item
-        ])
-    ).values()
-);
-
-    uniqueResults = calculateTrueOdds(uniqueResults, 1, false);
-
-    uniqueResults.sort((a, b) =>
-        (parseInt(a.horse['race number'], 10) - parseInt(b.horse['race number'], 10)) ||
-        (b.score - a.score)
-    );
-
-    return uniqueResults;
-}
-
-// STDIN/STDOUT handler
-let inputData = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', chunk => { inputData += chunk; });
-process.stdin.on('end', () => {
-    if (!inputData.trim()) {
-        console.error('Error: No input data received.');
-        process.exit(1);
     }
-    let input;
-    try { input = JSON.parse(inputData); } catch (err) {
-        console.error('Error: Invalid JSON input.', err.message);
-        process.exit(1);
+    
+    // CLASS DROP + SLOW SECTIONAL COMBO (works with both API and CSV)
+    const todayClassScore = calculateClassScore(horse['class restrictions'], horse['race prizemoney']);
+    const lastClassScore = calculateClassScore(horse['form class'], horse['prizemoney']);
+    const classChange = todayClassScore - lastClassScore;
+    
+    // Parse raw sectional for the combo detection
+    const sectionalMatch = String(horse['sectional'] || '').match(/(\d+\.?\d*)sec/);
+    const rawSectional = sectionalMatch ? parseFloat(sectionalMatch[1]) : null;
+    
+    if (classChange < -30 && rawSectional && rawSectional >= 37) {
+        score += 30;
+        notes += '+30.0 : Major class drop + slow sectional combo (100% SR, +85% ROI - elite to easier)\n';
     }
-    const csvData = input.csv_data || '';
-    const trackCondition = input.track_condition || 'good';
-    const isAdvanced = input.is_advanced || false;
-    try {
-        const results = analyzeCSV(csvData, trackCondition, isAdvanced);
-        console.log(JSON.stringify(results));
-    } catch (error) {
-        console.error('Error processing input:', (error && error.message) || error);
-        process.exit(1);
+    
+    // WEIGHT SCORING
+    const matchingWeight = weightScores.find(w => parseInt(w.race) === parseInt(raceNumber) && w.name.toLowerCase().trim() === horseName.toLowerCase().trim());
+    if (matchingWeight) {
+        score += matchingWeight.weightScore;
+        notes += matchingWeight.weightNote;
     }
+    
+    analysisResults.push({ horse, score, notes });
 });
