@@ -754,7 +754,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function renderSectionalChart(raceNum, horsesData) {
     const container = document.getElementById('sectional_container_race' + raceNum);
-    window.currentRaceHorses = horsesData;
     
     if (!horsesData || horsesData.length === 0) {
         container.innerHTML = '<div class="no-sectionals">No sectional data available for this race</div>';
@@ -783,12 +782,12 @@ function renderSectionalChart(raceNum, horsesData) {
     
     chartInstances['race' + raceNum] = {
         chart: chart,
-        data: chartData
+        data: chartData,
+        horsesData: horsesData  // ✨ STORE HORSES DATA PER RACE!
     };
     
     generateInsights(raceNum, horsesData);
 }
-
 function prepareChartData(horses) {
     const colors = ['#FFD700', '#C0C0C0', '#CD7F32', '#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b'];
     
@@ -983,17 +982,14 @@ function switchView(raceId, viewType) {
     const heatmapContainer = document.getElementById('pfaiHeatmap_' + raceId);
     
     if (viewType === 'pfai') {
-        // Show heatmap, hide chart
         chartContainer.style.display = 'none';
         heatmapContainer.style.display = 'block';
         
-        // Render heatmap if not already rendered
         if (!heatmapContainer.hasAttribute('data-rendered')) {
-            renderPFAIHeatmap(raceId, window.currentRaceHorses);
+            renderPFAIHeatmap(raceId, instance.horsesData);  // ✨ USE STORED DATA!
             heatmapContainer.setAttribute('data-rendered', 'true');
         }
     } else {
-        // Show chart, hide heatmap
         chartContainer.style.display = 'block';
         heatmapContainer.style.display = 'none';
         
