@@ -3290,17 +3290,28 @@ function calculateTrueOdds(results, priorStrength = 0.05, troubleshooting = fals
 
     Object.values(raceGroups).forEach(raceHorses => {
         const scores = raceHorses.map(h => h.score);
-        const minScore = Math.min(...scores);
-        const maxScore = Math.max(...scores);
-        const range = maxScore - minScore;
-        const minShiftForRatio = range > 0 ? range / (maxRatio - 1) : 1.0;
-        const basicShift = minScore < 0 ? Math.abs(minScore) + 0.01 : 0;
-        const shift = Math.max(basicShift, minShiftForRatio * 0.5);
-
-        const adjustedScores = scores.map(s => s + shift);
-        const posteriorCounts = adjustedScores.map(score => score + priorStrength);
+        
+        // ✨ Z-SCORE NORMALIZATION TO 0-100 SCALE
+        const mean = scores.reduce((sum, s) => sum + s, 0) / scores.length;
+        const variance = scores.reduce((sum, s) => sum + Math.pow(s - mean, 2), 0) / scores.length;
+        const stdDev = Math.sqrt(variance);
+        
+        const normalizedScores = scores.map(s => {
+            if (stdDev === 0) return 50;  // All scores equal = average
+            
+            const zScore = (s - mean) / stdDev;
+            
+            // Convert Z-score to 0-100 scale
+            // Maps -3σ to 0, +3σ to 100, mean to 50
+            let normalized = 50 + (zScore * 16.67);
+            
+            // Clamp to 0-100 range
+            return Math.max(0, Math.min(100, normalized));
+        });
+        
+        // Calculate probabilities from normalized 0-100 scores
+        const posteriorCounts = normalizedScores.map(score => score + priorStrength);
         const totalCounts = posteriorCounts.reduce((s, v) => s + v, 0);
-
         const baseProbability = priorStrength / totalCounts;
 
         raceHorses.forEach((horse, index) => {
@@ -3311,8 +3322,8 @@ function calculateTrueOdds(results, priorStrength = 0.05, troubleshooting = fals
             horse.baseProbability = (baseProbability * 100).toFixed(1) + '%';
             horse.trueOdds = `$${trueOdds.toFixed(2)}`;
             horse.rawWinProbability = winProbability * 1.10;
-            horse.performanceComponent = ((adjustedScores[index] / totalCounts) * 100).toFixed(1) + '%';
-            horse.adjustedScore = adjustedScores[index];
+            horse.performanceComponent = ((normalizedScores[index] / totalCounts) * 100).toFixed(1) + '%';
+            horse.adjustedScore = normalizedScores[index];
         });
 
         const totalProb = raceHorses.reduce((s, h) => s + (h.rawWinProbability || 0), 0);
