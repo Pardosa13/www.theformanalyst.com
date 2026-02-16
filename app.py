@@ -457,32 +457,42 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
     import json  # ← INDENTED INSIDE THE FUNCTION
     
     # ===== INJECT API SECTIONAL DATA INTO CSV =====
-    # Parse the CSV first
-    parsed_csv = parseCSV(csv_data)
+# Parse the CSV first
+parsed_csv = parseCSV(csv_data)
+
+# If we have sectionals data, inject it
+if sectionals_data:
+    sectionals_payload = sectionals_data.get('payLoad', [])
+    logger.info(f"Injecting API data for {len(sectionals_payload)} runners")
     
-    # If we have sectionals data, inject it
-    if sectionals_data:
-        for row in parsed_csv:
-            horse_name = row.get('horse name', '').strip()
-            race_num = row.get('race number', '').strip()
-            
-            # Find matching sectional data
-            sectionals_payload = sectionals_data.get('payLoad', [])
-            for runner in sectionals_payload:
-                if (str(runner.get('raceNo')) == str(race_num) and 
-                    runner.get('name', '').strip().lower() == horse_name.lower()):
-                    
-                    # Inject the API fields
-                    row['last200TimePrice'] = runner.get('last200TimePrice', '')
-                    row['last200TimeRank'] = runner.get('last200TimeRank', '')
-                    row['last400TimePrice'] = runner.get('last400TimePrice', '')
-                    row['last400TimeRank'] = runner.get('last400TimeRank', '')
-                    row['last600TimePrice'] = runner.get('last600TimePrice', '')
-                    row['last600TimeRank'] = runner.get('last600TimeRank', '')
-                    break
+    for row in parsed_csv:
+        horse_name = row.get('horse name', '').strip()
+        race_num = row.get('race number', '').strip()
         
-        # Rebuild CSV with injected data
-        csv_data = rebuildCSV(parsed_csv)
+        # Find matching runner in API data
+        for runner in sectionals_payload:
+            runner_name = runner.get('runnerName', '') or runner.get('name', '')
+            
+            if (str(runner.get('raceNo')) == str(race_num) and 
+                runner_name.strip().lower() == horse_name.lower()):
+                
+                # Inject sectional times
+                row['last200TimePrice'] = str(runner.get('last200TimePrice', ''))
+                row['last200TimeRank'] = str(runner.get('last200TimeRank', ''))
+                row['last400TimePrice'] = str(runner.get('last400TimePrice', ''))
+                row['last400TimeRank'] = str(runner.get('last400TimeRank', ''))
+                row['last600TimePrice'] = str(runner.get('last600TimePrice', ''))
+                row['last600TimeRank'] = str(runner.get('last600TimeRank', ''))
+                
+                # ✨ INJECT PFAI SCORE (this is the key!)
+                row['pfaiScore'] = str(runner.get('pfaiScore', ''))
+                
+                logger.debug(f"Injected API data for {horse_name} (R{race_num}): PFAI={runner.get('pfaiScore', 'N/A')}")
+                break
+    
+    # Rebuild CSV with injected data
+    csv_data = rebuildCSV(parsed_csv)
+    logger.info("✅ Rebuilt CSV with API data injection")
     
     # Run the analyzer
     analysis_results = run_analyzer(csv_data, track_condition, is_advanced)
@@ -1481,7 +1491,7 @@ def api_get_ratings(meeting_id):
 @app.route("/api/meetings/<meeting_id>/import", methods=["POST"])
 @login_required
 def api_import_meeting(meeting_id):
-    """Import meeting from PuntingForm API with speed maps and ratings"""
+    """Import meeting from PuntingForm API with speed maps, ratings, AND sectionals"""
     try:
         # Get date from request
         date_str = request.form.get('date')
@@ -1500,11 +1510,6 @@ def api_import_meeting(meeting_id):
         
         track_name = meeting_info['track_name']
         
-        # Fetch CSV data
-        csv_data = pf_service.get_fields_csv(track_name, date_str)
-        if not csv_data:
-            return jsonify({'success': False, 'error': 'No data available for this meeting'}), 400
-        
         # Track condition
         track_condition = request.form.get('track_condition', 'good')
         
@@ -1512,37 +1517,67 @@ def api_import_meeting(meeting_id):
         date_obj = datetime.strptime(date_str, '%Y-%m-%d')
         meeting_name = f"{date_obj.strftime('%y%m%d')}_{track_name}"
         
-        # Process and store
+        # ==========================================
+        # FETCH V2 API DATA BEFORE PROCESSING
+        # ==========================================
+        headers = {
+            'Authorization': f'Bearer {pf_service.api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Fetch sectionals/ratings (meeting-level)
+        sectionals_data = None
+        try:
+            sectionals_url = f"https://api.puntingform.com.au/v2/Ratings/MeetingRatings?meetingId={meeting_id}&apiKey={pf_service.api_key}"
+            logger.info(f"📡 Fetching sectionals/ratings for meeting {meeting_id}")
+            
+            sectionals_response = requests.get(sectionals_url, headers=headers, timeout=30)
+            
+            if sectionals_response.ok:
+                sectionals_data = sectionals_response.json()
+                logger.info(f"✅ Fetched sectionals data with {len(sectionals_data.get('payLoad', []))} runners")
+            else:
+                logger.warning(f"⚠️  Sectionals fetch failed: {sectionals_response.status_code}")
+        except Exception as e:
+            logger.warning(f"Could not fetch sectionals: {str(e)}")
+        
+        # ==========================================
+        # FETCH CSV DATA
+        # ==========================================
+        csv_data = pf_service.get_fields_csv(track_name, date_str)
+        if not csv_data:
+            return jsonify({'success': False, 'error': 'No data available for this meeting'}), 400
+        
+        # ==========================================
+        # PROCESS AND STORE (with V2 data)
+        # ==========================================
         meeting = process_and_store_results(
             csv_data=csv_data,
             filename=meeting_name,
             track_condition=track_condition,
             user_id=current_user.id,
             is_advanced=False,
-            puntingform_id=track_name
+            puntingform_id=track_name,
+            speed_maps_data=None,  # Will fetch per-race later
+            ratings_data=sectionals_data,
+            sectionals_data=sectionals_data  # Pass sectionals (includes PFAI)
         )
         
         meeting.date = date_obj.date()
         db.session.commit()
         
-        # FETCH AND STORE SPEED MAPS FOR EACH RACE
+        # ==========================================
+        # FETCH AND STORE SPEED MAPS PER RACE
+        # ==========================================
         races = Race.query.filter_by(meeting_id=meeting.id).order_by(Race.race_number).all()
-        
-        headers = {
-            'Authorization': f'Bearer {pf_service.api_key}',
-            'Content-Type': 'application/json'
-        }
         
         for race in races:
             try:
                 speed_url = f"https://api.puntingform.com.au/v2/User/Speedmaps?meetingId={meeting_id}&raceNo={race.race_number}&apiKey={pf_service.api_key}"
                 
                 logger.info(f"📡 Fetching speed map for Race {race.race_number}")
-                logger.info(f"   URL: {speed_url}")
                 
                 speed_response = requests.get(speed_url, headers=headers, timeout=30)
-                
-                logger.info(f"   Status: {speed_response.status_code}")
                 
                 if speed_response.ok:
                     speed_data = speed_response.json()
@@ -1550,38 +1585,21 @@ def api_import_meeting(meeting_id):
                     if isinstance(speed_data, dict) and speed_data.get('payLoad'):
                         race.speed_maps_json = json.dumps(speed_data)
                         logger.info(f"   ✅ Stored speed map for race {race.race_number}")
-                    else:
-                        logger.warning(f"   ⚠️  No speed map data for race {race.race_number}")
                 else:
                     logger.error(f"   ❌ HTTP {speed_response.status_code} for race {race.race_number}")
-                    logger.error(f"   Response: {speed_response.text[:300]}")
                     
             except Exception as e:
                 logger.error(f"   ❌ Error for race {race.race_number}: {str(e)}")
         
-        # FETCH RATINGS FOR THE MEETING
-        try:
-            ratings_url = f"https://api.puntingform.com.au/v2/Ratings/MeetingRatings?meetingId={meeting_id}&apiKey={pf_service.api_key}"
-            
-            logger.info(f"📡 Fetching ratings for meeting {meeting_id}")
-            
-            ratings_response = requests.get(ratings_url, headers=headers, timeout=30)
-            
-            if ratings_response.ok:
-                ratings_data = ratings_response.json()
-                
-                if races and isinstance(ratings_data, dict):
-                    races[0].ratings_json = json.dumps(ratings_data)
-                    logger.info("✅ Stored ratings data")
-            else:
-                logger.warning(f"⚠️  Ratings fetch failed: {ratings_response.status_code}")
-                
-        except Exception as e:
-            logger.warning(f"Could not fetch ratings: {str(e)}")
+        # Store sectionals data on first race (meeting-level data)
+        if sectionals_data and races:
+            races[0].sectionals_json = json.dumps(sectionals_data)
+            races[0].ratings_json = json.dumps(sectionals_data)
+            logger.info("✅ Stored sectionals/ratings data")
         
         db.session.commit()
         
-        logger.info(f"✓ Imported {meeting_name} with speed maps and ratings")
+        logger.info(f"✓ Imported {meeting_name} with V2 API data (speed maps, ratings, sectionals)")
         
         return jsonify({
             'success': True,
@@ -2681,20 +2699,16 @@ def api_score_analysis():
 @login_required
 def get_meeting_sectionals(meeting_id):
     """
-    Returns ACTUAL sectional times for each horse's last runs.
-    Parses the HISTORY arrays from notes.
+    Returns sectional times for each horse's last runs.
+    Now includes PFAI API sectionals when available.
     """
     try:
-        # Get the meeting first
         meeting = Meeting.query.get_or_404(meeting_id)
-        
-        # Get all races for this meeting
         races = Race.query.filter_by(meeting_id=meeting_id).all()
         
         if not races:
             return jsonify({}), 200
         
-        # Group by race
         races_data = {}
         
         for race in races:
@@ -2703,18 +2717,40 @@ def get_meeting_sectionals(meeting_id):
             if race_key not in races_data:
                 races_data[race_key] = []
             
-            # Get all horses in this race
             horses = Horse.query.filter_by(race_id=race.id).all()
             
             for horse in horses:
-                # Get the prediction for this horse
                 prediction = Prediction.query.filter_by(horse_id=horse.id).first()
                 
                 if not prediction:
                     continue
                 
-                # Extract ACTUAL sectional times from notes
+                # Extract historical sectional times from notes
                 sectional_data = extract_sectional_history(prediction.notes)
+                
+                # ✨ NEW: Add PFAI sectionals from race.sectionals_json if available
+                pfai_sectionals = None
+                if race.sectionals_json:
+                    try:
+                        sectionals_payload = json.loads(race.sectionals_json) if isinstance(race.sectionals_json, str) else race.sectionals_json
+                        
+                        # Find this horse's PFAI data
+                        if sectionals_payload and 'payLoad' in sectionals_payload:
+                            for runner in sectionals_payload['payLoad']:
+                                runner_name = runner.get('runnerName', '') or runner.get('name', '')
+                                
+                                if runner_name.strip().lower() == horse.horse_name.strip().lower():
+                                    pfai_sectionals = {
+                                        'last200_price': runner.get('last200TimePrice'),
+                                        'last200_rank': runner.get('last200TimeRank'),
+                                        'last400_price': runner.get('last400TimePrice'),
+                                        'last400_rank': runner.get('last400TimeRank'),
+                                        'last600_price': runner.get('last600TimePrice'),
+                                        'last600_rank': runner.get('last600TimeRank')
+                                    }
+                                    break
+                    except Exception as e:
+                        print(f"Error parsing PFAI sectionals: {e}")
                 
                 horse_data = {
                     'horse_name': horse.horse_name,
@@ -2724,12 +2760,12 @@ def get_meeting_sectionals(meeting_id):
                     'consistency': sectional_data.get('consistency'),
                     'history_adjusted': sectional_data.get('history_adjusted', []),
                     'history_raw': sectional_data.get('history_raw', []),
-                    'has_data': len(sectional_data.get('history_adjusted', [])) > 0
+                    'pfai_sectionals': pfai_sectionals,  # ✨ NEW
+                    'has_data': len(sectional_data.get('history_adjusted', [])) > 0 or pfai_sectionals is not None
                 }
                 
                 races_data[race_key].append(horse_data)
         
-        # Sort horses by score within each race
         for race_key in races_data:
             races_data[race_key].sort(key=lambda x: x['score'], reverse=True)
         
@@ -2740,63 +2776,6 @@ def get_meeting_sectionals(meeting_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
-
-def extract_sectional_history(notes):
-    """
-    Extract actual sectional history arrays from notes.
-    
-    Returns dict with:
-    - history_adjusted: [float, ...] (oldest to newest)
-    - history_raw: [float, ...]
-    - best_recent: {adjusted_time, raw_time, zscore}
-    - weighted_avg: {zscore, run_count}
-    - consistency: {rating, std_dev}
-    """
-    import re
-    
-    result = {}
-    
-    if not notes:
-        return result
-    
-    # Extract HISTORY_ADJ array
-    adj_match = re.search(r'HISTORY_ADJ:\s*\[([\d.,\s]+)\]', notes)
-    if adj_match:
-        result['history_adjusted'] = [float(x.strip()) for x in adj_match.group(1).split(',')]
-    
-    # Extract HISTORY_RAW array
-    raw_match = re.search(r'HISTORY_RAW:\s*\[([\d.,\s]+)\]', notes)
-    if raw_match:
-        result['history_raw'] = [float(x.strip()) for x in raw_match.group(1).split(',')]
-    
-    # Extract best recent info: "best of last 5 (z=-0.54)" then "33.77s → 33.02s"
-    best_match = re.search(r'best of last (\d+) \(z=([-\d.]+)\)\s+└─\s+([\d.]+)s\s*→\s*([\d.]+)s', notes)
-    if best_match:
-        result['best_recent'] = {
-            'from_last': int(best_match.group(1)),
-            'zscore': float(best_match.group(2)),
-            'raw_time': float(best_match.group(3)),
-            'adjusted_time': float(best_match.group(4))
-        }
-    
-    # Extract weighted avg: "weighted avg (z=0.86, 3 runs)"
-    wavg_match = re.search(r'weighted avg \(z=([-\d.]+),\s*(\d+)\s*runs?\)', notes)
-    if wavg_match:
-        result['weighted_avg'] = {
-            'zscore': float(wavg_match.group(1)),
-            'run_count': int(wavg_match.group(2))
-        }
-    
-    # Extract consistency: "consistency - good (SD=0.44s)"
-    cons_match = re.search(r'consistency - (\w+) \(SD=([\d.]+)s\)', notes)
-    if cons_match:
-        result['consistency'] = {
-            'rating': cons_match.group(1),
-            'std_dev': float(cons_match.group(2))
-        }
-    
-    return result
     
 @app.route("/api/data/component-analysis")
 @login_required
