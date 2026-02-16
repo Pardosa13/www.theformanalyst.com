@@ -451,10 +451,6 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                                    is_advanced=False, puntingform_id=None,
                                    speed_maps_data=None, ratings_data=None, 
                                    sectionals_data=None):
-    def process_and_store_results(csv_data, filename, track_condition, user_id, 
-                                   is_advanced=False, puntingform_id=None,
-                                   speed_maps_data=None, ratings_data=None, 
-                                   sectionals_data=None):
     """
     Process CSV through analyzer and store results in database
     """
