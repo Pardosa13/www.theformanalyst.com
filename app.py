@@ -454,7 +454,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
     """
     Process CSV through analyzer and store results in database
     """
-    import json  # ← INDENTED INSIDE THE FUNCTION
+import json  # ← INDENTED INSIDE THE FUNCTION
     
     # ===== INJECT API SECTIONAL DATA INTO CSV =====
 # Parse the CSV first
