@@ -3487,9 +3487,17 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
 let inputData = '';
 process.stdin.on('data', chunk => { inputData += chunk; });
 process.stdin.on('end', () => {
-    const lines = inputData.trim().split('\n');
-    const csvData = lines.slice(0, -1).join('\n');
-    const trackCondition = lines[lines.length - 1] || 'good';
-    const results = analyzeCSV(csvData, trackCondition);
-    console.log(JSON.stringify(results));
+    try {
+        // Try parsing as JSON first (new format)
+        const input = JSON.parse(inputData);
+        const results = analyzeCSV(input.csv_data, input.track_condition, input.is_advanced);
+        console.log(JSON.stringify(results));
+    } catch (jsonError) {
+        // Fallback to old format: CSV + track condition on last line
+        const lines = inputData.trim().split('\n');
+        const csvData = lines.slice(0, -1).join('\n');
+        const trackCondition = lines[lines.length - 1] || 'good';
+        const results = analyzeCSV(csvData, trackCondition);
+        console.log(JSON.stringify(results));
+    }
 });
