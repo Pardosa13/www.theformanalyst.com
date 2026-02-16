@@ -184,181 +184,181 @@
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 
-/* Jurisdiction Headers */
-.jurisdiction-header {
-    font-size: 18px;
-    font-weight: 700;
-    margin: 30px 0 15px 0;
-    padding: 10px 15px;
-    background: rgba(102, 126, 234, 0.05);
-    border-left: 4px solid;
-    border-radius: 8px;
+/* State Row Layout */
+.state-row {
     display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.jurisdiction-header:first-child {
-    margin-top: 0;
-}
-
-/* Meeting Grid - More compact */
-#meetings-list {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    align-items: stretch;
     gap: 15px;
-}
-
-/* Meeting Card - Compact version */
-.meeting-card {
+    margin-bottom: 20px;
     background: white;
     border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.state-label {
+    min-width: 120px;
+    padding: 20px 15px;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.state-emoji {
+    font-size: 32px;
+}
+
+.state-name {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: 1px;
+}
+
+.state-count {
+    font-size: 12px;
+    opacity: 0.9;
+    font-weight: 600;
+}
+
+.meetings-row {
+    flex: 1;
+    display: flex;
+    gap: 12px;
+    padding: 15px;
+    overflow-x: auto;
+    align-items: stretch;
+}
+
+/* Compact Meeting Cards */
+.meeting-card-compact {
+    min-width: 200px;
+    max-width: 200px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border: 2px solid transparent;
     transition: all 0.2s ease;
     cursor: pointer;
-    border: 2px solid transparent;
 }
 
-.meeting-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.2);
+.meeting-card-compact:hover {
     border-color: #667eea;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
 }
 
-.meeting-card.importing {
+.meeting-card-compact.importing {
     opacity: 0.6;
     pointer-events: none;
 }
 
-.meeting-card-header {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 12px 15px;
-    color: white;
+.compact-header {
+    text-align: center;
 }
 
-.meeting-title {
-    font-size: 16px;
+.compact-title {
+    font-size: 14px;
     font-weight: 700;
-    margin: 0 0 4px 0;
+    color: #2d3748;
+    margin-bottom: 4px;
 }
 
-.meeting-subtitle {
-    font-size: 12px;
-    opacity: 0.9;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+.compact-code {
+    font-size: 11px;
+    color: #6c757d;
+    font-weight: 600;
 }
 
-.meeting-card-body {
-    padding: 12px 15px;
-}
-
-.meeting-stats {
+.compact-stats {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
-    margin-bottom: 12px;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
 }
 
-.stat-item {
-    background: #f8f9fa;
-    padding: 8px;
+.compact-stat {
+    background: white;
+    padding: 6px;
     border-radius: 6px;
     text-align: center;
 }
 
-.stat-label {
-    font-size: 10px;
+.compact-stat-label {
+    display: block;
+    font-size: 9px;
     color: #6c757d;
     text-transform: uppercase;
     font-weight: 600;
-    letter-spacing: 0.3px;
     margin-bottom: 2px;
 }
 
-.stat-value {
-    font-size: 16px;
+.compact-stat-value {
+    display: block;
+    font-size: 14px;
     font-weight: 700;
     color: #2d3748;
 }
 
-.condition-select-wrapper {
-    margin-bottom: 10px;
-}
-
-.condition-label {
-    display: block;
-    margin-bottom: 6px;
-    font-weight: 600;
-    font-size: 11px;
-    color: #4a5568;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-}
-
-.track-condition-select {
+.track-condition-select-compact {
     width: 100%;
-    padding: 8px 12px;
+    padding: 6px 10px;
     border: 2px solid #e2e8f0;
     border-radius: 6px;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
     background: white;
     cursor: pointer;
-    transition: all 0.2s ease;
 }
 
-.track-condition-select:hover {
-    border-color: #667eea;
-}
-
-.track-condition-select:focus {
+.track-condition-select-compact:focus {
     outline: none;
     border-color: #667eea;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
-.import-btn {
+.import-btn-compact {
     width: 100%;
-    padding: 10px;
+    padding: 8px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     border: none;
     border-radius: 6px;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 6px;
     transition: all 0.2s ease;
 }
 
-.import-btn:hover {
+.import-btn-compact:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 
-.import-btn:active {
-    transform: translateY(0);
-}
-
-/* State Badge */
-.state-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 10px;
-    font-weight: 700;
-    background: rgba(255,255,255,0.2);
+#meetings-list {
+    display: block;
 }
 
 @media (max-width: 768px) {
-    #meetings-list {
-        grid-template-columns: 1fr;
+    .state-row {
+        flex-direction: column;
+    }
+    
+    .state-label {
+        flex-direction: row;
+        justify-content: space-between;
+        padding: 15px;
+    }
+    
+    .meetings-row {
+        padding: 0 15px 15px 15px;
     }
     
     .date-picker-content {
@@ -376,7 +376,6 @@
     }
 }
 </style>
-
 <script>
 const JURISDICTION_COLORS = {
     'VIC': '#003f87',
