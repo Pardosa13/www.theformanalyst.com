@@ -922,7 +922,7 @@ function getChartOptions(viewType) {
         },
         scales: {
             y: {
-                reverse: viewType !== 'zscore' && viewType !== 'pfai',
+                reverse: viewType !== 'zscore',
                 title: {
                     display: true,
                     text: viewType === 'zscore' ? 'Z-Score (higher = faster)' : 
