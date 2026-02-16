@@ -422,8 +422,38 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
     """
     Process CSV through analyzer and store results in database
     """
-    # Run the analyzer
-    analysis_results = run_analyzer(csv_data, track_condition, is_advanced)
+    # ===== INJECT API SECTIONAL DATA INTO CSV =====
+import json
+
+# Parse the CSV first
+parsed_csv = parseCSV(csv_data)  # You'll need to add this helper function
+
+# If we have sectionals data, inject it
+if sectionals_data:
+    for row in parsed_csv:
+        horse_name = row.get('horse name', '').strip()
+        race_num = row.get('race number', '').strip()
+        
+        # Find matching sectional data
+        sectionals_payload = sectionals_data.get('payLoad', [])
+        for runner in sectionals_payload:
+            if (str(runner.get('raceNo')) == str(race_num) and 
+                runner.get('name', '').strip().lower() == horse_name.lower()):
+                
+                # Inject the API fields
+                row['last200TimePrice'] = runner.get('last200TimePrice', '')
+                row['last200TimeRank'] = runner.get('last200TimeRank', '')
+                row['last400TimePrice'] = runner.get('last400TimePrice', '')
+                row['last400TimeRank'] = runner.get('last400TimeRank', '')
+                row['last600TimePrice'] = runner.get('last600TimePrice', '')
+                row['last600TimeRank'] = runner.get('last600TimeRank', '')
+                break
+    
+    # Rebuild CSV with injected data
+    csv_data = rebuildCSV(parsed_csv)  # You'll need this helper too
+
+# Run the analyzer
+analysis_results = run_analyzer(csv_data, track_condition, is_advanced)
     
     if not analysis_results:
         raise Exception("No results returned from analyzer")
