@@ -2879,9 +2879,6 @@ function calculateApiSectionalScore(runner, raceDistance) {
 
 // SECTIONAL HELPERS
 function calculateMean(values) {
-
-// SECTIONAL HELPERS
-function calculateMean(values) {
     if (!values || values.length === 0) return 0;
     return values.reduce((sum, v) => sum + v, 0) / values.length;
 }
@@ -3288,3 +3285,217 @@ function calculateWeightScores(data) {
 
     return results;
 }
+// Calculate "true" odds from scores (Dirichlet-ish approach)
+function calculateTrueOdds(results, priorStrength = 0.05, troubleshooting = false, maxRatio = 300.0) {
+    const raceGroups = results.reduce((acc, obj) => {
+        const raceNumber = obj.horse['race number'];
+        if (!acc[raceNumber]) acc[raceNumber] = [];
+        acc[raceNumber].push(obj);
+        return acc;
+    }, {});
+
+    Object.values(raceGroups).forEach(raceHorses => {
+        const scores = raceHorses.map(h => h.score);
+        const minScore = Math.min(...scores);
+        const maxScore = Math.max(...scores);
+        const range = maxScore - minScore;
+        const minShiftForRatio = range > 0 ? range / (maxRatio - 1) : 1.0;
+        const basicShift = minScore < 0 ? Math.abs(minScore) + 0.01 : 0;
+        const shift = Math.max(basicShift, minShiftForRatio * 0.5);
+
+        const adjustedScores = scores.map(s => s + shift);
+        const posteriorCounts = adjustedScores.map(score => score + priorStrength);
+        const totalCounts = posteriorCounts.reduce((s, v) => s + v, 0);
+
+        const baseProbability = priorStrength / totalCounts;
+
+        raceHorses.forEach((horse, index) => {
+            const winProbability = posteriorCounts[index] / totalCounts;
+            const trueOdds = 1 / (winProbability * 1.10);
+
+            horse.winProbability = (winProbability * 110).toFixed(1) + '%';
+            horse.baseProbability = (baseProbability * 100).toFixed(1) + '%';
+            horse.trueOdds = `$${trueOdds.toFixed(2)}`;
+            horse.rawWinProbability = winProbability * 1.10;
+            horse.performanceComponent = ((adjustedScores[index] / totalCounts) * 100).toFixed(1) + '%';
+            horse.adjustedScore = adjustedScores[index];
+        });
+
+        const totalProb = raceHorses.reduce((s, h) => s + (h.rawWinProbability || 0), 0);
+        if (totalProb < 1.09 || totalProb > 1.11) {
+            throw new Error(`Race ${raceHorses[0].horse['race number']} probabilities adding to ${(totalProb*100).toFixed(2)}%`);
+        }
+    });
+
+    return results;
+}
+
+// Simple CSV parser and helpers
+function parseCSVLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') inQuotes = !inQuotes;
+        else if (char === ',' && !inQuotes) { result.push(current); current = ''; }
+        else current += char;
+    }
+    result.push(current);
+    return result;
+}
+
+function parseCSV(csvString) {
+    const lines = String(csvString).trim().split('\n');
+    if (lines.length === 0) return [];
+    const headers = parseCSVLine(lines[0]);
+    const data = [];
+    for (let i = 1; i < lines.length; i++) {
+        const values = parseCSVLine(lines[i]);
+        if (values.length === headers.length) {
+            const row = {};
+            headers.forEach((h, idx) => { row[h.trim().toLowerCase()] = values[idx].trim(); });
+            data.push(row);
+        }
+    }
+    return data;
+}
+
+function parseDate(dateStr) {
+    if (!dateStr) return new Date(0);
+    const datePart = String(dateStr).split(' ')[0];
+    const parts = datePart.split('/');
+    if (parts.length !== 3) return new Date(0);
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    let year = parseInt(parts[2], 10);
+    if (year < 100) year += (year <= 50) ? 2000 : 1900;
+    return new Date(year, month, day);
+}
+
+function getUniqueHorsesOnly(data) {
+    const latestByComposite = new Map();
+    data.forEach(entry => {
+        const compositeKey = `${entry['horse name']}-${entry['race number']}`;
+        const currentDate = entry['form meeting date'];
+        if (!latestByComposite.has(compositeKey) || parseDate(currentDate) > parseDate(latestByComposite.get(compositeKey)['form meeting date'])) {
+            latestByComposite.set(compositeKey, entry);
+        }
+    });
+    return Array.from(latestByComposite.values());
+}
+
+// Main analysis function
+function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
+    let data = parseCSV(csvData);
+    if (!data || data.length === 0) return [];
+    data = data.filter(row => {
+        const horseName = String(row['horse name'] || '').trim().toLowerCase();
+        if (!horseName || horseName === 'horse name') return false;
+        const raceNum = String(row['race number'] || '').trim();
+        if (!raceNum || isNaN(parseInt(raceNum, 10)) || raceNum.toLowerCase() === 'race number') return false;
+        return true;
+    });
+    if (!data.length) return [];
+    
+    const analysisResults = [];
+    const filteredDataSectional = getLowestSectionalsByRace(data);
+    const averageFormPrices = calculateAverageFormPrices(data);
+    const weightScores = calculateWeightScores(data);
+    const uniqueHorses = getUniqueHorsesOnly(data);
+    
+    uniqueHorses.forEach(horse => {
+        if (!horse['meeting date'] || !horse['horse name']) return;
+        
+        const compositeKey = `${horse['horse name']}-${horse['race number']}`;
+        const avgFormPrice = averageFormPrices[compositeKey];
+        const raceNumber = horse['race number'];
+        const horseName = horse['horse name'];
+        
+        const matchingHorseForContext = filteredDataSectional.find(h => 
+            parseInt(h.race) === parseInt(raceNumber) && 
+            h.name.toLowerCase().trim() === horseName.toLowerCase().trim()
+        );
+        
+        const sectionalDetailsForContext = matchingHorseForContext ? {
+            bestRecent: matchingHorseForContext.sectionalDetails?.bestRecent || 0,
+            weightedAvg: matchingHorseForContext.sectionalDetails?.weightedAvg || 0
+        } : null;
+        
+        let [score, notes] = calculateScore(horse, trackCondition, false, avgFormPrice, sectionalDetailsForContext);
+        
+        // ==========================================
+        // SECTIONAL SCORING - API PRIMARY, CSV FALLBACK
+        // ==========================================
+        
+        const hasApiSectionalData = horse['last200TimePrice'] !== undefined;
+        
+        if (hasApiSectionalData) {
+            // USE API SECTIONAL PRICE/RANK SCORING
+            const raceDistance = parseInt(horse['distance'] || horse['race distance'], 10) || 1400;
+            const apiSectionalResult = calculateApiSectionalScore(horse, raceDistance);
+            
+            score += apiSectionalResult.score;
+            notes += '\n=== SECTIONAL ANALYSIS (API) ===\n';
+            notes += apiSectionalResult.note;
+            
+        } else {
+            // FALLBACK TO CSV SECTIONAL TIME SCORING
+            const matchingHorse = filteredDataSectional.find(h => 
+                parseInt(h.race) === parseInt(raceNumber) && 
+                h.name.toLowerCase().trim() === horseName.toLowerCase().trim()
+            );
+            
+            if (matchingHorse) {
+                const sectionalWeight = horse._sectionalWeight || 1.0;
+                const originalSectionalScore = matchingHorse.sectionalScore;
+                const adjustedSectionalScore = originalSectionalScore * sectionalWeight;
+                score += adjustedSectionalScore;
+                if (sectionalWeight !== 1.0) {
+                    notes += `ℹ️  Sectional weight applied: ${originalSectionalScore.toFixed(1)} × ${sectionalWeight.toFixed(2)} = ${adjustedSectionalScore.toFixed(1)}\n`;
+                }
+                notes += matchingHorse.sectionalNote;
+            }
+        }
+        
+        // CLASS DROP + SLOW SECTIONAL COMBO (works with both API and CSV)
+        const todayClassScore = calculateClassScore(horse['class restrictions'], horse['race prizemoney']);
+        const lastClassScore = calculateClassScore(horse['form class'], horse['prizemoney']);
+        const classChange = todayClassScore - lastClassScore;
+        
+        // Parse raw sectional for the combo detection
+        const sectionalMatch = String(horse['sectional'] || '').match(/(\d+\.?\d*)sec/);
+        const rawSectional = sectionalMatch ? parseFloat(sectionalMatch[1]) : null;
+        
+        if (classChange < -30 && rawSectional && rawSectional >= 37) {
+            score += 30;
+            notes += '+30.0 : Major class drop + slow sectional combo (100% SR, +85% ROI - elite to easier)\n';
+        }
+        
+        // WEIGHT SCORING
+        const matchingWeight = weightScores.find(w => 
+            parseInt(w.race) === parseInt(raceNumber) && 
+            w.name.toLowerCase().trim() === horseName.toLowerCase().trim()
+        );
+        
+        if (matchingWeight) {
+            score += matchingWeight.weightScore;
+            notes += matchingWeight.weightNote;
+        }
+        
+        analysisResults.push({ horse, score, notes });
+    });
+    
+    return calculateTrueOdds(analysisResults, 0.05, false, 300);
+}
+
+// Read from stdin
+let inputData = '';
+process.stdin.on('data', chunk => { inputData += chunk; });
+process.stdin.on('end', () => {
+    const lines = inputData.trim().split('\n');
+    const csvData = lines.slice(0, -1).join('\n');
+    const trackCondition = lines[lines.length - 1] || 'good';
+    const results = analyzeCSV(csvData, trackCondition);
+    console.log(JSON.stringify(results));
+});
