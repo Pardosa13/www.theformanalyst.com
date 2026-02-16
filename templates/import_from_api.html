@@ -3,136 +3,390 @@
 {% block title %}Import from PuntingForm API{% endblock %}
 
 {% block content %}
-<h1>🌐 Import Meetings from PuntingForm</h1>
-
-<div style="margin-bottom: 20px;">
-    <a href="{{ url_for('dashboard') }}" style="color: #667eea; text-decoration: none;">← Back to Dashboard</a>
-</div>
-
-<!-- Date Selection Card -->
-<div class="card" style="margin-bottom: 20px;">
-    <h3 style="margin: 0 0 15px 0;">Select Meeting Date</h3>
-    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-        <input 
-            type="date" 
-            id="meeting-date" 
-            style="padding: 10px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 16px;"
-        >
-        <button 
-            onclick="loadMeetings()" 
-            class="btn btn-primary"
-            style="padding: 10px 30px; font-size: 16px;"
-        >
-            📅 Get Meetings
-        </button>
+<div style="max-width: 1400px; margin: 0 auto;">
+    <div style="margin-bottom: 30px;">
+        <a href="{{ url_for('dashboard') }}" style="color: #667eea; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 8px;">
+            <span>←</span> Back to Dashboard
+        </a>
     </div>
-    <p style="color: #6c757d; margin: 15px 0 0 0; font-size: 14px;">
-        💡 Select a date to view all available meetings for that day
-    </p>
-</div>
 
-<!-- Meetings Display -->
-<div class="card">
-    <div id="loading" style="display: none; text-align: center; padding: 40px;">
-        <div style="font-size: 48px; margin-bottom: 20px;">⏳</div>
-        <p style="color: #6c757d; font-size: 18px;">Loading meetings from PuntingForm...</p>
+    <!-- Hero Header -->
+    <div style="text-align: center; margin-bottom: 40px;">
+        <h1 style="font-size: 42px; margin: 0 0 10px 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+            🌐 Import Race Meetings
+        </h1>
+        <p style="color: #6c757d; font-size: 18px; margin: 0;">
+            Connect to PuntingForm API and analyze any race meeting in seconds
+        </p>
+    </div>
+
+    <!-- Date Picker Card -->
+    <div class="date-picker-card">
+        <div class="date-picker-content">
+            <div class="date-icon">📅</div>
+            <div style="flex: 1;">
+                <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #2d3748;">
+                    Select Meeting Date
+                </label>
+                <input 
+                    type="date" 
+                    id="meeting-date" 
+                    class="date-input"
+                >
+            </div>
+            <button onclick="loadMeetings()" class="search-btn">
+                <span>🔍</span>
+                <span>Search Meetings</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="loading" class="state-container" style="display: none;">
+        <div class="loader"></div>
+        <p style="color: #6c757d; font-size: 18px; margin-top: 20px;">Loading meetings from PuntingForm...</p>
     </div>
     
+    <!-- Meetings Display -->
     <div id="meetings-container" style="display: none;">
-        <div style="margin-bottom: 25px;">
-            <h2 style="margin: 0 0 10px 0;">Available Meetings</h2>
-            <p style="color: #6c757d; margin: 0;">Click any meeting to import and analyze</p>
+        <div style="margin-bottom: 30px; text-align: center;">
+            <h2 style="margin: 0 0 10px 0; color: #2d3748;">Available Meetings</h2>
+            <p style="color: #6c757d; margin: 0;">Click any meeting card to import and analyze</p>
         </div>
         
         <div id="meetings-list"></div>
     </div>
     
-    <div id="error-container" style="display: none; text-align: center; padding: 40px;">
-        <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
-        <p style="color: #dc3545; font-size: 18px; margin-bottom: 10px;">Failed to load meetings</p>
-        <p id="error-message" style="color: #6c757d;"></p>
-        <button onclick="loadMeetings()" class="btn btn-primary" style="margin-top: 20px;">
-            Retry
+    <!-- Error State -->
+    <div id="error-container" class="state-container" style="display: none;">
+        <div style="font-size: 64px; margin-bottom: 20px;">⚠️</div>
+        <p style="color: #dc3545; font-size: 20px; font-weight: 600; margin-bottom: 10px;">Failed to load meetings</p>
+        <p id="error-message" style="color: #6c757d; margin-bottom: 20px;"></p>
+        <button onclick="loadMeetings()" class="retry-btn">
+            Try Again
         </button>
     </div>
     
-    <div id="initial-state" style="text-align: center; padding: 60px 20px;">
-        <div style="font-size: 64px; margin-bottom: 20px;">🏇</div>
-        <h3 style="color: #2d3748; margin-bottom: 10px;">Ready to Import Meetings</h3>
-        <p style="color: #6c757d; font-size: 16px;">Select a date above and click "Get Meetings" to start</p>
+    <!-- Initial State -->
+    <div id="initial-state" class="state-container">
+        <div class="initial-icon">🏇</div>
+        <h3 style="color: #2d3748; margin: 20px 0 10px 0; font-size: 24px;">Ready to Import Meetings</h3>
+        <p style="color: #6c757d; font-size: 16px; max-width: 500px;">
+            Select a date above and click "Search Meetings" to view all available race meetings from PuntingForm
+        </p>
     </div>
 </div>
 
 <style>
+/* Date Picker Card */
+.date-picker-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 16px;
+    padding: 30px;
+    margin-bottom: 40px;
+    box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+}
+
+.date-picker-content {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.date-icon {
+    font-size: 48px;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
+}
+
+.date-input {
+    padding: 14px 18px;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    width: 100%;
+    max-width: 250px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+}
+
+.date-input:focus {
+    outline: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    transform: translateY(-1px);
+}
+
+.search-btn {
+    background: white;
+    color: #667eea;
+    border: none;
+    padding: 14px 32px;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    transition: all 0.3s ease;
+}
+
+.search-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+}
+
+.search-btn:active {
+    transform: translateY(0);
+}
+
+/* State Containers */
+.state-container {
+    text-align: center;
+    padding: 80px 20px;
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.initial-icon {
+    font-size: 96px;
+    animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+}
+
+/* Loading Spinner */
+.loader {
+    width: 60px;
+    height: 60px;
+    border: 6px solid #f3f4f6;
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.retry-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 12px 32px;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    transition: all 0.3s ease;
+}
+
+.retry-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+/* Jurisdiction Headers */
+.jurisdiction-header {
+    font-size: 28px;
+    font-weight: 800;
+    margin: 50px 0 25px 0;
+    padding: 15px 25px;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    border-left: 6px solid;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.jurisdiction-header:first-child {
+    margin-top: 0;
+}
+
+/* Meeting Grid */
+#meetings-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 25px;
+}
+
+/* Meeting Card */
 .meeting-card {
     background: white;
-    border: 2px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 15px;
+    border-radius: 16px;
+    padding: 0;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
-    transition: all 0.2s ease;
+    border: 2px solid transparent;
 }
 
 .meeting-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 12px 30px rgba(102, 126, 234, 0.25);
     border-color: #667eea;
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
-    transform: translateY(-2px);
 }
 
 .meeting-card.importing {
     opacity: 0.6;
     pointer-events: none;
+    transform: scale(0.98);
 }
 
-.meeting-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 15px;
-    margin-bottom: 12px;
+.meeting-card-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 20px;
+    color: white;
 }
 
 .meeting-title {
-    font-size: 20px;
-    font-weight: 600;
-    color: #2d3748;
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0 0 8px 0;
 }
 
-.meeting-badge {
-    padding: 6px 12px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-}
-
-.meeting-details {
-    display: flex;
-    gap: 20px;
-    flex-wrap: wrap;
-    color: #6c757d;
+.meeting-subtitle {
     font-size: 14px;
-}
-
-.meeting-details span {
+    opacity: 0.9;
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 12px;
 }
 
-.jurisdiction-header {
-    font-size: 24px;
+.meeting-card-body {
+    padding: 20px;
+}
+
+.meeting-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.stat-item {
+    background: #f8f9fa;
+    padding: 12px;
+    border-radius: 10px;
+    text-align: center;
+}
+
+.stat-label {
+    font-size: 11px;
+    color: #6c757d;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+.stat-value {
+    font-size: 20px;
     font-weight: 700;
-    margin: 30px 0 15px 0;
     color: #2d3748;
-    padding-bottom: 10px;
-    border-bottom: 3px solid #667eea;
 }
 
-.jurisdiction-header:first-child {
-    margin-top: 0;
+.condition-select-wrapper {
+    margin-bottom: 15px;
+}
+
+.condition-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    color: #4a5568;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.track-condition-select {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid #e2e8f0;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 500;
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.track-condition-select:hover {
+    border-color: #667eea;
+}
+
+.track-condition-select:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.import-btn {
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.import-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.import-btn:active {
+    transform: translateY(0);
+}
+
+/* State Badge */
+.state-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+    background: rgba(255,255,255,0.2);
+    backdrop-filter: blur(10px);
+}
+
+@media (max-width: 768px) {
+    #meetings-list {
+        grid-template-columns: 1fr;
+    }
+    
+    .date-picker-content {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .date-input {
+        max-width: 100%;
+    }
+    
+    .search-btn {
+        width: 100%;
+        justify-content: center;
+    }
 }
 </style>
 
@@ -148,7 +402,17 @@ const JURISDICTION_COLORS = {
     'NT': '#d4581e'
 };
 
-// Set default date to today on page load
+const JURISDICTION_EMOJIS = {
+    'VIC': '🏛️',
+    'NSW': '🌊',
+    'QLD': '☀️',
+    'SA': '🍷',
+    'WA': '⛏️',
+    'TAS': '🏔️',
+    'ACT': '🏢',
+    'NT': '🦘'
+};
+
 document.addEventListener('DOMContentLoaded', function() {
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('meeting-date').value = today;
@@ -162,12 +426,9 @@ async function loadMeetings() {
         return;
     }
     
-    // Hide all containers
     document.getElementById('initial-state').style.display = 'none';
     document.getElementById('meetings-container').style.display = 'none';
     document.getElementById('error-container').style.display = 'none';
-    
-    // Show loading
     document.getElementById('loading').style.display = 'block';
     
     try {
@@ -195,7 +456,6 @@ async function loadMeetings() {
 function displayMeetings(meetings) {
     const grouped = {};
     
-    // Group by state
     meetings.forEach(meeting => {
         const state = meeting.state || 'OTHER';
         if (!grouped[state]) {
@@ -205,17 +465,20 @@ function displayMeetings(meetings) {
     });
     
     let html = '';
-    
-    // Sort states
     const sortedStates = Object.keys(grouped).sort();
     
     sortedStates.forEach(state => {
         const color = JURISDICTION_COLORS[state] || '#6c757d';
+        const emoji = JURISDICTION_EMOJIS[state] || '📍';
         
-        html += `<div class="jurisdiction-header" style="color: ${color};">${state}</div>`;
+        html += `<div class="jurisdiction-header" style="border-color: ${color}; color: ${color};">
+            <span>${emoji}</span>
+            <span>${state}</span>
+            <span style="margin-left: auto; font-size: 16px; font-weight: 600; opacity: 0.7;">${grouped[state].length} meeting${grouped[state].length !== 1 ? 's' : ''}</span>
+        </div>`;
         
         grouped[state].forEach(meeting => {
-            html += createMeetingCard(meeting);
+            html += createMeetingCard(meeting, color);
         });
     });
     
@@ -224,40 +487,57 @@ function displayMeetings(meetings) {
     document.getElementById('meetings-container').style.display = 'block';
 }
 
-function createMeetingCard(meeting) {
+function createMeetingCard(meeting, stateColor) {
     return `
         <div class="meeting-card" data-meeting-id="${meeting.meeting_id}" data-date="${meeting.date}">
-            <div class="meeting-header">
+            <div class="meeting-card-header">
                 <div class="meeting-title">${meeting.track_name}</div>
-                <div class="meeting-badge" style="background: #6c757d; color: white;">
-                    ${meeting.state}
+                <div class="meeting-subtitle">
+                    <span class="state-badge">${meeting.state}</span>
+                    <span>•</span>
+                    <span>${meeting.track_code}</span>
                 </div>
             </div>
-            <div class="meeting-details">
-                <span>📅 ${meeting.date}</span>
-                <span>🏇 ${meeting.race_count} races</span>
-                <span>📍 ${meeting.track_code}</span>
+            
+            <div class="meeting-card-body">
+                <div class="meeting-stats">
+                    <div class="stat-item">
+                        <div class="stat-label">Date</div>
+                        <div class="stat-value">${formatDate(meeting.date)}</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Races</div>
+                        <div class="stat-value">${meeting.race_count}</div>
+                    </div>
+                </div>
+                
+                <div class="condition-select-wrapper">
+                    <label class="condition-label">Track Condition</label>
+                    <select class="track-condition-select">
+                        <option value="firm">Firm</option>
+                        <option value="good" selected>Good</option>
+                        <option value="soft">Soft</option>
+                        <option value="heavy">Heavy</option>
+                        <option value="synthetic">Synthetic</option>
+                    </select>
+                </div>
+                
+                <button onclick="importMeetingWithCondition(this); event.stopPropagation();" class="import-btn">
+                    <span>📥</span>
+                    <span>Import & Analyze</span>
+                </button>
             </div>
-            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
-                <label style="display: block; margin-bottom: 8px; font-weight: 600; font-size: 14px; color: #4a5568;">
-                    Track Condition:
-                </label>
-                <select class="track-condition-select" style="padding: 8px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; width: 100%; margin-bottom: 10px;">
-                    <option value="firm">Firm</option>
-                    <option value="good" selected>Good</option>
-                    <option value="soft">Soft</option>
-                    <option value="heavy">Heavy</option>
-                    <option value="synthetic">Synthetic</option>
-                </select>
-            </div>
-            <button onclick="importMeetingWithCondition(this); event.stopPropagation();" 
-                    class="btn btn-primary" 
-                    style="width: 100%; padding: 12px; font-size: 14px; font-weight: 600;">
-                📥 Import Meeting
-            </button>
         </div>
     `;
 }
+
+function formatDate(dateStr) {
+    const date = new Date(dateStr + 'T00:00:00');
+    const day = date.getDate();
+    const month = date.toLocaleDateString('en-US', { month: 'short' });
+    return `${day} ${month}`;
+}
+
 async function importMeetingWithCondition(buttonElement) {
     const cardElement = buttonElement.closest('.meeting-card');
     const meetingId = cardElement.dataset.meetingId;
@@ -267,9 +547,10 @@ async function importMeetingWithCondition(buttonElement) {
     
     cardElement.classList.add('importing');
     cardElement.innerHTML = `
-        <div style="text-align: center; padding: 20px;">
-            <div style="font-size: 32px; margin-bottom: 10px;">⏳</div>
-            <p style="color: #6c757d; margin: 0;">Importing meeting...</p>
+        <div style="text-align: center; padding: 60px 20px;">
+            <div class="loader" style="margin: 0 auto 20px auto;"></div>
+            <p style="color: #6c757d; margin: 0; font-weight: 600;">Importing meeting...</p>
+            <p style="color: #9ca3af; margin: 8px 0 0 0; font-size: 14px;">This may take a few moments</p>
         </div>
     `;
     
@@ -291,7 +572,6 @@ async function importMeetingWithCondition(buttonElement) {
             return;
         }
         
-        // Redirect to meeting view
         window.location.href = data.redirect_url;
         
     } catch (error) {
