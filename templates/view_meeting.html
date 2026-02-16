@@ -183,20 +183,29 @@ window.speedMapData_{{ race.race_number }} = {{ race.speed_maps_json|safe }};
         </td>
         <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">
             <div style="font-weight: 600; display: flex; align-items: center; gap: 8px;">
-                <span>{{ horse.horse_name }}</span>
-                {% if horse.is_scratched %}
-                    <span style="background: #6c757d; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">SCRATCHED</span>
-                    <button onclick="toggleScratch({{ horse.horse_id }}, false)" 
-                            style="background: #28a745; color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 10px; cursor: pointer;">
-                        Unscratch
-                    </button>
-                {% else %}
-                    <button onclick="toggleScratch({{ horse.horse_id }}, true)" 
-                            style="background: #6c757d; color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 10px; cursor: pointer;">
-                        Scratch
-                    </button>
-                {% endif %}
-            </div>
+    <span>{{ horse.horse_name }}</span>
+    
+    {# PFAI Score Badge #}
+    {% if horse.pfai_score %}
+        <span style="background: #764ba2; color: white; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 700;">
+            PFAI: {{ horse.pfai_score }}
+        </span>
+    {% endif %}
+    
+    {# Scratch Status & Buttons #}
+    {% if horse.is_scratched %}
+        <span style="background: #6c757d; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">SCRATCHED</span>
+        <button onclick="toggleScratch({{ horse.horse_id }}, false)" 
+                style="background: #28a745; color: white; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;">
+            Click To Unscratch
+        </button>
+    {% else %}
+        <button onclick="toggleScratch({{ horse.horse_id }}, true)" 
+                style="background: #6c757d; color: white; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;">
+            Click To Scratch
+        </button>
+    {% endif %}
+</div>
             <div style="font-size: 12px; color: #6c757d;">
                 {% if horse.jockey %}J: {{ horse.jockey }}{% endif %}
                 {% if horse.trainer %} | T: {{ horse.trainer }}{% endif %}
