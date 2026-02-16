@@ -129,7 +129,7 @@ window.speedMapData_{{ race.race_number }} = {{ race.speed_maps_json|safe }};
 </script>
 {% endif %}
     
-    <!-- SECTIONAL ANALYSIS CHART SECTION (NEW) -->
+    <!-- SECTIONAL ANALYSIS CHART SECTION -->
     <div class="sectional-section">
         <h3>
             <span>📊</span>
@@ -246,7 +246,7 @@ window.speedMapData_{{ race.race_number }} = {{ race.speed_maps_json|safe }};
 </div>
 
 <style>
-/* ====== SECTIONAL CHART STYLES (NEW) ====== */
+/* ====== SECTIONAL CHART STYLES ====== */
 .sectional-section {
     background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
     padding: 20px;
@@ -472,6 +472,137 @@ table tr.horse-row-match td:first-child::before {
     font-weight: bold;
 }
 
+/* Speed Map Styles */
+.speedmap-container {
+    overflow-x: auto;
+    padding: 20px 0;
+}
+
+.speedmap-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    min-width: 800px;
+}
+
+.speedmap-column {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 15px;
+}
+
+.speedmap-column-header {
+    background: #2d3748;
+    color: white;
+    padding: 12px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 14px;
+    text-transform: uppercase;
+    border-radius: 6px 6px 0 0;
+    margin: -15px -15px 15px -15px;
+}
+
+.speedmap-horse-card {
+    background: white;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 10px;
+    transition: all 0.2s ease;
+}
+
+.speedmap-horse-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    border-color: #667eea;
+}
+
+.speedmap-tab-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: #667eea;
+    color: white;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 16px;
+    margin-bottom: 8px;
+}
+
+.speedmap-horse-name {
+    font-weight: 600;
+    font-size: 15px;
+    color: #2d3748;
+    margin-bottom: 8px;
+}
+
+.speedmap-pfai {
+    display: inline-block;
+    background: #764ba2;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.speedmap-badges {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.speedmap-badge {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.speedmap-badge-speed {
+    background: #e2e8f0;
+    color: #2d3748;
+}
+
+.speedmap-badge-settle {
+    background: #e2e8f0;
+    color: #2d3748;
+}
+
+.speedmap-map {
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+
+.speedmap-map-positive {
+    background: #28a745;
+    color: white;
+}
+
+.speedmap-map-neutral {
+    background: #6c757d;
+    color: white;
+}
+
+.speedmap-map-negative {
+    background: #dc3545;
+    color: white;
+}
+
+.speedmap-jockey {
+    font-size: 12px;
+    color: #6c757d;
+}
+
 @media print {
     nav, .btn, a[href*="history"], details summary, .chart-controls, .sectional-section {
         display: none !important;
@@ -498,6 +629,12 @@ table tr.horse-row-match td:first-child::before {
         font-size: 11px;
         padding: 6px 12px;
     }
+    .speedmap-grid {
+        min-width: 600px;
+    }
+    .speedmap-column {
+        padding: 10px;
+    }
 }
 
 details summary::-webkit-details-marker {
@@ -509,19 +646,20 @@ details summary {
 }
 </style>
 
+<!-- Chart.js must load BEFORE our scripts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
 <script>
-// ====== SECTIONAL CHART SYSTEM (NEW) ======
+// ====== SECTIONAL CHART SYSTEM ======
 const chartInstances = {};
 const meetingId = {{ meeting.id }};
 
-// Wait for both DOM and Chart.js to be ready
 function initializeSectionalCharts() {
     if (typeof Chart === 'undefined') {
         setTimeout(initializeSectionalCharts, 100);
         return;
     }
     
-    // Load sectional charts
     fetch('/api/meeting/' + meetingId + '/sectionals')
         .then(function(response) { return response.json(); })
         .then(function(data) {
@@ -540,16 +678,13 @@ function initializeSectionalCharts() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize sectional charts with Chart.js check
     initializeSectionalCharts();
     
-    // Initialize filter bar
     const placeholder = document.getElementById('filter-bar-placeholder');
     if (placeholder) {
         placeholder.appendChild(createFilterBar());
     }
     
-    // Initialize confidence banners
     const races = document.querySelectorAll('.card[id^="race-"]');
     races.forEach(function(raceCard) {
         if (raceCard.querySelector('.confidence-banner')) {
@@ -629,8 +764,110 @@ function prepareChartData(horses) {
         adjusted: [],
         raw: [],
         zscore: [],
-        pfai: []  // ✨ NEW
+        pfai: []
     };
+    
+    horses.forEach(function(horse, index) {
+        const color = colors[index % colors.length];
+        const historyAdj = horse.history_adjusted || [];
+        const historyRaw = horse.history_raw || [];
+        
+        if (historyAdj.length === 0) {
+            return;
+        }
+        
+        const mean = historyAdj.reduce(function(sum, val) { return sum + val; }, 0) / historyAdj.length;
+        const variance = historyAdj.reduce(function(sum, val) { return sum + Math.pow(val - mean, 2); }, 0) / historyAdj.length;
+        const stdDev = Math.sqrt(variance);
+        
+        const zscores = historyAdj.map(function(time) {
+            if (stdDev === 0) return 0;
+            return -1 * (time - mean) / stdDev;
+        });
+        
+        const bestTime = horse.best_recent ? horse.best_recent.adjusted_time.toFixed(2) + 's' : 'N/A';
+        const bestRawTime = horse.best_recent ? horse.best_recent.raw_time.toFixed(2) + 's' : 'N/A';
+        
+        datasets.adjusted.push({
+            label: horse.horse_name + ' (' + bestTime + ')',
+            data: historyAdj,
+            borderColor: color,
+            backgroundColor: color + '33',
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 8,
+            borderWidth: index < 3 ? 3 : 2
+        });
+        
+        datasets.raw.push({
+            label: horse.horse_name + ' (' + bestRawTime + ')',
+            data: historyRaw,
+            borderColor: color,
+            backgroundColor: color + '33',
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 8,
+            borderWidth: index < 3 ? 3 : 2
+        });
+        
+        datasets.zscore.push({
+            label: horse.horse_name + ' (z=' + (horse.best_recent ? horse.best_recent.zscore.toFixed(2) : 'N/A') + ')',
+            data: zscores,
+            borderColor: color,
+            backgroundColor: color + '33',
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 8,
+            borderWidth: index < 3 ? 3 : 2
+        });
+        
+        if (horse.pfai_sectionals) {
+            const pfai = horse.pfai_sectionals;
+            const pfaiData = [];
+            
+            if (pfai.last600_rank && pfai.last600_rank < 25) pfaiData.push(pfai.last600_rank);
+            if (pfai.last400_rank && pfai.last400_rank < 25) pfaiData.push(pfai.last400_rank);
+            if (pfai.last200_rank && pfai.last200_rank < 25) pfaiData.push(pfai.last200_rank);
+            
+            if (pfaiData.length > 0) {
+                const avgRank = (pfaiData.reduce(function(a, b) { return a + b; }, 0) / pfaiData.length).toFixed(1);
+                
+                datasets.pfai.push({
+                    label: horse.horse_name + ' (Avg: #' + avgRank + ')',
+                    data: pfaiData,
+                    borderColor: color,
+                    backgroundColor: color + '33',
+                    tension: 0,
+                    pointRadius: 8,
+                    pointHoverRadius: 12,
+                    borderWidth: index < 3 ? 4 : 3
+                });
+            }
+        }
+    });
+    
+    var maxRuns = 0;
+    horses.forEach(function(horse) {
+        var runCount = (horse.history_adjusted || []).length;
+        if (runCount > maxRuns) maxRuns = runCount;
+    });
+
+    var labels = [];
+    for (var i = maxRuns; i >= 1; i--) {
+        if (i === 1) {
+            labels.push('Last run');
+        } else {
+            labels.push(i + ' runs ago');
+        }
+    }
+    
+    return {
+        adjusted: { labels: labels, datasets: datasets.adjusted },
+        raw: { labels: labels, datasets: datasets.raw },
+        zscore: { labels: labels, datasets: datasets.zscore },
+        pfai: { labels: ['600m', '400m', '200m'], datasets: datasets.pfai }
+    };
+}
 
 function getChartOptions(viewType) {
     return {
@@ -661,12 +898,11 @@ function getChartOptions(viewType) {
                         let label = context.dataset.label.split('(')[0].trim() + ': ';
                         
                         if (viewType === 'pfai') {
-                            label += '#' + value;  // Show rank number
+                            label += '#' + value;
                         } else {
                             label += value + suffix;
                         }
                         
-                        // Add PFAI rank if available (for non-PFAI views)
                         if (viewType !== 'pfai') {
                             const horseIndex = context.datasetIndex;
                             const horse = window.currentRaceHorses ? window.currentRaceHorses[horseIndex] : null;
@@ -686,11 +922,11 @@ function getChartOptions(viewType) {
         },
         scales: {
             y: {
-                reverse: viewType !== 'zscore' && viewType !== 'pfai',  // ✨ Don't reverse PFAI (lower rank = better = top)
+                reverse: viewType !== 'zscore' && viewType !== 'pfai',
                 title: {
                     display: true,
                     text: viewType === 'zscore' ? 'Z-Score (higher = faster)' : 
-                          viewType === 'pfai' ? 'PFAI Rank (#1 = best)' :  // ✨ NEW
+                          viewType === 'pfai' ? 'PFAI Rank (#1 = best)' :
                           'Sectional Time (seconds)',
                     font: { size: 13, weight: 'bold' }
                 },
@@ -702,6 +938,7 @@ function getChartOptions(viewType) {
         }
     };
 }
+
 function switchView(raceId, viewType) {
     const instance = chartInstances[raceId];
     if (!instance) return;
@@ -749,7 +986,7 @@ function generateInsights(raceNum, horses) {
         const rating = bestSD < 0.3 ? 'Excellent' : bestSD < 0.5 ? 'Good' : bestSD < 0.7 ? 'Fair' : 'Variable';
         insights.push('✅ <strong>Most Consistent:</strong> ' + consistent + ' (' + rating + ' - SD: ' + bestSD.toFixed(2) + 's)');
     }
-    // ✨ NEW: PFAI Sectional Insights
+    
     let pfaiCount = 0;
     let bestPfaiHorse = null;
     let bestPfaiScore = Infinity;
@@ -758,7 +995,6 @@ function generateInsights(raceNum, horses) {
         if (horse.pfai_sectionals) {
             pfaiCount++;
             
-            // Calculate average PFAI rank (lower is better)
             const ranks = [];
             if (horse.pfai_sectionals.last200_rank && horse.pfai_sectionals.last200_rank < 25) {
                 ranks.push(horse.pfai_sectionals.last200_rank);
@@ -771,7 +1007,7 @@ function generateInsights(raceNum, horses) {
             }
             
             if (ranks.length > 0) {
-                const avgRank = ranks.reduce((a, b) => a + b, 0) / ranks.length;
+                const avgRank = ranks.reduce(function(a, b) { return a + b; }, 0) / ranks.length;
                 if (avgRank < bestPfaiScore) {
                     bestPfaiScore = avgRank;
                     bestPfaiHorse = horse.horse_name;
@@ -805,10 +1041,98 @@ function generateInsights(raceNum, horses) {
     container.innerHTML = '<h4>Key Insights</h4>' +
         insights.map(function(i) { return '<div class="insight-item">' + i + '</div>'; }).join('');
 }
-</script>
 
-<script>
-// ====== FILTER SYSTEM - PROFITABLE COMPONENTS ONLY ======
+// Speed Map Functions
+function toggleSpeedMap(raceNumber) {
+    const container = document.getElementById('speedmap-' + raceNumber);
+    const toggle = document.getElementById('speedmap-toggle-' + raceNumber);
+    
+    if (container.style.display === 'none' || container.style.display === '') {
+        container.style.display = 'block';
+        toggle.textContent = '▲ Hide';
+        renderSpeedMap(raceNumber);
+    } else {
+        container.style.display = 'none';
+        toggle.textContent = '▼ Show';
+    }
+}
+
+function renderSpeedMap(raceNumber) {
+    const data = window['speedMapData_' + raceNumber];
+    
+    if (!data || !data.payLoad || !data.payLoad[0] || !data.payLoad[0].items) {
+        console.error('No speed map data available');
+        return;
+    }
+    
+    const horses = data.payLoad[0].items;
+    
+    const categories = {
+        leader: [],
+        onpace: [],
+        midfield: [],
+        backmarker: []
+    };
+    
+    horses.forEach(function(horse) {
+        const settle = horse.settle;
+        if (settle <= 2) {
+            categories.leader.push(horse);
+        } else if (settle <= 4) {
+            categories.onpace.push(horse);
+        } else if (settle <= 8) {
+            categories.midfield.push(horse);
+        } else {
+            categories.backmarker.push(horse);
+        }
+    });
+    
+    Object.keys(categories).forEach(function(key) {
+        categories[key].sort(function(a, b) { return a.settle - b.settle; });
+    });
+    
+    const html = '<div class="speedmap-grid">' +
+        '<div class="speedmap-column">' +
+        '<div class="speedmap-column-header">Leader</div>' +
+        categories.leader.map(createHorseCard).join('') +
+        '</div>' +
+        '<div class="speedmap-column">' +
+        '<div class="speedmap-column-header">OnPace</div>' +
+        categories.onpace.map(createHorseCard).join('') +
+        '</div>' +
+        '<div class="speedmap-column">' +
+        '<div class="speedmap-column-header">Midfield</div>' +
+        categories.midfield.map(createHorseCard).join('') +
+        '</div>' +
+        '<div class="speedmap-column">' +
+        '<div class="speedmap-column-header">Backmarker</div>' +
+        categories.backmarker.map(createHorseCard).join('') +
+        '</div>' +
+        '</div>';
+    
+    document.querySelector('#speedmap-' + raceNumber + ' .speedmap-container').innerHTML = html;
+}
+
+function createHorseCard(horse) {
+    const mapValue = horse.mapA2E || 0;
+    let mapClass = 'speedmap-map-neutral';
+    if (mapValue > 0) mapClass = 'speedmap-map-positive';
+    if (mapValue < 0) mapClass = 'speedmap-map-negative';
+    
+    return '<div class="speedmap-horse-card">' +
+        '<div class="speedmap-tab-number">' + horse.tabNo + '</div>' +
+        '<div class="speedmap-horse-name">' + horse.runnerName + '</div>' +
+        '<div class="speedmap-pfai">PFAI: ' + horse.pfaiScore + '</div>' +
+        '<div class="speedmap-badges">' +
+        '<span class="speedmap-badge speedmap-badge-speed">Speed ' + horse.speed + '</span>' +
+        '<span class="speedmap-badge speedmap-badge-settle">Settle ' + horse.settle + '</span>' +
+        '</div>' +
+        '<div class="speedmap-map ' + mapClass + '">MAP: ' + mapValue.toFixed(2) + '</div>' +
+        '<div class="speedmap-jockey">Jockey A2E: ' + (horse.jockeyA2E > 0 ? '+' : '') + horse.jockeyA2E.toFixed(2) + '</div>' +
+        '</div>';
+}
+
+// Filter System
 const FILTER_CRITERIA = {
     majorClassDropSlowSectional: {
         label: 'Major Class Drop + Slow Sectional (720% ROI!)',
@@ -1042,7 +1366,6 @@ function applyFilters() {
     updateMatchCounter();
 }
 
-// Confidence calculation function
 function calculateRaceConfidence(horses) {
     if (horses.length < 2) return null;
     
@@ -1150,11 +1473,6 @@ function calculateRaceConfidence(horses) {
     return { confidence: finalConfidence, rating: rating, description: description, style: style, emoji: emoji };
 }
 
-</script>
-<!-- Chart.js must load BEFORE our scripts -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script>
-// ====== DATABASE-BACKED SCRATCH SYSTEM ======
 function toggleScratch(horseId, shouldScratch) {
     fetch('/api/horse/' + horseId + '/toggle-scratch', {
         method: 'POST',
@@ -1162,266 +1480,19 @@ function toggleScratch(horseId, shouldScratch) {
             'Content-Type': 'application/json',
         }
     })
-    .then(response => response.json())
-    .then(data => {
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
         if (data.success) {
-            // Reload page to show updated status
             location.reload();
         } else {
             alert('Failed to update scratch status');
         }
     })
-    .catch(error => {
+    .catch(function(error) {
         console.error('Error:', error);
         alert('Failed to update scratch status');
     });
 }
 </script>
-<style>
-/* Speed Map Styles */
-.speedmap-container {
-    overflow-x: auto;
-    padding: 20px 0;
-}
 
-.speedmap-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 15px;
-    min-width: 800px;
-}
-
-.speedmap-column {
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 15px;
-}
-
-.speedmap-column-header {
-    background: #2d3748;
-    color: white;
-    padding: 12px;
-    text-align: center;
-    font-weight: 700;
-    font-size: 14px;
-    text-transform: uppercase;
-    border-radius: 6px 6px 0 0;
-    margin: -15px -15px 15px -15px;
-}
-
-.speedmap-horse-card {
-    background: white;
-    border: 2px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 12px;
-    margin-bottom: 10px;
-    transition: all 0.2s ease;
-}
-
-.speedmap-horse-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    border-color: #667eea;
-}
-
-.speedmap-tab-number {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    background: #667eea;
-    color: white;
-    border-radius: 50%;
-    font-weight: 700;
-    font-size: 16px;
-    margin-bottom: 8px;
-}
-
-.speedmap-horse-name {
-    font-weight: 600;
-    font-size: 15px;
-    color: #2d3748;
-    margin-bottom: 8px;
-}
-
-.speedmap-pfai {
-    display: inline-block;
-    background: #764ba2;
-    color: white;
-    padding: 4px 10px;
-    border-radius: 4px;
-    font-size: 13px;
-    font-weight: 600;
-    margin-bottom: 8px;
-}
-
-.speedmap-badges {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 8px;
-    flex-wrap: wrap;
-}
-
-.speedmap-badge {
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-}
-
-.speedmap-badge-speed {
-    background: #e2e8f0;
-    color: #2d3748;
-}
-
-.speedmap-badge-settle {
-    background: #e2e8f0;
-    color: #2d3748;
-}
-
-.speedmap-map {
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-weight: 700;
-    font-size: 13px;
-    margin-bottom: 6px;
-}
-
-.speedmap-map-positive {
-    background: #28a745;
-    color: white;
-}
-
-.speedmap-map-neutral {
-    background: #6c757d;
-    color: white;
-}
-
-.speedmap-map-negative {
-    background: #dc3545;
-    color: white;
-}
-
-.speedmap-jockey {
-    font-size: 12px;
-    color: #6c757d;
-}
-
-@media (max-width: 768px) {
-    .speedmap-grid {
-        min-width: 600px;
-    }
-    
-    .speedmap-column {
-        padding: 10px;
-    }
-}
-</style>
-
-<script>
-function toggleSpeedMap(raceNumber) {
-    const container = document.getElementById(`speedmap-${raceNumber}`);
-    const toggle = document.getElementById(`speedmap-toggle-${raceNumber}`);
-    
-    if (container.style.display === 'none' || container.style.display === '') {
-        // Show speed map
-        container.style.display = 'block';
-        toggle.textContent = '▲ Hide';
-        
-        // ALWAYS render - removed the empty check that was causing issues
-        renderSpeedMap(raceNumber);
-    } else {
-        // Hide speed map
-        container.style.display = 'none';
-        toggle.textContent = '▼ Show';
-    }
-}
-function renderSpeedMap(raceNumber) {
-    const data = window[`speedMapData_${raceNumber}`];
-    
-    if (!data || !data.payLoad || !data.payLoad[0] || !data.payLoad[0].items) {
-        console.error('No speed map data available');
-        return;
-    }
-    
-    const horses = data.payLoad[0].items;
-    
-    // Categorize horses by settle position
-    const categories = {
-        leader: [],      // settle 1-2
-        onpace: [],      // settle 3-4
-        midfield: [],    // settle 5-8
-        backmarker: []   // settle 9+
-    };
-    
-    horses.forEach(horse => {
-        const settle = horse.settle;
-        if (settle <= 2) {
-            categories.leader.push(horse);
-        } else if (settle <= 4) {
-            categories.onpace.push(horse);
-        } else if (settle <= 8) {
-            categories.midfield.push(horse);
-        } else {
-            categories.backmarker.push(horse);
-        }
-    });
-    
-    // Sort within each category by settle position
-    Object.keys(categories).forEach(key => {
-        categories[key].sort((a, b) => a.settle - b.settle);
-    });
-    
-    // Build HTML
-    const html = `
-        <div class="speedmap-grid">
-            <div class="speedmap-column">
-                <div class="speedmap-column-header">Leader</div>
-                ${categories.leader.map(horse => createHorseCard(horse)).join('')}
-            </div>
-            <div class="speedmap-column">
-                <div class="speedmap-column-header">OnPace</div>
-                ${categories.onpace.map(horse => createHorseCard(horse)).join('')}
-            </div>
-            <div class="speedmap-column">
-                <div class="speedmap-column-header">Midfield</div>
-                ${categories.midfield.map(horse => createHorseCard(horse)).join('')}
-            </div>
-            <div class="speedmap-column">
-                <div class="speedmap-column-header">Backmarker</div>
-                ${categories.backmarker.map(horse => createHorseCard(horse)).join('')}
-            </div>
-        </div>
-    `;
-    
-    document.querySelector(`#speedmap-${raceNumber} .speedmap-container`).innerHTML = html;
-}
-
-function createHorseCard(horse) {
-    const mapValue = horse.mapA2E || 0;
-    let mapClass = 'speedmap-map-neutral';
-    if (mapValue > 0) mapClass = 'speedmap-map-positive';
-    if (mapValue < 0) mapClass = 'speedmap-map-negative';
-    
-    return `
-        <div class="speedmap-horse-card">
-            <div class="speedmap-tab-number">${horse.tabNo}</div>
-            <div class="speedmap-horse-name">${horse.runnerName}</div>
-            <div class="speedmap-pfai">PFAI: ${horse.pfaiScore}</div>
-            <div class="speedmap-badges">
-                <span class="speedmap-badge speedmap-badge-speed">Speed ${horse.speed}</span>
-                <span class="speedmap-badge speedmap-badge-settle">Settle ${horse.settle}</span>
-            </div>
-            <div class="speedmap-map ${mapClass}">
-                MAP: ${mapValue.toFixed(2)}
-            </div>
-            <div class="speedmap-jockey">
-                Jockey A2E: ${horse.jockeyA2E > 0 ? '+' : ''}${horse.jockeyA2E.toFixed(2)}
-            </div>
-        </div>
-    `;
-}
-</script>
 {% endblock %}
