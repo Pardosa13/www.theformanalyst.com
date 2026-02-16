@@ -1663,6 +1663,58 @@ function toggleScratch(horseId, shouldScratch) {
         alert('Failed to update scratch status');
     });
 }
+// ====== INJECT PFAI SCORES FROM SPEED MAP DATA ======
+function injectPFAIScores() {
+    // Loop through all races
+    const races = document.querySelectorAll('.card[id^="race-"]');
+    
+    races.forEach(function(raceCard) {
+        // Extract race number from the card ID (e.g., "race-3" -> "3")
+        const raceId = raceCard.id.replace('race-', '');
+        const speedMapData = window['speedMapData_' + raceId];
+        
+        // Skip if no speed map data for this race
+        if (!speedMapData || !speedMapData.payLoad || !speedMapData.payLoad[0] || !speedMapData.payLoad[0].items) {
+            return;
+        }
+        
+        const horses = speedMapData.payLoad[0].items;
+        
+        // Get all horse rows in this race's table
+        const horseRows = raceCard.querySelectorAll('tbody tr');
+        
+        horseRows.forEach(function(row) {
+            // Get the horse name from the row
+            const horseNameCell = row.querySelector('td:nth-child(2)');
+            if (!horseNameCell) return;
+            
+            const horseNameSpan = horseNameCell.querySelector('span');
+            if (!horseNameSpan) return;
+            
+            const horseName = horseNameSpan.textContent.trim();
+            
+            // Find matching horse in speed map data
+            const matchingHorse = horses.find(function(h) {
+                return h.runnerName === horseName;
+            });
+            
+            if (matchingHorse && matchingHorse.pfaiScore) {
+                // Check if PFAI badge already exists (avoid duplicates)
+                const existingBadge = horseNameCell.querySelector('.pfai-badge');
+                if (existingBadge) return;
+                
+                // Create PFAI badge
+                const pfaiBadge = document.createElement('span');
+                pfaiBadge.className = 'pfai-badge';
+                pfaiBadge.style.cssText = 'background: #764ba2; color: white; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; margin-left: 8px;';
+                pfaiBadge.textContent = 'PFAI: ' + matchingHorse.pfaiScore;
+                
+                // Insert badge after the horse name span
+                horseNameSpan.parentNode.insertBefore(pfaiBadge, horseNameSpan.nextSibling);
+            }
+        });
+    });
+}
 </script>
 
 {% endblock %}
