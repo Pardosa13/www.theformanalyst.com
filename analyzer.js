@@ -3280,7 +3280,7 @@ function calculateWeightScores(data) {
     return results;
 }
 // Calculate "true" odds from scores (Dirichlet-ish approach)
-function calculateTrueOdds(results, priorStrength = 0.05, troubleshooting = false, maxRatio = 300.0) {
+function calculateTrueOdds(results, priorStrength = 0.01, troubleshooting = false, maxRatio = 300.0) {
     const raceGroups = results.reduce((acc, obj) => {
         const raceNumber = obj.horse['race number'];
         if (!acc[raceNumber]) acc[raceNumber] = [];
@@ -3291,44 +3291,49 @@ function calculateTrueOdds(results, priorStrength = 0.05, troubleshooting = fals
     Object.values(raceGroups).forEach(raceHorses => {
         const scores = raceHorses.map(h => h.score);
         
-        // ✨ Z-SCORE NORMALIZATION TO 0-100 SCALE
+        // Z-SCORE NORMALIZATION TO 0-100 SCALE
         const mean = scores.reduce((sum, s) => sum + s, 0) / scores.length;
         const variance = scores.reduce((sum, s) => sum + Math.pow(s - mean, 2), 0) / scores.length;
         const stdDev = Math.sqrt(variance);
         
         const normalizedScores = scores.map(s => {
-            if (stdDev === 0) return 50;  // All scores equal = average
-            
+            if (stdDev === 0) return 50;
             const zScore = (s - mean) / stdDev;
-            
-            // Convert Z-score to 0-100 scale
-            // Maps -3σ to 0, +3σ to 100, mean to 50
             let normalized = 50 + (zScore * 16.67);
-            
-            // Clamp to 0-100 range
             return Math.max(0, Math.min(100, normalized));
         });
         
-        // Calculate probabilities from normalized 0-100 scores
-        const posteriorCounts = normalizedScores.map(score => score + priorStrength);
-        const totalCounts = posteriorCounts.reduce((s, v) => s + v, 0);
-        const baseProbability = priorStrength / totalCounts;
-
+        // ✨ EXPONENTIAL PROBABILITY WEIGHTING (like bookmakers)
+        // Use exp(score/k) where k controls steepness
+        // k=15 is aggressive, k=20 is moderate, k=25 is conservative
+        const k = 15;  // Steepness factor - lower = more aggressive odds spread
+        
+        const expScores = normalizedScores.map(score => Math.exp(score / k));
+        const totalExp = expScores.reduce((sum, e) => sum + e, 0);
+        
+        // Convert to probabilities
+        const probabilities = expScores.map(e => e / totalExp);
+        
+        // Add overround (bookmaker margin of 10%)
+        const totalProb = probabilities.reduce((sum, p) => sum + p, 0);
+        const overround = 1.10;
+        
         raceHorses.forEach((horse, index) => {
-            const winProbability = posteriorCounts[index] / totalCounts;
-            const trueOdds = 1 / (winProbability * 1.10);
+            const winProbability = probabilities[index];
+            const trueOdds = 1 / (winProbability * overround);
 
             horse.winProbability = (winProbability * 110).toFixed(1) + '%';
-            horse.baseProbability = (baseProbability * 100).toFixed(1) + '%';
+            horse.baseProbability = (1 / normalizedScores.length * 100).toFixed(1) + '%';
             horse.trueOdds = `$${trueOdds.toFixed(2)}`;
-            horse.rawWinProbability = winProbability * 1.10;
-            horse.performanceComponent = ((normalizedScores[index] / totalCounts) * 100).toFixed(1) + '%';
-            horse.adjustedScore = normalizedScores[index];
+            horse.rawWinProbability = winProbability * overround;
+            horse.performanceComponent = ((normalizedScores[index] / 100) * 100).toFixed(1) + '%';
+            horse.score = normalizedScores[index];  // Display normalized score
+            horse.rawScore = scores[index];  // Keep original
         });
 
-        const totalProb = raceHorses.reduce((s, h) => s + (h.rawWinProbability || 0), 0);
-        if (totalProb < 1.09 || totalProb > 1.11) {
-            throw new Error(`Race ${raceHorses[0].horse['race number']} probabilities adding to ${(totalProb*100).toFixed(2)}%`);
+        const totalCheck = raceHorses.reduce((s, h) => s + (h.rawWinProbability || 0), 0);
+        if (totalCheck < 1.09 || totalCheck > 1.11) {
+            throw new Error(`Race ${raceHorses[0].horse['race number']} probabilities adding to ${(totalCheck*100).toFixed(2)}%`);
         }
     });
 
