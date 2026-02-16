@@ -1050,7 +1050,16 @@ function renderPFAIHeatmap(raceNum, horses) {
     horsesWithPFAI.forEach(function(horse, index) {
         const pfai = horse.pfai_sectionals;
         
-        html += '<tr style="' + (index % 2 === 0 ? 'background: #f8f9fa;' : '') + '">';
+        // Determine row color based on position (index + 1)
+        let rowColor;
+        const position = index + 1;
+        if (position === 1) rowColor = '#15803d'; // Elite - DARK GREEN
+        else if (position <= 3) rowColor = '#84cc16'; // Good - lime
+        else if (position <= 5) rowColor = '#eab308'; // Average - yellow
+        else if (position <= 7) rowColor = '#f97316'; // Below Avg - orange
+        else rowColor = '#dc2626'; // Poor - RED
+        
+        html += '<tr style="background: ' + rowColor + ';">';
         html += '<td style="padding: 12px; font-weight: 600;">' + horse.horse_name + '</td>';
         html += '<td style="padding: 12px; text-align: center;">' + getRankCell(pfai.last600_rank) + '</td>';
         html += '<td style="padding: 12px; text-align: center;">' + getRankCell(pfai.last400_rank) + '</td>';
@@ -1062,11 +1071,11 @@ function renderPFAIHeatmap(raceNum, horses) {
     html += '</tbody></table>';
     html += '<div style="margin-top: 15px; padding: 12px; background: #f0f4ff; border-radius: 6px; font-size: 13px;">';
     html += '<strong>Legend:</strong> ';
-    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #22c55e; border-radius: 3px; margin: 0 5px;"></span> Elite (#1-5) ';
-    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #84cc16; border-radius: 3px; margin: 0 5px;"></span> Good (#6-10) ';
-    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #eab308; border-radius: 3px; margin: 0 5px;"></span> Average (#11-15) ';
-    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #f97316; border-radius: 3px; margin: 0 5px;"></span> Below Avg (#16-20) ';
-    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #e5e7eb; border-radius: 3px; margin: 0 5px;"></span> Poor (#21+)';
+    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #22c55e; border-radius: 3px; margin: 0 5px;"></span> Elite (1st) ';
+    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #84cc16; border-radius: 3px; margin: 0 5px;"></span> Good (2nd-3rd) ';
+    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #eab308; border-radius: 3px; margin: 0 5px;"></span> Average (4th-5th) ';
+    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #f97316; border-radius: 3px; margin: 0 5px;"></span> Below Avg (6th-7th) ';
+    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #e5e7eb; border-radius: 3px; margin: 0 5px;"></span> Poor (8th+)';
     html += '</div></div>';
     
     container.innerHTML = html;
