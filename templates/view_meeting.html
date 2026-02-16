@@ -599,6 +599,7 @@ function renderSectionalChart(raceNum, horsesData) {
         '<button class="chart-toggle-btn active" onclick="switchView(\'race' + raceNum + '\', \'adjusted\')">Adjusted Times</button>' +
         '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'raw\')">Raw Times</button>' +
         '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'zscore\')">Z-Scores</button>' +
+        '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'pfai\')">🎯 PFAI Rankings</button>' +
         '</div>' +
         '<div style="position: relative; height: 350px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">' +
         '<canvas id="sectionalChart_race' + raceNum + '"></canvas>' +
@@ -627,8 +628,130 @@ function prepareChartData(horses) {
     const datasets = {
         adjusted: [],
         raw: [],
-        zscore: []
+        zscore: [],
+        pfai: []  // ✨ NEW
     };
+    
+    horses.forEach(function(horse, index) {
+        const color = colors[index % colors.length];
+        
+        // Use REAL historical data if available
+        const historyAdj = horse.history_adjusted || [];
+        const historyRaw = horse.history_raw || [];
+        
+        if (historyAdj.length === 0) {
+            // No sectional data for this horse
+            return;
+        }
+        
+        // Create labels based on actual number of runs
+        const runCount = historyAdj.length;
+        const labels = [];
+        for (let i = runCount; i >= 1; i--) {
+            if (i === 1) {
+                labels.push('Last run');
+            } else {
+                labels.push(i + ' runs ago');
+            }
+        }
+        
+        // Calculate z-scores for the actual data
+        const mean = historyAdj.reduce(function(sum, val) { return sum + val; }, 0) / historyAdj.length;
+        const variance = historyAdj.reduce(function(sum, val) { return sum + Math.pow(val - mean, 2); }, 0) / historyAdj.length;
+        const stdDev = Math.sqrt(variance);
+        
+        const zscores = historyAdj.map(function(time) {
+            if (stdDev === 0) return 0;
+            return -1 * (time - mean) / stdDev;  // Negative because lower time = better = positive z-score
+        });
+        
+        // Best time for label
+        const bestTime = horse.best_recent ? horse.best_recent.adjusted_time.toFixed(2) + 's' : 'N/A';
+        const bestRawTime = horse.best_recent ? horse.best_recent.raw_time.toFixed(2) + 's' : 'N/A';
+        
+        datasets.adjusted.push({
+            label: horse.horse_name + ' (' + bestTime + ')',
+            data: historyAdj,
+            borderColor: color,
+            backgroundColor: color + '33',
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 8,
+            borderWidth: index < 3 ? 3 : 2
+        });
+        
+        datasets.raw.push({
+            label: horse.horse_name + ' (' + bestRawTime + ')',
+            data: historyRaw,
+            borderColor: color,
+            backgroundColor: color + '33',
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 8,
+            borderWidth: index < 3 ? 3 : 2
+        });
+        
+        datasets.zscore.push({
+            label: horse.horse_name + ' (z=' + (horse.best_recent ? horse.best_recent.zscore.toFixed(2) : 'N/A') + ')',
+            data: zscores,
+            borderColor: color,
+            backgroundColor: color + '33',
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 8,
+            borderWidth: index < 3 ? 3 : 2
+        });
+        
+        // ✨ NEW: PFAI Rankings dataset
+        if (horse.pfai_sectionals) {
+            const pfai = horse.pfai_sectionals;
+            const pfaiData = [];
+            
+            // Add ranks in order: 600m, 400m, 200m (most recent at end)
+            if (pfai.last600_rank && pfai.last600_rank < 25) pfaiData.push(pfai.last600_rank);
+            if (pfai.last400_rank && pfai.last400_rank < 25) pfaiData.push(pfai.last400_rank);
+            if (pfai.last200_rank && pfai.last200_rank < 25) pfaiData.push(pfai.last200_rank);
+            
+            if (pfaiData.length > 0) {
+                const avgRank = (pfaiData.reduce((a, b) => a + b, 0) / pfaiData.length).toFixed(1);
+                
+                datasets.pfai.push({
+                    label: horse.horse_name + ' (Avg: #' + avgRank + ')',
+                    data: pfaiData,
+                    borderColor: color,
+                    backgroundColor: color + '33',
+                    tension: 0,
+                    pointRadius: 8,
+                    pointHoverRadius: 12,
+                    borderWidth: index < 3 ? 4 : 3
+                });
+            }
+        }
+    });
+    
+    // Use the longest history to create labels
+    var maxRuns = 0;
+    horses.forEach(function(horse) {
+        var runCount = (horse.history_adjusted || []).length;
+        if (runCount > maxRuns) maxRuns = runCount;
+    });
+
+    var labels = [];
+    for (var i = maxRuns; i >= 1; i--) {
+        if (i === 1) {
+            labels.push('Last run');
+        } else {
+            labels.push(i + ' runs ago');
+        }
+    }
+    
+    return {
+        adjusted: { labels: labels, datasets: datasets.adjusted },
+        raw: { labels: labels, datasets: datasets.raw },
+        zscore: { labels: labels, datasets: datasets.zscore },
+        pfai: { labels: ['600m', '400m', '200m'], datasets: datasets.pfai }  // ✨ NEW
+    };
+}
     
     horses.forEach(function(horse, index) {
         const color = colors[index % colors.length];
@@ -749,18 +872,26 @@ function getChartOptions(viewType) {
                 callbacks: {
                     label: function(context) {
                         const value = context.parsed.y.toFixed(2);
-                        const suffix = viewType === 'zscore' ? '' : 's';
-                        let label = context.dataset.label.split('(')[0].trim() + ': ' + value + suffix;
+                        const suffix = viewType === 'zscore' ? '' : viewType === 'pfai' ? '' : 's';
+                        let label = context.dataset.label.split('(')[0].trim() + ': ';
                         
-                        // ✨ NEW: Add PFAI rank if available
-                        const horseIndex = context.datasetIndex;
-                        const horse = window.currentRaceHorses ? window.currentRaceHorses[horseIndex] : null;
-                        if (horse && horse.pfai_sectionals) {
-                            const pfai = horse.pfai_sectionals;
-                            label += '\nPFAI Ranks: ';
-                            if (pfai.last200_rank && pfai.last200_rank < 25) label += '200m: #' + pfai.last200_rank + ' ';
-                            if (pfai.last400_rank && pfai.last400_rank < 25) label += '400m: #' + pfai.last400_rank + ' ';
-                            if (pfai.last600_rank && pfai.last600_rank < 25) label += '600m: #' + pfai.last600_rank;
+                        if (viewType === 'pfai') {
+                            label += '#' + value;  // Show rank number
+                        } else {
+                            label += value + suffix;
+                        }
+                        
+                        // Add PFAI rank if available (for non-PFAI views)
+                        if (viewType !== 'pfai') {
+                            const horseIndex = context.datasetIndex;
+                            const horse = window.currentRaceHorses ? window.currentRaceHorses[horseIndex] : null;
+                            if (horse && horse.pfai_sectionals) {
+                                const pfai = horse.pfai_sectionals;
+                                label += '\nPFAI Ranks: ';
+                                if (pfai.last200_rank && pfai.last200_rank < 25) label += '200m: #' + pfai.last200_rank + ' ';
+                                if (pfai.last400_rank && pfai.last400_rank < 25) label += '400m: #' + pfai.last400_rank + ' ';
+                                if (pfai.last600_rank && pfai.last600_rank < 25) label += '600m: #' + pfai.last600_rank;
+                            }
                         }
                         
                         return label;
@@ -770,10 +901,12 @@ function getChartOptions(viewType) {
         },
         scales: {
             y: {
-                reverse: viewType !== 'zscore',
+                reverse: viewType !== 'zscore' && viewType !== 'pfai',  // ✨ Don't reverse PFAI (lower rank = better = top)
                 title: {
                     display: true,
-                    text: viewType === 'zscore' ? 'Z-Score (higher = faster)' : 'Sectional Time (seconds)',
+                    text: viewType === 'zscore' ? 'Z-Score (higher = faster)' : 
+                          viewType === 'pfai' ? 'PFAI Rank (#1 = best)' :  // ✨ NEW
+                          'Sectional Time (seconds)',
                     font: { size: 13, weight: 'bold' }
                 },
                 grid: { color: '#e2e8f0' }
@@ -784,7 +917,6 @@ function getChartOptions(viewType) {
         }
     };
 }
-
 function switchView(raceId, viewType) {
     const instance = chartInstances[raceId];
     if (!instance) return;
