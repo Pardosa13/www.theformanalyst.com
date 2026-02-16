@@ -568,7 +568,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
             
             prediction = Prediction(
                 horse_id=horse.id,
-                score=result.get('score', 0),
+                score=result.get('adjustedScore', result.get('score', 0)),
                 predicted_odds=result.get('trueOdds', ''),
                 win_probability=result.get('winProbability', ''),
                 performance_component=result.get('performanceComponent', ''),
