@@ -3437,7 +3437,7 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
         notes += apiSectionalResult.note || '';
     
         console.error(`DEBUG API SECTIONALS: ${horse['horse name']}: score=${apiSectionalResult.score}, note length=${apiSectionalResult.note?.length || 0}`);
-            
+
         } else {
             // FALLBACK TO CSV SECTIONAL TIME SCORING
             const matchingHorse = filteredDataSectional.find(h => 
