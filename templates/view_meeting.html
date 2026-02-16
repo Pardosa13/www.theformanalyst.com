@@ -588,6 +588,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function renderSectionalChart(raceNum, horsesData) {
     const container = document.getElementById('sectional_container_race' + raceNum);
+    window.currentRaceHorses = horsesData;
     
     if (!horsesData || horsesData.length === 0) {
         container.innerHTML = '<div class="no-sectionals">No sectional data available for this race</div>';
@@ -749,7 +750,20 @@ function getChartOptions(viewType) {
                     label: function(context) {
                         const value = context.parsed.y.toFixed(2);
                         const suffix = viewType === 'zscore' ? '' : 's';
-                        return context.dataset.label.split('(')[0].trim() + ': ' + value + suffix;
+                        let label = context.dataset.label.split('(')[0].trim() + ': ' + value + suffix;
+                        
+                        // ✨ NEW: Add PFAI rank if available
+                        const horseIndex = context.datasetIndex;
+                        const horse = window.currentRaceHorses ? window.currentRaceHorses[horseIndex] : null;
+                        if (horse && horse.pfai_sectionals) {
+                            const pfai = horse.pfai_sectionals;
+                            label += '\nPFAI Ranks: ';
+                            if (pfai.last200_rank && pfai.last200_rank < 25) label += '200m: #' + pfai.last200_rank + ' ';
+                            if (pfai.last400_rank && pfai.last400_rank < 25) label += '400m: #' + pfai.last400_rank + ' ';
+                            if (pfai.last600_rank && pfai.last600_rank < 25) label += '600m: #' + pfai.last600_rank;
+                        }
+                        
+                        return label;
                     }
                 }
             }
