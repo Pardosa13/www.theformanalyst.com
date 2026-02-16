@@ -398,7 +398,12 @@ const JURISDICTION_EMOJIS = {
     'ACT': '🏢',
     'NT': '🦘'
 };
-
+function formatDate(dateStr) {
+    const date = new Date(dateStr + 'T00:00:00');
+    const day = date.getDate();
+    const month = date.toLocaleDateString('en-US', { month: 'short' });
+    return `${day} ${month}`;
+}
 document.addEventListener('DOMContentLoaded', function() {
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('meeting-date').value = today;
