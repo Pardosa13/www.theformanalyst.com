@@ -3334,7 +3334,6 @@ function calculateTrueOdds(results, priorStrength = 0.05, troubleshooting = fals
 
     return results;
 }
-
 // Simple CSV parser and helpers
 function parseCSVLine(line) {
     const result = [];
