@@ -1464,7 +1464,34 @@ def api_get_speedmaps(meeting_id, race_number):
         logger.error(f"Speed maps fetch failed: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
-
+@app.route("/api/race/<int:race_id>/pfai-sectionals")
+@login_required
+def api_get_pfai_sectionals(race_id):
+    """Get PFAI sectional rankings for a specific race from stored data"""
+    try:
+        race = Race.query.get_or_404(race_id)
+        
+        if not race.sectionals_json:
+            return jsonify({'success': False, 'error': 'No PFAI data available'}), 404
+        
+        # Parse the stored JSON
+        sectionals_data = json.loads(race.sectionals_json) if isinstance(race.sectionals_json, str) else race.sectionals_json
+        
+        if not sectionals_data or 'payLoad' not in sectionals_data:
+            return jsonify({'success': False, 'error': 'No PFAI data available'}), 404
+        
+        # Filter for this race only
+        race_data = [
+            runner for runner in sectionals_data.get('payLoad', [])
+            if runner.get('raceNo') == race.race_number
+        ]
+        
+        return jsonify({'success': True, 'runners': race_data})
+        
+    except Exception as e:
+        logger.error(f"PFAI sectionals fetch failed: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+        
 @app.route("/api/meetings/<meeting_id>/ratings")
 @login_required
 def api_get_ratings(meeting_id):
