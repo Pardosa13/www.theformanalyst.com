@@ -81,90 +81,82 @@
 /* Date Picker Card */
 .date-picker-card {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 16px;
-    padding: 30px;
-    margin-bottom: 40px;
-    box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 30px;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
 }
 
 .date-picker-content {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 15px;
     flex-wrap: wrap;
 }
 
 .date-icon {
-    font-size: 48px;
-    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
+    font-size: 32px;
 }
 
 .date-input {
-    padding: 14px 18px;
+    padding: 10px 14px;
     border: none;
-    border-radius: 12px;
-    font-size: 16px;
-    width: 100%;
-    max-width: 250px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    transition: all 0.3s ease;
+    border-radius: 8px;
+    font-size: 14px;
+    width: 180px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .date-input:focus {
     outline: none;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
 .search-btn {
     background: white;
     color: #667eea;
     border: none;
-    padding: 14px 32px;
-    border-radius: 12px;
-    font-size: 16px;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-size: 14px;
     font-weight: 700;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 10px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    transition: all 0.3s ease;
+    gap: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    transition: all 0.2s ease;
 }
 
 .search-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
-}
-
-.search-btn:active {
-    transform: translateY(0);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 
 /* State Containers */
 .state-container {
     text-align: center;
-    padding: 80px 20px;
+    padding: 60px 20px;
     background: white;
-    border-radius: 16px;
+    border-radius: 12px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
 
 .initial-icon {
-    font-size: 96px;
+    font-size: 64px;
     animation: float 3s ease-in-out infinite;
 }
 
 @keyframes float {
     0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-10px); }
+    50% { transform: translateY(-8px); }
 }
 
 /* Loading Spinner */
 .loader {
-    width: 60px;
-    height: 60px;
-    border: 6px solid #f3f4f6;
+    width: 48px;
+    height: 48px;
+    border: 4px solid #f3f4f6;
     border-top-color: #667eea;
     border-radius: 50%;
     animation: spin 1s linear infinite;
@@ -179,142 +171,139 @@
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     border: none;
-    padding: 12px 32px;
-    border-radius: 12px;
-    font-size: 16px;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-    transition: all 0.3s ease;
+    transition: all 0.2s ease;
 }
 
 .retry-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 
 /* Jurisdiction Headers */
 .jurisdiction-header {
-    font-size: 28px;
-    font-weight: 800;
-    margin: 50px 0 25px 0;
-    padding: 15px 25px;
-    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-    border-left: 6px solid;
-    border-radius: 12px;
+    font-size: 18px;
+    font-weight: 700;
+    margin: 30px 0 15px 0;
+    padding: 10px 15px;
+    background: rgba(102, 126, 234, 0.05);
+    border-left: 4px solid;
+    border-radius: 8px;
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 10px;
 }
 
 .jurisdiction-header:first-child {
     margin-top: 0;
 }
 
-/* Meeting Grid */
+/* Meeting Grid - More compact */
 #meetings-list {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    gap: 25px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 15px;
 }
 
-/* Meeting Card */
+/* Meeting Card - Compact version */
 .meeting-card {
     background: white;
-    border-radius: 16px;
-    padding: 0;
+    border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    transition: all 0.2s ease;
     cursor: pointer;
     border: 2px solid transparent;
 }
 
 .meeting-card:hover {
-    transform: translateY(-8px);
-    box-shadow: 0 12px 30px rgba(102, 126, 234, 0.25);
+    transform: translateY(-4px);
+    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.2);
     border-color: #667eea;
 }
 
 .meeting-card.importing {
     opacity: 0.6;
     pointer-events: none;
-    transform: scale(0.98);
 }
 
 .meeting-card-header {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 20px;
+    padding: 12px 15px;
     color: white;
 }
 
 .meeting-title {
-    font-size: 22px;
+    font-size: 16px;
     font-weight: 700;
-    margin: 0 0 8px 0;
+    margin: 0 0 4px 0;
 }
 
 .meeting-subtitle {
-    font-size: 14px;
+    font-size: 12px;
     opacity: 0.9;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
 }
 
 .meeting-card-body {
-    padding: 20px;
+    padding: 12px 15px;
 }
 
 .meeting-stats {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-    margin-bottom: 20px;
+    gap: 8px;
+    margin-bottom: 12px;
 }
 
 .stat-item {
     background: #f8f9fa;
-    padding: 12px;
-    border-radius: 10px;
+    padding: 8px;
+    border-radius: 6px;
     text-align: center;
 }
 
 .stat-label {
-    font-size: 11px;
+    font-size: 10px;
     color: #6c757d;
     text-transform: uppercase;
     font-weight: 600;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
+    letter-spacing: 0.3px;
+    margin-bottom: 2px;
 }
 
 .stat-value {
-    font-size: 20px;
+    font-size: 16px;
     font-weight: 700;
     color: #2d3748;
 }
 
 .condition-select-wrapper {
-    margin-bottom: 15px;
+    margin-bottom: 10px;
 }
 
 .condition-label {
     display: block;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     font-weight: 600;
-    font-size: 13px;
+    font-size: 11px;
     color: #4a5568;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
 }
 
 .track-condition-select {
     width: 100%;
-    padding: 12px 16px;
+    padding: 8px 12px;
     border: 2px solid #e2e8f0;
-    border-radius: 10px;
-    font-size: 15px;
+    border-radius: 6px;
+    font-size: 13px;
     font-weight: 500;
     background: white;
     cursor: pointer;
@@ -333,25 +322,24 @@
 
 .import-btn {
     width: 100%;
-    padding: 14px;
+    padding: 10px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     border: none;
-    border-radius: 10px;
-    font-size: 15px;
+    border-radius: 6px;
+    font-size: 13px;
     font-weight: 700;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    gap: 8px;
+    transition: all 0.2s ease;
 }
 
 .import-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 
 .import-btn:active {
@@ -361,12 +349,11 @@
 /* State Badge */
 .state-badge {
     display: inline-block;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 10px;
     font-weight: 700;
     background: rgba(255,255,255,0.2);
-    backdrop-filter: blur(10px);
 }
 
 @media (max-width: 768px) {
@@ -380,7 +367,7 @@
     }
     
     .date-input {
-        max-width: 100%;
+        width: 100%;
     }
     
     .search-btn {
