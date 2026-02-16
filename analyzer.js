@@ -3397,26 +3397,52 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
     const averageFormPrices = calculateAverageFormPrices(data);
     const weightScores = calculateWeightScores(data);
     const uniqueHorses = getUniqueHorsesOnly(data);
+
+        uniqueHorses.forEach(horse => {
+    if (!horse['horse name']) return;
     
-    uniqueHorses.forEach(horse => {
-        if (!horse['horse name']) return;
+    const compositeKey = `${horse['horse name']}-${horse['race number']}`;
+    const avgFormPrice = averageFormPrices[compositeKey];
+    const raceNumber = horse['race number'];
+    const horseName = horse['horse name'];
+    
+    const matchingHorseForContext = filteredDataSectional.find(h => 
+        parseInt(h.race) === parseInt(raceNumber) && 
+        h.name.toLowerCase().trim() === horseName.toLowerCase().trim()
+    );
+    
+    const sectionalDetailsForContext = matchingHorseForContext ? {
+        bestRecent: matchingHorseForContext.sectionalDetails?.bestRecent || 0,
+        weightedAvg: matchingHorseForContext.sectionalDetails?.weightedAvg || 0
+    } : null;
+    
+    let [score, notes] = calculateScore(horse, trackCondition, false, avgFormPrice, sectionalDetailsForContext);
+
+    // ==========================================
+    // ✨ WEIGHTED SCORE: 70% Analyzer + 30% PFAI
+    // ==========================================
+    let finalScore = score;  // Default to analyzer score
+    let pfaiScore = 0;
+    let pfaiNote = '';
+
+    // Check if PFAI score is available
+    if (horse['pfaiScore'] !== undefined && horse['pfaiScore'] !== null && horse['pfaiScore'] !== '') {
+        pfaiScore = parseFloat(horse['pfaiScore']) || 0;
         
-        const compositeKey = `${horse['horse name']}-${horse['race number']}`;
-        const avgFormPrice = averageFormPrices[compositeKey];
-        const raceNumber = horse['race number'];
-        const horseName = horse['horse name'];
+        // PFAI scores are 0-100 scale, same as analyzer
+        // Calculate weighted score: 70% analyzer + 30% PFAI
+        finalScore = (score * 0.7) + (pfaiScore * 0.3);
         
-        const matchingHorseForContext = filteredDataSectional.find(h => 
-            parseInt(h.race) === parseInt(raceNumber) && 
-            h.name.toLowerCase().trim() === horseName.toLowerCase().trim()
-        );
-        
-        const sectionalDetailsForContext = matchingHorseForContext ? {
-            bestRecent: matchingHorseForContext.sectionalDetails?.bestRecent || 0,
-            weightedAvg: matchingHorseForContext.sectionalDetails?.weightedAvg || 0
-        } : null;
-        
-        let [score, notes] = calculateScore(horse, trackCondition, false, avgFormPrice, sectionalDetailsForContext);
+        pfaiNote = '\n=== WEIGHTED SCORE ===\n';
+        pfaiNote += `Analyzer Score: ${score.toFixed(1)} (70% weight)\n`;
+        pfaiNote += `PFAI Score: ${pfaiScore.toFixed(1)} (30% weight)\n`;
+        pfaiNote += `Final Weighted Score: ${finalScore.toFixed(1)}\n`;
+    }
+
+    notes += pfaiNote;
+    score = finalScore;  // Use weighted score going forward
+
+    // [Everything below this continues unchanged - your existing sectional scoring, etc.]
         
         // ==========================================
         // SECTIONAL SCORING - API PRIMARY, CSV FALLBACK
