@@ -3216,17 +3216,29 @@ def api_price_analysis():
                 price_analysis['total_overlays']['wins'] += 1
             price_analysis['total_overlays']['profit'] += profit
             
-            # Add to examples (limit 10)
-            if len(price_analysis['overlay_examples']) < 10:
-                price_analysis['overlay_examples'].append({
-                    'horse': horse_name,
-                    'score': score,
-                    'your_price': predicted_odds,
-                    'sp': sp,
-                    'overlay_pct': price_diff_pct,
-                    'won': won,
-                    'profit': profit
-                })
+            # Collect all examples for sorting later
+            price_analysis['overlay_examples'].append({
+                'horse': horse_name,
+                'score': score,
+                'your_price': predicted_odds,
+                'sp': sp,
+                'overlay_pct': price_diff_pct,
+                'won': won,
+                'profit': profit,
+                'race_id': race_key[0],
+                'race_number': race_key[1]
+            })
+    # Sort overlay examples by most recent race and trim to 10
+    price_analysis['overlay_examples'].sort(
+        key=lambda x: (x['race_id'], x['race_number']),
+        reverse=True
+    )
+    price_analysis['overlay_examples'] = price_analysis['overlay_examples'][:10]
+    for ex in price_analysis['overlay_examples']:
+        ex.pop('race_id', None)
+        ex.pop('race_number', None)
+
+    # Calculate strike rates and ROI for each tier
     
     # Calculate strike rates and ROI for each tier
     for tier in ['overlay_10_20', 'overlay_20_30', 'overlay_30_50', 'overlay_50_plus', 'total_overlays']:
