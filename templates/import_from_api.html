@@ -1,329 +1,362 @@
+
 {% extends "base.html" %}
 
 {% block title %}Import from PuntingForm API{% endblock %}
 
 {% block content %}
-<div style="max-width: 1400px; margin: 0 auto;">
-    <div style="margin-bottom: 30px;">
-        <a href="{{ url_for('dashboard') }}" style="color: #667eea; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 8px;">
-            <span>←</span> Back to Dashboard
-        </a>
-    </div>
-
-    <!-- Hero Header -->
-    <div style="text-align: center; margin-bottom: 40px;">
-        <h1 style="font-size: 42px; margin: 0 0 10px 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-            🌐 Import Race Meetings
-        </h1>
-        <p style="color: #6c757d; font-size: 18px; margin: 0;">
-            Connect to PuntingForm API and analyze any race meeting in seconds
-        </p>
-    </div>
-
-    <!-- Date Picker Card -->
-    <div class="date-picker-card">
-        <div class="date-picker-content">
-            <div class="date-icon">📅</div>
-            <div style="flex: 1;">
-                <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #2d3748;">
-                    Select Meeting Date
-                </label>
-                <input 
-                    type="date" 
-                    id="meeting-date" 
-                    class="date-input"
-                >
-            </div>
-            <button onclick="loadMeetings()" class="search-btn">
-                <span>🔍</span>
-                <span>Search Meetings</span>
-            </button>
-        </div>
-    </div>
-
-    <!-- Loading State -->
-    <div id="loading" class="state-container" style="display: none;">
-        <div class="loader"></div>
-        <p style="color: #6c757d; font-size: 18px; margin-top: 20px;">Loading meetings from PuntingForm...</p>
-    </div>
-    
-    <!-- Meetings Display -->
-    <div id="meetings-container" style="display: none;">
-        <div style="margin-bottom: 30px; text-align: center;">
-            <h2 style="margin: 0 0 10px 0; color: #2d3748;">Available Meetings</h2>
-            <p style="color: #6c757d; margin: 0;">Click any meeting card to import and analyze</p>
-        </div>
-        
-        <div id="meetings-list"></div>
-    </div>
-    
-    <!-- Error State -->
-    <div id="error-container" class="state-container" style="display: none;">
-        <div style="font-size: 64px; margin-bottom: 20px;">⚠️</div>
-        <p style="color: #dc3545; font-size: 20px; font-weight: 600; margin-bottom: 10px;">Failed to load meetings</p>
-        <p id="error-message" style="color: #6c757d; margin-bottom: 20px;"></p>
-        <button onclick="loadMeetings()" class="retry-btn">
-            Try Again
-        </button>
-    </div>
-    
-    <!-- Initial State -->
-    <div id="initial-state" class="state-container">
-        <div class="initial-icon">🏇</div>
-        <h3 style="color: #2d3748; margin: 20px 0 10px 0; font-size: 24px;">Ready to Import Meetings</h3>
-        <p style="color: #6c757d; font-size: 16px; max-width: 500px;">
-            Select a date above and click "Search Meetings" to view all available race meetings from PuntingForm
-        </p>
-    </div>
-</div>
 
 <style>
-/* Date Picker Card */
-.date-picker-card {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 30px;
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
-}
+  /* ══════════════════════════════════════════
+     IMPORT PAGE — dark premium theme
+     ALL class names used by JS are UNCHANGED
+  ══════════════════════════════════════════ */
 
-.date-picker-content {
+  .import-page { max-width: 1400px; margin: 0 auto; }
+
+  /* ── Back link ── */
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 28px;
+    transition: color 0.15s, gap 0.15s;
+  }
+  .back-link:hover { color: #8ba4f5; gap: 12px; }
+
+  /* ── Hero header ── */
+  .import-hero {
+    text-align: center;
+    margin-bottom: 36px;
+  }
+  .import-hero h1 {
+    font-size: 2.2rem;
+    font-weight: 800;
+    margin: 0 0 10px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .import-hero p {
+    color: var(--text-muted);
+    font-size: 1rem;
+    margin: 0;
+  }
+
+  /* ── Date picker card ── */
+  .date-picker-card {
+    background: linear-gradient(135deg, rgba(102,126,234,0.15) 0%, rgba(118,75,162,0.12) 100%);
+    border: 1px solid var(--border-accent);
+    border-radius: 14px;
+    padding: 20px 24px;
+    margin-bottom: 28px;
+    box-shadow: 0 4px 20px rgba(102,126,234,0.12);
+  }
+
+  .date-picker-content {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 16px;
     flex-wrap: wrap;
-}
+  }
 
-.date-icon {
-    font-size: 32px;
-}
+  .date-icon { font-size: 28px; flex-shrink: 0; }
 
-.date-input {
-    padding: 10px 14px;
-    border: none;
+  /* Label inside card */
+  .date-picker-card label {
+    display: block;
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 6px;
+    color: var(--text-secondary) !important;
+  }
+
+  .date-input {
+    padding: 9px 14px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-mid);
     border-radius: 8px;
     font-size: 14px;
+    color: var(--text-primary);
     width: 180px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.date-input:focus {
+    transition: border-color 0.2s, box-shadow 0.2s;
+    /* iOS date input fix */
+    -webkit-appearance: none;
+    appearance: none;
+    color-scheme: dark;
+  }
+  .date-input:focus {
     outline: none;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-}
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
 
-.search-btn {
-    background: white;
-    color: #667eea;
+  .search-btn {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: white;
     border: none;
-    padding: 10px 24px;
+    padding: 10px 22px;
     border-radius: 8px;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 700;
     cursor: pointer;
     display: flex;
     align-items: center;
     gap: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    transition: all 0.2s ease;
-}
-
-.search-btn:hover {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: 0 2px 10px var(--accent-glow);
+    font-family: 'Outfit', sans-serif;
+    white-space: nowrap;
+  }
+  .search-btn:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-}
+    box-shadow: 0 6px 20px var(--accent-glow);
+  }
+  .search-btn:active { transform: translateY(0); }
 
-/* State Containers */
-.state-container {
+  /* ── Shared state container ── */
+  .state-container {
     text-align: center;
     padding: 60px 20px;
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-}
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+  }
 
-.initial-icon {
-    font-size: 64px;
+  .state-container p { color: var(--text-muted); }
+
+  /* Initial icon float */
+  .initial-icon {
+    font-size: 56px;
     animation: float 3s ease-in-out infinite;
-}
-
-@keyframes float {
+  }
+  @keyframes float {
     0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-8px); }
-}
+    50%       { transform: translateY(-8px); }
+  }
 
-/* Loading Spinner */
-.loader {
-    width: 48px;
-    height: 48px;
-    border: 4px solid #f3f4f6;
-    border-top-color: #667eea;
+  .state-container h3 {
+    color: var(--text-primary);
+    margin: 16px 0 8px;
+    font-size: 1.3rem;
+  }
+
+  /* ── Loader spinner ── */
+  .loader {
+    width: 44px;
+    height: 44px;
+    border: 3px solid var(--border-mid);
+    border-top-color: var(--accent);
     border-radius: 50%;
-    animation: spin 1s linear infinite;
+    animation: spin 0.85s linear infinite;
     margin: 0 auto;
-}
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
+  /* ── Error state ── */
+  #error-container p { color: var(--text-muted); }
+  #error-container .error-title {
+    color: var(--danger);
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
 
-.retry-btn {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  .retry-btn {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
     color: white;
     border: none;
     padding: 10px 24px;
     border-radius: 8px;
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 700;
     cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.retry-btn:hover {
+    font-family: 'Outfit', sans-serif;
+    transition: transform 0.15s, box-shadow 0.15s;
+    box-shadow: 0 2px 10px var(--accent-glow);
+  }
+  .retry-btn:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-}
+    box-shadow: 0 6px 20px var(--accent-glow);
+  }
 
-/* State Row Layout */
-.state-row {
+  /* ── Meetings container header ── */
+  #meetings-container .meetings-header {
+    margin-bottom: 24px;
+    text-align: center;
+  }
+  #meetings-container .meetings-header h2 {
+    margin: 0 0 6px;
+    color: var(--text-primary);
+    font-size: 1.2rem;
+  }
+  #meetings-container .meetings-header p {
+    color: var(--text-muted);
+    margin: 0;
+    font-size: 13px;
+  }
+
+  /* ══════════════════════════════════════════
+     STATE ROW LAYOUT
+     (classes used by JS innerHTML — names locked)
+  ══════════════════════════════════════════ */
+  .state-row {
     display: flex;
     align-items: stretch;
-    gap: 15px;
-    margin-bottom: 20px;
-    background: white;
+    gap: 0;
+    margin-bottom: 16px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-}
+    transition: border-color 0.2s;
+  }
+  .state-row:hover { border-color: var(--border-mid); }
 
-.state-label {
-    min-width: 120px;
-    padding: 20px 15px;
+  .state-label {
+    min-width: 110px;
+    padding: 20px 14px;
     color: white;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-}
+    gap: 6px;
+    /* background colour set inline by JS via state color */
+    flex-shrink: 0;
+  }
 
-.state-emoji {
-    font-size: 32px;
-}
+  .state-emoji  { font-size: 28px; }
+  .state-name   { font-size: 18px; font-weight: 800; letter-spacing: 1px; font-family: 'DM Mono', monospace; }
+  .state-count  { font-size: 11px; opacity: 0.85; font-weight: 600; background: rgba(255,255,255,0.15); padding: 2px 8px; border-radius: 10px; }
 
-.state-name {
-    font-size: 20px;
-    font-weight: 800;
-    letter-spacing: 1px;
-}
-
-.state-count {
-    font-size: 12px;
-    opacity: 0.9;
-    font-weight: 600;
-}
-
-.meetings-row {
+  .meetings-row {
     flex: 1;
     display: flex;
-    gap: 12px;
-    padding: 15px;
+    gap: 10px;
+    padding: 14px;
     overflow-x: auto;
     align-items: stretch;
-}
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-mid) transparent;
+  }
+  .meetings-row::-webkit-scrollbar { height: 4px; }
+  .meetings-row::-webkit-scrollbar-track { background: transparent; }
+  .meetings-row::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 2px; }
 
-/* Compact Meeting Cards */
-.meeting-card-compact {
-    min-width: 200px;
-    max-width: 200px;
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 12px;
+  /* ══════════════════════════════════════════
+     MEETING CARDS
+     (classes used by JS — names locked)
+  ══════════════════════════════════════════ */
+  .meeting-card-compact {
+    min-width: 190px;
+    max-width: 190px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 14px;
     display: flex;
     flex-direction: column;
     gap: 10px;
-    border: 2px solid transparent;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
     cursor: pointer;
-}
-
-.meeting-card-compact:hover {
-    border-color: #667eea;
+    flex-shrink: 0;
+  }
+  .meeting-card-compact:hover {
+    border-color: var(--border-accent);
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
-}
-
-.meeting-card-compact.importing {
-    opacity: 0.6;
+    box-shadow: 0 6px 20px rgba(102,126,234,0.2);
+  }
+  .meeting-card-compact.importing {
+    opacity: 0.5;
     pointer-events: none;
-}
+  }
 
-.compact-header {
-    text-align: center;
-}
+  .compact-header { text-align: center; }
 
-.compact-title {
-    font-size: 14px;
+  .compact-title {
+    font-size: 13px;
     font-weight: 700;
-    color: #2d3748;
-    margin-bottom: 4px;
-}
+    color: var(--text-primary);
+    margin-bottom: 3px;
+    line-height: 1.3;
+  }
 
-.compact-code {
-    font-size: 11px;
-    color: #6c757d;
+  .compact-code {
+    font-size: 10px;
+    color: var(--text-muted);
     font-weight: 600;
-}
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.05em;
+  }
 
-.compact-stats {
+  .compact-stats {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 6px;
-}
+  }
 
-.compact-stat {
-    background: white;
+  .compact-stat {
+    background: var(--bg-base);
+    border: 1px solid var(--border-subtle);
     padding: 6px;
     border-radius: 6px;
     text-align: center;
-}
+  }
 
-.compact-stat-label {
+  .compact-stat-label {
     display: block;
     font-size: 9px;
-    color: #6c757d;
+    color: var(--text-muted);
     text-transform: uppercase;
-    font-weight: 600;
+    font-weight: 700;
+    letter-spacing: 0.06em;
     margin-bottom: 2px;
-}
+  }
 
-.compact-stat-value {
+  .compact-stat-value {
     display: block;
     font-size: 14px;
     font-weight: 700;
-    color: #2d3748;
-}
+    color: var(--text-primary);
+    font-family: 'DM Mono', monospace;
+  }
 
-.track-condition-select-compact {
+  .track-condition-select-compact {
     width: 100%;
     padding: 6px 10px;
-    border: 2px solid #e2e8f0;
+    background: var(--bg-base);
+    border: 1px solid var(--border-mid);
     border-radius: 6px;
     font-size: 12px;
     font-weight: 500;
-    background: white;
+    color: var(--text-primary);
     cursor: pointer;
-}
-
-.track-condition-select-compact:focus {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%239090a8' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 11px;
+    transition: border-color 0.2s;
+  }
+  .track-condition-select-compact:focus {
     outline: none;
-    border-color: #667eea;
-}
+    border-color: var(--accent);
+  }
+  .track-condition-select-compact option {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+  }
 
-.import-btn-compact {
+  .import-btn-compact {
     width: 100%;
     padding: 8px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
     color: white;
     border: none;
     border-radius: 6px;
@@ -334,48 +367,108 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    transition: all 0.2s ease;
-}
-
-.import-btn-compact:hover {
+    transition: transform 0.15s, box-shadow 0.15s;
+    font-family: 'Outfit', sans-serif;
+    box-shadow: 0 2px 8px var(--accent-glow);
+  }
+  .import-btn-compact:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-}
+    box-shadow: 0 4px 14px var(--accent-glow);
+  }
+  .import-btn-compact:active { transform: translateY(0); }
 
-#meetings-list {
-    display: block;
-}
+  #meetings-list { display: block; }
 
-@media (max-width: 768px) {
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
     .state-row {
-        flex-direction: column;
+      flex-direction: column;
     }
-    
     .state-label {
-        flex-direction: row;
-        justify-content: space-between;
-        padding: 15px;
+      flex-direction: row;
+      justify-content: space-between;
+      padding: 14px 16px;
     }
-    
     .meetings-row {
-        padding: 0 15px 15px 15px;
+      padding: 0 14px 14px;
     }
-    
     .date-picker-content {
-        flex-direction: column;
-        align-items: stretch;
+      flex-direction: column;
+      align-items: stretch;
     }
-    
-    .date-input {
-        width: 100%;
-    }
-    
-    .search-btn {
-        width: 100%;
-        justify-content: center;
-    }
-}
+    .date-input { width: 100%; }
+    .search-btn { width: 100%; justify-content: center; }
+    .import-hero h1 { font-size: 1.6rem; }
+  }
 </style>
+
+<div class="import-page">
+
+  <!-- Back link -->
+  <a href="{{ url_for('dashboard') }}" class="back-link">
+    <span>←</span> Back to Dashboard
+  </a>
+
+  <!-- Hero -->
+  <div class="import-hero">
+    <h1>🌐 Import Race Meetings</h1>
+    <p>Connect to PuntingForm API and analyse any race meeting in seconds</p>
+  </div>
+
+  <!-- Date picker -->
+  <div class="date-picker-card">
+    <div class="date-picker-content">
+      <div class="date-icon">📅</div>
+      <div style="flex:1;">
+        <label for="meeting-date">Select Meeting Date</label>
+        <input type="date" id="meeting-date" class="date-input">
+      </div>
+      <button onclick="loadMeetings()" class="search-btn">
+        <span>🔍</span>
+        <span>Search Meetings</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Loading state -->
+  <div id="loading" class="state-container" style="display:none;">
+    <div class="loader"></div>
+    <p style="margin-top:20px; font-size:15px;">Loading meetings from PuntingForm...</p>
+  </div>
+
+  <!-- Meetings display -->
+  <div id="meetings-container" style="display:none;">
+    <div class="meetings-header">
+      <h2>Available Meetings</h2>
+      <p>Click any meeting card to import and analyse</p>
+    </div>
+    <div id="meetings-list"></div>
+  </div>
+
+  <!-- Error state -->
+  <div id="error-container" class="state-container" style="display:none;">
+    <div style="font-size:52px; margin-bottom:16px;">⚠️</div>
+    <p class="error-title">Failed to load meetings</p>
+    <p id="error-message"></p>
+    <button onclick="loadMeetings()" class="retry-btn">Try Again</button>
+  </div>
+
+  <!-- Initial state -->
+  <div id="initial-state" class="state-container">
+    <div class="initial-icon">🏇</div>
+    <h3>Ready to Import Meetings</h3>
+    <p style="max-width:460px; margin: 0 auto; font-size:14px;">
+      Select a date above and click "Search Meetings" to view all available race meetings from PuntingForm
+    </p>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════
+     JAVASCRIPT — 100% IDENTICAL TO ORIGINAL
+     No function names, API endpoints, class
+     references, or logic changed whatsoever
+══════════════════════════════════════════ -->
 <script>
 const JURISDICTION_COLORS = {
     'VIC': '#003f87',
@@ -398,12 +491,14 @@ const JURISDICTION_EMOJIS = {
     'ACT': '🏢',
     'NT': '🦘'
 };
+
 function formatDate(dateStr) {
     const date = new Date(dateStr + 'T00:00:00');
     const day = date.getDate();
     const month = date.toLocaleDateString('en-US', { month: 'short' });
     return `${day} ${month}`;
 }
+
 document.addEventListener('DOMContentLoaded', function() {
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('meeting-date').value = today;
@@ -411,33 +506,33 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function loadMeetings() {
     const dateInput = document.getElementById('meeting-date').value;
-    
+
     if (!dateInput) {
         alert('Please select a date');
         return;
     }
-    
+
     document.getElementById('initial-state').style.display = 'none';
     document.getElementById('meetings-container').style.display = 'none';
     document.getElementById('error-container').style.display = 'none';
     document.getElementById('loading').style.display = 'block';
-    
+
     try {
         const response = await fetch(`/api/meetings/date/${dateInput}`);
         const data = await response.json();
-        
+
         if (!data.success) {
             showError(data.error || 'Unknown error');
             return;
         }
-        
+
         if (data.meetings.length === 0) {
             showError('No meetings available for this date');
             return;
         }
-        
+
         displayMeetings(data.meetings);
-        
+
     } catch (error) {
         console.error('Error loading meetings:', error);
         showError(error.message);
@@ -446,7 +541,7 @@ async function loadMeetings() {
 
 function displayMeetings(meetings) {
     const grouped = {};
-    
+
     meetings.forEach(meeting => {
         const state = meeting.state || 'OTHER';
         if (!grouped[state]) {
@@ -454,14 +549,14 @@ function displayMeetings(meetings) {
         }
         grouped[state].push(meeting);
     });
-    
+
     let html = '';
     const sortedStates = Object.keys(grouped).sort();
-    
+
     sortedStates.forEach(state => {
         const color = JURISDICTION_COLORS[state] || '#6c757d';
         const emoji = JURISDICTION_EMOJIS[state] || '📍';
-        
+
         html += `
             <div class="state-row">
                 <div class="state-label" style="background: ${color};">
@@ -475,7 +570,7 @@ function displayMeetings(meetings) {
             </div>
         `;
     });
-    
+
     document.getElementById('meetings-list').innerHTML = html;
     document.getElementById('loading').style.display = 'none';
     document.getElementById('meetings-container').style.display = 'block';
@@ -488,7 +583,7 @@ function createMeetingCard(meeting, stateColor) {
                 <div class="compact-title">${meeting.track_name}</div>
                 <div class="compact-code">${meeting.track_code}</div>
             </div>
-            
+
             <div class="compact-stats">
                 <div class="compact-stat">
                     <span class="compact-stat-label">Date</span>
@@ -499,7 +594,7 @@ function createMeetingCard(meeting, stateColor) {
                     <span class="compact-stat-value">${meeting.race_count}</span>
                 </div>
             </div>
-            
+
             <select class="track-condition-select-compact">
                 <option value="firm">Firm</option>
                 <option value="good" selected>Good</option>
@@ -507,7 +602,7 @@ function createMeetingCard(meeting, stateColor) {
                 <option value="heavy">Heavy</option>
                 <option value="synthetic">Synthetic</option>
             </select>
-            
+
             <button onclick="importMeetingWithCondition(this); event.stopPropagation();" class="import-btn-compact">
                 <span>📥</span>
                 <span>Import</span>
@@ -516,14 +611,13 @@ function createMeetingCard(meeting, stateColor) {
     `;
 }
 
-// Update the import function to use the new class name
 async function importMeetingWithCondition(buttonElement) {
     const cardElement = buttonElement.closest('.meeting-card-compact');
     const meetingId = cardElement.dataset.meetingId;
     const dateStr = cardElement.dataset.date;
     const trackConditionSelect = cardElement.querySelector('.track-condition-select-compact');
     const trackCondition = trackConditionSelect.value;
-    
+
     cardElement.classList.add('importing');
     cardElement.innerHTML = `
         <div style="text-align: center; padding: 40px 20px;">
@@ -531,27 +625,27 @@ async function importMeetingWithCondition(buttonElement) {
             <p style="color: #6c757d; margin: 0; font-size: 12px; font-weight: 600;">Importing...</p>
         </div>
     `;
-    
+
     try {
         const formData = new FormData();
         formData.append('date', dateStr);
         formData.append('track_condition', trackCondition);
-        
+
         const response = await fetch(`/api/meetings/${meetingId}/import`, {
             method: 'POST',
             body: formData
         });
-        
+
         const data = await response.json();
-        
+
         if (!data.success) {
             alert('Import failed: ' + (data.error || 'Unknown error'));
             location.reload();
             return;
         }
-        
+
         window.location.href = data.redirect_url;
-        
+
     } catch (error) {
         console.error('Import error:', error);
         alert('Import failed: ' + error.message);
