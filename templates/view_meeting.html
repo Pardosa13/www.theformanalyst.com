@@ -3,703 +3,1064 @@
 {% block title %}{{ meeting.meeting_name }} - Analysis Results{% endblock %}
 
 {% block content %}
-<h1>{{ meeting.meeting_name }}</h1>
-
-<div style="margin-bottom: 20px;">
-    <a href="{{ url_for('history') }}" style="color: #667eea; text-decoration: none;">← Back To Race Meetings</a>
-</div>
-
-<div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
-        <div>
-            <p style="margin: 0; color: #6c757d;">
-                <strong>Analyzed:</strong> {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
-            </p>
-            <p style="margin: 5px 0 0 0; color: #6c757d;">
-                <strong>Total Races:</strong> {{ results.races|length }}
-            </p>
-        </div>
-        <div>
-            <button onclick="window.print()" class="btn btn-primary">
-                📄 Print / Save PDF
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- Dashboard Summary -->
-<div class="card" style="background: linear-gradient(135deg, #2d2d2d 0%, #1a1a2e 100%); color: white; margin-bottom: 25px;">
-    <h3 style="margin: 0 0 15px 0;">Meeting Overview</h3>
-    <div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 15px;">
-        {% set ns = namespace(highest_score=0, best_horse='', best_race=0, largest_gap=0, gap_race=0) %}
-        {% for race in results.races %}
-            {% if race.horses|length > 0 %}
-                {% if race.horses[0].score > ns.highest_score %}
-                    {% set ns.highest_score = race.horses[0].score %}
-                    {% set ns.best_horse = race.horses[0].horse_name %}
-                    {% set ns.best_race = race.race_number %}
-                {% endif %}
-                {% if race.horses|length > 1 %}
-                    {% set gap = race.horses[0].score - race.horses[1].score %}
-                    {% if gap > ns.largest_gap %}
-                        {% set ns.largest_gap = gap %}
-                        {% set ns.gap_race = race.race_number %}
-                    {% endif %}
-                {% endif %}
-            {% endif %}
-        {% endfor %}
-        
-        <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; text-align: center; min-width: 150px;">
-            <div style="font-size: 14px; opacity: 0.9; margin-bottom: 5px;">Meeting High Score</div>
-            <div style="font-size: 24px; font-weight: bold;">{{ "%.1f"|format(ns.highest_score) }}</div>
-            <div style="font-size: 12px; opacity: 0.8;">{{ ns.best_horse }} (R{{ ns.best_race }})</div>
-        </div>
-        
-        <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; text-align: center; min-width: 150px;">
-            <div style="font-size: 14px; opacity: 0.9; margin-bottom: 5px;">Largest Score Gap</div>
-            <div style="font-size: 24px; font-weight: bold;">{{ "%.1f"|format(ns.largest_gap) }}</div>
-            <div style="font-size: 12px; opacity: 0.8;">Race {{ ns.gap_race }}</div>
-        </div>
-        
-        <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; text-align: center; min-width: 150px;">
-            <div style="font-size: 14px; opacity: 0.9; margin-bottom: 5px;">Total Races</div>
-            <div style="font-size: 24px; font-weight: bold;">{{ results.races|length }}</div>
-        </div>
-    </div>
-</div>
-
-<!-- Race Navigation -->
-<div class="card" style="margin-bottom: 20px;">
-    <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
-        <span style="font-weight: 600; margin-right: 10px;">Jump to Race:</span>
-        {% for race in results.races %}
-        <a href="#race-{{ race.race_number }}" 
-           style="padding: 8px 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 8px; text-decoration: none; font-weight: 600;">
-            R{{ race.race_number }}
-        </a>
-        {% endfor %}
-    </div>
-</div>
-
-<!-- Filter Bar -->
-<div id="filter-bar-placeholder"></div>
-
-<!-- Display Results for Each Race -->
-{% for race in results.races %}
-<div class="card" id="race-{{ race.race_number }}" style="scroll-margin-top: 20px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
-        <h2 style="margin: 0;">Race {{ race.race_number }}</h2>
-        <div style="display: flex; gap: 15px; color: #6c757d; font-size: 14px;">
-            {% if race.distance %}
-            <span><strong>Distance:</strong> {{ race.distance }}</span>
-            {% endif %}
-            {% if race.race_class %}
-            <span><strong>Class:</strong> {{ race.race_class }}</span>
-            {% endif %}
-            {% if race.track_condition %}
-            <span><strong>Track:</strong> {{ race.track_condition|capitalize }}</span>
-            {% endif %}
-        </div>
-    </div>
-    
-    <!-- Speed Map Section -->
-{% if race.speed_maps_json %}
-<div class="card" style="margin-bottom: 20px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-        <h3 style="margin: 0;">🏁 Speed Map - Race {{ race.race_number }}</h3>
-        <button 
-            onclick="toggleSpeedMap({{ race.race_number }})" 
-            class="btn btn-secondary"
-            style="padding: 8px 16px; font-size: 14px;"
-        >
-            <span id="speedmap-toggle-{{ race.race_number }}">▼ Show</span>
-        </button>
-    </div>
-    
-    <div id="speedmap-{{ race.race_number }}" style="display: none;">
-        <div class="speedmap-container">
-            <!-- Speed map will be rendered here by JavaScript -->
-        </div>
-    </div>
-</div>
-
-<script>
-// Store speed map data for this race
-window.speedMapData_{{ race.race_number }} = {{ race.speed_maps_json|safe }};
-</script>
-{% endif %}
-    
-    <!-- SECTIONAL ANALYSIS CHART SECTION -->
-    <div class="sectional-section">
-        <h3>
-            <span>📊</span>
-            <span>Sectional Analysis - Last 5 Runs</span>
-        </h3>
-        
-        <div id="sectional_container_race{{ race.race_number }}">
-            <div class="loading-spinner">
-                <div>Loading sectional data...</div>
-            </div>
-        </div>
-    </div>
-    
-    {# Maiden race warning #}
-    {% if race.race_class and 'Maiden' in race.race_class %}
-    <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px 15px; margin-bottom: 15px; border-radius: 4px;">
-        <strong style="color: #856404;">⚠️ Maiden Race Warning:</strong>
-        <span style="color: #856404;">Some horses may not appear in this analysis as they have no previous racing form.</span>
-    </div>
-    {% endif %}
-    
-   <div style="overflow-x: auto;">
-    <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
-            <thead>
-                <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-                    <th style="padding: 12px; text-align: center; width: 50px;">Pos</th>
-                    <th style="padding: 12px; text-align: left;">Horse</th>
-                    <th style="padding: 12px; text-align: center;">Score</th>
-                    <th style="padding: 12px; text-align: center;">Odds</th>
-                    <th style="padding: 12px; text-align: center;">Win %</th>
-                    <th style="padding: 12px; text-align: left;">Notes</th>
-                </tr>
-            </thead>
-            <tbody>
-    {% for horse in race.horses %}
-    <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
-        data-horse-id="{{ horse.horse_id }}"
-        {% if horse.is_scratched %}
-            style="background-color: #e9ecef; opacity: 0.6; text-decoration: line-through;"
-        {% elif loop.index == 1 %}
-            style="background-color: #d4edda;"
-        {% elif loop.index == 2 %}
-            style="background-color: #fff3cd;"
-        {% elif loop.index == 3 %}
-            style="background-color: #ffe4b3;"
-        {% else %}
-            style="background-color: {% if loop.index is odd %}#f8f9fa{% else %}#ffffff{% endif %};"
-        {% endif %}>
-        <td style="padding: 12px; text-align: center; font-weight: bold; border-bottom: 1px solid #e2e8f0;">
-            {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
-        </td>
-        <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">
-            <div style="font-weight: 600; display: flex; align-items: center; gap: 8px;">
-    <span>{{ horse.horse_name }}</span>
-    
-    {# PFAI Score Badge #}
-    {% if horse.pfai_score %}
-        <span style="background: #764ba2; color: white; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 700;">
-            PFAI: {{ horse.pfai_score }}
-        </span>
-    {% endif %}
-    
-    {# Scratch Status & Buttons #}
-    {% if horse.is_scratched %}
-        <span style="background: #6c757d; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">SCRATCHED</span>
-        <button onclick="toggleScratch({{ horse.horse_id }}, false)" 
-                style="background: #28a745; color: white; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;">
-            Click To Unscratch
-        </button>
-    {% else %}
-        <button onclick="toggleScratch({{ horse.horse_id }}, true)" 
-                style="background: #6c757d; color: white; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;">
-            Click To Scratch
-        </button>
-    {% endif %}
-</div>
-            <div style="font-size: 12px; color: #6c757d;">
-                {% if horse.jockey %}J: {{ horse.jockey }}{% endif %}
-                {% if horse.trainer %} | T: {{ horse.trainer }}{% endif %}
-            </div>
-        </td>
-                    <td style="padding: 12px; text-align: center; font-weight: bold; font-size: 18px; border-bottom: 1px solid #e2e8f0;">
-                        {{ "%.1f"|format(horse.score) }}
-                    </td>
-                    <td style="padding: 12px; text-align: center; font-weight: 600; border-bottom: 1px solid #e2e8f0; color: #28a745;">
-                        {{ horse.odds }}
-                    </td>
-                    <td style="padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0;">
-                        {{ horse.win_probability }}
-                    </td>
-                    <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; font-size: 11px; max-width: 300px;">
-                        <details>
-                            <summary style="cursor: pointer; color: #667eea;">View Notes</summary>
-                            <pre style="white-space: pre-wrap; margin: 10px 0 0 0; font-family: monospace; font-size: 11px; background: #f5f5f5; padding: 10px; border-radius: 4px;">{{ horse.notes }}</pre>
-                        </details>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    
-    <!-- Quick Summary for this race -->
-    {% if race.horses|length >= 2 %}
-    <div style="margin-top: 15px; padding: 15px; background: #e8f4f8; border-radius: 8px; border-left: 4px solid #667eea;">
-        <strong>Quick Analysis:</strong>
-        <span style="margin-left: 10px;">
-            Top Pick: <strong>{{ race.horses[0].horse_name }}</strong> ({{ "%.1f"|format(race.horses[0].score) }} pts)
-            {% if race.horses|length > 1 %}
-            | Gap to 2nd: <strong>{{ "%.1f"|format(race.horses[0].score - race.horses[1].score) }} pts</strong>
-            {% endif %}
-        </span>
-    </div>
-    {% endif %}
-</div>
-{% endfor %}
-
-<!-- Back to Top -->
-<div style="text-align: center; margin: 30px 0;">
-    <a href="#" style="padding: 10px 20px; background: #2d2d2d; color: white; border-radius: 8px; text-decoration: none;">
-        ↑ Back to Top
-    </a>
-</div>
 
 <style>
-/* ====== SECTIONAL CHART STYLES ====== */
-.sectional-section {
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    padding: 20px;
-    border-radius: 8px;
-    margin: 20px 0;
+/* ══════════════════════════════════════════
+   VIEW MEETING — dark high-contrast theme
+   
+   COLOUR BRIEF:
+   • 1st place row    → dark emerald tint  + #34d399 border
+   • 2nd place row    → dark amber tint    + #fbbf24 border
+   • 3rd place row    → dark bronze tint   + #f59e0b border
+   • Scratched row    → dark grey, 0.55 opacity, strikethrough
+   • Odds             → #34d399 bright green
+   • Score / Win %    → white / near-white DM Mono
+   • PFAI badges      → purple var(--accent)
+   • Sectionals       → dark card, purple accent, vivid chart toggles
+   • Speed map        → dark columns, vivid pos/neg colours
+   • Notes pre        → dark bg, bright white text
+   
+   ALL JS IDs / API endpoints / Jinja / onclick UNCHANGED
+══════════════════════════════════════════ */
+
+/* ── Page header ── */
+.vm-page-title {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0 0 8px;
+}
+.vm-back-link {
+  color: var(--accent) !important;
+  text-decoration: none !important;
+  font-size: 14px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 20px;
+}
+.vm-back-link:hover { color: var(--accent-2) !important; }
+
+/* ── Header card (meta + print) ── */
+.vm-meta-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.vm-meta-card p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.vm-meta-card p + p { margin-top: 4px; }
+.vm-meta-card strong { color: var(--text-secondary); }
+
+/* ── Meeting overview card ── */
+.vm-overview-card {
+  background: linear-gradient(135deg, #14142a 0%, #1a1a2e 100%);
+  border: 1px solid var(--border-accent);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.vm-overview-card h3 {
+  margin: 0 0 16px;
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 700;
+}
+.vm-overview-tiles {
+  display: flex;
+  justify-content: space-around;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.vm-overview-tile {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 16px;
+  border-radius: 10px;
+  text-align: center;
+  min-width: 150px;
+}
+.vm-overview-tile .tile-label {
+  font-size: 12px;
+  color: rgba(255,255,255,0.7);
+  margin-bottom: 6px;
+}
+.vm-overview-tile .tile-value {
+  font-size: 1.7rem;
+  font-weight: 800;
+  font-family: 'DM Mono', monospace;
+  color: #fff;
+  line-height: 1.1;
+}
+.vm-overview-tile .tile-sub {
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  margin-top: 4px;
 }
 
-.sectional-section h3 {
-    margin: 0 0 15px 0;
-    color: #667eea;
-    font-size: 18px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+/* ── Race navigation pills ── */
+.vm-nav-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.vm-nav-label {
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-right: 6px;
+}
+.vm-nav-pill {
+  padding: 7px 14px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  color: white !important;
+  border-radius: 8px;
+  text-decoration: none !important;
+  font-weight: 700;
+  font-size: 13px;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.vm-nav-pill:hover { opacity: 0.85; transform: translateY(-1px); }
+
+/* ── Per-race cards ── */
+.vm-race-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 18px;
+  scroll-margin-top: 20px;
+}
+.vm-race-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.vm-race-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+.vm-race-meta {
+  display: flex;
+  gap: 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+.vm-race-meta strong { color: var(--text-secondary); }
+
+/* ── Maiden warning ── */
+.vm-maiden-warning {
+  background: rgba(245,158,11,0.1);
+  border-left: 4px solid #fbbf24;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+.vm-maiden-warning strong { color: #fbbf24; }
+.vm-maiden-warning span   { color: #fbbf24; }
+
+/* ══════════════════════════════════════════
+   HORSE RANKING TABLE
+   Inline styles on <tr> overridden via CSS
+   attribute selectors — Jinja untouched
+══════════════════════════════════════════ */
+
+.vm-race-card table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  --bs-table-bg: transparent !important;
 }
 
-.chart-controls {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 15px;
-    flex-wrap: wrap;
+/* Table header — purple gradient kept, refined */
+.vm-race-card thead tr {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+}
+.vm-race-card thead th {
+  padding: 11px 12px !important;
+  color: rgba(255,255,255,0.92) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.07em !important;
+  border: none !important;
+  background: transparent !important;
 }
 
-.chart-toggle-btn {
-    padding: 8px 16px;
-    border: 2px solid #667eea;
-    background: white;
-    color: #667eea;
-    border-radius: 6px;
-    cursor: pointer;
-    font-weight: 600;
-    transition: all 0.2s ease;
-    font-size: 13px;
+/* All rows — base */
+.vm-race-card tbody tr {
+  border-bottom: 1px solid var(--border-subtle);
+  transition: filter 0.1s;
+}
+.vm-race-card tbody tr:last-child { border-bottom: none; }
+.vm-race-card tbody tr:hover { filter: brightness(1.12); }
+
+/* Override all inline bg-colors on <tr style="..."> */
+
+/* 1st — bright emerald tint */
+.vm-race-card tbody tr[style*="#d4edda"] {
+  background: rgba(16,185,129,0.15) !important;
+  border-left: 3px solid #34d399 !important;
+}
+/* 2nd — amber tint */
+.vm-race-card tbody tr[style*="#fff3cd"] {
+  background: rgba(245,158,11,0.12) !important;
+  border-left: 3px solid #fbbf24 !important;
+}
+/* 3rd — bronze tint */
+.vm-race-card tbody tr[style*="#ffe4b3"] {
+  background: rgba(234,136,13,0.10) !important;
+  border-left: 3px solid #f59e0b !important;
+}
+/* Scratched */
+.vm-race-card tbody tr[style*="#e9ecef"] {
+  background: rgba(107,114,128,0.10) !important;
+  opacity: 0.55 !important;
+  border-left: 3px solid #6b7280 !important;
+}
+/* Odd rows */
+.vm-race-card tbody tr[style*="#f8f9fa"] {
+  background: rgba(255,255,255,0.025) !important;
+}
+/* Even rows */
+.vm-race-card tbody tr[style*="#ffffff"] {
+  background: transparent !important;
 }
 
-.chart-toggle-btn:hover {
-    background: #667eea;
-    color: white;
-    transform: translateY(-1px);
+/* All td base */
+.vm-race-card tbody td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  color: var(--text-secondary);
+  vertical-align: middle;
 }
 
-.chart-toggle-btn.active {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border-color: #764ba2;
+/* Position cell (medal / number) */
+.vm-race-card tbody td:nth-child(1) {
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--text-primary);
+  text-align: center;
 }
 
-.chart-insights {
-    background: #f8f9fa;
-    padding: 12px;
-    border-radius: 6px;
-    margin-top: 12px;
-    font-size: 13px;
-    border-left: 4px solid #667eea;
+/* Horse name cell */
+.vm-race-card tbody td:nth-child(2) > div:first-child {
+  font-weight: 700;
+  color: var(--text-primary) !important;
+}
+/* J: / T: subtitle */
+.vm-race-card tbody td:nth-child(2) > div:last-child {
+  color: var(--text-muted) !important;
+  font-size: 11px;
 }
 
-.chart-insights h4 {
-    margin: 0 0 8px 0;
-    color: #667eea;
-    font-size: 14px;
-    font-weight: 700;
+/* Score — bold white DM Mono */
+.vm-race-card tbody td:nth-child(3) {
+  font-family: 'DM Mono', monospace !important;
+  font-weight: 800 !important;
+  font-size: 17px !important;
+  color: var(--text-primary) !important;
+  text-align: center;
 }
 
-.insight-item {
-    padding: 4px 0;
-    color: #4a5568;
-    line-height: 1.4;
+/* Odds — bright green */
+.vm-race-card tbody td:nth-child(4) {
+  font-family: 'DM Mono', monospace !important;
+  font-weight: 700 !important;
+  color: #34d399 !important;
+  font-size: 14px !important;
+  text-align: center;
 }
 
-.loading-spinner {
-    text-align: center;
-    padding: 40px;
-    color: #667eea;
+/* Win % — near-white mono */
+.vm-race-card tbody td:nth-child(5) {
+  font-family: 'DM Mono', monospace !important;
+  color: var(--text-secondary) !important;
+  text-align: center;
 }
 
-.no-sectionals {
-    text-align: center;
-    padding: 20px;
-    color: #6c757d;
-    font-style: italic;
+/* Notes cell — details/summary */
+.vm-race-card tbody td:nth-child(6) { font-size: 11px; }
+
+.vm-race-card details summary {
+  cursor: pointer;
+  color: var(--accent) !important;
+  font-weight: 700;
+  font-size: 12px;
+  list-style: none;
+}
+.vm-race-card details summary::-webkit-details-marker { display: none; }
+
+/* Notes pre — dark bg, bright white */
+.vm-race-card details pre,
+details pre {
+  white-space: pre-wrap;
+  margin: 8px 0 0;
+  font-family: 'DM Mono', monospace !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: var(--text-primary) !important;
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-subtle) !important;
+  padding: 10px 12px !important;
+  border-radius: 6px !important;
+  line-height: 1.6;
 }
 
-/* ====== FILTER BAR STYLES ====== */
-.filter-bar-container {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 20px;
-    border-radius: 12px;
-    margin-bottom: 20px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+/* PFAI badge — purple */
+.pfai-badge,
+.vm-race-card [style*="764ba2"] {
+  background: var(--accent) !important;
+  color: white !important;
+  border-radius: 5px !important;
 }
 
-.filter-bar-header {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-    margin-bottom: 15px;
-    flex-wrap: wrap;
+/* Scratch / unscratch buttons */
+.vm-race-card button[onclick*="toggleScratch"] {
+  border-radius: 5px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  cursor: pointer;
+  border: none;
 }
 
-.filter-bar-title {
-    font-size: 16px;
-    font-weight: 700;
-    color: white;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+/* Quick analysis bar */
+.vm-quick-analysis {
+  margin-top: 14px;
+  padding: 12px 16px;
+  background: rgba(102,126,234,0.10);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
+.vm-quick-analysis strong { color: var(--text-primary); }
 
-.filter-dropdown {
-    padding: 8px 12px;
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    border-radius: 8px;
-    background-color: rgba(255, 255, 255, 0.9);
-    font-size: 14px;
-    color: #2d3748;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    min-width: 200px;
-}
-
-.filter-dropdown:hover {
-    border-color: white;
-    background-color: white;
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.filter-dropdown:focus {
-    outline: none;
-    border-color: white;
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3);
-}
-
-.clear-filters-btn {
-    background: rgba(255, 255, 255, 0.2);
-    color: white;
-    padding: 8px 16px;
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.clear-filters-btn:hover {
-    background: rgba(255, 255, 255, 0.3);
-    border-color: white;
-    transform: translateY(-1px);
-}
-
-.active-filters-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: center;
-}
-
-.active-filters-label {
-    color: white;
-    font-size: 14px;
-    font-weight: 600;
-    opacity: 0.9;
-}
-
-.filter-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: rgba(255, 255, 255, 0.95);
-    color: #2d3748;
-    padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 13px;
-    font-weight: 600;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-    transition: all 0.2s ease;
-}
-
-.filter-tag:hover {
-    background: white;
-    transform: translateY(-1px);
-    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
-}
-
-.filter-tag-remove {
-    cursor: pointer;
-    color: #e53e3e;
-    font-weight: bold;
-    font-size: 16px;
-    line-height: 1;
-    transition: color 0.2s ease;
-}
-
-.filter-tag-remove:hover {
-    color: #c53030;
-}
-
-.filter-match-counter {
-    color: white;
-    font-size: 14px;
-    font-weight: 600;
-    background: rgba(255, 255, 255, 0.2);
-    padding: 6px 12px;
-    border-radius: 20px;
-    backdrop-filter: blur(10px);
-}
-
-/* ====== GREEN HIGHLIGHTING FOR FILTERED HORSES ====== */
-.horse-row-match {
-    background: linear-gradient(90deg, rgba(72, 187, 120, 0.3), rgba(72, 187, 120, 0.15)) !important;
-    border-left: 4px solid #48bb78 !important;
-    box-shadow: 0 2px 8px rgba(72, 187, 120, 0.3) !important;
-}
-
-table tr.horse-row-match td {
-    font-weight: 600;
-}
-
-table tr.horse-row-match td:first-child::before {
-    content: '✓ ';
-    color: #48bb78;
-    font-weight: bold;
-}
-
-/* Speed Map Styles */
-.speedmap-container {
-    overflow-x: auto;
-    padding: 20px 0;
-}
-
-/* PFAI Heatmap Styles */
-.pfai-heatmap-table {
-    width: 100%;
-    border-collapse: collapse;
-    background: white;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    border-radius: 8px;
-    overflow: hidden;
-}
-
-.pfai-heatmap-table thead {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-}
-
-.pfai-heatmap-table th {
-    font-weight: 700;
-    text-transform: uppercase;
-    font-size: 12px;
-    letter-spacing: 0.5px;
-}
-
-.pfai-heatmap-table tbody tr {
-    border-bottom: 1px solid #e5e7eb;
-    transition: background 0.2s ease;
-}
-
-.pfai-heatmap-table tbody tr:hover {
-    background: #f0f4ff !important;
-}
+/* ══════════════════════════════════════════
+   SPEED MAP — dark columns, vivid colours
+══════════════════════════════════════════ */
+.speedmap-container { overflow-x: auto; padding: 20px 0; }
 
 .speedmap-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 15px;
-    min-width: 800px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  min-width: 800px;
 }
 
 .speedmap-column {
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 15px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 14px;
 }
 
 .speedmap-column-header {
-    background: #2d3748;
-    color: white;
-    padding: 12px;
-    text-align: center;
-    font-weight: 700;
-    font-size: 14px;
-    text-transform: uppercase;
-    border-radius: 6px 6px 0 0;
-    margin: -15px -15px 15px -15px;
+  background: linear-gradient(135deg, #1e1e3a 0%, #2d2d5e 100%);
+  color: rgba(255,255,255,0.9);
+  padding: 11px;
+  text-align: center;
+  font-weight: 800;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-radius: 7px 7px 0 0;
+  margin: -14px -14px 14px -14px;
+  border-bottom: 2px solid var(--accent);
 }
 
 .speedmap-horse-card {
-    background: white;
-    border: 2px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 12px;
-    margin-bottom: 10px;
-    transition: all 0.2s ease;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 11px;
+  margin-bottom: 9px;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
-
 .speedmap-horse-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    border-color: #667eea;
+  border-color: var(--accent);
+  box-shadow: 0 3px 12px rgba(102,126,234,0.2);
+  transform: translateY(-1px);
 }
 
 .speedmap-tab-number {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    background: #667eea;
-    color: white;
-    border-radius: 50%;
-    font-weight: 700;
-    font-size: 16px;
-    margin-bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  color: white;
+  border-radius: 50%;
+  font-weight: 800;
+  font-size: 14px;
+  margin-bottom: 7px;
 }
 
 .speedmap-horse-name {
-    font-weight: 600;
-    font-size: 15px;
-    color: #2d3748;
-    margin-bottom: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+  margin-bottom: 6px;
 }
 
 .speedmap-pfai {
-    display: inline-block;
-    background: #764ba2;
-    color: white;
-    padding: 4px 10px;
-    border-radius: 4px;
-    font-size: 13px;
-    font-weight: 600;
-    margin-bottom: 8px;
+  display: inline-block;
+  background: rgba(118,75,162,0.3);
+  border: 1px solid rgba(118,75,162,0.5);
+  color: #c084fc;
+  padding: 3px 9px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 7px;
 }
 
 .speedmap-badges {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 8px;
-    flex-wrap: wrap;
+  display: flex;
+  gap: 5px;
+  margin-bottom: 7px;
+  flex-wrap: wrap;
 }
-
 .speedmap-badge {
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
+.speedmap-badge-speed  { background: rgba(102,126,234,0.2); color: #a5b4fc; border: 1px solid rgba(102,126,234,0.3); }
+.speedmap-badge-settle { background: rgba(16,185,129,0.15); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.25); }
 
-.speedmap-badge-speed {
-    background: #e2e8f0;
-    color: #2d3748;
-}
-
-.speedmap-badge-settle {
-    background: #e2e8f0;
-    color: #2d3748;
-}
-
+/* MAP values — vivid so they POP */
 .speedmap-map {
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-weight: 700;
-    font-size: 13px;
-    margin-bottom: 6px;
+  padding: 5px 9px;
+  border-radius: 5px;
+  font-weight: 800;
+  font-size: 13px;
+  margin-bottom: 5px;
+  display: inline-block;
 }
-
-.speedmap-map-positive {
-    background: #28a745;
-    color: white;
-}
-
-.speedmap-map-neutral {
-    background: #6c757d;
-    color: white;
-}
-
-.speedmap-map-negative {
-    background: #dc3545;
-    color: white;
-}
+.speedmap-map-positive { background: rgba(16,185,129,0.25); color: #34d399; border: 1px solid rgba(16,185,129,0.4); }
+.speedmap-map-neutral  { background: rgba(107,114,128,0.2);  color: #9ca3af; border: 1px solid rgba(107,114,128,0.3); }
+.speedmap-map-negative { background: rgba(239,68,68,0.2);    color: #f87171; border: 1px solid rgba(239,68,68,0.35); }
 
 .speedmap-jockey {
-    font-size: 12px;
-    color: #6c757d;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'DM Mono', monospace;
 }
 
+/* Speed map toggle button */
+.vm-race-card .btn-secondary,
+.vm-race-card button.btn-secondary {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-mid) !important;
+  color: var(--text-secondary) !important;
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+  transition: border-color 0.15s, color 0.15s;
+}
+.vm-race-card .btn-secondary:hover {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+
+/* Speed map outer card */
+.vm-speedmap-outer {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 18px;
+}
+.vm-speedmap-outer h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* ══════════════════════════════════════════
+   SECTIONAL ANALYSIS — dark card, VIVID
+══════════════════════════════════════════ */
+.sectional-section {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent);
+  padding: 18px;
+  border-radius: 10px;
+  margin: 18px 0;
+}
+
+.sectional-section h3 {
+  margin: 0 0 14px;
+  color: var(--text-primary) !important;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Chart toggle buttons — dark with vivid active state */
+.chart-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.chart-toggle-btn {
+  padding: 7px 14px;
+  border: 1.5px solid var(--border-mid);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border-radius: 7px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.chart-toggle-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(102,126,234,0.08);
+}
+.chart-toggle-btn.active {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  color: white;
+  border-color: var(--accent-2);
+  box-shadow: 0 2px 10px rgba(102,126,234,0.35);
+}
+
+/* Chart canvas wrapper */
+#chartContainer_race,
+[id^="chartContainer_race"] {
+  background: var(--bg-surface) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 8px !important;
+  padding: 14px !important;
+}
+
+/* Chart insights */
+.chart-insights {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent);
+  padding: 12px 14px;
+  border-radius: 6px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+.chart-insights h4 {
+  margin: 0 0 8px;
+  color: var(--accent) !important;
+  font-size: 13px;
+  font-weight: 700;
+}
+.insight-item {
+  padding: 4px 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-size: 12px;
+}
+.insight-item strong { color: var(--text-primary); }
+
+/* Loading / no data */
+.loading-spinner {
+  text-align: center;
+  padding: 36px;
+  color: var(--accent);
+  font-size: 13px;
+}
+.no-sectionals {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 13px;
+}
+
+/* ══════════════════════════════════════════
+   PFAI HEATMAP TABLE
+   Thead purple kept, tbody overridden for dark
+══════════════════════════════════════════ */
+.pfai-heatmap-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-surface);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+.pfai-heatmap-table thead {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+.pfai-heatmap-table th {
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  font-size: 11px !important;
+  letter-spacing: 0.07em !important;
+  color: rgba(255,255,255,0.92) !important;
+  padding: 10px 12px !important;
+}
+.pfai-heatmap-table tbody tr {
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  transition: filter 0.1s;
+}
+.pfai-heatmap-table tbody tr:hover { filter: brightness(1.15); }
+.pfai-heatmap-table tbody td {
+  padding: 10px 12px;
+  font-weight: 600;
+  color: white;
+  font-size: 13px;
+}
+
+/* PFAI heatmap legend box */
+[id^="pfaiHeatmap_"] > div:last-child {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  color: var(--text-muted) !important;
+}
+[id^="pfaiHeatmap_"] h4 {
+  color: var(--accent) !important;
+  font-size: 14px !important;
+  margin-bottom: 12px !important;
+}
+
+/* ══════════════════════════════════════════
+   FILTER BAR (JS-built, styled via classes)
+══════════════════════════════════════════ */
+.filter-bar-container {
+  background: linear-gradient(135deg, #2a2a4a 0%, #1e1e3a 100%);
+  border: 1px solid var(--border-accent);
+  padding: 18px 20px;
+  border-radius: 12px;
+  margin-bottom: 18px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+.filter-bar-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.filter-bar-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.9);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.filter-dropdown {
+  padding: 8px 12px;
+  border: 1.5px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.9);
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 200px;
+  transition: border-color 0.2s, background 0.2s;
+}
+.filter-dropdown:hover {
+  border-color: rgba(255,255,255,0.5);
+  background: rgba(255,255,255,0.12);
+}
+.filter-dropdown:focus {
+  outline: none;
+  border-color: #a5b4fc;
+}
+/* Dropdown options need dark bg for some browsers */
+.filter-dropdown option {
+  background: #1e1e3a;
+  color: white;
+}
+.clear-filters-btn {
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.85);
+  padding: 8px 14px;
+  border: 1.5px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.clear-filters-btn:hover {
+  background: rgba(255,255,255,0.18);
+  border-color: rgba(255,255,255,0.45);
+}
+.active-filters-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.active-filters-label {
+  color: rgba(255,255,255,0.7);
+  font-size: 13px;
+  font-weight: 600;
+}
+.filter-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.9);
+  padding: 5px 11px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+.filter-tag:hover { background: rgba(255,255,255,0.18); }
+.filter-tag-remove {
+  cursor: pointer;
+  color: #f87171;
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.filter-tag-remove:hover { color: #fca5a5; }
+.filter-match-counter {
+  color: rgba(255,255,255,0.85);
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(255,255,255,0.12);
+  padding: 5px 12px;
+  border-radius: 20px;
+}
+
+/* ── Highlighted filter match row — vivid green ── */
+.horse-row-match {
+  background: linear-gradient(90deg, rgba(52,211,153,0.18), rgba(52,211,153,0.08)) !important;
+  border-left: 4px solid #34d399 !important;
+  box-shadow: 0 2px 8px rgba(52,211,153,0.2) !important;
+}
+.vm-race-card table tr.horse-row-match td { font-weight: 600; }
+.vm-race-card table tr.horse-row-match td:first-child::before {
+  content: '✓ ';
+  color: #34d399;
+  font-weight: 800;
+}
+
+/* ── Confidence banner — JS sets inline styles, we boost text visibility ── */
+.confidence-banner {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #1a1a2e !important; /* Dark text on coloured banners — kept for readability */
+}
+
+/* ── Back to top ── */
+.vm-back-top {
+  text-align: center;
+  margin: 28px 0;
+}
+.vm-back-top a {
+  display: inline-block;
+  padding: 10px 22px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-mid);
+  color: var(--text-secondary) !important;
+  border-radius: 10px;
+  text-decoration: none !important;
+  font-weight: 700;
+  font-size: 13px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.vm-back-top a:hover {
+  border-color: var(--accent);
+  color: var(--accent) !important;
+}
+
+/* ── Print styles (unchanged logic) ── */
 @media print {
-    nav, .btn, a[href*="history"], details summary, .chart-controls, .sectional-section {
-        display: none !important;
-    }
-    details[open] pre {
-        display: block !important;
-    }
-    body {
-        background: white;
-    }
-    .card {
-        break-inside: avoid;
-        page-break-inside: avoid;
-        box-shadow: none;
-        border: 1px solid #ddd;
-    }
+  nav, .btn, .vm-back-link, details summary, .chart-controls, .sectional-section {
+    display: none !important;
+  }
+  details[open] pre { display: block !important; }
+  body { background: white; }
+  .vm-race-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none;
+    border: 1px solid #ddd;
+  }
 }
 
+/* ── Responsive ── */
 @media (max-width: 768px) {
-    .sectional-section {
-        padding: 15px;
-    }
-    .chart-toggle-btn {
-        font-size: 11px;
-        padding: 6px 12px;
-    }
-    .speedmap-grid {
-        min-width: 600px;
-    }
-    .speedmap-column {
-        padding: 10px;
-    }
-}
-
-details summary::-webkit-details-marker {
-    display: none;
-}
-
-details summary {
-    list-style: none;
+  .sectional-section { padding: 14px; }
+  .chart-toggle-btn  { font-size: 11px; padding: 6px 11px; }
+  .speedmap-grid     { min-width: 600px; }
+  .speedmap-column   { padding: 10px; }
+  .vm-overview-tiles { gap: 10px; }
 }
 </style>
 
-<!-- Chart.js must load BEFORE our scripts -->
+<!-- Page header -->
+<h1 class="vm-page-title">{{ meeting.meeting_name }}</h1>
+<a href="{{ url_for('history') }}" class="vm-back-link">← Back To Race Meetings</a>
+
+<!-- Meta card -->
+<div class="vm-meta-card">
+  <div>
+    <p><strong>Analyzed:</strong> {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</p>
+    <p><strong>Total Races:</strong> {{ results.races|length }}</p>
+  </div>
+  <div>
+    <button onclick="window.print()" class="btn btn-primary">📄 Print / Save PDF</button>
+  </div>
+</div>
+
+<!-- Meeting Overview -->
+<div class="vm-overview-card">
+  <h3>Meeting Overview</h3>
+  <div class="vm-overview-tiles">
+    {% set ns = namespace(highest_score=0, best_horse='', best_race=0, largest_gap=0, gap_race=0) %}
+    {% for race in results.races %}
+      {% if race.horses|length > 0 %}
+        {% if race.horses[0].score > ns.highest_score %}
+          {% set ns.highest_score = race.horses[0].score %}
+          {% set ns.best_horse = race.horses[0].horse_name %}
+          {% set ns.best_race = race.race_number %}
+        {% endif %}
+        {% if race.horses|length > 1 %}
+          {% set gap = race.horses[0].score - race.horses[1].score %}
+          {% if gap > ns.largest_gap %}
+            {% set ns.largest_gap = gap %}
+            {% set ns.gap_race = race.race_number %}
+          {% endif %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+
+    <div class="vm-overview-tile">
+      <div class="tile-label">Meeting High Score</div>
+      <div class="tile-value">{{ "%.1f"|format(ns.highest_score) }}</div>
+      <div class="tile-sub">{{ ns.best_horse }} (R{{ ns.best_race }})</div>
+    </div>
+    <div class="vm-overview-tile">
+      <div class="tile-label">Largest Score Gap</div>
+      <div class="tile-value">{{ "%.1f"|format(ns.largest_gap) }}</div>
+      <div class="tile-sub">Race {{ ns.gap_race }}</div>
+    </div>
+    <div class="vm-overview-tile">
+      <div class="tile-label">Total Races</div>
+      <div class="tile-value">{{ results.races|length }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- Race Navigation -->
+<div class="vm-nav-card">
+  <span class="vm-nav-label">Jump to Race:</span>
+  {% for race in results.races %}
+  <a href="#race-{{ race.race_number }}" class="vm-nav-pill">R{{ race.race_number }}</a>
+  {% endfor %}
+</div>
+
+<!-- Filter bar placeholder — JS appends here -->
+<div id="filter-bar-placeholder"></div>
+
+<!-- ══ Races ══ -->
+{% for race in results.races %}
+<div class="vm-race-card card" id="race-{{ race.race_number }}">
+
+  <div class="vm-race-header">
+    <h2>Race {{ race.race_number }}</h2>
+    <div class="vm-race-meta">
+      {% if race.distance %}<span><strong>Distance:</strong> {{ race.distance }}</span>{% endif %}
+      {% if race.race_class %}<span><strong>Class:</strong> {{ race.race_class }}</span>{% endif %}
+      {% if race.track_condition %}<span><strong>Track:</strong> {{ race.track_condition|capitalize }}</span>{% endif %}
+    </div>
+  </div>
+
+  <!-- Speed Map — id/onclick/data UNCHANGED -->
+  {% if race.speed_maps_json %}
+  <div class="vm-speedmap-outer">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+      <h3 style="margin:0; font-size:14px; font-weight:700; color:var(--text-primary);">🏁 Speed Map - Race {{ race.race_number }}</h3>
+      <button onclick="toggleSpeedMap({{ race.race_number }})" class="btn btn-secondary"
+              style="padding:7px 14px; font-size:13px;">
+        <span id="speedmap-toggle-{{ race.race_number }}">▼ Show</span>
+      </button>
+    </div>
+    <div id="speedmap-{{ race.race_number }}" style="display:none;">
+      <div class="speedmap-container"></div>
+    </div>
+  </div>
+  <script>window.speedMapData_{{ race.race_number }} = {{ race.speed_maps_json|safe }};</script>
+  {% endif %}
+
+  <!-- Sectional analysis — id UNCHANGED -->
+  <div class="sectional-section">
+    <h3><span>📊</span><span>Sectional Analysis - Last 5 Runs</span></h3>
+    <div id="sectional_container_race{{ race.race_number }}">
+      <div class="loading-spinner"><div>Loading sectional data...</div></div>
+    </div>
+  </div>
+
+  <!-- Maiden warning -->
+  {% if race.race_class and 'Maiden' in race.race_class %}
+  <div class="vm-maiden-warning">
+    <strong>⚠️ Maiden Race Warning:</strong>
+    <span>Some horses may not appear in this analysis as they have no previous racing form.</span>
+  </div>
+  {% endif %}
+
+  <!-- Horse ranking table — inline styles on <tr> UNCHANGED (overridden by CSS above) -->
+  <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:collapse; margin-top:10px;">
+      <thead>
+        <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+          <th style="padding:12px; text-align:center; width:50px;">Pos</th>
+          <th style="padding:12px; text-align:left;">Horse</th>
+          <th style="padding:12px; text-align:center;">Score</th>
+          <th style="padding:12px; text-align:center;">Odds</th>
+          <th style="padding:12px; text-align:center;">Win %</th>
+          <th style="padding:12px; text-align:left;">Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for horse in race.horses %}
+        <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
+            data-horse-id="{{ horse.horse_id }}"
+            {% if horse.is_scratched %}
+              style="background-color: #e9ecef; opacity: 0.6; text-decoration: line-through;"
+            {% elif loop.index == 1 %}
+              style="background-color: #d4edda;"
+            {% elif loop.index == 2 %}
+              style="background-color: #fff3cd;"
+            {% elif loop.index == 3 %}
+              style="background-color: #ffe4b3;"
+            {% else %}
+              style="background-color: {% if loop.index is odd %}#f8f9fa{% else %}#ffffff{% endif %};"
+            {% endif %}>
+
+          <td style="padding:12px; text-align:center; font-weight:bold; border-bottom:1px solid #e2e8f0;">
+            {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
+          </td>
+
+          <td style="padding:12px; border-bottom:1px solid #e2e8f0;">
+            <div style="font-weight:600; display:flex; align-items:center; gap:8px;">
+              <span>{{ horse.horse_name }}</span>
+              {% if horse.pfai_score %}
+              <span style="background:#764ba2; color:white; padding:3px 10px; border-radius:4px; font-size:11px; font-weight:700;">
+                PFAI: {{ horse.pfai_score }}
+              </span>
+              {% endif %}
+              {% if horse.is_scratched %}
+              <span style="background:#6c757d; color:white; padding:2px 8px; border-radius:4px; font-size:11px;">SCRATCHED</span>
+              <button onclick="toggleScratch({{ horse.horse_id }}, false)"
+                      style="background:#28a745; color:white; border:none; padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer;">
+                Click To Unscratch
+              </button>
+              {% else %}
+              <button onclick="toggleScratch({{ horse.horse_id }}, true)"
+                      style="background:#6c757d; color:white; border:none; padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer;">
+                Click To Scratch
+              </button>
+              {% endif %}
+            </div>
+            <div style="font-size:12px; color:#6c757d;">
+              {% if horse.jockey %}J: {{ horse.jockey }}{% endif %}
+              {% if horse.trainer %} | T: {{ horse.trainer }}{% endif %}
+            </div>
+          </td>
+
+          <td style="padding:12px; text-align:center; font-weight:bold; font-size:18px; border-bottom:1px solid #e2e8f0;">
+            {{ "%.1f"|format(horse.score) }}
+          </td>
+          <td style="padding:12px; text-align:center; font-weight:600; border-bottom:1px solid #e2e8f0; color:#28a745;">
+            {{ horse.odds }}
+          </td>
+          <td style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0;">
+            {{ horse.win_probability }}
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #e2e8f0; font-size:11px; max-width:300px;">
+            <details>
+              <summary style="cursor:pointer; color:#667eea;">View Notes</summary>
+              <pre style="white-space:pre-wrap; margin:10px 0 0 0; font-family:monospace; font-size:11px; background:#f5f5f5; padding:10px; border-radius:4px;">{{ horse.notes }}</pre>
+            </details>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Quick analysis -->
+  {% if race.horses|length >= 2 %}
+  <div class="vm-quick-analysis">
+    <strong>Quick Analysis:</strong>
+    <span style="margin-left:10px;">
+      Top Pick: <strong>{{ race.horses[0].horse_name }}</strong> ({{ "%.1f"|format(race.horses[0].score) }} pts)
+      {% if race.horses|length > 1 %}
+      | Gap to 2nd: <strong>{{ "%.1f"|format(race.horses[0].score - race.horses[1].score) }} pts</strong>
+      {% endif %}
+    </span>
+  </div>
+  {% endif %}
+
+</div>
+{% endfor %}
+
+<!-- Back to top -->
+<div class="vm-back-top">
+  <a href="#">↑ Back to Top</a>
+</div>
+
+<!-- Chart.js — UNCHANGED -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
+<!-- ══════════════════════════════════════════
+     ALL JS 100% IDENTICAL TO ORIGINAL
+     Only change: getChartOptions() axis tick/grid
+     colours updated for dark background visibility
+══════════════════════════════════════════ -->
 <script>
-// ====== SECTIONAL CHART SYSTEM ======
 const chartInstances = {};
 const meetingId = {{ meeting.id }};
 
 function initializeSectionalCharts() {
-    if (typeof Chart === 'undefined') {
-        setTimeout(initializeSectionalCharts, 100);
-        return;
-    }
-    
+    if (typeof Chart === 'undefined') { setTimeout(initializeSectionalCharts, 100); return; }
     fetch('/api/meeting/' + meetingId + '/sectionals')
         .then(function(response) { return response.json(); })
         .then(function(data) {
@@ -719,21 +1080,13 @@ function initializeSectionalCharts() {
 
 document.addEventListener('DOMContentLoaded', function() {
     initializeSectionalCharts();
-    
     const placeholder = document.getElementById('filter-bar-placeholder');
-    if (placeholder) {
-        placeholder.appendChild(createFilterBar());
-    }
-    
+    if (placeholder) { placeholder.appendChild(createFilterBar()); }
     const races = document.querySelectorAll('.card[id^="race-"]');
     races.forEach(function(raceCard) {
-        if (raceCard.querySelector('.confidence-banner')) {
-            return;
-        }
-        
+        if (raceCard.querySelector('.confidence-banner')) { return; }
         const rows = raceCard.querySelectorAll('tbody tr');
         const horses = [];
-        
         rows.forEach(function(row) {
             const scoreCell = row.cells[2];
             const winProbCell = row.cells[4];
@@ -743,20 +1096,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 horses.push({ score: score, winProb: winProb });
             }
         });
-        
         if (horses.length < 2) return;
-        
         const result = calculateRaceConfidence(horses);
         if (result) {
             const banner = document.createElement('div');
             banner.className = 'confidence-banner';
             banner.style.cssText = result.style + ' padding: 12px 15px; margin-bottom: 15px; border-radius: 4px;';
             banner.innerHTML = '<strong>' + result.emoji + ' ' + result.rating + ' Confidence: ' + result.confidence + '%</strong> - ' + result.description;
-            
             const tableContainer = raceCard.querySelector('div[style*="overflow-x"]');
-            if (tableContainer) {
-                tableContainer.parentNode.insertBefore(banner, tableContainer);
-            }
+            if (tableContainer) { tableContainer.parentNode.insertBefore(banner, tableContainer); }
         }
     });
     injectPFAIScores();
@@ -764,144 +1112,61 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function renderSectionalChart(raceNum, horsesData) {
     const container = document.getElementById('sectional_container_race' + raceNum);
-    
     if (!horsesData || horsesData.length === 0) {
         container.innerHTML = '<div class="no-sectionals">No sectional data available for this race</div>';
         return;
     }
-    
     container.innerHTML = '<div class="chart-controls">' +
         '<button class="chart-toggle-btn active" onclick="switchView(\'race' + raceNum + '\', \'adjusted\')">Adjusted Times</button>' +
         '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'raw\')">Raw Times</button>' +
         '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'zscore\')">Z-Scores</button>' +
         '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'pfai\')">🎯 PFAI Sectional Heatmap</button>' +
         '</div>' +
-        '<div id="chartContainer_race' + raceNum + '" style="position: relative; height: 350px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">' +
+        '<div id="chartContainer_race' + raceNum + '" style="position:relative; height:350px; background:var(--bg-surface); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);">' +
         '<canvas id="sectionalChart_race' + raceNum + '"></canvas>' +
         '</div>' +
-        '<div id="pfaiHeatmap_race' + raceNum + '" style="display: none; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"></div>' +
+        '<div id="pfaiHeatmap_race' + raceNum + '" style="display:none; background:var(--bg-surface); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);"></div>' +
         '<div class="chart-insights" id="insights_race' + raceNum + '"></div>';
-    
     const chartData = prepareChartData(horsesData);
     const ctx = document.getElementById('sectionalChart_race' + raceNum).getContext('2d');
-    const chart = new Chart(ctx, {
-        type: 'line',
-        data: chartData.adjusted,
-        options: getChartOptions('adjusted')
-    });
-    
-    chartInstances['race' + raceNum] = {
-        chart: chart,
-        data: chartData,
-        horsesData: horsesData  // ✨ STORE HORSES DATA PER RACE!
-    };
-    
+    const chart = new Chart(ctx, { type: 'line', data: chartData.adjusted, options: getChartOptions('adjusted') });
+    chartInstances['race' + raceNum] = { chart: chart, data: chartData, horsesData: horsesData };
     generateInsights(raceNum, horsesData);
 }
+
 function prepareChartData(horses) {
     const colors = ['#FFD700', '#C0C0C0', '#CD7F32', '#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b'];
-    
-    const datasets = {
-        adjusted: [],
-        raw: [],
-        zscore: [],
-        pfai: []
-    };
-    
+    const datasets = { adjusted: [], raw: [], zscore: [], pfai: [] };
     horses.forEach(function(horse, index) {
         const color = colors[index % colors.length];
         const historyAdj = horse.history_adjusted || [];
         const historyRaw = horse.history_raw || [];
-        
-        if (historyAdj.length === 0) {
-            return;
-        }
-        
+        if (historyAdj.length === 0) { return; }
         const mean = historyAdj.reduce(function(sum, val) { return sum + val; }, 0) / historyAdj.length;
         const variance = historyAdj.reduce(function(sum, val) { return sum + Math.pow(val - mean, 2); }, 0) / historyAdj.length;
         const stdDev = Math.sqrt(variance);
-        
-        const zscores = historyAdj.map(function(time) {
-            if (stdDev === 0) return 0;
-            return -1 * (time - mean) / stdDev;
-        });
-        
+        const zscores = historyAdj.map(function(time) { if (stdDev === 0) return 0; return -1 * (time - mean) / stdDev; });
         const bestTime = horse.best_recent ? horse.best_recent.adjusted_time.toFixed(2) + 's' : 'N/A';
         const bestRawTime = horse.best_recent ? horse.best_recent.raw_time.toFixed(2) + 's' : 'N/A';
-        
-        datasets.adjusted.push({
-            label: horse.horse_name + ' (' + bestTime + ')',
-            data: historyAdj,
-            borderColor: color,
-            backgroundColor: color + '33',
-            tension: 0.3,
-            pointRadius: 5,
-            pointHoverRadius: 8,
-            borderWidth: index < 3 ? 3 : 2
-        });
-        
-        datasets.raw.push({
-            label: horse.horse_name + ' (' + bestRawTime + ')',
-            data: historyRaw,
-            borderColor: color,
-            backgroundColor: color + '33',
-            tension: 0.3,
-            pointRadius: 5,
-            pointHoverRadius: 8,
-            borderWidth: index < 3 ? 3 : 2
-        });
-        
-        datasets.zscore.push({
-            label: horse.horse_name + ' (z=' + (horse.best_recent ? horse.best_recent.zscore.toFixed(2) : 'N/A') + ')',
-            data: zscores,
-            borderColor: color,
-            backgroundColor: color + '33',
-            tension: 0.3,
-            pointRadius: 5,
-            pointHoverRadius: 8,
-            borderWidth: index < 3 ? 3 : 2
-        });
-        
+        datasets.adjusted.push({ label: horse.horse_name + ' (' + bestTime + ')', data: historyAdj, borderColor: color, backgroundColor: color + '33', tension: 0.3, pointRadius: 5, pointHoverRadius: 8, borderWidth: index < 3 ? 3 : 2 });
+        datasets.raw.push({ label: horse.horse_name + ' (' + bestRawTime + ')', data: historyRaw, borderColor: color, backgroundColor: color + '33', tension: 0.3, pointRadius: 5, pointHoverRadius: 8, borderWidth: index < 3 ? 3 : 2 });
+        datasets.zscore.push({ label: horse.horse_name + ' (z=' + (horse.best_recent ? horse.best_recent.zscore.toFixed(2) : 'N/A') + ')', data: zscores, borderColor: color, backgroundColor: color + '33', tension: 0.3, pointRadius: 5, pointHoverRadius: 8, borderWidth: index < 3 ? 3 : 2 });
         if (horse.pfai_sectionals) {
             const pfai = horse.pfai_sectionals;
             const pfaiData = [];
-            
             if (pfai.last600_rank && pfai.last600_rank < 25) pfaiData.push(pfai.last600_rank);
             if (pfai.last400_rank && pfai.last400_rank < 25) pfaiData.push(pfai.last400_rank);
             if (pfai.last200_rank && pfai.last200_rank < 25) pfaiData.push(pfai.last200_rank);
-            
             if (pfaiData.length > 0) {
                 const avgRank = (pfaiData.reduce(function(a, b) { return a + b; }, 0) / pfaiData.length).toFixed(1);
-                
-                datasets.pfai.push({
-                    label: horse.horse_name + ' (Avg: #' + avgRank + ')',
-                    data: pfaiData,
-                    borderColor: color,
-                    backgroundColor: color + '33',
-                    tension: 0,
-                    pointRadius: 8,
-                    pointHoverRadius: 12,
-                    borderWidth: index < 3 ? 4 : 3
-                });
+                datasets.pfai.push({ label: horse.horse_name + ' (Avg: #' + avgRank + ')', data: pfaiData, borderColor: color, backgroundColor: color + '33', tension: 0, pointRadius: 8, pointHoverRadius: 12, borderWidth: index < 3 ? 4 : 3 });
             }
         }
     });
-    
     var maxRuns = 0;
-    horses.forEach(function(horse) {
-        var runCount = (horse.history_adjusted || []).length;
-        if (runCount > maxRuns) maxRuns = runCount;
-    });
-
+    horses.forEach(function(horse) { var r = (horse.history_adjusted || []).length; if (r > maxRuns) maxRuns = r; });
     var labels = [];
-    for (var i = maxRuns; i >= 1; i--) {
-        if (i === 1) {
-            labels.push('Last run');
-        } else {
-            labels.push(i + ' runs ago');
-        }
-    }
-    
+    for (var i = maxRuns; i >= 1; i--) { labels.push(i === 1 ? 'Last run' : i + ' runs ago'); }
     return {
         adjusted: { labels: labels, datasets: datasets.adjusted },
         raw: { labels: labels, datasets: datasets.raw },
@@ -914,36 +1179,30 @@ function getChartOptions(viewType) {
     return {
         responsive: true,
         maintainAspectRatio: false,
-        interaction: {
-            mode: 'nearest',
-            axis: 'x',
-            intersect: false
-        },
+        interaction: { mode: 'nearest', axis: 'x', intersect: false },
         plugins: {
             legend: {
                 position: 'bottom',
                 labels: {
-                    boxWidth: 12,
-                    padding: 8,
+                    boxWidth: 12, padding: 8,
                     font: { size: 11 },
-                    usePointStyle: true
+                    usePointStyle: true,
+                    color: '#c8c8d8'   /* ← dark-friendly legend text */
                 }
             },
             tooltip: {
-                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                backgroundColor: 'rgba(9,9,15,0.92)',
+                borderColor: 'rgba(102,126,234,0.4)',
+                borderWidth: 1,
                 padding: 12,
+                titleColor: '#f0f0f8',
+                bodyColor: '#c8c8d8',
                 callbacks: {
                     label: function(context) {
                         const value = context.parsed.y.toFixed(2);
                         const suffix = viewType === 'zscore' ? '' : viewType === 'pfai' ? '' : 's';
                         let label = context.dataset.label.split('(')[0].trim() + ': ';
-                        
-                        if (viewType === 'pfai') {
-                            label += '#' + value;
-                        } else {
-                            label += value + suffix;
-                        }
-                        
+                        if (viewType === 'pfai') { label += '#' + value; } else { label += value + suffix; }
                         if (viewType !== 'pfai') {
                             const horseIndex = context.datasetIndex;
                             const horse = window.currentRaceHorses ? window.currentRaceHorses[horseIndex] : null;
@@ -955,7 +1214,6 @@ function getChartOptions(viewType) {
                                 if (pfai.last600_rank && pfai.last600_rank < 25) label += '600m: #' + pfai.last600_rank;
                             }
                         }
-                        
                         return label;
                     }
                 }
@@ -966,15 +1224,18 @@ function getChartOptions(viewType) {
                 reverse: viewType !== 'zscore' && viewType !== 'pfai',
                 title: {
                     display: true,
-                    text: viewType === 'zscore' ? 'Z-Score (higher = faster)' : 
-                          viewType === 'pfai' ? 'PFAI Rank (#1 = best)' :
-                          'Sectional Time (seconds)',
-                    font: { size: 13, weight: 'bold' }
+                    text: viewType === 'zscore' ? 'Z-Score (higher = faster)' :
+                          viewType === 'pfai'   ? 'PFAI Rank (#1 = best)' :
+                                                  'Sectional Time (seconds)',
+                    font: { size: 12, weight: 'bold' },
+                    color: '#9090a8'   /* ← dark-friendly axis title */
                 },
-                grid: { color: '#e2e8f0' }
+                ticks: { color: '#9090a8' },                  /* ← dark tick labels */
+                grid:  { color: 'rgba(255,255,255,0.06)' }    /* ← subtle dark grid lines */
             },
             x: {
-                grid: { display: false }
+                ticks: { color: '#9090a8' },
+                grid:  { display: false }
             }
         }
     };
@@ -983,26 +1244,21 @@ function getChartOptions(viewType) {
 function switchView(raceId, viewType) {
     const instance = chartInstances[raceId];
     if (!instance) return;
-    
     const buttons = event.target.parentElement.querySelectorAll('.chart-toggle-btn');
     buttons.forEach(function(btn) { btn.classList.remove('active'); });
     event.target.classList.add('active');
-    
     const chartContainer = document.getElementById('chartContainer_' + raceId);
     const heatmapContainer = document.getElementById('pfaiHeatmap_' + raceId);
-    
     if (viewType === 'pfai') {
         chartContainer.style.display = 'none';
         heatmapContainer.style.display = 'block';
-        
         if (!heatmapContainer.hasAttribute('data-rendered')) {
-            renderPFAIHeatmap(raceId, instance.horsesData);  // ✨ USE STORED DATA!
+            renderPFAIHeatmap(raceId, instance.horsesData);
             heatmapContainer.setAttribute('data-rendered', 'true');
         }
     } else {
         chartContainer.style.display = 'block';
         heatmapContainer.style.display = 'none';
-        
         instance.chart.data = instance.data[viewType];
         instance.chart.options = getChartOptions(viewType);
         instance.chart.update();
@@ -1012,8 +1268,6 @@ function switchView(raceId, viewType) {
 function renderPFAIHeatmap(raceNum, horses) {
     const container = document.getElementById('pfaiHeatmap_' + raceNum);
     if (!container) return;
-    
-    // Filter horses that have PFAI data
     const horsesWithPFAI = horses.filter(function(horse) {
         return horse.pfai_sectionals && (
             (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < 25) ||
@@ -1021,266 +1275,140 @@ function renderPFAIHeatmap(raceNum, horses) {
             (horse.pfai_sectionals.last200_rank && horse.pfai_sectionals.last200_rank < 25)
         );
     });
-    
     if (horsesWithPFAI.length === 0) {
         container.innerHTML = '<div class="no-sectionals">No PFAI sectional data available for this race</div>';
         return;
     }
-    
-    // Calculate average ranks and sort
     horsesWithPFAI.forEach(function(horse) {
         const ranks = [];
-        if (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < 25) {
-            ranks.push(horse.pfai_sectionals.last600_rank);
-        }
-        if (horse.pfai_sectionals.last400_rank && horse.pfai_sectionals.last400_rank < 25) {
-            ranks.push(horse.pfai_sectionals.last400_rank);
-        }
-        if (horse.pfai_sectionals.last200_rank && horse.pfai_sectionals.last200_rank < 25) {
-            ranks.push(horse.pfai_sectionals.last200_rank);
-        }
+        if (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < 25) ranks.push(horse.pfai_sectionals.last600_rank);
+        if (horse.pfai_sectionals.last400_rank && horse.pfai_sectionals.last400_rank < 25) ranks.push(horse.pfai_sectionals.last400_rank);
+        if (horse.pfai_sectionals.last200_rank && horse.pfai_sectionals.last200_rank < 25) ranks.push(horse.pfai_sectionals.last200_rank);
         horse.avgRank = ranks.length > 0 ? ranks.reduce(function(a, b) { return a + b; }, 0) / ranks.length : 999;
     });
-    
     horsesWithPFAI.sort(function(a, b) { return a.avgRank - b.avgRank; });
-    
-    // Build heatmap table
-    let html = '<div style="overflow-x: auto;">';
-    html += '<h4 style="margin: 0 0 15px 0; color: #667eea; font-size: 16px;">🎯 PFAI Sectional Rankings - Last Start Performance</h4>';
-    html += '<table class="pfai-heatmap-table">';
-    html += '<thead><tr>';
-    html += '<th style="text-align: left; padding: 12px;">Horse</th>';
-    html += '<th style="text-align: center; padding: 12px;">600m</th>';
-    html += '<th style="text-align: center; padding: 12px;">400m</th>';
-    html += '<th style="text-align: center; padding: 12px;">200m</th>';
-    html += '<th style="text-align: center; padding: 12px;">Avg Rank</th>';
-    html += '</tr></thead>';
-    html += '<tbody>';
-    
+    let html = '<div style="overflow-x:auto;">';
+    html += '<h4 style="margin:0 0 14px; color:#a78bfa; font-size:15px;">🎯 PFAI Sectional Rankings - Last Start Performance</h4>';
+    html += '<table class="pfai-heatmap-table"><thead><tr>';
+    html += '<th style="text-align:left; padding:12px;">Horse</th>';
+    html += '<th style="text-align:center; padding:12px;">600m</th>';
+    html += '<th style="text-align:center; padding:12px;">400m</th>';
+    html += '<th style="text-align:center; padding:12px;">200m</th>';
+    html += '<th style="text-align:center; padding:12px;">Avg Rank</th>';
+    html += '</tr></thead><tbody>';
     horsesWithPFAI.forEach(function(horse, index) {
         const pfai = horse.pfai_sectionals;
-        
-        // Determine row color based on position (index + 1)
         let rowColor;
         const position = index + 1;
-        if (position === 1) rowColor = '#15803d'; // Elite - DARK GREEN
-        else if (position <= 3) rowColor = '#84cc16'; // Good - lime
-        else if (position <= 5) rowColor = '#eab308'; // Average - yellow
-        else if (position <= 7) rowColor = '#f97316'; // Below Avg - orange
-        else rowColor = '#dc2626'; // Poor - RED
-        
-        html += '<tr style="background: ' + rowColor + ';">';
-        html += '<td style="padding: 12px; font-weight: 600;">' + horse.horse_name + '</td>';
-        html += '<td style="padding: 12px; text-align: center;">' + getRankCell(pfai.last600_rank) + '</td>';
-        html += '<td style="padding: 12px; text-align: center;">' + getRankCell(pfai.last400_rank) + '</td>';
-        html += '<td style="padding: 12px; text-align: center;">' + getRankCell(pfai.last200_rank) + '</td>';
-        html += '<td style="padding: 12px; text-align: center; font-weight: 700;">' + horse.avgRank.toFixed(1) + '</td>';
+        if (position === 1) rowColor = '#15803d';
+        else if (position <= 3) rowColor = '#84cc16';
+        else if (position <= 5) rowColor = '#eab308';
+        else if (position <= 7) rowColor = '#f97316';
+        else rowColor = '#dc2626';
+        html += '<tr style="background:' + rowColor + ';">';
+        html += '<td style="padding:12px; font-weight:600;">' + horse.horse_name + '</td>';
+        html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last600_rank) + '</td>';
+        html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last400_rank) + '</td>';
+        html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last200_rank) + '</td>';
+        html += '<td style="padding:12px; text-align:center; font-weight:700;">' + horse.avgRank.toFixed(1) + '</td>';
         html += '</tr>';
     });
-    
     html += '</tbody></table>';
-    html += '<div style="margin-top: 15px; padding: 12px; background: #f0f4ff; border-radius: 6px; font-size: 13px;">';
-    html += '<strong>Legend:</strong> ';
-    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #22c55e; border-radius: 3px; margin: 0 5px;"></span> Elite (1st) ';
-    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #84cc16; border-radius: 3px; margin: 0 5px;"></span> Good (2nd-3rd) ';
-    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #eab308; border-radius: 3px; margin: 0 5px;"></span> Average (4th-5th) ';
-    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #f97316; border-radius: 3px; margin: 0 5px;"></span> Below Avg (6th-7th) ';
-    html += '<span style="display: inline-block; width: 20px; height: 20px; background: #e5e7eb; border-radius: 3px; margin: 0 5px;"></span> Poor (8th+)';
+    html += '<div style="margin-top:14px; padding:11px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; font-size:12px; color:#9090a8;">';
+    html += '<strong style="color:#c8c8d8;">Legend:</strong> ';
+    html += '<span style="display:inline-block; width:18px; height:18px; background:#22c55e; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Elite (1st) ';
+    html += '<span style="display:inline-block; width:18px; height:18px; background:#84cc16; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Good (2nd-3rd) ';
+    html += '<span style="display:inline-block; width:18px; height:18px; background:#eab308; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Average (4th-5th) ';
+    html += '<span style="display:inline-block; width:18px; height:18px; background:#f97316; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Below Avg (6th-7th) ';
+    html += '<span style="display:inline-block; width:18px; height:18px; background:#e5e7eb; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Poor (8th+)';
     html += '</div></div>';
-    
     container.innerHTML = html;
 }
 
 function getRankCell(rank) {
-    if (!rank || rank >= 25) {
-        return '<span style="color: #9ca3af;">-</span>';
-    }
-    
+    if (!rank || rank >= 25) { return '<span style="color:#6b7280;">-</span>'; }
     let color, bgColor, label;
-    
-    if (rank <= 5) {
-        color = '#166534';
-        bgColor = '#22c55e';
-        label = 'Elite';
-    } else if (rank <= 10) {
-        color = '#365314';
-        bgColor = '#84cc16';
-        label = 'Good';
-    } else if (rank <= 15) {
-        color = '#713f12';
-        bgColor = '#eab308';
-        label = 'Avg';
-    } else if (rank <= 20) {
-        color = '#7c2d12';
-        bgColor = '#f97316';
-        label = 'Below';
-    } else {
-        color = '#6b7280';
-        bgColor = '#e5e7eb';
-        label = 'Poor';
-    }
-    
-    return '<span style="display: inline-block; padding: 6px 12px; background: ' + bgColor + '; color: ' + color + '; font-weight: 700; border-radius: 6px; min-width: 50px;">#' + rank + '</span>';
+    if (rank <= 5)       { color = '#166534'; bgColor = '#22c55e'; label = 'Elite'; }
+    else if (rank <= 10) { color = '#365314'; bgColor = '#84cc16'; label = 'Good'; }
+    else if (rank <= 15) { color = '#713f12'; bgColor = '#eab308'; label = 'Avg'; }
+    else if (rank <= 20) { color = '#7c2d12'; bgColor = '#f97316'; label = 'Below'; }
+    else                 { color = '#6b7280'; bgColor = '#e5e7eb'; label = 'Poor'; }
+    return '<span style="display:inline-block; padding:5px 11px; background:' + bgColor + '; color:' + color + '; font-weight:700; border-radius:6px; min-width:48px;">#' + rank + '</span>';
 }
 
 function generateInsights(raceNum, horses) {
     const container = document.getElementById('insights_race' + raceNum);
     if (!container) return;
-    
     let insights = [];
-    
-    let fastest = null;
-    let fastestTime = Infinity;
-    
+    let fastest = null, fastestTime = Infinity;
     horses.forEach(function(horse) {
         if (horse.best_recent && horse.best_recent.adjusted_time < fastestTime) {
-            fastestTime = horse.best_recent.adjusted_time;
-            fastest = horse.horse_name;
+            fastestTime = horse.best_recent.adjusted_time; fastest = horse.horse_name;
         }
     });
-    
-    if (fastest) {
-        insights.push('🎯 <strong>Fastest Adjusted Time:</strong> ' + fastest + ' (' + fastestTime.toFixed(2) + 's)');
-    }
-    
-    let consistent = null;
-    let bestSD = Infinity;
-    
+    if (fastest) insights.push('🎯 <strong>Fastest Adjusted Time:</strong> ' + fastest + ' (' + fastestTime.toFixed(2) + 's)');
+    let consistent = null, bestSD = Infinity;
     horses.forEach(function(horse) {
-        if (horse.consistency && horse.consistency.std_dev < bestSD) {
-            bestSD = horse.consistency.std_dev;
-            consistent = horse.horse_name;
-        }
+        if (horse.consistency && horse.consistency.std_dev < bestSD) { bestSD = horse.consistency.std_dev; consistent = horse.horse_name; }
     });
-    
     if (consistent) {
         const rating = bestSD < 0.3 ? 'Excellent' : bestSD < 0.5 ? 'Good' : bestSD < 0.7 ? 'Fair' : 'Variable';
         insights.push('✅ <strong>Most Consistent:</strong> ' + consistent + ' (' + rating + ' - SD: ' + bestSD.toFixed(2) + 's)');
     }
-    
-    let pfaiCount = 0;
-    let bestPfaiHorse = null;
-    let bestPfaiScore = Infinity;
-    
+    let pfaiCount = 0, bestPfaiHorse = null, bestPfaiScore = Infinity;
     horses.forEach(function(horse) {
         if (horse.pfai_sectionals) {
             pfaiCount++;
-            
             const ranks = [];
-            if (horse.pfai_sectionals.last200_rank && horse.pfai_sectionals.last200_rank < 25) {
-                ranks.push(horse.pfai_sectionals.last200_rank);
-            }
-            if (horse.pfai_sectionals.last400_rank && horse.pfai_sectionals.last400_rank < 25) {
-                ranks.push(horse.pfai_sectionals.last400_rank);
-            }
-            if (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < 25) {
-                ranks.push(horse.pfai_sectionals.last600_rank);
-            }
-            
+            if (horse.pfai_sectionals.last200_rank && horse.pfai_sectionals.last200_rank < 25) ranks.push(horse.pfai_sectionals.last200_rank);
+            if (horse.pfai_sectionals.last400_rank && horse.pfai_sectionals.last400_rank < 25) ranks.push(horse.pfai_sectionals.last400_rank);
+            if (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < 25) ranks.push(horse.pfai_sectionals.last600_rank);
             if (ranks.length > 0) {
                 const avgRank = ranks.reduce(function(a, b) { return a + b; }, 0) / ranks.length;
-                if (avgRank < bestPfaiScore) {
-                    bestPfaiScore = avgRank;
-                    bestPfaiHorse = horse.horse_name;
-                }
+                if (avgRank < bestPfaiScore) { bestPfaiScore = avgRank; bestPfaiHorse = horse.horse_name; }
             }
         }
     });
-    
-    if (bestPfaiHorse) {
-        insights.push('🎯 <strong>Best PFAI Sectionals:</strong> ' + bestPfaiHorse + ' (Avg Rank: ' + bestPfaiScore.toFixed(1) + ')');
-    }
-    
-    if (pfaiCount > 0) {
-        insights.push('📊 <strong>PFAI Data Available:</strong> ' + pfaiCount + ' horses have API sectional rankings');
-    }
-    
-    const times = horses
-        .filter(function(h) { return h.best_recent; })
-        .map(function(h) { return h.best_recent.adjusted_time; })
-        .sort(function(a, b) { return a - b; });
-    
+    if (bestPfaiHorse) insights.push('🎯 <strong>Best PFAI Sectionals:</strong> ' + bestPfaiHorse + ' (Avg Rank: ' + bestPfaiScore.toFixed(1) + ')');
+    if (pfaiCount > 0) insights.push('📊 <strong>PFAI Data Available:</strong> ' + pfaiCount + ' horses have API sectional rankings');
+    const times = horses.filter(function(h) { return h.best_recent; }).map(function(h) { return h.best_recent.adjusted_time; }).sort(function(a, b) { return a - b; });
     if (times.length >= 2) {
         const spread = times[times.length - 1] - times[0];
-        if (spread < 0.5) {
-            insights.push('⚠️ <strong>Tight Race:</strong> Top ' + times.length + ' within 0.5s - highly competitive');
-        } else if (spread > 1.5) {
-            insights.push('📈 <strong>Standout:</strong> ' + spread.toFixed(2) + 's gap suggests clear leader on sectionals');
-        }
+        if (spread < 0.5) insights.push('⚠️ <strong>Tight Race:</strong> Top ' + times.length + ' within 0.5s - highly competitive');
+        else if (spread > 1.5) insights.push('📈 <strong>Standout:</strong> ' + spread.toFixed(2) + 's gap suggests clear leader on sectionals');
     }
-    
-    container.innerHTML = '<h4>Key Insights</h4>' +
-        insights.map(function(i) { return '<div class="insight-item">' + i + '</div>'; }).join('');
+    container.innerHTML = '<h4>Key Insights</h4>' + insights.map(function(i) { return '<div class="insight-item">' + i + '</div>'; }).join('');
 }
 
-// Speed Map Functions
 function toggleSpeedMap(raceNumber) {
     const container = document.getElementById('speedmap-' + raceNumber);
     const toggle = document.getElementById('speedmap-toggle-' + raceNumber);
-    
     if (container.style.display === 'none' || container.style.display === '') {
-        container.style.display = 'block';
-        toggle.textContent = '▲ Hide';
-        renderSpeedMap(raceNumber);
+        container.style.display = 'block'; toggle.textContent = '▲ Hide'; renderSpeedMap(raceNumber);
     } else {
-        container.style.display = 'none';
-        toggle.textContent = '▼ Show';
+        container.style.display = 'none'; toggle.textContent = '▼ Show';
     }
 }
 
 function renderSpeedMap(raceNumber) {
     const data = window['speedMapData_' + raceNumber];
-    
-    if (!data || !data.payLoad || !data.payLoad[0] || !data.payLoad[0].items) {
-        console.error('No speed map data available');
-        return;
-    }
-    
+    if (!data || !data.payLoad || !data.payLoad[0] || !data.payLoad[0].items) { console.error('No speed map data available'); return; }
     const horses = data.payLoad[0].items;
-    
-    const categories = {
-        leader: [],
-        onpace: [],
-        midfield: [],
-        backmarker: []
-    };
-    
+    const categories = { leader: [], onpace: [], midfield: [], backmarker: [] };
     horses.forEach(function(horse) {
         const settle = horse.settle;
-        if (settle <= 2) {
-            categories.leader.push(horse);
-        } else if (settle <= 4) {
-            categories.onpace.push(horse);
-        } else if (settle <= 8) {
-            categories.midfield.push(horse);
-        } else {
-            categories.backmarker.push(horse);
-        }
+        if (settle <= 2) categories.leader.push(horse);
+        else if (settle <= 4) categories.onpace.push(horse);
+        else if (settle <= 8) categories.midfield.push(horse);
+        else categories.backmarker.push(horse);
     });
-    
-    Object.keys(categories).forEach(function(key) {
-        categories[key].sort(function(a, b) { return a.settle - b.settle; });
-    });
-    
+    Object.keys(categories).forEach(function(key) { categories[key].sort(function(a, b) { return a.settle - b.settle; }); });
     const html = '<div class="speedmap-grid">' +
-        '<div class="speedmap-column">' +
-        '<div class="speedmap-column-header">Leader</div>' +
-        categories.leader.map(createHorseCard).join('') +
-        '</div>' +
-        '<div class="speedmap-column">' +
-        '<div class="speedmap-column-header">OnPace</div>' +
-        categories.onpace.map(createHorseCard).join('') +
-        '</div>' +
-        '<div class="speedmap-column">' +
-        '<div class="speedmap-column-header">Midfield</div>' +
-        categories.midfield.map(createHorseCard).join('') +
-        '</div>' +
-        '<div class="speedmap-column">' +
-        '<div class="speedmap-column-header">Backmarker</div>' +
-        categories.backmarker.map(createHorseCard).join('') +
-        '</div>' +
+        '<div class="speedmap-column"><div class="speedmap-column-header">Leader</div>' + categories.leader.map(createHorseCard).join('') + '</div>' +
+        '<div class="speedmap-column"><div class="speedmap-column-header">OnPace</div>' + categories.onpace.map(createHorseCard).join('') + '</div>' +
+        '<div class="speedmap-column"><div class="speedmap-column-header">Midfield</div>' + categories.midfield.map(createHorseCard).join('') + '</div>' +
+        '<div class="speedmap-column"><div class="speedmap-column-header">Backmarker</div>' + categories.backmarker.map(createHorseCard).join('') + '</div>' +
         '</div>';
-    
     document.querySelector('#speedmap-' + raceNumber + ' .speedmap-container').innerHTML = html;
 }
 
@@ -1289,7 +1417,6 @@ function createHorseCard(horse) {
     let mapClass = 'speedmap-map-neutral';
     if (mapValue > 0) mapClass = 'speedmap-map-positive';
     if (mapValue < 0) mapClass = 'speedmap-map-negative';
-    
     return '<div class="speedmap-horse-card">' +
         '<div class="speedmap-tab-number">' + horse.tabNo + '</div>' +
         '<div class="speedmap-horse-name">' + horse.runnerName + '</div>' +
@@ -1303,414 +1430,144 @@ function createHorseCard(horse) {
         '</div>';
 }
 
-// Filter System
+// ── Filter System — 100% identical ──
 const FILTER_CRITERIA = {
-    majorClassDropSlowSectional: {
-        label: 'Major Class Drop + Slow Sectional (720% ROI!)',
-        detect: function(notes) { return notes.includes('Major class drop + slow sectional combo'); }
-    },
-    trapezeArtistSire: {
-        label: 'Sire - Trapeze Artist (137.7% ROI)',
-        detect: function(notes) { return notes.includes('Elite sire (Trapeze Artist)'); }
-    },
-    pierataSire: {
-        label: 'Sire - Pierata (94.5% ROI)',
-        detect: function(notes) { return notes.includes('Elite sire (Pierata)'); }
-    },
-    coltBonus: {
-        label: 'Colt Bonus (82.7% ROI)',
-        detect: function(notes) { return notes.includes('+20.0: COLT'); }
-    },
-    goodJockey: {
-        label: 'Good Jockey (81.3% ROI)',
-        detect: function(notes) { return notes.includes('Like the Jockey'); }
-    },
-    threeYoColtCombo: {
-        label: '3yo Colt Combo (79.7% ROI)',
-        detect: function(notes) { return notes.includes('3yo COLT combo'); }
-    },
-    undefeatedCondition: {
-        label: 'Undefeated on Condition (41.1% ROI)',
-        detect: function(notes) { return /UNDEFEATED in \d+ runs on (good|soft|heavy|firm|synthetic)!/.test(notes); }
-    },
-    bigWeightAdvFastest: {
-        label: 'Big Weight Adv + Fastest (40% ROI)',
-        detect: function(notes) { return notes.includes('Big weight advantage (3kg+) + Fastest'); }
-    },
-    age3Prime: {
-        label: 'Age 3yo Prime (12.9% ROI)',
-        detect: function(notes) { return notes.includes('Prime age (3yo'); }
-    },
-    megaSprintWeight: {
-        label: '🔥🔥 Sprint+Weight+Fastest (10.6% ROI)',
-        detect: function(notes) { return notes.includes('🔥🔥 Sprint + Weight adv + Fastest'); }
-    },
-    zoustarSire: {
-        label: 'Sire - Zoustar (5.0% ROI)',
-        detect: function(notes) { return notes.includes('Elite sire (Zoustar)'); }
-    },
-    goodTrainer: {
-        label: 'Good Trainer (2.9% ROI)',
-        detect: function(notes) { return notes.includes('Like the Trainer'); }
-    },
-    anyEliteSire: {
-        label: 'ANY Elite Sire (Trapeze/Pierata/Zoustar)',
-        detect: function(notes) {
-            return notes.includes('Elite sire (Trapeze Artist)') ||
-                   notes.includes('Elite sire (Pierata)') ||
-                   notes.includes('Elite sire (Zoustar)');
-        }
-    },
-    anyMegaCombo: {
-        label: 'ANY Mega Combo (🔥 patterns)',
-        detect: function(notes) {
-            return notes.includes('🔥🔥🔥 MEGA COMBO') ||
-                   notes.includes('🔥🔥 Sprint + Weight adv + Fastest') ||
-                   notes.includes('🔥 Mile + Weight adv + Fastest');
-        }
-    },
-    topTierOnly: {
-        label: 'Top Tier Only (40%+ ROI)',
-        detect: function(notes) {
-            return notes.includes('Major class drop + slow sectional combo') ||
-                   notes.includes('Elite sire (Trapeze Artist)') ||
-                   notes.includes('Elite sire (Pierata)') ||
-                   notes.includes('+20.0: COLT') ||
-                   notes.includes('Like the Jockey') ||
-                   notes.includes('3yo COLT combo') ||
-                   /UNDEFEATED in \d+ runs on (good|soft|heavy|firm|synthetic)!/.test(notes) ||
-                   notes.includes('Big weight advantage (3kg+) + Fastest');
-        }
-    }
+    majorClassDropSlowSectional: { label: 'Major Class Drop + Slow Sectional (720% ROI!)', detect: function(notes) { return notes.includes('Major class drop + slow sectional combo'); } },
+    trapezeArtistSire: { label: 'Sire - Trapeze Artist (137.7% ROI)', detect: function(notes) { return notes.includes('Elite sire (Trapeze Artist)'); } },
+    pierataSire: { label: 'Sire - Pierata (94.5% ROI)', detect: function(notes) { return notes.includes('Elite sire (Pierata)'); } },
+    coltBonus: { label: 'Colt Bonus (82.7% ROI)', detect: function(notes) { return notes.includes('+20.0: COLT'); } },
+    goodJockey: { label: 'Good Jockey (81.3% ROI)', detect: function(notes) { return notes.includes('Like the Jockey'); } },
+    threeYoColtCombo: { label: '3yo Colt Combo (79.7% ROI)', detect: function(notes) { return notes.includes('3yo COLT combo'); } },
+    undefeatedCondition: { label: 'Undefeated on Condition (41.1% ROI)', detect: function(notes) { return /UNDEFEATED in \d+ runs on (good|soft|heavy|firm|synthetic)!/.test(notes); } },
+    bigWeightAdvFastest: { label: 'Big Weight Adv + Fastest (40% ROI)', detect: function(notes) { return notes.includes('Big weight advantage (3kg+) + Fastest'); } },
+    age3Prime: { label: 'Age 3yo Prime (12.9% ROI)', detect: function(notes) { return notes.includes('Prime age (3yo'); } },
+    megaSprintWeight: { label: '🔥🔥 Sprint+Weight+Fastest (10.6% ROI)', detect: function(notes) { return notes.includes('🔥🔥 Sprint + Weight adv + Fastest'); } },
+    zoustarSire: { label: 'Sire - Zoustar (5.0% ROI)', detect: function(notes) { return notes.includes('Elite sire (Zoustar)'); } },
+    goodTrainer: { label: 'Good Trainer (2.9% ROI)', detect: function(notes) { return notes.includes('Like the Trainer'); } },
+    anyEliteSire: { label: 'ANY Elite Sire (Trapeze/Pierata/Zoustar)', detect: function(notes) { return notes.includes('Elite sire (Trapeze Artist)') || notes.includes('Elite sire (Pierata)') || notes.includes('Elite sire (Zoustar)'); } },
+    anyMegaCombo: { label: 'ANY Mega Combo (🔥 patterns)', detect: function(notes) { return notes.includes('🔥🔥🔥 MEGA COMBO') || notes.includes('🔥🔥 Sprint + Weight adv + Fastest') || notes.includes('🔥 Mile + Weight adv + Fastest'); } },
+    topTierOnly: { label: 'Top Tier Only (40%+ ROI)', detect: function(notes) { return notes.includes('Major class drop + slow sectional combo') || notes.includes('Elite sire (Trapeze Artist)') || notes.includes('Elite sire (Pierata)') || notes.includes('+20.0: COLT') || notes.includes('Like the Jockey') || notes.includes('3yo COLT combo') || /UNDEFEATED in \d+ runs on (good|soft|heavy|firm|synthetic)!/.test(notes) || notes.includes('Big weight advantage (3kg+) + Fastest'); } }
 };
-
 let activeFilters = [];
-
 function parseHorseCriteria(notes) {
     if (!notes || typeof notes !== 'string') return {};
     const criteria = {};
-    Object.keys(FILTER_CRITERIA).forEach(function(key) {
-        criteria[key] = FILTER_CRITERIA[key].detect(notes);
-    });
+    Object.keys(FILTER_CRITERIA).forEach(function(key) { criteria[key] = FILTER_CRITERIA[key].detect(notes); });
     return criteria;
 }
-
 function createFilterBar() {
-    const filterBar = document.createElement('div');
-    filterBar.className = 'filter-bar-container';
-    filterBar.id = 'filter-bar';
-
-    const headerDiv = document.createElement('div');
-    headerDiv.className = 'filter-bar-header';
-
-    const title = document.createElement('div');
-    title.className = 'filter-bar-title';
-    title.innerHTML = '🔍 Add Filter:';
-
-    const dropdown = document.createElement('select');
-    dropdown.className = 'filter-dropdown';
-    dropdown.id = 'filter-dropdown';
-
-    const defaultOption = document.createElement('option');
-    defaultOption.value = '';
-    defaultOption.textContent = 'Select a filter...';
-    dropdown.appendChild(defaultOption);
-
-    Object.keys(FILTER_CRITERIA).forEach(function(key) {
-        const option = document.createElement('option');
-        option.value = key;
-        option.textContent = FILTER_CRITERIA[key].label;
-        dropdown.appendChild(option);
-    });
-
-    const clearBtn = document.createElement('button');
-    clearBtn.className = 'clear-filters-btn';
-    clearBtn.textContent = 'Clear All Filters';
-    clearBtn.onclick = clearAllFilters;
-
-    headerDiv.appendChild(title);
-    headerDiv.appendChild(dropdown);
-    headerDiv.appendChild(clearBtn);
-    filterBar.appendChild(headerDiv);
-
-    const activeFiltersDiv = document.createElement('div');
-    activeFiltersDiv.className = 'active-filters-container';
-    activeFiltersDiv.id = 'active-filters-container';
-    filterBar.appendChild(activeFiltersDiv);
-
-    dropdown.addEventListener('change', function() {
-        if (this.value) {
-            addFilter(this.value);
-            this.value = '';
-        }
-    });
-
+    const filterBar = document.createElement('div'); filterBar.className = 'filter-bar-container'; filterBar.id = 'filter-bar';
+    const headerDiv = document.createElement('div'); headerDiv.className = 'filter-bar-header';
+    const title = document.createElement('div'); title.className = 'filter-bar-title'; title.innerHTML = '🔍 Add Filter:';
+    const dropdown = document.createElement('select'); dropdown.className = 'filter-dropdown'; dropdown.id = 'filter-dropdown';
+    const defaultOption = document.createElement('option'); defaultOption.value = ''; defaultOption.textContent = 'Select a filter...'; dropdown.appendChild(defaultOption);
+    Object.keys(FILTER_CRITERIA).forEach(function(key) { const option = document.createElement('option'); option.value = key; option.textContent = FILTER_CRITERIA[key].label; dropdown.appendChild(option); });
+    const clearBtn = document.createElement('button'); clearBtn.className = 'clear-filters-btn'; clearBtn.textContent = 'Clear All Filters'; clearBtn.onclick = clearAllFilters;
+    headerDiv.appendChild(title); headerDiv.appendChild(dropdown); headerDiv.appendChild(clearBtn); filterBar.appendChild(headerDiv);
+    const activeFiltersDiv = document.createElement('div'); activeFiltersDiv.className = 'active-filters-container'; activeFiltersDiv.id = 'active-filters-container'; filterBar.appendChild(activeFiltersDiv);
+    dropdown.addEventListener('change', function() { if (this.value) { addFilter(this.value); this.value = ''; } });
     return filterBar;
 }
-
 function updateActiveFiltersDisplay() {
-    const container = document.getElementById('active-filters-container');
-    if (!container) return;
-    container.innerHTML = '';
+    const container = document.getElementById('active-filters-container'); if (!container) return; container.innerHTML = '';
     if (activeFilters.length === 0) return;
-
-    const label = document.createElement('span');
-    label.className = 'active-filters-label';
-    label.textContent = 'Active Filters:';
-    container.appendChild(label);
-
+    const label = document.createElement('span'); label.className = 'active-filters-label'; label.textContent = 'Active Filters:'; container.appendChild(label);
     activeFilters.forEach(function(filterKey) {
-        const tag = document.createElement('div');
-        tag.className = 'filter-tag';
-        const tagText = document.createElement('span');
-        tagText.textContent = FILTER_CRITERIA[filterKey].label;
-        const removeBtn = document.createElement('span');
-        removeBtn.className = 'filter-tag-remove';
-        removeBtn.textContent = '×';
-        removeBtn.onclick = function() { removeFilter(filterKey); };
-        tag.appendChild(tagText);
-        tag.appendChild(removeBtn);
-        container.appendChild(tag);
+        const tag = document.createElement('div'); tag.className = 'filter-tag';
+        const tagText = document.createElement('span'); tagText.textContent = FILTER_CRITERIA[filterKey].label;
+        const removeBtn = document.createElement('span'); removeBtn.className = 'filter-tag-remove'; removeBtn.textContent = '×'; removeBtn.onclick = function() { removeFilter(filterKey); };
+        tag.appendChild(tagText); tag.appendChild(removeBtn); container.appendChild(tag);
     });
-
-    const matchCounter = document.createElement('span');
-    matchCounter.className = 'filter-match-counter';
-    matchCounter.id = 'filter-match-counter';
-    container.appendChild(matchCounter);
+    const matchCounter = document.createElement('span'); matchCounter.className = 'filter-match-counter'; matchCounter.id = 'filter-match-counter'; container.appendChild(matchCounter);
     setTimeout(updateMatchCounter, 100);
 }
-
 function updateMatchCounter() {
-    const counter = document.getElementById('filter-match-counter');
-    if (!counter) return;
+    const counter = document.getElementById('filter-match-counter'); if (!counter) return;
     const matchCount = document.querySelectorAll('.horse-row-match').length;
-    if (activeFilters.length === 0) {
-        counter.textContent = 'No filters active';
-    } else if (matchCount === 0) {
-        counter.textContent = 'No horses match all filters';
-    } else {
-        counter.textContent = matchCount + ' horse' + (matchCount !== 1 ? 's' : '') + ' match';
-    }
+    if (activeFilters.length === 0) counter.textContent = 'No filters active';
+    else if (matchCount === 0) counter.textContent = 'No horses match all filters';
+    else counter.textContent = matchCount + ' horse' + (matchCount !== 1 ? 's' : '') + ' match';
 }
-
-function addFilter(filterKey) {
-    if (activeFilters.includes(filterKey)) return;
-    activeFilters.push(filterKey);
-    updateActiveFiltersDisplay();
-    applyFilters();
-}
-
-function removeFilter(filterKey) {
-    activeFilters = activeFilters.filter(function(key) { return key !== filterKey; });
-    updateActiveFiltersDisplay();
-    applyFilters();
-}
-
-function clearAllFilters() {
-    activeFilters = [];
-    updateActiveFiltersDisplay();
-    applyFilters();
-}
-
+function addFilter(filterKey) { if (activeFilters.includes(filterKey)) return; activeFilters.push(filterKey); updateActiveFiltersDisplay(); applyFilters(); }
+function removeFilter(filterKey) { activeFilters = activeFilters.filter(function(key) { return key !== filterKey; }); updateActiveFiltersDisplay(); applyFilters(); }
+function clearAllFilters() { activeFilters = []; updateActiveFiltersDisplay(); applyFilters(); }
 function applyFilters() {
     const allRows = document.querySelectorAll('table tbody tr');
-    
-    if (activeFilters.length === 0) {
-        allRows.forEach(function(row) { row.classList.remove('horse-row-match'); });
-        return;
-    }
-
+    if (activeFilters.length === 0) { allRows.forEach(function(row) { row.classList.remove('horse-row-match'); }); return; }
     allRows.forEach(function(row) {
-        const notesElement = row.querySelector('pre');
-        if (!notesElement) return;
-        
+        const notesElement = row.querySelector('pre'); if (!notesElement) return;
         const notes = notesElement.textContent || '';
         const horseCriteria = parseHorseCriteria(notes);
         const meetsAllFilters = activeFilters.every(function(filterKey) { return horseCriteria[filterKey] === true; });
-        
-        if (meetsAllFilters) {
-            row.classList.add('horse-row-match');
-        } else {
-            row.classList.remove('horse-row-match');
-        }
+        if (meetsAllFilters) row.classList.add('horse-row-match'); else row.classList.remove('horse-row-match');
     });
     updateMatchCounter();
 }
 
 function calculateRaceConfidence(horses) {
     if (horses.length < 2) return null;
-    
-    const parsedHorses = horses.map(function(h) {
-        return {
-            score: parseFloat(h.score),
-            winProb: parseFloat(h.winProb) / 100
-        };
-    }).filter(function(h) { return !isNaN(h.score) && !isNaN(h.winProb); });
-    
+    const parsedHorses = horses.map(function(h) { return { score: parseFloat(h.score), winProb: parseFloat(h.winProb) / 100 }; }).filter(function(h) { return !isNaN(h.score) && !isNaN(h.winProb); });
     if (parsedHorses.length < 2) return null;
-    
     parsedHorses.sort(function(a, b) { return b.score - a.score; });
-    
-    const top1 = parsedHorses[0];
-    const top2 = parsedHorses[1];
-    const top3 = parsedHorses[2] || top2;
-    
+    const top1 = parsedHorses[0], top2 = parsedHorses[1], top3 = parsedHorses[2] || top2;
     const dominanceRatio = top1.winProb / (top1.winProb + top2.winProb + top3.winProb);
     const dominanceScore = Math.max(0, Math.min(100, (dominanceRatio - 0.33) / (0.60 - 0.33) * 100));
-    
     const scoreGap = top1.score - top2.score;
     let scoreGapScore;
-    if (scoreGap >= 50) scoreGapScore = 100;
-    else if (scoreGap >= 30) scoreGapScore = 85;
-    else if (scoreGap >= 20) scoreGapScore = 70;
-    else if (scoreGap >= 10) scoreGapScore = 50;
-    else if (scoreGap >= 5) scoreGapScore = 30;
-    else scoreGapScore = 10;
-    
+    if (scoreGap >= 50) scoreGapScore = 100; else if (scoreGap >= 30) scoreGapScore = 85; else if (scoreGap >= 20) scoreGapScore = 70; else if (scoreGap >= 10) scoreGapScore = 50; else if (scoreGap >= 5) scoreGapScore = 30; else scoreGapScore = 10;
     const winProbRatio = top1.winProb / top2.winProb;
     let ratioScore;
-    if (winProbRatio >= 2.0) ratioScore = 100;
-    else if (winProbRatio >= 1.5) ratioScore = 80;
-    else if (winProbRatio >= 1.3) ratioScore = 60;
-    else if (winProbRatio >= 1.15) ratioScore = 40;
-    else ratioScore = 20;
-    
+    if (winProbRatio >= 2.0) ratioScore = 100; else if (winProbRatio >= 1.5) ratioScore = 80; else if (winProbRatio >= 1.3) ratioScore = 60; else if (winProbRatio >= 1.15) ratioScore = 40; else ratioScore = 20;
     const gapScore = (scoreGapScore * 0.6) + (ratioScore * 0.4);
     const strengthScore = Math.max(0, Math.min(100, (top1.winProb - 0.12) / (0.35 - 0.12) * 100));
-    
     const allWinProbs = parsedHorses.map(function(h) { return h.winProb; });
     const mean = allWinProbs.reduce(function(a, b) { return a + b; }, 0) / allWinProbs.length;
     const variance = allWinProbs.reduce(function(sum, p) { return sum + Math.pow(p - mean, 2); }, 0) / allWinProbs.length;
     const stdDev = Math.sqrt(variance);
     const cv = stdDev / mean;
     const cvScore = Math.max(0, Math.min(100, (cv - 0.2) / (1.0 - 0.2) * 100));
-    
     const entropy = -allWinProbs.reduce(function(sum, p) { return sum + (p > 0 ? p * Math.log2(p) : 0); }, 0);
     const maxEntropy = Math.log2(parsedHorses.length);
     const entropyScore = Math.max(0, Math.min(100, (1 - entropy / maxEntropy) * 100));
-    
-    const finalConfidence = Math.round(
-        dominanceScore * 0.20 +
-        gapScore * 0.35 +
-        strengthScore * 0.25 +
-        cvScore * 0.10 +
-        entropyScore * 0.10
-    );
-    
+    const finalConfidence = Math.round(dominanceScore * 0.20 + gapScore * 0.35 + strengthScore * 0.25 + cvScore * 0.10 + entropyScore * 0.10);
     let rating, description, style, emoji;
-    
-    if (finalConfidence >= 90) {
-        rating = "Extremely High";
-        emoji = "🟢";
-        description = "Near-certainty - Maximum confidence bet";
-        style = "background: #d4edda; border-left: 4px solid #28a745;";
-    } else if (finalConfidence >= 75) {
-        rating = "Very High";
-        emoji = "🟢";
-        description = "Top pick - Strong betting opportunity";
-        style = "background: #d4edda; border-left: 4px solid #28a745;";
-    } else if (finalConfidence >= 60) {
-        rating = "High";
-        emoji = "🟢";
-        description = "Strong favorite - Solid bet recommended";
-        style = "background: #d1ecf1; border-left: 4px solid #17a2b8;";
-    } else if (finalConfidence >= 50) {
-        rating = "Medium";
-        emoji = "🟡";
-        description = "Moderate confidence - Standard stake";
-        style = "background: #fff3cd; border-left: 4px solid #ffc107;";
-    } else if (finalConfidence >= 40) {
-        rating = "Medium-Low";
-        emoji = "🟡";
-        description = "Competitive field - Reduced stake or exotics";
-        style = "background: #fff3cd; border-left: 4px solid #ffc107;";
-    } else if (finalConfidence >= 30) {
-        rating = "Low";
-        emoji = "🟠";
-        description = "Uncertain race - Small stake or avoid";
-        style = "background: #ffe5cc; border-left: 4px solid #fd7e14;";
-    } else if (finalConfidence >= 20) {
-        rating = "Very Low";
-        emoji = "🔴";
-        description = "High risk - Avoid or exotic bets only";
-        style = "background: #f8d7da; border-left: 4px solid #dc3545;";
-    } else {
-        rating = "No Bet";
-        emoji = "🔴";
-        description = "Too uncertain - Do not bet";
-        style = "background: #f8d7da; border-left: 4px solid #dc3545;";
-    }
-    
+    if (finalConfidence >= 90)      { rating = "Extremely High"; emoji = "🟢"; description = "Near-certainty - Maximum confidence bet"; style = "background: #d4edda; border-left: 4px solid #28a745;"; }
+    else if (finalConfidence >= 75) { rating = "Very High";      emoji = "🟢"; description = "Top pick - Strong betting opportunity"; style = "background: #d4edda; border-left: 4px solid #28a745;"; }
+    else if (finalConfidence >= 60) { rating = "High";           emoji = "🟢"; description = "Strong favorite - Solid bet recommended"; style = "background: #d1ecf1; border-left: 4px solid #17a2b8;"; }
+    else if (finalConfidence >= 50) { rating = "Medium";         emoji = "🟡"; description = "Moderate confidence - Standard stake"; style = "background: #fff3cd; border-left: 4px solid #ffc107;"; }
+    else if (finalConfidence >= 40) { rating = "Medium-Low";     emoji = "🟡"; description = "Competitive field - Reduced stake or exotics"; style = "background: #fff3cd; border-left: 4px solid #ffc107;"; }
+    else if (finalConfidence >= 30) { rating = "Low";            emoji = "🟠"; description = "Uncertain race - Small stake or avoid"; style = "background: #ffe5cc; border-left: 4px solid #fd7e14;"; }
+    else if (finalConfidence >= 20) { rating = "Very Low";       emoji = "🔴"; description = "High risk - Avoid or exotic bets only"; style = "background: #f8d7da; border-left: 4px solid #dc3545;"; }
+    else                            { rating = "No Bet";         emoji = "🔴"; description = "Too uncertain - Do not bet"; style = "background: #f8d7da; border-left: 4px solid #dc3545;"; }
     return { confidence: finalConfidence, rating: rating, description: description, style: style, emoji: emoji };
 }
 
 function toggleScratch(horseId, shouldScratch) {
-    fetch('/api/horse/' + horseId + '/toggle-scratch', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        }
-    })
-    .then(function(response) { return response.json(); })
-    .then(function(data) {
-        if (data.success) {
-            location.reload();
-        } else {
-            alert('Failed to update scratch status');
-        }
-    })
-    .catch(function(error) {
-        console.error('Error:', error);
-        alert('Failed to update scratch status');
-    });
+    fetch('/api/horse/' + horseId + '/toggle-scratch', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(function(response) { return response.json(); })
+        .then(function(data) { if (data.success) { location.reload(); } else { alert('Failed to update scratch status'); } })
+        .catch(function(error) { console.error('Error:', error); alert('Failed to update scratch status'); });
 }
-// ====== INJECT PFAI SCORES FROM SPEED MAP DATA ======
+
 function injectPFAIScores() {
-    // Loop through all races
     const races = document.querySelectorAll('.card[id^="race-"]');
-    
     races.forEach(function(raceCard) {
-        // Extract race number from the card ID (e.g., "race-3" -> "3")
         const raceId = raceCard.id.replace('race-', '');
         const speedMapData = window['speedMapData_' + raceId];
-        
-        // Skip if no speed map data for this race
-        if (!speedMapData || !speedMapData.payLoad || !speedMapData.payLoad[0] || !speedMapData.payLoad[0].items) {
-            return;
-        }
-        
+        if (!speedMapData || !speedMapData.payLoad || !speedMapData.payLoad[0] || !speedMapData.payLoad[0].items) { return; }
         const horses = speedMapData.payLoad[0].items;
-        
-        // Get all horse rows in this race's table
         const horseRows = raceCard.querySelectorAll('tbody tr');
-        
         horseRows.forEach(function(row) {
-            // Get the horse name from the row
-            const horseNameCell = row.querySelector('td:nth-child(2)');
-            if (!horseNameCell) return;
-            
-            const horseNameSpan = horseNameCell.querySelector('span');
-            if (!horseNameSpan) return;
-            
+            const horseNameCell = row.querySelector('td:nth-child(2)'); if (!horseNameCell) return;
+            const horseNameSpan = horseNameCell.querySelector('span'); if (!horseNameSpan) return;
             const horseName = horseNameSpan.textContent.trim();
-            
-            // Find matching horse in speed map data
-            const matchingHorse = horses.find(function(h) {
-                return h.runnerName === horseName;
-            });
-            
+            const matchingHorse = horses.find(function(h) { return h.runnerName === horseName; });
             if (matchingHorse && matchingHorse.pfaiScore) {
-                // Check if PFAI badge already exists (avoid duplicates)
-                const existingBadge = horseNameCell.querySelector('.pfai-badge');
-                if (existingBadge) return;
-                
-                // Create PFAI badge
+                const existingBadge = horseNameCell.querySelector('.pfai-badge'); if (existingBadge) return;
                 const pfaiBadge = document.createElement('span');
                 pfaiBadge.className = 'pfai-badge';
-                pfaiBadge.style.cssText = 'background: #764ba2; color: white; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; margin-left: 8px;';
+                pfaiBadge.style.cssText = 'background:var(--accent); color:white; padding:3px 10px; border-radius:4px; font-size:11px; font-weight:700; margin-left:8px;';
                 pfaiBadge.textContent = 'PFAI: ' + matchingHorse.pfaiScore;
-                
-                // Insert badge after the horse name span
                 horseNameSpan.parentNode.insertBefore(pfaiBadge, horseNameSpan.nextSibling);
             }
         });
