@@ -23,7 +23,12 @@
                 radial-gradient(ellipse at 80% 20%, #1a0d2e 0%, transparent 50%);
     overflow: hidden;
   }
-
+/* Break out of base template container */
+.login-page {
+  margin-left: calc(-50vw + 50%);
+  margin-right: calc(-50vw + 50%);
+  width: 100vw;
+}
   /* ─── Subtle grid overlay (terminal feel) ─── */
   .login-page::before {
     content: '';
