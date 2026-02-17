@@ -1,38 +1,390 @@
 {% extends "base.html" %}
-
 {% block title %}Login - The Form Analyst{% endblock %}
 
 {% block content %}
-<div style="max-width: 400px; margin: 80px auto;">
-    <div class="card">
-        <h1 style="text-align: center; margin-bottom: 30px;">Login</h1>
-        
-        <form method="POST" action="{{ url_for('login') }}">
-            <div style="margin-bottom: 20px;">
-                <label for="username" style="display: block; margin-bottom: 8px; font-weight: 600;">Username</label>
-                <input type="text" id="username" name="username" required 
-                       style="width: 100%; padding: 10px; border: 2px solid #e9ecef; border-radius: 8px; font-size: 14px;">
-            </div>
-            
-            <div style="margin-bottom: 20px;">
-                <label for="password" style="display: block; margin-bottom: 8px; font-weight: 600;">Password</label>
-                <input type="password" id="password" name="password" required 
-                       style="width: 100%; padding: 10px; border: 2px solid #e9ecef; border-radius: 8px; font-size: 14px;">
-            </div>
-            
-            <div style="margin-bottom: 25px;">
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" name="remember" style="width: 16px; height: 16px;">
-                    <span>Remember me</span>
-                </label>
-            </div>
-            
-            <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
-        </form>
-        
-        <div style="margin-top: 20px; text-align: center; font-size: 14px; color: #6c757d;">
-            <p>Contact your administrator for account access.</p>
-        </div>
+<style>
+  /* ─── Reset page chrome from base layout ─── */
+  body {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    background: #000;
+  }
+
+  /* ─── Full-screen dark background ─── */
+  .login-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    position: relative;
+    background: radial-gradient(ellipse at 20% 50%, #0d1a2e 0%, #000000 60%),
+                radial-gradient(ellipse at 80% 20%, #1a0d2e 0%, transparent 50%);
+    overflow: hidden;
+  }
+
+  /* ─── Subtle grid overlay (terminal feel) ─── */
+  .login-page::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(102, 126, 234, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(102, 126, 234, 0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  /* ─── Ambient glow orbs ─── */
+  .glow-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    pointer-events: none;
+    animation: orb-drift 12s ease-in-out infinite alternate;
+  }
+  .glow-orb-1 {
+    width: 400px;
+    height: 400px;
+    background: rgba(102, 126, 234, 0.12);
+    top: -100px;
+    left: -100px;
+    animation-delay: 0s;
+  }
+  .glow-orb-2 {
+    width: 300px;
+    height: 300px;
+    background: rgba(118, 75, 162, 0.10);
+    bottom: -80px;
+    right: -80px;
+    animation-delay: -6s;
+  }
+  @keyframes orb-drift {
+    from { transform: translate(0, 0) scale(1); }
+    to   { transform: translate(30px, 20px) scale(1.08); }
+  }
+
+  /* ─── Login card (glassmorphism) ─── */
+  .login-card {
+    position: relative;
+    z-index: 10;
+    width: 100%;
+    max-width: 420px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 20px;
+    padding: 48px 40px 40px;
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow:
+      0 0 0 1px rgba(102, 126, 234, 0.08),
+      0 32px 64px rgba(0, 0, 0, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    animation: card-enter 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes card-enter {
+    from {
+      opacity: 0;
+      transform: translateY(24px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  /* ─── Logo section ─── */
+  .login-logo-wrap {
+    text-align: center;
+    margin-bottom: 36px;
+  }
+  .login-logo {
+    height: 64px;
+    width: auto;
+    max-width: 200px;
+    object-fit: contain;
+    filter: drop-shadow(0 4px 16px rgba(102, 126, 234, 0.4));
+    animation: logo-enter 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+  }
+  @keyframes logo-enter {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ─── Divider ─── */
+  .login-divider {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(102, 126, 234, 0.3) 30%,
+      rgba(118, 75, 162, 0.3) 70%,
+      transparent
+    );
+    margin: 0 0 32px 0;
+  }
+
+  /* ─── Form heading ─── */
+  .login-heading {
+    font-family: 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+    text-align: center;
+    margin: 0 0 28px 0;
+  }
+
+  /* ─── Flash messages ─── */
+  .login-flash {
+    background: rgba(220, 53, 69, 0.15);
+    border: 1px solid rgba(220, 53, 69, 0.3);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    font-size: 13px;
+    color: #ff8090;
+    text-align: center;
+  }
+
+  /* ─── Field groups ─── */
+  .field-group {
+    margin-bottom: 20px;
+    animation: field-enter 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .field-group:nth-child(1) { animation-delay: 0.2s; }
+  .field-group:nth-child(2) { animation-delay: 0.28s; }
+  .field-group:nth-child(3) { animation-delay: 0.36s; }
+  @keyframes field-enter {
+    from { opacity: 0; transform: translateX(-8px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .field-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+    margin-bottom: 8px;
+  }
+
+  /* ─── Inputs ─── */
+  .login-input {
+    width: 100%;
+    padding: 13px 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 10px;
+    font-size: 15px;
+    color: #fff;
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    outline: none;
+    box-sizing: border-box;
+    -webkit-appearance: none;
+    /* Fix autofill background on iOS/Chrome */
+    caret-color: #667eea;
+  }
+  .login-input::placeholder {
+    color: rgba(255, 255, 255, 0.2);
+  }
+  .login-input:focus {
+    border-color: rgba(102, 126, 234, 0.6);
+    background: rgba(102, 126, 234, 0.07);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+  }
+  /* Chrome autofill override */
+  .login-input:-webkit-autofill,
+  .login-input:-webkit-autofill:hover,
+  .login-input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px #0d1117 inset;
+    -webkit-text-fill-color: #fff;
+    border-color: rgba(102, 126, 234, 0.4);
+    transition: background-color 5000s ease-in-out 0s;
+  }
+
+  /* ─── Remember me ─── */
+  .remember-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 28px;
+    animation: field-enter 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.44s both;
+  }
+  .remember-checkbox {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border: 1.5px solid rgba(255, 255, 255, 0.2);
+    border-radius: 5px;
+    background: rgba(255,255,255,0.04);
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .remember-checkbox:checked {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    border-color: #667eea;
+  }
+  .remember-checkbox:checked::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 6px;
+    height: 10px;
+    border: 2px solid #fff;
+    border-top: none;
+    border-left: none;
+    transform: rotate(45deg);
+  }
+  .remember-label {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  /* ─── Submit button ─── */
+  .login-btn {
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #fff;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: opacity 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+    box-shadow: 0 4px 24px rgba(102, 126, 234, 0.35);
+    animation: field-enter 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.52s both;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .login-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+  .login-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 32px rgba(102, 126, 234, 0.5);
+  }
+  .login-btn:hover::before { opacity: 1; }
+  .login-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 12px rgba(102, 126, 234, 0.3);
+  }
+
+  /* ─── Footer note ─── */
+  .login-footer {
+    margin-top: 24px;
+    text-align: center;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.2);
+    letter-spacing: 0.02em;
+  }
+
+  /* ─── Mobile tweaks ─── */
+  @media (max-width: 480px) {
+    .login-card {
+      padding: 36px 24px 32px;
+      border-radius: 16px;
+    }
+    .login-logo {
+      height: 52px;
+    }
+  }
+</style>
+
+<div class="login-page">
+  <!-- Ambient orbs -->
+  <div class="glow-orb glow-orb-1"></div>
+  <div class="glow-orb glow-orb-2"></div>
+
+  <div class="login-card">
+
+    <!-- Logo -->
+    <div class="login-logo-wrap">
+      <img
+        src="{{ url_for('static', filename='images/logo.png') }}"
+        alt="The Form Analyst"
+        class="login-logo"
+      >
     </div>
+
+    <!-- Divider -->
+    <div class="login-divider"></div>
+
+    <!-- Heading -->
+    <p class="login-heading">Sign in to your account</p>
+
+    <!-- Flash messages (errors from Flask) -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="login-flash">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <!-- Form -->
+    <form method="POST" action="{{ url_for('login') }}">
+
+      <div class="field-group">
+        <label for="username" class="field-label">Username</label>
+        <input
+          type="text"
+          id="username"
+          name="username"
+          class="login-input"
+          placeholder="Enter your username"
+          autocomplete="username"
+          required
+          autofocus
+        >
+      </div>
+
+      <div class="field-group">
+        <label for="password" class="field-label">Password</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          class="login-input"
+          placeholder="Enter your password"
+          autocomplete="current-password"
+          required
+        >
+      </div>
+
+      <div class="remember-row">
+        <input type="checkbox" id="remember" name="remember" class="remember-checkbox">
+        <label for="remember" class="remember-label">Keep me signed in</label>
+      </div>
+
+      <button type="submit" class="login-btn">
+        Sign In
+      </button>
+
+    </form>
+
+    <p class="login-footer">Contact your administrator for account access</p>
+
+  </div>
 </div>
+
 {% endblock %}
