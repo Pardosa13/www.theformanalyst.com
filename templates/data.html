@@ -3,584 +3,694 @@
 {% block title %}Data Analytics{% endblock %}
 
 {% block content %}
-<div class="container-fluid py-4">
-    <h1 class="mb-4">📊 Data Analytics</h1>
-    
-    <!-- Filters -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0">🔍 Filters</h5>
-        </div>
-        <div class="card-body">
-            <form method="get" class="row g-3">
-                <div class="col-md-2">
-                    <label class="form-label">Track</label>
-                    <select name="track" class="form-select">
-                        <option value="">All Tracks</option>
-                        {% for track in track_list %}
-                        <option value="{{ track }}" {% if filters.track == track %}selected{% endif %}>{{ track }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Min Score</label>
-                    <input type="number" name="min_score" class="form-control" step="0.1" 
-                           value="{{ filters.min_score or '' }}" placeholder="e.g. 60">
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Date From</label>
-                    <input type="date" name="date_from" class="form-control" value="{{ filters.date_from }}">
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Date To</label>
-                    <input type="date" name="date_to" class="form-control" value="{{ filters.date_to }}">
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Show Last</label>
-                    <select name="limit" class="form-select" style="min-width: 180px;">
-                        <option value="50" {% if filters.limit == 50 %}selected{% endif %}>50 Races (Fast)</option>
-                        <option value="100" {% if filters.limit == 100 %}selected{% endif %}>100 Races (Balanced)</option>
-                        <option value="200" {% if filters.limit == 200 or not filters.limit %}selected{% endif %}>200 Races (More Data)</option>
-                        <option value="500" {% if filters.limit == 500 %}selected{% endif %}>500 Races (Slow)</option>
-                        {% if current_user.is_admin %}
-                        <option value="all" {% if filters.limit == 'all' %}selected{% endif %}>All Races (Admin)</option>
-                        {% endif %}
-                    </select>
-                </div>
-                <div class="col-md-2 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary me-2">Apply Filters</button>
-                    <a href="{{ url_for('data_analytics') }}" class="btn btn-outline-secondary">Reset</a>
-                </div>
-            </form>
-        </div>
-    </div>
-    
-    <!-- ML Export Button -->
+
+<style>
+  /* ══════════════════════════════════════════
+     DATA ANALYTICS — dark high-contrast theme
+
+     CONTRAST HIERARCHY FOR DENSE DATA:
+     • Primary names/labels  → #f0f0f8 (text-primary) — max legibility
+     • Numeric data cells    → #c8c8d8 (text-secondary) + DM Mono
+     • Profitable ROI/profit → #34d399 bright emerald — unmissable
+     • Loss ROI/profit       → #f87171 bright coral red — unmissable
+     • fw-bold strike rates  → weight + colour both applied
+     • Column headers        → 10px uppercase muted — clear hierarchy
+     • Row hover             → subtle bg lift — easy scanning
+
+     ALL JS IDs / API endpoints / class names UNCHANGED
+  ══════════════════════════════════════════ */
+
+  .analytics-header {
+    margin-bottom: 24px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .analytics-header h1 {
+    font-size: 1.55rem;
+    font-weight: 800;
+    margin: 0;
+    color: var(--text-primary);
+  }
+
+  /* ── Filter card ── */
+  .filter-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .filter-card-header {
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 11px 20px;
+  }
+  .filter-card-header h5 {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+    margin: 0;
+  }
+  .filter-card-body { padding: 16px 20px; }
+  .filter-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+  .filter-group { display: flex; flex-direction: column; gap: 5px; }
+  .filter-group label {
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted) !important;
+    margin: 0 !important;
+  }
+  .filter-actions { display: flex; gap: 8px; align-items: flex-end; padding-bottom: 1px; }
+
+  /* ── ML Export ── */
+  .ml-export-wrap { margin-bottom: 20px; }
+  .ml-export-wrap p { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+
+  /* ── Overview tiles ── */
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .overview-tile {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 22px 16px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .overview-tile::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  }
+  .overview-tile.pos::before { background: linear-gradient(90deg, #059669, #34d399); }
+  .overview-tile.neg::before { background: linear-gradient(90deg, #dc2626, #f87171); }
+  .overview-tile:hover { border-color: var(--border-mid); box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+  .stat-val {
+    display: block;
+    font-size: 2rem;
+    font-weight: 800;
+    font-family: 'DM Mono', monospace;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+    line-height: 1.1;
+  }
+  .stat-val.profit { color: #34d399; }
+  .stat-val.loss   { color: #f87171; }
+  .stat-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+
+  /* ── Collapsible section cards ── */
+  .section-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .section-card-header {
+    background: var(--bg-elevated);
+    border-bottom: 1px solid transparent;
+    padding: 14px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+  }
+  .section-card-header:hover { background: var(--bg-hover); }
+  .section-card-header[aria-expanded="true"] { border-bottom-color: var(--border-subtle); }
+  .section-card-header h5 { font-size: 14px; font-weight: 700; margin: 0; color: var(--text-primary); }
+  .section-card-header .bi-chevron-down { color: var(--text-muted); transition: transform 0.22s; font-size: 13px; }
+  .section-card-header[aria-expanded="true"] .bi-chevron-down { transform: rotate(180deg); }
+
+  /* ══════════════════════════════════════════
+     HIGH-CONTRAST TABLE SYSTEM
+     Applies to ALL tables — Jinja + JS innerHTML
+  ══════════════════════════════════════════ */
+
+  .section-card .card-body { padding: 20px !important; }
+
+  /* Base table */
+  .card-body table,
+  .card-body .table {
+    width: 100%;
+    color: var(--text-secondary) !important;
+    border-color: var(--border-subtle) !important;
+    font-size: 13px;
+    border-collapse: collapse;
+    margin-bottom: 0 !important;
+  }
+
+  /* Column headers (table-dark from JS + plain thead) */
+  .card-body thead,
+  .card-body .table-dark,
+  .card-body thead.table-dark { background: var(--bg-hover) !important; }
+
+  .card-body thead th,
+  .card-body .table-dark th,
+  .card-body thead.table-dark th {
+    background: var(--bg-hover) !important;
+    color: var(--text-muted) !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+    padding: 10px 12px !important;
+    border-color: var(--border-mid) !important;
+    white-space: nowrap;
+  }
+
+  /* Data rows */
+  .card-body tbody tr { border-bottom: 1px solid var(--border-subtle) !important; transition: background 0.1s; }
+  .card-body tbody tr:last-child { border-bottom: none !important; }
+  .card-body tbody tr:hover { background: var(--bg-elevated) !important; }
+
+  .card-body tbody td {
+    padding: 10px 12px !important;
+    border-color: var(--border-subtle) !important;
+    color: var(--text-secondary) !important;
+    vertical-align: middle;
+    font-size: 13px;
+  }
+
+  /* Primary names — full bright white, max legibility */
+  .card-body tbody td strong {
+    color: var(--text-primary) !important;
+    font-weight: 700;
+    font-size: 13px;
+  }
+
+  /* Numeric cells — monospace for alignment */
+  .card-body tbody td:not(:first-child) {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+  }
+
+  /* Striped — very subtle */
+  .card-body .table-striped > tbody > tr:nth-of-type(odd) > * {
+    background-color: rgba(255,255,255,0.025) !important;
+    color: var(--text-secondary) !important;
+  }
+
+  /* Won overlay row */
+  .card-body tr.table-success > td,
+  .card-body .table-success {
+    background: rgba(16,185,129,0.10) !important;
+    border-color: rgba(16,185,129,0.15) !important;
+    color: var(--text-primary) !important;
+  }
+
+  /* ── PROFIT / LOSS — MAXIMUM CONTRAST ── */
+  .card-body .text-success,
+  .card-body .text-success.fw-bold { color: #34d399 !important; }
+  .card-body .text-danger,
+  .card-body .text-danger.fw-bold  { color: #f87171 !important; }
+  .card-body .fw-bold              { font-weight: 700 !important; }
+  .card-body .text-muted           { color: #7070a0 !important; }
+  .card-body .text-dark            { color: #1a1a2e !important; }
+
+  /* ── VALUE BADGES (JS innerHTML + Jinja) ── */
+  .card-body .badge {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    padding: 3px 8px !important;
+    border-radius: 5px !important;
+  }
+  .card-body .badge.bg-success   { background: rgba(16,185,129,0.18) !important; color: #34d399 !important; border: 1px solid rgba(16,185,129,0.35) !important; }
+  .card-body .badge.bg-info      { background: rgba(59,130,246,0.18) !important;  color: #60a5fa !important; border: 1px solid rgba(59,130,246,0.3) !important; }
+  .card-body .badge.bg-warning   { background: rgba(245,158,11,0.18) !important;  color: #fbbf24 !important; border: 1px solid rgba(245,158,11,0.3) !important; }
+  .card-body .badge.bg-danger    { background: rgba(239,68,68,0.18) !important;   color: #f87171 !important; border: 1px solid rgba(239,68,68,0.3) !important; }
+  .card-body .badge.bg-secondary { background: rgba(107,114,128,0.18) !important; color: #9ca3af !important; border: 1px solid rgba(107,114,128,0.3) !important; }
+  .card-body .badge.bg-primary   { background: rgba(102,126,234,0.18) !important; color: var(--accent) !important; border: 1px solid var(--border-accent) !important; }
+  .card-body .badge.bg-warning.text-dark { color: #fbbf24 !important; }
+
+  /* ── NESTED CARDS ── */
+  .card-body .card {
+    background: var(--bg-elevated) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
+    margin-bottom: 14px;
+  }
+  .card-body .card:hover { transform: none !important; border-color: var(--border-mid) !important; }
+  .card-body .card .card-header {
+    background: var(--bg-hover) !important;
+    border-bottom: 1px solid var(--border-subtle) !important;
+    padding: 10px 16px !important;
+  }
+  .card-body .card .card-header h5,
+  .card-body .card .card-header h6 {
+    color: var(--text-primary) !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    margin: 0 !important;
+  }
+  .card-body .card .card-body { padding: 16px !important; }
+
+  /* Summary stat cards (bg-primary/success/info/danger) */
+  .card-body .card.bg-primary { background: rgba(102,126,234,0.18) !important; border-color: var(--border-accent) !important; }
+  .card-body .card.bg-success { background: rgba(16,185,129,0.14) !important;  border-color: rgba(16,185,129,0.3) !important; }
+  .card-body .card.bg-info    { background: rgba(59,130,246,0.14) !important;   border-color: rgba(59,130,246,0.25) !important; }
+  .card-body .card.bg-danger  { background: rgba(239,68,68,0.14) !important;    border-color: rgba(239,68,68,0.25) !important; }
+  .card-body .card.bg-primary h5,
+  .card-body .card.bg-success h5,
+  .card-body .card.bg-info h5,
+  .card-body .card.bg-danger h5 { color: var(--text-muted) !important; font-size: 11px !important; text-transform: uppercase; letter-spacing: 0.06em; }
+  .card-body .card.bg-primary h2 { color: var(--text-primary) !important; font-family: 'DM Mono', monospace; }
+  .card-body .card.bg-success h2 { color: #34d399 !important; font-family: 'DM Mono', monospace; }
+  .card-body .card.bg-info h2    { color: #60a5fa !important; font-family: 'DM Mono', monospace; }
+  .card-body .card.bg-danger h2  { color: #f87171 !important; font-family: 'DM Mono', monospace; }
+  .card-body .card.text-white    { color: var(--text-primary) !important; }
+  .card-body .card small         { color: var(--text-muted) !important; font-size: 11px; }
+
+  /* Overlay tier border cards */
+  .card-body .card.border-primary { border-color: rgba(102,126,234,0.4) !important; }
+  .card-body .card.border-success { border-color: rgba(16,185,129,0.4) !important; }
+  .card-body .card.border-warning { border-color: rgba(245,158,11,0.35) !important; }
+  .card-body .card.border-danger  { border-color: rgba(239,68,68,0.35) !important; }
+
+  /* Headings inside sections */
+  .card-body h4,
+  .card-body h5       { color: var(--text-primary) !important; }
+  .card-body h6       { color: var(--text-secondary) !important; font-size: 12px !important; font-weight: 700 !important; }
+  .card-body h6.text-success { color: #34d399 !important; font-size: 12px !important; margin-top: 12px !important; }
+
+  /* Component guide box (bg-light) */
+  .card-body .bg-light {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 8px !important;
+  }
+  .card-body .bg-light h6     { color: var(--text-primary) !important; margin-bottom: 8px !important; }
+  .card-body .bg-light li     { color: var(--text-muted) !important; font-size: 12px !important; line-height: 1.6 !important; }
+  .card-body .bg-light strong { color: var(--text-secondary) !important; }
+
+  /* Spinner */
+  .card-body .spinner-border { color: var(--accent) !important; }
+  .card-body .spinner-border ~ p { color: var(--text-muted) !important; font-size: 13px !important; }
+
+  /* Alert-info */
+  .card-body .alert-info {
+    background: rgba(59,130,246,0.08) !important;
+    border: 1px solid rgba(59,130,246,0.2) !important;
+    border-radius: 10px !important;
+    color: var(--text-secondary) !important;
+  }
+  .card-body .alert-info strong { color: var(--text-primary) !important; }
+  .card-body .alert-info a { color: var(--accent) !important; }
+
+  /* Financial summary values */
+  .card-body .row .col-md-4 strong { color: var(--text-muted) !important; font-size: 12px; font-weight: 700; }
+  .card-body .row .col-md-4 span   { color: var(--text-primary) !important; font-family: 'DM Mono', monospace; margin-left: 4px; }
+
+  /* Section subtext */
+  .card-body > div > h5,
+  .card-body .mb-5 h5,
+  .card-body .mb-4 h5 { font-size: 14px !important; font-weight: 700 !important; color: var(--text-primary) !important; margin-bottom: 4px !important; }
+  .card-body .mb-5 p.text-muted,
+  .card-body .mb-4 p.text-muted,
+  .card-body > p.text-muted { font-size: 12px !important; color: var(--text-muted) !important; }
+
+  /* Empty / error states */
+  .analytics-empty {
+    background: rgba(59,130,246,0.07);
+    border: 1px solid rgba(59,130,246,0.18);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-top: 8px;
+  }
+  .analytics-empty h5 { color: var(--text-primary); margin: 0 0 8px; font-size: 1rem; }
+  .analytics-empty p  { color: var(--text-muted); font-size: 13px; margin: 0; }
+  .analytics-empty a  { color: var(--accent); }
+
+  /* Charts */
+  .card-body canvas { background: transparent !important; border-radius: 6px; }
+
+  /* Responsive */
+  @media (max-width: 900px) { .overview-grid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 768px) {
+    .filter-row { flex-direction: column; }
+    .filter-group { width: 100%; }
+    .filter-actions { width: 100%; }
+    .filter-actions .btn { flex: 1; text-align: center; }
+    .overview-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+    .stat-val { font-size: 1.5rem; }
+  }
+</style>
+
+<!-- Page header -->
+<div class="analytics-header">
+  <h1>📊 Data Analytics</h1>
+</div>
+
+<!-- Filters — all name attrs, method, url_for UNCHANGED -->
+<div class="filter-card">
+  <div class="filter-card-header"><h5>🔍 Filters</h5></div>
+  <div class="filter-card-body">
+    <form method="get" class="filter-row">
+      <div class="filter-group">
+        <label>Track</label>
+        <select name="track" class="form-select">
+          <option value="">All Tracks</option>
+          {% for track in track_list %}
+          <option value="{{ track }}" {% if filters.track == track %}selected{% endif %}>{{ track }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Min Score</label>
+        <input type="number" name="min_score" class="form-control" step="0.1"
+               value="{{ filters.min_score or '' }}" placeholder="e.g. 60">
+      </div>
+      <div class="filter-group">
+        <label>Date From</label>
+        <input type="date" name="date_from" class="form-control" value="{{ filters.date_from }}">
+      </div>
+      <div class="filter-group">
+        <label>Date To</label>
+        <input type="date" name="date_to" class="form-control" value="{{ filters.date_to }}">
+      </div>
+      <div class="filter-group">
+        <label>Show Last</label>
+        <select name="limit" class="form-select" style="min-width:180px;">
+          <option value="50"  {% if filters.limit == 50  %}selected{% endif %}>50 Races (Fast)</option>
+          <option value="100" {% if filters.limit == 100 %}selected{% endif %}>100 Races (Balanced)</option>
+          <option value="200" {% if filters.limit == 200 or not filters.limit %}selected{% endif %}>200 Races (More Data)</option>
+          <option value="500" {% if filters.limit == 500 %}selected{% endif %}>500 Races (Slow)</option>
+          {% if current_user.is_admin %}
+          <option value="all" {% if filters.limit == 'all' %}selected{% endif %}>All Races (Admin)</option>
+          {% endif %}
+        </select>
+      </div>
+      <div class="filter-actions">
+        <button type="submit" class="btn btn-primary">Apply Filters</button>
+        <a href="{{ url_for('data_analytics') }}" class="btn btn-secondary">Reset</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ML Export — url_for + all params UNCHANGED -->
 {% if current_user.is_admin %}
-<div class="mb-4">
-    <a href="{{ url_for('export_ml_data', track=filters.track or '', min_score=filters.min_score or '', date_from=filters.date_from or '', date_to=filters.date_to or '') }}" 
-       class="btn btn-success btn-lg">
-        <i class="bi bi-download"></i> Download Complete ML Training Data
-    </a>
-    <p class="text-muted small mt-2">
-        Export all race data with 22 parsed scoring components + complete raw CSV fields for machine learning analysis.
-        {% if total_races > 0 %}
-        Currently showing {{ total_races }} races with complete results.
-        {% else %}
-        No data available yet - enter results to start exporting.
-        {% endif %}
-    </p>
+<div class="ml-export-wrap">
+  <a href="{{ url_for('export_ml_data', track=filters.track or '', min_score=filters.min_score or '', date_from=filters.date_from or '', date_to=filters.date_to or '') }}"
+     class="btn btn-success btn-lg">
+    <i class="bi bi-download"></i> Download Complete ML Training Data
+  </a>
+  <p>Export all race data with 22 parsed scoring components + complete raw CSV fields for machine learning analysis.
+    {% if total_races > 0 %}Currently showing {{ total_races }} races with complete results.
+    {% else %}No data available yet — enter results to start exporting.{% endif %}
+  </p>
 </div>
 {% endif %}
-    
-    <!-- Section 1: Overview Cards -->
-    <div class="row mb-4">
-        <div class="col-md-3">
-            <div class="card text-center h-100">
-                <div class="card-body">
-                    <h3 class="display-4">{{ total_races }}</h3>
-                    <p class="text-muted mb-0">Races Analysed</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card text-center h-100">
-                <div class="card-body">
-                    <h3 class="display-4">{{ "%.1f"|format(strike_rate) }}%</h3>
-                    <p class="text-muted mb-0">Strike Rate ({{ top_pick_wins }}/{{ total_races }})</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card text-center h-100 {% if roi >= 0 %}border-success{% else %}border-danger{% endif %}">
-                <div class="card-body">
-                    <h3 class="display-4 {% if roi >= 0 %}text-success{% else %}text-danger{% endif %}">
-                        {{ "%.1f"|format(roi) }}%
-                    </h3>
-                    <p class="text-muted mb-0">ROI (${{ "%.2f"|format(total_profit) }})</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card text-center h-100">
-                <div class="card-body">
-                    <h3 class="display-4">${{ "%.2f"|format(avg_winner_sp) }}</h3>
-                    <p class="text-muted mb-0">Avg Winner SP</p>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Section 2: Score Analysis -->
-    <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center" 
-             data-bs-toggle="collapse" data-bs-target="#scoreAnalysis" style="cursor: pointer;">
-            <h5 class="mb-0">📈 Score Analysis</h5>
-            <i class="bi bi-chevron-down"></i>
-        </div>
-        <div id="scoreAnalysis" class="collapse">
-            <div class="card-body text-center">
-                <p class="text-muted">Click to expand and load score analysis...</p>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Section 3: Component Analysis -->
-    <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center" 
-             data-bs-toggle="collapse" data-bs-target="#componentAnalysis" style="cursor: pointer;">
-            <h5 class="mb-0">🧩 Component Analysis</h5>
-            <i class="bi bi-chevron-down"></i>
-        </div>
-        <div id="componentAnalysis" class="collapse">
-            <div class="card-body text-center">
-                <p class="text-muted">Click to expand and load component analysis...</p>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Section 4: External Factors -->
-    <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center" 
-             data-bs-toggle="collapse" data-bs-target="#externalFactors" style="cursor: pointer;">
-            <h5 class="mb-0">🏇 External Factors</h5>
-            <i class="bi bi-chevron-down"></i>
-        </div>
-        <div id="externalFactors" class="collapse">
-            <div class="card-body text-center">
-                <p class="text-muted">Click to expand and load external factors...</p>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Section 5: Price Analysis -->
-<div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center" 
-         data-bs-toggle="collapse" data-bs-target="#priceAnalysis" style="cursor: pointer;">
-        <h5 class="mb-0">💰 Price Analysis</h5>
-        <i class="bi bi-chevron-down"></i>
-    </div>
-    <div id="priceAnalysis" class="collapse">
-        <div class="card-body text-center">
-            <p class="text-muted">Click to expand and load price analysis...</p>
-        </div>
-    </div>
-</div>
-    
-    <!-- Section 6: Best Bets Performance -->
-<div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center" 
-         data-bs-toggle="collapse" data-bs-target="#bestBetsPerformance" style="cursor: pointer;">
-        <h5 class="mb-0">🔥 Best Bets Performance</h5>
-        <i class="bi bi-chevron-down"></i>
-    </div>
-    <div id="bestBetsPerformance" class="collapse">
-        <div class="card-body">
-            {% if best_bets_stats %}
-            <div class="row mb-4">
-                <div class="col-md-12">
-                    <h4>📊 Best Bets Performance Tracker</h4>
-                    <p class="text-muted">Tracking performance of all horses that appeared on the Best Bets page (assuming $10 win bets)</p>
-                </div>
-            </div>
-            
-            <!-- Summary Stats -->
-            <div class="row mb-4">
-                <div class="col-md-3">
-                    <div class="card bg-primary text-white">
-                        <div class="card-body text-center">
-                            <h5>Total Bets</h5>
-                            <h2>{{ best_bets_stats.total_bets }}</h2>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="card bg-success text-white">
-                        <div class="card-body text-center">
-                            <h5>Wins</h5>
-                            <h2>{{ best_bets_stats.wins }} ({{ best_bets_stats.strike_rate|round(1) }}%)</h2>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="card bg-info text-white">
-                        <div class="card-body text-center">
-                            <h5>Places (1-3)</h5>
-                            <h2>{{ best_bets_stats.places }} ({{ best_bets_stats.place_rate|round(1) }}%)</h2>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="card bg-{% if best_bets_stats.profit > 0 %}success{% else %}danger{% endif %} text-white">
-                        <div class="card-body text-center">
-                            <h5>Profit/Loss</h5>
-                            <h2>${{ best_bets_stats.profit|round(2) }}</h2>
-                            <small>ROI: {{ best_bets_stats.roi|round(1) }}%</small>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Financial Breakdown -->
-            <div class="row mb-4">
-                <div class="col-md-12">
-                    <div class="card">
-                        <div class="card-header">
-                            <h5>💰 Financial Summary</h5>
-                        </div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <strong>Total Staked:</strong> ${{ best_bets_stats.total_staked|round(2) }}
-                                </div>
-                                <div class="col-md-4">
-                                    <strong>Total Return:</strong> ${{ best_bets_stats.total_return|round(2) }}
-                                </div>
-                                <div class="col-md-4">
-                                    <strong>Net Profit:</strong> 
-                                    <span class="text-{% if best_bets_stats.profit > 0 %}success{% else %}danger{% endif %}">
-                                        ${{ best_bets_stats.profit|round(2) }}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Component Performance Breakdown -->
-            <div class="row">
-                <div class="col-md-12">
-                    <div class="card">
-                        <div class="card-header">
-                            <h5>🎯 Component Performance Breakdown</h5>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-striped table-hover">
-                                    <thead>
-                                        <tr>
-                                            <th>Component</th>
-                                            <th>Bets</th>
-                                            <th>Wins</th>
-                                            <th>Strike Rate</th>
-                                            <th>Total Staked</th>
-                                            <th>Total Return</th>
-                                            <th>Profit</th>
-                                            <th>ROI</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for comp_name, stats in best_bets_stats.component_performance.items() %}
-                                        <tr>
-                                            <td><strong>{{ comp_name }}</strong></td>
-                                            <td>{{ stats.bets }}</td>
-                                            <td>{{ stats.wins }}</td>
-                                            <td>{{ stats.sr|round(1) }}%</td>
-                                            <td>${{ stats.staked|round(2) }}</td>
-                                            <td>${{ stats.return|round(2) }}</td>
-                                            <td class="text-{% if stats.profit > 0 %}success{% else %}danger{% endif %}">
-                                                ${{ stats.profit|round(2) }}
-                                            </td>
-                                            <td>
-                                                <span class="badge bg-{% if stats.roi >= 50 %}success{% elif stats.roi >= 10 %}info{% elif stats.roi >= 0 %}warning{% else %}danger{% endif %}">
-                                                    {{ stats.roi|round(1) }}%
-                                                </span>
-                                            </td>
-                                        </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            {% else %}
-            <div class="alert alert-info">
-                <h4>No Best Bets Data Yet</h4>
-                <p>Start using the Best Bets feature and entering results to see performance tracking here!</p>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-</div>
-    
-    {% if total_races == 0 %}
-    <div class="alert alert-info">
-        <h5>No results data yet!</h5>
-        <p class="mb-0">Go to <a href="{{ url_for('results') }}">Results</a> to start entering race outcomes, then come back here to see your analytics.</p>
-    </div>
-    {% endif %}
+
+<!-- Overview tiles -->
+<div class="overview-grid">
+  <div class="overview-tile">
+    <span class="stat-val">{{ total_races }}</span>
+    <div class="stat-label">Races Analysed</div>
+  </div>
+  <div class="overview-tile">
+    <span class="stat-val">{{ "%.1f"|format(strike_rate) }}%</span>
+    <div class="stat-label">Strike Rate ({{ top_pick_wins }}/{{ total_races }})</div>
+  </div>
+  <div class="overview-tile {% if roi >= 0 %}pos{% else %}neg{% endif %}">
+    <span class="stat-val {% if roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%.1f"|format(roi) }}%</span>
+    <div class="stat-label">ROI (${{ "%.2f"|format(total_profit) }})</div>
+  </div>
+  <div class="overview-tile">
+    <span class="stat-val">${{ "%.2f"|format(avg_winner_sp) }}</span>
+    <div class="stat-label">Avg Winner SP</div>
+  </div>
 </div>
 
-<!-- Chart.js -->
+<!-- All collapse IDs UNCHANGED -->
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#scoreAnalysis" aria-expanded="false">
+    <h5>📈 Score Analysis</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="scoreAnalysis" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load score analysis...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#componentAnalysis" aria-expanded="false">
+    <h5>🧩 Component Analysis</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="componentAnalysis" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load component analysis...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#externalFactors" aria-expanded="false">
+    <h5>🏇 External Factors</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="externalFactors" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load external factors...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#priceAnalysis" aria-expanded="false">
+    <h5>💰 Price Analysis</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="priceAnalysis" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load price analysis...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#bestBetsPerformance" aria-expanded="false">
+    <h5>🔥 Best Bets Performance</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="bestBetsPerformance" class="collapse">
+    <div class="card-body">
+      {% if best_bets_stats %}
+      <h4>📊 Best Bets Performance Tracker</h4>
+      <p class="text-muted">Tracking performance of all horses on the Best Bets page (assuming $10 win bets)</p>
+
+      <div class="overview-grid" style="margin:16px 0;">
+        <div class="card bg-primary text-white"><div class="card-body text-center"><h5>Total Bets</h5><h2>{{ best_bets_stats.total_bets }}</h2></div></div>
+        <div class="card bg-success text-white"><div class="card-body text-center"><h5>Wins</h5><h2>{{ best_bets_stats.wins }} ({{ best_bets_stats.strike_rate|round(1) }}%)</h2></div></div>
+        <div class="card bg-info text-white"><div class="card-body text-center"><h5>Places (1-3)</h5><h2>{{ best_bets_stats.places }} ({{ best_bets_stats.place_rate|round(1) }}%)</h2></div></div>
+        <div class="card bg-{% if best_bets_stats.profit > 0 %}success{% else %}danger{% endif %} text-white">
+          <div class="card-body text-center"><h5>Profit/Loss</h5><h2>${{ best_bets_stats.profit|round(2) }}</h2><small>ROI: {{ best_bets_stats.roi|round(1) }}%</small></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h5>💰 Financial Summary</h5></div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-4"><strong>Total Staked:</strong> <span>${{ best_bets_stats.total_staked|round(2) }}</span></div>
+            <div class="col-md-4"><strong>Total Return:</strong> <span>${{ best_bets_stats.total_return|round(2) }}</span></div>
+            <div class="col-md-4"><strong>Net Profit:</strong>
+              <span class="{% if best_bets_stats.profit > 0 %}text-success{% else %}text-danger{% endif %}" style="font-weight:700;">
+                ${{ best_bets_stats.profit|round(2) }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h5>🎯 Component Performance Breakdown</h5></div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-striped table-hover">
+              <thead class="table-dark">
+                <tr><th>Component</th><th>Bets</th><th>Wins</th><th>Strike Rate</th><th>Total Staked</th><th>Total Return</th><th>Profit</th><th>ROI</th></tr>
+              </thead>
+              <tbody>
+                {% for comp_name, stats in best_bets_stats.component_performance.items() %}
+                <tr>
+                  <td><strong>{{ comp_name }}</strong></td>
+                  <td>{{ stats.bets }}</td><td>{{ stats.wins }}</td><td>{{ stats.sr|round(1) }}%</td>
+                  <td>${{ stats.staked|round(2) }}</td><td>${{ stats.return|round(2) }}</td>
+                  <td class="{% if stats.profit > 0 %}text-success{% else %}text-danger{% endif %}">${{ stats.profit|round(2) }}</td>
+                  <td>
+                    <span class="badge bg-{% if stats.roi >= 50 %}success{% elif stats.roi >= 10 %}info{% elif stats.roi >= 0 %}warning{% else %}danger{% endif %}">
+                      {{ stats.roi|round(1) }}%
+                    </span>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {% else %}
+      <div class="analytics-empty">
+        <h5>No Best Bets Data Yet</h5>
+        <p>Start using the Best Bets feature and entering results to see performance tracking here!</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if total_races == 0 %}
+<div class="analytics-empty">
+  <h5>No results data yet!</h5>
+  <p>Go to <a href="{{ url_for('results') }}">Results</a> to start entering race outcomes, then come back here to see your analytics.</p>
+</div>
+{% endif %}
+
+<!-- Chart.js CDN — UNCHANGED -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- ALL JS 100% IDENTICAL TO SOURCE except renderScoreAnalysis chart
+     colours updated to dark-visible purple/green palette -->
 <script>
-// Lazy loading for data sections
 const loadedSections = new Set();
 
-// FIXED: Include limit parameter in filterParams
 const filterParams = new URLSearchParams({
     track: '{{ filters.track }}',
     min_score: '{{ filters.min_score or "" }}',
     date_from: '{{ filters.date_from }}',
     date_to: '{{ filters.date_to }}',
-    limit: '{{ filters.limit or 200 }}'  // ADDED THIS LINE
+    limit: '{{ filters.limit or 200 }}'
 });
 
-// Listen for section expansions
 document.addEventListener('DOMContentLoaded', function() {
-    // Score Analysis
     const scoreAnalysis = document.getElementById('scoreAnalysis');
-    if (scoreAnalysis) {
-        scoreAnalysis.addEventListener('show.bs.collapse', function() {
-            if (!loadedSections.has('score-analysis')) {
-                loadScoreAnalysis();
-            }
-        });
-    }
-    
-    // Component Analysis
+    if (scoreAnalysis) { scoreAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('score-analysis')) { loadScoreAnalysis(); } }); }
     const componentAnalysis = document.getElementById('componentAnalysis');
-    if (componentAnalysis) {
-        componentAnalysis.addEventListener('show.bs.collapse', function() {
-            if (!loadedSections.has('component-analysis')) {
-                loadComponentAnalysis();
-            }
-        });
-    }
-    
-    // External Factors
+    if (componentAnalysis) { componentAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('component-analysis')) { loadComponentAnalysis(); } }); }
     const externalFactors = document.getElementById('externalFactors');
-    if (externalFactors) {
-        externalFactors.addEventListener('show.bs.collapse', function() {
-            if (!loadedSections.has('external-factors')) {
-                loadExternalFactors();
-            }
-        });
-    }
-    
-    // Price Analysis
+    if (externalFactors) { externalFactors.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('external-factors')) { loadExternalFactors(); } }); }
     const priceAnalysis = document.getElementById('priceAnalysis');
-    if (priceAnalysis) {
-        priceAnalysis.addEventListener('show.bs.collapse', function() {
-            if (!loadedSections.has('price-analysis')) {
-                loadPriceAnalysis();
-            }
-        });
-    }
+    if (priceAnalysis) { priceAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('price-analysis')) { loadPriceAnalysis(); } }); }
 });
 
 function loadScoreAnalysis() {
     const container = document.getElementById('scoreAnalysis');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading score analysis...</p></div>';
-    
     fetch(`/api/data/score-analysis?${filterParams}`)
         .then(response => response.json())
-        .then(data => {
-            renderScoreAnalysis(data);
-            loadedSections.add('score-analysis');
-        })
-        .catch(error => {
-            container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>';
-            console.error('Error:', error);
-        });
+        .then(data => { renderScoreAnalysis(data); loadedSections.add('score-analysis'); })
+        .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>'; console.error('Error:', error); });
 }
-
 function loadComponentAnalysis() {
     const container = document.getElementById('componentAnalysis');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading component analysis...</p></div>';
-    
     fetch(`/api/data/component-analysis?${filterParams}`)
         .then(response => response.json())
-        .then(data => {
-            renderComponentAnalysis(data);
-            loadedSections.add('component-analysis');
-        })
-        .catch(error => {
-            container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>';
-            console.error('Error:', error);
-        });
+        .then(data => { renderComponentAnalysis(data); loadedSections.add('component-analysis'); })
+        .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>'; console.error('Error:', error); });
 }
-
 function loadExternalFactors() {
     const container = document.getElementById('externalFactors');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading external factors...</p></div>';
-    
     fetch(`/api/data/external-factors?${filterParams}`)
         .then(response => response.json())
-        .then(data => {
-            renderExternalFactors(data);
-            loadedSections.add('external-factors');
-        })
-        .catch(error => {
-            container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>';
-            console.error('Error:', error);
-        });
+        .then(data => { renderExternalFactors(data); loadedSections.add('external-factors'); })
+        .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>'; console.error('Error:', error); });
 }
-
 function loadPriceAnalysis() {
     const container = document.getElementById('priceAnalysis');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading price analysis...</p></div>';
-    
     fetch(`/api/data/price-analysis?${filterParams}`)
         .then(response => response.json())
-        .then(data => {
-            renderPriceAnalysis(data);
-            loadedSections.add('price-analysis');
-        })
-        .catch(error => {
-            container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>';
-            console.error('Error:', error);
-        });
+        .then(data => { renderPriceAnalysis(data); loadedSections.add('price-analysis'); })
+        .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>'; console.error('Error:', error); });
 }
 
-// Render functions
 function renderScoreAnalysis(data) {
     const container = document.getElementById('scoreAnalysis');
-    
     let html = '<div class="card-body"><div class="row">';
-    
-    // Score Tier Table
     html += '<div class="col-md-6"><h6>Strike Rate by Score Tier</h6><table class="table table-sm"><thead><tr><th>Score</th><th>Races</th><th>Wins</th><th>Strike %</th><th>ROI</th></tr></thead><tbody>';
-    
     const tierOrder = ['150+', '140-149', '130-139', '120-129', '110-119', '100-109', '90-99'];
     for (const tier of tierOrder) {
         const d = data.score_tiers[tier];
-        html += `<tr>
-            <td><strong>${tier}</strong></td>
-            <td>${d.races}</td>
-            <td>${d.wins}</td>
-            <td>${d.strike_rate.toFixed(1)}%</td>
-            <td class="${d.roi >= 0 ? 'text-success' : 'text-danger'}">${d.roi.toFixed(1)}%</td>
-        </tr>`;
+        html += `<tr><td><strong>${tier}</strong></td><td>${d.races}</td><td>${d.wins}</td><td>${d.strike_rate.toFixed(1)}%</td><td class="${d.roi >= 0 ? 'text-success' : 'text-danger'}">${d.roi.toFixed(1)}%</td></tr>`;
     }
     html += '</tbody></table></div>';
-    
-    // Score Tier Chart
     html += '<div class="col-md-6"><canvas id="scoreTierChart" height="200"></canvas></div></div><hr>';
-    
-    // Score Gap Table
     html += '<div class="row mt-4"><div class="col-md-6"><h6>Strike Rate by Score Gap (to 2nd place)</h6><table class="table table-sm"><thead><tr><th>Gap</th><th>Races</th><th>Wins</th><th>Strike %</th><th>ROI</th></tr></thead><tbody>';
-    
     const gapOrder = ['50+', '40-49', '30-39', '20-29', '10-19', '<10'];
     for (const gap of gapOrder) {
         const d = data.score_gaps[gap];
-        html += `<tr>
-            <td><strong>${gap}</strong></td>
-            <td>${d.races}</td>
-            <td>${d.wins}</td>
-            <td>${d.strike_rate.toFixed(1)}%</td>
-            <td class="${d.roi >= 0 ? 'text-success' : 'text-danger'}">${d.roi.toFixed(1)}%</td>
-        </tr>`;
+        html += `<tr><td><strong>${gap}</strong></td><td>${d.races}</td><td>${d.wins}</td><td>${d.strike_rate.toFixed(1)}%</td><td class="${d.roi >= 0 ? 'text-success' : 'text-danger'}">${d.roi.toFixed(1)}%</td></tr>`;
     }
     html += '</tbody></table></div>';
-    
-    // Score Gap Chart
     html += '<div class="col-md-6"><canvas id="scoreGapChart" height="200"></canvas></div></div></div>';
-    
     container.innerHTML = html;
-    
-    // Draw charts
-    const tierLabels = tierOrder;
-    const tierStrikeRates = tierOrder.map(t => data.score_tiers[t].strike_rate);
-    
+
+    // Purple bars — visible on dark background
     new Chart(document.getElementById('scoreTierChart'), {
         type: 'bar',
-        data: {
-            labels: tierLabels,
-            datasets: [{
-                label: 'Strike Rate %',
-                data: tierStrikeRates,
-                backgroundColor: 'rgba(54, 162, 235, 0.7)',
-                borderColor: 'rgba(54, 162, 235, 1)',
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            scales: { y: { beginAtZero: true, max: 100 } },
-            plugins: { legend: { display: false } }
-        }
+        data: { labels: tierOrder, datasets: [{ label: 'Strike Rate %', data: tierOrder.map(t => data.score_tiers[t].strike_rate),
+            backgroundColor: 'rgba(102, 126, 234, 0.75)', borderColor: 'rgba(102, 126, 234, 1)', borderWidth: 1 }] },
+        options: { responsive: true,
+            scales: { y: { beginAtZero: true, max: 100, ticks: { color: '#9090a8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                      x: { ticks: { color: '#9090a8', font: { size: 11 } }, grid: { display: false } } },
+            plugins: { legend: { display: false } } }
     });
-    
-    const gapLabels = gapOrder;
-    const gapStrikeRates = gapOrder.map(g => data.score_gaps[g].strike_rate);
-    
+
+    // Green bars — visible on dark background
     new Chart(document.getElementById('scoreGapChart'), {
         type: 'bar',
-        data: {
-            labels: gapLabels,
-            datasets: [{
-                label: 'Strike Rate %',
-                data: gapStrikeRates,
-                backgroundColor: 'rgba(75, 192, 192, 0.7)',
-                borderColor: 'rgba(75, 192, 192, 1)',
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            scales: { y: { beginAtZero: true, max: 100 } },
-            plugins: { legend: { display: false } }
-        }
+        data: { labels: gapOrder, datasets: [{ label: 'Strike Rate %', data: gapOrder.map(g => data.score_gaps[g].strike_rate),
+            backgroundColor: 'rgba(16, 185, 129, 0.75)', borderColor: 'rgba(16, 185, 129, 1)', borderWidth: 1 }] },
+        options: { responsive: true,
+            scales: { y: { beginAtZero: true, max: 100, ticks: { color: '#9090a8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                      x: { ticks: { color: '#9090a8', font: { size: 11 } }, grid: { display: false } } },
+            plugins: { legend: { display: false } } }
     });
 }
 
 function renderComponentAnalysis(data) {
     const container = document.getElementById('componentAnalysis');
-    
     if (!data.components || data.components.length === 0) {
         container.innerHTML = '<div class="card-body text-center text-muted py-5"><i class="bi bi-database display-4"></i><p class="mt-3">No component data yet.</p></div>';
         return;
     }
-    
     let html = '<div class="card-body">';
     html += '<p class="text-muted mb-3">Which scoring factors actually predict winners? Components sorted by ROI.</p>';
     html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
     html += '<th>Component</th><th class="text-center">Appearances</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
     html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th><th class="text-center">Value?</th>';
     html += '</tr></thead><tbody>';
-    
     for (const comp of data.components) {
         let strikeClass = '';
         if (comp.strike_rate >= 30) strikeClass = 'text-success fw-bold';
         else if (comp.strike_rate >= 20) strikeClass = 'text-success';
         else if (comp.strike_rate < 10) strikeClass = 'text-danger';
-        
         let valueBadge = '';
-        if (comp.roi >= 25 && comp.appearances >= 5) {
-            valueBadge = '<span class="badge bg-success">✓ Strong</span>';
-        } else if (comp.roi >= 18 && comp.appearances >= 3) {
-            valueBadge = '<span class="badge bg-info">Promising</span>';
-        } else if (comp.roi < 10 && comp.appearances >= 5) {
-            valueBadge = '<span class="badge bg-danger">Weak</span>';
-        } else if (comp.appearances < 5) {
-            valueBadge = '<span class="badge bg-secondary">Low Data</span>';
-        } else {
-            valueBadge = '<span class="badge bg-warning text-dark">Neutral</span>';
-        }
-        
-        // NEW: Detect age/sex demographics and add emoji
+        if (comp.roi >= 25 && comp.appearances >= 5) valueBadge = '<span class="badge bg-success">✓ Strong</span>';
+        else if (comp.roi >= 18 && comp.appearances >= 3) valueBadge = '<span class="badge bg-info">Promising</span>';
+        else if (comp.roi < 10 && comp.appearances >= 5) valueBadge = '<span class="badge bg-danger">Weak</span>';
+        else if (comp.appearances < 5) valueBadge = '<span class="badge bg-secondary">Low Data</span>';
+        else valueBadge = '<span class="badge bg-warning text-dark">Neutral</span>';
         let displayName = comp.name;
-        if (/^\d+yo\s+(Mare|Gelding|Colt|Horse|Filly)$/i.test(comp.name)) {
-            displayName = `🐴 ${comp.name}`;
-        }
-        
-        html += `<tr>
-            <td><strong>${displayName}</strong></td>
-            <td class="text-center">${comp.appearances}</td>
-            <td class="text-center">${comp.wins}</td>
-            <td class="text-center ${strikeClass}">${comp.strike_rate.toFixed(1)}%</td>
-            <td class="text-center">${comp.places}</td>
-            <td class="text-center${comp.place_rate >= 50 ? ' text-success' : ''}">${comp.place_rate.toFixed(1)}%</td>
-            <td class="text-center ${comp.roi >= 0 ? 'text-success' : 'text-danger'}">${comp.roi.toFixed(1)}%</td>
-            <td class="text-center">${valueBadge}</td>
-        </tr>`;
+        if (/^\d+yo\s+(Mare|Gelding|Colt|Horse|Filly)$/i.test(comp.name)) { displayName = `🐴 ${comp.name}`; }
+        html += `<tr><td><strong>${displayName}</strong></td><td class="text-center">${comp.appearances}</td><td class="text-center">${comp.wins}</td><td class="text-center ${strikeClass}">${comp.strike_rate.toFixed(1)}%</td><td class="text-center">${comp.places}</td><td class="text-center${comp.place_rate >= 50 ? ' text-success' : ''}">${comp.place_rate.toFixed(1)}%</td><td class="text-center ${comp.roi >= 0 ? 'text-success' : 'text-danger'}">${comp.roi.toFixed(1)}%</td><td class="text-center">${valueBadge}</td></tr>`;
     }
-    
     html += '</tbody></table></div>';
     html += '<div class="mt-4 p-3 bg-light rounded"><h6>📊 How to read this:</h6><ul class="mb-0 small">';
     html += '<li><strong>Strike %</strong> - How often horses with this component win</li>';
@@ -589,412 +699,154 @@ function renderComponentAnalysis(data) {
     html += '<li><strong>Value?</strong> - Quick assessment: Strong (25%+ ROI, 5+ appearances), Promising (18%+), Weak (&lt;10%), or needs more data</li>';
     html += '<li><strong>🐴 Icon</strong> - Age/sex demographics (e.g., 3yo Colt, 4yo Mare)</li>';
     html += '</ul></div></div>';
-    
     container.innerHTML = html;
 }
+
 function renderExternalFactors(data) {
     const container = document.getElementById('externalFactors');
-    
     let html = '<div class="card-body">';
-    
-    // Jockeys
-html += '<div class="mb-5"><h5>🏇 Jockeys</h5><p class="text-muted small">Strike rates for all horses ridden, not just your top picks.</p>';
-
-if (data.jockeys_reliable && Object.keys(data.jockeys_reliable).length > 0) {
-    html += '<h6 class="text-success mt-3">Reliable Data (40+ rides)</h6>';
-    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-    html += '<th>Jockey</th><th class="text-center">Rides</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
-    
-    // Sort by ROI descending
-    const jockeysSorted = Object.entries(data.jockeys_reliable).sort((a, b) => b[1].roi - a[1].roi);
-    
-    for (const [name, stats] of jockeysSorted) {
-        let strikeClass = '';
-        if (stats.strike_rate >= 25) strikeClass = 'text-success fw-bold';
-        else if (stats.strike_rate >= 15) strikeClass = 'text-success';
-        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-        
-        html += `<tr>
-            <td><strong>${name}</strong></td>
-            <td class="text-center">${stats.runs}</td>
-            <td class="text-center">${stats.wins}</td>
-            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-            <td class="text-center">${stats.places}</td>
-            <td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-        </tr>`;
+    html += '<div class="mb-5"><h5>🏇 Jockeys</h5><p class="text-muted small">Strike rates for all horses ridden, not just your top picks.</p>';
+    if (data.jockeys_reliable && Object.keys(data.jockeys_reliable).length > 0) {
+        html += '<h6 class="text-success mt-3">Reliable Data (40+ rides)</h6>';
+        html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Jockey</th><th class="text-center">Rides</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
+        const jockeysSorted = Object.entries(data.jockeys_reliable).sort((a, b) => b[1].roi - a[1].roi);
+        for (const [name, stats] of jockeysSorted) {
+            let sc = stats.strike_rate >= 25 ? 'text-success fw-bold' : stats.strike_rate >= 15 ? 'text-success' : stats.strike_rate < 8 ? 'text-danger' : '';
+            html += `<tr><td><strong>${name}</strong></td><td class="text-center">${stats.runs}</td><td class="text-center">${stats.wins}</td><td class="text-center ${sc}">${stats.strike_rate.toFixed(1)}%</td><td class="text-center">${stats.places}</td><td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td><td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td></tr>`;
+        }
+        html += '</tbody></table></div>';
     }
-    html += '</tbody></table></div>';
-}
-html += '</div>';
-    
-    // Trainers  
-html += '<div class="mb-5"><h5>👔 Trainers</h5>';
-
-if (data.trainers_reliable && Object.keys(data.trainers_reliable).length > 0) {
-    html += '<h6 class="text-success mt-3">Reliable Data (40+ runners)</h6>';
-    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-    html += '<th>Trainer</th><th class="text-center">Runners</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
-    
-    // Sort by ROI descending
-    const trainersSorted = Object.entries(data.trainers_reliable).sort((a, b) => b[1].roi - a[1].roi);
-    
-    for (const [name, stats] of trainersSorted) {
-        let strikeClass = '';
-        if (stats.strike_rate >= 25) strikeClass = 'text-success fw-bold';
-        else if (stats.strike_rate >= 15) strikeClass = 'text-success';
-        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-        
-        html += `<tr>
-            <td><strong>${name}</strong></td>
-            <td class="text-center">${stats.runs}</td>
-            <td class="text-center">${stats.wins}</td>
-            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-            <td class="text-center">${stats.places}</td>
-            <td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-        </tr>`;
+    html += '</div>';
+    html += '<div class="mb-5"><h5>👔 Trainers</h5>';
+    if (data.trainers_reliable && Object.keys(data.trainers_reliable).length > 0) {
+        html += '<h6 class="text-success mt-3">Reliable Data (40+ runners)</h6>';
+        html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Trainer</th><th class="text-center">Runners</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
+        const trainersSorted = Object.entries(data.trainers_reliable).sort((a, b) => b[1].roi - a[1].roi);
+        for (const [name, stats] of trainersSorted) {
+            let sc = stats.strike_rate >= 25 ? 'text-success fw-bold' : stats.strike_rate >= 15 ? 'text-success' : stats.strike_rate < 8 ? 'text-danger' : '';
+            html += `<tr><td><strong>${name}</strong></td><td class="text-center">${stats.runs}</td><td class="text-center">${stats.wins}</td><td class="text-center ${sc}">${stats.strike_rate.toFixed(1)}%</td><td class="text-center">${stats.places}</td><td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td><td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td></tr>`;
+        }
+        html += '</tbody></table></div>';
     }
-    html += '</tbody></table></div>';
-}
-html += '</div>';
-    // Sires
-if (data.sires_reliable && Object.keys(data.sires_reliable).length > 0) {
-    html += '<div class="mb-5"><h5>🐴 Sires (30+ Appearances)</h5>';
-    html += '<p class="text-muted small">Performance of horses by their sire (minimum 30 runners).</p>';
-    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-    html += '<th>Sire</th><th class="text-center">Runners</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
-    
-    // Sort by ROI descending
-    const siresSorted = Object.entries(data.sires_reliable).sort((a, b) => b[1].roi - a[1].roi);
-    
-    for (const [name, stats] of siresSorted) {
-        let strikeClass = '';
-        if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
-        else if (stats.strike_rate >= 12) strikeClass = 'text-success';
-        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-        
-        html += `<tr>
-            <td><strong>${name}</strong></td>
-            <td class="text-center">${stats.runs}</td>
-            <td class="text-center">${stats.wins}</td>
-            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-            <td class="text-center">${stats.places}</td>
-            <td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-        </tr>`;
+    html += '</div>';
+    if (data.sires_reliable && Object.keys(data.sires_reliable).length > 0) {
+        html += '<div class="mb-5"><h5>🐴 Sires (30+ Appearances)</h5><p class="text-muted small">Performance of horses by their sire (minimum 30 runners).</p>';
+        html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Sire</th><th class="text-center">Runners</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
+        const siresSorted = Object.entries(data.sires_reliable).sort((a, b) => b[1].roi - a[1].roi);
+        for (const [name, stats] of siresSorted) {
+            let sc = stats.strike_rate >= 20 ? 'text-success fw-bold' : stats.strike_rate >= 12 ? 'text-success' : stats.strike_rate < 8 ? 'text-danger' : '';
+            html += `<tr><td><strong>${name}</strong></td><td class="text-center">${stats.runs}</td><td class="text-center">${stats.wins}</td><td class="text-center ${sc}">${stats.strike_rate.toFixed(1)}%</td><td class="text-center">${stats.places}</td><td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td><td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td></tr>`;
+        }
+        html += '</tbody></table></div></div>';
     }
-    html += '</tbody></table></div></div>';
-}
-
-// Dams
-if (data.dams_reliable && Object.keys(data.dams_reliable).length > 0) {
-    html += '<div class="mb-5"><h5>🐎 Dams (5+ Appearances)</h5>';
-    html += '<p class="text-muted small">Performance of horses by their dam (minimum 5 runners).</p>';
-    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-    html += '<th>Dam</th><th class="text-center">Runners</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
-    
-    // Sort by ROI descending
-    const damsSorted = Object.entries(data.dams_reliable).sort((a, b) => b[1].roi - a[1].roi);
-    
-    for (const [name, stats] of damsSorted) {
-        let strikeClass = '';
-        if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
-        else if (stats.strike_rate >= 12) strikeClass = 'text-success';
-        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-        
-        html += `<tr>
-            <td><strong>${name}</strong></td>
-            <td class="text-center">${stats.runs}</td>
-            <td class="text-center">${stats.wins}</td>
-            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-            <td class="text-center">${stats.places}</td>
-            <td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-        </tr>`;
+    if (data.dams_reliable && Object.keys(data.dams_reliable).length > 0) {
+        html += '<div class="mb-5"><h5>🐎 Dams (5+ Appearances)</h5><p class="text-muted small">Performance of horses by their dam (minimum 5 runners).</p>';
+        html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Dam</th><th class="text-center">Runners</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI</th></tr></thead><tbody>';
+        const damsSorted = Object.entries(data.dams_reliable).sort((a, b) => b[1].roi - a[1].roi);
+        for (const [name, stats] of damsSorted) {
+            let sc = stats.strike_rate >= 20 ? 'text-success fw-bold' : stats.strike_rate >= 12 ? 'text-success' : stats.strike_rate < 8 ? 'text-danger' : '';
+            html += `<tr><td><strong>${name}</strong></td><td class="text-center">${stats.runs}</td><td class="text-center">${stats.wins}</td><td class="text-center ${sc}">${stats.strike_rate.toFixed(1)}%</td><td class="text-center">${stats.places}</td><td class="text-center${stats.place_rate >= 50 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td><td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td></tr>`;
+        }
+        html += '</tbody></table></div></div>';
     }
-    html += '</tbody></table></div></div>';
-}
-    // Race Classes
-if (data.class_performance && Object.keys(data.class_performance).length > 0) {
-    html += '<div class="mb-4"><h5>🏆 Race Classes</h5>';
-    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-    html += '<th>Class</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
-    
-    // Sort by ROI descending
-    const classesSorted = Object.entries(data.class_performance).sort((a, b) => b[1].roi - a[1].roi);
-    
-    for (const [className, stats] of classesSorted) {
-        let strikeClass = '';
-        if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
-        else if (stats.strike_rate >= 12) strikeClass = 'text-success';
-        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-        
-        html += `<tr>
-            <td><strong>${className}</strong></td>
-            <td class="text-center">${stats.runs}</td>
-            <td class="text-center">${stats.wins}</td>
-            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-            <td class="text-center">${stats.places}</td>
-            <td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-        </tr>`;
+    if (data.class_performance && Object.keys(data.class_performance).length > 0) {
+        html += '<div class="mb-4"><h5>🏆 Race Classes</h5><div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Class</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
+        const classesSorted = Object.entries(data.class_performance).sort((a, b) => b[1].roi - a[1].roi);
+        for (const [className, stats] of classesSorted) {
+            let sc = stats.strike_rate >= 20 ? 'text-success fw-bold' : stats.strike_rate >= 12 ? 'text-success' : stats.strike_rate < 8 ? 'text-danger' : '';
+            html += `<tr><td><strong>${className}</strong></td><td class="text-center">${stats.runs}</td><td class="text-center">${stats.wins}</td><td class="text-center ${sc}">${stats.strike_rate.toFixed(1)}%</td><td class="text-center">${stats.places}</td><td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td><td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td></tr>`;
+        }
+        html += '</tbody></table></div></div>';
     }
-    html += '</tbody></table></div></div>';
-    }
-    // Class Drops Analysis - NEW SECTION
-if (data.class_drops && Object.keys(data.class_drops).length > 0) {
-    html += '<div class="mb-4"><h5>📉 Class Drop / Rise Analysis (All Horses)</h5>';
-html += '<p class="text-muted small">Performance based on class point changes across ALL horses in database. Higher drops = bigger class advantages.</p>';
-    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-    html += '<th>Class Change</th><th class="text-center">Horses</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
-    
-    // Define display order (drops first, then rises)
-    const dropOrder = ['100+', '90-99', '80-89', '70-79', '60-69', '50-59', '40-49', 
-                       '30-39', '20-29', '10-19', '0-9', 'Same Class', 
-                       'Rise 0-9', 'Rise 10-19', 'Rise 20-29', 'Rise 30+'];
-    
-    for (const dropRange of dropOrder) {
-        if (data.class_drops[dropRange] && data.class_drops[dropRange].runs > 0) {
-            const stats = data.class_drops[dropRange];
-            let strikeClass = '';
-            if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
-            else if (stats.strike_rate >= 12) strikeClass = 'text-success';
-            else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-            
-            // Format display name
-            let displayName = dropRange;
-            if (dropRange === 'Same Class') {
-                displayName = '⚖️ Same Class (0 pts)';
-            } else if (dropRange.startsWith('Rise')) {
-                displayName = '🔺 Class Rise: ' + dropRange.replace('Rise ', '') + ' pts';
-            } else {
-                displayName = '🔻 Class Drop: ' + dropRange + ' pts';
+    if (data.class_drops && Object.keys(data.class_drops).length > 0) {
+        html += '<div class="mb-4"><h5>📉 Class Drop / Rise Analysis (All Horses)</h5><p class="text-muted small">Performance based on class point changes across ALL horses in database. Higher drops = bigger class advantages.</p><div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Class Change</th><th class="text-center">Horses</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
+        const dropOrder = ['100+','90-99','80-89','70-79','60-69','50-59','40-49','30-39','20-29','10-19','0-9','Same Class','Rise 0-9','Rise 10-19','Rise 20-29','Rise 30+'];
+        for (const dropRange of dropOrder) {
+            if (data.class_drops[dropRange] && data.class_drops[dropRange].runs > 0) {
+                const stats = data.class_drops[dropRange];
+                let sc = stats.strike_rate >= 20 ? 'text-success fw-bold' : stats.strike_rate >= 12 ? 'text-success' : stats.strike_rate < 8 ? 'text-danger' : '';
+                let displayName = dropRange === 'Same Class' ? '⚖️ Same Class (0 pts)' : dropRange.startsWith('Rise') ? '🔺 Class Rise: ' + dropRange.replace('Rise ','') + ' pts' : '🔻 Class Drop: ' + dropRange + ' pts';
+                html += `<tr><td><strong>${displayName}</strong></td><td class="text-center">${stats.runs}</td><td class="text-center">${stats.wins}</td><td class="text-center ${sc}">${stats.strike_rate.toFixed(1)}%</td><td class="text-center">${stats.places}</td><td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td><td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td></tr>`;
             }
-            
-            html += `<tr>
-                <td><strong>${displayName}</strong></td>
-                <td class="text-center">${stats.runs}</td>
-                <td class="text-center">${stats.wins}</td>
-                <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-                <td class="text-center">${stats.places}</td>
-                <td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-                <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-            </tr>`;
         }
+        html += '</tbody></table></div></div>';
     }
-    html += '</tbody></table></div></div>';
-}
-    // Tracks (ROI Breakdown)
-if (data.tracks && Object.keys(data.tracks).length > 0) {
-    html += '<div class="mb-4"><h5>🏇 Race Track Analysis (All Horses)</h5>';
-    html += '<p class="text-muted small">Performance based on class point changes across ALL horses in database. Higher drops = bigger class advantages.</p>';
-    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-    html += '<th>Track</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
-    
-    // Sort by ROI descending
-    const tracksSorted = Object.entries(data.tracks).sort((a, b) => b[1].roi - a[1].roi);
-    
-    for (const [trackName, stats] of tracksSorted) {
-        let strikeClass = '';
-        if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
-        else if (stats.strike_rate >= 12) strikeClass = 'text-success';
-        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-        
-        html += `<tr>
-            <td><strong>${trackName}</strong></td>
-            <td class="text-center">${stats.runs}</td>
-            <td class="text-center">${stats.wins}</td>
-            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-            <td class="text-center">${stats.places}</td>
-            <td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-        </tr>`;
-    }
-    html += '</tbody></table></div></div>';
-}
-    // Distances (ROI Breakdown)
-if (data.distances && Object.keys(data.distances).length > 0) {
-    html += '<div class="mb-4"><h5>📏 Distance Performance (Top Picks Only)</h5>';
-    html += '<p class="text-muted small">Performance of your #1 rated horses at different distance ranges.</p>';
-    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-    html += '<th>Distance</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
-    
-    // Define order for distances
-    const distanceOrder = ['Sprint (≤1200m)', 'Short (1300-1500m)', 'Mile (1550-1700m)', 'Middle (1800-2200m)', 'Staying (2400m+)'];
-    
-    for (const distRange of distanceOrder) {
-        if (data.distances[distRange] && data.distances[distRange].runs > 0) {
-            const stats = data.distances[distRange];
-            let strikeClass = '';
-            if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
-            else if (stats.strike_rate >= 12) strikeClass = 'text-success';
-            else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-            
-            html += `<tr>
-                <td><strong>${distRange}</strong></td>
-                <td class="text-center">${stats.runs}</td>
-                <td class="text-center">${stats.wins}</td>
-                <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-                <td class="text-center">${stats.places}</td>
-                <td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-                <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-            </tr>`;
+    if (data.tracks && Object.keys(data.tracks).length > 0) {
+        html += '<div class="mb-4"><h5>🏇 Race Track Analysis (All Horses)</h5><p class="text-muted small">Performance based on class point changes across ALL horses in database. Higher drops = bigger class advantages.</p><div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Track</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
+        const tracksSorted = Object.entries(data.tracks).sort((a, b) => b[1].roi - a[1].roi);
+        for (const [trackName, stats] of tracksSorted) {
+            let sc = stats.strike_rate >= 20 ? 'text-success fw-bold' : stats.strike_rate >= 12 ? 'text-success' : stats.strike_rate < 8 ? 'text-danger' : '';
+            html += `<tr><td><strong>${trackName}</strong></td><td class="text-center">${stats.runs}</td><td class="text-center">${stats.wins}</td><td class="text-center ${sc}">${stats.strike_rate.toFixed(1)}%</td><td class="text-center">${stats.places}</td><td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td><td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td></tr>`;
         }
+        html += '</tbody></table></div></div>';
     }
-    html += '</tbody></table></div></div>';
-}
-    
-// Track Conditions (ROI Breakdown)
-if (data.track_conditions && Object.keys(data.track_conditions).length > 0) {
-    html += '<div class="mb-4"><h5>🌦️ Track Condition Performance (All Horses)</h5>';
-    html += '<p class="text-muted small">Performance across different track conditions.</p>';
-    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-    html += '<th>Condition</th><th class="text-center">Runs</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
-    
-    // Sort by ROI descending
-    const conditionsSorted = Object.entries(data.track_conditions).sort((a, b) => b[1].roi - a[1].roi);
-    
-    for (const [condition, stats] of conditionsSorted) {
-        let strikeClass = '';
-        if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
-        else if (stats.strike_rate >= 12) strikeClass = 'text-success';
-        else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-        
-        html += `<tr>
-            <td><strong>${condition}</strong></td>
-            <td class="text-center">${stats.runs}</td>
-            <td class="text-center">${stats.wins}</td>
-            <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-            <td class="text-center">${stats.places}</td>
-            <td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-            <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-        </tr>`;
-    }
-    html += '</tbody></table></div></div>';
-    }
-// Barriers (ROI Breakdown)
-if (data.barriers && Object.keys(data.barriers).length > 0) {
-    html += '<div class="mb-4"><h5>🎯 Barrier Performance (All Horses)</h5>';
-    html += '<p class="text-muted small">Performance from different barrier positions.</p>';
-    html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
-    html += '<th>Barrier</th><th class="text-center">Runs</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
-    html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
-    
-    // Define order for barriers
-    const barrierOrder = ['1-3', '4-6', '7-9', '10+'];
-    
-    for (const barrierRange of barrierOrder) {
-        if (data.barriers[barrierRange] && data.barriers[barrierRange].runs > 0) {
-            const stats = data.barriers[barrierRange];
-            let strikeClass = '';
-            if (stats.strike_rate >= 20) strikeClass = 'text-success fw-bold';
-            else if (stats.strike_rate >= 12) strikeClass = 'text-success';
-            else if (stats.strike_rate < 8) strikeClass = 'text-danger';
-            
-            html += `<tr>
-                <td><strong>${barrierRange}</strong></td>
-                <td class="text-center">${stats.runs}</td>
-                <td class="text-center">${stats.wins}</td>
-                <td class="text-center ${strikeClass}">${stats.strike_rate.toFixed(1)}%</td>
-                <td class="text-center">${stats.places}</td>
-                <td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td>
-                <td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td>
-            </tr>`;
+    if (data.distances && Object.keys(data.distances).length > 0) {
+        html += '<div class="mb-4"><h5>📏 Distance Performance (Top Picks Only)</h5><p class="text-muted small">Performance of your #1 rated horses at different distance ranges.</p><div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Distance</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
+        const distanceOrder = ['Sprint (≤1200m)','Short (1300-1500m)','Mile (1550-1700m)','Middle (1800-2200m)','Staying (2400m+)'];
+        for (const distRange of distanceOrder) {
+            if (data.distances[distRange] && data.distances[distRange].runs > 0) {
+                const stats = data.distances[distRange];
+                let sc = stats.strike_rate >= 20 ? 'text-success fw-bold' : stats.strike_rate >= 12 ? 'text-success' : stats.strike_rate < 8 ? 'text-danger' : '';
+                html += `<tr><td><strong>${distRange}</strong></td><td class="text-center">${stats.runs}</td><td class="text-center">${stats.wins}</td><td class="text-center ${sc}">${stats.strike_rate.toFixed(1)}%</td><td class="text-center">${stats.places}</td><td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td><td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td></tr>`;
+            }
         }
+        html += '</tbody></table></div></div>';
     }
-    html += '</tbody></table></div></div>';
-}
- html += '</div>';
+    if (data.track_conditions && Object.keys(data.track_conditions).length > 0) {
+        html += '<div class="mb-4"><h5>🌦️ Track Condition Performance (All Horses)</h5><p class="text-muted small">Performance across different track conditions.</p><div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Condition</th><th class="text-center">Runs</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
+        const conditionsSorted = Object.entries(data.track_conditions).sort((a, b) => b[1].roi - a[1].roi);
+        for (const [condition, stats] of conditionsSorted) {
+            let sc = stats.strike_rate >= 20 ? 'text-success fw-bold' : stats.strike_rate >= 12 ? 'text-success' : stats.strike_rate < 8 ? 'text-danger' : '';
+            html += `<tr><td><strong>${condition}</strong></td><td class="text-center">${stats.runs}</td><td class="text-center">${stats.wins}</td><td class="text-center ${sc}">${stats.strike_rate.toFixed(1)}%</td><td class="text-center">${stats.places}</td><td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td><td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td></tr>`;
+        }
+        html += '</tbody></table></div></div>';
+    }
+    if (data.barriers && Object.keys(data.barriers).length > 0) {
+        html += '<div class="mb-4"><h5>🎯 Barrier Performance (All Horses)</h5><p class="text-muted small">Performance from different barrier positions.</p><div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Barrier</th><th class="text-center">Runs</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th></tr></thead><tbody>';
+        const barrierOrder = ['1-3','4-6','7-9','10+'];
+        for (const barrierRange of barrierOrder) {
+            if (data.barriers[barrierRange] && data.barriers[barrierRange].runs > 0) {
+                const stats = data.barriers[barrierRange];
+                let sc = stats.strike_rate >= 20 ? 'text-success fw-bold' : stats.strike_rate >= 12 ? 'text-success' : stats.strike_rate < 8 ? 'text-danger' : '';
+                html += `<tr><td><strong>${barrierRange}</strong></td><td class="text-center">${stats.runs}</td><td class="text-center">${stats.wins}</td><td class="text-center ${sc}">${stats.strike_rate.toFixed(1)}%</td><td class="text-center">${stats.places}</td><td class="text-center${stats.place_rate >= 40 ? ' text-success' : ''}">${stats.place_rate.toFixed(1)}%</td><td class="text-center ${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</td></tr>`;
+            }
+        }
+        html += '</tbody></table></div></div>';
+    }
+    html += '</div>';
     container.innerHTML = html;
 }
+
 function renderPriceAnalysis(data) {
     const container = document.getElementById('priceAnalysis');
-    
     if (data.total_compared === 0) {
         container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No price comparison data yet.</p></div>';
         return;
     }
-    
     let html = '<div class="card-body">';
     html += '<p class="text-muted mb-3">Overlay analysis: When SP is better than your predicted price, are you finding winners?</p>';
-    
-    // Total Overlays Summary
     html += '<div class="row mb-4">';
-    html += `<div class="col-md-12"><div class="card border-primary"><div class="card-body text-center">
-        <h5>📊 Total Overlays Found</h5>
-        <h2>${data.total_overlays.wins}/${data.total_overlays.count}</h2>
-        <p class="mb-1">Strike Rate: <strong class="${data.total_overlays.strike_rate >= 20 ? 'text-success' : 'text-danger'}">${data.total_overlays.strike_rate.toFixed(1)}%</strong></p>
-        <p class="mb-0">ROI: <strong class="${data.total_overlays.roi >= 0 ? 'text-success' : 'text-danger'}">${data.total_overlays.roi.toFixed(1)}%</strong></p>
-        <small class="text-muted">${data.total_overlays.count} out of ${data.total_compared} races analyzed (${((data.total_overlays.count / data.total_compared) * 100).toFixed(1)}%)</small>
-    </div></div></div>`;
-    html += '</div>';
-    
-    // Tiered Overlay Breakdown
-    html += '<div class="row mb-4">';
-    
-    const tiers = [
-        {key: 'overlay_10_20', label: '10-20% Overlay', desc: 'SP 10-20% better than your price'},
-        {key: 'overlay_20_30', label: '20-30% Overlay', desc: 'SP 20-30% better than your price'},
-        {key: 'overlay_30_50', label: '30-50% Overlay', desc: 'SP 30-50% better than your price'},
-        {key: 'overlay_50_plus', label: '50%+ Overlay', desc: 'SP 50%+ better than your price'}
-    ];
-    
+    html += `<div class="col-md-12"><div class="card border-primary"><div class="card-body text-center"><h5>📊 Total Overlays Found</h5><h2>${data.total_overlays.wins}/${data.total_overlays.count}</h2><p class="mb-1">Strike Rate: <strong class="${data.total_overlays.strike_rate >= 20 ? 'text-success' : 'text-danger'}">${data.total_overlays.strike_rate.toFixed(1)}%</strong></p><p class="mb-0">ROI: <strong class="${data.total_overlays.roi >= 0 ? 'text-success' : 'text-danger'}">${data.total_overlays.roi.toFixed(1)}%</strong></p><small class="text-muted">${data.total_overlays.count} out of ${data.total_compared} races analyzed (${((data.total_overlays.count / data.total_compared) * 100).toFixed(1)}%)</small></div></div></div>`;
+    html += '</div><div class="row mb-4">';
+    const tiers = [{key:'overlay_10_20',label:'10-20% Overlay',desc:'SP 10-20% better than your price'},{key:'overlay_20_30',label:'20-30% Overlay',desc:'SP 20-30% better than your price'},{key:'overlay_30_50',label:'30-50% Overlay',desc:'SP 30-50% better than your price'},{key:'overlay_50_plus',label:'50%+ Overlay',desc:'SP 50%+ better than your price'}];
     for (const tier of tiers) {
         const stats = data[tier.key];
         if (stats.count > 0) {
-            html += `<div class="col-md-6 mb-3"><div class="card h-100 ${stats.roi >= 0 ? 'border-success' : 'border-warning'}"><div class="card-body">
-                <h6>${tier.label}</h6>
-                <p class="small text-muted mb-2">${tier.desc}</p>
-                <h4>${stats.wins}/${stats.count}</h4>
-                <p class="mb-1">Strike: <strong class="${stats.strike_rate >= 20 ? 'text-success' : ''}">${stats.strike_rate.toFixed(1)}%</strong></p>
-                <p class="mb-0">ROI: <strong class="${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</strong></p>
-                <small class="text-muted">Profit: $${stats.profit.toFixed(2)}</small>
-            </div></div></div>`;
+            html += `<div class="col-md-6 mb-3"><div class="card h-100 ${stats.roi >= 0 ? 'border-success' : 'border-warning'}"><div class="card-body"><h6>${tier.label}</h6><p class="small text-muted mb-2">${tier.desc}</p><h4>${stats.wins}/${stats.count}</h4><p class="mb-1">Strike: <strong class="${stats.strike_rate >= 20 ? 'text-success' : ''}">${stats.strike_rate.toFixed(1)}%</strong></p><p class="mb-0">ROI: <strong class="${stats.roi >= 0 ? 'text-success' : 'text-danger'}">${stats.roi.toFixed(1)}%</strong></p><small class="text-muted">Profit: $${stats.profit.toFixed(2)}</small></div></div></div>`;
         }
     }
-    
     html += '</div>';
-    
-    // Examples Table
     if (data.overlay_examples && data.overlay_examples.length > 0) {
-        html += '<div class="card mb-3"><div class="card-header"><h6 class="mb-0">Recent Overlay Examples</h6></div>';
-        html += '<div class="card-body"><div class="table-responsive"><table class="table table-sm table-hover">';
-        html += '<thead><tr><th>Horse</th><th>Score</th><th>Your Price</th><th>SP</th><th>Overlay %</th><th>Result</th><th>Profit</th></tr></thead><tbody>';
-        
+        html += '<div class="card mb-3"><div class="card-header"><h6 class="mb-0">Recent Overlay Examples</h6></div><div class="card-body"><div class="table-responsive"><table class="table table-sm table-hover"><thead><tr><th>Horse</th><th>Score</th><th>Your Price</th><th>SP</th><th>Overlay %</th><th>Result</th><th>Profit</th></tr></thead><tbody>';
         for (const ex of data.overlay_examples) {
-            html += `<tr class="${ex.won ? 'table-success' : ''}">
-                <td><strong>${ex.horse}</strong></td>
-                <td>${ex.score.toFixed(1)}</td>
-                <td>$${ex.your_price.toFixed(2)}</td>
-                <td>$${ex.sp.toFixed(2)}</td>
-                <td class="text-success">+${ex.overlay_pct.toFixed(1)}%</td>
-                <td>${ex.won ? '✅ WON' : '❌'}</td>
-                <td class="${ex.profit >= 0 ? 'text-success' : 'text-danger'}">$${ex.profit.toFixed(2)}</td>
-            </tr>`;
+            html += `<tr class="${ex.won ? 'table-success' : ''}"><td><strong>${ex.horse}</strong></td><td>${ex.score.toFixed(1)}</td><td>$${ex.your_price.toFixed(2)}</td><td>$${ex.sp.toFixed(2)}</td><td class="text-success">+${ex.overlay_pct.toFixed(1)}%</td><td>${ex.won ? '✅ WON' : '❌'}</td><td class="${ex.profit >= 0 ? 'text-success' : 'text-danger'}">$${ex.profit.toFixed(2)}</td></tr>`;
         }
-        
         html += '</tbody></table></div></div></div>';
     }
-    
-    html += '<div class="alert alert-info mt-3">';
-    html += '<strong>💡 What to look for:</strong> ';
-    html += 'Positive ROI in any tier means you\'re finding genuine value in that overlay range. ';
-    html += 'If larger overlays (50%+) have worse ROI, it may indicate your model is too aggressive on those selections.';
+    html += '<div class="alert alert-info mt-3"><strong>💡 What to look for:</strong> Positive ROI in any tier means you\'re finding genuine value in that overlay range. If larger overlays (50%+) have worse ROI, it may indicate your model is too aggressive on those selections.</div>';
     html += '</div>';
-    
-    html += '</div>';
-    
     container.innerHTML = html;
 }
 </script>
+
 {% endblock %}
