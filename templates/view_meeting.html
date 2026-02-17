@@ -277,7 +277,7 @@
 }
 /* J: / T: subtitle */
 .vm-race-card tbody td:nth-child(2) > div:last-child {
-  color: var(--text-muted) !important;
+  color: var(--text-secondary) !important;
   font-size: 11px;
 }
 
@@ -302,7 +302,7 @@
 /* Win % — near-white mono */
 .vm-race-card tbody td:nth-child(5) {
   font-family: 'DM Mono', monospace !important;
-  color: var(--text-secondary) !important;
+  color: var(--text-primary) !important;
   text-align: center;
 }
 
@@ -1310,7 +1310,7 @@ function renderPFAIHeatmap(raceNum, horses) {
         html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last600_rank) + '</td>';
         html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last400_rank) + '</td>';
         html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last200_rank) + '</td>';
-        html += '<td style="padding:12px; text-align:center; font-weight:700;">' + horse.avgRank.toFixed(1) + '</td>';
+        html += '<td style="padding:12px; text-align:center; font-weight:700; color:#ffffff;">' + horse.avgRank.toFixed(1) + '</td>';
         html += '</tr>';
     });
     html += '</tbody></table>';
