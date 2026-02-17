@@ -1,68 +1,288 @@
 {% extends "base.html" %}
 {% block content %}
+
 <style>
-  /* Small local tweaks to keep the list tidy and match site visuals */
-  .history-container { max-width: 1000px; margin: 24px auto; padding: 0 16px; }
-  .meeting-card { display:flex; align-items:center; justify-content:space-between; padding:14px; border:1px solid var(--border-color, #e6e6e6); border-radius:8px; background:var(--card-bg, #fff); margin-bottom:12px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
-  .meeting-meta { color: var(--muted, #6c757d); font-size:0.95rem; margin-top:4px; }
-  .meeting-left { display:flex; gap:14px; align-items:center; min-width:0; }
-  .meeting-title { font-weight:600; color: var(--text-color, #222); margin:0; overflow:hidden; text-overflow:ellipsis; max-width:100%; line-height:1.3; }
-  .meeting-date-badge { font-size:0.85rem; padding:6px 8px; border-radius:6px; background:var(--accent, #1e90ff); color:#fff; }
-  .meeting-actions { display:flex; gap:8px; align-items:center; flex-shrink:0; }
-  .meeting-actions .btn { white-space:nowrap; min-width:60px; }
-  .small-muted { font-size:0.85rem; color:var(--muted, #6c757d); }
-  .no-meetings { padding:20px; text-align:center; color:var(--muted, #6c757d); }
-  /* Make View button green */
-  .btn-view-green { background-color: #28a745; color: white; border-color: #28a745; }
-  .btn-view-green:hover { background-color: #218838; border-color: #1e7e34; }
-  /* responsive */
-  @media (max-width:640px) {
-    .meeting-card { flex-direction:column; align-items:flex-start; gap:12px; }
-    .meeting-left { flex-direction:column; align-items:flex-start; gap:6px; width:100%; }
-    .meeting-title { max-width:100%; }
-    .meeting-actions { width:100%; justify-content:flex-start; }
+  /* ── History page — dark theme, inherits base.html tokens ── */
+
+  .history-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 16px 40px;
+  }
+
+  /* ── Page header ── */
+  .page-header {
+    margin-bottom: 28px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .page-header h1 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin: 0 0 4px 0;
+    color: var(--text-primary);
+  }
+
+  .page-header p {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+  }
+
+  /* ── Meeting card ── */
+  .meeting-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 20px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    margin-bottom: 10px;
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Accent left strip */
+  .meeting-card::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    border-radius: 12px 0 0 12px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  .meeting-card:hover {
+    border-color: var(--border-accent);
+    background: var(--bg-elevated);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  }
+
+  .meeting-card:hover::before {
+    opacity: 1;
+  }
+
+  /* ── Left side ── */
+  .meeting-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  /* Race number icon */
+  .meeting-icon {
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, rgba(102,126,234,0.15), rgba(118,75,162,0.15));
+    border: 1px solid var(--border-accent);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .meeting-info { min-width: 0; }
+
+  .meeting-title {
+    font-weight: 600;
+    font-size: 0.975rem;
+    color: var(--text-primary);
+    margin: 0 0 5px 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+    line-height: 1.3;
+  }
+
+  .meeting-title a {
+    color: inherit;
+    text-decoration: none;
+    transition: color 0.15s ease;
+  }
+
+  .meeting-title a:hover {
+    color: var(--accent);
+  }
+
+  .meeting-meta {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    line-height: 1.4;
+  }
+
+  .meeting-meta strong {
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  .meeting-meta .sep {
+    color: var(--border-mid);
+  }
+
+  /* Date badge */
+  .meeting-date-badge {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 3px 8px;
+    border-radius: 5px;
+    background: rgba(102,126,234,0.15);
+    border: 1px solid var(--border-accent);
+    color: var(--accent);
+    letter-spacing: 0.03em;
+  }
+
+  /* ── Actions ── */
+  .meeting-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  /* Override btn-view-green to match dark theme */
+  .btn-view-green {
+    background: linear-gradient(135deg, #065f46, #10b981) !important;
+    color: #fff !important;
+    border: none !important;
+    white-space: nowrap;
+    min-width: 58px;
+    text-align: center;
+  }
+
+  .btn-view-green:hover {
+    background: linear-gradient(135deg, #047857, #34d399) !important;
+    box-shadow: 0 4px 12px rgba(16,185,129,0.3) !important;
+  }
+
+  /* ── Empty state ── */
+  .no-meetings {
+    padding: 60px 20px;
+    text-align: center;
+    color: var(--text-muted);
+    background: var(--bg-surface);
+    border: 1px dashed var(--border-mid);
+    border-radius: 14px;
+    margin-top: 8px;
+  }
+
+  .no-meetings p { margin: 6px 0; color: var(--text-muted); }
+  .no-meetings strong { color: var(--text-secondary); }
+  .no-meetings .no-meetings-icon {
+    font-size: 2.5rem;
+    margin-bottom: 12px;
+    opacity: 0.4;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 640px) {
+    .meeting-card {
+      flex-direction: column;
+      align-items: flex-start;
+      padding: 14px 16px;
+    }
+
+    .meeting-left {
+      width: 100%;
+    }
+
+    .meeting-title {
+      white-space: normal;
+    }
+
+    .meeting-actions {
+      width: 100%;
+      justify-content: flex-start;
+    }
+
+    .meeting-icon {
+      display: none;
+    }
   }
 </style>
+
 <div class="history-container">
+
+  <!-- Page header -->
   <div class="page-header">
-    <h1 style="margin-bottom:6px">Race Analysis Lists</h1>
-    <p class="small-muted" style="margin-top:0">All raceday analyses — click a meeting to view.</p>
+    <h1>Race Analysis Lists</h1>
+    <p>All raceday analyses — click a meeting to view.</p>
   </div>
+
   {% if meetings %}
     {% for m in meetings %}
       <div class="meeting-card" role="article" aria-labelledby="meeting-{{ m.id }}">
+
         <div class="meeting-left">
-          <div>
+
+          <!-- Icon -->
+          <div class="meeting-icon">🏇</div>
+
+          <div class="meeting-info">
             <h2 id="meeting-{{ m.id }}" class="meeting-title">
-              <a href="{{ url_for('view_meeting', meeting_id=m.id) }}" style="color:inherit; text-decoration:none;">
+              <a href="{{ url_for('view_meeting', meeting_id=m.id) }}">
                 {{ m.meeting_name }}
               </a>
             </h2>
+
             <div class="meeting-meta">
-              Uploaded by <strong>{{ m.user.username if m.user else 'unknown' }}</strong>
-              &nbsp;•&nbsp;
-              <span title="{{ m.uploaded_at.isoformat() if m.uploaded_at }}">{{ m.uploaded_at.strftime('%Y-%m-%d %H:%M') if m.uploaded_at else 'unknown' }}</span>
+              <span>Uploaded by <strong>{{ m.user.username if m.user else 'unknown' }}</strong></span>
+              <span class="sep">•</span>
+              <span title="{{ m.uploaded_at.isoformat() if m.uploaded_at }}">
+                {{ m.uploaded_at.strftime('%Y-%m-%d %H:%M') if m.uploaded_at else 'unknown' }}
+              </span>
               {% if m.date %}
-                &nbsp;•&nbsp;
+                <span class="sep">•</span>
                 <span class="meeting-date-badge">{{ m.date.strftime('%Y-%m-%d') }}</span>
               {% endif %}
             </div>
           </div>
+
         </div>
+
         <div class="meeting-actions">
-          <a class="btn btn-sm btn-view-green" href="{{ url_for('view_meeting', meeting_id=m.id) }}">View</a>
-          <form method="post" action="{{ url_for('delete_meeting', meeting_id=m.id) }}" onsubmit="return confirm('Delete this meeting?');" style="display:inline;">
+          <a class="btn btn-sm btn-view-green"
+             href="{{ url_for('view_meeting', meeting_id=m.id) }}">
+            View
+          </a>
+          <form method="post"
+                action="{{ url_for('delete_meeting', meeting_id=m.id) }}"
+                onsubmit="return confirm('Delete this meeting?');"
+                style="display:inline;">
             <button type="submit" class="btn btn-sm btn-danger">Delete</button>
           </form>
         </div>
+
       </div>
     {% endfor %}
+
   {% else %}
     <div class="no-meetings">
+      <div class="no-meetings-icon">🏁</div>
       <p><strong>No meetings uploaded yet.</strong></p>
       <p>Return to the dashboard to upload CSVs and run analyses.</p>
-      <p><a href="{{ url_for('dashboard') }}" class="btn btn-primary">Go to Dashboard</a></p>
+      <br>
+      <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Go to Dashboard</a>
     </div>
   {% endif %}
+
 </div>
+
 {% endblock %}
