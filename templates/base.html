@@ -638,8 +638,13 @@
     <!-- ═══ NAVIGATION ═══ (all links/logic identical to original) -->
     <nav class="navbar navbar-expand-lg fixed-top">
         <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('dashboard') if current_user.is_authenticated else url_for('home') }}">
-                <span class="brand-icon">
+            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+                <img src="{{ url_for('static', filename='apple-touch-icon.png') }}" 
+                     alt="The Form Analyst" 
+                     style="height: 32px; width: auto;">
+                The Form Analyst
+            </a>
+            <span class="brand-icon">
                     <i class="bi bi-graph-up-arrow"></i>
                 </span>
                 The Form Analyst
