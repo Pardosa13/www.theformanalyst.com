@@ -1,86 +1,290 @@
+
 {% extends "base.html" %}
 
 {% block title %}Results - The Form Analyst{% endblock %}
 
 {% block content %}
-<h1>Results</h1>
 
-<div style="margin-bottom: 20px;">
-    <a href="{{ url_for('dashboard') }}" style="color: #667eea; text-decoration: none;">← Back to Dashboard</a>
+<style>
+  /* ══════════════════════════════════════════
+     RESULTS PAGE — dark premium theme
+     JS API endpoint and data fields unchanged
+  ══════════════════════════════════════════ */
+
+  /* ── Page header ── */
+  .results-header {
+    margin-bottom: 24px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .results-header h1 {
+    font-size: 1.55rem;
+    font-weight: 800;
+    margin: 0;
+    color: var(--text-primary);
+  }
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    transition: color 0.15s, gap 0.15s;
+  }
+  .back-link:hover { color: #8ba4f5; gap: 10px; }
+
+  /* ── Section cards ── */
+  .results-section {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+
+  .results-section-header {
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .results-section-header h2 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 0;
+    color: var(--text-primary);
+  }
+
+  .results-section-body { padding: 16px 20px; }
+
+  /* ── Meeting row — needs results (warning/amber) ── */
+  .meeting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    margin-bottom: 10px;
+    border-left: 3px solid;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .meeting-row:last-child { margin-bottom: 0; }
+
+  .meeting-row.needs {
+    background: rgba(245,158,11,0.07);
+    border-left-color: #f59e0b;
+  }
+  .meeting-row.needs:hover {
+    background: rgba(245,158,11,0.11);
+  }
+
+  /* ── Meeting row — complete (success/green) ── */
+  /* Used by both Jinja and JS innerHTML via CSS class */
+  .meeting-row.complete {
+    background: rgba(16,185,129,0.07);
+    border-left-color: #10b981;
+  }
+  .meeting-row.complete:hover {
+    background: rgba(16,185,129,0.11);
+  }
+
+  .meeting-row-info { min-width: 0; }
+
+  .meeting-row-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+    line-height: 1.3;
+  }
+
+  .meeting-row-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: 'DM Mono', monospace;
+    margin-bottom: 4px;
+  }
+
+  .meeting-row-status {
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .meeting-row-status.needs { color: #fbbf24; }
+  .meeting-row-status.complete { color: #34d399; }
+
+  .meeting-row-action { flex-shrink: 0; }
+
+  /* View/Edit button style used in JS innerHTML */
+  .btn-view-edit {
+    background: var(--bg-hover) !important;
+    color: var(--text-secondary) !important;
+    border: 1px solid var(--border-mid) !important;
+    white-space: nowrap;
+  }
+  .btn-view-edit:hover {
+    color: var(--text-primary) !important;
+    border-color: var(--border-mid) !important;
+  }
+
+  /* ── Empty / loading states ── */
+  .results-empty {
+    padding: 24px 0 8px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .results-loading {
+    padding: 24px 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .results-loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border-mid);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .results-error {
+    color: var(--danger);
+    font-size: 13px;
+    text-align: center;
+    padding: 16px 0;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    .results-header { flex-direction: column; align-items: flex-start; }
+    .meeting-row { flex-direction: column; align-items: flex-start; }
+    .meeting-row-action { width: 100%; }
+    .meeting-row-action .btn { width: 100%; text-align: center; }
+  }
+</style>
+
+<!-- Page header -->
+<div class="results-header">
+  <h1>Results</h1>
+  <a href="{{ url_for('dashboard') }}" class="back-link">← Back to Dashboard</a>
 </div>
 
 <!-- Section 1: Results Needed -->
-<div class="card" style="margin-bottom: 25px;">
-    <h2 style="margin: 0 0 20px 0;">📝 Results Needed</h2>
-    
+<div class="results-section">
+  <div class="results-section-header">
+    <h2>📝 Results Needed</h2>
+  </div>
+  <div class="results-section-body">
     {% if needs_results %}
-    <div style="display: flex; flex-direction: column; gap: 15px;">
-        {% for meeting in needs_results %}
-        <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-            <div>
-                <div style="font-size: 18px; font-weight: 600;">{{ meeting.meeting_name }}</div>
-                <div style="font-size: 14px; color: #6c757d; margin-top: 5px;">
-                    Uploaded by {{ meeting.user }} • {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
-                </div>
-                <div style="font-size: 14px; color: #856404; margin-top: 5px;">
-                    <strong>{{ meeting.races_complete }} of {{ meeting.total_races }}</strong> races complete
-                </div>
-            </div>
-            <a href="{{ url_for('results_entry', meeting_id=meeting.id) }}" 
-               class="btn btn-primary" 
-               style="white-space: nowrap;">
-                Enter Results
-            </a>
+      {% for meeting in needs_results %}
+      <div class="meeting-row needs">
+        <div class="meeting-row-info">
+          <div class="meeting-row-name">{{ meeting.meeting_name }}</div>
+          <div class="meeting-row-meta">
+            Uploaded by {{ meeting.user }} &nbsp;·&nbsp; {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
+          </div>
+          <div class="meeting-row-status needs">
+            {{ meeting.races_complete }} of {{ meeting.total_races }} races complete
+          </div>
         </div>
-        {% endfor %}
-    </div>
+        <div class="meeting-row-action">
+          <!-- url_for route unchanged -->
+          <a href="{{ url_for('results_entry', meeting_id=meeting.id) }}"
+             class="btn btn-primary"
+             style="white-space: nowrap;">
+            Enter Results
+          </a>
+        </div>
+      </div>
+      {% endfor %}
     {% else %}
-    <p style="color: #6c757d; margin: 0;">No meetings waiting for results.</p>
+      <div class="results-empty">No meetings waiting for results.</div>
     {% endif %}
+  </div>
 </div>
 
-<!-- Section 2: Results Complete -->
-<div class="card">
-    <h2 style="margin: 0 0 20px 0;">✅ Results Complete</h2>
+<!-- Section 2: Results Complete (populated by JS) -->
+<div class="results-section">
+  <div class="results-section-header">
+    <h2>✅ Results Complete</h2>
+  </div>
+  <div class="results-section-body">
+    <!-- id="results-complete-container" unchanged — JS injects here -->
     <div id="results-complete-container">
-        <p style="color: #6c757d; text-align: center;">Loading completed results...</p>
+      <div class="results-loading">
+        <div class="results-loading-spinner"></div>
+        <span>Loading completed results...</span>
+      </div>
     </div>
+  </div>
 </div>
 
 <script>
-// Load completed results after page loads
+/*
+  API endpoint:  fetch('/api/results/complete')  — UNCHANGED
+  Data fields:   meeting.meeting_name, .uploaded_at, .user,
+                 .total_races, .total_horses, .id            — UNCHANGED
+  Route:         /results/${meeting.id}                      — UNCHANGED
+  Container id:  results-complete-container                  — UNCHANGED
+
+  Inline styles replaced with CSS classes defined above
+  so they inherit the dark theme correctly.
+*/
 document.addEventListener('DOMContentLoaded', function() {
     fetch('/api/results/complete')
         .then(response => response.json())
         .then(data => {
             const container = document.getElementById('results-complete-container');
-            
+
             if (data.length === 0) {
-                container.innerHTML = '<p style="color: #6c757d; margin: 0;">No completed meetings yet.</p>';
+                container.innerHTML = '<div class="results-empty">No completed meetings yet.</div>';
                 return;
             }
-            
-            let html = '<div style="display: flex; flex-direction: column; gap: 15px;">';
+
+            let html = '<div style="display:flex; flex-direction:column; gap:10px;">';
             data.forEach(meeting => {
                 const date = new Date(meeting.uploaded_at);
                 const formattedDate = date.toISOString().slice(0, 16).replace('T', ' ');
-                
+
                 html += `
-                    <div style="background: #d4edda; border-left: 4px solid #28a745; padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-                        <div>
-                            <div style="font-size: 18px; font-weight: 600;">${meeting.meeting_name}</div>
-                            <div style="font-size: 14px; color: #6c757d; margin-top: 5px;">
-                                Uploaded by ${meeting.user} • ${formattedDate}
+                    <div class="meeting-row complete">
+                        <div class="meeting-row-info">
+                            <div class="meeting-row-name">${meeting.meeting_name}</div>
+                            <div class="meeting-row-meta">
+                                Uploaded by ${meeting.user} &nbsp;·&nbsp; ${formattedDate}
                             </div>
-                            <div style="font-size: 14px; color: #155724; margin-top: 5px;">
-                                <strong>${meeting.total_races}</strong> races • <strong>${meeting.total_horses}</strong> horses recorded
+                            <div class="meeting-row-status complete">
+                                ${meeting.total_races} races &nbsp;·&nbsp; ${meeting.total_horses} horses recorded
                             </div>
                         </div>
-                        <a href="/results/${meeting.id}" 
-                           class="btn" 
-                           style="background: #6c757d; color: white; white-space: nowrap;">
-                            View / Edit
-                        </a>
+                        <div class="meeting-row-action">
+                            <a href="/results/${meeting.id}"
+                               class="btn btn-secondary btn-view-edit"
+                               style="white-space:nowrap;">
+                                View / Edit
+                            </a>
+                        </div>
                     </div>
                 `;
             });
@@ -89,8 +293,8 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .catch(error => {
             console.error('Error loading completed results:', error);
-            document.getElementById('results-complete-container').innerHTML = 
-                '<p style="color: #dc3545;">Error loading completed results. Please refresh the page.</p>';
+            document.getElementById('results-complete-container').innerHTML =
+                '<div class="results-error">Error loading completed results. Please refresh the page.</div>';
         });
 });
 </script>
