@@ -1390,7 +1390,33 @@ function toggleSpeedMap(raceNumber) {
         container.style.display = 'none'; toggle.textContent = '▼ Show';
     }
 }
+const top3Active = {};
+function toggleTop3(raceId) {
+    const instance = chartInstances[raceId];
+    if (!instance) return;
+    const btn = document.getElementById('top3-btn-' + raceId);
+    top3Active[raceId] = !top3Active[raceId];
 
+    const chartContainer = document.getElementById('chartContainer_' + raceId);
+    const heatmapContainer = document.getElementById('pfaiHeatmap_' + raceId);
+    chartContainer.style.display = 'block';
+    heatmapContainer.style.display = 'none';
+
+    if (top3Active[raceId]) {
+        btn.classList.add('active');
+        const sorted = instance.data.adjusted.datasets.slice().sort(function(a, b) {
+            const aMin = Math.min.apply(null, a.data.filter(function(v) { return v != null; }));
+            const bMin = Math.min.apply(null, b.data.filter(function(v) { return v != null; }));
+            return aMin - bMin;
+        });
+        instance.chart.data = { labels: instance.data.adjusted.labels, datasets: sorted.slice(0, 3) };
+    } else {
+        btn.classList.remove('active');
+        instance.chart.data = instance.data.adjusted;
+    }
+    instance.chart.options = getChartOptions('adjusted');
+    instance.chart.update();
+}
 function renderSpeedMap(raceNumber) {
     const data = window['speedMapData_' + raceNumber];
     if (!data || !data.payLoad || !data.payLoad[0] || !data.payLoad[0].items) { console.error('No speed map data available'); return; }
