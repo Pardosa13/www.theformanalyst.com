@@ -2124,7 +2124,7 @@ def save_results(meeting_id):
 def admin_panel():
     if not current_user.is_admin:
         flash("Access denied", "danger")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("history"))
     
     from models import Component  # ADD THIS IMPORT
     
