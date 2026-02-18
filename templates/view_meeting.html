@@ -1121,6 +1121,7 @@ function renderSectionalChart(raceNum, horsesData) {
         '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'raw\')">Raw Times</button>' +
         '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'zscore\')">Z-Scores</button>' +
         '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'pfai\')">🎯 PFAI Sectional Heatmap</button>' +
+        '<button class="chart-toggle-btn" id="top3-btn-race' + raceNum + '" onclick="toggleTop3(\'race' + raceNum + '\')">🏆 Top 3 Adjusted Times</button>' +
         '</div>' +
         '<div id="chartContainer_race' + raceNum + '" style="position:relative; height:350px; background:var(--bg-surface); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);">' +
         '<canvas id="sectionalChart_race' + raceNum + '"></canvas>' +
