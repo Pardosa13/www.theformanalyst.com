@@ -646,14 +646,14 @@ def get_meeting_results(meeting_id):
 @app.route("/")
 def home():
     if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("history"))
     return redirect(url_for("login"))
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("history"))
         
     if request.method == "POST":
         username = request.form.get("username")
@@ -676,7 +676,7 @@ def login():
         
         login_user(user, remember=remember)
         flash(f"Welcome back, {username}!", "success")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("history"))
     
     # This handles GET requests - notice it's NOT indented under the if POST block
     return render_template("login.html")
