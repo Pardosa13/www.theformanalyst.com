@@ -273,8 +273,8 @@
     padding: 2px 8px;
     border-radius: 5px;
     background: var(--bg-hover);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-muted);
+    border: 1px solid var(--border-mid);
+    color: var(--text-primary);
     font-family: 'DM Mono', monospace;
   }
 
@@ -291,14 +291,24 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     white-space: nowrap;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: rgba(255,255,255,0.92);
   }
   .bets-table thead th:first-child { width: 36px; }
 
   .bets-table tbody tr {
     border-bottom: 1px solid var(--border-subtle);
     transition: background 0.15s;
+    border-left: 3px solid transparent;
+  }
+  .bets-table tbody tr:nth-child(odd) {
+    background: rgba(255,255,255,0.025);
+  }
+  .bets-table tbody tr:hover {
+    background: rgba(102,126,234,0.1) !important;
+    border-left-color: var(--accent);
   }
   .bets-table tbody tr:last-child { border-bottom: none; }
   .bets-table tbody tr:hover { background: var(--bg-elevated); }
