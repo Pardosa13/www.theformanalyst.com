@@ -644,7 +644,7 @@ function renderScoreAnalysis(data) {
     const container = document.getElementById('scoreAnalysis');
     let html = '<div class="card-body"><div class="row">';
     html += '<div class="col-md-6"><h6>Strike Rate by Score Tier</h6><table class="table table-sm"><thead><tr><th>Score</th><th>Races</th><th>Wins</th><th>Strike %</th><th>ROI</th></tr></thead><tbody>';
-    const tierOrder = ['150+', '140-149', '130-139', '120-129', '110-119', '100-109', '90-99'];
+    const tierOrder = ['90-100', '80-89', '70-79', '60-69', '50-59', '40-49', '30-39', '20-29', '0-19'];
     for (const tier of tierOrder) {
         const d = data.score_tiers[tier];
         html += `<tr><td><strong>${tier}</strong></td><td>${d.races}</td><td>${d.wins}</td><td>${d.strike_rate.toFixed(1)}%</td><td class="${d.roi >= 0 ? 'text-success' : 'text-danger'}">${d.roi.toFixed(1)}%</td></tr>`;
