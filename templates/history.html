@@ -414,10 +414,20 @@
 
         filterBtn.addEventListener('click', () => {
           const d = dateSelect.value;
-          filtering = !filtering;
-          filterBtn.setAttribute('aria-pressed', String(filtering));
-          applyFilter(filtering ? d : '');
-        });
+
+          // If no date selected, show all
+          if (!d) {
+            filtering = false;
+            filterBtn.setAttribute('aria-pressed', 'false');
+            applyFilter('');
+            return;
+  }
+
+  // Always apply the selected date (no toggle)
+  filtering = true;
+  filterBtn.setAttribute('aria-pressed', 'true');
+  applyFilter(d);
+});
 
         clearBtn.addEventListener('click', () => {
           dateSelect.value = '';
