@@ -1851,14 +1851,15 @@ def analyze():
 @app.route('/history')
 @login_required
 def history():
-    meetings = Meeting.query.order_by(Meeting.uploaded_at.desc()).all()
+    meetings = Meeting.query.order_by(Meeting.date.asc(), Meeting.uploaded_at.desc()).all()
     
     # Convert meetings to JSON for calendar view
     meetings_json = [{
         'id': m.id,
         'meeting_name': m.meeting_name,
-        'user': m.user.username,
-        'uploaded_at': m.uploaded_at.isoformat()
+        'user': m.user.username if m.user else 'unknown',
+        'uploaded_at': m.uploaded_at.isoformat() if m.uploaded_at else None,
+        'date': m.date.isoformat() if m.date else None
     } for m in meetings]
     
     import json
