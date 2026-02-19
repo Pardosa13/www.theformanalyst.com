@@ -3333,6 +3333,19 @@ function calculateTrueOdds(results, priorStrength = 0.01, troubleshooting = fals
             horse.performanceComponent = ((normalizedScores[index] / 100) * 100).toFixed(1) + '%';
             horse.score = blendedScores[index];
             horse.rawScore = scores[index];  // Keep original
+
+            // ✨ ADD THIS BLOCK HERE ↓
+const pfaiScore = horse.pfaiScore || 0;
+if (pfaiScore > 0) {
+    const analyzerNormalized = normalizedScores[index];
+    const blendedFinal = blendedScores[index];
+    let blendNote = '\n=== PFAI BLEND ===\n';
+    blendNote += `Analyzer Score (normalized): ${analyzerNormalized.toFixed(1)} (70% weight)\n`;
+    blendNote += `PFAI Score: ${pfaiScore.toFixed(1)} (30% weight)\n`;
+    blendNote += `Final Blended Score: ${blendedFinal.toFixed(1)}\n`;
+    blendNote += `Calculation: (${analyzerNormalized.toFixed(1)} × 0.7) + (${pfaiScore.toFixed(1)} × 0.3) = ${blendedFinal.toFixed(1)}\n`;
+    horse.notes = (horse.notes || '') + blendNote;
+}
         });
 
         const totalCheck = raceHorses.reduce((s, h) => s + (h.rawWinProbability || 0), 0);
@@ -3500,15 +3513,8 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             score += matchingWeight.weightScore;
             notes += matchingWeight.weightNote;
         }
-        
-        const pfaiScoreVal = parseFloat(horse['pfaiscore']) || 0;
-        if (pfaiScoreVal > 0) {
-            notes += `\n=== PFAI BLEND ===\n`;
-            notes += `Analyzer Raw Score: ${score.toFixed(1)}\n`;
-            notes += `PFAI Score: ${pfaiScoreVal.toFixed(1)} (30% weight)\n`;
-            notes += `(Blend applied after normalization)\n`;
-        }
-        analysisResults.push({ horse, score, notes, pfaiScore: pfaiScoreVal });
+
+        analysisResults.push({ horse, score, notes, pfaiScore: parseFloat(horse['pfaiscore']) || 0 });
     });
     
     return calculateTrueOdds(analysisResults, 0.05, false, 300);
