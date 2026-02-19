@@ -496,7 +496,24 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                     
                     logger.debug(f"Injected API data for {horse_name} (R{race_num}): PFAI={runner.get('pfaiScore', 'N/A')}")
                     break
-
+# ===== INJECT PFAI SCORE FROM RATINGS DATA =====
+    if ratings_data:
+        ratings_payload = ratings_data.get('payLoad', [])
+        logger.info(f"Injecting PFAI scores from ratings for {len(ratings_payload)} runners")
+        
+        for row in parsed_csv:
+            horse_name = row.get('horse name', '').strip()
+            race_num = row.get('race number', '').strip()
+            
+            for runner in ratings_payload:
+                runner_name = runner.get('runnerName', '').strip()
+                
+                if (str(runner.get('raceNo')) == str(race_num) and
+                    runner_name.lower() == horse_name.lower()):
+                    
+                    row['pfaiScore'] = str(runner.get('pfaiScore', ''))
+                    logger.info(f"✅ PFAI injected: {horse_name} R{race_num} = {runner.get('pfaiScore')}")
+                    break
     # Rebuild CSV with injected data
     csv_data = rebuildCSV(parsed_csv)
     logger.info("✅ Rebuilt CSV with API data injection")
