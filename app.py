@@ -2640,13 +2640,15 @@ def api_score_analysis():
     
     stake = 10.0
     score_tiers = {
-        '150+': {'races': 0, 'wins': 0, 'profit': 0},
-        '140-149': {'races': 0, 'wins': 0, 'profit': 0},
-        '130-139': {'races': 0, 'wins': 0, 'profit': 0},
-        '120-129': {'races': 0, 'wins': 0, 'profit': 0},
-        '110-119': {'races': 0, 'wins': 0, 'profit': 0},
-        '100-109': {'races': 0, 'wins': 0, 'profit': 0},
-        '90-99': {'races': 0, 'wins': 0, 'profit': 0},
+        '90-100': {'races': 0, 'wins': 0, 'profit': 0},
+        '80-89': {'races': 0, 'wins': 0, 'profit': 0},
+        '70-79': {'races': 0, 'wins': 0, 'profit': 0},
+        '60-69': {'races': 0, 'wins': 0, 'profit': 0},
+        '50-59': {'races': 0, 'wins': 0, 'profit': 0},
+        '40-49': {'races': 0, 'wins': 0, 'profit': 0},
+        '30-39': {'races': 0, 'wins': 0, 'profit': 0},
+        '20-29': {'races': 0, 'wins': 0, 'profit': 0},
+        '0-19': {'races': 0, 'wins': 0, 'profit': 0},
     }
     
     score_gaps = {
@@ -2672,22 +2674,24 @@ def api_score_analysis():
         second_score = horses[1]['prediction'].score if len(horses) > 1 else 0
         score_gap = top_score - second_score
         
-        if top_score >= 150:
-            tier = '150+'
-        elif top_score >= 140:
-            tier = '140-149'
-        elif top_score >= 130:
-            tier = '130-139'
-        elif top_score >= 120:
-            tier = '120-129'
-        elif top_score >= 110:
-            tier = '110-119'
-        elif top_score >= 100:
-            tier = '100-109'
-        elif top_score >= 90:
-            tier = '90-99'
+        if top_score >= 90:
+            tier = '90-100'
+        elif top_score >= 80:
+            tier = '80-89'
+        elif top_score >= 70:
+            tier = '70-79'
+        elif top_score >= 60:
+            tier = '60-69'
+        elif top_score >= 50:
+            tier = '50-59'
+        elif top_score >= 40:
+            tier = '40-49'
+        elif top_score >= 30:
+            tier = '30-39'
+        elif top_score >= 20:
+            tier = '20-29'
         else:
-            tier = None
+            tier = '0-19'
         
         if score_gap >= 50:
             gap_bucket = '50+'
