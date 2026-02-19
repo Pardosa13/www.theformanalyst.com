@@ -3441,8 +3441,8 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
     let pfaiNote = '';
 
     // Check if PFAI score is available
-    if (horse['pfaiScore'] !== undefined && horse['pfaiScore'] !== null && horse['pfaiScore'] !== '') {
-        pfaiScore = parseFloat(horse['pfaiScore']) || 0;
+    if (horse['pfaiscore'] !== undefined && horse['pfaiscore'] !== null && horse['pfaiscore'] !== '') {
+    pfaiScore = parseFloat(horse['pfaiscore']) || 0;
         
         // PFAI scores are 0-100 scale, same as analyzer
         // Calculate weighted score: 70% analyzer + 30% PFAI
