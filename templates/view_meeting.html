@@ -1594,7 +1594,9 @@ function injectPFAIScores() {
                 const pfaiBadge = document.createElement('span');
                 pfaiBadge.className = 'pfai-badge';
                 pfaiBadge.style.cssText = 'background:var(--accent); color:white; padding:3px 10px; border-radius:4px; font-size:11px; font-weight:700; margin-left:8px;';
-                pfaiBadge.textContent = 'PFAI: ' + matchingHorse.pfaiScore;
+                const pfaiPrice = matchingHorse.pfaiPrice;
+                const priceText = (pfaiPrice && pfaiPrice > 0 && pfaiPrice !== 900) ? ' · $' + pfaiPrice.toFixed(2) : '';
+                pfaiBadge.textContent = 'PFAI: ' + matchingHorse.pfaiScore + priceText;
                 horseNameSpan.parentNode.insertBefore(pfaiBadge, horseNameSpan.nextSibling);
             }
         });
