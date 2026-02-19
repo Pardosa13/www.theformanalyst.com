@@ -497,23 +497,25 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                     logger.debug(f"Injected API data for {horse_name} (R{race_num}): PFAI={runner.get('pfaiScore', 'N/A')}")
                     break
 # ===== INJECT PFAI SCORE FROM RATINGS DATA =====
-    if ratings_data:
-        ratings_payload = ratings_data.get('payLoad', [])
-        logger.info(f"Injecting PFAI scores from ratings for {len(ratings_payload)} runners")
+if ratings_data:
+    ratings_payload = ratings_data.get('payLoad', [])
+    logged_horses = set()
+    
+    for row in parsed_csv:
+        row['pfaiScore'] = ''
+        horse_name = row.get('horse name', '').strip()
+        race_num = row.get('race number', '').strip()
+        key = f"{horse_name}-{race_num}"
         
-        for row in parsed_csv:
-            horse_name = row.get('horse name', '').strip()
-            race_num = row.get('race number', '').strip()
-            
-            for runner in ratings_payload:
-                runner_name = runner.get('runnerName', '').strip()
-                
-                if (str(runner.get('raceNo')) == str(race_num) and
-                    runner_name.lower() == horse_name.lower()):
-                    
-                    row['pfaiScore'] = str(runner.get('pfaiScore', ''))
+        for runner in ratings_payload:
+            runner_name = runner.get('runnerName', '').strip()
+            if (str(runner.get('raceNo')) == str(race_num) and
+                runner_name.lower() == horse_name.lower()):
+                row['pfaiScore'] = str(runner.get('pfaiScore', ''))
+                if key not in logged_horses:
                     logger.info(f"✅ PFAI injected: {horse_name} R{race_num} = {runner.get('pfaiScore')}")
-                    break
+                    logged_horses.add(key)
+                break
     # Rebuild CSV with injected data
     csv_data = rebuildCSV(parsed_csv)
     logger.info("✅ Rebuilt CSV with API data injection")
