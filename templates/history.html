@@ -30,6 +30,68 @@
     color: var(--text-muted);
   }
 
+  /* ─────────────────────────────────────────────
+     NEW: Date toolbar (uses EXACT same tokens)
+     ───────────────────────────────────────────── */
+  .history-toolbar {
+    position: sticky;
+    top: 10px;
+    z-index: 20;
+
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+
+    padding: 16px 20px;
+    margin: 0 0 10px 0;
+
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+
+    /* same interaction feel as cards (but subtle) */
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .history-toolbar:hover {
+    border-color: var(--border-accent);
+    background: var(--bg-elevated);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+  }
+
+  .history-toolbar-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+
+  .history-toolbar-select {
+    padding: 8px 12px;
+    border-radius: 10px;
+    min-width: 220px;
+
+    /* only use your existing palette tokens */
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+  }
+
+  .history-toolbar-select:hover {
+    border-color: var(--border-accent);
+  }
+
+  .history-toolbar-select:focus {
+    outline: none;
+    border-color: var(--border-accent);
+  }
+
+  /* Dark dropdown options */
+  .history-toolbar-select option {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+  }
+
   /* ── Meeting card ── */
   .meeting-card {
     display: flex;
@@ -215,6 +277,15 @@
     .meeting-icon {
       display: none;
     }
+
+    .history-toolbar {
+      padding: 14px 16px;
+    }
+
+    .history-toolbar-select {
+      min-width: 100%;
+      width: 100%;
+    }
   }
 </style>
 
@@ -227,8 +298,26 @@
   </div>
 
   {% if meetings %}
+
+    <!-- NEW: Date toolbar (matches meeting-card aesthetic exactly via tokens) -->
+    <div class="history-toolbar" id="historyToolbar">
+      <span class="history-toolbar-label">Find by raceday:</span>
+
+      <select id="dateSelect" class="history-toolbar-select">
+        <option value="">All dates</option>
+      </select>
+
+      <!-- Use your existing global button theme classes -->
+      <button type="button" class="btn btn-sm btn-secondary" id="jumpBtn">Jump</button>
+      <button type="button" class="btn btn-sm btn-secondary" id="filterBtn" aria-pressed="false">Filter</button>
+      <button type="button" class="btn btn-sm btn-secondary" id="clearBtn">Clear</button>
+    </div>
+
     {% for m in meetings %}
-      <div class="meeting-card" role="article" aria-labelledby="meeting-{{ m.id }}">
+      <div class="meeting-card"
+           role="article"
+           aria-labelledby="meeting-{{ m.id }}"
+           data-meeting-date="{{ m.date.strftime('%Y-%m-%d') if m.date else '' }}">
 
         <div class="meeting-left">
 
@@ -272,6 +361,60 @@
 
       </div>
     {% endfor %}
+
+    <script>
+      (function () {
+        const cards = Array.from(document.querySelectorAll('.meeting-card[data-meeting-date]'));
+
+        const dateSelect = document.getElementById('dateSelect');
+        const jumpBtn = document.getElementById('jumpBtn');
+        const filterBtn = document.getElementById('filterBtn');
+        const clearBtn = document.getElementById('clearBtn');
+
+        // Build unique date list from cards (YYYY-MM-DD strings)
+        const dates = [...new Set(cards.map(c => c.dataset.meetingDate).filter(Boolean))].sort();
+
+        for (const d of dates) {
+          const opt = document.createElement('option');
+          opt.value = d;
+          opt.textContent = d;
+          dateSelect.appendChild(opt);
+        }
+
+        let filtering = false;
+
+        function applyFilter(date) {
+          for (const c of cards) {
+            c.style.display = (!date || c.dataset.meetingDate === date) ? '' : 'none';
+          }
+        }
+
+        jumpBtn.addEventListener('click', () => {
+          const d = dateSelect.value;
+          if (!d) return;
+
+          const target = cards.find(c => c.dataset.meetingDate === d);
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+
+        filterBtn.addEventListener('click', () => {
+          const d = dateSelect.value;
+
+          filtering = !filtering;
+          filterBtn.setAttribute('aria-pressed', String(filtering));
+
+          applyFilter(filtering ? d : '');
+        });
+
+        clearBtn.addEventListener('click', () => {
+          dateSelect.value = '';
+          filtering = false;
+          filterBtn.setAttribute('aria-pressed', 'false');
+          applyFilter('');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      })();
+    </script>
 
   {% else %}
     <div class="no-meetings">
