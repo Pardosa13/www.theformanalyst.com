@@ -3501,7 +3501,14 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             notes += matchingWeight.weightNote;
         }
         
-        analysisResults.push({ horse, score, notes, pfaiScore: parseFloat(horse['pfaiscore']) || 0 });
+        const pfaiScoreVal = parseFloat(horse['pfaiscore']) || 0;
+        if (pfaiScoreVal > 0) {
+            notes += `\n=== PFAI BLEND ===\n`;
+            notes += `Analyzer Raw Score: ${score.toFixed(1)}\n`;
+            notes += `PFAI Score: ${pfaiScoreVal.toFixed(1)} (30% weight)\n`;
+            notes += `(Blend applied after normalization)\n`;
+        }
+        analysisResults.push({ horse, score, notes, pfaiScore: pfaiScoreVal });
     });
     
     return calculateTrueOdds(analysisResults, 0.05, false, 300);
