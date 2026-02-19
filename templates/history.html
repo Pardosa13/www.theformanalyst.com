@@ -31,7 +31,7 @@
   }
 
   /* ─────────────────────────────────────────────
-     NEW: Date toolbar (uses EXACT same tokens)
+     Date toolbar (uses EXACT same tokens)
      ───────────────────────────────────────────── */
   .history-toolbar {
     position: sticky;
@@ -50,7 +50,6 @@
     border: 1px solid var(--border-subtle);
     border-radius: 12px;
 
-    /* same interaction feel as cards (but subtle) */
     transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
   }
 
@@ -71,7 +70,6 @@
     border-radius: 10px;
     min-width: 220px;
 
-    /* only use your existing palette tokens */
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     color: var(--text-primary);
@@ -86,7 +84,6 @@
     border-color: var(--border-accent);
   }
 
-  /* Dark dropdown options */
   .history-toolbar-select option {
     background: var(--bg-surface);
     color: var(--text-primary);
@@ -299,7 +296,7 @@
 
   {% if meetings %}
 
-    <!-- NEW: Date toolbar (matches meeting-card aesthetic exactly via tokens) -->
+    <!-- Date toolbar -->
     <div class="history-toolbar" id="historyToolbar">
       <span class="history-toolbar-label">Find by raceday:</span>
 
@@ -307,8 +304,6 @@
         <option value="">All dates</option>
       </select>
 
-      <!-- Use your existing global button theme classes -->
-      <button type="button" class="btn btn-sm btn-secondary" id="jumpBtn">Jump</button>
       <button type="button" class="btn btn-sm btn-secondary" id="filterBtn" aria-pressed="false">Filter</button>
       <button type="button" class="btn btn-sm btn-secondary" id="clearBtn">Clear</button>
     </div>
@@ -367,7 +362,6 @@
         const cards = Array.from(document.querySelectorAll('.meeting-card[data-meeting-date]'));
 
         const dateSelect = document.getElementById('dateSelect');
-        const jumpBtn = document.getElementById('jumpBtn');
         const filterBtn = document.getElementById('filterBtn');
         const clearBtn = document.getElementById('clearBtn');
 
@@ -375,17 +369,26 @@
         const dates = [...new Set(cards.map(c => c.dataset.meetingDate).filter(Boolean))].sort();
 
         function formatAuDDMMYY(isoDate) {
-  // isoDate: "YYYY-MM-DD" -> "DD-MM-YY"
-  const [y, m, d] = isoDate.split('-');
-  return `${d}-${m}-${y.slice(2)}`;
-}
+          // isoDate: "YYYY-MM-DD" -> "DD-MM-YY"
+          const [y, m, d] = isoDate.split('-');
+          return `${d}-${m}-${y.slice(2)}`;
+        }
 
-for (const d of dates) {
-  const opt = document.createElement('option');
-  opt.value = d;                     // KEEP value as ISO for filtering
-  opt.textContent = formatAuDDMMYY(d); // DISPLAY as AU format
-  dateSelect.appendChild(opt);
-}
+        function todayIsoLocal() {
+          // Local (user computer) date -> "YYYY-MM-DD"
+          const now = new Date();
+          const y = now.getFullYear();
+          const m = String(now.getMonth() + 1).padStart(2, '0');
+          const d = String(now.getDate()).padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        }
+
+        for (const d of dates) {
+          const opt = document.createElement('option');
+          opt.value = d;                       // keep ISO for filtering
+          opt.textContent = formatAuDDMMYY(d); // display AU format
+          dateSelect.appendChild(opt);
+        }
 
         let filtering = false;
 
@@ -395,20 +398,24 @@ for (const d of dates) {
           }
         }
 
-        jumpBtn.addEventListener('click', () => {
-          const d = dateSelect.value;
-          if (!d) return;
+        // Auto-default to today's local date and auto-filter on load (if present)
+        const today = todayIsoLocal();
+        if (dates.includes(today)) {
+          dateSelect.value = today;
 
-          const target = cards.find(c => c.dataset.meetingDate === d);
-          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        });
+          filtering = true;
+          filterBtn.setAttribute('aria-pressed', 'true');
+          applyFilter(today);
+        } else {
+          filtering = false;
+          filterBtn.setAttribute('aria-pressed', 'false');
+          applyFilter('');
+        }
 
         filterBtn.addEventListener('click', () => {
           const d = dateSelect.value;
-
           filtering = !filtering;
           filterBtn.setAttribute('aria-pressed', String(filtering));
-
           applyFilter(filtering ? d : '');
         });
 
