@@ -3308,7 +3308,11 @@ function calculateTrueOdds(results, priorStrength = 0.01, troubleshooting = fals
         // k=15 is aggressive, k=20 is moderate, k=25 is conservative
         const k = 15;  // Steepness factor - lower = more aggressive odds spread
         
-        const expScores = normalizedScores.map(score => Math.exp(score / k));
+        const blendedScores = normalizedScores.map((analyzerScore, index) => {
+            const pfaiScore = raceHorses[index].pfaiScore || 0;
+            return pfaiScore > 0 ? (analyzerScore * 0.7) + (pfaiScore * 0.3) : analyzerScore;
+        });
+        const expScores = blendedScores.map(score => Math.exp(score / k));
         const totalExp = expScores.reduce((sum, e) => sum + e, 0);
         
         // Convert to probabilities
@@ -3327,7 +3331,7 @@ function calculateTrueOdds(results, priorStrength = 0.01, troubleshooting = fals
             horse.trueOdds = `$${trueOdds.toFixed(2)}`;
             horse.rawWinProbability = winProbability * overround;
             horse.performanceComponent = ((normalizedScores[index] / 100) * 100).toFixed(1) + '%';
-            horse.score = normalizedScores[index];  // Display normalized score
+            horse.score = blendedScores[index];
             horse.rawScore = scores[index];  // Keep original
         });
 
@@ -3432,32 +3436,6 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
     } : null;
     
     let [score, notes] = calculateScore(horse, trackCondition, false, avgFormPrice, sectionalDetailsForContext);
-
-    // ==========================================
-    // ✨ WEIGHTED SCORE: 70% Analyzer + 30% PFAI
-    // ==========================================
-    let finalScore = score;  // Default to analyzer score
-    let pfaiScore = 0;
-    let pfaiNote = '';
-
-    // Check if PFAI score is available
-    if (horse['pfaiscore'] !== undefined && horse['pfaiscore'] !== null && horse['pfaiscore'] !== '') {
-    pfaiScore = parseFloat(horse['pfaiscore']) || 0;
-        
-        // PFAI scores are 0-100 scale, same as analyzer
-        // Calculate weighted score: 70% analyzer + 30% PFAI
-        finalScore = (score * 0.7) + (pfaiScore * 0.3);
-        
-        pfaiNote = '\n=== WEIGHTED SCORE ===\n';
-        pfaiNote += `Analyzer Score: ${score.toFixed(1)} (70% weight)\n`;
-        pfaiNote += `PFAI Score: ${pfaiScore.toFixed(1)} (30% weight)\n`;
-        pfaiNote += `Final Weighted Score: ${finalScore.toFixed(1)}\n`;
-    }
-
-    notes += pfaiNote;
-    score = finalScore;  // Use weighted score going forward
-
-    // [Everything below this continues unchanged - your existing sectional scoring, etc.]
         
         // ==========================================
         // SECTIONAL SCORING - API PRIMARY, CSV FALLBACK
@@ -3523,7 +3501,7 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             notes += matchingWeight.weightNote;
         }
         
-        analysisResults.push({ horse, score, notes });
+        analysisResults.push({ horse, score, notes, pfaiScore: parseFloat(horse['pfaiscore']) || 0 });
     });
     
     return calculateTrueOdds(analysisResults, 0.05, false, 300);
