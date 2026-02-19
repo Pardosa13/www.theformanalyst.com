@@ -374,12 +374,18 @@
         // Build unique date list from cards (YYYY-MM-DD strings)
         const dates = [...new Set(cards.map(c => c.dataset.meetingDate).filter(Boolean))].sort();
 
-        for (const d of dates) {
-          const opt = document.createElement('option');
-          opt.value = d;
-          opt.textContent = d;
-          dateSelect.appendChild(opt);
-        }
+        function formatAuDDMMYY(isoDate) {
+  // isoDate: "YYYY-MM-DD" -> "DD-MM-YY"
+  const [y, m, d] = isoDate.split('-');
+  return `${d}-${m}-${y.slice(2)}`;
+}
+
+for (const d of dates) {
+  const opt = document.createElement('option');
+  opt.value = d;                     // KEEP value as ISO for filtering
+  opt.textContent = formatAuDDMMYY(d); // DISPLAY as AU format
+  dateSelect.appendChild(opt);
+}
 
         let filtering = false;
 
