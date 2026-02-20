@@ -1539,11 +1539,24 @@ def api_get_ratings(meeting_id):
 def api_get_strikerate(meeting_id):
     """Get jockey/trainer career and last 100 strike rate data"""
     try:
-        url = f"https://api.puntingform.com.au/v2/form/strikerate/csv?apiKey={pf_service.api_key}"
+        # Look up the meeting to get PF meeting ID
+        meeting = Meeting.query.get_or_404(meeting_id)
+        
+        # Get date from meeting name (format: YYMMDD_Track)
+        if meeting.meeting_name and '_' in meeting.meeting_name:
+            date_part = meeting.meeting_name.split('_')[0]
+            year = '20' + date_part[:2]
+            month = date_part[2:4]
+            day = date_part[4:6]
+            date_str = f"{year}-{month}-{day}"
+        else:
+            date_str = datetime.now().strftime('%Y-%m-%d')
+        
+        url = f"https://api.puntingform.com.au/v2/form/strikerate/csv?meetingDate={date_str}&apiKey={pf_service.api_key}"
         response = requests.get(url, headers={'accept': 'application/json'}, timeout=30)
         
         if not response.ok:
-            return jsonify({'success': False, 'error': f'API error {response.status_code}'}), response.status_code
+            return jsonify({'success': False, 'error': f'API error {response.status_code}', 'url_tried': url.replace(pf_service.api_key, 'REDACTED')}), response.status_code
         
         return jsonify(response.json())
         
