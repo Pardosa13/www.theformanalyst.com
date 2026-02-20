@@ -417,8 +417,8 @@ if (!isNaN(horseAge)) {
     
     // 4yo: -26.6% ROI - reduced from +3 to +2
     if (horseAge === 4) {
-        score += 2;
-        notes += '+ 2.0 : Good age (4yo)\n';
+        score += 0;
+        notes += '+ 0.0 : (4yo)\n';
     }
     
     // === NEW: MARE AGE PENALTIES ===
@@ -777,8 +777,8 @@ if (careerRecord && typeof careerRecord === 'string') {
 const lastMargin = parseFloat(horseRow['form margin']);
 const lastPosition = parseInt(horseRow['form position']);
 if (!isNaN(lastMargin) && !isNaN(lastPosition) && lastPosition > 1 && lastMargin > 0 && lastMargin <= 2.5) {
-    score += 7;  // INCREASED from 5
-    notes += '+7.0: Close loss last start (0.5-2.5L) - very competitive\n';
+    score += 0;  // INCREASED from 5
+    notes += '+0.0: Close loss last start (0.5-2.5L) - not competitive\n';
 }
     // === COLT BONUS SYSTEM (MUTUALLY EXCLUSIVE) ===
 if (horseSex === 'Colt') {
@@ -787,8 +787,8 @@ if (horseSex === 'Colt') {
     
     // Priority 1: Fast sectional Colt (most valuable)
     if (rawSectional && rawSectional < 34) {
-        score += 25;
-        notes += '+25.0 : Fast sectional + COLT combo (44.4% SR, +33% ROI)\n';
+        score += 15;
+        notes += '+15.0 : Fast sectional + COLT combo (44.4% SR, +33% ROI)\n';
     }
     // Priority 2: 3yo Colt (age advantage)
     else if (horseAge === 3) {
@@ -1948,8 +1948,8 @@ function checkDaysSinceLastRun(meetingDate, formMeetingDate) {
         note += `-20.0 : Too fresh - ${daysSinceLastRun} days since last run\n`;
     } else if (daysSinceLastRun <= 7) {
         // 7 days or less - quick backup, BIG bonus (strongly outperforms market)
-        addScore = 15;
-        note += `+15.0 : Quick backup - only ${daysSinceLastRun} days since last run (market underrates!)\n`;
+        addScore = 0;
+        note += `+0.0 : Quick backup - only ${daysSinceLastRun} days since last run (no longer positive roi!)\n`;
     }
     // 8-149 days is the sweet spot - no penalty or bonus
     return [addScore, note];
@@ -2364,12 +2364,12 @@ function checkFirstUpSecondUp(horseRow) {
             const runs = nums[0], wins = nums[1], seconds = nums[2], thirds = nums[3];
             const podiumRate = (wins + seconds + thirds) / runs;
             if (wins > 0) {
-                addScore += 4;
-                note += `+ 4.0 : First-up winner(s) in ${wins} of ${runs} runs\n`;
+                addScore += 0;
+                note += `+ 0.0 : First-up winner(s) in ${wins} of ${runs} runs\n`;
             }
             if (podiumRate >= 0.5) {
-                addScore += 3;
-                note += `+ 3.0 : Strong first-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
+                addScore += 0;
+                note += `+ 0.0 : Strong first-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
             }
         }
     }
@@ -2381,12 +2381,12 @@ function checkFirstUpSecondUp(horseRow) {
             const runs = nums2[0], wins = nums2[1], seconds = nums2[2], thirds = nums2[3];
             const podiumRate = (wins + seconds + thirds) / runs;
             if (wins > 0) {
-                addScore += 3;
-                note += `+ 3.0 : Second-up winners in ${wins} of ${runs} runs\n`;
+                addScore += 0;
+                note += `+ 0.0 : Second-up winners in ${wins} of ${runs} runs\n`;
             }
             if (podiumRate >= 0.5) {
-                addScore += 2;
-                note += `+ 2.0 : Strong second-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
+                addScore += 0;
+                note += `+ 0.0 : Strong second-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
             }
         }
     }
@@ -2672,7 +2672,7 @@ function calculatePerfectRecordBonus(horse, trackCondition) {
     // Award bonuses per perfect record (confidence-weighted)
     if (perfectRecords.length > 0) {
         perfectRecords.forEach(record => {
-            const baseBonus = 20; // base specialist bonus
+            const baseBonus = 5; // WAS 20 - data shows undefeated records are -37% to -79% ROI
             let confidenceMultiplier = 1.0;
 
             if (record.runs <= 2) confidenceMultiplier = 0.5;
