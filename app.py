@@ -1534,29 +1534,30 @@ def api_get_ratings(meeting_id):
         logger.error(f"Ratings fetch failed: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route("/api/meetings/<meeting_id>/strikerate")
+@app.route("/api/meetings/<int:meeting_id>/strikerate")
 @login_required
 def api_get_strikerate(meeting_id):
     """Get jockey/trainer career and last 100 strike rate data"""
     try:
-        # Look up the meeting to get PF meeting ID
-        meeting = Meeting.query.get_or_404(meeting_id)
+        # Get the PF meeting ID from speedmaps_json stored on first race
+        from models import Race
+        first_race = Race.query.filter_by(meeting_id=meeting_id).first()
         
-        # Get date from meeting name (format: YYMMDD_Track)
-        if meeting.meeting_name and '_' in meeting.meeting_name:
-            date_part = meeting.meeting_name.split('_')[0]
-            year = '20' + date_part[:2]
-            month = date_part[2:4]
-            day = date_part[4:6]
-            date_str = f"{year}-{month}-{day}"
+        if first_race and first_race.speed_maps_json:
+            speed_data = first_race.speed_maps_json if isinstance(first_race.speed_maps_json, dict) else json.loads(first_race.speed_maps_json)
+            pf_meeting_id = speed_data.get('payLoad', [{}])[0].get('meetingId') if speed_data.get('payLoad') else None
         else:
-            date_str = datetime.now().strftime('%Y-%m-%d')
+            pf_meeting_id = None
         
-        url = f"https://api.puntingform.com.au/v2/form/strikerate/csv?meetingDate={date_str}&apiKey={pf_service.api_key}"
+        if not pf_meeting_id:
+            return jsonify({'success': False, 'error': 'Could not find PuntingForm meeting ID'}), 400
+        
+        url = f"https://api.puntingform.com.au/v2/form/strikerate/csv?meetingId={pf_meeting_id}&apiKey={pf_service.api_key}"
+        
         response = requests.get(url, headers={'accept': 'application/json'}, timeout=30)
         
         if not response.ok:
-            return jsonify({'success': False, 'error': f'API error {response.status_code}', 'url_tried': url.replace(pf_service.api_key, 'REDACTED')}), response.status_code
+            return jsonify({'success': False, 'error': f'API error {response.status_code}'}), response.status_code
         
         return jsonify(response.json())
         
