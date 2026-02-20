@@ -761,14 +761,14 @@ if (careerRecord && typeof careerRecord === 'string') {
         if (careerStarts >= 5) {
             const careerWinPct = (careerWins / careerStarts) * 100;
             if (careerWinPct >= 40) {
-                score += 15;
-                notes += '+15.0 : Elite career win rate (40%+, 30.8% SR)\n';
+                score += 0;
+                notes += '+0.0 : Elite career win rate (40%+, 30.8% SR)\n';
             } else if (careerWinPct >= 30) {
-                score += 8;
-                notes += '+ 8.0 : Strong career win rate (30-40%)\n';
+                score += 0;
+                notes += '+ 0.0 : Strong career win rate (30-40%)\n';
             } else if (careerWinPct < 10) {
-                score -= 10;
-                notes += '-10.0 : Poor career win rate (<10%)\n';
+                score -= 15;
+                notes += '-15.0 : Poor career win rate (<10%)\n';
             }
         }
     }
@@ -1457,20 +1457,17 @@ function checkTrackConditionForm(racingForm, trackCondition) {
 
     let undefeatedBonus = 0;
     if (wins === runs && runs >= 2) {
-    if (runs >= 5) {
-        undefeatedBonus = 20;
-        note += '+ 20.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (5+ runs) [+154% ROI]\n';
-    } else if (runs >= 4) {
-        undefeatedBonus = 17;
-        note += '+ 17.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (4 runs)\n';
-    } else if (runs >= 3) {
-        undefeatedBonus = 15;
-        note += '+ 15.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (3 runs)\n';
-    } else {
-        undefeatedBonus = 10;
-        note += '+ 10.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '! (2 runs)\n';
+        if (runs >= 5) {
+            undefeatedBonus = 5;
+            note += '+ 5.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + ' (reduced - undefeated records show -7% to -79% ROI)\n';
+        } else if (runs >= 3) {
+            undefeatedBonus = 4;
+            note += '+ 4.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '\n';
+        } else {
+            undefeatedBonus = 3;
+            note += '+ 3.0 : UNDEFEATED in ' + runs + ' runs on ' + trackCondition + '\n';
+        }
     }
-}
 
     let subtotal = winScore + podiumScore + undefeatedBonus;
 
@@ -2333,73 +2330,6 @@ function checkFormPrice(formPrice, specialistContext = null) {
     return [addScore, note];
 }
 
-function checkFirstUpSecondUp(horseRow) {
-    let addScore = 0;
-    let note = '';
-
-    const last10 = String(horseRow['horse last10'] || '');
-    const firstUpRecord = horseRow['horse record first up'];
-    const secondUpRecord = horseRow['horse record second up'];
-
-    // Determine if horse is first up or second up today
-    let isFirstUp = false;
-    let isSecondUp = false;
-
-    // If the most recent character is 'x' (or 'X'), treat as first-up marker
-    if (last10.toLowerCase().endsWith('x')) {
-        isFirstUp = true;
-    } else if (last10.length >= 2) {
-        const lastChar = last10.charAt(last10.length - 1);
-        const secondLastChar = last10.charAt(last10.length - 2);
-        // Second up means: previous run was 'x' and current run is a single digit
-        if (secondLastChar.toLowerCase() === 'x' && /\d/.test(lastChar)) {
-            isSecondUp = true;
-        }
-    }
-
-    // Score based on first-up record
-    if (isFirstUp && typeof firstUpRecord === 'string') {
-        const nums = firstUpRecord.split(/[:\-]/).map(s => Number(s.trim()));
-        if (nums.length === 4 && nums[0] > 0) {
-            const runs = nums[0], wins = nums[1], seconds = nums[2], thirds = nums[3];
-            const podiumRate = (wins + seconds + thirds) / runs;
-            if (wins > 0) {
-                addScore += 0;
-                note += `+ 0.0 : First-up winner(s) in ${wins} of ${runs} runs\n`;
-            }
-            if (podiumRate >= 0.5) {
-                addScore += 0;
-                note += `+ 0.0 : Strong first-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
-            }
-        }
-    }
-
-    // Score based on second-up record
-    if (isSecondUp && typeof secondUpRecord === 'string') {
-        const nums2 = secondUpRecord.split(/[:\-]/).map(s => Number(s.trim()));
-        if (nums2.length === 4 && nums2[0] > 0) {
-            const runs = nums2[0], wins = nums2[1], seconds = nums2[2], thirds = nums2[3];
-            const podiumRate = (wins + seconds + thirds) / runs;
-            if (wins > 0) {
-                addScore += 0;
-                note += `+ 0.0 : Second-up winners in ${wins} of ${runs} runs\n`;
-            }
-            if (podiumRate >= 0.5) {
-                addScore += 0;
-                note += `+ 0.0 : Strong second-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
-            }
-        }
-    }
-
-    if (!isFirstUp && !isSecondUp && last10.length > 0 && /x/i.test(last10)) {
-        // Rare/unusual pattern - mild penalty for uncertain spell markers
-        addScore -= 1;
-        note += `- 1.0 : Unclear spell/return status (markers present but pattern not first/second-up)\n`;
-    }
-
-    return [addScore, note];
-}
-
 // TRACK CONDITION CONTEXT FOR SECTIONALS
 function applyConditionContext(horse, raceCondition, sectionalDetails) {
     let sectionalWeight = 1.0;
@@ -2738,12 +2668,12 @@ function checkFirstUpSecondUp(horseRow) {
             const runs = nums[0], wins = nums[1], seconds = nums[2], thirds = nums[3];
             const podiumRate = (wins + seconds + thirds) / runs;
             if (wins > 0) {
-                addScore += 4;
-                note += `+ 4.0 : First-up winner(s) in ${wins} of ${runs} runs\n`;
+                addScore += 0;
+                note += `+ 0.0 : First-up winner(s) in ${wins} of ${runs} runs\n`;
             }
             if (podiumRate >= 0.5) {
-                addScore += 3;
-                note += `+ 3.0 : Strong first-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
+                addScore += 0;
+                note += `+ 0.0 : Strong first-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
             }
         }
     }
