@@ -37,7 +37,11 @@ const jockeyMapping = {
     "J Allen": "John Allen",
     "L Bates": "Logan Bates",
     "C Sutherland": "Corey Sutherland",
-    "T Nugent": "Teodore Nugent",
+
+    // spelling normalization
+    "T Nugent": "Theodore Nugent",
+    "Teodore Nugent": "Theodore Nugent",
+
     "B Allen": "Ben Allen",
     "R Houston": "Ryan Houston",
     "K Wilson-Taylor": "Kyle Wilson-Taylor",
@@ -58,7 +62,6 @@ const jockeyMapping = {
     "W Stanley": "William Stanley",
     "R Jones": "Reece Jones",
 };
-
 // Mapping of equivalent trainer names
 const trainerMapping = {
     'C Maher': 'Ciaron Maher',
