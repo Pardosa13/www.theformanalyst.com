@@ -1539,22 +1539,10 @@ def api_get_ratings(meeting_id):
 def api_get_strikerate(meeting_id):
     """Get jockey/trainer career and last 100 strike rate data"""
     try:
-        # Get the PF meeting ID from speedmaps_json stored on first race
-        from models import Race
-        first_race = Race.query.filter_by(meeting_id=meeting_id).first()
+        url = f"https://api.puntingform.com.au/v2/form/strikerate/csv?apiKey={pf_service.api_key}"
         
-        if first_race and first_race.speed_maps_json:
-            speed_data = first_race.speed_maps_json if isinstance(first_race.speed_maps_json, dict) else json.loads(first_race.speed_maps_json)
-            pf_meeting_id = speed_data.get('payLoad', [{}])[0].get('meetingId') if speed_data.get('payLoad') else None
-        else:
-            pf_meeting_id = None
-        
-        if not pf_meeting_id:
-            return jsonify({'success': False, 'error': 'Could not find PuntingForm meeting ID'}), 400
-        
-        url = f"https://api.puntingform.com.au/v2/form/strikerate/csv?meetingId={pf_meeting_id}&apiKey={pf_service.api_key}"
-        
-        response = requests.get(url, headers={'accept': 'application/json'}, timeout=30)
+        headers = {'accept': 'application/json'}
+        response = requests.get(url, headers=headers, timeout=30)
         
         if not response.ok:
             return jsonify({'success': False, 'error': f'API error {response.status_code}'}), response.status_code
