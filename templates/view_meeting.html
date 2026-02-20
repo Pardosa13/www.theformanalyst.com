@@ -955,7 +955,9 @@ details pre {
           <th style="padding:12px; text-align:center;">Score</th>
           <th style="padding:12px; text-align:center;">Odds</th>
           <th style="padding:12px; text-align:center;">Win %</th>
+          {% if current_user.is_admin %}
           <th style="padding:12px; text-align:left;">Notes</th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
