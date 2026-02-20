@@ -1,66 +1,68 @@
 // Mapping of equivalent jockey names
 const jockeyMapping = {
-    "J B Mc Donald": "James McDonald",
-    "A Bullock": "Aaron Bullock",
-    "W Pike": "William Pike",
-    "N Rawiller": "Nash Rawiller",
-    "J Parr": "Josh Parr",
-    "J R Collett": "Jason Collett",
-    "M Zahra": "Mark Zahra",
-    "B Shinn": "Blake Shinn",
-    "C Williams": "Craig Williams",
-    "E Brown": "Ethan Brown",
-    "D Lane": "Damian Lane",
-    "B Melham": "Ben Melham",
-    "T Berry": "Tommy Berry",
-    "H Coffey": "Hollie Coffey",
-    "B Avdulla": "Brenton Avdulla",
-    "J Ford": "Jay Ford",
-    "R King": "Rachel King",
-    "H Bowman": "Hugh Bowman",
-    "K Mc Evoy": "Kerrin McEvoy",
-    "A Livesey": "Alana Livesey",
-    "T Clark": "Tim Clark",
-    "L Cartwright": "Luke Cartwright",
-    "T Schiller": "Tyler Schiller",
-    "A Warren": "Alysha Warren",
-    "C Tootell": "Caitlin Tootell",
-    "B Thompson": "Ben Thompson",
-    "Z Lloyd": "Zac Lloyd",
-    "J McNeil": "Jye McNeil",
-    "R Maloney": "Ryan Maloney",
-    "J Childs": "Jordan Childs",
-    "H Nottle": "Holly Nottle",
-    "D Gibbons": "Dylan Gibbons",
-    "J Radley": "Jackson Radley",
-    "L Neindorf": "Lachlan Neindorf",
-    "J Allen": "John Allen",
-    "L Bates": "Logan Bates",
-    "C Sutherland": "Corey Sutherland",
-
-    // spelling normalization
-    "T Nugent": "Theodore Nugent",
-    "Teodore Nugent": "Theodore Nugent",
-
-    "B Allen": "Ben Allen",
-    "R Houston": "Ryan Houston",
-    "K Wilson-Taylor": "Kyle Wilson-Taylor",
-    "E Pozman": "Emily Pozman",
-    "A Roper": "Anna Roper",
-    "T Stockdale": "Thomas Stockdale",
-    "C Parnham": "Chris Parnham",
-    "R Bayliss": "Regan Bayliss",
-    "A Morgan": "Ashley Morgan",
-    "S Grima": "Siena Grima",
-    "C Graham": "Cejay Graham",
-    "T Sherry": "Tom Sherry",
-    "C Hefel": "Carleen Hefel",
-    "K Crowther": "Kayla Crowther",
-    "D Thornton": "Damien Thornton",
-    "B Mertens": "Beau Mertens",
-    "H Watson": "Holly Watson",
-    "W Stanley": "William Stanley",
-    "R Jones": "Reece Jones",
+    // Abbreviation → full name as used in tier lists
+    "J B Mc Donald": "James McDonald",     // neutral (-9.8% ROI)
+    "A Bullock": "Aaron Bullock",           // neutral (-32.8% ROI) - below Tier 4 threshold
+    "W Pike": "William Pike",               // neutral (-4.4% ROI)
+    "J Parr": "J Parr",                     // Tier 4 - maps to tier list key
+    "J R Collett": "J R Collett",           // Tier 4 - maps to tier list key
+    "M Zahra": "Mark Zahra",                // neutral (-77.5% ROI, only 10 rides - below threshold)
+    "B Shinn": "Blake Shinn",               // neutral
+    "C Williams": "Craig Williams",         // Tier 4
+    "E Brown": "Ethan Brown",               // Tier 1
+    "D Lane": "Damian Lane",                // Tier 4
+    "B Melham": "B Melham",                 // Tier 3 - tier list uses "B Melham"
+    "T Berry": "Tommy Berry",               // neutral (-9.9% ROI)
+    "H Coffey": "H Coffey",                 // neutral - tier list uses "H Coffey" directly
+    "B Avdulla": "Brenton Avdulla",         // neutral
+    "J Ford": "J Ford",                     // Tier 4 - tier list uses "J Ford"
+    "R King": "Rachel King",                // neutral (-43.8% ROI, below threshold)
+    "H Bowman": "Hugh Bowman",              // neutral
+    "K Mc Evoy": "K Mc Evoy",               // Tier 4 - tier list uses "K Mc Evoy"
+    "A Livesey": "Alana Livesey",           // Tier 1
+    "T Clark": "Tim Clark",                 // Tier 2
+    "L Cartwright": "Luke Cartwright",      // Tier 1
+    "T Schiller": "Tyler Schiller",         // Tier 3
+    "A Warren": "Alysha Warren",            // neutral (-7.1% ROI)
+    "C Tootell": "Caitlin Tootell",         // Tier 2
+    "B Thompson": "Ben Thompson",           // neutral (-21.5% ROI)
+    "Z Lloyd": "Zac Lloyd",                 // neutral (-19.4% ROI)
+    "J McNeil": "Jye McNeil",               // Tier 4
+    "R Maloney": "Ryan Maloney",            // Tier 4
+    "J Childs": "Jordan Childs",            // Tier 4
+    "H Nottle": "Holly Nottle",             // neutral (-41.6% ROI, below threshold)
+    "D Gibbons": "Dylan Gibbons",           // Tier 3
+    "J Radley": "Jackson Radley",           // Tier 4
+    "L Neindorf": "Lachlan Neindorf",       // Tier 4
+    "J Allen": "John Allen",                // Tier 4
+    "L Bates": "Logan Bates",               // Tier 4
+    "C Sutherland": "Corey Sutherland",     // Tier 4
+    // Spelling normalization
+    "T Nugent": "Theodore Nugent",          // neutral
+    "Teodore Nugent": "Theodore Nugent",    // neutral
+    "B Allen": "Ben Allen",                 // neutral (-33.0% ROI)
+    "R Houston": "Ryan Houston",            // Tier 4
+    "K Wilson-Taylor": "Kyle Wilson-Taylor", // Tier 4
+    "E Pozman": "Emily Pozman",             // neutral (-47.7% ROI)
+    "A Roper": "Anna Roper",                // Tier 4
+    "T Stockdale": "Thomas Stockdale",      // Tier 4
+    "C Parnham": "Chris Parnham",           // Tier 4
+    "R Bayliss": "Regan Bayliss",           // Tier 4
+    "A Morgan": "Ashley Morgan",            // Tier 4
+    "S Grima": "Siena Grima",               // neutral (-37.5% ROI)
+    "C Graham": "Cejay Graham",             // Tier 4
+    "T Sherry": "Tom Sherry",               // Tier 4
+    "C Hefel": "Carleen Hefel",             // Tier 4
+    "K Crowther": "Kayla Crowther",         // Tier 4
+    "D Thornton": "Damien Thornton",        // Tier 4
+    "B Mertens": "Beau Mertens",            // Tier 4
+    "H Watson": "Holly Watson",             // Tier 4
+    "W Stanley": "William Stanley",         // Tier 4
+    "R Jones": "Reece Jones",               // Tier 4
+    // New additions
+    "J Williams": "Jai Williams",           // Tier 1 - NEW
+    "L Ramoly": "Laqdar Ramoly",            // Tier 3 - NEW
+    "N Rawiller": "N Rawiller",             // Tier 4 - tier list uses abbreviation
 };
 // Mapping of equivalent trainer names
 const trainerMapping = {
