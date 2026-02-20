@@ -1539,15 +1539,17 @@ def api_get_ratings(meeting_id):
 def api_get_strikerate(meeting_id):
     """Get jockey/trainer career and last 100 strike rate data"""
     try:
-        url = f"https://api.puntingform.com.au/v2/form/strikerate/csv?apiKey={pf_service.api_key}"
+        entity_type = request.args.get('entityType', '0')  # 0=Jockey, 1=Trainer, 2=Both
+        jurisdiction = request.args.get('jurisdiction', '0')
         
-        headers = {'accept': 'application/json'}
-        response = requests.get(url, headers=headers, timeout=30)
+        url = f"https://api.puntingform.com.au/v2/form/strikerate/csv?entityType={entity_type}&jurisdiction={jurisdiction}&apiKey={pf_service.api_key}"
+        
+        response = requests.get(url, headers={'accept': 'text/plain'}, timeout=30)
         
         if not response.ok:
             return jsonify({'success': False, 'error': f'API error {response.status_code}'}), response.status_code
         
-        return jsonify(response.json())
+        return response.text, 200, {'Content-Type': 'text/plain'}
         
     except Exception as e:
         logger.error(f"Strikerate fetch failed: {str(e)}", exc_info=True)
