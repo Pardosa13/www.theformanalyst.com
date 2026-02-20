@@ -3,532 +3,779 @@
 {% block title %}Admin Panel{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
-    <h1>Admin Panel</h1>
-    
-    <!-- Overview Stats -->
-    <div class="row mb-4">
-        <div class="col-md-4">
-            <div class="card bg-primary text-white">
-                <div class="card-body">
-                    <h5 class="card-title">Total Users</h5>
-                    <h2>{{ stats.total_users }}</h2>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card bg-success text-white">
-                <div class="card-body">
-                    <h5 class="card-title">Total Meetings Analyzed</h5>
-                    <h2>{{ stats.total_meetings }}</h2>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card bg-info text-white">
-                <div class="card-body">
-                    <h5 class="card-title">Active Users</h5>
-                    <h2>{{ stats.users|length }}</h2>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- Tab Navigation -->
-    <ul class="nav nav-tabs mb-3" id="adminTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button">Manage Users</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="create-tab" data-bs-toggle="tab" data-bs-target="#create" type="button">Create User</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="myaccount-tab" data-bs-toggle="tab" data-bs-target="#myaccount" type="button">My Account</button>
-        </li>
-    </ul>
+<style>
+/* ══════════════════════════════════════════
+   ADMIN PANEL — dark premium theme
+   
+   All form actions, input names, IDs, JS
+   functions, modal IDs 100% UNCHANGED
+══════════════════════════════════════════ */
 
-    <!-- Tab Content -->
-    <div class="tab-content" id="adminTabContent">
-        
-        <!-- Manage Users Tab -->
-        <div class="tab-pane fade show active" id="users" role="tabpanel">
-            <div class="card">
-                <div class="card-header">
-                    <h4>All Users</h4>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-striped">
-                            <thead>
-                                <tr>
-                                    <th>Username</th>
-                                    <th>Email</th>
-                                    <th>Role</th>
-                                    <th>Status</th>
-                                    <th>Meetings</th>
-                                    <th>Last Login</th>
-                                    <th>Created</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for user in stats.users %}
-                                <tr>
-                                    <td><strong>{{ user.username }}</strong></td>
-                                    <td>{{ user.email }}</td>
-                                    <td>
-                                        {% if user.is_admin %}
-                                            <span class="badge bg-danger">Admin</span>
-                                        {% else %}
-                                            <span class="badge bg-primary">User</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if user.is_active %}
-                                            <span class="badge bg-success">Active</span>
-                                        {% else %}
-                                            <span class="badge bg-secondary">Inactive</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>{{ user.meeting_count }}</td>
-                                    <td>
-                                        {% if user.last_login %}
-                                            {{ user.last_login.strftime('%Y-%m-%d %H:%M') }}
-                                        {% else %}
-                                            Never
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if user.created_at %}
-                                            {{ user.created_at.strftime('%Y-%m-%d') }}
-                                        {% else %}
-                                            -
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        <!-- Toggle Admin Button -->
-                                        {% if user.id != current_user.id %}
-                                            <button class="btn btn-sm btn-info mb-1" onclick="toggleAdmin('{{ user.id }}', {{ user.is_admin|lower }})">
-                                                {% if user.is_admin %}Revoke Admin{% else %}Make Admin{% endif %}
-                                            </button>
-                                        {% endif %}
-                                        
-                                        <!-- Toggle Active Button -->
-                                        {% if user.id != current_user.id %}
-                                            <button class="btn btn-sm btn-{{ 'warning' if user.is_active else 'success' }} mb-1" onclick="toggleActive('{{ user.id }}', {{ user.is_active|lower }})">
-                                                {% if user.is_active %}Deactivate{% else %}Activate{% endif %}
-                                            </button>
-                                        {% endif %}
-                                        
-                                        <!-- Reset Password Button -->
-                                        {% if user.id != current_user.id %}
-                                            <button class="btn btn-sm btn-secondary mb-1" onclick="showResetPassword('{{ user.id }}', '{{ user.username }}')">
-                                                Reset Pass
-                                            </button>
-                                        {% endif %}
-                                        
-                                        <!-- Delete User Button -->
-                                        {% if user.id != current_user.id %}
-                                            <button class="btn btn-sm btn-danger mb-1" onclick="confirmDelete('{{ user.id }}', '{{ user.username }}')">
-                                                Delete
-                                            </button>
-                                        {% else %}
-                                            <span class="text-muted">(You)</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
+.admin-header {
+  margin-bottom: 24px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.admin-header h1 {
+  font-size: 1.55rem;
+  font-weight: 800;
+  margin: 0;
+  color: var(--text-primary);
+}
 
-        <!-- Create User Tab -->
-        <div class="tab-pane fade" id="create" role="tabpanel">
-            <div class="card">
-                <div class="card-header">
-                    <h4>Create New User</h4>
-                </div>
-                <div class="card-body">
-                    <form method="POST" action="{{ url_for('admin_panel') }}">
-                        <input type="hidden" name="action" value="create_user">
-                        
-                        <div class="mb-3">
-                            <label for="username" class="form-label">Username</label>
-                            <input type="text" class="form-control" id="username" name="username" required 
-                                   placeholder="Enter username" minlength="3" maxlength="50">
-                            <small class="form-text text-muted">Must be unique, 3-50 characters. This is what they'll use to log in.</small>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="email" class="form-label">Email</label>
-                            <input type="email" class="form-control" id="email" name="email" required 
-                                   placeholder="Enter email address">
-                            <small class="form-text text-muted">For your reference only - no emails are sent automatically.</small>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="password" class="form-label">Password</label>
-                            <input type="text" class="form-control" id="password" name="password" required 
-                                   placeholder="Enter password" minlength="6">
-                            <small class="form-text text-muted">Minimum 6 characters. You'll need to tell them this password yourself.</small>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="is_admin" name="is_admin" value="1">
-                                <label class="form-check-label" for="is_admin">
-                                    Grant Admin Privileges
-                                </label>
-                            </div>
-                            <small class="form-text text-muted">Admins can create/delete users and see all meetings.</small>
-                        </div>
-                        
-                        <button type="submit" class="btn btn-success">Create User</button>
-                    </form>
-                    
-                    <div class="alert alert-info mt-4">
-                        <strong>Note:</strong> After creating a user, you'll need to manually share their login details:
-                        <ul class="mb-0 mt-2">
-                            <li>Website: <strong>theformanalyst.com</strong></li>
-                            <li>Username: (what you entered above)</li>
-                            <li>Password: (what you entered above)</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </div>
+/* ── Overview stat cards ── */
+.admin-overview {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.admin-stat-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 20px 18px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.admin-stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+}
+.admin-stat-card.primary::before { background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+.admin-stat-card.success::before { background: linear-gradient(90deg, #059669, #34d399); }
+.admin-stat-card.info::before    { background: linear-gradient(90deg, #1e40af, #60a5fa); }
+.admin-stat-card:hover { border-color: var(--border-mid); }
 
-        <!-- My Account Tab -->
-        <div class="tab-pane fade" id="myaccount" role="tabpanel">
-            <div class="card">
-                <div class="card-header">
-                    <h4>Change My Password</h4>
-                </div>
-                <div class="card-body">
-                    <form method="POST" action="{{ url_for('admin_panel') }}">
-                        <input type="hidden" name="action" value="change_my_password">
-                        
-                        <div class="mb-3">
-                            <label for="current_password" class="form-label">Current Password</label>
-                            <input type="password" class="form-control" id="current_password" name="current_password" required>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="new_password" class="form-label">New Password</label>
-                            <input type="password" class="form-control" id="new_password" name="new_password" required minlength="6">
-                            <small class="form-text text-muted">Minimum 6 characters</small>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="confirm_password" class="form-label">Confirm New Password</label>
-                            <input type="password" class="form-control" id="confirm_password" name="confirm_password" required minlength="6">
-                        </div>
-                        
-                        <button type="submit" class="btn btn-primary">Change Password</button>
-                    </form>
-                </div>
-            </div>
-            
-            <div class="card mt-3">
-                <div class="card-header">
-                    <h4>My Account Info</h4>
-                </div>
-                <div class="card-body">
-                    <p><strong>Username:</strong> {{ current_user.username }}</p>
-                    <p><strong>Email:</strong> {{ current_user.email }}</p>
-                    <p><strong>Role:</strong> {% if current_user.is_admin %}Admin{% else %}User{% endif %}</p>
-                </div>
-            </div>
-        </div>
-    </div>
+.admin-stat-card h5 {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
+.admin-stat-card h2 {
+  font-size: 2rem;
+  font-weight: 800;
+  font-family: 'DM Mono', monospace;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.1;
+}
 
-    <!-- Hidden Forms for Actions -->
-    <!-- Delete User Form -->
-    <form id="deleteUserForm" method="POST" action="{{ url_for('admin_panel') }}" style="display: none;">
-        <input type="hidden" name="action" value="delete_user">
-        <input type="hidden" name="user_id" id="deleteUserId">
-    </form>
+/* ── Nav tabs ── */
+.nav-tabs {
+  border-bottom: 1px solid var(--border-subtle) !important;
+  margin-bottom: 20px !important;
+}
+.nav-tabs .nav-link {
+  border: none !important;
+  background: transparent !important;
+  color: var(--text-muted) !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  padding: 10px 18px !important;
+  border-bottom: 2px solid transparent !important;
+  transition: color 0.2s, border-color 0.2s !important;
+}
+.nav-tabs .nav-link:hover {
+  color: var(--text-secondary) !important;
+  border-bottom-color: var(--border-mid) !important;
+}
+.nav-tabs .nav-link.active {
+  color: var(--accent) !important;
+  border-bottom-color: var(--accent) !important;
+  background: transparent !important;
+}
 
-    <!-- Toggle Admin Form -->
-    <form id="toggleAdminForm" method="POST" action="{{ url_for('admin_panel') }}" style="display: none;">
-        <input type="hidden" name="action" value="toggle_admin">
-        <input type="hidden" name="user_id" id="toggleAdminUserId">
-    </form>
+/* ── Tab content cards ── */
+.tab-content .card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  margin-bottom: 20px;
+}
+.tab-content .card-header {
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 14px 20px;
+}
+.tab-content .card-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
 
-    <!-- Toggle Active Form -->
-    <form id="toggleActiveForm" method="POST" action="{{ url_for('admin_panel') }}" style="display: none;">
-        <input type="hidden" name="action" value="toggle_active">
-        <input type="hidden" name="user_id" id="toggleActiveUserId">
-    </form>
+/* ── Tables ── */
+.table {
+  --bs-table-bg: transparent !important;
+  --bs-table-striped-bg: rgba(255,255,255,0.02) !important;
+  --bs-table-hover-bg: var(--bg-hover) !important;
+  color: var(--text-secondary) !important;
+  border-color: var(--border-subtle) !important;
+}
+.table thead th {
+  background: var(--bg-hover) !important;
+  color: var(--text-muted) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  padding: 11px 12px !important;
+  border-color: var(--border-mid) !important;
+}
+.table tbody tr {
+  border-color: var(--border-subtle) !important;
+  transition: background 0.1s;
+}
+.table tbody tr:hover {
+  background: var(--bg-hover) !important;
+}
+.table tbody td {
+  padding: 11px 12px !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-secondary) !important;
+  vertical-align: middle;
+  font-size: 13px;
+}
+.table tbody td strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.table tbody td small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
 
-    <!-- Reset Password Modal -->
-    <div class="modal fade" id="resetPasswordModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Reset Password</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <form method="POST" action="{{ url_for('admin_panel') }}">
-                    <div class="modal-body">
-                        <input type="hidden" name="action" value="reset_password">
-                        <input type="hidden" name="user_id" id="resetUserId">
-                        
-                        <div class="mb-3">
-                            <label for="new_password_reset" class="form-label">New Password for <strong><span id="resetUsernameDisplay"></span></strong></label>
-                            <input type="text" class="form-control" name="new_password" id="new_password_reset" required minlength="6">
-                            <small class="form-text text-muted">Minimum 6 characters. Remember to tell the user their new password!</small>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-warning">Reset Password</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
+/* ── Badges ── */
+.badge {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  padding: 4px 9px !important;
+  border-radius: 5px !important;
+}
+.badge.bg-danger    { background: rgba(239,68,68,0.2) !important;   color: #f87171 !important; border: 1px solid rgba(239,68,68,0.3) !important; }
+.badge.bg-primary   { background: rgba(102,126,234,0.2) !important; color: var(--accent) !important; border: 1px solid var(--border-accent) !important; }
+.badge.bg-success   { background: rgba(16,185,129,0.2) !important;  color: #34d399 !important; border: 1px solid rgba(16,185,129,0.3) !important; }
+.badge.bg-secondary { background: rgba(107,114,128,0.2) !important; color: #9ca3af !important; border: 1px solid rgba(107,114,128,0.3) !important; }
+.badge.bg-info      { background: rgba(59,130,246,0.2) !important;  color: #60a5fa !important; border: 1px solid rgba(59,130,246,0.3) !important; }
+.badge.bg-warning   { background: rgba(245,158,11,0.2) !important;  color: #fbbf24 !important; border: 1px solid rgba(245,158,11,0.3) !important; }
 
-    <div class="mt-3">
-        <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
-    </div>
+/* ── Buttons ── */
+.btn-sm {
+  font-size: 11px !important;
+  padding: 5px 11px !important;
+  font-weight: 600 !important;
+  border-radius: 6px !important;
+}
+
+/* ── Forms ── */
+.form-label {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: var(--text-secondary) !important;
+  margin-bottom: 6px !important;
+}
+.form-control,
+.form-select {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-mid) !important;
+  color: var(--text-primary) !important;
+  font-size: 13px !important;
+}
+.form-control:focus,
+.form-select:focus {
+  background: var(--bg-elevated) !important;
+  border-color: var(--accent) !important;
+  color: var(--text-primary) !important;
+  box-shadow: 0 0 0 3px rgba(102,126,234,0.15) !important;
+}
+.form-control::placeholder { color: var(--text-muted) !important; }
+.form-text {
+  color: var(--text-muted) !important;
+  font-size: 11px !important;
+}
+.form-check-input {
+  background-color: var(--bg-elevated) !important;
+  border: 1px solid var(--border-mid) !important;
+}
+.form-check-input:checked {
+  background-color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+.form-check-label {
+  color: var(--text-secondary) !important;
+  font-size: 13px;
+}
+
+/* ── Alert info ── */
+.alert-info {
+  background: rgba(59,130,246,0.08) !important;
+  border: 1px solid rgba(59,130,246,0.2) !important;
+  color: var(--text-secondary) !important;
+  border-radius: 10px !important;
+}
+.alert-info strong { color: var(--text-primary) !important; }
+
+/* ── Modals ── */
+.modal-content {
+  background: var(--bg-surface) !important;
+  border: 1px solid var(--border-mid) !important;
+  border-radius: 14px !important;
+}
+.modal-header {
+  background: var(--bg-elevated) !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
+  padding: 14px 20px !important;
+}
+.modal-header.bg-danger {
+  background: linear-gradient(135deg, #7f1d1d, #dc2626) !important;
+  color: white !important;
+  border: none !important;
+}
+.modal-title {
+  color: var(--text-primary) !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+}
+.modal-header.bg-danger .modal-title { color: white !important; }
+.modal-body {
+  padding: 20px !important;
+  color: var(--text-secondary) !important;
+}
+.modal-body p { color: var(--text-secondary) !important; }
+.modal-footer {
+  background: var(--bg-elevated) !important;
+  border-top: 1px solid var(--border-subtle) !important;
+  padding: 12px 20px !important;
+}
+.btn-close {
+  filter: invert(1) brightness(0.7) !important;
+}
+
+/* ── Component management section ── */
+.component-section {
+  margin-top: 48px;
+  padding-top: 32px;
+  border-top: 2px solid var(--border-subtle);
+}
+.component-section h3 {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.component-section > p {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .admin-overview {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .table-responsive { overflow-x: auto; }
+}
+</style>
+
+<!-- Page header -->
+<div class="admin-header">
+  <h1>🔐 Admin Panel</h1>
 </div>
 
-<!-- NEW: Component Management Section -->
-<div class="container mt-5">
-    <div class="row mt-5">
-        <div class="col-md-12">
-            <h3>Component Management</h3>
-            <p class="text-muted">Manage betting components for the Best Bets feature</p>
-        </div>
-    </div>
-
-    <div class="row mb-4">
-        <div class="col-md-12">
-            <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#createComponentModal">
-                + Create New Component
-            </button>
-        </div>
-    </div>
-
-    <div class="row">
-        <div class="col-md-12">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover">
-                    <thead class="thead-dark">
-                        <tr>
-                            <th>Component Name</th>
-                            <th>Status</th>
-                            <th>Appearances</th>
-                            <th>Wins</th>
-                            <th>Strike Rate</th>
-                            <th>ROI %</th>
-                            <th>Value?</th>
-                            <th>Last Updated</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% if stats.components %}
-                            {% for comp in stats.components %}
-                            <tr>
-                                <td>
-                                    <strong>{{ comp.name }}</strong>
-                                    {% if comp.notes %}
-                                    <br><small class="text-muted">{{ comp.notes }}</small>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if comp.is_active %}
-                                    <span class="badge bg-success">Active</span>
-                                    {% else %}
-                                    <span class="badge bg-secondary">Inactive</span>
-                                    {% endif %}
-                                </td>
-                                <td>{{ comp.appearances }}</td>
-                                <td>{{ comp.wins }}</td>
-                                <td>{{ comp.strike_rate|round(1) }}%</td>
-                                <td>
-                                    <span class="badge bg-{% if comp.roi >= 50 %}success{% elif comp.roi >= 10 %}info{% elif comp.roi >= 0 %}warning{% else %}danger{% endif %}">
-                                        {{ comp.roi|round(1) }}%
-                                    </span>
-                                </td>
-                                <td>
-                                    {% if comp.appearances >= 10 and comp.roi >= 10 %}
-                                    <span class="badge bg-success">✓ Strong</span>
-                                    {% elif comp.appearances >= 5 and comp.roi >= 10 %}
-                                    <span class="badge bg-warning">⚠ Emerging</span>
-                                    {% else %}
-                                    <span class="badge bg-secondary">⊗ Low Data</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if comp.last_updated %}
-                                    {{ comp.last_updated.strftime('%Y-%m-%d') }}
-                                    {% else %}
-                                    Never
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <button class="btn btn-sm btn-primary" 
-                                            data-bs-toggle="modal" 
-                                            data-bs-target="#editComponentModal{{ comp.id }}">
-                                        Edit
-                                    </button>
-                                    <form method="POST" style="display: inline;">
-                                        <input type="hidden" name="action" value="toggle_component">
-                                        <input type="hidden" name="component_id" value="{{ comp.id }}">
-                                        <button type="submit" class="btn btn-sm btn-{% if comp.is_active %}warning{% else %}success{% endif %}">
-                                            {% if comp.is_active %}Deactivate{% else %}Activate{% endif %}
-                                        </button>
-                                    </form>
-                                    <button class="btn btn-sm btn-danger" 
-                                            data-bs-toggle="modal" 
-                                            data-bs-target="#deleteComponentModal{{ comp.id }}">
-                                        Delete
-                                    </button>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        {% else %}
-                            <tr>
-                                <td colspan="9" class="text-center">No components found</td>
-                            </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <!-- Create Component Modal -->
-    <div class="modal fade" id="createComponentModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <form method="POST">
-                    <input type="hidden" name="action" value="create_component">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Create New Component</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="mb-3">
-                            <label class="form-label">Component Name *</label>
-                            <input type="text" name="component_name" class="form-control" required>
-                            <small class="form-text text-muted">Must match exactly as it appears in analyzer notes</small>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Appearances</label>
-                            <input type="number" name="appearances" class="form-control" value="0" min="0">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Wins</label>
-                            <input type="number" name="wins" class="form-control" value="0" min="0">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">ROI %</label>
-                            <input type="number" step="0.1" name="roi" class="form-control" value="0">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Notes (optional)</label>
-                            <textarea name="notes" class="form-control" rows="2"></textarea>
-                        </div>
-                        <div class="form-check">
-                            <input type="checkbox" name="is_active" class="form-check-input" id="createActive">
-                            <label class="form-check-label" for="createActive">Active (show on Best Bets)</label>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-success">Create Component</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- Edit Component Modals -->
-    {% for comp in stats.components %}
-    <div class="modal fade" id="editComponentModal{{ comp.id }}" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <form method="POST">
-                    <input type="hidden" name="action" value="edit_component">
-                    <input type="hidden" name="component_id" value="{{ comp.id }}">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Edit Component</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="mb-3">
-                            <label class="form-label">Component Name</label>
-                            <input type="text" name="component_name" class="form-control" value="{{ comp.name }}" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Appearances</label>
-                            <input type="number" name="appearances" class="form-control" value="{{ comp.appearances }}" min="0">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Wins</label>
-                            <input type="number" name="wins" class="form-control" value="{{ comp.wins }}" min="0">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">ROI %</label>
-                            <input type="number" step="0.1" name="roi" class="form-control" value="{{ comp.roi }}">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Notes</label>
-                            <textarea name="notes" class="form-control" rows="2">{{ comp.notes }}</textarea>
-                        </div>
-                        <div class="alert alert-info">
-                            <small>
-                                <strong>Current Stats:</strong><br>
-                                Strike Rate: {{ comp.strike_rate|round(1) }}%<br>
-                                Status: {% if comp.is_active %}Active{% else %}Inactive{% endif %}<br>
-                                Last Updated: {% if comp.last_updated %}{{ comp.last_updated.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}
-                            </small>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Save Changes</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- Delete Component Modal -->
-    <div class="modal fade" id="deleteComponentModal{{ comp.id }}" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <form method="POST">
-                    <input type="hidden" name="action" value="delete_component">
-                    <input type="hidden" name="component_id" value="{{ comp.id }}">
-                    <div class="modal-header bg-danger text-white">
-                        <h5 class="modal-title">Delete Component</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p>Are you sure you want to delete the component:</p>
-                        <p class="text-center"><strong>{{ comp.name }}</strong></p>
-                        <p class="text-danger">This action cannot be undone!</p>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-danger">Delete Component</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-    {% endfor %}
+<!-- Overview Stats -->
+<div class="admin-overview">
+  <div class="admin-stat-card primary">
+    <h5>Total Users</h5>
+    <h2>{{ stats.total_users }}</h2>
+  </div>
+  <div class="admin-stat-card success">
+    <h5>Total Meetings Analyzed</h5>
+    <h2>{{ stats.total_meetings }}</h2>
+  </div>
+  <div class="admin-stat-card info">
+    <h5>Active Users</h5>
+    <h2>{{ stats.users|length }}</h2>
+  </div>
 </div>
-<!-- END Component Management Section -->
 
+<!-- Tab Navigation — all IDs/data-bs UNCHANGED -->
+<ul class="nav nav-tabs" id="adminTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button">
+      Manage Users
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="create-tab" data-bs-toggle="tab" data-bs-target="#create" type="button">
+      Create User
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="myaccount-tab" data-bs-toggle="tab" data-bs-target="#myaccount" type="button">
+      My Account
+    </button>
+  </li>
+</ul>
+
+<!-- Tab Content — all form actions/names/IDs UNCHANGED -->
+<div class="tab-content" id="adminTabContent">
+
+  <!-- ══ Manage Users Tab ══ -->
+  <div class="tab-pane fade show active" id="users" role="tabpanel">
+    <div class="card">
+      <div class="card-header"><h4>All Users</h4></div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-striped table-hover">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Meetings</th>
+                <th>Last Login</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for user in stats.users %}
+              <tr>
+                <td><strong>{{ user.username }}</strong></td>
+                <td>{{ user.email }}</td>
+                <td>
+                  {% if user.is_admin %}
+                  <span class="badge bg-danger">Admin</span>
+                  {% else %}
+                  <span class="badge bg-primary">User</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if user.is_active %}
+                  <span class="badge bg-success">Active</span>
+                  {% else %}
+                  <span class="badge bg-secondary">Inactive</span>
+                  {% endif %}
+                </td>
+                <td>{{ user.meeting_count }}</td>
+                <td>
+                  {% if user.last_login %}
+                  {{ user.last_login.strftime('%Y-%m-%d %H:%M') }}
+                  {% else %}
+                  Never
+                  {% endif %}
+                </td>
+                <td>
+                  {% if user.created_at %}
+                  {{ user.created_at.strftime('%Y-%m-%d') }}
+                  {% else %}
+                  -
+                  {% endif %}
+                </td>
+                <td>
+                  {% if user.id != current_user.id %}
+                  <button class="btn btn-sm btn-info mb-1" onclick="toggleAdmin('{{ user.id }}', {{ user.is_admin|lower }})">
+                    {% if user.is_admin %}Revoke Admin{% else %}Make Admin{% endif %}
+                  </button>
+                  <button class="btn btn-sm btn-{{ 'warning' if user.is_active else 'success' }} mb-1" onclick="toggleActive('{{ user.id }}', {{ user.is_active|lower }})">
+                    {% if user.is_active %}Deactivate{% else %}Activate{% endif %}
+                  </button>
+                  <button class="btn btn-sm btn-secondary mb-1" onclick="showResetPassword('{{ user.id }}', '{{ user.username }}')">
+                    Reset Pass
+                  </button>
+                  <button class="btn btn-sm btn-danger mb-1" onclick="confirmDelete('{{ user.id }}', '{{ user.username }}')">
+                    Delete
+                  </button>
+                  {% else %}
+                  <span class="text-muted">(You)</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Create User Tab ══ -->
+  <div class="tab-pane fade" id="create" role="tabpanel">
+    <div class="card">
+      <div class="card-header"><h4>Create New User</h4></div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('admin_panel') }}">
+          <input type="hidden" name="action" value="create_user">
+
+          <div class="mb-3">
+            <label for="username" class="form-label">Username</label>
+            <input type="text" class="form-control" id="username" name="username" required
+                   placeholder="Enter username" minlength="3" maxlength="50">
+            <small class="form-text">Must be unique, 3-50 characters. This is what they'll use to log in.</small>
+          </div>
+
+          <div class="mb-3">
+            <label for="email" class="form-label">Email</label>
+            <input type="email" class="form-control" id="email" name="email" required
+                   placeholder="Enter email address">
+            <small class="form-text">For your reference only - no emails are sent automatically.</small>
+          </div>
+
+          <div class="mb-3">
+            <label for="password" class="form-label">Password</label>
+            <input type="text" class="form-control" id="password" name="password" required
+                   placeholder="Enter password" minlength="6">
+            <small class="form-text">Minimum 6 characters. You'll need to tell them this password yourself.</small>
+          </div>
+
+          <div class="mb-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="is_admin" name="is_admin" value="1">
+              <label class="form-check-label" for="is_admin">Grant Admin Privileges</label>
+            </div>
+            <small class="form-text">Admins can create/delete users and see all meetings.</small>
+          </div>
+
+          <button type="submit" class="btn btn-success">Create User</button>
+        </form>
+
+        <div class="alert alert-info mt-4">
+          <strong>Note:</strong> After creating a user, you'll need to manually share their login details:
+          <ul class="mb-0 mt-2">
+            <li>Website: <strong>theformanalyst.com</strong></li>
+            <li>Username: (what you entered above)</li>
+            <li>Password: (what you entered above)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ My Account Tab ══ -->
+  <div class="tab-pane fade" id="myaccount" role="tabpanel">
+    <div class="card">
+      <div class="card-header"><h4>Change My Password</h4></div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('admin_panel') }}">
+          <input type="hidden" name="action" value="change_my_password">
+
+          <div class="mb-3">
+            <label for="current_password" class="form-label">Current Password</label>
+            <input type="password" class="form-control" id="current_password" name="current_password" required>
+          </div>
+
+          <div class="mb-3">
+            <label for="new_password" class="form-label">New Password</label>
+            <input type="password" class="form-control" id="new_password" name="new_password" required minlength="6">
+            <small class="form-text">Minimum 6 characters</small>
+          </div>
+
+          <div class="mb-3">
+            <label for="confirm_password" class="form-label">Confirm New Password</label>
+            <input type="password" class="form-control" id="confirm_password" name="confirm_password" required minlength="6">
+          </div>
+
+          <button type="submit" class="btn btn-primary">Change Password</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h4>My Account Info</h4></div>
+      <div class="card-body">
+        <p><strong>Username:</strong> {{ current_user.username }}</p>
+        <p><strong>Email:</strong> {{ current_user.email }}</p>
+        <p><strong>Role:</strong> {% if current_user.is_admin %}Admin{% else %}User{% endif %}</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Hidden Forms — all IDs/names UNCHANGED -->
+<form id="deleteUserForm" method="POST" action="{{ url_for('admin_panel') }}" style="display:none;">
+  <input type="hidden" name="action" value="delete_user">
+  <input type="hidden" name="user_id" id="deleteUserId">
+</form>
+<form id="toggleAdminForm" method="POST" action="{{ url_for('admin_panel') }}" style="display:none;">
+  <input type="hidden" name="action" value="toggle_admin">
+  <input type="hidden" name="user_id" id="toggleAdminUserId">
+</form>
+<form id="toggleActiveForm" method="POST" action="{{ url_for('admin_panel') }}" style="display:none;">
+  <input type="hidden" name="action" value="toggle_active">
+  <input type="hidden" name="user_id" id="toggleActiveUserId">
+</form>
+
+<!-- Reset Password Modal — all IDs/names UNCHANGED -->
+<div class="modal fade" id="resetPasswordModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Reset Password</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" action="{{ url_for('admin_panel') }}">
+        <div class="modal-body">
+          <input type="hidden" name="action" value="reset_password">
+          <input type="hidden" name="user_id" id="resetUserId">
+          <div class="mb-3">
+            <label for="new_password_reset" class="form-label">
+              New Password for <strong><span id="resetUsernameDisplay"></span></strong>
+            </label>
+            <input type="text" class="form-control" name="new_password" id="new_password_reset" required minlength="6">
+            <small class="form-text">Minimum 6 characters. Remember to tell the user their new password!</small>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-warning">Reset Password</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     COMPONENT MANAGEMENT SECTION
+══════════════════════════════════════════ -->
+<div class="component-section">
+  <h3>🧩 Component Management</h3>
+  <p>Manage betting components for the Best Bets feature</p>
+
+  <div style="margin-bottom:18px;">
+    <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#createComponentModal">
+      + Create New Component
+    </button>
+  </div>
+
+  <div class="card">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Component Name</th>
+              <th>Status</th>
+              <th>Appearances</th>
+              <th>Wins</th>
+              <th>Strike Rate</th>
+              <th>ROI %</th>
+              <th>Value?</th>
+              <th>Last Updated</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if stats.components %}
+            {% for comp in stats.components %}
+            <tr>
+              <td>
+                <strong>{{ comp.name }}</strong>
+                {% if comp.notes %}
+                <br><small>{{ comp.notes }}</small>
+                {% endif %}
+              </td>
+              <td>
+                {% if comp.is_active %}
+                <span class="badge bg-success">Active</span>
+                {% else %}
+                <span class="badge bg-secondary">Inactive</span>
+                {% endif %}
+              </td>
+              <td>{{ comp.appearances }}</td>
+              <td>{{ comp.wins }}</td>
+              <td>{{ comp.strike_rate|round(1) }}%</td>
+              <td>
+                <span class="badge bg-{% if comp.roi >= 50 %}success{% elif comp.roi >= 10 %}info{% elif comp.roi >= 0 %}warning{% else %}danger{% endif %}">
+                  {{ comp.roi|round(1) }}%
+                </span>
+              </td>
+              <td>
+                {% if comp.appearances >= 10 and comp.roi >= 10 %}
+                <span class="badge bg-success">✓ Strong</span>
+                {% elif comp.appearances >= 5 and comp.roi >= 10 %}
+                <span class="badge bg-warning">⚠ Emerging</span>
+                {% else %}
+                <span class="badge bg-secondary">⊗ Low Data</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if comp.last_updated %}
+                {{ comp.last_updated.strftime('%Y-%m-%d') }}
+                {% else %}
+                Never
+                {% endif %}
+              </td>
+              <td>
+                <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#editComponentModal{{ comp.id }}">
+                  Edit
+                </button>
+                <form method="POST" style="display:inline;">
+                  <input type="hidden" name="action" value="toggle_component">
+                  <input type="hidden" name="component_id" value="{{ comp.id }}">
+                  <button type="submit" class="btn btn-sm btn-{% if comp.is_active %}warning{% else %}success{% endif %}">
+                    {% if comp.is_active %}Deactivate{% else %}Activate{% endif %}
+                  </button>
+                </form>
+                <button class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#deleteComponentModal{{ comp.id }}">
+                  Delete
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr>
+              <td colspan="9" class="text-center">No components found</td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Create Component Modal — all names/IDs UNCHANGED -->
+<div class="modal fade" id="createComponentModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="POST">
+        <input type="hidden" name="action" value="create_component">
+        <div class="modal-header">
+          <h5 class="modal-title">Create New Component</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Component Name *</label>
+            <input type="text" name="component_name" class="form-control" required>
+            <small class="form-text">Must match exactly as it appears in analyzer notes</small>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Appearances</label>
+            <input type="number" name="appearances" class="form-control" value="0" min="0">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Wins</label>
+            <input type="number" name="wins" class="form-control" value="0" min="0">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">ROI %</label>
+            <input type="number" step="0.1" name="roi" class="form-control" value="0">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Notes (optional)</label>
+            <textarea name="notes" class="form-control" rows="2"></textarea>
+          </div>
+          <div class="form-check">
+            <input type="checkbox" name="is_active" class="form-check-input" id="createActive">
+            <label class="form-check-label" for="createActive">Active (show on Best Bets)</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">Create Component</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Component Modals — all names/IDs UNCHANGED -->
+{% for comp in stats.components %}
+<div class="modal fade" id="editComponentModal{{ comp.id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="POST">
+        <input type="hidden" name="action" value="edit_component">
+        <input type="hidden" name="component_id" value="{{ comp.id }}">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Component</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Component Name</label>
+            <input type="text" name="component_name" class="form-control" value="{{ comp.name }}" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Appearances</label>
+            <input type="number" name="appearances" class="form-control" value="{{ comp.appearances }}" min="0">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Wins</label>
+            <input type="number" name="wins" class="form-control" value="{{ comp.wins }}" min="0">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">ROI %</label>
+            <input type="number" step="0.1" name="roi" class="form-control" value="{{ comp.roi }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Notes</label>
+            <textarea name="notes" class="form-control" rows="2">{{ comp.notes }}</textarea>
+          </div>
+          <div class="alert alert-info">
+            <small>
+              <strong>Current Stats:</strong><br>
+              Strike Rate: {{ comp.strike_rate|round(1) }}%<br>
+              Status: {% if comp.is_active %}Active{% else %}Inactive{% endif %}<br>
+              Last Updated: {% if comp.last_updated %}{{ comp.last_updated.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}
+            </small>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Component Modal — all names/IDs UNCHANGED -->
+<div class="modal fade" id="deleteComponentModal{{ comp.id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="POST">
+        <input type="hidden" name="action" value="delete_component">
+        <input type="hidden" name="component_id" value="{{ comp.id }}">
+        <div class="modal-header bg-danger">
+          <h5 class="modal-title">Delete Component</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p>Are you sure you want to delete the component:</p>
+          <p class="text-center"><strong>{{ comp.name }}</strong></p>
+          <p class="text-danger">This action cannot be undone!</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger">Delete Component</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+<!-- Back button -->
+<div style="margin-top:32px;">
+  <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">← Back to Dashboard</a>
+</div>
+
+<!-- JS functions — 100% UNCHANGED -->
 <script>
 function confirmDelete(userId, username) {
     if (confirm(`Are you sure you want to delete user '${username}'?\n\nThis will also delete ALL their meeting analyses.\n\nThis action cannot be undone!`)) {
@@ -560,4 +807,5 @@ function showResetPassword(userId, username) {
     new bootstrap.Modal(document.getElementById('resetPasswordModal')).show();
 }
 </script>
+
 {% endblock %}
