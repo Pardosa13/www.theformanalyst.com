@@ -842,15 +842,15 @@ function checkLast10runs(last10) {
 // =============================================================================
 
 function normalizeJockeyName(jockeyName) {
-    // guard against undefined/null
     if (!jockeyName || typeof jockeyName !== 'string') return jockeyName || '';
-    const jr = jockeyName.trim();
+    const jr = jockeyName.trim().replace(/\s+/g, ' '); // collapse whitespace
+
     for (const [key, value] of Object.entries(jockeyMapping)) {
         if (jr.startsWith(key)) {
             return jr.replace(key, value);
         }
     }
-    return jr; // Return the original if no mapping is found
+    return jr;
 }
 
 function checkJockeys(JockeyName) {
