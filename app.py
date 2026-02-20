@@ -1534,6 +1534,39 @@ def api_get_ratings(meeting_id):
         logger.error(f"Ratings fetch failed: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route("/api/meetings/<meeting_id>/strikerate")
+@login_required
+def api_get_strikerate(meeting_id):
+    """Get jockey/trainer career and last 100 strike rate data"""
+    try:
+        url = f"https://api.puntingform.com.au/v2/form/strikerate/csv?apiKey={pf_service.api_key}"
+        response = requests.get(url, headers={'accept': 'application/json'}, timeout=30)
+        
+        if not response.ok:
+            return jsonify({'success': False, 'error': f'API error {response.status_code}'}), response.status_code
+        
+        return jsonify(response.json())
+        
+    except Exception as e:
+        logger.error(f"Strikerate fetch failed: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route("/api/meetings/<meeting_id>/scratchings")
+@login_required
+def api_get_scratchings(meeting_id):
+    """Get current scratchings"""
+    try:
+        url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
+        response = requests.get(url, headers={'accept': 'application/json'}, timeout=30)
+        
+        if not response.ok:
+            return jsonify({'success': False, 'error': f'API error {response.status_code}'}), response.status_code
+        
+        return jsonify(response.json())
+        
+    except Exception as e:
+        logger.error(f"Scratchings fetch failed: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route("/api/meetings/<meeting_id>/import", methods=["POST"])
 @login_required
