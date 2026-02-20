@@ -66,41 +66,52 @@ const jockeyMapping = {
 };
 // Mapping of equivalent trainer names
 const trainerMapping = {
-    'C Maher': 'Ciaron Maher',
-    'C J Waller': 'Chris Waller',
-    'Ben Will & Jd Hayes': 'Ben, Will & J.D. Hayes',
-    'G Waterhouse & A Bott': 'Gai Waterhouse & Adrian Bott',
-    'G M Begg': 'Grahame Begg',
-    'P Stokes': 'Phillip Stokes',
-    'M M Laurie': 'Matthew Laurie',
-    'K Lees': 'Kris Lees',
-    'K A Lees': 'Kris Lees',
-    'J Cummings': 'James Cummings',
-    'J Pride': 'Joseph Pride',
-    'J O\'Shea': 'John O\'Shea',
-    'P Moody': 'Peter Moody',
-    'R D Griffiths': 'R D Griffiths',
-    'T Busuttin & N Young': 'T Busuttin & N Young',
-    'S W Kendrick': 'S W Kendrick',
-    'T & C McEvoy': 'T & C McEvoy',
-    'A & S Freedman': 'A & S Freedman',
-    'R L Heathcote': 'R L Heathcote',
-    'D T O\'Brien': 'D T O\'Brien',
-    'Annabel & Rob Archibald': 'Annabel & Rob Archibald',
-    'Matthew Smith': 'Matthew Smith',
-    'Gavin Bedggood': 'Gavin Bedggood',
-    'Chris & Corey Munce': 'Chris & Corey Munce',
-    'P G Moody & Katherine Coleman': 'P G Moody & Katherine Coleman',
-    'T J Gollan': 'T J Gollan',
-    'Ben Brisbourne': 'Ben Brisbourne',
-    'G Ryan & S Alexiou': 'G Ryan & S Alexiou',
-    'Peter Snowden': 'Peter Snowden',
-    'P Snowden': 'Peter Snowden',
-    'M Price & M Kent Jnr': 'M Price & M Kent Jnr',
-    'Bjorn Baker': 'Bjorn Baker',
-    'B Baker': 'Bjorn Baker',
-    'Patrick & Michelle Payne': 'Patrick & Michelle Payne',
-    'N D Parnham': 'N D Parnham',
+    // These map to tier list keys exactly
+    'C Maher': 'C Maher',                               // Tier 1 - tier list uses 'C Maher'
+    'C J Waller': 'C J Waller',                         // neutral - tier list uses 'C J Waller'
+    'Ben Will & Jd Hayes': 'Ben Will & Jd Hayes',       // Tier 4 - tier list uses this exact string
+    'G Waterhouse & A Bott': 'G Waterhouse & A Bott',   // neutral - tier list uses abbreviation
+    'Gai Waterhouse & Adrian Bott': 'G Waterhouse & A Bott', // alternate full name → abbreviation
+    'G M Begg': 'G M Begg',                             // Tier 4 - tier list uses abbreviation
+    'P Stokes': 'P Stokes',                             // neutral - tier list uses 'P Stokes'
+    'M M Laurie': 'M M Laurie',                         // Tier 4 - tier list uses abbreviation
+    'K Lees': 'K A Lees',                               // Tier 4 - tier list uses 'K A Lees'
+    'K A Lees': 'K A Lees',                             // Tier 4
+    'J Cummings': 'J Cummings',                         // neutral
+    'J Pride': 'Joseph Pride',                          // Tier 4 - tier list uses full name
+    'J O\'Shea': 'John O\'Shea & Tom Charlton',         // Tier 3 - maps to partnership name
+    'P Moody': 'P G Moody & Katherine Coleman',         // Tier 3 - maps to partnership name
+    'R D Griffiths': 'R D Griffiths',                   // neutral
+    'T Busuttin & N Young': 'T Busuttin & N Young',     // Tier 3
+    'S W Kendrick': 'S W Kendrick',                     // neutral
+    'T & C McEvoy': 'T & C McEvoy',                     // Tier 4
+    'A & S Freedman': 'A & S Freedman',                 // Tier 3
+    'R L Heathcote': 'R L Heathcote',                   // neutral
+    'D T O\'Brien': 'D T O\'Brien',                     // Tier 4
+    'Annabel & Rob Archibald': 'Annabel & Rob Archibald', // Tier 4
+    'Matthew Smith': 'Matthew Smith',                   // Tier 4
+    'Gavin Bedggood': 'Gavin Bedggood',                 // Tier 4
+    'Chris & Corey Munce': 'Chris & Corey Munce',       // Tier 4
+    'P G Moody & Katherine Coleman': 'P G Moody & Katherine Coleman', // Tier 3
+    'T J Gollan': 'T J Gollan',                         // Tier 4
+    'Ben Brisbourne': 'Ben Brisbourne',                 // Tier 4
+    'G Ryan & S Alexiou': 'G Ryan & S Alexiou',         // Tier 4
+    'Peter Snowden': 'Peter Snowden',                   // Tier 4
+    'P Snowden': 'Peter Snowden',                       // Tier 4
+    'M Price & M Kent Jnr': 'M Price & M Kent Jnr',     // Tier 4
+    'Bjorn Baker': 'Bjorn Baker',                       // Tier 4
+    'B Baker': 'Bjorn Baker',                           // Tier 4
+    'Patrick & Michelle Payne': 'Patrick & Michelle Payne', // Tier 4
+    'N D Parnham': 'N D Parnham',                       // Tier 4
+    // New additions
+    'M W & J Hawkes': 'M W & J Hawkes',                 // Tier 2 - NEW
+    'Brett & Georgie Cavanough': 'Brett & Georgie Cavanough', // Tier 2 - NEW
+    'Declan Maher': 'Declan Maher',                     // Tier 2 - NEW
+    'Richard Litt': 'Richard Litt',                     // Tier 3 - NEW
+    'Richard & Will Freedman': 'Richard & Will Freedman', // Tier 3 - NEW
+    'L & T Corstens & W Larkin': 'L & T Corstens & W Larkin', // Tier 4 - NEW
+    'Annabel & Rob Archibald': 'Annabel & Rob Archibald', // Tier 4 - NEW (big sample)
+    'Mitchell Beer & George Carpenter': 'Mitchell Beer & George Carpenter', // Tier 4 - NEW
 };
 function convertCSV(data) {
     // Normalize line endings (convert CRLF and CR to LF)
