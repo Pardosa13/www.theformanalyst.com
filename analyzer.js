@@ -3535,23 +3535,23 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
     
         console.error(`DEBUG API SECTIONALS: ${horse['horse name']}: score=${apiSectionalResult.score}, note length=${apiSectionalResult.note?.length || 0}`);
 
-        } else {
-            // FALLBACK TO CSV SECTIONAL TIME SCORING
-            const matchingHorse = filteredDataSectional.find(h => 
-                parseInt(h.race) === parseInt(raceNumber) && 
-                h.name.toLowerCase().trim() === horseName.toLowerCase().trim()
-            );
-            
-            if (matchingHorse) {
-                const sectionalWeight = horse._sectionalWeight || 1.0;
-                const originalSectionalScore = matchingHorse.sectionalScore;
-                const adjustedSectionalScore = originalSectionalScore * sectionalWeight;
-                score += adjustedSectionalScore;
-                if (sectionalWeight !== 1.0) {
-                    notes += `ℹ️  Sectional weight applied: ${originalSectionalScore.toFixed(1)} × ${sectionalWeight.toFixed(2)} = ${adjustedSectionalScore.toFixed(1)}\n`;
-                }
-                notes += matchingHorse.sectionalNote;
+        }
+        
+        // ALWAYS run CSV sectional z-score scoring (history + consistency)
+        const matchingHorse = filteredDataSectional.find(h => 
+            parseInt(h.race) === parseInt(raceNumber) && 
+            h.name.toLowerCase().trim() === horseName.toLowerCase().trim()
+        );
+        
+        if (matchingHorse) {
+            const sectionalWeight = horse._sectionalWeight || 1.0;
+            const originalSectionalScore = matchingHorse.sectionalScore;
+            const adjustedSectionalScore = originalSectionalScore * sectionalWeight;
+            score += adjustedSectionalScore;
+            if (sectionalWeight !== 1.0) {
+                notes += `ℹ️  Sectional weight applied: ${originalSectionalScore.toFixed(1)} × ${sectionalWeight.toFixed(2)} = ${adjustedSectionalScore.toFixed(1)}\n`;
             }
+            notes += matchingHorse.sectionalNote;
         }
         
         // CLASS DROP + SLOW SECTIONAL COMBO (works with both API and CSV)
