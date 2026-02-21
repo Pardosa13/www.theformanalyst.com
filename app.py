@@ -1775,10 +1775,6 @@ def api_import_meeting(meeting_id):
             logger.info("✅ Stored sectionals/ratings data on all races")
 
         db.session.commit()
-
-After deploying, import one meeting and check your Railway logs for a line like:
-
-logger.info(f"Injected running position for {injected_count} horses from speedmap")
         
         # ==========================================
         # FETCH AND STORE SPEED MAPS PER RACE
