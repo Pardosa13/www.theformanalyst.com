@@ -523,7 +523,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
 
     # ===== INJECT RUNNING POSITION FROM SPEED MAP DATA =====
     if speed_maps_data:
-    logger.info("✅ SPEEDMAP: starting runningPosition injection")
+        logger.info("✅ SPEEDMAP: starting runningPosition injection")
 
         # Ensure the key exists on every row (prevents missing-key issues in analyzer)
         for row in parsed_csv:
