@@ -1726,6 +1726,18 @@ async function fetchAndApplyScratchings() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', fetchAndApplyScratchings);
+function waitForRaceCards(callback) {
+  const interval = setInterval(() => {
+    const raceCards = document.querySelectorAll('.vm-race-card[id^="race-"]');
+    if (raceCards.length > 0) {
+      clearInterval(interval);
+      callback();
+    }
+  }, 200);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  waitForRaceCards(fetchAndApplyScratchings);
+});
 </script>
 {% endblock %}
