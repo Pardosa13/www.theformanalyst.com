@@ -1558,7 +1558,7 @@ def api_get_strikerate(meeting_id):
 @app.route("/api/meetings/<meeting_id>/scratchings")
 @login_required
 def api_get_scratchings(meeting_id):
-    """Get current scratchings (normalized for frontend consumption)"""
+    """Get current scratchings (normalized to a list for the frontend)"""
     try:
         url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
         response = requests.get(url, headers={'accept': 'application/json'}, timeout=30)
@@ -1568,16 +1568,16 @@ def api_get_scratchings(meeting_id):
 
         data = response.json()
 
-        # PuntingForm v2 responses are often { payLoad: [...] }
+        # PuntingForm v2 commonly returns { "payLoad": [...] }
         if isinstance(data, dict):
-            scratchings = data.get('payLoad') or data.get('payload') or data.get('scratchings') or []
+            items = data.get('payLoad') or []
         elif isinstance(data, list):
-            scratchings = data
+            items = data
         else:
-            scratchings = []
+            items = []
 
-        normalized = []
-        for s in scratchings:
+        scratchings = []
+        for s in items:
             if not isinstance(s, dict):
                 continue
 
@@ -1588,14 +1588,13 @@ def api_get_scratchings(meeting_id):
             if track is None or race_no is None or tab_no is None:
                 continue
 
-            normalized.append({
-                'track': str(track),
-                'raceNo': int(race_no) if str(race_no).isdigit() else race_no,
-                'tabNo': int(tab_no) if str(tab_no).isdigit() else tab_no,
-                'raw': s  # keep original for debugging
+            scratchings.append({
+                "track": str(track).strip(),
+                "raceNo": int(race_no) if str(race_no).isdigit() else race_no,
+                "tabNo": int(tab_no) if str(tab_no).isdigit() else tab_no
             })
 
-        return jsonify({'success': True, 'scratchings': normalized})
+        return jsonify({"success": True, "scratchings": scratchings})
 
     except Exception as e:
         logger.error(f"Scratchings fetch failed: {str(e)}", exc_info=True)
