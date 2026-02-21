@@ -139,7 +139,20 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
 
     var score = 0;
     var notes = '';
+    
+    // ==========================================
+    // RUNNING POSITION SCORING (Speedmap)
+    // (runningPosition injected into CSV in app.py)
+    // ==========================================
+    const runningPosition = (horseRow['runningPosition'] || '').trim();
 
+    // Distance can be "1200" or "1200m" depending on data source
+    const raceDistanceRaw = horseRow['distance'] || '';
+    const raceDistance = parseInt(String(raceDistanceRaw).replace(/[^\d]/g, ''), 10) || 0;
+
+    const [rpScore, rpNote] = calculateRunningPositionScore(runningPosition, raceDistance);
+    score += rpScore;
+    notes += rpNote;
     // Check horse weight and score
     var [a, b] = checkWeight(horseRow['horse weight'], horseRow['horse claim']);
     score += a;
