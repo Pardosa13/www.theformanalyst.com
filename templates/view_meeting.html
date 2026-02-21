@@ -1655,16 +1655,10 @@ function applyScrachings(scratchings) {
   const meetingName = document.querySelector('.vm-page-title')?.textContent?.trim() || '';
   const trackName = meetingName.includes('_') ? meetingName.split('_')[1] : '';
 
-  console.log('Track looking for:', trackName);
-
   const relevantScratchings = scratchings.filter(s =>
     (s.track || '').toLowerCase().trim() === (trackName || '').toLowerCase().trim()
   );
   console.log('Relevant scratchings:', relevantScratchings.length);
-
-  // NEW: build lookup from what is actually rendered on the page
-  const domLookup = buildSpeedmapDomLookup();
-  // console.log('Speedmap DOM lookup:', domLookup); // uncomment if needed
 
   let matched = 0;
 
@@ -1676,14 +1670,16 @@ function applyScrachings(scratchings) {
     const raceCard = document.querySelector('#race-' + raceNo);
     if (!raceCard) return;
 
-    const raceMap = domLookup[raceNo];
-    if (!raceMap) return;
+    // Get horse name directly from the speedmap JSON data (always available)
+    const speedMapData = window['speedMapData_' + raceNo];
+    if (!speedMapData?.payLoad?.[0]?.items) return;
 
-    const scratchedNameNorm = raceMap[tabNo];
-    if (!scratchedNameNorm) return;
+    const mapHorse = speedMapData.payLoad[0].items.find(h => Number(h.tabNo) === tabNo);
+    if (!mapHorse) return;
+
+    const scratchedNameNorm = normalizeHorseName(mapHorse.runnerName);
 
     raceCard.querySelectorAll('tbody tr').forEach(row => {
-      // IMPORTANT: deterministic selection of the real horse name span
       const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
       const rowNameNorm = normalizeHorseName(nameSpan?.textContent);
 
@@ -1731,6 +1727,5 @@ async function fetchAndApplyScratchings() {
 }
 
 document.addEventListener('DOMContentLoaded', fetchAndApplyScratchings);
-</script>
 </script>
 {% endblock %}
