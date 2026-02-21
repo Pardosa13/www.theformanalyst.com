@@ -1558,7 +1558,6 @@ def api_get_strikerate(meeting_id):
 @app.route("/api/meetings/<meeting_id>/scratchings")
 @login_required
 def api_get_scratchings(meeting_id):
-    """Get current scratchings (normalized to a list for the frontend)"""
     try:
         url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
         response = requests.get(url, headers={'accept': 'application/json'}, timeout=30)
@@ -1567,20 +1566,26 @@ def api_get_scratchings(meeting_id):
             return jsonify({'success': False, 'error': f'API error {response.status_code}'}), response.status_code
 
         data = response.json()
+        items = data.get('payLoad') or [] if isinstance(data, dict) else data if isinstance(data, list) else []
 
-        # PuntingForm v2 commonly returns { "payLoad": [...] }
-        if isinstance(data, dict):
-            items = data.get('payLoad') or []
-        elif isinstance(data, list):
-            items = data
-        else:
-            items = []
+        # Build a tab->horseName lookup from stored speedmap data
+        # meeting_id here is the DB meeting ID
+        tab_name_lookup = {}  # { (raceNo, tabNo): horseName }
+        try:
+            db_meeting = Meeting.query.get(int(meeting_id))
+            if db_meeting:
+                for race in db_meeting.races:
+                    if race.speed_maps_json:
+                        sm = race.speed_maps_json if isinstance(race.speed_maps_json, dict) else json.loads(race.speed_maps_json)
+                        for item in sm.get('payLoad', [{}])[0].get('items', []):
+                            tab_name_lookup[(race.race_number, int(item.get('tabNo', 0)))] = item.get('runnerName', '')
+        except Exception as e:
+            logger.warning(f"Could not build tab lookup: {e}")
 
         scratchings = []
         for s in items:
             if not isinstance(s, dict):
                 continue
-
             track = s.get('track') or s.get('Track') or s.get('trackName') or s.get('TrackName')
             race_no = s.get('raceNo') or s.get('RaceNo') or s.get('raceNumber') or s.get('RaceNumber')
             tab_no = s.get('tabNo') or s.get('TabNo') or s.get('tabNumber') or s.get('TabNumber')
@@ -1588,10 +1593,16 @@ def api_get_scratchings(meeting_id):
             if track is None or race_no is None or tab_no is None:
                 continue
 
+            race_no_int = int(race_no) if str(race_no).isdigit() else race_no
+            tab_no_int = int(tab_no) if str(tab_no).isdigit() else tab_no
+
+            horse_name = tab_name_lookup.get((race_no_int, tab_no_int), '')
+
             scratchings.append({
                 "track": str(track).strip(),
-                "raceNo": int(race_no) if str(race_no).isdigit() else race_no,
-                "tabNo": int(tab_no) if str(tab_no).isdigit() else tab_no
+                "raceNo": race_no_int,
+                "tabNo": tab_no_int,
+                "horseName": horse_name  # Will be '' if not found in speedmap
             })
 
         return jsonify({"success": True, "scratchings": scratchings})
@@ -1599,7 +1610,6 @@ def api_get_scratchings(meeting_id):
     except Exception as e:
         logger.error(f"Scratchings fetch failed: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
-
 @app.route("/api/meetings/<meeting_id>/import", methods=["POST"])
 @login_required
 def api_import_meeting(meeting_id):
