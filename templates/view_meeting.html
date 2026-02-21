@@ -1641,9 +1641,15 @@ function applyScrachings(scratchings) {
     const raceCard = document.querySelector('#race-' + raceNo);
     if (!raceCard) return;
 
-    const speedMapData = window['speedMapData_' + raceNo];
-    const payload = speedMapData?.payLoad;
-    if (!Array.isArray(payload) || payload.length === 0) return;
+    ```html name=templates/view_meeting.html
+  const speedMapData = window['speedMapData_' + raceNo];
+  if (!speedMapData) { console.log('NO speedMapData for race', raceNo); return; }
+
+  const payload = speedMapData?.payLoad;
+  if (!Array.isArray(payload) || payload.length === 0) {
+    console.log('NO payload for race', raceNo, speedMapData);
+    return;
+  }
 
     // IMPORTANT: do NOT assume payload[0] is this race
     const raceObj =
