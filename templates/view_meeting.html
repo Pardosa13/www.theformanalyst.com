@@ -1607,5 +1607,53 @@ function injectPFAIScores() {
     });
 }
 </script>
+<script>
+function applyScrachings(scratchings) {
+  if (!scratchings || scratchings.length === 0) return;
+  
+  scratchings.forEach(s => {
+    const name = s.runnerName?.toLowerCase().trim();
+    const tabNo = String(s.tabNo);
+    const track = s.track?.toLowerCase();
+    
+    if (!name) return;
+    
+    document.querySelectorAll('tr').forEach(row => {
+      const rowText = row.textContent.toLowerCase();
+      if (rowText.includes(name)) {
+        row.style.opacity = '0.4';
+        row.style.textDecoration = 'line-through';
+        row.style.color = '#888';
+        
+        if (!row.querySelector('.scratched-badge')) {
+          const firstCell = row.querySelector('td');
+          if (firstCell) {
+            const badge = document.createElement('span');
+            badge.className = 'scratched-badge';
+            badge.textContent = 'SCR';
+            badge.style.cssText = 'background:#dc3545;color:white;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:6px;font-weight:bold;';
+            firstCell.appendChild(badge);
+          }
+        }
+      }
+    });
+  });
+}
 
+document.addEventListener('DOMContentLoaded', function() {
+  const meetingId = window.location.pathname.split('/').pop();
+  
+  fetch(`/api/meetings/${meetingId}/scratchings`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.payLoad && data.payLoad.length > 0) {
+        console.log(`%c${data.payLoad.length} scratchings today`, 'color: orange');
+        applyScrachings(data.payLoad);
+      } else {
+        console.log('No scratchings today');
+      }
+    })
+    .catch(e => console.log('Scratchings error:', e));
+});
+</script>
 {% endblock %}
