@@ -536,7 +536,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                 runner_name = normalize_runner_name(item.get('runnerName') or '')
 
                 # UI shows "Settle 1/2/4..." so settlePosition is numeric.
-                settle_val = item.get('settlePosition')
+                settle_val = item.get('settle')
                 try:
                     settle_num = int(str(settle_val).strip())
                 except Exception:
