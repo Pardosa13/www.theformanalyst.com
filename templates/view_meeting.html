@@ -1638,10 +1638,9 @@ function applyScrachings(scratchings) {
     const tabNo  = Number(s.tabNo);
     if (!raceNo || !tabNo) return;
 
-    const raceCard = document.querySelector('#race-' + raceNo);
-    if (!raceCard) return;
+  const raceCard = document.querySelector('#race-' + raceNo);
+  if (!raceCard) return;
 
-    ```html name=templates/view_meeting.html
   const speedMapData = window['speedMapData_' + raceNo];
   if (!speedMapData) { console.log('NO speedMapData for race', raceNo); return; }
 
