@@ -3566,24 +3566,6 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             notes += matchingWeight.weightNote;
         }
 
-        // RUNNING POSITION SCORING (from speedmap window data)
-        const raceNum = horse['race number'] || horse['race_number'];
-        const speedMapData = window['speedMapData_' + raceNum];
-        if (speedMapData && speedMapData.payLoad && speedMapData.payLoad[0]) {
-            const smItems = speedMapData.payLoad[0].items || [];
-            const horseName = (horse['horse name'] || '').toLowerCase().trim();
-            const smHorse = smItems.find(h => (h.runnerName || '').toLowerCase().trim() === horseName);
-            if (smHorse && smHorse.ratedRunStyle) {
-                const styleMap = {1: 'LEADER', 2: 'ONPACE', 3: 'MIDFIELD', 4: 'BACKMARKER'};
-                const runningPosition = styleMap[smHorse.ratedRunStyle];
-                if (runningPosition) {
-                    const rpDistance = parseInt(horse['distance'] || horse['race distance'], 10) || 1400;
-                    const [rpScore, rpNote] = calculateRunningPositionScore(runningPosition, rpDistance);
-                    score += rpScore;
-                    notes += rpNote;
-                }
-            }
-        }
         analysisResults.push({ horse, score, notes, pfaiScore: parseFloat(horse['pfaiscore']) || 0 });
     });
     
