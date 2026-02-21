@@ -144,7 +144,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     // RUNNING POSITION SCORING (Speedmap)
     // (runningPosition injected into CSV in app.py)
     // ==========================================
-    const runningPosition = (horseRow['runningPosition'] || '').trim();
+    const runningPosition = (horseRow['runningposition'] || '').trim();
 
     // Distance can be "1200" or "1200m" depending on data source
     const raceDistanceRaw = horseRow['distance'] || '';
@@ -2776,12 +2776,12 @@ function calculateApiSectionalScore(runner, raceDistance) {
     let notes = '';
     
     // Extract API data
-    const last200Price = parseFloat(runner['last200TimePrice']) || 900;
-    const last200Rank = parseInt(runner['last200TimeRank']) || 25;
-    const last400Price = parseFloat(runner['last400TimePrice']) || 900;
-    const last400Rank = parseInt(runner['last400TimeRank']) || 25;
-    const last600Price = parseFloat(runner['last600TimePrice']) || 900;
-    const last600Rank = parseInt(runner['last600TimeRank']) || 25;
+    const last200Price = parseFloat(runner['last200timeprice']) || 900;
+    const last200Rank = parseInt(runner['last200timerank']) || 25;
+    const last400Price = parseFloat(runner['last400timeprice']) || 900;
+    const last400Rank = parseInt(runner['last400timerank']) || 25;
+    const last600Price = parseFloat(runner['last600timeprice']) || 900;
+    const last600Rank = parseInt(runner['last600timerank']) || 25;
     
     // Check if we have any valid data
     const hasData = (last200Price < 900 || last400Price < 900 || last600Price < 900);
@@ -3519,7 +3519,7 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
         // SECTIONAL SCORING - API PRIMARY, CSV FALLBACK
         // ==========================================
         
-        const hasApiSectionalData = horse['last200TimePrice'] !== undefined;
+       const hasApiSectionalData = horse['last200timeprice'] && parseFloat(horse['last200timeprice']) > 0;
         
         if (hasApiSectionalData) {
         // USE API SECTIONAL PRICE/RANK SCORING
