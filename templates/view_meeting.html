@@ -1611,18 +1611,13 @@ function injectPFAIScores() {
 function applyScrachings(scratchings) {
   if (!scratchings || scratchings.length === 0) return;
   
-  // Get track name from meeting name (format: YYMMDD_Track)
   const meetingName = document.querySelector('.vm-page-title')?.textContent?.trim() || '';
-  const trackName = meetingName.includes('_') ? meetingName.split('_')[1].toLowerCase() : '';
+  const trackName = meetingName.includes('_') ? meetingName.split('_')[1] : '';
   
-  if (!trackName) {
-    console.log('Could not determine track name from: ' + meetingName);
-    return;
-  }
+  console.log('Track looking for:', trackName);
   
-  // Filter scratchings to only this track
-  const relevantScratchings = scratchings.filter(s => s.track?.toLowerCase() === trackName);
-  console.log('%cRelevant scratchings for ' + trackName + ': ' + relevantScratchings.length, 'color: orange');
+  const relevantScratchings = scratchings.filter(s => s.track?.toLowerCase() === trackName.toLowerCase());
+  console.log('Relevant scratchings:', relevantScratchings.length);
   
   let matched = 0;
   
@@ -1650,7 +1645,6 @@ function applyScrachings(scratchings) {
         row.style.opacity = '0.4';
         row.style.textDecoration = 'line-through';
         row.style.color = '#888';
-        
         if (!row.querySelector('.scratched-badge')) {
           const badge = document.createElement('span');
           badge.className = 'scratched-badge';
@@ -1663,7 +1657,7 @@ function applyScrachings(scratchings) {
     });
   });
   
-  console.log('%cScratchings applied: ' + matched, 'color: orange');
+  console.log('Scratchings applied:', matched);
 }
 </script>
 {% endblock %}
