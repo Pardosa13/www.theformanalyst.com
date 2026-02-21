@@ -1776,8 +1776,6 @@ def api_import_meeting(meeting_id):
 
         db.session.commit()
 
-## Step 5: Verify the speedmap field name
-
 After deploying, import one meeting and check your Railway logs for a line like:
 
 logger.info(f"Injected running position for {injected_count} horses from speedmap")
