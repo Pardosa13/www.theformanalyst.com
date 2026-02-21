@@ -529,7 +529,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                     pos_category = 'BACKMARKER'
                 else:
                     pos_category = None
-
+                logger.info(f"DEBUG SM: race={race_no} runner={runner_name} settle_raw='{settle_raw}'")
                 if race_no and runner_name and pos_category:
                     speedmap_lookup[(race_no, runner_name)] = pos_category
 
