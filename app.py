@@ -500,17 +500,17 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                     logger.debug(f"Injected API data for {horse_name} (R{race_num}): PFAI={runner.get('pfaiScore', 'N/A')}")
                     break
 
-    # ===== INJECT PFAI SCORE FROM RATINGS DATA =====
+        # ===== INJECT PFAI SCORE FROM RATINGS DATA =====
     if ratings_data:
         ratings_payload = ratings_data.get('payLoad', [])
         logged_horses = set()
-        
+
         for row in parsed_csv:
             row['pfaiScore'] = ''
             horse_name = row.get('horse name', '').strip()
             race_num = row.get('race number', '').strip()
             key = f"{horse_name}-{race_num}"
-            
+
             for runner in ratings_payload:
                 runner_name = runner.get('runnerName', '').strip()
                 if (str(runner.get('raceNo')) == str(race_num) and
@@ -521,24 +521,28 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                         logged_horses.add(key)
                     break
 
-        # ===== INJECT RUNNING POSITION FROM SPEED MAP DATA =====
+    # ===== INJECT RUNNING POSITION FROM SPEED MAP DATA =====
     if speed_maps_data:
+        logger.info("✅ SPEEDMAP: starting runningPosition injection")
+
         # Ensure the key exists on every row (prevents missing-key issues in analyzer)
         for row in parsed_csv:
             row['runningPosition'] = ''
 
-        speedmap_lookup = {}  # { (race_no_str, horse_name_lower): position_category }
+        speedmap_lookup = {}  # { (race_no_str, horse_name_norm): position_category }
 
-        for race_sm in speed_maps_data.get('payLoad', []):
+        payload = speed_maps_data.get('payLoad', [])
+        logger.info(f"✅ SPEEDMAP: payLoad races={len(payload)}")
+
+        for race_sm in payload:
             race_no = str(race_sm.get('raceNo', '')).strip()
 
             for item in race_sm.get('items', []):
                 runner_name = normalize_runner_name(item.get('runnerName') or '')
 
-                # UI shows "Settle 1/2/4..." so settlePosition is numeric.
-                settle_val = item.get('settle')
+                settle_val = item.get('settle')  # <-- correct key
                 try:
-                    settle_num = int(str(settle_val).strip())
+                    settle_num = int(str(settle_val).split('/')[0].strip())
                 except Exception:
                     settle_num = None
 
@@ -553,11 +557,6 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                 else:
                     pos_category = None
 
-                logger.info(
-                    f"DEBUG SM: race={race_no} runner={runner_name} "
-                    f"settle_val='{settle_val}' settle_num={settle_num} bucket='{pos_category}'"
-                )
-
                 if race_no and runner_name and pos_category:
                     speedmap_lookup[(race_no, runner_name)] = pos_category
 
@@ -571,7 +570,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                 row['runningPosition'] = speedmap_lookup[key]
                 injected_count += 1
 
-        logger.info(f"Injected running position for {injected_count} horses from speedmap")
+        logger.info(f"✅ SPEEDMAP: Injected running position for {injected_count} horses")
         
     # Rebuild CSV with injected data
     csv_data = rebuildCSV(parsed_csv)
