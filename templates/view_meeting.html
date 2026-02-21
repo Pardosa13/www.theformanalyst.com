@@ -1618,125 +1618,39 @@ function normalizeHorseName(name) {
     .trim();
 }
 
-/**
- * Build a lookup from the *rendered* speedmap DOM:
- *   raceNo -> { tabNo -> normalizedRunnerName }
- *
- * This avoids relying on whatever field name/numbering PuntingForm used in JSON.
- */
-function buildSpeedmapDomLookup() {
-  const lookup = {}; // { [raceNo]: { [tabNo]: runnerNameNorm } }
-
+function applySpeedmapScratchings() {
   document.querySelectorAll('.vm-race-card[id^="race-"]').forEach(raceCard => {
-    const raceNo = Number(raceCard.id.replace('race-', ''));
-    if (!raceNo) return;
-
-    const map = {};
-
-    // Each speedmap horse has .speedmap-tab-number and .speedmap-horse-name in your CSS
-    raceCard.querySelectorAll('.speedmap-horse-card').forEach(card => {
-      const tabEl = card.querySelector('.speedmap-tab-number');
-      const nameEl = card.querySelector('.speedmap-horse-name');
-      const tabNo = Number(tabEl?.textContent?.trim());
-      const nameNorm = normalizeHorseName(nameEl?.textContent);
-
-      if (tabNo && nameNorm) map[tabNo] = nameNorm;
-    });
-
-    if (Object.keys(map).length > 0) lookup[raceNo] = map;
-  });
-
-  return lookup;
-}
-
-function applyScrachings(scratchings) {
-  if (!Array.isArray(scratchings) || scratchings.length === 0) return;
-
-  const meetingName = document.querySelector('.vm-page-title')?.textContent?.trim() || '';
-  const trackName = meetingName.includes('_') ? meetingName.split('_')[1] : '';
-
-  const relevantScratchings = scratchings.filter(s =>
-    (s.track || '').toLowerCase().trim() === (trackName || '').toLowerCase().trim()
-  );
-  console.log('Relevant scratchings:', relevantScratchings.length);
-
-  let matched = 0;
-
-  relevantScratchings.forEach(s => {
-    const raceNo = Number(s.raceNo);
-    const tabNo  = Number(s.tabNo);
-    if (!raceNo || !tabNo) return;
-
-    const raceCard = document.querySelector('#race-' + raceNo);
-    if (!raceCard) return;
-
-    // Try speedmap first, fall back to horseName from API
+    const raceNo = raceCard.id.replace('race-', '');
     const speedMapData = window['speedMapData_' + raceNo];
-    const mapHorse = speedMapData?.payLoad?.[0]?.items?.find(h => Number(h.tabNo) === tabNo);
-    const scratchedNameNorm = mapHorse
-      ? normalizeHorseName(mapHorse.runnerName)
-      : normalizeHorseName(s.horseName);
 
-    if (!scratchedNameNorm) return;
+    if (!speedMapData?.payLoad?.[0]?.items) return;
+
+    const speedmapNames = new Set(
+      speedMapData.payLoad[0].items.map(h => normalizeHorseName(h.runnerName))
+    );
 
     raceCard.querySelectorAll('tbody tr').forEach(row => {
       const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
-      const rowNameNorm = normalizeHorseName(nameSpan?.textContent);
+      if (!nameSpan) return;
 
-      if (rowNameNorm && rowNameNorm === scratchedNameNorm) {
+      const rowNameNorm = normalizeHorseName(nameSpan.textContent);
+      if (!rowNameNorm) return;
+
+      if (!speedmapNames.has(rowNameNorm) && !row.querySelector('.scratched-badge')) {
         row.style.opacity = '0.4';
         row.style.textDecoration = 'line-through';
         row.style.color = '#888';
 
-        if (!row.querySelector('.scratched-badge')) {
-          const badge = document.createElement('span');
-          badge.className = 'scratched-badge';
-          badge.textContent = 'SCR';
-          badge.style.cssText =
-            'background:#dc3545;color:white;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:6px;font-weight:bold;';
-          nameSpan.insertAdjacentElement('afterend', badge);
-          matched++;
-        }
+        const badge = document.createElement('span');
+        badge.className = 'scratched-badge';
+        badge.textContent = 'SCR';
+        badge.style.cssText = 'background:#dc3545;color:white;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:6px;font-weight:bold;';
+        nameSpan.insertAdjacentElement('afterend', badge);
       }
     });
   });
-
-  console.log('Scratchings applied:', matched);
-}
-async function fetchAndApplyScratchings() {
-  try {
-    const meetingId = {{ meeting.id }};
-
-    const res = await fetch(`/api/meetings/${meetingId}/scratchings`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-
-    const data = await res.json();
-
-    if (!data || data.success !== true) {
-      console.warn('Scratchings API returned error:', data);
-      return;
-    }
-
-    applyScrachings(data.scratchings);
-  } catch (err) {
-    console.error('Failed to fetch/apply scratchings:', err);
-  }
 }
 
-function waitForRaceCards(callback) {
-  const interval = setInterval(() => {
-    const raceCards = document.querySelectorAll('.vm-race-card[id^="race-"]');
-    if (raceCards.length > 0) {
-      clearInterval(interval);
-      callback();
-    }
-  }, 200);
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  waitForRaceCards(fetchAndApplyScratchings);
-});
+document.addEventListener('DOMContentLoaded', applySpeedmapScratchings);
 </script>
 {% endblock %}
