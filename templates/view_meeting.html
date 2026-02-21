@@ -1618,6 +1618,37 @@ function normalizeHorseName(name) {
     .trim();
 }
 
+/**
+ * Build a lookup from the *rendered* speedmap DOM:
+ *   raceNo -> { tabNo -> normalizedRunnerName }
+ *
+ * This avoids relying on whatever field name/numbering PuntingForm used in JSON.
+ */
+function buildSpeedmapDomLookup() {
+  const lookup = {}; // { [raceNo]: { [tabNo]: runnerNameNorm } }
+
+  document.querySelectorAll('.vm-race-card[id^="race-"]').forEach(raceCard => {
+    const raceNo = Number(raceCard.id.replace('race-', ''));
+    if (!raceNo) return;
+
+    const map = {};
+
+    // Each speedmap horse has .speedmap-tab-number and .speedmap-horse-name in your CSS
+    raceCard.querySelectorAll('.speedmap-horse-card').forEach(card => {
+      const tabEl = card.querySelector('.speedmap-tab-number');
+      const nameEl = card.querySelector('.speedmap-horse-name');
+      const tabNo = Number(tabEl?.textContent?.trim());
+      const nameNorm = normalizeHorseName(nameEl?.textContent);
+
+      if (tabNo && nameNorm) map[tabNo] = nameNorm;
+    });
+
+    if (Object.keys(map).length > 0) lookup[raceNo] = map;
+  });
+
+  return lookup;
+}
+
 function applyScrachings(scratchings) {
   if (!Array.isArray(scratchings) || scratchings.length === 0) return;
 
@@ -1631,6 +1662,10 @@ function applyScrachings(scratchings) {
   );
   console.log('Relevant scratchings:', relevantScratchings.length);
 
+  // NEW: build lookup from what is actually rendered on the page
+  const domLookup = buildSpeedmapDomLookup();
+  // console.log('Speedmap DOM lookup:', domLookup); // uncomment if needed
+
   let matched = 0;
 
   relevantScratchings.forEach(s => {
@@ -1641,30 +1676,18 @@ function applyScrachings(scratchings) {
     const raceCard = document.querySelector('#race-' + raceNo);
     if (!raceCard) return;
 
-    const speedMapData = window['speedMapData_' + raceNo];
-    const payload = speedMapData?.payLoad;
-    if (!Array.isArray(payload) || payload.length === 0) return;
+    const raceMap = domLookup[raceNo];
+    if (!raceMap) return;
 
-    const raceObj =
-      payload.find(r => Number(r.raceNo) === raceNo) ||
-      payload.find(r => String(r.raceNo) === String(raceNo)) ||
-      payload[0];
-
-    const horses = raceObj?.items || [];
-    if (!Array.isArray(horses) || horses.length === 0) return;
-
-    const scratchedHorse = horses.find(h => Number(h.tabNo) === tabNo);
-    if (!scratchedHorse) return;
-
-    const horseNameNorm = normalizeHorseName(scratchedHorse.runnerName || scratchedHorse.name);
-    if (!horseNameNorm) return;
+    const scratchedNameNorm = raceMap[tabNo];
+    if (!scratchedNameNorm) return;
 
     raceCard.querySelectorAll('tbody tr').forEach(row => {
-      // IMPORTANT FIX: select the REAL horse name span (not the pfai placeholder span)
+      // IMPORTANT: deterministic selection of the real horse name span
       const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
       const rowNameNorm = normalizeHorseName(nameSpan?.textContent);
 
-      if (rowNameNorm && rowNameNorm === horseNameNorm) {
+      if (rowNameNorm && rowNameNorm === scratchedNameNorm) {
         row.style.opacity = '0.4';
         row.style.textDecoration = 'line-through';
         row.style.color = '#888';
