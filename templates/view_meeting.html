@@ -1612,9 +1612,9 @@ function normalizeHorseName(name) {
   return (name || '')
     .toLowerCase()
     .trim()
-    .replace(/\([^)]*\)/g, '')       // remove (NZ), (AUS), etc
-    .replace(/[^a-z0-9\s]/g, ' ')    // punctuation -> spaces
-    .replace(/\s+/g, ' ')            // collapse whitespace
+    .replace(/\([^)]*\)/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -1638,19 +1638,13 @@ function applyScrachings(scratchings) {
     const tabNo  = Number(s.tabNo);
     if (!raceNo || !tabNo) return;
 
-  const raceCard = document.querySelector('#race-' + raceNo);
-  if (!raceCard) return;
+    const raceCard = document.querySelector('#race-' + raceNo);
+    if (!raceCard) return;
 
-  const speedMapData = window['speedMapData_' + raceNo];
-  if (!speedMapData) { console.log('NO speedMapData for race', raceNo); return; }
+    const speedMapData = window['speedMapData_' + raceNo];
+    const payload = speedMapData?.payLoad;
+    if (!Array.isArray(payload) || payload.length === 0) return;
 
-  const payload = speedMapData?.payLoad;
-  if (!Array.isArray(payload) || payload.length === 0) {
-    console.log('NO payload for race', raceNo, speedMapData);
-    return;
-  }
-
-    // IMPORTANT: do NOT assume payload[0] is this race
     const raceObj =
       payload.find(r => Number(r.raceNo) === raceNo) ||
       payload.find(r => String(r.raceNo) === String(raceNo)) ||
@@ -1666,6 +1660,7 @@ function applyScrachings(scratchings) {
     if (!horseNameNorm) return;
 
     raceCard.querySelectorAll('tbody tr').forEach(row => {
+      // IMPORTANT FIX: select the REAL horse name span (not the pfai placeholder span)
       const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
       const rowNameNorm = normalizeHorseName(nameSpan?.textContent);
 
@@ -1706,7 +1701,6 @@ async function fetchAndApplyScratchings() {
       return;
     }
 
-    // Your updated app.py returns { success: true, scratchings: [...] }
     applyScrachings(data.scratchings);
   } catch (err) {
     console.error('Failed to fetch/apply scratchings:', err);
@@ -1714,5 +1708,6 @@ async function fetchAndApplyScratchings() {
 }
 
 document.addEventListener('DOMContentLoaded', fetchAndApplyScratchings);
+</script>
 </script>
 {% endblock %}
