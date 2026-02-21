@@ -2957,6 +2957,9 @@ def extract_sectional_history(notes):
     if not notes:
         return result
     
+    # Unescape literal \n if stored that way in DB
+    notes = notes.replace('\\n', '\n')
+    
     # Extract HISTORY_ADJ array
     adj_match = re.search(r'HISTORY_ADJ:\s*\[([\d.,\s]+)\]', notes)
     if adj_match:
