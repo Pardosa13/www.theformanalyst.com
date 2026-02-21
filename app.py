@@ -511,39 +511,57 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                     break
 
     # ===== INJECT RUNNING POSITION FROM SPEED MAP DATA =====
-    if speed_maps_data:
-        speedmap_lookup = {}  # { (race_no_str, horse_name_lower): position_category }
+if speed_maps_data:
+    # Ensure the key exists on every row (prevents missing-key issues in analyzer)
+    for row in parsed_csv:
+        row['runningPosition'] = ''
 
-        for race_sm in speed_maps_data.get('payLoad', []):
-            race_no = str(race_sm.get('raceNo', '')).strip()
-            for item in race_sm.get('items', []):
-                runner_name = (item.get('runnerName') or '').strip().lower()
-                settle_raw = str(item.get('settlePosition') or '').upper().strip()
+    speedmap_lookup = {}  # { (race_no_str, horse_name_lower): position_category }
 
-                if 'LEADER' in settle_raw:
-                    pos_category = 'LEADER'
-                elif 'ONPACE' in settle_raw or 'ON PACE' in settle_raw:
-                    pos_category = 'ONPACE'
-                elif 'MIDFIELD' in settle_raw or 'MID' in settle_raw:
-                    pos_category = 'MIDFIELD'
-                elif 'BACK' in settle_raw:
-                    pos_category = 'BACKMARKER'
-                else:
-                    pos_category = None
-                logger.info(f"DEBUG SM: race={race_no} runner={runner_name} settle_raw='{settle_raw}'")
-                if race_no and runner_name and pos_category:
-                    speedmap_lookup[(race_no, runner_name)] = pos_category
+    for race_sm in speed_maps_data.get('payLoad', []):
+        race_no = str(race_sm.get('raceNo', '')).strip()
 
-        injected_count = 0
-        for row in parsed_csv:
-            horse_name = row.get('horse name', '').strip().lower()
-            race_num = str(row.get('race number', '')).strip()
-            key = (race_num, horse_name)
-            if key in speedmap_lookup:
-                row['runningPosition'] = speedmap_lookup[key]
-                injected_count += 1
+        for item in race_sm.get('items', []):
+            runner_name = (item.get('runnerName') or '').strip().lower()
 
-        logger.info(f"Injected running position for {injected_count} horses from speedmap")
+            # UI shows "Settle 1/2/4..." so settlePosition is numeric.
+            settle_val = item.get('settlePosition')
+            try:
+                settle_num = int(str(settle_val).strip())
+            except Exception:
+                settle_num = None
+
+            if settle_num == 1:
+                pos_category = 'LEADER'
+            elif settle_num is not None and 2 <= settle_num <= 3:
+                pos_category = 'ONPACE'
+            elif settle_num is not None and 4 <= settle_num <= 7:
+                pos_category = 'MIDFIELD'
+            elif settle_num is not None:
+                pos_category = 'BACKMARKER'
+            else:
+                pos_category = None
+
+            # Optional debug (keep if you want, remove later)
+            logger.info(
+                f"DEBUG SM: race={race_no} runner={runner_name} "
+                f"settle_val='{settle_val}' settle_num={settle_num} bucket='{pos_category}'"
+            )
+
+            if race_no and runner_name and pos_category:
+                speedmap_lookup[(race_no, runner_name)] = pos_category
+
+    injected_count = 0
+    for row in parsed_csv:
+        horse_name = row.get('horse name', '').strip().lower()
+        race_num = str(row.get('race number', '')).strip()
+        key = (race_num, horse_name)
+
+        if key in speedmap_lookup:
+            row['runningPosition'] = speedmap_lookup[key]
+            injected_count += 1
+
+    logger.info(f"Injected running position for {injected_count} horses from speedmap")
         
     # Rebuild CSV with injected data
     csv_data = rebuildCSV(parsed_csv)
