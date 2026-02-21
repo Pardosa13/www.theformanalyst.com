@@ -1558,16 +1558,45 @@ def api_get_strikerate(meeting_id):
 @app.route("/api/meetings/<meeting_id>/scratchings")
 @login_required
 def api_get_scratchings(meeting_id):
-    """Get current scratchings"""
+    """Get current scratchings (normalized for frontend consumption)"""
     try:
         url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
         response = requests.get(url, headers={'accept': 'application/json'}, timeout=30)
-        
+
         if not response.ok:
             return jsonify({'success': False, 'error': f'API error {response.status_code}'}), response.status_code
-        
-        return jsonify(response.json())
-        
+
+        data = response.json()
+
+        # PuntingForm v2 responses are often { payLoad: [...] }
+        if isinstance(data, dict):
+            scratchings = data.get('payLoad') or data.get('payload') or data.get('scratchings') or []
+        elif isinstance(data, list):
+            scratchings = data
+        else:
+            scratchings = []
+
+        normalized = []
+        for s in scratchings:
+            if not isinstance(s, dict):
+                continue
+
+            track = s.get('track') or s.get('Track') or s.get('trackName') or s.get('TrackName')
+            race_no = s.get('raceNo') or s.get('RaceNo') or s.get('raceNumber') or s.get('RaceNumber')
+            tab_no = s.get('tabNo') or s.get('TabNo') or s.get('tabNumber') or s.get('TabNumber')
+
+            if track is None or race_no is None or tab_no is None:
+                continue
+
+            normalized.append({
+                'track': str(track),
+                'raceNo': int(race_no) if str(race_no).isdigit() else race_no,
+                'tabNo': int(tab_no) if str(tab_no).isdigit() else tab_no,
+                'raw': s  # keep original for debugging
+            })
+
+        return jsonify({'success': True, 'scratchings': normalized})
+
     except Exception as e:
         logger.error(f"Scratchings fetch failed: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
