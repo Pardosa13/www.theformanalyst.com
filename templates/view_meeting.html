@@ -1611,22 +1611,31 @@ function injectPFAIScores() {
 function applyScrachings(scratchings) {
   if (!scratchings || scratchings.length === 0) return;
   
+  // Get track name from meeting name (format: YYMMDD_Track)
+  const meetingName = document.querySelector('.vm-page-title')?.textContent?.trim() || '';
+  const trackName = meetingName.includes('_') ? meetingName.split('_')[1].toLowerCase() : '';
+  
+  if (!trackName) {
+    console.log('Could not determine track name from: ' + meetingName);
+    return;
+  }
+  
+  // Filter scratchings to only this track
+  const relevantScratchings = scratchings.filter(s => s.track?.toLowerCase() === trackName);
+  console.log('%cRelevant scratchings for ' + trackName + ': ' + relevantScratchings.length, 'color: orange');
+  
   let matched = 0;
   
-  scratchings.forEach(s => {
+  relevantScratchings.forEach(s => {
     const raceNo = s.raceNo;
     const tabNo = s.tabNo;
-    
     if (!raceNo || !tabNo) return;
     
-    // Find the race card
     const raceCard = document.querySelector('#race-' + raceNo);
     if (!raceCard) return;
     
-    // Find row by tab number — tab number is in the speedmap data on each row
-    // Match via the horse name shown in the speed map data
     const speedMapData = window['speedMapData_' + raceNo];
-    if (!speedMapData || !speedMapData.payLoad || !speedMapData.payLoad[0]) return;
+    if (!speedMapData?.payLoad?.[0]) return;
     
     const horses = speedMapData.payLoad[0].items || [];
     const scratchedHorse = horses.find(h => h.tabNo === tabNo);
@@ -1635,7 +1644,6 @@ function applyScrachings(scratchings) {
     const horseName = scratchedHorse.runnerName?.toLowerCase().trim();
     if (!horseName) return;
     
-    // Find the row with this horse name
     raceCard.querySelectorAll('tbody tr').forEach(row => {
       const nameSpan = row.querySelector('td:nth-child(2) span');
       if (nameSpan && nameSpan.textContent.trim().toLowerCase() === horseName) {
@@ -1644,15 +1652,12 @@ function applyScrachings(scratchings) {
         row.style.color = '#888';
         
         if (!row.querySelector('.scratched-badge')) {
-          const nameCell = row.querySelector('td:nth-child(2)');
-          if (nameCell) {
-            const badge = document.createElement('span');
-            badge.className = 'scratched-badge';
-            badge.textContent = 'SCR';
-            badge.style.cssText = 'background:#dc3545;color:white;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:6px;font-weight:bold;';
-            nameSpan.insertAdjacentElement('afterend', badge);
-            matched++;
-          }
+          const badge = document.createElement('span');
+          badge.className = 'scratched-badge';
+          badge.textContent = 'SCR';
+          badge.style.cssText = 'background:#dc3545;color:white;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:6px;font-weight:bold;';
+          nameSpan.insertAdjacentElement('afterend', badge);
+          matched++;
         }
       }
     });
@@ -1660,21 +1665,5 @@ function applyScrachings(scratchings) {
   
   console.log('%cScratchings applied: ' + matched, 'color: orange');
 }
-
-document.addEventListener('DOMContentLoaded', function() {
-  const meetingId = window.location.pathname.split('/').pop();
-  
-  fetch(`/api/meetings/${meetingId}/scratchings`)
-    .then(r => r.json())
-    .then(data => {
-      if (data.payLoad && data.payLoad.length > 0) {
-        console.log(`%c${data.payLoad.length} scratchings today`, 'color: orange');
-        applyScrachings(data.payLoad);
-      } else {
-        console.log('No scratchings today');
-      }
-    })
-    .catch(e => console.log('Scratchings error:', e));
-});
 </script>
 {% endblock %}
