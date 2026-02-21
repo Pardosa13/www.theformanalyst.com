@@ -454,6 +454,17 @@ def extract_race_sectionals(sectionals_data, race_number):
     
     return race_sectionals if race_sectionals else None
 
+def normalize_runner_name(name: str) -> str:
+    """
+    Normalize runner names from different sources so lookups match.
+    """
+    if not name:
+        return ''
+    s = str(name).lower().strip()
+    s = re.sub(r"[^a-z0-9\s]", " ", s)   # remove punctuation
+    s = re.sub(r"\s+", " ", s).strip()  # collapse multiple spaces
+    return s
+
 def process_and_store_results(csv_data, filename, track_condition, user_id, 
                               is_advanced=False, puntingform_id=None,
                               speed_maps_data=None, ratings_data=None, 
@@ -522,7 +533,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
             race_no = str(race_sm.get('raceNo', '')).strip()
 
             for item in race_sm.get('items', []):
-                runner_name = (item.get('runnerName') or '').strip().lower()
+                runner_name = normalize_runner_name(item.get('runnerName') or '')
 
                 # UI shows "Settle 1/2/4..." so settlePosition is numeric.
                 settle_val = item.get('settlePosition')
@@ -552,7 +563,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
 
         injected_count = 0
         for row in parsed_csv:
-            horse_name = row.get('horse name', '').strip().lower()
+            horse_name = normalize_runner_name(row.get('horse name', ''))
             race_num = str(row.get('race number', '')).strip()
             key = (race_num, horse_name)
 
