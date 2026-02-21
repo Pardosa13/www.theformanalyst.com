@@ -1779,8 +1779,8 @@ def api_import_meeting(meeting_id):
 ## Step 5: Verify the speedmap field name
 
 After deploying, import one meeting and check your Railway logs for a line like:
-```
-✅ Injected running position for X horses from speedmap
+
+logger.info(f"Injected running position for {injected_count} horses from speedmap")
         
         # ==========================================
         # FETCH AND STORE SPEED MAPS PER RACE
