@@ -509,7 +509,8 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                         logger.info(f"✅ PFAI injected: {horse_name} R{race_num} = {runner.get('pfaiScore')}")
                         logged_horses.add(key)
                     break
-# ===== INJECT RUNNING POSITION FROM SPEED MAP DATA =====
+
+    # ===== INJECT RUNNING POSITION FROM SPEED MAP DATA =====
     if speed_maps_data:
         speedmap_lookup = {}  # { (race_no_str, horse_name_lower): position_category }
 
@@ -542,7 +543,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                 row['runningPosition'] = speedmap_lookup[key]
                 injected_count += 1
 
-        logger.info(f"✅ Injected running position for {injected_count} horses from speedmap")
+        logger.info(f"Injected running position for {injected_count} horses from speedmap")
         
     # Rebuild CSV with injected data
     csv_data = rebuildCSV(parsed_csv)
