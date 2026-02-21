@@ -3290,6 +3290,47 @@ function calculateWeightScores(data) {
 
     return results;
 }
+
+// ==========================================
+// RUNNING POSITION SCORING (Speedmap)
+// ==========================================
+function calculateRunningPositionScore(runningPosition, raceDistance) {
+    if (!runningPosition) return [0, ''];
+    
+    const pos = String(runningPosition).toUpperCase().trim();
+    let score = 0;
+    let note = '';
+    
+    const isSprint = raceDistance <= 1200;
+    const isMile = raceDistance >= 1300 && raceDistance <= 1700;
+    const isMiddle = raceDistance >= 1800 && raceDistance <= 2200;
+    const isStaying = raceDistance > 2200;
+    
+    if (isSprint) {
+        if (pos === 'LEADER')      { score = 12; note = '+12.0 : LEADER in Sprint (≤1200m)\n'; }
+        else if (pos === 'ONPACE') { score = 8;  note = '+ 8.0 : ONPACE in Sprint\n'; }
+        else if (pos === 'MIDFIELD')   { score = 0;  note = '  0.0 : MIDFIELD in Sprint\n'; }
+        else if (pos === 'BACKMARKER') { score = -8; note = '- 8.0 : BACKMARKER in Sprint\n'; }
+    } else if (isMile) {
+        if (pos === 'LEADER')      { score = 6;  note = '+ 6.0 : LEADER in Mile (1300-1700m)\n'; }
+        else if (pos === 'ONPACE') { score = 8;  note = '+ 8.0 : ONPACE in Mile - sweet spot\n'; }
+        else if (pos === 'MIDFIELD')   { score = 2;  note = '+ 2.0 : MIDFIELD in Mile\n'; }
+        else if (pos === 'BACKMARKER') { score = -5; note = '- 5.0 : BACKMARKER in Mile\n'; }
+    } else if (isMiddle) {
+        if (pos === 'LEADER')      { score = -5; note = '- 5.0 : LEADER in Middle distance (1800-2200m) - may tire\n'; }
+        else if (pos === 'ONPACE') { score = 5;  note = '+ 5.0 : ONPACE in Middle distance\n'; }
+        else if (pos === 'MIDFIELD')   { score = 3;  note = '+ 3.0 : MIDFIELD in Middle distance\n'; }
+        else if (pos === 'BACKMARKER') { score = 0;  note = '  0.0 : BACKMARKER in Middle distance\n'; }
+    } else if (isStaying) {
+        if (pos === 'LEADER')      { score = -8; note = '- 8.0 : LEADER in Staying race (2400m+) - likely to tire\n'; }
+        else if (pos === 'ONPACE') { score = 3;  note = '+ 3.0 : ONPACE in Staying race\n'; }
+        else if (pos === 'MIDFIELD')   { score = 5;  note = '+ 5.0 : MIDFIELD in Staying race\n'; }
+        else if (pos === 'BACKMARKER') { score = 2;  note = '+ 2.0 : BACKMARKER in Staying race\n'; }
+    }
+    
+    return [score, note];
+}
+
 // Calculate "true" odds from scores (Dirichlet-ish approach)
 function calculateTrueOdds(results, priorStrength = 0.01, troubleshooting = false, maxRatio = 300.0) {
     const raceGroups = results.reduce((acc, obj) => {
@@ -3523,6 +3564,15 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
         if (matchingWeight) {
             score += matchingWeight.weightScore;
             notes += matchingWeight.weightNote;
+        }
+
+        // RUNNING POSITION SCORING (injected from speedmap)
+        const runningPosition = horse['runningposition'] || horse['runningPosition'];
+        if (runningPosition) {
+            const rpDistance = parseInt(horse['distance'] || horse['race distance'], 10) || 1400;
+            const [rpScore, rpNote] = calculateRunningPositionScore(runningPosition, rpDistance);
+            score += rpScore;
+            notes += rpNote;
         }
 
         analysisResults.push({ horse, score, notes, pfaiScore: parseFloat(horse['pfaiscore']) || 0 });
