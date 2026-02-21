@@ -1661,7 +1661,7 @@ function applyScrachings(scratchings) {
     if (!horseNameNorm) return;
 
     raceCard.querySelectorAll('tbody tr').forEach(row => {
-      const nameSpan = row.querySelector('td:nth-child(2) span');
+      const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
       const rowNameNorm = normalizeHorseName(nameSpan?.textContent);
 
       if (rowNameNorm && rowNameNorm === horseNameNorm) {
