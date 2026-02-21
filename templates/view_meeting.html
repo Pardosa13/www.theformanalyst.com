@@ -1670,14 +1670,14 @@ function applyScrachings(scratchings) {
     const raceCard = document.querySelector('#race-' + raceNo);
     if (!raceCard) return;
 
-    // Get horse name directly from the speedmap JSON data (always available)
+    // Try speedmap first, fall back to horseName from API
     const speedMapData = window['speedMapData_' + raceNo];
-    if (!speedMapData?.payLoad?.[0]?.items) return;
+    const mapHorse = speedMapData?.payLoad?.[0]?.items?.find(h => Number(h.tabNo) === tabNo);
+    const scratchedNameNorm = mapHorse
+      ? normalizeHorseName(mapHorse.runnerName)
+      : normalizeHorseName(s.horseName);
 
-    const mapHorse = speedMapData.payLoad[0].items.find(h => Number(h.tabNo) === tabNo);
-    if (!mapHorse) return;
-
-    const scratchedNameNorm = normalizeHorseName(mapHorse.runnerName);
+    if (!scratchedNameNorm) return;
 
     raceCard.querySelectorAll('tbody tr').forEach(row => {
       const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
@@ -1703,7 +1703,6 @@ function applyScrachings(scratchings) {
 
   console.log('Scratchings applied:', matched);
 }
-
 async function fetchAndApplyScratchings() {
   try {
     const meetingId = {{ meeting.id }};
