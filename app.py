@@ -509,7 +509,41 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                         logger.info(f"✅ PFAI injected: {horse_name} R{race_num} = {runner.get('pfaiScore')}")
                         logged_horses.add(key)
                     break
+# ===== INJECT RUNNING POSITION FROM SPEED MAP DATA =====
+    if speed_maps_data:
+        speedmap_lookup = {}  # { (race_no_str, horse_name_lower): position_category }
 
+        for race_sm in speed_maps_data.get('payLoad', []):
+            race_no = str(race_sm.get('raceNo', '')).strip()
+            for item in race_sm.get('items', []):
+                runner_name = (item.get('runnerName') or '').strip().lower()
+                settle_raw = str(item.get('settlePosition') or '').upper().strip()
+
+                if 'LEADER' in settle_raw:
+                    pos_category = 'LEADER'
+                elif 'ONPACE' in settle_raw or 'ON PACE' in settle_raw:
+                    pos_category = 'ONPACE'
+                elif 'MIDFIELD' in settle_raw or 'MID' in settle_raw:
+                    pos_category = 'MIDFIELD'
+                elif 'BACK' in settle_raw:
+                    pos_category = 'BACKMARKER'
+                else:
+                    pos_category = None
+
+                if race_no and runner_name and pos_category:
+                    speedmap_lookup[(race_no, runner_name)] = pos_category
+
+        injected_count = 0
+        for row in parsed_csv:
+            horse_name = row.get('horse name', '').strip().lower()
+            race_num = str(row.get('race number', '')).strip()
+            key = (race_num, horse_name)
+            if key in speedmap_lookup:
+                row['runningPosition'] = speedmap_lookup[key]
+                injected_count += 1
+
+        logger.info(f"✅ Injected running position for {injected_count} horses from speedmap")
+        
     # Rebuild CSV with injected data
     csv_data = rebuildCSV(parsed_csv)
     logger.info("✅ Rebuilt CSV with API data injection")
@@ -1669,9 +1703,44 @@ def api_import_meeting(meeting_id):
         csv_data = pf_service.get_fields_csv(track_name, date_str)
         if not csv_data:
             return jsonify({'success': False, 'error': 'No data available for this meeting'}), 400
-        
+
         # ==========================================
-        # PROCESS AND STORE (with V2 data)
+        # PRE-FETCH SPEED MAPS (needed before analysis for running position injection)
+        # ==========================================
+        import io as _io
+        import csv as _csv
+
+        csv_reader = _csv.DictReader(_io.StringIO(csv_data))
+        race_numbers = set()
+        for csv_row in csv_reader:
+            rn = csv_row.get('race number', '').strip()
+            if rn and rn.isdigit():
+                race_numbers.add(int(rn))
+
+        combined_speedmap = {'payLoad': []}
+        all_speedmap_data = {}  # race_number (int) -> raw speed data for DB storage
+
+        for rn in sorted(race_numbers):
+            try:
+                speed_url = f"https://api.puntingform.com.au/v2/User/Speedmaps?meetingId={meeting_id}&raceNo={rn}&apiKey={pf_service.api_key}"
+                logger.info(f"📡 Pre-fetching speed map for Race {rn}")
+                speed_response = requests.get(speed_url, headers=headers, timeout=30)
+                if speed_response.ok:
+                    speed_data = speed_response.json()
+                    if isinstance(speed_data, dict) and speed_data.get('payLoad'):
+                        all_speedmap_data[rn] = speed_data
+                        for item in speed_data.get('payLoad', []):
+                            combined_speedmap['payLoad'].append(item)
+                        logger.info(f"   ✅ Pre-fetched speed map for race {rn}")
+                    else:
+                        logger.warning(f"   ⚠️  Empty speedmap payload for race {rn}")
+                else:
+                    logger.error(f"   ❌ HTTP {speed_response.status_code} for race {rn}")
+            except Exception as e:
+                logger.warning(f"   ⚠️  Could not pre-fetch speedmap for race {rn}: {e}")
+
+        # ==========================================
+        # PROCESS AND STORE (with all V2 data including speedmaps)
         # ==========================================
         meeting = process_and_store_results(
             csv_data=csv_data,
@@ -1680,13 +1749,38 @@ def api_import_meeting(meeting_id):
             user_id=current_user.id,
             is_advanced=False,
             puntingform_id=track_name,
-            speed_maps_data=None,  # Will fetch per-race later
+            speed_maps_data=combined_speedmap if combined_speedmap['payLoad'] else None,
             ratings_data=sectionals_data,
-            sectionals_data=sectionals_data  # Pass sectionals (includes PFAI)
+            sectionals_data=sectionals_data
         )
-        
+
         meeting.date = date_obj.date()
         db.session.commit()
+
+        # ==========================================
+        # STORE SPEED MAPS ON RACE RECORDS
+        # ==========================================
+        races = Race.query.filter_by(meeting_id=meeting.id).order_by(Race.race_number).all()
+
+        for race in races:
+            if race.race_number in all_speedmap_data:
+                race.speed_maps_json = json.dumps(all_speedmap_data[race.race_number])
+                logger.info(f"   ✅ Stored speed map for race {race.race_number}")
+
+        # Store sectionals data on ALL races
+        if sectionals_data and races:
+            for race in races:
+                race.sectionals_json = json.dumps(sectionals_data)
+                race.ratings_json = json.dumps(sectionals_data)
+            logger.info("✅ Stored sectionals/ratings data on all races")
+
+        db.session.commit()
+
+## Step 5: Verify the speedmap field name
+
+After deploying, import one meeting and check your Railway logs for a line like:
+```
+✅ Injected running position for X horses from speedmap
         
         # ==========================================
         # FETCH AND STORE SPEED MAPS PER RACE
