@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+v{% extends "base.html" %}
 
 {% block title %}Data Analytics{% endblock %}
 
@@ -10,7 +10,7 @@
 
      CONTRAST HIERARCHY FOR DENSE DATA:
      • Primary names/labels  → #f0f0f8 (text-primary) — max legibility
-     • Numeric data cells    → #c8c8d8 (text-secondary) + DM Mono
+     • Numeric data cells    → #c8c8d8 (text-primary) + DM Mono
      • Profitable ROI/profit → #34d399 bright emerald — unmissable
      • Loss ROI/profit       → #f87171 bright coral red — unmissable
      • fw-bold strike rates  → weight + colour both applied
@@ -160,8 +160,8 @@
     --bs-table-bg: transparent !important;
     --bs-table-striped-bg: rgba(255,255,255,0.025) !important;
     --bs-table-hover-bg: var(--bg-elevated) !important;
-    --bs-table-color: var(--text-secondary) !important;
-    --bs-table-striped-color: var(--text-secondary) !important;
+    --bs-table-color: var(--text-primary) !important;
+    --bs-table-striped-color: var(--text-primary) !important;
     --bs-table-hover-color: var(--text-primary) !important;
     --bs-table-border-color: var(--border-subtle) !important;
   }
@@ -170,7 +170,7 @@
   .card-body table, .card-body .table,
   .collapse table,  .collapse .table {
     width: 100%;
-    color: var(--text-secondary) !important;
+    color: var(--text-primary) !important;
     border-color: var(--border-subtle) !important;
     background-color: transparent !important;
     font-size: 13px;
@@ -206,7 +206,7 @@
     padding: 10px 12px !important;
     border-color: var(--border-subtle) !important;
     background-color: transparent !important;
-    color: var(--text-secondary) !important;
+    color: var(--text-primary) !important;
     vertical-align: middle;
     font-size: 13px;
   }
@@ -229,7 +229,7 @@
   .card-body .table-striped > tbody > tr:nth-of-type(odd) > *,
   .collapse .table-striped > tbody > tr:nth-of-type(odd) > * {
     background-color: rgba(255,255,255,0.025) !important;
-    color: var(--text-secondary) !important;
+    color: var(--text-primary) !important;
   }
 
   /* Won overlay row */
@@ -313,7 +313,7 @@
   /* Headings inside sections */
   .card-body h4, .collapse h4,
   .card-body h5, .collapse h5       { color: var(--text-primary) !important; }
-  .card-body h6, .collapse h6       { color: var(--text-secondary) !important; font-size: 12px !important; font-weight: 700 !important; }
+  .card-body h6, .collapse h6       { color: var(--text-primary) !important; font-size: 12px !important; font-weight: 700 !important; }
   .card-body h6.text-success, .collapse h6.text-success { color: #34d399 !important; font-size: 12px !important; margin-top: 12px !important; }
 
   /* Component guide box (bg-light) */
@@ -323,8 +323,8 @@
     border-radius: 8px !important;
   }
   .card-body .bg-light h6,     .collapse .bg-light h6     { color: var(--text-primary) !important; margin-bottom: 8px !important; }
-  .card-body .bg-light li,     .collapse .bg-light li     { color: var(--text-muted) !important; font-size: 12px !important; line-height: 1.6 !important; }
-  .card-body .bg-light strong, .collapse .bg-light strong { color: var(--text-secondary) !important; }
+  .card-body .bg-light li,     .collapse .bg-light li     { color: var(--text-primary) !important; font-size: 12px !important; line-height: 1.6 !important; }
+  .card-body .bg-light strong, .collapse .bg-light strong { color: var(--text-primary) !important; }
 
   /* Spinner */
   .card-body .spinner-border, .collapse .spinner-border { color: var(--accent) !important; }
@@ -335,7 +335,7 @@
     background: rgba(59,130,246,0.08) !important;
     border: 1px solid rgba(59,130,246,0.2) !important;
     border-radius: 10px !important;
-    color: var(--text-secondary) !important;
+    color: var(--text-primary) !important;
   }
   .card-body .alert-info strong, .collapse .alert-info strong { color: var(--text-primary) !important; }
   .card-body .alert-info a,      .collapse .alert-info a      { color: var(--accent) !important; }
