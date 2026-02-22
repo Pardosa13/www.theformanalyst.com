@@ -882,6 +882,158 @@ function renderPriceAnalysis(data) {
     html += '</div>';
     container.innerHTML = html;
 }
+
+function loadProbabilityCalibration() {
+    const container = document.getElementById('probabilityCalibration');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading calibration data...</p></div>';
+    fetch(`/api/data/probability-calibration?${filterParams}`)
+        .then(response => response.json())
+        .then(data => { renderProbabilityCalibration(data); loadedSections.add('probability-calibration'); })
+        .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>'; console.error('Error:', error); });
+}
+
+function renderProbabilityCalibration(data) {
+    const container = document.getElementById('probabilityCalibration');
+
+    if (!data.buckets || data.buckets.length === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No probability data available yet. Run some meetings and enter results to see calibration.</p></div>';
+        return;
+    }
+
+    const gradeColor = {
+        'Excellent': '#34d399',
+        'Good': '#60a5fa',
+        'Fair': '#fbbf24',
+        'Poor': '#f87171',
+        'No Data': '#9090a8'
+    }[data.calibration_grade] || '#9090a8';
+
+    let html = '<div class="card-body">';
+
+    html += `<div class="overview-grid" style="margin-bottom:20px;">
+        <div class="overview-tile">
+            <span class="stat-val">${data.total_horses.toLocaleString()}</span>
+            <div class="stat-label">Horses Analysed</div>
+        </div>
+        <div class="overview-tile">
+            <span class="stat-val" style="color:${gradeColor}">${data.calibration_grade}</span>
+            <div class="stat-label">Calibration Grade</div>
+        </div>
+        <div class="overview-tile">
+            <span class="stat-val" style="color:${gradeColor}">${data.mae !== null ? data.mae.toFixed(1) + '%' : '-'}</span>
+            <div class="stat-label">Mean Avg Error</div>
+        </div>
+        <div class="overview-tile">
+            <span class="stat-val">${data.buckets.filter(b => b.calibrated).length}/${data.buckets.length}</span>
+            <div class="stat-label">Buckets Within 5%</div>
+        </div>
+    </div>`;
+
+    html += `<div class="table-responsive mb-4">
+        <table class="table table-sm table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>Predicted Win %</th>
+                    <th class="text-center">Horses</th>
+                    <th class="text-center">Wins</th>
+                    <th class="text-center">Predicted Midpoint</th>
+                    <th class="text-center">Actual Strike %</th>
+                    <th class="text-center">Difference</th>
+                    <th class="text-center">Status</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+    for (const b of data.buckets) {
+        const diffClass = Math.abs(b.difference) <= 5 ? 'text-success' : Math.abs(b.difference) <= 10 ? 'text-warning' : 'text-danger';
+        const diffSign = b.difference >= 0 ? '+' : '';
+        const status = b.calibrated
+            ? '<span class="badge bg-success">✓ Good</span>'
+            : Math.abs(b.difference) <= 10
+                ? '<span class="badge bg-warning">⚠ Fair</span>'
+                : b.difference > 0
+                    ? '<span class="badge bg-info">Underconfident</span>'
+                    : '<span class="badge bg-danger">Overconfident</span>';
+
+        html += `<tr>
+            <td><strong>${b.label}</strong></td>
+            <td class="text-center">${b.horses}</td>
+            <td class="text-center">${b.wins}</td>
+            <td class="text-center">${b.predicted_midpoint.toFixed(1)}%</td>
+            <td class="text-center">${b.actual_strike_rate.toFixed(1)}%</td>
+            <td class="text-center ${diffClass}">${diffSign}${b.difference.toFixed(1)}%</td>
+            <td class="text-center">${status}</td>
+        </tr>`;
+    }
+
+    html += `</tbody></table></div>`;
+
+    html += `<div class="row">
+        <div class="col-md-8">
+            <canvas id="calibrationChart" height="160"></canvas>
+        </div>
+        <div class="col-md-4">
+            <div class="p-3 bg-light rounded">
+                <h6>📖 How to read this</h6>
+                <ul class="mb-0 small">
+                    <li><strong>Predicted Midpoint</strong> — middle of the bucket range your model assigned</li>
+                    <li><strong>Actual Strike %</strong> — how often those horses actually won</li>
+                    <li><strong>Difference</strong> — gap between predicted and actual. Closer to 0 = better</li>
+                    <li><strong>Overconfident</strong> — model predicts higher % than reality (Kelly will overbet)</li>
+                    <li><strong>Underconfident</strong> — model predicts lower % than reality (safe for Kelly)</li>
+                    <li><strong>MAE ≤ 5%</strong> = Excellent calibration for Kelly staking</li>
+                </ul>
+            </div>
+        </div>
+    </div>`;
+
+    html += '</div>';
+    container.innerHTML = html;
+
+    const labels = data.buckets.map(b => b.label);
+    const predicted = data.buckets.map(b => b.predicted_midpoint);
+    const actual = data.buckets.map(b => b.actual_strike_rate);
+
+    new Chart(document.getElementById('calibrationChart'), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Predicted %',
+                    data: predicted,
+                    backgroundColor: 'rgba(102, 126, 234, 0.6)',
+                    borderColor: 'rgba(102, 126, 234, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Actual Strike %',
+                    data: actual,
+                    backgroundColor: 'rgba(16, 185, 129, 0.6)',
+                    borderColor: 'rgba(16, 185, 129, 1)',
+                    borderWidth: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: { color: '#9090a8', font: { size: 11 }, callback: v => v + '%' },
+                    grid: { color: 'rgba(255,255,255,0.05)' }
+                },
+                x: {
+                    ticks: { color: '#9090a8', font: { size: 11 } },
+                    grid: { display: false }
+                }
+            },
+            plugins: {
+                legend: { labels: { color: '#9090a8', font: { size: 11 } } }
+            }
+        }
+    });
+}
 </script>
 
 {% endblock %}
