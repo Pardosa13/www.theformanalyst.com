@@ -261,7 +261,7 @@ v{% extends "base.html" %}
   .card-body .badge.bg-info,      .collapse .badge.bg-info      { background: rgba(59,130,246,0.18) !important;  color: #60a5fa !important; border: 1px solid rgba(59,130,246,0.3) !important; }
   .card-body .badge.bg-warning,   .collapse .badge.bg-warning   { background: rgba(245,158,11,0.18) !important;  color: #fbbf24 !important; border: 1px solid rgba(245,158,11,0.3) !important; }
   .card-body .badge.bg-danger,    .collapse .badge.bg-danger    { background: rgba(239,68,68,0.18) !important;   color: #f87171 !important; border: 1px solid rgba(239,68,68,0.3) !important; }
-  .card-body .badge.bg-secondary, .collapse .badge.bg-secondary { background: rgba(107,114,128,0.18) !important; color: #9ca3af !important; border: 1px solid rgba(107,114,128,0.3) !important; }
+  .card-body .badge.bg-primary, .collapse .badge.bg-primary { background: rgba(107,114,128,0.18) !important; color: #9ca3af !important; border: 1px solid rgba(107,114,128,0.3) !important; }
   .card-body .badge.bg-primary,   .collapse .badge.bg-primary   { background: rgba(102,126,234,0.18) !important; color: var(--accent) !important; border: 1px solid var(--border-accent) !important; }
   .card-body .badge.bg-warning.text-dark, .collapse .badge.bg-warning.text-dark { color: #fbbf24 !important; }
 
@@ -425,7 +425,7 @@ v{% extends "base.html" %}
       </div>
       <div class="filter-actions">
         <button type="submit" class="btn btn-primary">Apply Filters</button>
-        <a href="{{ url_for('data_analytics') }}" class="btn btn-secondary">Reset</a>
+        <a href="{{ url_for('data_analytics') }}" class="btn btn-primary">Reset</a>
       </div>
     </form>
   </div>
@@ -721,7 +721,7 @@ function renderComponentAnalysis(data) {
         if (comp.roi >= 25 && comp.appearances >= 5) valueBadge = '<span class="badge bg-success">✓ Strong</span>';
         else if (comp.roi >= 18 && comp.appearances >= 3) valueBadge = '<span class="badge bg-info">Promising</span>';
         else if (comp.roi < 10 && comp.appearances >= 5) valueBadge = '<span class="badge bg-danger">Weak</span>';
-        else if (comp.appearances < 5) valueBadge = '<span class="badge bg-secondary">Low Data</span>';
+        else if (comp.appearances < 5) valueBadge = '<span class="badge bg-primary">Low Data</span>';
         else valueBadge = '<span class="badge bg-warning text-dark">Neutral</span>';
         let displayName = comp.name;
         if (/^\d+yo\s+(Mare|Gelding|Colt|Horse|Filly)$/i.test(comp.name)) { displayName = `🐴 ${comp.name}`; }
