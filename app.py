@@ -3295,6 +3295,137 @@ def api_external_factors():
     
     return result
 
+@app.route("/api/data/probability-calibration")
+@login_required
+def api_probability_calibration():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    track_filter = request.args.get('track', '')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    limit_param = request.args.get('limit', '200')
+
+    race_id_query = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(
+        Horse, Horse.race_id == Race.id
+    ).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+
+    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(
+        Meeting.uploaded_at.desc(), Race.id.desc()
+    ).all()
+
+    if limit_param == 'all':
+        recent_race_ids = [r[0] for r in all_race_ids]
+    else:
+        limit = int(limit_param) if limit_param.isdigit() else 200
+        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
+
+    # Query ALL horses (not just top picks)
+    all_horses = db.session.query(
+        Horse, Prediction, Result
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).filter(
+        Result.finish_position > 0,
+        Race.id.in_(recent_race_ids),
+        Prediction.win_probability.isnot(None),
+        Prediction.win_probability != ''
+    ).all()
+
+    # Buckets: predicted win probability ranges
+    buckets = {
+        '50%+':   {'label': '50%+',   'min': 50,  'max': 100, 'horses': 0, 'wins': 0},
+        '40-50%': {'label': '40-50%', 'min': 40,  'max': 50,  'horses': 0, 'wins': 0},
+        '30-40%': {'label': '30-40%', 'min': 30,  'max': 40,  'horses': 0, 'wins': 0},
+        '20-30%': {'label': '20-30%', 'min': 20,  'max': 30,  'horses': 0, 'wins': 0},
+        '15-20%': {'label': '15-20%', 'min': 15,  'max': 20,  'horses': 0, 'wins': 0},
+        '10-15%': {'label': '10-15%', 'min': 10,  'max': 15,  'horses': 0, 'wins': 0},
+        '5-10%':  {'label': '5-10%',  'min': 5,   'max': 10,  'horses': 0, 'wins': 0},
+        '<5%':    {'label': '<5%',    'min': 0,   'max': 5,   'horses': 0, 'wins': 0},
+    }
+
+    total_horses = 0
+    skipped = 0
+
+    for horse, pred, result in all_horses:
+        try:
+            wp = float(str(pred.win_probability).replace('%', '').strip())
+        except (ValueError, TypeError):
+            skipped += 1
+            continue
+
+        won = result.finish_position == 1
+        total_horses += 1
+
+        for key, bucket in buckets.items():
+            if bucket['min'] <= wp < bucket['max'] or (key == '50%+' and wp >= 50):
+                bucket['horses'] += 1
+                if won:
+                    bucket['wins'] += 1
+                break
+
+    # Calculate stats per bucket
+    bucket_order = ['50%+', '40-50%', '30-40%', '20-30%', '15-20%', '10-15%', '5-10%', '<5%']
+    results_list = []
+
+    for key in bucket_order:
+        b = buckets[key]
+        if b['horses'] == 0:
+            continue
+
+        actual_sr = (b['wins'] / b['horses']) * 100
+        midpoint = (b['min'] + min(b['max'], 60)) / 2  # midpoint of predicted range
+        if key == '50%+':
+            midpoint = 55
+        difference = actual_sr - midpoint
+
+        results_list.append({
+            'label': b['label'],
+            'horses': b['horses'],
+            'wins': b['wins'],
+            'predicted_midpoint': round(midpoint, 1),
+            'actual_strike_rate': round(actual_sr, 1),
+            'difference': round(difference, 1),
+            'calibrated': abs(difference) <= 5  # within 5% = well calibrated
+        })
+
+    # Overall calibration score (mean absolute error)
+    if results_list:
+        mae = sum(abs(r['difference']) for r in results_list) / len(results_list)
+        calibration_grade = 'Excellent' if mae <= 3 else 'Good' if mae <= 6 else 'Fair' if mae <= 10 else 'Poor'
+    else:
+        mae = None
+        calibration_grade = 'No Data'
+
+    result = jsonify({
+        'buckets': results_list,
+        'total_horses': total_horses,
+        'skipped': skipped,
+        'mae': round(mae, 2) if mae else None,
+        'calibration_grade': calibration_grade
+    })
+
+    del all_horses
+    import gc
+    gc.collect()
+    db.session.remove()
+
+    return result
 
 @app.route("/api/data/price-analysis")
 @login_required
