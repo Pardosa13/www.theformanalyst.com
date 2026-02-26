@@ -10,5 +10,5 @@ requests
 tweepy
 gevent==24.2.1
 anthropic
-Flask-Limiter
+Flask-Limiter[sqlalchemy]
 betfairlightweight
