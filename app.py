@@ -69,7 +69,8 @@ client = Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri=os.environ.get('DATABASE_URL', '').replace('postgres://', 'postgresql://', 1)
 )
 
 # Configuration
