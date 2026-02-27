@@ -3622,6 +3622,7 @@ def api_price_analysis():
     
     result = jsonify(price_analysis)
     
+    db.session.expire_all()
     del all_results
     del races_data
     del price_analysis
