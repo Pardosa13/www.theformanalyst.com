@@ -3448,6 +3448,7 @@ def api_probability_calibration():
         'calibration_grade': calibration_grade
     })
 
+    db.session.expire_all()
     del all_horses
     import gc
     gc.collect()
