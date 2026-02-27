@@ -1011,18 +1011,6 @@ def aggregate_component_stats(all_results_data, stake=10.0):
         stats['roi'] = (stats['total_profit'] / (stats['appearances'] * stake) * 100) if stats['appearances'] > 0 else 0
     
     return component_stats
-"""
-FIXED analyze_external_factors function for app.py
-
-This replaces the existing function starting around line 630.
-
-KEY FIX: Barriers, Distances, and Track Conditions now count RACES (top picks only)
-instead of counting every horse, matching how Tracks work.
-
-To apply this fix:
-1. Find the analyze_external_factors function in your app.py (around line 630)
-2. Replace the entire function with this code below
-"""
 
 def analyze_external_factors(all_results_data, races_data, stake=10.0):
     """
