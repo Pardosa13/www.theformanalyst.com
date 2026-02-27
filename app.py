@@ -3310,7 +3310,7 @@ def api_external_factors():
         'class_performance': class_performance_filtered,
         'class_drops': class_drops
     })
-    
+    db.session.expire_all()
     del all_results
     del all_results_data
     del races_data
