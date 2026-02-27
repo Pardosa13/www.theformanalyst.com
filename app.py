@@ -3458,6 +3458,8 @@ def api_probability_calibration():
 @app.route("/api/data/price-analysis")
 @login_required
 def api_price_analysis():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
     from flask import jsonify
     
     track_filter = request.args.get('track', '')
