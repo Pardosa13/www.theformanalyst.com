@@ -931,7 +931,47 @@ def parse_notes_components(notes):
         (r'\+\s*24\.0\s*:\s*🔥🔥 Sprint\s*\+\s*Weight adv\s*\+\s*Fastest.*', 'MEGA - Sprint+Weight+Fastest'),
         (r'\+\s*16\.0\s*:\s*🔥 Mile\s*\+\s*Weight adv\s*\+\s*Fastest.*', 'MEGA - Mile+Weight+Fastest'),
         (r'\+\s*12\.0\s*:\s*4yo Mare\s*\+\s*Top 20% sectional.*', 'MEGA - 4yo Mare + Top 20%'),
+
+        # ====== RUNNING POSITION (SPEEDMAP) ======
+        (r'\+\s*12\.0\s*:\s*LEADER in Sprint', 'Running Position - Leader Sprint'),
+        (r'\+\s*8\.0\s*:\s*ONPACE in Sprint', 'Running Position - OnPace Sprint'),
+        (r'-\s*8\.0\s*:\s*BACKMARKER in Sprint', 'Running Position - Backmarker Sprint'),
+        (r'\+\s*6\.0\s*:\s*LEADER in Mile', 'Running Position - Leader Mile'),
+        (r'\+\s*8\.0\s*:\s*ONPACE in Mile', 'Running Position - OnPace Mile'),
+        (r'\+\s*2\.0\s*:\s*MIDFIELD in Mile', 'Running Position - Midfield Mile'),
+        (r'-\s*5\.0\s*:\s*BACKMARKER in Mile', 'Running Position - Backmarker Mile'),
+        (r'-\s*5\.0\s*:\s*LEADER in Middle distance', 'Running Position - Leader Middle'),
+        (r'\+\s*5\.0\s*:\s*ONPACE in Middle distance', 'Running Position - OnPace Middle'),
+        (r'\+\s*3\.0\s*:\s*MIDFIELD in Middle distance', 'Running Position - Midfield Middle'),
+        (r'-\s*8\.0\s*:\s*LEADER in Staying race', 'Running Position - Leader Staying'),
+        (r'\+\s*5\.0\s*:\s*MIDFIELD in Staying race', 'Running Position - Midfield Staying'),
+
+        # ====== API SECTIONAL ANALYSIS ======
+        (r'\+\s*([\d.]+):\s*Last 200m \(Rank \d+.*ELITE', 'API Sectional - Last 200m Elite'),
+        (r'\+\s*([\d.]+):\s*Last 200m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 200m Very Good'),
+        (r'\+\s*([\d.]+):\s*Last 200m \(Rank \d+.*GOOD', 'API Sectional - Last 200m Good'),
+        (r'\+\s*([\d.]+):\s*Last 400m \(Rank \d+.*ELITE', 'API Sectional - Last 400m Elite'),
+        (r'\+\s*([\d.]+):\s*Last 400m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 400m Very Good'),
+        (r'\+\s*([\d.]+):\s*Last 400m \(Rank \d+.*GOOD', 'API Sectional - Last 400m Good'),
+        (r'\+\s*([\d.]+):\s*Last 600m \(Rank \d+.*ELITE', 'API Sectional - Last 600m Elite'),
+        (r'\+\s*([\d.]+):\s*IMPROVING TREND', 'API Sectional - Improving Trend'),
+
+        # ====== PFAI BLEND ======
+        (r'Final Blended Score:\s*([\d.]+)', 'PFAI Blend - Used'),
+
+        # ====== TRAINER TIERS ======
+        (r'\+\s*20\.0\s*:\s*Elite value trainer', 'Elite Trainer'),
+        (r'\+\s*15\.0\s*:\s*Strong value trainer', 'Strong Value Trainer'),
+        (r'\+\s*10\.0\s*:\s*Profitable trainer', 'Good Trainer'),
+        (r'-\s*15\.0\s*:\s*Poor value trainer', 'Negative Trainer'),
+
+        # ====== AGE PENALTIES ======
+        (r'-\s*15\.0\s*:\s*5yo Mare', 'Age - 5yo Mare Penalty'),
+        (r'-\s*10\.0\s*:\s*6-7yo Mare', 'Age - 6-7yo Mare Penalty'),
+        (r'-\s*25\.0\s*:\s*Old age \(7-8yo', 'Age - 7-8yo Penalty'),
+        (r'-\s*35\.0\s*:\s*9yo - ZERO WINS', 'Age - 9yo Penalty'),
         ]
+    
     for pattern, name in patterns:
         match = re.search(pattern, notes, re.IGNORECASE)
         if match:
