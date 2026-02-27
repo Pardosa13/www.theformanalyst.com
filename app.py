@@ -3197,7 +3197,7 @@ def api_component_analysis():
             })
     
     result = jsonify({'components': components_list})
-    
+    db.session.expire_all()
     del all_results
     del all_results_data
     del component_stats
