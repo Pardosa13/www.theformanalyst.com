@@ -482,15 +482,43 @@ def normalize_runner_name(name: str) -> str:
 
 def apply_track_bias(speed_map_score, running_position, rail_position, pace_bias):
     """
-    Adjust a horse's speed map score based on:
-    - rail_position: 0=True rail, 1-15 = metres the rail is out
-      (wider rail = narrower track = leaders harder to run down = leader bonus)
-    - pace_bias: -2=strong backmarker, -1=slight backmarker, 0=neutral,
-                  +1=slight leader, +2=leaders paradise
-    Both adjustments are INDEPENDENT and compound.
+    Adds rail and pace bias ON TOP of the existing speed map score
+    already calculated by the analyzer (e.g. +6.0 LEADER in Mile).
+    Rail applied once at import. Pace bias applied/updated live.
     """
     if not running_position:
         return speed_map_score
+
+    # ── Rail modifier ──
+    if rail_position >= 13:
+        rail_mod = 20.0
+    elif rail_position >= 10:
+        rail_mod = 14.0
+    elif rail_position >= 7:
+        rail_mod = 9.0
+    elif rail_position >= 4:
+        rail_mod = 5.0
+    elif rail_position >= 1:
+        rail_mod = 2.0
+    else:
+        rail_mod = 0.0
+
+    # ── Pace bias modifier — each step = 5 points base ──
+    pace_mod = pace_bias * 5.0
+
+    # ── Add ON TOP of existing speed map score by position ──
+    pos = running_position.upper()
+
+    if pos == 'LEADER':
+        speed_map_score += rail_mod + pace_mod
+    elif pos == 'ONPACE':
+        speed_map_score += (rail_mod * 0.6) + (pace_mod * 0.6)
+    elif pos == 'MIDFIELD':
+        speed_map_score -= (rail_mod * 0.3) + (pace_mod * 0.3)
+    elif pos == 'BACKMARKER':
+        speed_map_score -= (rail_mod * 0.8) + (pace_mod * 0.8)
+
+    return round(speed_map_score, 1)
 
     # ── Rail modifier ──
     # Wider rail = narrower track = leaders harder to run down
