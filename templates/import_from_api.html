@@ -638,6 +638,8 @@ async function importMeetingWithCondition(buttonElement) {
     const dateStr = cardElement.dataset.date;
     const trackConditionSelect = cardElement.querySelector('.track-condition-select-compact');
     const trackCondition = trackConditionSelect.value;
+    const railPositionSelect = cardElement.querySelector('.rail-position-select');
+    const railPosition = railPositionSelect ? railPositionSelect.value : '0';
 
     cardElement.classList.add('importing');
     cardElement.innerHTML = `
@@ -651,6 +653,7 @@ async function importMeetingWithCondition(buttonElement) {
         const formData = new FormData();
         formData.append('date', dateStr);
         formData.append('track_condition', trackCondition);
+        formData.append('rail_position', railPosition);
 
         const response = await fetch(`/api/meetings/${meetingId}/import`, {
             method: 'POST',
