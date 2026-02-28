@@ -531,11 +531,8 @@ def apply_track_bias(speed_map_score, running_position, rail_position, pace_bias
 def process_and_store_results(csv_data, filename, track_condition, user_id, 
                               is_advanced=False, puntingform_id=None,
                               speed_maps_data=None, ratings_data=None, 
-                              sectionals_data=None):
-    """
-    Process CSV through analyzer and store results in database
-    """
-    import json  # ✅ properly indented
+                              sectionals_data=None, rail_position=0, **kwargs):
+    kwargs['rail_position'] = rail_position
 
     # ===== INJECT API SECTIONAL DATA INTO CSV =====
     # Parse the CSV first
