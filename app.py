@@ -3456,19 +3456,19 @@ def api_probability_calibration():
         'calibration_grade': calibration_grade
     })
 
-db.session.expire_all()
+    db.session.expire_all()
 
-del all_horses
-del all_race_ids
-del recent_race_ids
+    del all_horses
+    del all_race_ids
+    del recent_race_ids
 
-import gc
-gc.collect()
+    import gc
+    gc.collect()
 
-db.session.expunge_all()
-db.session.remove()
+    db.session.expunge_all()
+    db.session.remove()
 
-return result
+    return result
 
 @app.route("/api/data/price-analysis")
 @login_required
