@@ -1792,6 +1792,7 @@ def api_import_meeting(meeting_id):
         
         # Track condition
         track_condition = request.form.get('track_condition', 'good')
+        rail_position = int(request.form.get('rail_position', 0))
         
         # Generate meeting name
         date_obj = datetime.strptime(date_str, '%Y-%m-%d')
