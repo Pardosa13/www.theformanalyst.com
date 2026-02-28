@@ -270,7 +270,6 @@ with app.app_context():
         db.session.add(admin)
         db.session.commit()
 
-
 # ----- Analyzer Integration -----
 def run_analyzer(csv_data, track_condition, is_advanced=False):
     """
