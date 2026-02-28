@@ -2260,10 +2260,11 @@ def toggle_horse_scratch(horse_id):
     if active_horses:
         total_score = sum(h.prediction.score for h in active_horses)
 
+        OVERROUND = 1.10  # 110% market
         for h in active_horses:
             if total_score > 0:
                 new_prob = (h.prediction.score / total_score) * 100
-                new_odds = round(1 / (new_prob / 100), 2) if new_prob > 0 else 99.0
+                new_odds = round(1 / ((new_prob / 100) * OVERROUND), 2) if new_prob > 0 else 99.0
                 h.prediction.win_probability = f"{new_prob:.1f}%"
                 h.prediction.predicted_odds = f"${new_odds:.2f}"
 
