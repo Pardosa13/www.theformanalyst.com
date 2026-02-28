@@ -1691,5 +1691,65 @@ function applySpeedmapScratchings() {
 }
 
 document.addEventListener('DOMContentLoaded', applySpeedmapScratchings);
+
+// ── Track Bias ──
+const MEETING_ID = {{ meeting.id }};
+let currentBias = {{ meeting.pace_bias or 0 }};
+
+function highlightBiasButton(bias) {
+    [-2, -1, 0, 1, 2].forEach(function(b) {
+        const btn = document.getElementById('bias-btn-' + b);
+        if (!btn) return;
+        if (b === bias) {
+            btn.style.background = 'linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%)';
+            btn.style.color = 'white';
+            btn.style.borderColor = 'var(--accent-2)';
+            btn.style.boxShadow = '0 2px 10px rgba(102,126,234,0.35)';
+        } else {
+            btn.style.background = 'var(--bg-surface)';
+            btn.style.color = 'var(--text-secondary)';
+            btn.style.borderColor = 'var(--border-mid)';
+            btn.style.boxShadow = 'none';
+        }
+    });
+    const labels = {'-2': '⬅⬅ Strong Backmarker', '-1': '⬅ Slight Backmarker', '0': '⚖️ Neutral', '1': 'Slight Leader ➡', '2': 'Leaders Paradise ➡➡'};
+    const statusEl = document.getElementById('bias-status');
+    if (statusEl) statusEl.textContent = 'Current: ' + (labels[String(bias)] || 'Neutral');
+}
+
+function setTrackBias(newBias) {
+    if (newBias === currentBias) return;
+    const statusEl = document.getElementById('bias-status');
+    if (statusEl) statusEl.textContent = 'Updating...';
+
+    fetch('/api/meeting/' + MEETING_ID + '/update-bias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pace_bias: newBias })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            currentBias = newBias;
+            highlightBiasButton(newBias);
+            // Reload to show recalculated scores
+            location.reload();
+        } else {
+            alert('Failed to update track bias: ' + (data.error || 'Unknown error'));
+            if (statusEl) statusEl.textContent = 'Update failed';
+        }
+    })
+    .catch(function(err) {
+        console.error('Bias update error:', err);
+        alert('Failed to update track bias');
+        if (statusEl) statusEl.textContent = 'Update failed';
+    });
+}
+
+// Highlight the current bias on page load
+document.addEventListener('DOMContentLoaded', function() {
+    highlightBiasButton(currentBias);
+});
+
 </script>
 {% endblock %}
