@@ -1462,26 +1462,52 @@ function toggleTop3(raceId) {
 }
 function renderSpeedMap(raceNumber) {
     const data = window['speedMapData_' + raceNumber];
-    if (!data || !data.payLoad || !data.payLoad[0] || !data.payLoad[0].items) { console.error('No speed map data available'); return; }
-    const horses = data.payLoad[0].items;
+    if (!data || !data.payLoad || !data.payLoad[0] || !data.payLoad[0].items) {
+        console.error('No speed map data available');
+        return;
+    }
+
+    // Build a set of scratched horse names from the table rows
+    const raceCard = document.getElementById('race-' + raceNumber);
+    const scratchedNames = new Set();
+    if (raceCard) {
+        raceCard.querySelectorAll('tbody tr').forEach(function(row) {
+            const isScratchedRow = row.style.textDecoration === 'line-through' ||
+                                   row.querySelector('.scratched-badge') ||
+                                   row.querySelector('span[style*="#6c757d"]');
+            if (isScratchedRow) {
+                const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
+                if (nameSpan) scratchedNames.add(normalizeHorseName(nameSpan.textContent));
+            }
+        });
+    }
+
+    // Filter out scratched horses
+    const allHorses = data.payLoad[0].items.filter(function(horse) {
+        return !scratchedNames.has(normalizeHorseName(horse.runnerName));
+    });
+
     const categories = { leader: [], onpace: [], midfield: [], backmarker: [] };
-    horses.forEach(function(horse) {
+    allHorses.forEach(function(horse) {
         const settle = horse.settle;
         if (settle <= 2) categories.leader.push(horse);
         else if (settle <= 4) categories.onpace.push(horse);
         else if (settle <= 8) categories.midfield.push(horse);
         else categories.backmarker.push(horse);
     });
-    Object.keys(categories).forEach(function(key) { categories[key].sort(function(a, b) { return a.settle - b.settle; }); });
+    Object.keys(categories).forEach(function(key) {
+        categories[key].sort(function(a, b) { return a.settle - b.settle; });
+    });
+
     const html = '<div class="speedmap-grid">' +
         '<div class="speedmap-column"><div class="speedmap-column-header">Leader</div>' + categories.leader.map(createHorseCard).join('') + '</div>' +
         '<div class="speedmap-column"><div class="speedmap-column-header">OnPace</div>' + categories.onpace.map(createHorseCard).join('') + '</div>' +
         '<div class="speedmap-column"><div class="speedmap-column-header">Midfield</div>' + categories.midfield.map(createHorseCard).join('') + '</div>' +
         '<div class="speedmap-column"><div class="speedmap-column-header">Backmarker</div>' + categories.backmarker.map(createHorseCard).join('') + '</div>' +
         '</div>';
+
     document.querySelector('#speedmap-' + raceNumber + ' .speedmap-container').innerHTML = html;
 }
-
 function createHorseCard(horse) {
     const mapValue = horse.mapA2E || 0;
     let mapClass = 'speedmap-map-neutral';
