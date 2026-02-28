@@ -2357,30 +2357,41 @@ def update_meeting_bias(meeting_id):
 
 
 def _bias_adjustment(running_position, rail_position, pace_bias):
+    """
+    Score adjustment based on rail position and pace bias.
+    Rail position = metres the running rail is out from the fence.
+    Wider rail = narrower track = leaders harder to run down.
+    """
+    # ── Rail modifier ──
+    # True rail: no adjustment
+    # +15m out: massive leader advantage — up to +15 points for leaders
     if rail_position >= 13:
-        rail_mod = 3.0
+        rail_mod = 15.0
     elif rail_position >= 10:
-        rail_mod = 2.0
+        rail_mod = 11.0
     elif rail_position >= 7:
-        rail_mod = 1.2
+        rail_mod = 7.0
     elif rail_position >= 4:
-        rail_mod = 0.6
+        rail_mod = 4.0
     elif rail_position >= 1:
-        rail_mod = 0.3
+        rail_mod = 1.5
     else:
-        rail_mod = 0.0
+        rail_mod = 0.0  # True rail
 
-    pace_mod = pace_bias * 1.5
+    # ── Pace bias modifier ──
+    # Each step = 4.0 points base adjustment
+    # -2 = strong backmarker, +2 = leaders paradise
+    pace_mod = pace_bias * 4.0
 
     pos = running_position.upper()
     if pos == 'LEADER':
         return rail_mod + pace_mod
     elif pos == 'ONPACE':
-        return (rail_mod * 0.6) + (pace_mod * 0.6)
+        return (rail_mod * 0.65) + (pace_mod * 0.65)
     elif pos == 'MIDFIELD':
-        return -((rail_mod * 0.3) + (pace_mod * 0.3))
+        return -((rail_mod * 0.35) + (pace_mod * 0.35))
     elif pos == 'BACKMARKER':
-        return -((rail_mod * 0.8) + (pace_mod * 0.8))
+        return -((rail_mod * 0.85) + (pace_mod * 0.85))
     return 0.0
 
 @app.route("/meeting/<int:meeting_id>/delete", methods=["POST"])
