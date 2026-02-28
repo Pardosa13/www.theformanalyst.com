@@ -2162,16 +2162,35 @@ def view_meeting(meeting_id):
     # All logged-in users can view all meetings
     results = get_meeting_results(meeting_id)
     return render_template("view_meeting.html", meeting=meeting, results=results)
+    
 @app.route("/api/horse/<int:horse_id>/toggle-scratch", methods=["POST"])
 @login_required
 def toggle_horse_scratch(horse_id):
-    """Toggle scratch status for a horse"""
+    """Toggle scratch status and recalculate remaining runners' odds/probabilities"""
     horse = Horse.query.get_or_404(horse_id)
-    
-    # Toggle the scratched status
     horse.is_scratched = not horse.is_scratched
     db.session.commit()
-    
+
+    race = Race.query.get(horse.race_id)
+    meeting = Meeting.query.get(race.meeting_id)
+
+    active_horses = [
+        h for h in race.horses
+        if not h.is_scratched and h.prediction
+    ]
+
+    if active_horses:
+        total_score = sum(h.prediction.score for h in active_horses)
+
+        for h in active_horses:
+            if total_score > 0:
+                new_prob = (h.prediction.score / total_score) * 100
+                new_odds = round(1 / (new_prob / 100), 2) if new_prob > 0 else 99.0
+                h.prediction.win_probability = f"{new_prob:.1f}%"
+                h.prediction.predicted_odds = f"${new_odds:.2f}"
+
+        db.session.commit()
+
     return jsonify({
         'success': True,
         'horse_id': horse_id,
