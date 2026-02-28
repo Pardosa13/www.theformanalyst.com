@@ -1881,7 +1881,8 @@ def api_import_meeting(meeting_id):
             puntingform_id=track_name,
             speed_maps_data=combined_speedmap if combined_speedmap['payLoad'] else None,
             ratings_data=sectionals_data,
-            sectionals_data=sectionals_data
+            sectionals_data=sectionals_data,
+            rail_position=rail_position
         )
 
         meeting.date = date_obj.date()
