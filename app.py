@@ -2279,11 +2279,6 @@ def toggle_horse_scratch(horse_id):
 @app.route("/api/meeting/<int:meeting_id>/update-bias", methods=["POST"])
 @login_required
 def update_meeting_bias(meeting_id):
-    """
-    Update pace_bias for a meeting and recalculate all horse scores
-    based on stored runningPosition. Rail position is read-only after import.
-    pace_bias: -2 (strong backmarker) to +2 (leaders paradise)
-    """
     meeting = Meeting.query.get_or_404(meeting_id)
     data = request.get_json()
     new_bias = int(data.get('pace_bias', 0))
@@ -2295,33 +2290,53 @@ def update_meeting_bias(meeting_id):
     meeting.pace_bias = new_bias
     db.session.commit()
 
-    # Recalculate scores for every active horse in this meeting
     races = Race.query.filter_by(meeting_id=meeting_id).all()
     updated_count = 0
 
     for race in races:
+        position_map = {}
+
+        if race.speed_maps_json:
+            try:
+                smap = race.speed_maps_json
+                if isinstance(smap, str):
+                    import json
+                    smap = json.loads(smap)
+
+                items = smap.get('payLoad', [{}])[0].get('items', [])
+                for item in items:
+                    settle = item.get('settle', 99)
+                    name = item.get('runnerName', '').strip().lower()
+                    if settle <= 2:
+                        pos = 'LEADER'
+                    elif settle <= 4:
+                        pos = 'ONPACE'
+                    elif settle <= 8:
+                        pos = 'MIDFIELD'
+                    else:
+                        pos = 'BACKMARKER'
+                    position_map[name] = pos
+            except Exception as e:
+                logger.warning(f"Could not parse speedmap for race {race.id}: {e}")
+
         active_horses = [h for h in race.horses if not h.is_scratched and h.prediction]
 
         for h in active_horses:
-            running_position = ''
-            if h.csv_data:
-                running_position = h.csv_data.get('runningPosition', '')
+            horse_name_norm = h.horse_name.strip().lower()
+            running_position = position_map.get(horse_name_norm, '')
 
             if not running_position:
                 continue
 
-            # Strip the old bias adjustment, apply the new one
-            # We store the base score separately via notes — instead we
-            # reverse-engineer by removing old bias and adding new
-            old_bias_adj = apply_track_bias(0, running_position, meeting.rail_position or 0, old_bias)
-            new_bias_adj = apply_track_bias(0, running_position, meeting.rail_position or 0, new_bias)
-            diff = new_bias_adj - old_bias_adj
+            old_adj = _bias_adjustment(running_position, meeting.rail_position or 0, old_bias)
+            new_adj = _bias_adjustment(running_position, meeting.rail_position or 0, new_bias)
+            diff = new_adj - old_adj
 
-            h.prediction.score = round(h.prediction.score + diff, 1)
-            updated_count += 1
+            if diff != 0:
+                h.prediction.score = round(h.prediction.score + diff, 1)
+                updated_count += 1
 
-        # Recalculate odds after score changes
-        total_score = sum(h.prediction.score for h in active_horses if h.prediction)
+        total_score = sum(h.prediction.score for h in active_horses if h.prediction and h.prediction.score > 0)
         for h in active_horses:
             if h.prediction and total_score > 0:
                 new_prob = (h.prediction.score / total_score) * 100
@@ -2338,6 +2353,34 @@ def update_meeting_bias(meeting_id):
         'pace_bias': new_bias,
         'updated_horses': updated_count
     })
+
+
+def _bias_adjustment(running_position, rail_position, pace_bias):
+    if rail_position >= 13:
+        rail_mod = 3.0
+    elif rail_position >= 10:
+        rail_mod = 2.0
+    elif rail_position >= 7:
+        rail_mod = 1.2
+    elif rail_position >= 4:
+        rail_mod = 0.6
+    elif rail_position >= 1:
+        rail_mod = 0.3
+    else:
+        rail_mod = 0.0
+
+    pace_mod = pace_bias * 1.5
+
+    pos = running_position.upper()
+    if pos == 'LEADER':
+        return rail_mod + pace_mod
+    elif pos == 'ONPACE':
+        return (rail_mod * 0.6) + (pace_mod * 0.6)
+    elif pos == 'MIDFIELD':
+        return -((rail_mod * 0.3) + (pace_mod * 0.3))
+    elif pos == 'BACKMARKER':
+        return -((rail_mod * 0.8) + (pace_mod * 0.8))
+    return 0.0
 
 @app.route("/meeting/<int:meeting_id>/delete", methods=["POST"])
 @login_required
