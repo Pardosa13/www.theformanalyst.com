@@ -2249,20 +2249,21 @@ def toggle_horse_scratch(horse_id):
     horse.is_scratched = not horse.is_scratched
     db.session.commit()
 
-    race = Race.query.get(horse.race_id)
-    meeting = Meeting.query.get(race.meeting_id)
-
-    active_horses = [
-        h for h in race.horses
-        if not h.is_scratched and h.prediction
-    ]
+    # Force fresh query — don't rely on cached relationship
+    active_horses = Horse.query.filter_by(
+        race_id=horse.race_id,
+        is_scratched=False
+    ).join(Prediction).all()
 
     if active_horses:
-        total_score = sum(h.prediction.score for h in active_horses)
-
         OVERROUND = 1.10  # 110% market
+        total_score = sum(
+            h.prediction.score for h in active_horses
+            if h.prediction and h.prediction.score > 0
+        )
+
         for h in active_horses:
-            if total_score > 0:
+            if total_score > 0 and h.prediction:
                 new_prob = (h.prediction.score / total_score) * 100
                 new_odds = round(1 / ((new_prob / 100) * OVERROUND), 2) if new_prob > 0 else 99.0
                 h.prediction.win_probability = f"{new_prob:.1f}%"
@@ -2276,7 +2277,6 @@ def toggle_horse_scratch(horse_id):
         'is_scratched': horse.is_scratched,
         'horse_name': horse.horse_name
     })
-
 @app.route("/api/meeting/<int:meeting_id>/update-bias", methods=["POST"])
 @login_required
 def update_meeting_bias(meeting_id):
