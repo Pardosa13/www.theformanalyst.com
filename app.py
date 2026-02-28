@@ -2198,6 +2198,69 @@ def toggle_horse_scratch(horse_id):
         'horse_name': horse.horse_name
     })
 
+@app.route("/api/meeting/<int:meeting_id>/update-bias", methods=["POST"])
+@login_required
+def update_meeting_bias(meeting_id):
+    """
+    Update pace_bias for a meeting and recalculate all horse scores
+    based on stored runningPosition. Rail position is read-only after import.
+    pace_bias: -2 (strong backmarker) to +2 (leaders paradise)
+    """
+    meeting = Meeting.query.get_or_404(meeting_id)
+    data = request.get_json()
+    new_bias = int(data.get('pace_bias', 0))
+
+    if new_bias not in [-2, -1, 0, 1, 2]:
+        return jsonify({'success': False, 'error': 'pace_bias must be -2 to +2'}), 400
+
+    old_bias = meeting.pace_bias or 0
+    meeting.pace_bias = new_bias
+    db.session.commit()
+
+    # Recalculate scores for every active horse in this meeting
+    races = Race.query.filter_by(meeting_id=meeting_id).all()
+    updated_count = 0
+
+    for race in races:
+        active_horses = [h for h in race.horses if not h.is_scratched and h.prediction]
+
+        for h in active_horses:
+            running_position = ''
+            if h.csv_data:
+                running_position = h.csv_data.get('runningPosition', '')
+
+            if not running_position:
+                continue
+
+            # Strip the old bias adjustment, apply the new one
+            # We store the base score separately via notes — instead we
+            # reverse-engineer by removing old bias and adding new
+            old_bias_adj = apply_track_bias(0, running_position, meeting.rail_position or 0, old_bias)
+            new_bias_adj = apply_track_bias(0, running_position, meeting.rail_position or 0, new_bias)
+            diff = new_bias_adj - old_bias_adj
+
+            h.prediction.score = round(h.prediction.score + diff, 1)
+            updated_count += 1
+
+        # Recalculate odds after score changes
+        total_score = sum(h.prediction.score for h in active_horses if h.prediction)
+        for h in active_horses:
+            if h.prediction and total_score > 0:
+                new_prob = (h.prediction.score / total_score) * 100
+                new_odds = round(1 / (new_prob / 100), 2) if new_prob > 0 else 99.0
+                h.prediction.win_probability = f"{new_prob:.1f}%"
+                h.prediction.predicted_odds = f"${new_odds:.2f}"
+
+    db.session.commit()
+    logger.info(f"✅ Updated pace_bias to {new_bias} for meeting {meeting_id}, adjusted {updated_count} horses")
+
+    return jsonify({
+        'success': True,
+        'meeting_id': meeting_id,
+        'pace_bias': new_bias,
+        'updated_horses': updated_count
+    })
+
 @app.route("/meeting/<int:meeting_id>/delete", methods=["POST"])
 @login_required
 def delete_meeting(meeting_id):
