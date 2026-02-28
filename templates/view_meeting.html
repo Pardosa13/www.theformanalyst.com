@@ -1069,6 +1069,52 @@ details pre {
     </table>
   </div>
 
+  <!-- Track Bias Indicator -->
+  {% if meeting.pace_bias != 0 or (meeting.rail_position and meeting.rail_position > 0) %}
+  <div style="background:rgba(102,126,234,0.08); border:1px solid rgba(102,126,234,0.2); border-radius:8px; padding:10px 14px; margin-top:12px; font-size:12px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+    <strong style="color:var(--accent);">🏇 Track Adjustments Active:</strong>
+
+    {% if meeting.rail_position and meeting.rail_position > 0 %}
+      {% if meeting.rail_position >= 13 %}{% set rail_leader = 15.0 %}{% set rail_back = 12.75 %}
+      {% elif meeting.rail_position >= 10 %}{% set rail_leader = 11.0 %}{% set rail_back = 9.35 %}
+      {% elif meeting.rail_position >= 7 %}{% set rail_leader = 7.0 %}{% set rail_back = 5.95 %}
+      {% elif meeting.rail_position >= 4 %}{% set rail_leader = 4.0 %}{% set rail_back = 3.4 %}
+      {% else %}{% set rail_leader = 1.5 %}{% set rail_back = 1.28 %}{% endif %}
+      <span style="color:var(--text-muted);">
+        🛤️ Rail +{{ meeting.rail_position }}m:
+        <span style="color:#34d399; font-weight:700;">LEADER +{{ "%.1f"|format(rail_leader) }}</span>
+        <span style="color:#a5b4fc; margin:0 4px;">ONPACE +{{ "%.1f"|format(rail_leader * 0.65) }}</span>
+        <span style="color:#f87171; margin-left:4px;">MIDFIELD -{{ "%.1f"|format(rail_leader * 0.35) }}</span>
+        <span style="color:#f87171; font-weight:700;">BACKMARKER -{{ "%.1f"|format(rail_back) }}</span>
+      </span>
+    {% endif %}
+
+    {% if meeting.pace_bias != 0 %}
+      {% set pace_mod = meeting.pace_bias * 4.0 %}
+      {% if meeting.pace_bias == -2 %}{% set bias_label = "⬅⬅ Strong Backmarker" %}
+      {% elif meeting.pace_bias == -1 %}{% set bias_label = "⬅ Slight Backmarker" %}
+      {% elif meeting.pace_bias == 1 %}{% set bias_label = "Slight Leader ➡" %}
+      {% else %}{% set bias_label = "Leaders Paradise ➡➡" %}{% endif %}
+      <span style="color:var(--text-muted);">
+        🏇 Bias ({{ bias_label }}):
+        {% if pace_mod > 0 %}
+          <span style="color:#34d399; font-weight:700;">LEADER +{{ "%.1f"|format(pace_mod) }}</span>
+          <span style="color:#a5b4fc; margin:0 4px;">ONPACE +{{ "%.1f"|format(pace_mod * 0.65) }}</span>
+          <span style="color:#f87171; margin-left:4px;">MIDFIELD -{{ "%.1f"|format(pace_mod * 0.35) }}</span>
+          <span style="color:#f87171; font-weight:700;">BACKMARKER -{{ "%.1f"|format(pace_mod * 0.85) }}</span>
+        {% else %}
+          {% set pace_abs = (pace_mod)|abs %}
+          <span style="color:#f87171; font-weight:700;">LEADER -{{ "%.1f"|format(pace_abs) }}</span>
+          <span style="color:#f87171; margin:0 4px;">ONPACE -{{ "%.1f"|format(pace_abs * 0.65) }}</span>
+          <span style="color:#34d399; margin-left:4px;">MIDFIELD +{{ "%.1f"|format(pace_abs * 0.35) }}</span>
+          <span style="color:#34d399; font-weight:700;">BACKMARKER +{{ "%.1f"|format(pace_abs * 0.85) }}</span>
+        {% endif %}
+      </span>
+    {% endif %}
+
+  </div>
+  {% endif %}
+
   <!-- Quick analysis -->
   {% if race.horses|length >= 2 %}
   <div class="vm-quick-analysis">
