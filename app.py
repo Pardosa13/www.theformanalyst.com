@@ -487,27 +487,29 @@ def apply_track_bias(speed_map_score, running_position, rail_position, pace_bias
     Rail applied once at import. Pace bias applied/updated live.
     """
     if not running_position:
-        return speed_map_score
+        return round(speed_map_score, 1)
 
     # ── Rail modifier ──
+    # Wider rail = narrower track = leaders harder to run down
     if rail_position >= 13:
-        rail_mod = 20.0
+        rail_mod = 3.0
     elif rail_position >= 10:
-        rail_mod = 14.0
-    elif rail_position >= 7:
-        rail_mod = 9.0
-    elif rail_position >= 4:
-        rail_mod = 5.0
-    elif rail_position >= 1:
         rail_mod = 2.0
+    elif rail_position >= 7:
+        rail_mod = 1.2
+    elif rail_position >= 4:
+        rail_mod = 0.6
+    elif rail_position >= 1:
+        rail_mod = 0.3
     else:
-        rail_mod = 0.0
+        rail_mod = 0.0  # True rail — no adjustment
 
-    # ── Pace bias modifier — each step = 5 points base ──
-    pace_mod = pace_bias * 5.0
+    # ── Pace bias modifier ──
+    # pace_bias is -2..+2. Each step = 1.5 points base adjustment
+    pace_mod = float(pace_bias) * 1.5
 
-    # ── Add ON TOP of existing speed map score by position ──
-    pos = running_position.upper()
+    # ── Apply by running position ──
+    pos = running_position.strip().upper()
 
     if pos == 'LEADER':
         speed_map_score += rail_mod + pace_mod
@@ -519,7 +521,6 @@ def apply_track_bias(speed_map_score, running_position, rail_position, pace_bias
         speed_map_score -= (rail_mod * 0.8) + (pace_mod * 0.8)
 
     return round(speed_map_score, 1)
-
     # ── Rail modifier ──
     # Wider rail = narrower track = leaders harder to run down
     if rail_position >= 13:
