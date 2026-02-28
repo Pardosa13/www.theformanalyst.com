@@ -281,9 +281,9 @@ def run_analyzer(csv_data, track_condition, is_advanced=False):
         'track_condition': track_condition,
         'is_advanced': is_advanced
     }
-    
+
     analyzer_path = os.path.join(os.path.dirname(__file__), 'analyzer.js')
-    
+
     try:
         result = subprocess.run(
             ['node', analyzer_path],
@@ -292,10 +292,10 @@ def run_analyzer(csv_data, track_condition, is_advanced=False):
             text=True,
             timeout=60  # Increased timeout for large files
         )
-        
+
         if result.returncode != 0:
             raise Exception(f"Analyzer error: {result.stderr}")
-        # ✨ ADD THIS DEBUG LOGGING
+
         parsed_results = json.loads(result.stdout)
         if parsed_results:
             print("=== FIRST RESULT FROM ANALYZER ===")
@@ -303,8 +303,7 @@ def run_analyzer(csv_data, track_condition, is_advanced=False):
             print("===================================")
 
         return parsed_results
-        return json.loads(result.stdout)
-        
+
     except subprocess.TimeoutExpired:
         raise Exception("Analysis timed out (>60 seconds)")
     except json.JSONDecodeError as e:
@@ -313,6 +312,7 @@ def run_analyzer(csv_data, track_condition, is_advanced=False):
         raise Exception("Node.js not found.  Please ensure Node.js is installed.")
     except Exception as e:
         raise Exception(f"Analysis failed: {str(e)}")
+        
 def post_best_bets_to_telegram(best_bets, meeting_name):
     """
     Post best bets to Telegram channel
