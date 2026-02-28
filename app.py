@@ -195,7 +195,7 @@ with app.app_context():
             print("Added best_bet_flagged_at column to predictions table")
     except Exception as e:
         print(f"Best Bet migration check: {e}")
-        # Migration: Add is_scratched column to horses table if it doesn't exist
+
     try:
         from sqlalchemy import inspect, text
         inspector = inspect(db.engine)
@@ -208,7 +208,8 @@ with app.app_context():
             print("Added is_scratched column to horses table")
     except Exception as e:
         print(f"Scratched migration check: {e}")
-         try:
+
+    try:
         from sqlalchemy import inspect, text
         inspector = inspect(db.engine)
         meetings_columns = [col['name'] for col in inspector.get_columns('meetings')]
@@ -217,28 +218,25 @@ with app.app_context():
             with db.engine.connect() as conn:
                 conn.execute(text('ALTER TABLE meetings ADD COLUMN rail_position INTEGER DEFAULT 0'))
                 conn.commit()
-            print("✓ Added rail_position column to meetings table")
+            print("Added rail_position column to meetings table")
 
         if 'pace_bias' not in meetings_columns:
             with db.engine.connect() as conn:
                 conn.execute(text('ALTER TABLE meetings ADD COLUMN pace_bias INTEGER DEFAULT 0'))
                 conn.commit()
-            print("✓ Added pace_bias column to meetings table")
+            print("Added pace_bias column to meetings table")
     except Exception as e:
         print(f"Track bias migration check: {e}")
-    
+
     # Migration: Create components table if it doesn't exist
     try:
         from models import Component
-        # This will create the components table if it doesn't exist
         db.create_all()
         
-        # Check if we need to seed initial components
         component_count = Component.query.count()
         if component_count == 0:
             print("Seeding initial components...")
             
-            # Add some starter components based on your analyzer patterns
             starter_components = [
                 {'component_name': '3yo Colt Combo', 'appearances': 38, 'wins': 8, 'strike_rate': 21.1, 'roi_percentage': 109.6, 'is_active': True},
                 {'component_name': 'Major Class Drop + Slow Sectional', 'appearances': 5, 'wins': 2, 'strike_rate': 40.0, 'roi_percentage': 720.0, 'is_active': False, 'notes': 'Sample size too small'},
@@ -259,7 +257,7 @@ with app.app_context():
             
     except Exception as e:
         print(f"Component migration check: {e}")
-    
+
     # Create default admin if doesn't exist
     admin = User.query.filter_by(username='admin').first()
     if not admin:
