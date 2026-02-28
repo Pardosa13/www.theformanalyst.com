@@ -1880,6 +1880,8 @@ def api_import_meeting(meeting_id):
         )
 
         meeting.date = date_obj.date()
+        meeting.rail_position = rail_position
+        meeting.pace_bias = 0  # Always starts neutral
         db.session.commit()
 
         # ==========================================
