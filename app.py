@@ -704,9 +704,17 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
             db.session.add(horse)
             db.session.flush()
             
+            base_score = result.get('adjustedScore', result.get('score', 0))
+            running_position = horse_data.get('runningPosition', '')
+            rail_pos = kwargs.get('rail_position', 0)
+
+            # Apply rail bias at import (rail never changes during meeting)
+            if running_position and rail_pos:
+                base_score = apply_track_bias(base_score, running_position, rail_pos, 0)
+
             prediction = Prediction(
                 horse_id=horse.id,
-                score=result.get('adjustedScore', result.get('score', 0)),
+                score=base_score,
                 predicted_odds=result.get('trueOdds', ''),
                 win_probability=result.get('winProbability', ''),
                 performance_component=result.get('performanceComponent', ''),
