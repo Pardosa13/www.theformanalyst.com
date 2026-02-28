@@ -208,6 +208,24 @@ with app.app_context():
             print("Added is_scratched column to horses table")
     except Exception as e:
         print(f"Scratched migration check: {e}")
+         try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        meetings_columns = [col['name'] for col in inspector.get_columns('meetings')]
+
+        if 'rail_position' not in meetings_columns:
+            with db.engine.connect() as conn:
+                conn.execute(text('ALTER TABLE meetings ADD COLUMN rail_position INTEGER DEFAULT 0'))
+                conn.commit()
+            print("✓ Added rail_position column to meetings table")
+
+        if 'pace_bias' not in meetings_columns:
+            with db.engine.connect() as conn:
+                conn.execute(text('ALTER TABLE meetings ADD COLUMN pace_bias INTEGER DEFAULT 0'))
+                conn.commit()
+            print("✓ Added pace_bias column to meetings table")
+    except Exception as e:
+        print(f"Track bias migration check: {e}")
     
     # Migration: Create components table if it doesn't exist
     try:
