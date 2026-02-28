@@ -1489,6 +1489,11 @@ def analyze_class_drops(stake=10.0):
     
     # Filter out buckets with no data
     class_drop_stats = {k: v for k, v in class_drop_stats.items() if v['runs'] > 0}
+
+    del all_horses
+    import gc
+    gc.collect()
+    db.session.expunge_all()
     
     return class_drop_stats
     
