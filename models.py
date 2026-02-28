@@ -46,6 +46,8 @@ class Meeting(db.Model):
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
     puntingform_id = db.Column(db.String(255))  # PuntingForm API meeting ID
     auto_imported = db.Column(db.Boolean, default=False)  # True if imported from API
+    rail_position = db.Column(db.Integer, default=0)   # 0=True, 1-15 = metres out
+    pace_bias = db.Column(db.Integer, default=0)        # -2 to +2 (neg=backmarkers, pos=leaders)
     
     # Relationships
     races = db.relationship('Race', backref='meeting', lazy=True, cascade='all, delete-orphan')
