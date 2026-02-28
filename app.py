@@ -1673,6 +1673,23 @@ def api_get_speedmaps(meeting_id, race_number):
         logger.error(f"Speed maps fetch failed: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route("/api/debug/meeting/<int:meeting_id>/positions", methods=["GET"])
+@login_required
+def debug_positions(meeting_id):
+    races = Race.query.filter_by(meeting_id=meeting_id).all()
+    result = []
+    for race in races:
+        for h in race.horses[:3]:  # first 3 horses per race only
+            csv_keys = list(h.csv_data.keys())[:10] if h.csv_data else []
+            running_pos = h.csv_data.get('runningPosition', 'NOT FOUND') if h.csv_data else 'NO CSV_DATA'
+            result.append({
+                'horse': h.horse_name,
+                'race': race.race_number,
+                'runningPosition': running_pos,
+                'csv_data_keys': csv_keys
+            })
+    return jsonify(result)
+
 @app.route("/api/debug/horse/<int:horse_id>", methods=["GET"])
 @login_required  
 def debug_horse(horse_id):
