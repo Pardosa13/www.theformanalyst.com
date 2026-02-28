@@ -603,6 +603,28 @@ function createMeetingCard(meeting, stateColor) {
                 <option value="synthetic">Synthetic</option>
             </select>
 
+            <div style="margin-top:2px;">
+                <div style="font-size:9px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:4px;">🛤️ Rail Position</div>
+                <select class="track-condition-select-compact rail-position-select">
+                    <option value="0">True Rail</option>
+                    <option value="1">+1m</option>
+                    <option value="2">+2m</option>
+                    <option value="3">+3m</option>
+                    <option value="4">+4m</option>
+                    <option value="5">+5m</option>
+                    <option value="6">+6m</option>
+                    <option value="7">+7m</option>
+                    <option value="8">+8m</option>
+                    <option value="9">+9m</option>
+                    <option value="10">+10m</option>
+                    <option value="11">+11m</option>
+                    <option value="12">+12m</option>
+                    <option value="13">+13m</option>
+                    <option value="14">+14m</option>
+                    <option value="15">+15m</option>
+                </select>
+            </div>
+
             <button onclick="importMeetingWithCondition(this); event.stopPropagation();" class="import-btn-compact">
                 <span>📥</span>
                 <span>Import</span>
@@ -610,7 +632,6 @@ function createMeetingCard(meeting, stateColor) {
         </div>
     `;
 }
-
 async function importMeetingWithCondition(buttonElement) {
     const cardElement = buttonElement.closest('.meeting-card-compact');
     const meetingId = cardElement.dataset.meetingId;
