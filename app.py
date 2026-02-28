@@ -1673,6 +1673,32 @@ def api_get_speedmaps(meeting_id, race_number):
         logger.error(f"Speed maps fetch failed: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route("/api/debug/horse/<int:horse_id>", methods=["GET"])
+@login_required  
+def debug_horse(horse_id):
+    try:
+        horse = Horse.query.get_or_404(horse_id)
+        result = {
+            'horse_id': horse.id,
+            'horse_name': horse.horse_name,
+            'is_scratched': horse.is_scratched,
+            'has_race_id': hasattr(horse, 'race_id'),
+            'race_id': getattr(horse, 'race_id', 'NO RACE_ID ATTR'),
+        }
+        if hasattr(horse, 'race_id') and horse.race_id:
+            race = Race.query.get(horse.race_id)
+            result['race_found'] = race is not None
+            if race:
+                result['meeting_id'] = race.meeting_id
+                result['active_horses_in_race'] = len([h for h in race.horses if not h.is_scratched])
+                first_active = next((h for h in race.horses if not h.is_scratched), None)
+                if first_active:
+                    result['has_prediction'] = first_active.prediction is not None
+                    result['prediction_attr'] = type(first_active.prediction).__name__
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e), 'type': type(e).__name__}), 500
+
 @app.route("/api/race/<int:race_id>/pfai-sectionals")
 @login_required
 def api_get_pfai_sectionals(race_id):
