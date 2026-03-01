@@ -3241,16 +3241,15 @@ def api_score_analysis():
         'score_tiers': score_tiers,
         'score_gaps': score_gaps
     })
-    db.session.expire_all()
     del all_results
     del races_data
     del score_tiers
     del score_gaps
     import gc
     gc.collect()
-    
+    db.session.expunge_all()
     db.session.remove()
-    
+
     return result
     
 def extract_sectional_history(notes):
