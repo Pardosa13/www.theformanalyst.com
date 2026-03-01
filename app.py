@@ -3053,7 +3053,7 @@ def data_analytics():
     import gc
     gc.collect()
     db.session.expunge_all()
-    db.session.remove())
+    db.session.remove()
     
     return render_template("data.html",
         total_races=total_races,
