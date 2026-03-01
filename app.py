@@ -5274,6 +5274,9 @@ def new_chat_session():
 @app.route('/export-all-data')
 @login_required
 def export_all_data():
+    import io
+    import csv
+    import zipfile
     tables = ['chat_messages', 'components', 'horses', 'meetings', 
               'predictions', 'races', 'results', 'users']
     
