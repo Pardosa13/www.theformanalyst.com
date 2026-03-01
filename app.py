@@ -3482,16 +3482,15 @@ def api_component_analysis():
             })
     
     result = jsonify({'components': components_list})
-    db.session.expire_all()
     del all_results
     del all_results_data
     del component_stats
     del components_list
     import gc
     gc.collect()
-    
+    db.session.expunge_all()
     db.session.remove()
-    
+
     return result
 
 
@@ -3596,7 +3595,6 @@ def api_external_factors():
         'class_drops': class_drops
     })
     
-    db.session.expire_all()
     del all_results
     del all_results_data
     del races_data
@@ -3605,7 +3603,6 @@ def api_external_factors():
     del class_drops
     import gc
     gc.collect()
-
     db.session.expunge_all()
     db.session.remove()
 
@@ -3915,16 +3912,14 @@ def api_price_analysis():
         cat['roi'] = (cat['profit'] / (cat['count'] * stake) * 100) if cat['count'] > 0 else 0
     
     result = jsonify(price_analysis)
-    
-    db.session.expire_all()
     del all_results
     del races_data
     del price_analysis
     import gc
     gc.collect()
-    
+    db.session.expunge_all()
     db.session.remove()
-    
+
     return result
     
 # ----- ML Data Export Route -----
