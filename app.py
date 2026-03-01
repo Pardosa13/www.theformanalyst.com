@@ -5269,3 +5269,28 @@ def new_chat_session():
     
     session['chat_session_id'] = str(uuid.uuid4())
     return jsonify({'message': 'New conversation started'})
+
+# ===== POSTGRES FULL RAW DATABASE EXPORT =====
+@app.route('/export-all-data')
+@login_required
+def export_all_data():
+    tables = ['chat_messages', 'components', 'horses', 'meetings', 
+              'predictions', 'races', 'results', 'users']
+    
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for table in tables:
+            result = db.session.execute(db.text(f'SELECT * FROM "{table}"'))
+            rows = result.fetchall()
+            columns = result.keys()
+            
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer)
+            writer.writerow(columns)
+            writer.writerows(rows)
+            
+            zip_file.writestr(f'{table}.csv', csv_buffer.getvalue())
+    
+    zip_buffer.seek(0)
+    return send_file(zip_buffer, mimetype='application/zip', 
+                     as_attachment=True, download_name='database_export.zip')
