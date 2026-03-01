@@ -1587,8 +1587,7 @@ def analyze_class_drops(stake=10.0):
     del all_horses
     import gc
     gc.collect()
-    db.session.expunge_all()
-    
+
     return class_drop_stats
     
 @app.route("/logout")
@@ -3733,15 +3732,13 @@ def api_probability_calibration():
         'calibration_grade': calibration_grade
     })
 
-    db.session.expire_all()
-
     del all_horses
     del all_race_ids
     del recent_race_ids
-
+    del buckets
+    del results_list
     import gc
     gc.collect()
-
     db.session.expunge_all()
     db.session.remove()
 
