@@ -5277,6 +5277,8 @@ def export_all_data():
     import io
     import csv
     import zipfile
+    from flask import send_file as flask_send_file
+    
     tables = ['chat_messages', 'components', 'horses', 'meetings', 
               'predictions', 'races', 'results', 'users']
     
@@ -5295,5 +5297,5 @@ def export_all_data():
             zip_file.writestr(f'{table}.csv', csv_buffer.getvalue())
     
     zip_buffer.seek(0)
-    return send_file(zip_buffer, mimetype='application/zip', 
+    return flask_send_file(zip_buffer, mimetype='application/zip', 
                      as_attachment=True, download_name='database_export.zip')
