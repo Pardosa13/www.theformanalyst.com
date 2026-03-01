@@ -3050,12 +3050,10 @@ def data_analytics():
     del all_results
     del races_data
     del winner_sps
-    del best_bets_stats
-    del track_list
     import gc
     gc.collect()
     db.session.expunge_all()
-    db.session.remove()
+    db.session.remove())
     
     return render_template("data.html",
         total_races=total_races,
