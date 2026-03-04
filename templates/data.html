@@ -1145,10 +1145,8 @@ function loadMarketDivergence() {
 function loadMonthlyPerformance() {
     const container = document.getElementById('monthlyPerformance');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading monthly data...</p></div>';
-    // Use filterParams but override limit to 'all' for trend analysis
-    const params = new URLSearchParams(filterParams);
-    params.set('limit', 'all');
-    fetch(`/api/data/monthly-performance?${params}`)
+    // Remove the params override — just use filterParams as-is
+    fetch(`/api/data/monthly-performance?${filterParams}`)
         .then(r => r.json())
         .then(data => { renderMonthlyPerformance(data); loadedSections.add('monthly-performance'); })
         .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data.</div>'; console.error(err); });
