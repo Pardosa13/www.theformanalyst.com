@@ -3992,7 +3992,8 @@ def api_price_analysis():
     del all_results 
     del races_data 
     del price_analysis 
-    import gc gc.collect() 
+    import gc 
+    gc.collect() 
     db.session.expunge_all()
     db.session.remove()
 
