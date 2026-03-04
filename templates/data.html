@@ -1257,13 +1257,14 @@ function renderPnlOverTime(data) {
 
 function renderFieldSize(data) {
     const container = document.getElementById('fieldSizeAnalysis');
-    const fs = data.field_size;
-    if (!fs) {
+    const fs = {};
+    (data.field_sizes || []).forEach(item => { fs[item.label] = item; });
+    if (!data.field_sizes || data.field_sizes.length === 0) {
         container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No data yet.</p></div>';
         return;
     }
 
-    const bucketOrder = ['Small (≤7)', 'Medium (8-11)', 'Large (12+)'];
+    const bucketOrder = ['Small (≤7)', 'Medium (8-11)', 'Large (12-15)', 'Very Large (16+)'];
     const colours = ['rgba(102,126,234,0.75)', 'rgba(16,185,129,0.75)', 'rgba(245,158,11,0.75)'];
 
     let html = `<div class="card-body">
@@ -1297,7 +1298,7 @@ function renderFieldSize(data) {
 
     for (const b of bucketOrder) {
         const s = fs[b];
-        if (!s || s.races === 0) continue;
+        if (!s || s.runs === 0) continue;
         html += `<tr><td><strong>${b}</strong></td><td class="text-center">${s.races}</td><td class="text-center">${s.wins}</td>
             <td class="text-center ${s.strike_rate >= 20 ? 'text-success' : ''}">${s.strike_rate}%</td>
             <td class="text-center">${s.place_rate}%</td>
@@ -1328,10 +1329,11 @@ function renderFieldSize(data) {
 
 function renderDaysSinceRun(data) {
     const container = document.getElementById('daysSinceRun');
-    const dsr = data.days_since_run;
-    const order = data.bucket_order;
+    const order = ['Quick Back-up (≤7d)','Short (8-14d)','Normal (15-28d)','Fresh (29-59d)','Resuming (60-89d)','Long Spell (90d+)','First Start / Unknown'];
+    const dsr = {};
+    (data.buckets || []).forEach(item => { dsr[item.label] = item; });
 
-    if (!dsr || !order) {
+    if (!data.buckets || data.buckets.length === 0) {
         container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No data yet.</p></div>';
         return;
     }
@@ -1357,11 +1359,11 @@ function renderDaysSinceRun(data) {
 
         for (const b of order) {
             const s = dsr[b];
-            if (!s || s.races === 0) continue;
+            if (!s || s.runs === 0) continue;
             const isUnknown = b === 'Unknown';
             html += `<tr style="${isUnknown ? 'opacity:0.6' : ''}">
                 <td><strong>${b}</strong></td>
-                <td class="text-center">${s.races}</td>
+                <td class="text-center">${s.runs}</td>
                 <td class="text-center">${s.wins}</td>
                 <td class="text-center ${s.strike_rate >= 20 ? 'text-success' : s.strike_rate < 10 ? 'text-danger' : ''}">${s.strike_rate}%</td>
                 <td class="text-center">${s.place_rate}%</td>
