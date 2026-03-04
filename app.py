@@ -3033,187 +3033,90 @@ def data_analytics():
 def api_score_analysis():
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
-    
-    from flask import jsonify
-    
+
     track_filter = request.args.get('track', '')
     min_score_filter = request.args.get('min_score', type=float)
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    
-    race_id_query = db.session.query(Race.id).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).join(
-        Horse, Horse.race_id == Race.id
-    ).join(
-        Result, Result.horse_id == Horse.id
-    ).filter(
-        Result.finish_position > 0
-    )
-    
-    if track_filter:
-        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
-    
     limit_param = request.args.get('limit', '200')
-    # Get distinct race IDs ordered by most recent
-    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
-    # Apply limit
-    if limit_param == 'all':
-        recent_race_ids = [r[0] for r in all_race_ids]
-    else:
-        limit = int(limit_param) if limit_param.isdigit() else 200
-        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
-    
-    base_query = db.session.query(
-        Horse, Prediction, Result, Race, Meeting
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
-        Result, Horse.id == Result.horse_id
-    ).join(
-        Race, Horse.race_id == Race.id
-    ).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).filter(
-        Result.finish_position > 0,
-        Race.id.in_(recent_race_ids)
-    )
-    
-    all_results = base_query.all()
-    
-    races_data = {}
-    for horse, pred, result, race, meeting in all_results:
-        race_key = (meeting.id, race.race_number)
-        if race_key not in races_data:
-            races_data[race_key] = []
-        races_data[race_key].append({
-            'prediction': pred,
-            'result': result
-        })
-    
+
+    from collections import defaultdict
+
+    q = db.session.query(
+        Meeting.id,
+        Race.race_number,
+        Prediction.score,
+        Result.finish_position,
+        Result.sp
+    ).join(Race,       Race.meeting_id      == Meeting.id
+    ).join(Horse,      Horse.race_id        == Race.id
+    ).join(Prediction, Prediction.horse_id  == Horse.id
+    ).join(Result,     Result.horse_id      == Horse.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        q = q.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        q = q.filter(Meeting.uploaded_at <= date_to)
+
+    q = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc())
+    rows = q.all()
+
+    races = defaultdict(list)
+    race_keys_ordered = []
+    for meeting_id, race_num, score, finish_pos, sp in rows:
+        key = (meeting_id, race_num)
+        if key not in races:
+            race_keys_ordered.append(key)
+        races[key].append({'score': score, 'finish_pos': finish_pos, 'sp': sp or 0})
+
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        race_keys_ordered = race_keys_ordered[:limit]
+
     stake = 10.0
-    score_tiers = {
-        '90-100': {'races': 0, 'wins': 0, 'profit': 0},
-        '80-89': {'races': 0, 'wins': 0, 'profit': 0},
-        '70-79': {'races': 0, 'wins': 0, 'profit': 0},
-        '60-69': {'races': 0, 'wins': 0, 'profit': 0},
-        '50-59': {'races': 0, 'wins': 0, 'profit': 0},
-        '40-49': {'races': 0, 'wins': 0, 'profit': 0},
-        '30-39': {'races': 0, 'wins': 0, 'profit': 0},
-        '20-29': {'races': 0, 'wins': 0, 'profit': 0},
-        '0-19': {'races': 0, 'wins': 0, 'profit': 0},
-    }
-    
-    score_gaps = {
-        '50+': {'races': 0, 'wins': 0, 'profit': 0},
-        '40-49': {'races': 0, 'wins': 0, 'profit': 0},
-        '30-39': {'races': 0, 'wins': 0, 'profit': 0},
-        '20-29': {'races': 0, 'wins': 0, 'profit': 0},
-        '10-19': {'races': 0, 'wins': 0, 'profit': 0},
-        '<10': {'races': 0, 'wins': 0, 'profit': 0},
-    }
-    
-    for race_key, horses in races_data.items():
-        horses.sort(key=lambda x: x['prediction'].score, reverse=True)
+    score_tiers = {t: {'races': 0, 'wins': 0, 'profit': 0} for t in
+                   ['90-100','80-89','70-79','60-69','50-59','40-49','30-39','20-29','0-19']}
+    score_gaps  = {g: {'races': 0, 'wins': 0, 'profit': 0} for g in
+                   ['50+','40-49','30-39','20-29','10-19','<10']}
+
+    for key in race_keys_ordered:
+        horses = sorted(races[key], key=lambda x: x['score'], reverse=True)
         if not horses:
             continue
-        
-        top_pick = horses[0]
-        top_score = top_pick['prediction'].score
-        
-        if min_score_filter and top_score < min_score_filter:
+        top = horses[0]
+        if min_score_filter and top['score'] < min_score_filter:
             continue
-        
-        second_score = horses[1]['prediction'].score if len(horses) > 1 else 0
-        score_gap = top_score - second_score
-        
-        if top_score >= 90:
-            tier = '90-100'
-        elif top_score >= 80:
-            tier = '80-89'
-        elif top_score >= 70:
-            tier = '70-79'
-        elif top_score >= 60:
-            tier = '60-69'
-        elif top_score >= 50:
-            tier = '50-59'
-        elif top_score >= 40:
-            tier = '40-49'
-        elif top_score >= 30:
-            tier = '30-39'
-        elif top_score >= 20:
-            tier = '20-29'
-        else:
-            tier = '0-19'
-        
-        if score_gap >= 50:
-            gap_bucket = '50+'
-        elif score_gap >= 40:
-            gap_bucket = '40-49'
-        elif score_gap >= 30:
-            gap_bucket = '30-39'
-        elif score_gap >= 20:
-            gap_bucket = '20-29'
-        elif score_gap >= 10:
-            gap_bucket = '10-19'
-        else:
-            gap_bucket = '<10'
-        
-        won = top_pick['result'].finish_position == 1
-        sp = top_pick['result'].sp
-        profit = (sp * stake - stake) if won else -stake
-        
-        if tier:
-            score_tiers[tier]['races'] += 1
-            if won:
-                score_tiers[tier]['wins'] += 1
-            score_tiers[tier]['profit'] += profit
-        
+
+        s = top['score']
+        gap = s - (horses[1]['score'] if len(horses) > 1 else 0)
+        won = top['finish_pos'] == 1
+        profit = (top['sp'] * stake - stake) if won else -stake
+
+        tier = ('90-100' if s >= 90 else '80-89' if s >= 80 else '70-79' if s >= 70 else
+                '60-69' if s >= 60 else '50-59' if s >= 50 else '40-49' if s >= 40 else
+                '30-39' if s >= 30 else '20-29' if s >= 20 else '0-19')
+        gap_bucket = ('50+' if gap >= 50 else '40-49' if gap >= 40 else '30-39' if gap >= 30 else
+                      '20-29' if gap >= 20 else '10-19' if gap >= 10 else '<10')
+
+        score_tiers[tier]['races'] += 1
         score_gaps[gap_bucket]['races'] += 1
         if won:
+            score_tiers[tier]['wins'] += 1
             score_gaps[gap_bucket]['wins'] += 1
+        score_tiers[tier]['profit'] += profit
         score_gaps[gap_bucket]['profit'] += profit
-    
-    for tier in score_tiers:
-        t = score_tiers[tier]
-        t['strike_rate'] = (t['wins'] / t['races'] * 100) if t['races'] > 0 else 0
-        t['roi'] = (t['profit'] / (t['races'] * stake) * 100) if t['races'] > 0 else 0
-    
-    for gap in score_gaps:
-        g = score_gaps[gap]
-        g['strike_rate'] = (g['wins'] / g['races'] * 100) if g['races'] > 0 else 0
-        g['roi'] = (g['profit'] / (g['races'] * stake) * 100) if g['races'] > 0 else 0
-    
-    result = jsonify({
-        'score_tiers': score_tiers,
-        'score_gaps': score_gaps
-    })
-    del all_results
-    del races_data
-    del score_tiers
-    del score_gaps
-    import gc
-    gc.collect()
-    db.session.expunge_all()
-    db.session.remove()
 
-    return result
+    for d in list(score_tiers.values()) + list(score_gaps.values()):
+        d['strike_rate'] = (d['wins'] / d['races'] * 100) if d['races'] else 0
+        d['roi'] = (d['profit'] / (d['races'] * stake) * 100) if d['races'] else 0
+
+    return jsonify({'score_tiers': score_tiers, 'score_gaps': score_gaps})
     
 def extract_sectional_history(notes):
-    """
-    Extract actual sectional history arrays from notes.
     
-    Returns dict with:
-    - history_adjusted: [float, ...] (oldest to newest)
-    - history_raw: [float, ...]
-    - best_recent: {adjusted_time, raw_time, zscore}
-    - weighted_avg: {zscore, run_count}
-    - consistency: {rating, std_dev}
-    """
     import re
     
     result = {}
@@ -3349,100 +3252,54 @@ def get_meeting_sectionals(meeting_id):
 def api_component_analysis():
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
-    
-    from flask import jsonify
-    
-    track_filter = request.args.get('track', '')
-    min_score_filter = request.args.get('min_score', type=float)
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-    
-    race_id_query = db.session.query(Race.id).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).join(
-        Horse, Horse.race_id == Race.id
-    ).join(
-        Result, Result.horse_id == Horse.id
-    ).filter(
-        Result.finish_position > 0
-    )
-    
-    if track_filter:
-        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
-    
-    limit_param = request.args.get('limit', '200')
-    # Get distinct race IDs ordered by most recent
-    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
-    # Apply limit
-    if limit_param == 'all':
-        recent_race_ids = [r[0] for r in all_race_ids]
-    else:
-        limit = int(limit_param) if limit_param.isdigit() else 200
-        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
-    
-    base_query = db.session.query(
-        Horse, Prediction, Result, Race, Meeting
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
-        Result, Horse.id == Result.horse_id
-    ).join(
-        Race, Horse.race_id == Race.id
-    ).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).filter(
-        Result.finish_position > 0,
-        Race.id.in_(recent_race_ids)
-    )
-    
-    all_results = base_query.all()
-    
-    all_results_data = []
-    for horse, pred, result, race, meeting in all_results:
-        all_results_data.append({
-            'horse': horse,
-            'prediction': pred,
-            'result': result,
-            'race': race,
-            'meeting': meeting
-        })
-    
-    component_stats = aggregate_component_stats(all_results_data, stake=10.0)
-    
-    sorted_components = sorted(
-        component_stats.items(),
-        key=lambda x: x[1]['roi'],
-        reverse=True
-    )
-    
-    components_list = []
-    for name, stats in sorted_components:
-        if stats['appearances'] >= 2:
-            components_list.append({
-                'name': name,
-                'appearances': stats['appearances'],
-                'wins': stats['wins'],
-                'strike_rate': stats['strike_rate'],
-                'places': stats['places'],
-                'place_rate': stats['place_rate'],
-                'roi': stats['roi']
-            })
-    
-    result = jsonify({'components': components_list})
-    del all_results
-    del all_results_data
-    del component_stats
-    del components_list
-    import gc
-    gc.collect()
-    db.session.expunge_all()
-    db.session.remove()
 
-    return result
+    track_filter    = request.args.get('track', '')
+    min_score_filter = request.args.get('min_score', type=float)
+    date_from       = request.args.get('date_from', '')
+    date_to         = request.args.get('date_to', '')
+    limit_param     = request.args.get('limit', '200')
+
+    q = db.session.query(
+        Horse, Prediction, Result, Race, Meeting
+    ).join(Prediction, Horse.id == Prediction.horse_id
+    ).join(Result,     Horse.id == Result.horse_id
+    ).join(Race,       Horse.race_id == Race.id
+    ).join(Meeting,    Race.meeting_id == Meeting.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        q = q.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        q = q.filter(Meeting.uploaded_at <= date_to)
+
+    q = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc())
+
+    # Slice to limit*~10 rows (races * avg field size) to avoid loading everything
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        row_cap = limit * 14  # ~14 horses per race on average
+        all_results = q.limit(row_cap).all()
+    else:
+        all_results = q.all()
+
+    all_results_data = [
+        {'horse': h, 'prediction': p, 'result': r, 'race': race, 'meeting': m}
+        for h, p, r, race, m in all_results
+    ]
+
+    component_stats = aggregate_component_stats(all_results_data, stake=10.0)
+    sorted_components = sorted(component_stats.items(), key=lambda x: x[1]['roi'], reverse=True)
+
+    components_list = [
+        {'name': name, 'appearances': s['appearances'], 'wins': s['wins'],
+         'strike_rate': s['strike_rate'], 'places': s['places'],
+         'place_rate': s['place_rate'], 'roi': s['roi']}
+        for name, s in sorted_components if s['appearances'] >= 2
+    ]
+
+    return jsonify({'components': components_list})
 
 
 @app.route("/api/data/external-factors")
@@ -3450,114 +3307,66 @@ def api_component_analysis():
 def api_external_factors():
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
-    
-    from flask import jsonify
-    
-    track_filter = request.args.get('track', '')
+
+    track_filter    = request.args.get('track', '')
     min_score_filter = request.args.get('min_score', type=float)
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-    
-    race_id_query = db.session.query(Race.id).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).join(
-        Horse, Horse.race_id == Race.id
-    ).join(
-        Result, Result.horse_id == Horse.id
-    ).filter(
-        Result.finish_position > 0
-    )
-    
-    if track_filter:
-        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
-    
-    limit_param = request.args.get('limit', '200')
-    # Get distinct race IDs ordered by most recent
-    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
-    # Apply limit
-    if limit_param == 'all':
-        recent_race_ids = [r[0] for r in all_race_ids]
-    else:
-        limit = int(limit_param) if limit_param.isdigit() else 200
-        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
-    
-    base_query = db.session.query(
+    date_from       = request.args.get('date_from', '')
+    date_to         = request.args.get('date_to', '')
+    limit_param     = request.args.get('limit', '200')
+
+    q = db.session.query(
         Horse, Prediction, Result, Race, Meeting
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
-        Result, Horse.id == Result.horse_id
-    ).join(
-        Race, Horse.race_id == Race.id
-    ).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).filter(
-        Result.finish_position > 0,
-        Race.id.in_(recent_race_ids)
-    )
-    
-    all_results = base_query.all()
-    
+    ).join(Prediction, Horse.id == Prediction.horse_id
+    ).join(Result,     Horse.id == Result.horse_id
+    ).join(Race,       Horse.race_id == Race.id
+    ).join(Meeting,    Race.meeting_id == Meeting.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        q = q.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        q = q.filter(Meeting.uploaded_at <= date_to)
+
+    q = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc())
+
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        row_cap = limit * 14
+        all_results = q.limit(row_cap).all()
+    else:
+        all_results = q.all()
+
     all_results_data = []
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
-        all_results_data.append({
-            'horse': horse,
-            'prediction': pred,
-            'result': result,
-            'race': race,
-            'meeting': meeting
-        })
-        
-        race_key = (meeting.id, race.race_number)
-        if race_key not in races_data:
-            races_data[race_key] = []
-        races_data[race_key].append({
-            'horse': horse,
-            'prediction': pred,
-            'result': result,
-            'race': race,
-            'meeting': meeting
-        })
-    
-    external_factors = analyze_external_factors(all_results_data, races_data, stake=10.0)
-    class_performance = analyze_race_classes(races_data, stake=10.0)
-    
+        row = {'horse': horse, 'prediction': pred, 'result': result, 'race': race, 'meeting': meeting}
+        all_results_data.append(row)
+        key = (meeting.id, race.race_number)
+        if key not in races_data:
+            races_data[key] = []
+        races_data[key].append(row)
+
+    external_factors   = analyze_external_factors(all_results_data, races_data, stake=10.0)
+    class_performance  = analyze_race_classes(races_data, stake=10.0)
     class_performance_filtered = {k: v for k, v in class_performance.items() if v['runs'] >= 2}
+    class_drops        = analyze_class_drops(stake=10.0)
 
-    class_drops = analyze_class_drops(stake=10.0)
-    
-    result = jsonify({
-        'jockeys_reliable': external_factors['jockeys_reliable'],
-        'jockeys_limited': external_factors['jockeys_limited'],
+    return jsonify({
+        'jockeys_reliable':  external_factors['jockeys_reliable'],
+        'jockeys_limited':   external_factors['jockeys_limited'],
         'trainers_reliable': external_factors['trainers_reliable'],
-        'trainers_limited': external_factors['trainers_limited'],
-        'sires_reliable': external_factors['sires_reliable'],
-        'dams_reliable': external_factors['dams_reliable'],
-        'barriers': external_factors['barriers'],
-        'distances': external_factors['distances'],
-        'tracks': external_factors['tracks'],
-        'track_conditions': external_factors['track_conditions'],
+        'trainers_limited':  external_factors['trainers_limited'],
+        'sires_reliable':    external_factors['sires_reliable'],
+        'dams_reliable':     external_factors['dams_reliable'],
+        'barriers':          external_factors['barriers'],
+        'distances':         external_factors['distances'],
+        'tracks':            external_factors['tracks'],
+        'track_conditions':  external_factors['track_conditions'],
         'class_performance': class_performance_filtered,
-        'class_drops': class_drops
+        'class_drops':       class_drops
     })
-    
-    del all_results
-    del all_results_data
-    del races_data
-    del external_factors
-    del class_performance
-    del class_drops
-    import gc
-    gc.collect()
-    db.session.expunge_all()
-    db.session.remove()
-
-    return result
 
 @app.route("/api/data/probability-calibration")
 @login_required
@@ -3566,109 +3375,104 @@ def api_probability_calibration():
         return jsonify({'error': 'Admin access required'}), 403
 
     track_filter = request.args.get('track', '')
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-    limit_param = request.args.get('limit', '200')
+    date_from    = request.args.get('date_from', '')
+    date_to      = request.args.get('date_to', '')
+    limit_param  = request.args.get('limit', '200')
 
-    race_id_query = db.session.query(Race.id).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).join(
-        Horse, Horse.race_id == Race.id
-    ).join(
-        Result, Result.horse_id == Horse.id
-    ).filter(Result.finish_position > 0)
+    from collections import defaultdict
 
-    if track_filter:
-        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
-
-    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(
-        Meeting.uploaded_at.desc(), Race.id.desc()
-    ).all()
-
-    if limit_param == 'all':
-        recent_race_ids = [r[0] for r in all_race_ids]
-    else:
-        limit = int(limit_param) if limit_param.isdigit() else 200
-        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
-
-    # Query ALL horses (not just top picks)
-    all_horses = db.session.query(
-        Horse, Prediction, Result
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
-        Result, Horse.id == Result.horse_id
-    ).join(
-        Race, Horse.race_id == Race.id
+    q = db.session.query(
+        Meeting.id,
+        Race.race_number,
+        Prediction.win_probability,
+        Result.finish_position
+    ).join(Race,       Race.meeting_id      == Meeting.id
+    ).join(Horse,      Horse.race_id        == Race.id
+    ).join(Prediction, Prediction.horse_id  == Horse.id
+    ).join(Result,     Result.horse_id      == Horse.id
     ).filter(
         Result.finish_position > 0,
-        Race.id.in_(recent_race_ids),
         Prediction.win_probability.isnot(None),
         Prediction.win_probability != ''
-    ).all()
+    )
 
-    # Buckets: predicted win probability ranges
-    buckets = {
-        '50%+':   {'label': '50%+',   'min': 50,  'max': 100, 'horses': 0, 'wins': 0},
-        '40-50%': {'label': '40-50%', 'min': 40,  'max': 50,  'horses': 0, 'wins': 0},
-        '30-40%': {'label': '30-40%', 'min': 30,  'max': 40,  'horses': 0, 'wins': 0},
-        '20-30%': {'label': '20-30%', 'min': 20,  'max': 30,  'horses': 0, 'wins': 0},
-        '15-20%': {'label': '15-20%', 'min': 15,  'max': 20,  'horses': 0, 'wins': 0},
-        '10-15%': {'label': '10-15%', 'min': 10,  'max': 15,  'horses': 0, 'wins': 0},
-        '5-10%':  {'label': '5-10%',  'min': 5,   'max': 10,  'horses': 0, 'wins': 0},
-        '<5%':    {'label': '<5%',    'min': 0,   'max': 5,   'horses': 0, 'wins': 0},
-    }
+    if track_filter:
+        q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        q = q.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        q = q.filter(Meeting.uploaded_at <= date_to)
+
+    q = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc())
+    rows = q.all()
+
+    # Group by race for limit
+    races = defaultdict(list)
+    race_keys_ordered = []
+    for meeting_id, race_num, win_prob, finish_pos in rows:
+        key = (meeting_id, race_num)
+        if key not in races:
+            race_keys_ordered.append(key)
+        races[key].append({'win_prob': win_prob, 'finish_pos': finish_pos})
+
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        allowed = set(race_keys_ordered[:limit])
+    else:
+        allowed = set(race_keys_ordered)
+
+    bucket_defs = [
+        ('50%+',   50, 100),
+        ('40-50%', 40, 50),
+        ('30-40%', 30, 40),
+        ('20-30%', 20, 30),
+        ('15-20%', 15, 20),
+        ('10-15%', 10, 15),
+        ('5-10%',  5,  10),
+        ('<5%',    0,  5),
+    ]
+    buckets = {label: {'label': label, 'min': mn, 'max': mx, 'horses': 0, 'wins': 0}
+               for label, mn, mx in bucket_defs}
 
     total_horses = 0
     skipped = 0
 
-    for horse, pred, result in all_horses:
-        try:
-            wp = float(str(pred.win_probability).replace('%', '').strip())
-        except (ValueError, TypeError):
-            skipped += 1
+    for key, horse_list in races.items():
+        if key not in allowed:
             continue
+        for h in horse_list:
+            try:
+                wp = float(str(h['win_prob']).replace('%', '').strip())
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+            won = h['finish_pos'] == 1
+            total_horses += 1
+            for label, mn, mx in bucket_defs:
+                if mn <= wp < mx or (label == '50%+' and wp >= 50):
+                    buckets[label]['horses'] += 1
+                    if won:
+                        buckets[label]['wins'] += 1
+                    break
 
-        won = result.finish_position == 1
-        total_horses += 1
-
-        for key, bucket in buckets.items():
-            if bucket['min'] <= wp < bucket['max'] or (key == '50%+' and wp >= 50):
-                bucket['horses'] += 1
-                if won:
-                    bucket['wins'] += 1
-                break
-
-    # Calculate stats per bucket
-    bucket_order = ['50%+', '40-50%', '30-40%', '20-30%', '15-20%', '10-15%', '5-10%', '<5%']
     results_list = []
-
-    for key in bucket_order:
-        b = buckets[key]
+    for label, mn, mx in bucket_defs:
+        b = buckets[label]
         if b['horses'] == 0:
             continue
-
         actual_sr = (b['wins'] / b['horses']) * 100
-        midpoint = (b['min'] + min(b['max'], 60)) / 2  # midpoint of predicted range
-        if key == '50%+':
-            midpoint = 55
+        midpoint = 55 if label == '50%+' else (mn + min(mx, 60)) / 2
         difference = actual_sr - midpoint
-
         results_list.append({
-            'label': b['label'],
+            'label': label,
             'horses': b['horses'],
             'wins': b['wins'],
             'predicted_midpoint': round(midpoint, 1),
             'actual_strike_rate': round(actual_sr, 1),
             'difference': round(difference, 1),
-            'calibrated': abs(difference) <= 5  # within 5% = well calibrated
+            'calibrated': abs(difference) <= 5
         })
 
-    # Overall calibration score (mean absolute error)
     if results_list:
         mae = sum(abs(r['difference']) for r in results_list) / len(results_list)
         calibration_grade = 'Excellent' if mae <= 3 else 'Good' if mae <= 6 else 'Fair' if mae <= 10 else 'Poor'
@@ -3676,26 +3480,13 @@ def api_probability_calibration():
         mae = None
         calibration_grade = 'No Data'
 
-    result = jsonify({
+    return jsonify({
         'buckets': results_list,
         'total_horses': total_horses,
         'skipped': skipped,
         'mae': round(mae, 2) if mae else None,
         'calibration_grade': calibration_grade
     })
-
-    del all_horses
-    del all_race_ids
-    del recent_race_ids
-    del buckets
-    del results_list
-    import gc
-    gc.collect()
-    db.session.expunge_all()
-    db.session.remove()
-
-    return result
-
 @app.route("/api/data/price-analysis")
 @login_required
 def api_price_analysis():
