@@ -4461,80 +4461,73 @@ def api_monthly_performance():
     track_filter = request.args.get('track', '')
     date_from    = request.args.get('date_from', '')
     date_to      = request.args.get('date_to', '')
-    # FIX: default to 500 instead of 'all' — prevents worker timeout on large datasets
     limit_param  = request.args.get('limit', '500')
     stake        = 10.0
 
-    race_id_q = db.session.query(Race.id).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).join(
-        Horse, Horse.race_id == Race.id
-    ).join(
-        Result, Result.horse_id == Horse.id
+    q = db.session.query(
+        Meeting.id,
+        Meeting.uploaded_at,
+        Meeting.date,
+        Race.race_number,
+        Prediction.score,
+        Result.finish_position,
+        Result.sp
+    ).join(Race,       Race.meeting_id       == Meeting.id
+    ).join(Horse,      Horse.race_id         == Race.id
+    ).join(Prediction, Prediction.horse_id   == Horse.id
+    ).join(Result,     Result.horse_id       == Horse.id
     ).filter(Result.finish_position > 0)
 
     if track_filter:
-        race_id_q = race_id_q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+        q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
-        race_id_q = race_id_q.filter(Meeting.uploaded_at >= date_from)
+        q = q.filter(Meeting.uploaded_at >= date_from)
     if date_to:
-        race_id_q = race_id_q.filter(Meeting.uploaded_at <= date_to)
+        q = q.filter(Meeting.uploaded_at <= date_to)
 
-    all_ids = race_id_q.add_columns(Meeting.uploaded_at).distinct().order_by(
-        Meeting.uploaded_at.asc(), Race.id.asc()
-    ).all()
+    q = q.order_by(Meeting.uploaded_at.asc(), Race.id.asc())
 
-    if limit_param == 'all':
-        race_ids = [r[0] for r in all_ids]
-    else:
-        limit = int(limit_param) if str(limit_param).isdigit() else 500
-        race_ids = [r[0] for r in all_ids[:limit]]
+    rows = q.all()
 
-    rows = db.session.query(
-        Horse, Prediction, Result, Race, Meeting
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
-        Result, Horse.id == Result.horse_id
-    ).join(
-        Race, Horse.race_id == Race.id
-    ).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).filter(
-        Result.finish_position > 0,
-        Race.id.in_(race_ids)
-    ).all()
+    # Group into races first
+    races = defaultdict(list)
+    race_keys_ordered = []
+    for meeting_id, uploaded_at, meeting_date, race_num, score, finish_pos, sp in rows:
+        key = (meeting_id, race_num)
+        if key not in races:
+            race_keys_ordered.append(key)
 
-    races_map = defaultdict(list)
-    for horse, pred, result, race, meeting in rows:
-        key = (meeting.id, race.race_number)
-
-        # FIX: safe date resolution — meeting.date or uploaded_at, with None guards
         try:
-            if meeting.date:
-                date_val = meeting.date
-            elif meeting.uploaded_at:
-                date_val = meeting.uploaded_at.date()
+            if meeting_date:
+                period = meeting_date.strftime('%Y-%m')
+            elif uploaded_at:
+                period = uploaded_at.strftime('%Y-%m')
             else:
-                continue  # skip records with no date at all
-            period = date_val.strftime('%Y-%m')
+                continue
         except Exception:
-            continue  # skip anything that fails to format
+            continue
 
-        races_map[key].append({
-            'period': period,
-            'score':  pred.score,
-            'result': result
+        races[key].append({
+            'period':     period,
+            'score':      score,
+            'finish_pos': finish_pos,
+            'sp':         sp or 0
         })
+
+    # Apply limit by race count
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 500
+        race_keys_ordered = race_keys_ordered[:limit]
 
     monthly = defaultdict(lambda: {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0})
 
-    for race_data in races_map.values():
+    for key in race_keys_ordered:
+        race_data = races[key]
         top    = max(race_data, key=lambda x: x['score'])
         period = top['period']
-        won    = top['result'].finish_position == 1
-        placed = top['result'].finish_position in [1, 2, 3]
-        sp     = top['result'].sp or 0
+        won    = top['finish_pos'] == 1
+        placed = top['finish_pos'] in [1, 2, 3]
+        sp     = top['sp']
         profit = (sp * stake - stake) if won else -stake
 
         monthly[period]['races']  += 1
@@ -4557,15 +4550,7 @@ def api_monthly_performance():
             'profit':      round(s['profit'], 2),
         })
 
-    result = jsonify({'monthly': result_list})
-
-    del rows, races_map, monthly, result_list
-    import gc
-    gc.collect()
-    db.session.expunge_all()
-    db.session.remove()
-
-    return result
+    return jsonify({'monthly': result_list})
 
 # ----- ML Data Export Route -----
 @app.route("/data/export")
