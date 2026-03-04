@@ -4006,81 +4006,72 @@ def api_pnl_over_time():
         return jsonify({'error': 'Admin access required'}), 403
 
     track_filter = request.args.get('track', '')
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-    limit_param = request.args.get('limit', '200')
+    date_from    = request.args.get('date_from', '')
+    date_to      = request.args.get('date_to', '')
+    limit_param  = request.args.get('limit', '200')
 
-    race_id_query = db.session.query(Race.id, Meeting.uploaded_at).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).join(
-        Horse, Horse.race_id == Race.id
-    ).join(
-        Result, Result.horse_id == Horse.id
+    # SINGLE QUERY — no IN clause, only fetch what we need
+    q = db.session.query(
+        Meeting.id,
+        Meeting.uploaded_at,
+        Meeting.meeting_name,
+        Race.race_number,
+        Prediction.score,
+        Result.finish_position,
+        Result.sp
+    ).join(Race,      Race.meeting_id      == Meeting.id
+    ).join(Horse,     Horse.race_id        == Race.id
+    ).join(Prediction,Prediction.horse_id  == Horse.id
+    ).join(Result,    Result.horse_id      == Horse.id
     ).filter(Result.finish_position > 0)
 
     if track_filter:
-        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+        q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+        q = q.filter(Meeting.uploaded_at >= date_from)
     if date_to:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+        q = q.filter(Meeting.uploaded_at <= date_to)
 
-    all_race_ids = race_id_query.distinct().order_by(Meeting.uploaded_at.asc(), Race.id.asc()).all()
+    q = q.order_by(Meeting.uploaded_at.asc(), Race.race_number.asc())
 
-    if limit_param == 'all':
-        recent_race_ids = [r[0] for r in all_race_ids]
-    else:
-        limit = int(limit_param) if limit_param.isdigit() else 200
-        recent_race_ids = [r[0] for r in all_race_ids[-limit:]]
+    rows = q.all()
 
-    all_results = db.session.query(
-        Horse, Prediction, Result, Race, Meeting
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
-        Result, Horse.id == Result.horse_id
-    ).join(
-        Race, Horse.race_id == Race.id
-    ).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).filter(
-        Result.finish_position > 0,
-        Race.id.in_(recent_race_ids)
-    ).order_by(Meeting.uploaded_at.asc(), Race.race_number.asc()).all()
+    # Group by race, then apply limit AFTER grouping
+    from collections import defaultdict
+    races = defaultdict(list)
+    race_meta = {}
+    for meeting_id, uploaded_at, meeting_name, race_num, score, finish_pos, sp in rows:
+        key = (meeting_id, race_num)
+        races[key].append({'score': score, 'finish_pos': finish_pos, 'sp': sp or 0})
+        if key not in race_meta:
+            race_meta[key] = (uploaded_at, meeting_name, race_num)
 
-    races_data = {}
-    race_order = []
-    for horse, pred, result, race, meeting in all_results:
-        race_key = (meeting.id, race.race_number)
-        if race_key not in races_data:
-            races_data[race_key] = []
-            race_order.append((race_key, meeting.uploaded_at, meeting.meeting_name, race.race_number))
-        races_data[race_key].append({'prediction': pred, 'result': result})
+    # Apply limit by taking last N races chronologically
+    all_keys = list(races.keys())
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        all_keys = all_keys[-limit:]
 
     stake = 10.0
     cumulative = 0.0
     data_points = []
     monthly = {}
 
-    for race_key, uploaded_at, meeting_name, race_num in race_order:
-        horses = races_data[race_key]
-        horses.sort(key=lambda x: x['prediction'].score, reverse=True)
-        top = horses[0]
-        won = top['result'].finish_position == 1
-        sp = top['result'].sp or 0
+    for key in all_keys:
+        horses = races[key]
+        top = max(horses, key=lambda x: x['score'])
+        won   = top['finish_pos'] == 1
+        sp    = top['sp']
         profit = (sp * stake - stake) if won else -stake
         cumulative += profit
 
-        date_str = uploaded_at.strftime('%Y-%m-%d') if uploaded_at else ''
-        month_key = uploaded_at.strftime('%Y-%m') if uploaded_at else 'Unknown'
+        uploaded_at, meeting_name, race_num = race_meta[key]
+        date_str  = uploaded_at.strftime('%Y-%m-%d') if uploaded_at else ''
+        month_key = uploaded_at.strftime('%Y-%m')    if uploaded_at else 'Unknown'
 
         data_points.append({
-            'date': date_str,
-            'meeting': meeting_name,
-            'race': race_num,
-            'profit': round(profit, 2),
-            'cumulative': round(cumulative, 2),
-            'won': won
+            'date': date_str, 'meeting': meeting_name, 'race': race_num,
+            'profit': round(profit, 2), 'cumulative': round(cumulative, 2), 'won': won
         })
 
         if month_key not in monthly:
@@ -4091,26 +4082,22 @@ def api_pnl_over_time():
         monthly[month_key]['profit'] += profit
 
     monthly_list = []
-    for month, stats in sorted(monthly.items()):
-        stats['roi'] = round((stats['profit'] / (stats['races'] * stake) * 100), 1) if stats['races'] > 0 else 0
-        stats['strike_rate'] = round((stats['wins'] / stats['races'] * 100), 1) if stats['races'] > 0 else 0
-        stats['profit'] = round(stats['profit'], 2)
-        monthly_list.append({'month': month, **stats})
+    for month, s in sorted(monthly.items()):
+        monthly_list.append({
+            'month': month,
+            'races': s['races'],
+            'wins':  s['wins'],
+            'roi':   round(s['profit'] / (s['races'] * stake) * 100, 1) if s['races'] else 0,
+            'strike_rate': round(s['wins'] / s['races'] * 100, 1) if s['races'] else 0,
+            'profit': round(s['profit'], 2)
+        })
 
-    result = jsonify({
+    return jsonify({
         'data_points': data_points,
         'monthly': monthly_list,
         'total_profit': round(cumulative, 2),
         'total_races': len(data_points)
     })
-
-    del all_results, races_data, data_points, monthly_list
-    import gc
-    gc.collect()
-    db.session.expunge_all()
-    db.session.remove()
-    return result
-
 
 @app.route("/api/data/field-size")
 @login_required
