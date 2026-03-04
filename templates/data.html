@@ -510,7 +510,50 @@ v{% extends "base.html" %}
     <div class="card-body text-center"><p class="text-muted">Click to expand and load probability calibration...</p></div>
   </div>
 </div>
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#pnlOverTime" aria-expanded="false">
+    <h5>📈 Cumulative P&L Over Time</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="pnlOverTime" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load P&L chart...</p></div>
+  </div>
+</div>
 
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#fieldSizeAnalysis" aria-expanded="false">
+    <h5>🏟️ Field Size Performance</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="fieldSizeAnalysis" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load field size analysis...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#daysSinceRun" aria-expanded="false">
+    <h5>📅 Days Since Last Run</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="daysSinceRun" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load days-since-run analysis...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#marketDivergence" aria-expanded="false">
+    <h5>🎯 Favourite vs Your Pick</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="marketDivergence" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load market divergence analysis...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#monthlyPerformance" aria-expanded="false">
+    <h5>🗓️ Monthly Performance (Model Drift)</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="monthlyPerformance" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load monthly breakdown...</p></div>
+  </div>
+</div>
 <div class="section-card">
   <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#bestBetsPerformance" aria-expanded="false">
     <h5>🔥 Best Bets Performance</h5><i class="bi bi-chevron-down"></i>
@@ -617,11 +660,21 @@ document.addEventListener('DOMContentLoaded', function() {
     if (priceAnalysis) { priceAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('price-analysis')) { loadPriceAnalysis(); } }); }
     const probabilityCalibration = document.getElementById('probabilityCalibration');
     if (probabilityCalibration) {
-    probabilityCalibration.addEventListener('show.bs.collapse', function() {
-    if (!loadedSections.has('probability-calibration')) { loadProbabilityCalibration(); }
-    });
-}
-});
+        probabilityCalibration.addEventListener('show.bs.collapse', function() {
+            if (!loadedSections.has('probability-calibration')) { loadProbabilityCalibration(); }
+        });
+    }
+    const pnlOverTime = document.getElementById('pnlOverTime');
+    if (pnlOverTime) { pnlOverTime.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('pnl-over-time')) { loadPnlOverTime(); } }); }
+    const fieldSizeAnalysis = document.getElementById('fieldSizeAnalysis');
+    if (fieldSizeAnalysis) { fieldSizeAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('field-size')) { loadFieldSize(); } }); }
+    const daysSinceRun = document.getElementById('daysSinceRun');
+    if (daysSinceRun) { daysSinceRun.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('days-since-run')) { loadDaysSinceRun(); } }); }
+    const marketDivergence = document.getElementById('marketDivergence');
+    if (marketDivergence) { marketDivergence.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('market-divergence')) { loadMarketDivergence(); } }); }
+    const monthlyPerformance = document.getElementById('monthlyPerformance');
+    if (monthlyPerformance) { monthlyPerformance.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('monthly-performance')) { loadMonthlyPerformance(); } }); }
+});;
 
 function loadScoreAnalysis() {
     const container = document.getElementById('scoreAnalysis');
@@ -1049,6 +1102,474 @@ function renderProbabilityCalibration(data) {
             },
             plugins: {
                 legend: { labels: { color: '#9090a8', font: { size: 11 } } }
+            }
+        }
+    });
+}
+function loadPnlOverTime() {
+    const container = document.getElementById('pnlOverTime');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading P&L data...</p></div>';
+    fetch(`/api/data/pnl-over-time?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderPnlOverTime(data); loadedSections.add('pnl-over-time'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data.</div>'; console.error(err); });
+}
+
+function loadFieldSize() {
+    const container = document.getElementById('fieldSizeAnalysis');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading field size data...</p></div>';
+    fetch(`/api/data/field-size?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderFieldSize(data); loadedSections.add('field-size'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data.</div>'; console.error(err); });
+}
+
+function loadDaysSinceRun() {
+    const container = document.getElementById('daysSinceRun');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading days-since-run data...</p></div>';
+    fetch(`/api/data/days-since-run?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderDaysSinceRun(data); loadedSections.add('days-since-run'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data.</div>'; console.error(err); });
+}
+
+function loadMarketDivergence() {
+    const container = document.getElementById('marketDivergence');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading market divergence data...</p></div>';
+    fetch(`/api/data/market-divergence?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderMarketDivergence(data); loadedSections.add('market-divergence'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data.</div>'; console.error(err); });
+}
+
+function loadMonthlyPerformance() {
+    const container = document.getElementById('monthlyPerformance');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading monthly data...</p></div>';
+    // Use filterParams but override limit to 'all' for trend analysis
+    const params = new URLSearchParams(filterParams);
+    params.set('limit', 'all');
+    fetch(`/api/data/monthly-performance?${params}`)
+        .then(r => r.json())
+        .then(data => { renderMonthlyPerformance(data); loadedSections.add('monthly-performance'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data.</div>'; console.error(err); });
+}
+
+// ── Renderers ──────────────────────────────────────────────────
+
+function renderPnlOverTime(data) {
+    const container = document.getElementById('pnlOverTime');
+    if (!data.series || data.series.length === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No data with results yet.</p></div>';
+        return;
+    }
+
+    const finalPnl = data.total_cumulative;
+    const pnlColor = finalPnl >= 0 ? '#34d399' : '#f87171';
+    const pnlSign  = finalPnl >= 0 ? '+' : '';
+
+    let html = `<div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h5 style="margin:0;color:var(--text-primary)">Cumulative P&L</h5>
+                <p class="text-muted" style="font-size:12px;margin:0">$10 flat stakes on every top pick</p>
+            </div>
+            <div style="text-align:right">
+                <span style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace;color:${pnlColor}">${pnlSign}$${finalPnl.toFixed(2)}</span>
+                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em">${data.series.length} days / ${data.series.reduce((a,b) => a + b.races, 0)} races</div>
+            </div>
+        </div>
+        <canvas id="pnlChart" height="140"></canvas>
+        <div class="table-responsive mt-4">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr><th>Date</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Day P&L</th><th class="text-center">Day ROI</th><th class="text-center">Cumulative</th></tr>
+                </thead><tbody>`;
+
+    // Show last 30 days in table (chart shows all)
+    const tableRows = data.series.slice(-30).reverse();
+    for (const row of tableRows) {
+        const sr = row.races > 0 ? (row.wins / row.races * 100).toFixed(1) : '0.0';
+        html += `<tr>
+            <td><strong>${row.date}</strong></td>
+            <td class="text-center">${row.races}</td>
+            <td class="text-center">${row.wins}</td>
+            <td class="text-center">${sr}%</td>
+            <td class="text-center ${row.daily_profit >= 0 ? 'text-success' : 'text-danger'}">${row.daily_profit >= 0 ? '+' : ''}$${row.daily_profit.toFixed(2)}</td>
+            <td class="text-center ${row.daily_roi >= 0 ? 'text-success' : 'text-danger'}">${row.daily_roi >= 0 ? '+' : ''}${row.daily_roi.toFixed(1)}%</td>
+            <td class="text-center ${row.cumulative_profit >= 0 ? 'text-success' : 'text-danger'}">${row.cumulative_profit >= 0 ? '+' : ''}$${row.cumulative_profit.toFixed(2)}</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div></div>';
+    container.innerHTML = html;
+
+    const labels = data.series.map(r => r.date);
+    const cumValues = data.series.map(r => r.cumulative_profit);
+
+    new Chart(document.getElementById('pnlChart'), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Cumulative P&L ($)',
+                data: cumValues,
+                borderColor: pnlColor,
+                backgroundColor: finalPnl >= 0 ? 'rgba(52,211,153,0.10)' : 'rgba(248,113,113,0.10)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointRadius: data.series.length > 60 ? 0 : 3,
+                pointHoverRadius: 5,
+            }]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                y: {
+                    ticks: { color: '#9090a8', font: { size: 11 }, callback: v => '$' + v.toFixed(0) },
+                    grid: { color: 'rgba(255,255,255,0.05)' }
+                },
+                x: {
+                    ticks: {
+                        color: '#9090a8', font: { size: 10 }, maxTicksLimit: 12,
+                        callback: function(val, idx) {
+                            return data.series.length > 30 && idx % Math.ceil(data.series.length / 12) !== 0 ? '' : this.getLabelForValue(val);
+                        }
+                    },
+                    grid: { display: false }
+                }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ` Cumulative: $${ctx.parsed.y.toFixed(2)}`,
+                        afterLabel: ctx => {
+                            const row = data.series[ctx.dataIndex];
+                            return ` Day P&L: ${row.daily_profit >= 0 ? '+' : ''}$${row.daily_profit.toFixed(2)} | ${row.wins}/${row.races} wins`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderFieldSize(data) {
+    const container = document.getElementById('fieldSizeAnalysis');
+    const fs = data.field_size;
+    if (!fs) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No data yet.</p></div>';
+        return;
+    }
+
+    const bucketOrder = ['Small (≤7)', 'Medium (8-11)', 'Large (12+)'];
+    const colours = ['rgba(102,126,234,0.75)', 'rgba(16,185,129,0.75)', 'rgba(245,158,11,0.75)'];
+
+    let html = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px">Performance of your #1 rated horse by field size. Identifies where your model has the strongest edge.</p>
+        <div class="row mb-4">`;
+
+    bucketOrder.forEach((b, i) => {
+        const s = fs[b];
+        if (!s || s.races === 0) return;
+        const roiCol = s.roi >= 0 ? '#34d399' : '#f87171';
+        html += `<div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <h6 style="color:${colours[i].replace('0.75','1')}">${b}</h6>
+                    <div style="font-size:1.5rem;font-weight:800;font-family:'DM Mono',monospace;color:var(--text-primary)">${s.wins}/${s.races}</div>
+                    <div style="font-size:13px;margin:4px 0">Strike: <strong style="color:${s.strike_rate >= 20 ? '#34d399' : 'var(--text-primary)'}">${s.strike_rate}%</strong></div>
+                    <div style="font-size:13px">Place: <strong>${s.place_rate}%</strong></div>
+                    <div style="font-size:13px">ROI: <strong style="color:${roiCol}">${s.roi >= 0 ? '+' : ''}${s.roi}%</strong></div>
+                    <div style="font-size:11px;color:var(--text-muted)">P&L: $${s.profit.toFixed(2)}</div>
+                </div>
+            </div>
+        </div>`;
+    });
+
+    html += `</div>
+        <canvas id="fieldSizeChart" height="120"></canvas>
+        <div class="table-responsive mt-4">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark"><tr><th>Field Size</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Place %</th><th class="text-center">ROI %</th><th class="text-center">P&L</th></tr></thead>
+                <tbody>`;
+
+    for (const b of bucketOrder) {
+        const s = fs[b];
+        if (!s || s.races === 0) continue;
+        html += `<tr><td><strong>${b}</strong></td><td class="text-center">${s.races}</td><td class="text-center">${s.wins}</td>
+            <td class="text-center ${s.strike_rate >= 20 ? 'text-success' : ''}">${s.strike_rate}%</td>
+            <td class="text-center">${s.place_rate}%</td>
+            <td class="text-center ${s.roi >= 0 ? 'text-success' : 'text-danger'}">${s.roi >= 0 ? '+' : ''}${s.roi}%</td>
+            <td class="text-center ${s.profit >= 0 ? 'text-success' : 'text-danger'}">$${s.profit.toFixed(2)}</td></tr>`;
+    }
+    html += '</tbody></table></div></div>';
+    container.innerHTML = html;
+
+    new Chart(document.getElementById('fieldSizeChart'), {
+        type: 'bar',
+        data: {
+            labels: bucketOrder.filter(b => fs[b] && fs[b].races > 0),
+            datasets: [
+                { label: 'Strike Rate %', data: bucketOrder.filter(b => fs[b]?.races > 0).map(b => fs[b].strike_rate), backgroundColor: colours, borderWidth: 1 },
+            ]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: { beginAtZero: true, max: 60, ticks: { color: '#9090a8', font: { size: 11 }, callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                x: { ticks: { color: '#9090a8', font: { size: 11 } }, grid: { display: false } }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+}
+
+function renderDaysSinceRun(data) {
+    const container = document.getElementById('daysSinceRun');
+    const dsr = data.days_since_run;
+    const order = data.bucket_order;
+
+    if (!dsr || !order) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No data yet.</p></div>';
+        return;
+    }
+
+    const hasData = order.some(b => dsr[b] && dsr[b].races > 0);
+    const unknown = dsr['Unknown'] || {};
+
+    let html = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px">Performance of your #1 rated horse by days since last run. Reveals whether fresh or race-fit horses have the edge.</p>`;
+
+    if (!hasData || (order.filter(b => b !== 'Unknown' && dsr[b]?.races > 0).length === 0)) {
+        html += `<div class="alert alert-info">
+            <strong>CSV Field Not Found</strong> — Days since last run data isn't being picked up from your CSV.
+            The field must be named: <code>days since last run</code>, <code>days_since_last_run</code>, or <code>daysSinceLastRun</code>.
+            ${unknown.races > 0 ? `<br><small>${unknown.races} races had no days data.</small>` : ''}
+        </div>`;
+    } else {
+        html += `<div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr><th>Days Since Run</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Place %</th><th class="text-center">ROI %</th><th class="text-center">P&L</th></tr>
+                </thead><tbody>`;
+
+        for (const b of order) {
+            const s = dsr[b];
+            if (!s || s.races === 0) continue;
+            const isUnknown = b === 'Unknown';
+            html += `<tr style="${isUnknown ? 'opacity:0.6' : ''}">
+                <td><strong>${b}</strong></td>
+                <td class="text-center">${s.races}</td>
+                <td class="text-center">${s.wins}</td>
+                <td class="text-center ${s.strike_rate >= 20 ? 'text-success' : s.strike_rate < 10 ? 'text-danger' : ''}">${s.strike_rate}%</td>
+                <td class="text-center">${s.place_rate}%</td>
+                <td class="text-center ${s.roi >= 0 ? 'text-success' : 'text-danger'}">${s.roi >= 0 ? '+' : ''}${s.roi}%</td>
+                <td class="text-center ${s.profit >= 0 ? 'text-success' : 'text-danger'}">$${s.profit.toFixed(2)}</td>
+            </tr>`;
+        }
+        html += '</tbody></table></div>';
+
+        // Bar chart for non-unknown buckets
+        const chartBuckets = order.filter(b => b !== 'Unknown' && dsr[b]?.races > 0);
+        if (chartBuckets.length > 0) {
+            html += `<canvas id="dsrChart" height="120" class="mt-3"></canvas>`;
+        }
+    }
+    html += '</div>';
+    container.innerHTML = html;
+
+    const chartBuckets = order.filter(b => b !== 'Unknown' && dsr[b]?.races > 0);
+    if (chartBuckets.length > 0 && document.getElementById('dsrChart')) {
+        new Chart(document.getElementById('dsrChart'), {
+            type: 'bar',
+            data: {
+                labels: chartBuckets,
+                datasets: [{
+                    label: 'Strike Rate %',
+                    data: chartBuckets.map(b => dsr[b].strike_rate),
+                    backgroundColor: 'rgba(102,126,234,0.75)',
+                    borderColor: 'rgba(102,126,234,1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { beginAtZero: true, ticks: { color: '#9090a8', font: { size: 11 }, callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    x: { ticks: { color: '#9090a8', font: { size: 11 } }, grid: { display: false } }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+}
+
+function renderMarketDivergence(data) {
+    const container = document.getElementById('marketDivergence');
+    const md = data.market_divergence;
+    if (!md) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No data yet.</p></div>';
+        return;
+    }
+
+    const agree    = md.agree    || {};
+    const disagree = md.disagree || {};
+    const totalRaces = (agree.races || 0) + (disagree.races || 0);
+
+    let html = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px">
+            Does your model add value beyond just following the market?
+            When you pick the same horse as the market vs when you diverge.
+            ${data.skipped_races > 0 ? `<span style="color:var(--text-muted)">(${data.skipped_races} races skipped — missing SP coverage)</span>` : ''}
+        </p>
+        <div class="row mb-4">
+            <div class="col-md-6 mb-3">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h6 style="color:#60a5fa">✅ Agree with Market</h6>
+                        <p style="font-size:11px;color:var(--text-muted)">Your top pick = market favourite</p>
+                        <div style="font-size:1.5rem;font-weight:800;font-family:'DM Mono',monospace">${agree.wins || 0}/${agree.races || 0}</div>
+                        <div style="font-size:13px;margin:4px 0">Strike: <strong style="color:${(agree.strike_rate || 0) >= 20 ? '#34d399' : 'var(--text-primary)'}">${agree.strike_rate || 0}%</strong></div>
+                        <div style="font-size:13px">ROI: <strong style="color:${(agree.roi || 0) >= 0 ? '#34d399' : '#f87171'}">${(agree.roi || 0) >= 0 ? '+' : ''}${agree.roi || 0}%</strong></div>
+                        <div style="font-size:11px;color:var(--text-muted)">${((agree.races || 0) / totalRaces * 100).toFixed(0)}% of races</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 mb-3">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h6 style="color:#fbbf24">🔥 Disagree with Market</h6>
+                        <p style="font-size:11px;color:var(--text-muted)">Your pick ≠ market favourite</p>
+                        <div style="font-size:1.5rem;font-weight:800;font-family:'DM Mono',monospace">${disagree.wins || 0}/${disagree.races || 0}</div>
+                        <div style="font-size:13px;margin:4px 0">Strike: <strong style="color:${(disagree.strike_rate || 0) >= 20 ? '#34d399' : 'var(--text-primary)'}">${disagree.strike_rate || 0}%</strong></div>
+                        <div style="font-size:13px">ROI: <strong style="color:${(disagree.roi || 0) >= 0 ? '#34d399' : '#f87171'}">${(disagree.roi || 0) >= 0 ? '+' : ''}${disagree.roi || 0}%</strong></div>
+                        <div style="font-size:11px;color:var(--text-muted)">${((disagree.races || 0) / totalRaces * 100).toFixed(0)}% of races</div>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+    // Insight callout
+    const hasDisagreeEdge = (disagree.roi || 0) > (agree.roi || 0);
+    html += `<div class="alert alert-info">
+        <strong>💡 What this means: </strong>
+        ${hasDisagreeEdge
+            ? `Your model outperforms the market when it <em>disagrees</em> with the favourite (${disagree.roi}% ROI vs ${agree.roi}% when agreeing). This suggests genuine independent edge — your model is finding value the market misses.`
+            : `Your model performs better when it <em>agrees</em> with the market (${agree.roi}% ROI). When you disagree (${disagree.roi}% ROI) the market tends to be right. Consider using market agreement as a confidence filter.`}
+    </div>
+    </div>`;
+
+    container.innerHTML = html;
+}
+
+function renderMonthlyPerformance(data) {
+    const container = document.getElementById('monthlyPerformance');
+    if (!data.monthly || data.monthly.length === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No data yet.</p></div>';
+        return;
+    }
+
+    const months = data.monthly;
+    const recentMonths = months.slice(-3);
+    const earlierMonths = months.slice(0, -3);
+    const recentAvgROI = recentMonths.length
+        ? recentMonths.reduce((a, b) => a + b.roi, 0) / recentMonths.length
+        : 0;
+    const driftColor = recentAvgROI >= 0 ? '#34d399' : '#f87171';
+    const driftLabel = recentMonths.length >= 2
+        ? (recentAvgROI >= 0 ? '✅ Model Healthy' : '⚠️ Recent Decline — Review algorithm changes')
+        : '⏳ Not enough months yet';
+
+    let html = `<div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h5 style="margin:0;color:var(--text-primary)">Monthly Breakdown</h5>
+                <p class="text-muted" style="font-size:12px;margin:0">Period-by-period — detect if recent algorithm changes helped or hurt</p>
+            </div>
+            <div style="text-align:right">
+                <span style="font-size:1rem;font-weight:700;color:${driftColor}">${driftLabel}</span>
+                <div style="font-size:11px;color:var(--text-muted)">Avg ROI last 3 months: ${recentAvgROI.toFixed(1)}%</div>
+            </div>
+        </div>
+        <canvas id="monthlyChart" height="140" class="mb-4"></canvas>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr><th>Month</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Place %</th><th class="text-center">ROI %</th><th class="text-center">P&L</th></tr>
+                </thead><tbody>`;
+
+    for (const row of [...months].reverse()) {
+        const isRecent = recentMonths.some(r => r.period === row.period);
+        html += `<tr style="${isRecent ? 'background:rgba(102,126,234,0.06)' : ''}">
+            <td><strong>${row.period}</strong>${isRecent ? ' <span style="font-size:10px;color:var(--text-muted)">(recent)</span>' : ''}</td>
+            <td class="text-center">${row.races}</td>
+            <td class="text-center">${row.wins}</td>
+            <td class="text-center ${row.strike_rate >= 20 ? 'text-success' : row.strike_rate < 10 ? 'text-danger' : ''}">${row.strike_rate}%</td>
+            <td class="text-center">${row.place_rate}%</td>
+            <td class="text-center ${row.roi >= 0 ? 'text-success' : 'text-danger'}">${row.roi >= 0 ? '+' : ''}${row.roi}%</td>
+            <td class="text-center ${row.profit >= 0 ? 'text-success' : 'text-danger'}">${row.profit >= 0 ? '+' : ''}$${row.profit.toFixed(2)}</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div></div>';
+    container.innerHTML = html;
+
+    const labels    = months.map(r => r.period);
+    const strikeRates = months.map(r => r.strike_rate);
+    const roiValues = months.map(r => r.roi);
+
+    new Chart(document.getElementById('monthlyChart'), {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'ROI %',
+                    data: roiValues,
+                    backgroundColor: roiValues.map(v => v >= 0 ? 'rgba(52,211,153,0.65)' : 'rgba(248,113,113,0.65)'),
+                    borderColor:     roiValues.map(v => v >= 0 ? 'rgba(52,211,153,1)' : 'rgba(248,113,113,1)'),
+                    borderWidth: 1,
+                    yAxisID: 'y',
+                },
+                {
+                    label: 'Strike %',
+                    data: strikeRates,
+                    type: 'line',
+                    borderColor: 'rgba(102,126,234,1)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    tension: 0.3,
+                    yAxisID: 'y2',
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                y: {
+                    position: 'left',
+                    ticks: { color: '#9090a8', font: { size: 11 }, callback: v => v + '%' },
+                    grid: { color: 'rgba(255,255,255,0.05)' }
+                },
+                y2: {
+                    position: 'right',
+                    min: 0, max: 60,
+                    ticks: { color: 'rgba(102,126,234,0.8)', font: { size: 11 }, callback: v => v + '%' },
+                    grid: { display: false }
+                },
+                x: {
+                    ticks: { color: '#9090a8', font: { size: 11 } },
+                    grid: { display: false }
+                }
+            },
+            plugins: {
+                legend: {
+                    labels: { color: '#9090a8', font: { size: 11 } }
+                }
             }
         }
     });
