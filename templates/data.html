@@ -555,6 +555,14 @@
   </div>
 </div>
 <div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#combinationAnalysis" aria-expanded="false">
+    <h5>🔗 Combination Analysis</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="combinationAnalysis" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load combination analysis...</p></div>
+  </div>
+</div>
+<div class="section-card">
   <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#bestBetsPerformance" aria-expanded="false">
     <h5>🔥 Best Bets Performance</h5><i class="bi bi-chevron-down"></i>
   </div>
@@ -674,6 +682,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (marketDivergence) { marketDivergence.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('market-divergence')) { loadMarketDivergence(); } }); }
     const monthlyPerformance = document.getElementById('monthlyPerformance');
     if (monthlyPerformance) { monthlyPerformance.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('monthly-performance')) { loadMonthlyPerformance(); } }); }
+    const combinationAnalysis = document.getElementById('combinationAnalysis');
+    if (combinationAnalysis) { combinationAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('combination-analysis')) { loadCombinationAnalysis(); } }); }
 });;
 
 function loadScoreAnalysis() {
@@ -1600,6 +1610,70 @@ function renderMonthlyPerformance(data) {
             }
         }
     });
+}
+function loadCombinationAnalysis() {
+    const container = document.getElementById('combinationAnalysis');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading combination analysis...</p></div>';
+    fetch(`/api/data/combination-analysis?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderCombinationAnalysis(data); loadedSections.add('combination-analysis'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>'; console.error(err); });
+}
+
+function renderCombinationAnalysis(data) {
+    const container = document.getElementById('combinationAnalysis');
+
+    if (!data.combinations || data.combinations.length === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No positive-ROI combinations found yet. More race data will improve results.</p></div>';
+        return;
+    }
+
+    const twos   = data.combinations.filter(c => c.factor_count === 2);
+    const threes = data.combinations.filter(c => c.factor_count === 3);
+
+    function comboTable(combos) {
+        let t = `<div class="table-responsive"><table class="table table-sm table-hover">
+            <thead class="table-dark"><tr>
+                <th>Factors</th>
+                <th class="text-center">Races</th>
+                <th class="text-center">Wins</th>
+                <th class="text-center">Strike %</th>
+                <th class="text-center">ROI %</th>
+                <th class="text-center">P&L</th>
+            </tr></thead><tbody>`;
+        for (const c of combos) {
+            const roiClass = c.roi >= 30 ? 'text-success fw-bold' : 'text-success';
+            t += `<tr>
+                <td>${c.factors.map(f => `<span class="badge bg-primary" style="margin-right:4px;margin-bottom:2px">${f}</span>`).join('')}</td>
+                <td class="text-center">${c.races}</td>
+                <td class="text-center">${c.wins}</td>
+                <td class="text-center ${c.strike_rate >= 25 ? 'text-success fw-bold' : ''}">${c.strike_rate}%</td>
+                <td class="text-center ${roiClass}">${c.roi >= 0 ? '+' : ''}${c.roi}%</td>
+                <td class="text-center text-success">$${c.profit.toFixed(2)}</td>
+            </tr>`;
+        }
+        t += '</tbody></table></div>';
+        return t;
+    }
+
+    let html = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px">Multi-factor combinations that produce positive ROI when your top pick hits all conditions simultaneously. Single factors excluded — see other sections for those.</p>`;
+
+    if (threes.length > 0) {
+        html += `<h5 style="margin-bottom:12px">3-Factor Combinations <span style="font-size:12px;color:var(--text-muted);font-weight:400">(${threes.length} found)</span></h5>`;
+        html += comboTable(threes);
+    }
+
+    if (twos.length > 0) {
+        html += `<h5 style="margin:20px 0 12px">2-Factor Combinations <span style="font-size:12px;color:var(--text-muted);font-weight:400">(${twos.length} found)</span></h5>`;
+        html += comboTable(twos);
+    }
+
+    html += `<div class="alert alert-info mt-3">
+        <strong>💡 How to use this:</strong> When your top pick hits multiple positive factors simultaneously, that's your highest-confidence bet. Focus on combinations with 20+ races and 30%+ ROI.
+    </div></div>`;
+
+    container.innerHTML = html;
 }
 </script>
 
