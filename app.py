@@ -3998,7 +3998,567 @@ def api_price_analysis():
     db.session.remove()
 
     return result
-    
+
+@app.route("/api/data/pnl-over-time")
+@login_required
+def api_pnl_over_time():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    track_filter = request.args.get('track', '')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    limit_param = request.args.get('limit', '200')
+
+    race_id_query = db.session.query(Race.id, Meeting.uploaded_at).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(
+        Horse, Horse.race_id == Race.id
+    ).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+
+    all_race_ids = race_id_query.distinct().order_by(Meeting.uploaded_at.asc(), Race.id.asc()).all()
+
+    if limit_param == 'all':
+        recent_race_ids = [r[0] for r in all_race_ids]
+    else:
+        limit = int(limit_param) if limit_param.isdigit() else 200
+        recent_race_ids = [r[0] for r in all_race_ids[-limit:]]
+
+    all_results = db.session.query(
+        Horse, Prediction, Result, Race, Meeting
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Result.finish_position > 0,
+        Race.id.in_(recent_race_ids)
+    ).order_by(Meeting.uploaded_at.asc(), Race.race_number.asc()).all()
+
+    races_data = {}
+    race_order = []
+    for horse, pred, result, race, meeting in all_results:
+        race_key = (meeting.id, race.race_number)
+        if race_key not in races_data:
+            races_data[race_key] = []
+            race_order.append((race_key, meeting.uploaded_at, meeting.meeting_name, race.race_number))
+        races_data[race_key].append({'prediction': pred, 'result': result})
+
+    stake = 10.0
+    cumulative = 0.0
+    data_points = []
+    monthly = {}
+
+    for race_key, uploaded_at, meeting_name, race_num in race_order:
+        horses = races_data[race_key]
+        horses.sort(key=lambda x: x['prediction'].score, reverse=True)
+        top = horses[0]
+        won = top['result'].finish_position == 1
+        sp = top['result'].sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        cumulative += profit
+
+        date_str = uploaded_at.strftime('%Y-%m-%d') if uploaded_at else ''
+        month_key = uploaded_at.strftime('%Y-%m') if uploaded_at else 'Unknown'
+
+        data_points.append({
+            'date': date_str,
+            'meeting': meeting_name,
+            'race': race_num,
+            'profit': round(profit, 2),
+            'cumulative': round(cumulative, 2),
+            'won': won
+        })
+
+        if month_key not in monthly:
+            monthly[month_key] = {'races': 0, 'wins': 0, 'profit': 0.0}
+        monthly[month_key]['races'] += 1
+        if won:
+            monthly[month_key]['wins'] += 1
+        monthly[month_key]['profit'] += profit
+
+    monthly_list = []
+    for month, stats in sorted(monthly.items()):
+        stats['roi'] = round((stats['profit'] / (stats['races'] * stake) * 100), 1) if stats['races'] > 0 else 0
+        stats['strike_rate'] = round((stats['wins'] / stats['races'] * 100), 1) if stats['races'] > 0 else 0
+        stats['profit'] = round(stats['profit'], 2)
+        monthly_list.append({'month': month, **stats})
+
+    result = jsonify({
+        'data_points': data_points,
+        'monthly': monthly_list,
+        'total_profit': round(cumulative, 2),
+        'total_races': len(data_points)
+    })
+
+    del all_results, races_data, data_points, monthly_list
+    import gc
+    gc.collect()
+    db.session.expunge_all()
+    db.session.remove()
+    return result
+
+
+@app.route("/api/data/field-size")
+@login_required
+def api_field_size():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    track_filter = request.args.get('track', '')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    limit_param = request.args.get('limit', '200')
+
+    race_id_query = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(
+        Horse, Horse.race_id == Race.id
+    ).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+
+    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(
+        Meeting.uploaded_at.desc(), Race.id.desc()
+    ).all()
+
+    if limit_param == 'all':
+        recent_race_ids = [r[0] for r in all_race_ids]
+    else:
+        limit = int(limit_param) if limit_param.isdigit() else 200
+        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
+
+    all_results = db.session.query(
+        Horse, Prediction, Result, Race, Meeting
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Result.finish_position > 0,
+        Race.id.in_(recent_race_ids)
+    ).all()
+
+    races_data = {}
+    for horse, pred, result, race, meeting in all_results:
+        race_key = (meeting.id, race.race_number)
+        if race_key not in races_data:
+            races_data[race_key] = []
+        races_data[race_key].append({'horse': horse, 'prediction': pred, 'result': result})
+
+    stake = 10.0
+    buckets = {
+        'Small (≤7)':       {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'Medium (8-11)':    {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'Large (12-15)':    {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'Very Large (16+)': {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    }
+
+    for race_key, horses in races_data.items():
+        active = [h for h in horses if h['result'].finish_position > 0]
+        field_size = len(active)
+
+        if field_size <= 7:
+            bucket = 'Small (≤7)'
+        elif field_size <= 11:
+            bucket = 'Medium (8-11)'
+        elif field_size <= 15:
+            bucket = 'Large (12-15)'
+        else:
+            bucket = 'Very Large (16+)'
+
+        horses_sorted = sorted(active, key=lambda x: x['prediction'].score, reverse=True)
+        top = horses_sorted[0]
+        won = top['result'].finish_position == 1
+        placed = top['result'].finish_position in [1, 2, 3]
+        sp = top['result'].sp or 0
+        profit = (sp * stake - stake) if won else -stake
+
+        buckets[bucket]['races'] += 1
+        if won:
+            buckets[bucket]['wins'] += 1
+        if placed:
+            buckets[bucket]['places'] += 1
+        buckets[bucket]['profit'] += profit
+
+    result_list = []
+    for label, stats in buckets.items():
+        if stats['races'] > 0:
+            result_list.append({
+                'label': label,
+                'races': stats['races'],
+                'wins': stats['wins'],
+                'places': stats['places'],
+                'strike_rate': round(stats['wins'] / stats['races'] * 100, 1),
+                'place_rate': round(stats['places'] / stats['races'] * 100, 1),
+                'profit': round(stats['profit'], 2),
+                'roi': round(stats['profit'] / (stats['races'] * stake) * 100, 1)
+            })
+
+    result = jsonify({'field_sizes': result_list})
+    del all_results, races_data, result_list
+    import gc
+    gc.collect()
+    db.session.expunge_all()
+    db.session.remove()
+    return result
+
+
+@app.route("/api/data/days-since-run")
+@login_required
+def api_days_since_run():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    track_filter = request.args.get('track', '')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    limit_param = request.args.get('limit', '200')
+
+    race_id_query = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(
+        Horse, Horse.race_id == Race.id
+    ).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+
+    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(
+        Meeting.uploaded_at.desc(), Race.id.desc()
+    ).all()
+
+    if limit_param == 'all':
+        recent_race_ids = [r[0] for r in all_race_ids]
+    else:
+        limit = int(limit_param) if limit_param.isdigit() else 200
+        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
+
+    all_results = db.session.query(
+        Horse, Prediction, Result
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).filter(
+        Result.finish_position > 0,
+        Race.id.in_(recent_race_ids)
+    ).all()
+
+    import re as _re
+    stake = 10.0
+
+    buckets = {
+        'Quick Back-up (≤7d)':  {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'Short (8-14d)':        {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'Normal (15-28d)':      {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'Fresh (29-59d)':       {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'Resuming (60-89d)':    {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'Long Spell (90d+)':    {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'First Start / Unknown':{'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    }
+
+    for horse, pred, result in all_results:
+        won = result.finish_position == 1
+        placed = result.finish_position in [1, 2, 3]
+        sp = result.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+
+        days = None
+        csv_data = horse.csv_data or {}
+        raw_days = csv_data.get('days since last run', '') or csv_data.get('days_since_run', '')
+        if raw_days:
+            try:
+                days = int(float(str(raw_days).strip()))
+            except (ValueError, TypeError):
+                pass
+
+        if days is None and pred.notes:
+            match = _re.search(r'(\d+)\s*days?\s*since\s*(last\s*)?run', pred.notes, _re.IGNORECASE)
+            if match:
+                try:
+                    days = int(match.group(1))
+                except ValueError:
+                    pass
+
+        if days is None:
+            bucket = 'First Start / Unknown'
+        elif days <= 7:
+            bucket = 'Quick Back-up (≤7d)'
+        elif days <= 14:
+            bucket = 'Short (8-14d)'
+        elif days <= 28:
+            bucket = 'Normal (15-28d)'
+        elif days <= 59:
+            bucket = 'Fresh (29-59d)'
+        elif days <= 89:
+            bucket = 'Resuming (60-89d)'
+        else:
+            bucket = 'Long Spell (90d+)'
+
+        buckets[bucket]['runs'] += 1
+        if won:
+            buckets[bucket]['wins'] += 1
+        if placed:
+            buckets[bucket]['places'] += 1
+        buckets[bucket]['profit'] += profit
+
+    result_list = []
+    for label, stats in buckets.items():
+        if stats['runs'] > 0:
+            result_list.append({
+                'label': label,
+                'runs': stats['runs'],
+                'wins': stats['wins'],
+                'places': stats['places'],
+                'strike_rate': round(stats['wins'] / stats['runs'] * 100, 1),
+                'place_rate': round(stats['places'] / stats['runs'] * 100, 1),
+                'profit': round(stats['profit'], 2),
+                'roi': round(stats['profit'] / (stats['runs'] * stake) * 100, 1)
+            })
+
+    result = jsonify({'buckets': result_list})
+    del all_results, result_list
+    import gc
+    gc.collect()
+    db.session.expunge_all()
+    db.session.remove()
+    return result
+
+
+@app.route("/api/data/market-divergence")
+@login_required
+def api_market_divergence():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    track_filter = request.args.get('track', '')
+    date_from    = request.args.get('date_from', '')
+    date_to      = request.args.get('date_to', '')
+    limit_param  = request.args.get('limit', '200')
+    stake        = 10.0
+
+    race_id_q = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(
+        Horse, Horse.race_id == Race.id
+    ).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        race_id_q = race_id_q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_q = race_id_q.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_q = race_id_q.filter(Meeting.uploaded_at <= date_to)
+
+    all_ids = race_id_q.add_columns(Meeting.uploaded_at).distinct().order_by(
+        Meeting.uploaded_at.desc(), Race.id.desc()
+    ).all()
+
+    if limit_param == 'all':
+        race_ids = [r[0] for r in all_ids]
+    else:
+        limit = int(limit_param) if limit_param.isdigit() else 200
+        race_ids = [r[0] for r in all_ids[:limit]]
+
+    rows = db.session.query(
+        Horse, Prediction, Result, Race, Meeting
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Result.finish_position > 0,
+        Race.id.in_(race_ids)
+    ).all()
+
+    from collections import defaultdict
+    races_map = defaultdict(list)
+    for horse, pred, result, race, meeting in rows:
+        key = (meeting.id, race.race_number)
+        races_map[key].append({
+            'horse_id': horse.id,
+            'score':    pred.score,
+            'sp':       result.sp or 999,
+            'result':   result,
+        })
+
+    stats = {
+        'agree':    {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'disagree': {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    }
+    skipped = 0
+
+    for race_data in races_map.values():
+        valid = [h for h in race_data if h['sp'] < 900]
+        if len(valid) < 2:
+            skipped += 1
+            continue
+
+        top_pick   = max(race_data, key=lambda x: x['score'])
+        market_fav = min(valid, key=lambda x: x['sp'])
+
+        won    = top_pick['result'].finish_position == 1
+        placed = top_pick['result'].finish_position in [1, 2, 3]
+        sp     = top_pick['result'].sp or 0
+        profit = (sp * stake - stake) if won else -stake
+
+        bucket = 'agree' if top_pick['horse_id'] == market_fav['horse_id'] else 'disagree'
+
+        stats[bucket]['races']  += 1
+        stats[bucket]['wins']   += (1 if won else 0)
+        stats[bucket]['places'] += (1 if placed else 0)
+        stats[bucket]['profit'] += profit
+
+    for b, s in stats.items():
+        n = s['races']
+        s['strike_rate'] = round(s['wins']   / n * 100, 1) if n else 0
+        s['place_rate']  = round(s['places'] / n * 100, 1) if n else 0
+        s['roi']         = round(s['profit'] / (n * stake) * 100, 1) if n else 0
+
+    result = jsonify({'market_divergence': stats, 'skipped_races': skipped})
+    del rows, races_map
+    import gc
+    gc.collect()
+    db.session.expunge_all()
+    db.session.remove()
+    return result
+
+
+@app.route("/api/data/monthly-performance")
+@login_required
+def api_monthly_performance():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    track_filter = request.args.get('track', '')
+    date_from    = request.args.get('date_from', '')
+    date_to      = request.args.get('date_to', '')
+    limit_param  = request.args.get('limit', 'all')
+    stake        = 10.0
+
+    race_id_q = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(
+        Horse, Horse.race_id == Race.id
+    ).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        race_id_q = race_id_q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_q = race_id_q.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_q = race_id_q.filter(Meeting.uploaded_at <= date_to)
+
+    all_ids = race_id_q.add_columns(Meeting.uploaded_at).distinct().order_by(
+        Meeting.uploaded_at.asc(), Race.id.asc()
+    ).all()
+
+    if limit_param == 'all':
+        race_ids = [r[0] for r in all_ids]
+    else:
+        limit = int(limit_param) if limit_param.isdigit() else 9999
+        race_ids = [r[0] for r in all_ids[:limit]]
+
+    rows = db.session.query(
+        Horse, Prediction, Result, Race, Meeting
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Result.finish_position > 0,
+        Race.id.in_(race_ids)
+    ).all()
+
+    from collections import defaultdict
+    races_map = defaultdict(list)
+    for horse, pred, result, race, meeting in rows:
+        key = (meeting.id, race.race_number)
+        date_val = meeting.date or meeting.uploaded_at.date()
+        period = date_val.strftime('%Y-%m')
+        races_map[key].append({'period': period, 'score': pred.score, 'result': result})
+
+    monthly = defaultdict(lambda: {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0})
+    for race_data in races_map.values():
+        top    = max(race_data, key=lambda x: x['score'])
+        period = top['period']
+        won    = top['result'].finish_position == 1
+        placed = top['result'].finish_position in [1, 2, 3]
+        sp     = top['result'].sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        monthly[period]['races']  += 1
+        monthly[period]['wins']   += (1 if won else 0)
+        monthly[period]['places'] += (1 if placed else 0)
+        monthly[period]['profit'] += profit
+
+    result_list = []
+    for period in sorted(monthly.keys()):
+        s = monthly[period]
+        n = s['races']
+        result_list.append({
+            'period':      period,
+            'races':       n,
+            'wins':        s['wins'],
+            'places':      s['places'],
+            'strike_rate': round(s['wins']   / n * 100, 1) if n else 0,
+            'place_rate':  round(s['places'] / n * 100, 1) if n else 0,
+            'roi':         round(s['profit'] / (n * stake) * 100, 1) if n else 0,
+            'profit':      round(s['profit'], 2),
+        })
+
+    result = jsonify({'monthly': result_list})
+    del rows, races_map, monthly, result_list
+    import gc
+    gc.collect()
+    db.session.expunge_all()
+    db.session.remove()
+    return result
+
 # ----- ML Data Export Route -----
 @app.route("/data/export")
 @login_required
