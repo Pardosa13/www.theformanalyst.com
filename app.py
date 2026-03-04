@@ -4388,6 +4388,517 @@ def api_monthly_performance():
 
     return jsonify({'monthly': result_list})
 
+@app.route("/api/data/combination-analysis")
+@login_required
+def api_combination_analysis():
+    """
+    Meta-analysis route: finds positive ROI factors across ALL other analytics
+    routes, then identifies combinations of 2+ factors that produce positive ROI.
+    
+    Single factors are excluded — they already appear in their respective sections.
+    Only multi-factor combinations with positive ROI are returned.
+    """
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    track_filter  = request.args.get('track', '')
+    date_from     = request.args.get('date_from', '')
+    date_to       = request.args.get('date_to', '')
+    limit_param   = request.args.get('limit', '200')
+    min_appearances = int(request.args.get('min_appearances', 10))
+    stake         = 10.0
+
+    # ── 1. Pull all race data (same pattern as every other route) ──────────────
+    q = db.session.query(
+        Meeting.id,
+        Meeting.meeting_name,
+        Meeting.uploaded_at,
+        Race.id.label('race_id'),
+        Race.race_number,
+        Race.distance,
+        Race.race_class,
+        Race.track_condition,
+        Horse.id.label('horse_id'),
+        Horse.horse_name,
+        Horse.jockey,
+        Horse.trainer,
+        Horse.csv_data,
+        Prediction.score,
+        Prediction.win_probability,
+        Prediction.predicted_odds,
+        Prediction.notes,
+        Result.finish_position,
+        Result.sp
+    ).join(Race,       Race.meeting_id      == Meeting.id
+    ).join(Horse,      Horse.race_id        == Race.id
+    ).join(Prediction, Prediction.horse_id  == Horse.id
+    ).join(Result,     Result.horse_id      == Horse.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        q = q.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        q = q.filter(Meeting.uploaded_at <= date_to)
+
+    q = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc())
+    rows = q.all()
+
+    # Group into races, apply limit
+    from collections import defaultdict
+    import itertools
+    import re as _re
+
+    races_map = defaultdict(list)
+    race_keys_ordered = []
+    for row in rows:
+        key = (row.id, row.race_number)
+        if key not in races_map:
+            race_keys_ordered.append(key)
+        races_map[key].append(row)
+
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        race_keys_ordered = race_keys_ordered[:limit]
+
+    # ── 2. Compute positive ROI thresholds from existing route logic ───────────
+    #
+    # We run lightweight versions of each analytics bucket calculation
+    # across ALL races first, to discover which single-factor values are +ROI.
+    # Then in pass 2 we tag each race's top pick with its positive factors
+    # and look for combinations.
+    #
+    # Buckets mirroring your existing routes:
+    #   • Score tier        (api_score_analysis)
+    #   • Field size        (api_field_size)
+    #   • Distance          (api_external_factors → distances)
+    #   • Track condition   (api_external_factors → track_conditions)
+    #   • Barrier group     (api_external_factors → barriers)
+    #   • Track             (api_external_factors → tracks, 5+ races)
+    #   • Race class        (api_external_factors → class_performance, 5+ races)
+    #   • Jockey            (api_external_factors → jockeys_reliable, 10+ rides)
+    #   • Trainer           (api_external_factors → trainers_reliable, 10+ runs)
+    #   • Sire              (api_external_factors → sires_reliable, 10+ runs)
+    #   • Market agreement  (api_market_divergence)
+    #   • Component flags   (api_component_analysis, positive ROI components)
+    #   • Days since run    (api_days_since_run)
+    #   • Open class flag   (race_class == 'Open')
+
+    # First pass: build per-bucket accumulators
+    def empty_bucket():
+        return {'races': 0, 'wins': 0, 'profit': 0.0}
+
+    score_buckets      = defaultdict(empty_bucket)
+    field_buckets      = defaultdict(empty_bucket)
+    dist_buckets       = defaultdict(empty_bucket)
+    cond_buckets       = defaultdict(empty_bucket)
+    barrier_buckets    = defaultdict(empty_bucket)
+    track_buckets      = defaultdict(empty_bucket)
+    class_buckets      = defaultdict(empty_bucket)
+    jockey_buckets     = defaultdict(empty_bucket)
+    trainer_buckets    = defaultdict(empty_bucket)
+    sire_buckets       = defaultdict(empty_bucket)
+    market_agree_stat  = {'agree': empty_bucket(), 'disagree': empty_bucket()}
+    component_buckets  = defaultdict(empty_bucket)  # component name → stats (all horses)
+    days_buckets       = defaultdict(empty_bucket)
+
+    # We need ALL horses for jockey/trainer/sire (not just top picks)
+    # But for top-pick-only metrics we use the race top pick
+
+    def _accum(bucket, won, sp):
+        bucket['races']  += 1
+        bucket['wins']   += (1 if won else 0)
+        bucket['profit'] += ((sp * stake - stake) if won else -stake)
+
+    def _score_tier(s):
+        if s >= 90: return '90-100'
+        if s >= 80: return '80-89'
+        if s >= 70: return '70-79'
+        if s >= 60: return '60-69'
+        if s >= 50: return '50-59'
+        if s >= 40: return '40-49'
+        if s >= 30: return '30-39'
+        return '<30'
+
+    def _dist_bucket(d):
+        try:
+            d = int(d)
+        except (ValueError, TypeError):
+            return None
+        if d <= 1200: return 'Sprint (≤1200m)'
+        if d <= 1500: return 'Short (1300-1500m)'
+        if d <= 1700: return 'Mile (1550-1700m)'
+        if d <= 2200: return 'Middle (1800-2200m)'
+        return 'Staying (2400m+)'
+
+    def _barrier_bucket(b):
+        try:
+            b = int(b)
+        except (ValueError, TypeError):
+            return None
+        if b <= 3:  return '1-3'
+        if b <= 6:  return '4-6'
+        if b <= 9:  return '7-9'
+        return '10+'
+
+    def _days_bucket(days):
+        if days is None:            return 'First Start / Unknown'
+        if days <= 7:               return 'Quick Back-up (≤7d)'
+        if days <= 14:              return 'Short (8-14d)'
+        if days <= 28:              return 'Normal (15-28d)'
+        if days <= 59:              return 'Fresh (29-59d)'
+        if days <= 89:              return 'Resuming (60-89d)'
+        return 'Long Spell (90d+)'
+
+    def _track_from_name(meeting_name):
+        if '_' in meeting_name:
+            return meeting_name.split('_')[1]
+        return meeting_name
+
+    def _parse_days(row):
+        csv_data = row.csv_data or {}
+        raw = csv_data.get('days since last run', '') or csv_data.get('days_since_run', '')
+        if raw:
+            try:
+                return int(float(str(raw).strip()))
+            except (ValueError, TypeError):
+                pass
+        if row.notes:
+            m = _re.search(r'(\d+)\s*days?\s*since\s*(last\s*)?run', row.notes, _re.IGNORECASE)
+            if m:
+                try:
+                    return int(m.group(1))
+                except ValueError:
+                    pass
+        return None
+
+    # Jockey/trainer/sire counts (all horses, not just top picks)
+    jockey_run_count  = defaultdict(int)
+    trainer_run_count = defaultdict(int)
+    sire_run_count    = defaultdict(int)
+
+    for row in rows:
+        csv_data = row.csv_data or {}
+        j = (row.jockey or '').strip()
+        t = (row.trainer or '').strip()
+        s = csv_data.get('horse sire', '').strip()
+        if j: jockey_run_count[j]  += 1
+        if t: trainer_run_count[t] += 1
+        if s: sire_run_count[s]    += 1
+
+    # Process components across all horses (mirroring aggregate_component_stats)
+    comp_all = defaultdict(lambda: {'appearances': 0, 'wins': 0, 'profit': 0.0})
+    for row in rows:
+        if not row.notes:
+            continue
+        won = row.finish_position == 1
+        sp  = row.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        components = parse_notes_components(row.notes)
+        # also add age/sex
+        csv_data = row.csv_data or {}
+        age = csv_data.get('horse age')
+        sex = csv_data.get('horse sex')
+        if age and sex:
+            components[f"{age}yo {sex}"] = 1.0
+        for cname in components:
+            comp_all[cname]['appearances'] += 1
+            if won:
+                comp_all[cname]['wins'] += 1
+            comp_all[cname]['profit'] += profit
+
+    # Derive positive ROI component set (min 20 appearances to trust signal)
+    positive_components = {
+        name for name, stats in comp_all.items()
+        if stats['appearances'] >= 20
+        and (stats['profit'] / (stats['appearances'] * stake) * 100) > 0
+    }
+
+    # ── 3. Per-race top-pick pass: accumulate single-factor buckets ────────────
+    for key in race_keys_ordered:
+        horse_rows = races_map[key]
+        if not horse_rows:
+            continue
+
+        # find top pick
+        top = max(horse_rows, key=lambda r: r.score)
+        won    = top.finish_position == 1
+        sp     = top.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        csv_data = top.csv_data or {}
+
+        # Score tier
+        _accum(score_buckets[_score_tier(top.score)], won, sp)
+
+        # Field size
+        active = [r for r in horse_rows if r.finish_position > 0]
+        fs = len(active)
+        if fs <= 7:   fs_label = 'Small (≤7)'
+        elif fs <= 11: fs_label = 'Medium (8-11)'
+        elif fs <= 15: fs_label = 'Large (12-15)'
+        else:          fs_label = 'Very Large (16+)'
+        _accum(field_buckets[fs_label], won, sp)
+
+        # Distance
+        db_val = _dist_bucket(csv_data.get('distance') or top.distance)
+        if db_val:
+            _accum(dist_buckets[db_val], won, sp)
+
+        # Track condition
+        cond = top.track_condition or 'Unknown'
+        _accum(cond_buckets[cond], won, sp)
+
+        # Barrier
+        bb = _barrier_bucket(csv_data.get('horse barrier') or csv_data.get('barrier'))
+        if bb:
+            _accum(barrier_buckets[bb], won, sp)
+
+        # Track
+        track = _track_from_name(top.meeting_name)
+        _accum(track_buckets[track], won, sp)
+
+        # Race class
+        rc = top.race_class or 'Unknown'
+        _accum(class_buckets[rc], won, sp)
+
+        # Days since run
+        days = _parse_days(top)
+        _accum(days_buckets[_days_bucket(days)], won, sp)
+
+        # Market agreement: find market fav (lowest SP among active runners)
+        valid_sp = [(r.sp, r.horse_id) for r in active if r.sp and r.sp < 900]
+        if valid_sp:
+            fav_sp, fav_hid = min(valid_sp, key=lambda x: x[0])
+            bucket = 'agree' if top.horse_id == fav_hid else 'disagree'
+            _accum(market_agree_stat[bucket], won, sp)
+
+        # Jockey / Trainer / Sire (all horses in race, not just top pick)
+        for row in horse_rows:
+            row_won    = row.finish_position == 1
+            row_sp     = row.sp or 0
+            row_csv    = row.csv_data or {}
+            j = (row.jockey or '').strip()
+            t = (row.trainer or '').strip()
+            s = row_csv.get('horse sire', '').strip()
+            if j: _accum(jockey_buckets[j],  row_won, row_sp)
+            if t: _accum(trainer_buckets[t], row_won, row_sp)
+            if s: _accum(sire_buckets[s],    row_won, row_sp)
+
+    # ── 4. Derive positive-ROI sets from single-factor buckets ────────────────
+    def _positive_keys(bucket_dict, min_races=5):
+        return {
+            k for k, v in bucket_dict.items()
+            if v['races'] >= min_races
+            and (v['profit'] / (v['races'] * stake) * 100) > 0
+        }
+
+    pos_scores    = _positive_keys(score_buckets,   min_races=10)
+    pos_fields    = _positive_keys(field_buckets,   min_races=10)
+    pos_dists     = _positive_keys(dist_buckets,    min_races=10)
+    pos_conds     = _positive_keys(cond_buckets,    min_races=10)
+    pos_barriers  = _positive_keys(barrier_buckets, min_races=10)
+    pos_tracks    = _positive_keys(track_buckets,   min_races=5)
+    pos_classes   = _positive_keys(class_buckets,   min_races=5)
+    pos_days      = _positive_keys(days_buckets,    min_races=10)
+    pos_jockeys   = {k for k, v in jockey_buckets.items()
+                     if jockey_run_count[k] >= 10
+                     and v['races'] >= 10
+                     and (v['profit'] / (v['races'] * stake) * 100) > 0}
+    pos_trainers  = {k for k, v in trainer_buckets.items()
+                     if trainer_run_count[k] >= 10
+                     and v['races'] >= 10
+                     and (v['profit'] / (v['races'] * stake) * 100) > 0}
+    pos_sires     = {k for k, v in sire_buckets.items()
+                     if sire_run_count[k] >= 10
+                     and v['races'] >= 10
+                     and (v['profit'] / (v['races'] * stake) * 100) > 0}
+    # Market agree is binary
+    pos_market = set()
+    if market_agree_stat['agree']['races'] >= 10:
+        agree_roi = market_agree_stat['agree']['profit'] / (market_agree_stat['agree']['races'] * stake) * 100
+        if agree_roi > 0:
+            pos_market.add('Market: Agree with Favourite')
+
+    # ── 5. Tag each race's top pick with its active positive factors ───────────
+    #
+    # Each factor is namespaced so combinations are meaningful:
+    #   "Score: 90-100", "Field: Large (12-15)", "Distance: Mile", etc.
+
+    tagged_races = []  # list of {'factors': set, 'won': bool, 'sp': float}
+
+    for key in race_keys_ordered:
+        horse_rows = races_map[key]
+        if not horse_rows:
+            continue
+
+        top      = max(horse_rows, key=lambda r: r.score)
+        won      = top.finish_position == 1
+        sp       = top.sp or 0
+        csv_data = top.csv_data or {}
+        active   = [r for r in horse_rows if r.finish_position > 0]
+
+        factors = set()
+
+        # Score tier
+        st = _score_tier(top.score)
+        if st in pos_scores:
+            factors.add(f"Score: {st}")
+
+        # Field size
+        fs = len(active)
+        if fs <= 7:   fsl = 'Small (≤7)'
+        elif fs <= 11: fsl = 'Medium (8-11)'
+        elif fs <= 15: fsl = 'Large (12-15)'
+        else:          fsl = 'Very Large (16+)'
+        if fsl in pos_fields:
+            factors.add(f"Field: {fsl}")
+
+        # Distance
+        db_val = _dist_bucket(csv_data.get('distance') or top.distance)
+        if db_val and db_val in pos_dists:
+            factors.add(f"Distance: {db_val}")
+
+        # Track condition
+        cond = top.track_condition or 'Unknown'
+        if cond in pos_conds:
+            factors.add(f"Condition: {cond}")
+
+        # Barrier
+        bb = _barrier_bucket(csv_data.get('horse barrier') or csv_data.get('barrier'))
+        if bb and bb in pos_barriers:
+            factors.add(f"Barrier: {bb}")
+
+        # Track
+        track = _track_from_name(top.meeting_name)
+        if track in pos_tracks:
+            factors.add(f"Track: {track}")
+
+        # Race class
+        rc = top.race_class or 'Unknown'
+        if rc in pos_classes:
+            factors.add(f"Class: {rc}")
+
+        # Days since run
+        days = _parse_days(top)
+        db_days = _days_bucket(days)
+        if db_days in pos_days:
+            factors.add(f"Days: {db_days}")
+
+        # Jockey
+        j = (top.jockey or '').strip()
+        if j and j in pos_jockeys:
+            factors.add(f"Jockey: {j}")
+
+        # Trainer
+        t = (top.trainer or '').strip()
+        if t and t in pos_trainers:
+            factors.add(f"Trainer: {t}")
+
+        # Sire
+        s = csv_data.get('horse sire', '').strip()
+        if s and s in pos_sires:
+            factors.add(f"Sire: {s}")
+
+        # Market agreement
+        valid_sp = [(r.sp, r.horse_id) for r in active if r.sp and r.sp < 900]
+        if valid_sp:
+            fav_hid = min(valid_sp, key=lambda x: x[0])[1]
+            if top.horse_id == fav_hid and 'Market: Agree with Favourite' in pos_market:
+                factors.add('Market: Agree with Favourite')
+
+        # Positive ROI components (from notes)
+        if top.notes:
+            components = parse_notes_components(top.notes)
+            csv_data2 = top.csv_data or {}
+            age = csv_data2.get('horse age')
+            sex = csv_data2.get('horse sex')
+            if age and sex:
+                components[f"{age}yo {sex}"] = 1.0
+            for cname in components:
+                if cname in positive_components:
+                    factors.add(f"Component: {cname}")
+
+        if len(factors) >= 2:
+            tagged_races.append({'factors': factors, 'won': won, 'sp': sp})
+
+    # ── 6. Count all 2-factor and 3-factor combinations ───────────────────────
+    combo_stats = defaultdict(lambda: {'races': 0, 'wins': 0, 'profit': 0.0})
+
+    for race in tagged_races:
+        factors = sorted(race['factors'])
+        # Cap to 12 most specific factors to avoid combinatorial explosion
+        if len(factors) > 12:
+            priority = [f for f in factors if any(f.startswith(p) for p in ('Component:', 'Jockey:', 'Trainer:', 'Sire:', 'Track:'))]
+            generic  = [f for f in factors if f not in priority]
+            factors  = (priority + generic)[:12]
+        won     = race['won']
+        sp      = race['sp']
+        profit  = (sp * stake - stake) if won else -stake
+
+        # 2-factor combos
+        for pair in itertools.combinations(factors, 2):
+            combo_stats[pair]['races']  += 1
+            combo_stats[pair]['wins']   += (1 if won else 0)
+            combo_stats[pair]['profit'] += profit
+
+        # 3-factor combos
+        for triple in itertools.combinations(factors, 3):
+            combo_stats[triple]['races']  += 1
+            combo_stats[triple]['wins']   += (1 if won else 0)
+            combo_stats[triple]['profit'] += profit
+
+    # ── 7. Filter: positive ROI, minimum appearances, sort by ROI ─────────────
+    results_list = []
+    for combo, stats in combo_stats.items():
+        n = stats['races']
+        if n < min_appearances:
+            continue
+        roi = stats['profit'] / (n * stake) * 100
+        if roi <= 0:
+            continue
+        sr  = stats['wins'] / n * 100
+        results_list.append({
+            'factors':      list(combo),
+            'factor_count': len(combo),
+            'races':        n,
+            'wins':         stats['wins'],
+            'strike_rate':  round(sr, 1),
+            'roi':          round(roi, 1),
+            'profit':       round(stats['profit'], 2),
+        })
+
+    # Sort: 3-factor combos first (more specific), then by ROI descending
+    results_list.sort(key=lambda x: (-x['factor_count'], -x['roi']))
+
+    # Cap output to avoid enormous JSON responses
+    results_list = results_list[:200]
+
+    import gc
+    gc.collect()
+    db.session.expunge_all()
+    db.session.remove()
+
+    return jsonify({
+        'combinations': results_list,
+        'total_found':  len(results_list),
+        'positive_single_factors': {
+            'score_tiers':  list(pos_scores),
+            'field_sizes':  list(pos_fields),
+            'distances':    list(pos_dists),
+            'conditions':   list(pos_conds),
+            'barriers':     list(pos_barriers),
+            'tracks':       sorted(pos_tracks),
+            'classes':      sorted(pos_classes),
+            'days_buckets': list(pos_days),
+            'jockeys':      sorted(pos_jockeys),
+            'trainers':     sorted(pos_trainers),
+            'sires':        sorted(pos_sires),
+            'market':       list(pos_market),
+            'components':   sorted(positive_components),
+        }
+    })
+
 # ----- ML Data Export Route -----
 @app.route("/data/export")
 @login_required
