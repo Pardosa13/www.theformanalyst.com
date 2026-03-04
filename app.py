@@ -4469,10 +4469,13 @@ def api_monthly_performance():
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
 
+    from collections import defaultdict
+
     track_filter = request.args.get('track', '')
     date_from    = request.args.get('date_from', '')
     date_to      = request.args.get('date_to', '')
-    limit_param  = request.args.get('limit', 'all')
+    # FIX: default to 500 instead of 'all' — prevents worker timeout on large datasets
+    limit_param  = request.args.get('limit', '500')
     stake        = 10.0
 
     race_id_q = db.session.query(Race.id).join(
@@ -4497,7 +4500,7 @@ def api_monthly_performance():
     if limit_param == 'all':
         race_ids = [r[0] for r in all_ids]
     else:
-        limit = int(limit_param) if limit_param.isdigit() else 9999
+        limit = int(limit_param) if str(limit_param).isdigit() else 500
         race_ids = [r[0] for r in all_ids[:limit]]
 
     rows = db.session.query(
@@ -4515,15 +4518,30 @@ def api_monthly_performance():
         Race.id.in_(race_ids)
     ).all()
 
-    from collections import defaultdict
     races_map = defaultdict(list)
     for horse, pred, result, race, meeting in rows:
         key = (meeting.id, race.race_number)
-        date_val = meeting.date or meeting.uploaded_at.date()
-        period = date_val.strftime('%Y-%m')
-        races_map[key].append({'period': period, 'score': pred.score, 'result': result})
+
+        # FIX: safe date resolution — meeting.date or uploaded_at, with None guards
+        try:
+            if meeting.date:
+                date_val = meeting.date
+            elif meeting.uploaded_at:
+                date_val = meeting.uploaded_at.date()
+            else:
+                continue  # skip records with no date at all
+            period = date_val.strftime('%Y-%m')
+        except Exception:
+            continue  # skip anything that fails to format
+
+        races_map[key].append({
+            'period': period,
+            'score':  pred.score,
+            'result': result
+        })
 
     monthly = defaultdict(lambda: {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0})
+
     for race_data in races_map.values():
         top    = max(race_data, key=lambda x: x['score'])
         period = top['period']
@@ -4531,6 +4549,7 @@ def api_monthly_performance():
         placed = top['result'].finish_position in [1, 2, 3]
         sp     = top['result'].sp or 0
         profit = (sp * stake - stake) if won else -stake
+
         monthly[period]['races']  += 1
         monthly[period]['wins']   += (1 if won else 0)
         monthly[period]['places'] += (1 if placed else 0)
@@ -4552,11 +4571,13 @@ def api_monthly_performance():
         })
 
     result = jsonify({'monthly': result_list})
+
     del rows, races_map, monthly, result_list
     import gc
     gc.collect()
     db.session.expunge_all()
     db.session.remove()
+
     return result
 
 # ----- ML Data Export Route -----
