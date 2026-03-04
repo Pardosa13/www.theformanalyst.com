@@ -1158,15 +1158,19 @@ function loadMonthlyPerformance() {
 
 function renderPnlOverTime(data) {
     const container = document.getElementById('pnlOverTime');
-    if (!data.series || data.series.length === 0) {
+
+    // FIX: backend sends data.data_points, not data.series
+    if (!data.data_points || data.data_points.length === 0) {
         container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No data with results yet.</p></div>';
         return;
     }
 
-    const finalPnl = data.total_cumulative;
+    // FIX: backend sends data.total_profit, not data.total_cumulative
+    const finalPnl = data.total_profit;
     const pnlColor = finalPnl >= 0 ? '#34d399' : '#f87171';
     const pnlSign  = finalPnl >= 0 ? '+' : '';
 
+    // FIX: data.data_points is per-race (not per-day), so length = total races
     let html = `<div class="card-body">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <div>
@@ -1175,35 +1179,38 @@ function renderPnlOverTime(data) {
             </div>
             <div style="text-align:right">
                 <span style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace;color:${pnlColor}">${pnlSign}$${finalPnl.toFixed(2)}</span>
-                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em">${data.series.length} days / ${data.series.reduce((a,b) => a + b.races, 0)} races</div>
+                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em">${data.total_races} races total</div>
             </div>
         </div>
         <canvas id="pnlChart" height="140"></canvas>
         <div class="table-responsive mt-4">
             <table class="table table-sm table-hover">
                 <thead class="table-dark">
-                    <tr><th>Date</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Day P&L</th><th class="text-center">Day ROI</th><th class="text-center">Cumulative</th></tr>
+                    <tr><th>Date</th><th class="text-center">Meeting</th><th class="text-center">Race</th><th class="text-center">Result</th><th class="text-center">Race P&L</th><th class="text-center">Cumulative</th></tr>
                 </thead><tbody>`;
 
-    // Show last 30 days in table (chart shows all)
-    const tableRows = data.series.slice(-30).reverse();
+    // FIX: show last 30 races (each row = 1 race, not 1 day)
+    const tableRows = data.data_points.slice(-30).reverse();
     for (const row of tableRows) {
-        const sr = row.races > 0 ? (row.wins / row.races * 100).toFixed(1) : '0.0';
+        // FIX: row.profit (not row.daily_profit), row.cumulative (not row.cumulative_profit)
+        // FIX: row.won is boolean — no row.wins or row.races
+        const resultLabel = row.won ? '✅ WON' : '❌';
+        const racePnl = row.profit;
         html += `<tr>
             <td><strong>${row.date}</strong></td>
-            <td class="text-center">${row.races}</td>
-            <td class="text-center">${row.wins}</td>
-            <td class="text-center">${sr}%</td>
-            <td class="text-center ${row.daily_profit >= 0 ? 'text-success' : 'text-danger'}">${row.daily_profit >= 0 ? '+' : ''}$${row.daily_profit.toFixed(2)}</td>
-            <td class="text-center ${row.daily_roi >= 0 ? 'text-success' : 'text-danger'}">${row.daily_roi >= 0 ? '+' : ''}${row.daily_roi.toFixed(1)}%</td>
-            <td class="text-center ${row.cumulative_profit >= 0 ? 'text-success' : 'text-danger'}">${row.cumulative_profit >= 0 ? '+' : ''}$${row.cumulative_profit.toFixed(2)}</td>
+            <td class="text-center" style="font-size:11px;color:var(--text-muted)">${row.meeting}</td>
+            <td class="text-center">R${row.race}</td>
+            <td class="text-center">${resultLabel}</td>
+            <td class="text-center ${racePnl >= 0 ? 'text-success' : 'text-danger'}">${racePnl >= 0 ? '+' : ''}$${racePnl.toFixed(2)}</td>
+            <td class="text-center ${row.cumulative >= 0 ? 'text-success' : 'text-danger'}">${row.cumulative >= 0 ? '+' : ''}$${row.cumulative.toFixed(2)}</td>
         </tr>`;
     }
     html += '</tbody></table></div></div>';
     container.innerHTML = html;
 
-    const labels = data.series.map(r => r.date);
-    const cumValues = data.series.map(r => r.cumulative_profit);
+    // FIX: data.data_points, r.cumulative (not r.cumulative_profit)
+    const labels    = data.data_points.map(r => r.date);
+    const cumValues = data.data_points.map(r => r.cumulative);
 
     new Chart(document.getElementById('pnlChart'), {
         type: 'line',
@@ -1217,7 +1224,8 @@ function renderPnlOverTime(data) {
                 borderWidth: 2,
                 fill: true,
                 tension: 0.3,
-                pointRadius: data.series.length > 60 ? 0 : 3,
+                // FIX: use data.data_points.length
+                pointRadius: data.data_points.length > 60 ? 0 : 3,
                 pointHoverRadius: 5,
             }]
         },
@@ -1232,8 +1240,9 @@ function renderPnlOverTime(data) {
                 x: {
                     ticks: {
                         color: '#9090a8', font: { size: 10 }, maxTicksLimit: 12,
+                        // FIX: data.data_points.length
                         callback: function(val, idx) {
-                            return data.series.length > 30 && idx % Math.ceil(data.series.length / 12) !== 0 ? '' : this.getLabelForValue(val);
+                            return data.data_points.length > 30 && idx % Math.ceil(data.data_points.length / 12) !== 0 ? '' : this.getLabelForValue(val);
                         }
                     },
                     grid: { display: false }
@@ -1245,8 +1254,9 @@ function renderPnlOverTime(data) {
                     callbacks: {
                         label: ctx => ` Cumulative: $${ctx.parsed.y.toFixed(2)}`,
                         afterLabel: ctx => {
-                            const row = data.series[ctx.dataIndex];
-                            return ` Day P&L: ${row.daily_profit >= 0 ? '+' : ''}$${row.daily_profit.toFixed(2)} | ${row.wins}/${row.races} wins`;
+                            // FIX: data.data_points, row.profit (not daily_profit), row.won (not wins/races)
+                            const row = data.data_points[ctx.dataIndex];
+                            return ` Race P&L: ${row.profit >= 0 ? '+' : ''}$${row.profit.toFixed(2)} | ${row.won ? 'WON' : 'Lost'} | R${row.race} ${row.meeting}`;
                         }
                     }
                 }
@@ -1259,13 +1269,20 @@ function renderFieldSize(data) {
     const container = document.getElementById('fieldSizeAnalysis');
     const fs = {};
     (data.field_sizes || []).forEach(item => { fs[item.label] = item; });
+
     if (!data.field_sizes || data.field_sizes.length === 0) {
         container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No data yet.</p></div>';
         return;
     }
 
     const bucketOrder = ['Small (≤7)', 'Medium (8-11)', 'Large (12-15)', 'Very Large (16+)'];
-    const colours = ['rgba(102,126,234,0.75)', 'rgba(16,185,129,0.75)', 'rgba(245,158,11,0.75)'];
+    // FIX: 4 colours for 4 buckets (was only 3, causing TypeError on colours[3].replace())
+    const colours = [
+        'rgba(102,126,234,0.75)',
+        'rgba(16,185,129,0.75)',
+        'rgba(245,158,11,0.75)',
+        'rgba(239,68,68,0.75)'
+    ];
 
     let html = `<div class="card-body">
         <p class="text-muted" style="font-size:12px">Performance of your #1 rated horse by field size. Identifies where your model has the strongest edge.</p>
@@ -1273,9 +1290,10 @@ function renderFieldSize(data) {
 
     bucketOrder.forEach((b, i) => {
         const s = fs[b];
+        // FIX: backend uses s.races (not s.runs) — cards section was already correct
         if (!s || s.races === 0) return;
         const roiCol = s.roi >= 0 ? '#34d399' : '#f87171';
-        html += `<div class="col-md-4 mb-3">
+        html += `<div class="col-md-3 mb-3">
             <div class="card h-100">
                 <div class="card-body text-center">
                     <h6 style="color:${colours[i].replace('0.75','1')}">${b}</h6>
@@ -1298,7 +1316,8 @@ function renderFieldSize(data) {
 
     for (const b of bucketOrder) {
         const s = fs[b];
-        if (!s || s.runs === 0) continue;
+        // FIX: backend uses s.races (not s.runs) — was causing all table rows to be skipped
+        if (!s || s.races === 0) continue;
         html += `<tr><td><strong>${b}</strong></td><td class="text-center">${s.races}</td><td class="text-center">${s.wins}</td>
             <td class="text-center ${s.strike_rate >= 20 ? 'text-success' : ''}">${s.strike_rate}%</td>
             <td class="text-center">${s.place_rate}%</td>
@@ -1311,9 +1330,16 @@ function renderFieldSize(data) {
     new Chart(document.getElementById('fieldSizeChart'), {
         type: 'bar',
         data: {
+            // FIX: filter uses s.races (consistent with backend)
             labels: bucketOrder.filter(b => fs[b] && fs[b].races > 0),
             datasets: [
-                { label: 'Strike Rate %', data: bucketOrder.filter(b => fs[b]?.races > 0).map(b => fs[b].strike_rate), backgroundColor: colours, borderWidth: 1 },
+                {
+                    label: 'Strike Rate %',
+                    data: bucketOrder.filter(b => fs[b]?.races > 0).map(b => fs[b].strike_rate),
+                    // FIX: colours array now has 4 entries — no more undefined[i] crash
+                    backgroundColor: bucketOrder.filter(b => fs[b]?.races > 0).map((b, i) => colours[i]),
+                    borderWidth: 1
+                },
             ]
         },
         options: {
@@ -1338,29 +1364,33 @@ function renderDaysSinceRun(data) {
         return;
     }
 
-    const hasData = order.some(b => dsr[b] && dsr[b].races > 0);
+    // FIX: backend uses s.runs (not s.races) — was causing hasData to always be false
+    // meaning the "CSV Field Not Found" alert always showed even when data existed
+    const hasData = order.some(b => dsr[b] && dsr[b].runs > 0);
     const unknown = dsr['Unknown'] || {};
 
     let html = `<div class="card-body">
         <p class="text-muted" style="font-size:12px">Performance of your #1 rated horse by days since last run. Reveals whether fresh or race-fit horses have the edge.</p>`;
 
-    if (!hasData || (order.filter(b => b !== 'Unknown' && dsr[b]?.races > 0).length === 0)) {
+    // FIX: both checks use s.runs
+    if (!hasData || (order.filter(b => b !== 'Unknown' && dsr[b]?.runs > 0).length === 0)) {
         html += `<div class="alert alert-info">
             <strong>CSV Field Not Found</strong> — Days since last run data isn't being picked up from your CSV.
             The field must be named: <code>days since last run</code>, <code>days_since_last_run</code>, or <code>daysSinceLastRun</code>.
-            ${unknown.races > 0 ? `<br><small>${unknown.races} races had no days data.</small>` : ''}
+            ${unknown.runs > 0 ? `<br><small>${unknown.runs} races had no days data.</small>` : ''}
         </div>`;
     } else {
         html += `<div class="table-responsive">
             <table class="table table-sm table-hover">
                 <thead class="table-dark">
-                    <tr><th>Days Since Run</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Place %</th><th class="text-center">ROI %</th><th class="text-center">P&L</th></tr>
+                    <tr><th>Days Since Run</th><th class="text-center">Runs</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Place %</th><th class="text-center">ROI %</th><th class="text-center">P&L</th></tr>
                 </thead><tbody>`;
 
         for (const b of order) {
             const s = dsr[b];
+            // FIX: s.runs (backend field name) — this was already correct in the original
             if (!s || s.runs === 0) continue;
-            const isUnknown = b === 'Unknown';
+            const isUnknown = b === 'First Start / Unknown';
             html += `<tr style="${isUnknown ? 'opacity:0.6' : ''}">
                 <td><strong>${b}</strong></td>
                 <td class="text-center">${s.runs}</td>
@@ -1373,8 +1403,8 @@ function renderDaysSinceRun(data) {
         }
         html += '</tbody></table></div>';
 
-        // Bar chart for non-unknown buckets
-        const chartBuckets = order.filter(b => b !== 'Unknown' && dsr[b]?.races > 0);
+        // FIX: chartBuckets filter uses s.runs (not s.races)
+        const chartBuckets = order.filter(b => b !== 'First Start / Unknown' && dsr[b]?.runs > 0);
         if (chartBuckets.length > 0) {
             html += `<canvas id="dsrChart" height="120" class="mt-3"></canvas>`;
         }
@@ -1382,7 +1412,8 @@ function renderDaysSinceRun(data) {
     html += '</div>';
     container.innerHTML = html;
 
-    const chartBuckets = order.filter(b => b !== 'Unknown' && dsr[b]?.races > 0);
+    // FIX: chartBuckets filter uses s.runs (not s.races) — was causing chart to never render
+    const chartBuckets = order.filter(b => b !== 'First Start / Unknown' && dsr[b]?.runs > 0);
     if (chartBuckets.length > 0 && document.getElementById('dsrChart')) {
         new Chart(document.getElementById('dsrChart'), {
             type: 'bar',
@@ -1435,7 +1466,7 @@ function renderMarketDivergence(data) {
                         <div style="font-size:1.5rem;font-weight:800;font-family:'DM Mono',monospace">${agree.wins || 0}/${agree.races || 0}</div>
                         <div style="font-size:13px;margin:4px 0">Strike: <strong style="color:${(agree.strike_rate || 0) >= 20 ? '#34d399' : 'var(--text-primary)'}">${agree.strike_rate || 0}%</strong></div>
                         <div style="font-size:13px">ROI: <strong style="color:${(agree.roi || 0) >= 0 ? '#34d399' : '#f87171'}">${(agree.roi || 0) >= 0 ? '+' : ''}${agree.roi || 0}%</strong></div>
-                        <div style="font-size:11px;color:var(--text-muted)">${((agree.races || 0) / totalRaces * 100).toFixed(0)}% of races</div>
+                        <div style="font-size:11px;color:var(--text-muted)">${totalRaces > 0 ? ((agree.races || 0) / totalRaces * 100).toFixed(0) : 0}% of races</div>
                     </div>
                 </div>
             </div>
@@ -1447,13 +1478,12 @@ function renderMarketDivergence(data) {
                         <div style="font-size:1.5rem;font-weight:800;font-family:'DM Mono',monospace">${disagree.wins || 0}/${disagree.races || 0}</div>
                         <div style="font-size:13px;margin:4px 0">Strike: <strong style="color:${(disagree.strike_rate || 0) >= 20 ? '#34d399' : 'var(--text-primary)'}">${disagree.strike_rate || 0}%</strong></div>
                         <div style="font-size:13px">ROI: <strong style="color:${(disagree.roi || 0) >= 0 ? '#34d399' : '#f87171'}">${(disagree.roi || 0) >= 0 ? '+' : ''}${disagree.roi || 0}%</strong></div>
-                        <div style="font-size:11px;color:var(--text-muted)">${((disagree.races || 0) / totalRaces * 100).toFixed(0)}% of races</div>
+                        <div style="font-size:11px;color:var(--text-muted)">${totalRaces > 0 ? ((disagree.races || 0) / totalRaces * 100).toFixed(0) : 0}% of races</div>
                     </div>
                 </div>
             </div>
         </div>`;
 
-    // Insight callout
     const hasDisagreeEdge = (disagree.roi || 0) > (agree.roi || 0);
     html += `<div class="alert alert-info">
         <strong>💡 What this means: </strong>
@@ -1475,7 +1505,6 @@ function renderMonthlyPerformance(data) {
 
     const months = data.monthly;
     const recentMonths = months.slice(-3);
-    const earlierMonths = months.slice(0, -3);
     const recentAvgROI = recentMonths.length
         ? recentMonths.reduce((a, b) => a + b.roi, 0) / recentMonths.length
         : 0;
@@ -1517,9 +1546,9 @@ function renderMonthlyPerformance(data) {
     html += '</tbody></table></div></div>';
     container.innerHTML = html;
 
-    const labels    = months.map(r => r.period);
+    const labels      = months.map(r => r.period);
     const strikeRates = months.map(r => r.strike_rate);
-    const roiValues = months.map(r => r.roi);
+    const roiValues   = months.map(r => r.roi);
 
     new Chart(document.getElementById('monthlyChart'), {
         type: 'bar',
@@ -1530,7 +1559,7 @@ function renderMonthlyPerformance(data) {
                     label: 'ROI %',
                     data: roiValues,
                     backgroundColor: roiValues.map(v => v >= 0 ? 'rgba(52,211,153,0.65)' : 'rgba(248,113,113,0.65)'),
-                    borderColor:     roiValues.map(v => v >= 0 ? 'rgba(52,211,153,1)' : 'rgba(248,113,113,1)'),
+                    borderColor:     roiValues.map(v => v >= 0 ? 'rgba(52,211,153,1)'    : 'rgba(248,113,113,1)'),
                     borderWidth: 1,
                     yAxisID: 'y',
                 },
@@ -1569,9 +1598,7 @@ function renderMonthlyPerformance(data) {
                 }
             },
             plugins: {
-                legend: {
-                    labels: { color: '#9090a8', font: { size: 11 } }
-                }
+                legend: { labels: { color: '#9090a8', font: { size: 11 } } }
             }
         }
     });
