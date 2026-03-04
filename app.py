@@ -2871,92 +2871,72 @@ def admin_panel():
 def data_analytics():
     if not current_user.is_admin:
         flash("Access denied. Admin privileges required.", "danger")
-        return redirect(url_for("history"))  # Change from dashboard to history
-    
+        return redirect(url_for("history"))
+
     track_filter = request.args.get('track', '')
     min_score_filter = request.args.get('min_score', type=float)
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    
+    limit_param = request.args.get('limit', '200')
+
     tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
-    
-    race_id_query = db.session.query(Race.id).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).join(
-        Horse, Horse.race_id == Race.id
-    ).join(
-        Result, Result.horse_id == Horse.id
-    ).filter(
-        Result.finish_position > 0
-    )
-    
+
+    # SINGLE lean query — column-level only
+    q = db.session.query(
+        Meeting.id,
+        Race.race_number,
+        Prediction.score,
+        Result.finish_position,
+        Result.sp
+    ).join(Race,       Race.meeting_id      == Meeting.id
+    ).join(Horse,      Horse.race_id        == Race.id
+    ).join(Prediction, Prediction.horse_id  == Horse.id
+    ).join(Result,     Result.horse_id      == Horse.id
+    ).filter(Result.finish_position > 0)
+
     if track_filter:
-        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+        q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+        q = q.filter(Meeting.uploaded_at >= date_from)
     if date_to:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
-    
-    limit_param = request.args.get('limit', '200')
-    
-    # Get distinct race IDs ordered by most recent
-    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
-    
-    # Apply limit
-    if limit_param == 'all':
-        recent_race_ids = [r[0] for r in all_race_ids]
-    else:
-        limit = int(limit_param) if limit_param.isdigit() else 200
-        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
-    
-    base_query = db.session.query(
-        Horse, Prediction, Result, Race, Meeting
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
-        Result, Horse.id == Result.horse_id
-    ).join(
-        Race, Horse.race_id == Race.id
-    ).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).filter(
-        Result.finish_position > 0,
-        Race.id.in_(recent_race_ids)
-    )
-    
-    all_results = base_query.all()
-    
-    races_data = {}
-    for horse, pred, result, race, meeting in all_results:
-        race_key = (meeting.id, race.race_number)
-        if race_key not in races_data:
-            races_data[race_key] = []
-        races_data[race_key].append({
-            'prediction': pred,
-            'result': result
-        })
-    
-    total_races = len(races_data)
-    top_pick_wins = 0
-    total_profit = 0
-    winner_sps = []
+        q = q.filter(Meeting.uploaded_at <= date_to)
+
+    q = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc())
+    rows = q.all()
+
+    # Group by race
+    from collections import defaultdict
+    races = defaultdict(list)
+    race_keys_ordered = []
+    for meeting_id, race_num, score, finish_pos, sp in rows:
+        key = (meeting_id, race_num)
+        if key not in races:
+            race_keys_ordered.append(key)
+        races[key].append({'score': score, 'finish_pos': finish_pos, 'sp': sp or 0})
+
+    # Apply limit by race count
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        race_keys_ordered = race_keys_ordered[:limit]
+
     stake = 10.0
-    
-    for race_key, horses in races_data.items():
-        if not horses:
+    total_races = 0
+    top_pick_wins = 0
+    total_profit = 0.0
+    winner_sps = []
+
+    for key in race_keys_ordered:
+        horses = races[key]
+        top = max(horses, key=lambda x: x['score'])
+
+        if min_score_filter and top['score'] < min_score_filter:
             continue
-        horses_sorted = sorted(horses, key=lambda x: x['prediction'].score, reverse=True)
-        top_pick = horses_sorted[0]
-        
-        if min_score_filter and top_pick['prediction'].score < min_score_filter:
-            total_races -= 1
-            continue
-        
-        result = top_pick['result']
-        won = result.finish_position == 1
-        sp = result.sp or 0
-        
+
+        total_races += 1
+        won = top['finish_pos'] == 1
+        sp = top['sp']
+
         if won:
             top_pick_wins += 1
             total_profit += (sp * stake - stake)
@@ -2964,11 +2944,12 @@ def data_analytics():
                 winner_sps.append(sp)
         else:
             total_profit -= stake
-    
+
     strike_rate = (top_pick_wins / total_races * 100) if total_races > 0 else 0
     roi = (total_profit / (total_races * stake) * 100) if total_races > 0 else 0
     avg_winner_sp = sum(winner_sps) / len(winner_sps) if winner_sps else 0
-    
+
+    # Best bets stats (already limited to 500, keep as-is)
     best_bets_stats = None
     try:
         best_bet_predictions = db.session.query(Prediction, Result, Horse).join(
@@ -2979,82 +2960,56 @@ def data_analytics():
             Prediction.best_bet_flagged_at.isnot(None),
             Result.finish_position > 0
         ).limit(500).all()
-        
+
         if best_bet_predictions:
             total_bets = len(best_bet_predictions)
             wins = sum(1 for pred, res, horse in best_bet_predictions if res.finish_position == 1)
             places = sum(1 for pred, res, horse in best_bet_predictions if res.finish_position in [1, 2, 3])
-            
             stake_per_bet = 10
             total_staked = total_bets * stake_per_bet
-            total_return = 0
-            
-            for pred, res, horse in best_bet_predictions:
-                if res.finish_position == 1 and res.sp:
-                    total_return += stake_per_bet * res.sp
-            
+            total_return = sum(
+                stake_per_bet * res.sp
+                for pred, res, horse in best_bet_predictions
+                if res.finish_position == 1 and res.sp
+            )
             profit = total_return - total_staked
             bb_roi = (profit / total_staked * 100) if total_staked > 0 else 0
-            bb_strike = (wins / total_bets * 100) if total_bets > 0 else 0
-            bb_place = (places / total_bets * 100) if total_bets > 0 else 0
-            
+
             component_performance = {}
             for pred, res, horse in best_bet_predictions:
                 if pred.notes:
                     components = parse_notes_components(pred.notes)
                     for comp_name in components.keys():
                         if comp_name not in component_performance:
-                            component_performance[comp_name] = {
-                                'bets': 0,
-                                'wins': 0,
-                                'staked': 0,
-                                'return': 0
-                            }
-                        
+                            component_performance[comp_name] = {'bets': 0, 'wins': 0, 'staked': 0, 'return': 0}
                         component_performance[comp_name]['bets'] += 1
                         component_performance[comp_name]['staked'] += stake_per_bet
-                        
-                        if res.finish_position == 1:
+                        if res.finish_position == 1 and res.sp:
                             component_performance[comp_name]['wins'] += 1
-                            if res.sp:
-                                component_performance[comp_name]['return'] += stake_per_bet * res.sp
-            
-            for comp_name in component_performance:
-                comp = component_performance[comp_name]
+                            component_performance[comp_name]['return'] += stake_per_bet * res.sp
+
+            for comp in component_performance.values():
                 comp['profit'] = comp['return'] - comp['staked']
                 comp['roi'] = (comp['profit'] / comp['staked'] * 100) if comp['staked'] > 0 else 0
                 comp['sr'] = (comp['wins'] / comp['bets'] * 100) if comp['bets'] > 0 else 0
-            
+
             component_performance = dict(sorted(component_performance.items(), key=lambda x: x[1]['roi'], reverse=True))
-            
+
             best_bets_stats = {
                 'total_bets': total_bets,
                 'wins': wins,
                 'places': places,
-                'strike_rate': bb_strike,
-                'place_rate': bb_place,
+                'strike_rate': (wins / total_bets * 100) if total_bets else 0,
+                'place_rate': (places / total_bets * 100) if total_bets else 0,
                 'total_staked': total_staked,
                 'total_return': total_return,
                 'profit': profit,
                 'roi': bb_roi,
                 'component_performance': component_performance
             }
-            
-            del best_bet_predictions
-            import gc
-            gc.collect()
-            
     except Exception as e:
         print(f"Error calculating Best Bets stats: {e}")
-    
-    del all_results
-    del races_data
-    del winner_sps
-    import gc
-    gc.collect()
-    db.session.expunge_all()
-    db.session.remove()
-    
+
     return render_template("data.html",
         total_races=total_races,
         strike_rate=strike_rate,
@@ -3072,7 +3027,6 @@ def data_analytics():
             'limit': int(limit_param) if limit_param != 'all' else 'all'
         }
     )
-
 
 @app.route("/api/data/score-analysis")
 @login_required
