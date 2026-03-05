@@ -4745,6 +4745,16 @@ def api_combination_analysis():
             combo_stats[triple]['wins']   += (1 if won else 0)
             combo_stats[triple]['profit'] += profit
 
+        for quad in itertools.combinations(factors, 4):
+            combo_stats[quad]['races']  += 1
+            combo_stats[quad]['wins']   += (1 if won else 0)
+            combo_stats[quad]['profit'] += profit
+
+        for quint in itertools.combinations(factors, 5):
+            combo_stats[quint]['races']  += 1
+            combo_stats[quint]['wins']   += (1 if won else 0)
+            combo_stats[quint]['profit'] += profit
+
     # ── 7. Filter: positive ROI, minimum appearances, sort by ROI ─────────────
     results_list = []
     for combo, stats in combo_stats.items():
