@@ -1630,6 +1630,8 @@ function renderCombinationAnalysis(data) {
 
     const twos   = data.combinations.filter(c => c.factor_count === 2);
     const threes = data.combinations.filter(c => c.factor_count === 3);
+    const fours  = data.combinations.filter(c => c.factor_count === 4);
+    const fives  = data.combinations.filter(c => c.factor_count === 5);
 
     function comboTable(combos) {
         let t = `<div class="table-responsive"><table class="table table-sm table-hover">
@@ -1658,9 +1660,19 @@ function renderCombinationAnalysis(data) {
 
     let html = `<div class="card-body">
         <p class="text-muted" style="font-size:12px">Multi-factor combinations with positive ROI across <strong style="color:var(--text-primary)">${data.total_horses_analysed.toLocaleString()}</strong> horses analysed. These are patterns your scoring model may be underweighting — factors that predict winners regardless of current score.</p>`;
+    
+    if (fives.length > 0) {
+        html += `<h5 style="margin-bottom:12px">5-Factor Combinations <span style="font-size:12px;color:var(--text-muted);font-weight:400">(${fives.length} found)</span></h5>`;
+        html += comboTable(fives);
+    }
+
+    if (fours.length > 0) {
+        html += `<h5 style="margin:20px 0 12px">4-Factor Combinations <span style="font-size:12px;color:var(--text-muted);font-weight:400">(${fours.length} found)</span></h5>`;
+        html += comboTable(fours);
+    }
 
     if (threes.length > 0) {
-        html += `<h5 style="margin-bottom:12px">3-Factor Combinations <span style="font-size:12px;color:var(--text-muted);font-weight:400">(${threes.length} found)</span></h5>`;
+        html += `<h5 style="margin:20px 0 12px">3-Factor Combinations <span style="font-size:12px;color:var(--text-muted);font-weight:400">(${threes.length} found)</span></h5>`;
         html += comboTable(threes);
     }
 
