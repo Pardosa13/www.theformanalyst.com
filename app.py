@@ -4393,7 +4393,7 @@ def api_monthly_performance():
 def api_combination_analysis():
     """
     Finds positive-ROI single factors across ALL horses (not just top picks),
-    then identifies combinations of 2-3 factors that produce positive ROI.
+    then identifies combinations of 2-5 factors that produce positive ROI.
 
     Purpose: discover what your scoring model is MISSING — factors that predict
     winners but aren't being weighted heavily enough in the analyzer.
@@ -4508,13 +4508,57 @@ def api_combination_analysis():
         return '10+'
 
     def _days_bucket(days):
-        if days is None:  return None  # exclude unknowns from combinations
+        if days is None:  return None
         if days <= 7:     return 'Quick Back-up (≤7d)'
         if days <= 14:    return 'Short (8-14d)'
         if days <= 28:    return 'Normal (15-28d)'
         if days <= 59:    return 'Fresh (29-59d)'
         if days <= 89:    return 'Resuming (60-89d)'
         return 'Long Spell (90d+)'
+
+    def _weight_bucket(w):
+        try:
+            w = float(str(w).strip())
+        except (ValueError, TypeError):
+            return None
+        if w <= 54:  return '54kg or less'
+        if w <= 57:  return '55-57kg'
+        if w <= 60:  return '58-60kg'
+        return '61kg+'
+
+    def _claim_bucket(c):
+        try:
+            c = float(str(c).strip())
+        except (ValueError, TypeError):
+            return None
+        if c == 0:    return 'No Claim'
+        if c <= 1.5:  return 'Claim 1-1.5kg'
+        if c <= 3:    return 'Claim 2-3kg'
+        return 'Claim 3kg+'
+
+    def _form_price_bucket(p):
+        try:
+            p = float(str(p).strip())
+        except (ValueError, TypeError):
+            return None
+        if p <= 2.0:   return 'Last Start Fav (≤$2)'
+        if p <= 4.0:   return 'Last Start Favoured ($2-$4)'
+        if p <= 8.0:   return 'Last Start Mid ($4-$8)'
+        if p <= 15.0:  return 'Last Start Roughie ($8-$15)'
+        return 'Last Start Long Shot ($15+)'
+
+    def _weight_change_bucket(form_w, horse_w):
+        try:
+            fw = float(str(form_w).strip())
+            hw = float(str(horse_w).strip())
+            diff = hw - fw  # positive = carrying more today
+        except (ValueError, TypeError):
+            return None
+        if diff <= -2:   return 'Weight Drop 2kg+'
+        if diff < 0:     return 'Weight Drop <2kg'
+        if diff == 0:    return 'Same Weight'
+        if diff <= 2:    return 'Weight Rise <2kg'
+        return 'Weight Rise 2kg+'
 
     def _track_from_name(meeting_name):
         if '_' in meeting_name:
@@ -4539,18 +4583,29 @@ def api_combination_analysis():
         return None
 
     # ── 3. First pass: accumulate single-factor buckets across ALL horses ──────
-    score_buckets   = defaultdict(empty_bucket)
-    dist_buckets    = defaultdict(empty_bucket)
-    cond_buckets    = defaultdict(empty_bucket)
-    barrier_buckets = defaultdict(empty_bucket)
-    track_buckets   = defaultdict(empty_bucket)
-    class_buckets   = defaultdict(empty_bucket)
-    jockey_buckets  = defaultdict(empty_bucket)
-    trainer_buckets = defaultdict(empty_bucket)
-    sire_buckets    = defaultdict(empty_bucket)
-    days_buckets    = defaultdict(empty_bucket)
-    age_sex_buckets = defaultdict(empty_bucket)
-    component_buckets = defaultdict(empty_bucket)
+    score_buckets         = defaultdict(empty_bucket)
+    dist_buckets          = defaultdict(empty_bucket)
+    cond_buckets          = defaultdict(empty_bucket)
+    barrier_buckets       = defaultdict(empty_bucket)
+    track_buckets         = defaultdict(empty_bucket)
+    class_buckets         = defaultdict(empty_bucket)
+    jockey_buckets        = defaultdict(empty_bucket)
+    trainer_buckets       = defaultdict(empty_bucket)
+    sire_buckets          = defaultdict(empty_bucket)
+    dam_buckets           = defaultdict(empty_bucket)
+    days_buckets          = defaultdict(empty_bucket)
+    age_sex_buckets       = defaultdict(empty_bucket)
+    age_buckets           = defaultdict(empty_bucket)
+    sex_buckets           = defaultdict(empty_bucket)
+    component_buckets     = defaultdict(empty_bucket)
+    weight_buckets        = defaultdict(empty_bucket)
+    claim_buckets         = defaultdict(empty_bucket)
+    country_buckets       = defaultdict(empty_bucket)
+    sex_restrict_buckets  = defaultdict(empty_bucket)
+    weight_type_buckets   = defaultdict(empty_bucket)
+    form_price_buckets    = defaultdict(empty_bucket)
+    form_weight_buckets   = defaultdict(empty_bucket)
+    weight_change_buckets = defaultdict(empty_bucket)
 
     for row in all_horse_rows:
         won      = row.finish_position == 1
@@ -4597,17 +4652,76 @@ def api_combination_analysis():
         if s:
             _accum(sire_buckets[s], won, sp)
 
+        # Dam
+        dam = csv_data.get('horse dam', '').strip()
+        if dam:
+            _accum(dam_buckets[dam], won, sp)
+
         # Days since run
         days = _parse_days(row)
         db_days = _days_bucket(days)
         if db_days:
             _accum(days_buckets[db_days], won, sp)
 
-        # Age / Sex
+        # Age / Sex — combined and separate
         age = csv_data.get('horse age')
-        sex = csv_data.get('horse sex')
+        sex = csv_data.get('horse sex', '').strip()
         if age and sex:
             _accum(age_sex_buckets[f"{age}yo {sex}"], won, sp)
+        if age:
+            _accum(age_buckets[f"{age}yo"], won, sp)
+        if sex:
+            _accum(sex_buckets[sex], won, sp)
+
+        # Horse weight
+        hw = csv_data.get('horse weight')
+        wb = _weight_bucket(hw)
+        if wb:
+            _accum(weight_buckets[wb], won, sp)
+
+        # Claiming allowance
+        claim = csv_data.get('horse claim')
+        cb = _claim_bucket(claim)
+        if cb:
+            _accum(claim_buckets[cb], won, sp)
+
+        # Country
+        country = csv_data.get('country', '').strip()
+        if country:
+            if country.upper() in ('AUS', 'AUSTRALIA'):
+                country_label = 'AUS'
+            elif country.upper() in ('NZ', 'NEW ZEALAND'):
+                country_label = 'NZ'
+            else:
+                country_label = 'Other'
+            _accum(country_buckets[country_label], won, sp)
+
+        # Sex restrictions
+        sex_restrict = csv_data.get('sex restrictions', '').strip()
+        if sex_restrict:
+            _accum(sex_restrict_buckets[sex_restrict], won, sp)
+
+        # Weight type
+        wt = csv_data.get('weight type', '').strip()
+        if wt:
+            _accum(weight_type_buckets[wt], won, sp)
+
+        # Form price (last start market price)
+        fp = csv_data.get('form price')
+        fpb = _form_price_bucket(fp)
+        if fpb:
+            _accum(form_price_buckets[fpb], won, sp)
+
+        # Form weight (last start weight carried)
+        fw = csv_data.get('form weight')
+        fwb = _weight_bucket(fw)
+        if fwb:
+            _accum(form_weight_buckets[fwb], won, sp)
+
+        # Weight change (form weight vs today's horse weight)
+        wcb = _weight_change_bucket(fw, hw)
+        if wcb:
+            _accum(weight_change_buckets[wcb], won, sp)
 
         # Components from notes
         if row.notes:
@@ -4624,21 +4738,32 @@ def api_combination_analysis():
             and (v['profit'] / (v['races'] * stake) * 100) > 0
         }
 
-    pos_scores    = _positive_keys(score_buckets,    min_races=20)
-    pos_dists     = _positive_keys(dist_buckets,     min_races=20)
-    pos_conds     = _positive_keys(cond_buckets,     min_races=20)
-    pos_barriers  = _positive_keys(barrier_buckets,  min_races=20)
-    pos_tracks    = _positive_keys(track_buckets,    min_races=10)
-    pos_classes   = _positive_keys(class_buckets,    min_races=10)
-    pos_jockeys   = _positive_keys(jockey_buckets,   min_races=min_appearances)
-    pos_trainers  = _positive_keys(trainer_buckets,  min_races=min_appearances)
-    pos_sires     = _positive_keys(sire_buckets,     min_races=min_appearances)
-    pos_days      = _positive_keys(days_buckets,     min_races=20)
-    pos_age_sex   = _positive_keys(age_sex_buckets,  min_races=20)
-    pos_components = _positive_keys(component_buckets, min_races=20)
+    pos_scores        = _positive_keys(score_buckets,         min_races=20)
+    pos_dists         = _positive_keys(dist_buckets,          min_races=20)
+    pos_conds         = _positive_keys(cond_buckets,          min_races=20)
+    pos_barriers      = _positive_keys(barrier_buckets,       min_races=20)
+    pos_tracks        = _positive_keys(track_buckets,         min_races=10)
+    pos_classes       = _positive_keys(class_buckets,         min_races=10)
+    pos_jockeys       = _positive_keys(jockey_buckets,        min_races=min_appearances)
+    pos_trainers      = _positive_keys(trainer_buckets,       min_races=min_appearances)
+    pos_sires         = _positive_keys(sire_buckets,          min_races=min_appearances)
+    pos_dams          = _positive_keys(dam_buckets,           min_races=min_appearances)
+    pos_days          = _positive_keys(days_buckets,          min_races=20)
+    pos_age_sex       = _positive_keys(age_sex_buckets,       min_races=20)
+    pos_age           = _positive_keys(age_buckets,           min_races=20)
+    pos_sex           = _positive_keys(sex_buckets,           min_races=20)
+    pos_components    = _positive_keys(component_buckets,     min_races=20)
+    pos_weights       = _positive_keys(weight_buckets,        min_races=20)
+    pos_claims        = _positive_keys(claim_buckets,         min_races=20)
+    pos_countries     = _positive_keys(country_buckets,       min_races=20)
+    pos_sex_restrict  = _positive_keys(sex_restrict_buckets,  min_races=20)
+    pos_weight_types  = _positive_keys(weight_type_buckets,   min_races=20)
+    pos_form_prices   = _positive_keys(form_price_buckets,    min_races=20)
+    pos_form_weights  = _positive_keys(form_weight_buckets,   min_races=20)
+    pos_weight_change = _positive_keys(weight_change_buckets, min_races=20)
 
     # ── 5. Tag every horse with its positive factors ───────────────────────────
-    tagged_horses = []  # {'factors': set, 'won': bool, 'sp': float, 'horse': str}
+    tagged_horses = []
 
     for row in all_horse_rows:
         won      = row.finish_position == 1
@@ -4697,13 +4822,73 @@ def api_combination_analysis():
         if s and s in pos_sires:
             factors.add(f"Sire: {s}")
 
-        # Age / Sex
+        # Dam
+        dam = csv_data.get('horse dam', '').strip()
+        if dam and dam in pos_dams:
+            factors.add(f"Dam: {dam}")
+
+        # Age / Sex — combined and separate
         age = csv_data.get('horse age')
-        sex = csv_data.get('horse sex')
+        sex = csv_data.get('horse sex', '').strip()
         if age and sex:
             agesex = f"{age}yo {sex}"
             if agesex in pos_age_sex:
                 factors.add(f"AgeSex: {agesex}")
+        if age and f"{age}yo" in pos_age:
+            factors.add(f"Age: {age}yo")
+        if sex and sex in pos_sex:
+            factors.add(f"Sex: {sex}")
+
+        # Horse weight
+        hw = csv_data.get('horse weight')
+        wb = _weight_bucket(hw)
+        if wb and wb in pos_weights:
+            factors.add(f"Weight: {wb}")
+
+        # Claiming allowance
+        claim = csv_data.get('horse claim')
+        cb = _claim_bucket(claim)
+        if cb and cb in pos_claims:
+            factors.add(f"Claim: {cb}")
+
+        # Country
+        country = csv_data.get('country', '').strip()
+        if country:
+            if country.upper() in ('AUS', 'AUSTRALIA'):
+                country_label = 'AUS'
+            elif country.upper() in ('NZ', 'NEW ZEALAND'):
+                country_label = 'NZ'
+            else:
+                country_label = 'Other'
+            if country_label in pos_countries:
+                factors.add(f"Country: {country_label}")
+
+        # Sex restrictions
+        sex_restrict = csv_data.get('sex restrictions', '').strip()
+        if sex_restrict and sex_restrict in pos_sex_restrict:
+            factors.add(f"SexRestrict: {sex_restrict}")
+
+        # Weight type
+        wt = csv_data.get('weight type', '').strip()
+        if wt and wt in pos_weight_types:
+            factors.add(f"WeightType: {wt}")
+
+        # Form price
+        fp = csv_data.get('form price')
+        fpb = _form_price_bucket(fp)
+        if fpb and fpb in pos_form_prices:
+            factors.add(f"FormPrice: {fpb}")
+
+        # Form weight
+        fw = csv_data.get('form weight')
+        fwb = _weight_bucket(fw)
+        if fwb and fwb in pos_form_weights:
+            factors.add(f"FormWeight: {fwb}")
+
+        # Weight change
+        wcb = _weight_change_bucket(fw, hw)
+        if wcb and wcb in pos_weight_change:
+            factors.add(f"WeightChange: {wcb}")
 
         # Components
         if row.notes:
@@ -4720,14 +4905,16 @@ def api_combination_analysis():
                 'horse':   row.horse_name,
             })
 
-    # ── 6. Count all 2-factor and 3-factor combinations ───────────────────────
+    # ── 6. Count all 2, 3, 4 and 5 factor combinations ────────────────────────
     combo_stats = defaultdict(lambda: {'races': 0, 'wins': 0, 'profit': 0.0})
 
     for horse in tagged_horses:
         factors = sorted(horse['factors'])
         # Cap to 12 most specific factors to avoid combinatorial explosion
         if len(factors) > 12:
-            priority = [f for f in factors if any(f.startswith(p) for p in ('Component:', 'Jockey:', 'Trainer:', 'Sire:', 'AgeSex:'))]
+            priority = [f for f in factors if any(f.startswith(p) for p in (
+                'Component:', 'Jockey:', 'Trainer:', 'Sire:', 'Dam:', 'AgeSex:', 'FormPrice:'
+            ))]
             generic  = [f for f in factors if f not in priority]
             factors  = (priority + generic)[:12]
 
@@ -4755,11 +4942,13 @@ def api_combination_analysis():
             combo_stats[quint]['wins']   += (1 if won else 0)
             combo_stats[quint]['profit'] += profit
 
-    # ── 7. Filter: positive ROI, minimum appearances, sort by ROI ─────────────
+    # ── 7. Filter: positive ROI, tiered minimum appearances, sort by ROI ───────
     results_list = []
     for combo, stats in combo_stats.items():
-        n = stats['races']
-        if n < min_appearances:
+        n            = stats['races']
+        factor_count = len(combo)
+        min_n        = {2: 10, 3: 10, 4: 15, 5: 20}.get(factor_count, 10)
+        if n < min_n:
             continue
         roi = stats['profit'] / (n * stake) * 100
         if roi <= 0:
@@ -4767,7 +4956,7 @@ def api_combination_analysis():
         sr = stats['wins'] / n * 100
         results_list.append({
             'factors':      list(combo),
-            'factor_count': len(combo),
+            'factor_count': factor_count,
             'races':        n,
             'wins':         stats['wins'],
             'strike_rate':  round(sr, 1),
@@ -4775,7 +4964,7 @@ def api_combination_analysis():
             'profit':       round(stats['profit'], 2),
         })
 
-    # Sort: 3-factor combos first, then by ROI descending
+    # Sort: highest factor count first, then by ROI descending
     results_list.sort(key=lambda x: (-x['factor_count'], -x['roi']))
     results_list = results_list[:300]
 
@@ -4785,22 +4974,33 @@ def api_combination_analysis():
     db.session.remove()
 
     return jsonify({
-        'combinations': results_list,
-        'total_found':  len(results_list),
+        'combinations':          results_list,
+        'total_found':           len(results_list),
         'total_horses_analysed': len(all_horse_rows),
         'positive_single_factors': {
-            'score_tiers':  sorted(pos_scores),
-            'distances':    sorted(pos_dists),
-            'conditions':   sorted(pos_conds),
-            'barriers':     sorted(pos_barriers),
-            'tracks':       sorted(pos_tracks),
-            'classes':      sorted(pos_classes),
-            'days_buckets': sorted(pos_days),
-            'jockeys':      sorted(pos_jockeys),
-            'trainers':     sorted(pos_trainers),
-            'sires':        sorted(pos_sires),
-            'age_sex':      sorted(pos_age_sex),
-            'components':   sorted(pos_components),
+            'score_tiers':   sorted(pos_scores),
+            'distances':     sorted(pos_dists),
+            'conditions':    sorted(pos_conds),
+            'barriers':      sorted(pos_barriers),
+            'tracks':        sorted(pos_tracks),
+            'classes':       sorted(pos_classes),
+            'days_buckets':  sorted(pos_days),
+            'jockeys':       sorted(pos_jockeys),
+            'trainers':      sorted(pos_trainers),
+            'sires':         sorted(pos_sires),
+            'dams':          sorted(pos_dams),
+            'age_sex':       sorted(pos_age_sex),
+            'ages':          sorted(pos_age),
+            'sexes':         sorted(pos_sex),
+            'components':    sorted(pos_components),
+            'weights':       sorted(pos_weights),
+            'claims':        sorted(pos_claims),
+            'countries':     sorted(pos_countries),
+            'sex_restrict':  sorted(pos_sex_restrict),
+            'weight_types':  sorted(pos_weight_types),
+            'form_prices':   sorted(pos_form_prices),
+            'form_weights':  sorted(pos_form_weights),
+            'weight_change': sorted(pos_weight_change),
         }
     })
 
