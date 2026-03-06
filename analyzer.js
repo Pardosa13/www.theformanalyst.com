@@ -2278,6 +2278,223 @@ const formPriceScores = {
     250: -50, 300: -50, 350: -50, 400: -50, 450: -50, 500: -50
 };
 
+function calculateMarketExpectationScores(data) {
+
+    // --- Date parser (reused from existing code pattern) ---
+    const parseRowDate = (row) => {
+        const dateStr = row['form meeting date'];
+        if (!dateStr) return new Date(0);
+        const datePart = String(dateStr).split(' ')[0];
+        const parts = datePart.split('/');
+        if (parts.length !== 3) return new Date(0);
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        let year = parseInt(parts[2], 10);
+        if (year < 100) year += (year <= 50) ? 2000 : 1900;
+        return new Date(year, month, day);
+    };
+
+    // --- Group all rows by race number ---
+    const raceGroups = {};
+    data.forEach(entry => {
+        const raceNum = parseInt(entry['race number'], 10);
+        if (isNaN(raceNum) || raceNum <= 0) return;
+        if (!raceGroups[raceNum]) raceGroups[raceNum] = [];
+        raceGroups[raceNum].push(entry);
+    });
+
+    const results = [];
+
+    Object.keys(raceGroups).forEach(raceNumKey => {
+        const raceNum = parseInt(raceNumKey, 10);
+        const raceData = raceGroups[raceNum];
+
+        // --- Get unique horses in this race ---
+        const horseMap = {};
+        raceData.forEach(entry => {
+            const name = String(entry['horse name'] || '').trim();
+            if (!name || name.toLowerCase() === 'horse name') return;
+            if (!horseMap[name]) horseMap[name] = [];
+            horseMap[name].push(entry);
+        });
+
+        // --- Calculate raw weighted A/E for each horse ---
+        const horseAE = {}; // name → { ae, validRuns }
+
+        Object.keys(horseMap).forEach(horseName => {
+            const allRows = horseMap[horseName];
+
+            // Get the last10 string from any row (same on all rows for this horse)
+            const last10 = String(allRows[0]['horse last10'] || '').trim();
+            if (!last10 || last10.length === 0) {
+                horseAE[horseName] = { ae: null, validRuns: 0 };
+                return;
+            }
+
+            // Sort rows oldest→newest, filter to valid form prices only
+            const sortedRows = [...allRows]
+                .filter(row => {
+                    const fp = parseFloat(row['form price']);
+                    return !isNaN(fp) && fp >= 1.01 && fp <= 500;
+                })
+                .sort((a, b) => parseRowDate(a) - parseRowDate(b));
+
+            if (sortedRows.length === 0) {
+                horseAE[horseName] = { ae: null, validRuns: 0 };
+                return;
+            }
+
+            // --- Align last10 chars to sorted rows, skipping X (spells) ---
+            // left=oldest, right=newest
+            // Each non-X char maps to the next sorted row in order
+            const chars = last10.split('');
+            const pairs = []; // { char, price } oldest first
+
+            let rowIndex = 0;
+            for (let i = 0; i < chars.length; i++) {
+                const char = chars[i].toLowerCase();
+                if (char === 'x') continue; // spell - no row to align
+                if (rowIndex >= sortedRows.length) break;
+                const fp = parseFloat(sortedRows[rowIndex]['form price']);
+                if (!isNaN(fp) && fp >= 1.01) {
+                    pairs.push({ char, price: fp });
+                }
+                rowIndex++;
+            }
+
+            if (pairs.length === 0) {
+                horseAE[horseName] = { ae: null, validRuns: 0 };
+                return;
+            }
+
+            // --- Exponential decay weights ---
+            // pairs[0]=oldest, pairs[last]=newest
+            // newest gets weight 1.0, each step back multiplies by 0.65
+            // So run 10 ago ≈ 0.65^9 = 0.02 weight (almost nothing)
+            const DECAY = 0.65;
+            const n = pairs.length;
+            const weights = pairs.map((_, i) => {
+                const stepsFromNewest = (n - 1) - i;
+                return Math.pow(DECAY, stepsFromNewest);
+            });
+
+            // --- Weighted A/E calculation ---
+            // Overround factor 0.87 deflates SP-implied probs
+            // (raw SP probs sum to ~115% across a field, so we correct downward)
+            const OVERROUND_FACTOR = 0.87;
+
+            let weightedActual = 0;
+            let weightedExpected = 0;
+
+            pairs.forEach(({ char, price }, i) => {
+                const w = weights[i];
+                const isWin = char === '1' ? 1 : 0;
+                const impliedProb = (1 / price) * OVERROUND_FACTOR;
+                weightedActual += isWin * w;
+                weightedExpected += impliedProb * w;
+            });
+
+            if (weightedExpected === 0) {
+                horseAE[horseName] = { ae: null, validRuns: pairs.length };
+                return;
+            }
+
+            const ae = weightedActual / weightedExpected;
+            horseAE[horseName] = { ae, validRuns: pairs.length };
+        });
+
+        // --- Z-score normalise A/E values within this race field ---
+        // Only horses with valid A/E values participate in normalisation
+        const validAEHorses = Object.keys(horseAE).filter(n => horseAE[n].ae !== null);
+        const aeValues = validAEHorses.map(n => horseAE[n].ae);
+
+        let aeMean = 0;
+        let aeStdDev = 0;
+
+        if (aeValues.length > 1) {
+            aeMean = aeValues.reduce((s, v) => s + v, 0) / aeValues.length;
+            const variance = aeValues.reduce((s, v) => s + Math.pow(v - aeMean, 2), 0) / aeValues.length;
+            aeStdDev = Math.sqrt(variance);
+        }
+
+        // --- Convert to final scores for each horse in this race ---
+        Object.keys(horseMap).forEach(horseName => {
+            const { ae, validRuns } = horseAE[horseName] || { ae: null, validRuns: 0 };
+
+            // Not enough data
+            if (ae === null || validRuns === 0) {
+                results.push({
+                    race: raceNum,
+                    name: horseName,
+                    meScore: 0,
+                    meNote: '+0.0 : Market Expectation - insufficient data\n'
+                });
+                return;
+            }
+
+            // --- Sample size scalar ---
+            // Fewer valid (non-spell) runs = less confidence in A/E
+            let sampleScalar = 1.0;
+            if (validRuns <= 2)      sampleScalar = 0.25;
+            else if (validRuns === 3) sampleScalar = 0.50;
+            else if (validRuns === 4) sampleScalar = 0.65;
+            else if (validRuns === 5) sampleScalar = 0.80;
+            else if (validRuns === 6) sampleScalar = 0.90;
+            else                      sampleScalar = 1.0;
+
+            // --- Z-score based score ---
+            // If only 1 valid horse in field (edge case), fall back to absolute
+            let rawScore = 0;
+            let aeLabel = '';
+            let relativeNote = '';
+
+            if (aeValues.length > 1 && aeStdDev > 0) {
+                // RELATIVE: z-score within field
+                const zScore = (ae - aeMean) / aeStdDev;
+
+                // Scale z-score to ±20 points
+                // z=+2 (top of field) → ~+20, z=-2 (bottom of field) → ~-20
+                rawScore = Math.max(-20, Math.min(20, zScore * 10));
+
+                if (zScore >= 1.5)       aeLabel = 'best market performer in field';
+                else if (zScore >= 0.75) aeLabel = 'above field average';
+                else if (zScore >= -0.75) aeLabel = 'near field average';
+                else if (zScore >= -1.5) aeLabel = 'below field average';
+                else                      aeLabel = 'worst market performer in field';
+
+                relativeNote = `, z=${zScore.toFixed(2)} vs field avg A/E=${aeMean.toFixed(2)}`;
+
+            } else {
+                // ABSOLUTE fallback: only 1 horse with data, or all same A/E
+                if (ae >= 3.0)       { rawScore = 20;  aeLabel = 'chronic overperformer'; }
+                else if (ae >= 1.8)  { rawScore = 15;  aeLabel = 'strong overperformer'; }
+                else if (ae >= 1.2)  { rawScore = 8;   aeLabel = 'moderate outperformer'; }
+                else if (ae >= 0.8)  { rawScore = 0;   aeLabel = 'meeting expectations'; }
+                else if (ae >= 0.5)  { rawScore = -8;  aeLabel = 'mild underperformer'; }
+                else if (ae >= 0.3)  { rawScore = -15; aeLabel = 'significant underperformer'; }
+                else                 { rawScore = -20; aeLabel = 'chronic underperformer'; }
+                relativeNote = ' (absolute - single horse data)';
+            }
+
+            // Apply sample scalar
+            const finalScore = Math.round(rawScore * sampleScalar * 10) / 10;
+
+            // Build note
+            const sign = finalScore >= 0 ? '+' : '';
+            const meNote = `${sign}${finalScore.toFixed(1)} : Market Expectation A/E=${ae.toFixed(2)} (${aeLabel}${relativeNote}, ${validRuns} runs)\n`;
+
+            results.push({
+                race: raceNum,
+                name: horseName,
+                meScore: finalScore,
+                meNote
+            });
+        });
+    });
+
+    return results;
+}
+
 function checkFormPrice(formPrice, specialistContext = null) {
     let addScore = 0;
     let note = '';
@@ -3493,6 +3710,7 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
     const filteredDataSectional = getLowestSectionalsByRace(data);
     const averageFormPrices = calculateAverageFormPrices(data);
     const weightScores = calculateWeightScores(data);
+    const marketExpectationScores = calculateMarketExpectationScores(data);
     const uniqueHorses = getUniqueHorsesOnly(data);
 
         uniqueHorses.forEach(horse => {
@@ -3578,7 +3796,14 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             score += matchingWeight.weightScore;
             notes += matchingWeight.weightNote;
         }
-
+        const matchingME = marketExpectationScores.find(m =>
+    parseInt(m.race) === parseInt(raceNumber) &&
+    m.name.toLowerCase().trim() === horseName.toLowerCase().trim()
+);
+if (matchingME) {
+    score += matchingME.meScore;
+    notes += matchingME.meNote;
+}
         analysisResults.push({ horse, score, notes, pfaiScore: parseFloat(horse['pfaiscore']) || 0 });
     });
     
