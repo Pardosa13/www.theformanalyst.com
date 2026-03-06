@@ -2481,7 +2481,7 @@ function calculateMarketExpectationScores(data) {
 
             // Build note
             const sign = finalScore >= 0 ? '+' : '';
-            const meNote = `${sign}${finalScore.toFixed(1)} : Market Expectation A/E=${ae.toFixed(2)} (${aeLabel}${relativeNote}, ${validRuns} runs)\n`;
+            const meNote = `\n=== MARKET EXPECTATION ===\n${sign}${finalScore.toFixed(1)} : A/E=${ae.toFixed(2)} (${aeLabel}${relativeNote}, ${validRuns} runs)\n`;
 
             results.push({
                 race: raceNum,
