@@ -3584,13 +3584,14 @@ def api_price_analysis():
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
 
-    from flask import jsonify
-
-    track_filter = request.args.get('track', '')
+    track_filter     = request.args.get('track', '')
     min_score_filter = request.args.get('min_score', type=float)
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
+    date_from        = request.args.get('date_from', '')
+    date_to          = request.args.get('date_to', '')
+    limit_param      = request.args.get('limit', '200')
+    top_n            = request.args.get('top_n', 1, type=int)  # how many top-ranked runners to test
 
+    # ── Race ID subquery (no hardcoded date) ──────────────────────────────────
     race_id_query = db.session.query(Race.id).join(
         Meeting, Race.meeting_id == Meeting.id
     ).join(
@@ -3598,29 +3599,24 @@ def api_price_analysis():
     ).join(
         Result, Result.horse_id == Horse.id
     ).filter(
-        Result.finish_position > 0,
-        Meeting.uploaded_at >= '2026-02-13'
+        Result.finish_position > 0   # scratches already excluded here
     )
 
     if track_filter:
         race_id_query = race_id_query.filter(
             Meeting.meeting_name.ilike(f'%{track_filter}%')
         )
-
     if date_from:
         race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
-
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
 
-    limit_param = request.args.get('limit', '200')
-
-    race_id_query = race_id_query.add_columns(Meeting.uploaded_at)\
-        .distinct()\
+    race_id_query = race_id_query.add_columns(Meeting.uploaded_at) \
+        .distinct() \
         .order_by(Meeting.uploaded_at.desc(), Race.id.desc())
 
     if limit_param != 'all':
-        limit = int(limit_param) if limit_param.isdigit() else 200
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
         race_id_query = race_id_query.limit(limit)
 
     recent_race_ids = [r[0] for r in race_id_query.all()]
@@ -3628,6 +3624,7 @@ def api_price_analysis():
     if not recent_race_ids:
         return jsonify({'error': 'No races found'}), 404
 
+    # ── Main query ────────────────────────────────────────────────────────────
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
     ).join(
@@ -3648,193 +3645,223 @@ def api_price_analysis():
 
     all_results = base_query.all()
 
+    # ── Group by race ─────────────────────────────────────────────────────────
     races_data = {}
-
     for horse, pred, result, race, meeting in all_results:
         race_key = (meeting.id, race.race_number)
         if race_key not in races_data:
             races_data[race_key] = []
-
         races_data[race_key].append({
-            'horse': horse,
+            'horse':      horse,
             'prediction': pred,
-            'result': result
+            'result':     result
         })
 
     stake = 10.0
 
-    price_analysis = {
+    # ── Threshold levels to test ──────────────────────────────────────────────
+    thresholds = [0, 5, 10, 15, 20, 25, 30, 40, 50]
+
+    # Accumulators
+    # top_n picks overlay tiers (existing buckets)
+    overlay_tiers = {
         'overlay_10_20': {'count': 0, 'wins': 0, 'profit': 0},
         'overlay_20_30': {'count': 0, 'wins': 0, 'profit': 0},
         'overlay_30_50': {'count': 0, 'wins': 0, 'profit': 0},
         'overlay_50_plus': {'count': 0, 'wins': 0, 'profit': 0},
         'total_overlays': {'count': 0, 'wins': 0, 'profit': 0},
-        'total_compared': 0,
-        'overlay_examples': [],
-        'all_horse_overlays': {
-            'count': 0,
-            'wins': 0,
-            'profit': 0
-        },
-        'skipped_incomplete_races': 0
     }
+
+    # Threshold tuning: top_n picks
+    topn_thresholds  = {t: {'count': 0, 'wins': 0, 'profit': 0} for t in thresholds}
+    # Threshold tuning: all runners
+    all_thresholds   = {t: {'count': 0, 'wins': 0, 'profit': 0} for t in thresholds}
+
+    # All-horse overlay tiers (mirrors overlay_tiers but for every runner)
+    all_horse_tiers = {
+        'overlay_10_20':  {'count': 0, 'wins': 0, 'profit': 0},
+        'overlay_20_30':  {'count': 0, 'wins': 0, 'profit': 0},
+        'overlay_30_50':  {'count': 0, 'wins': 0, 'profit': 0},
+        'overlay_50_plus':{'count': 0, 'wins': 0, 'profit': 0},
+        'total_overlays': {'count': 0, 'wins': 0, 'profit': 0},
+    }
+
+    total_compared  = 0
+    skipped         = 0
+    overlay_examples = []
 
     for race_key, horses in races_data.items():
 
-        # Remove scratchings
-        active_runners = [
-            h for h in horses
-            if str(h['result'].finish_position).upper() != 'SCR'
-        ]
-
-        if not active_runners:
+        # Full SP coverage check (scratches already excluded by query)
+        valid_sp = [h for h in horses if h['result'].sp and h['result'].sp > 0]
+        if len(valid_sp) != len(horses):
+            skipped += 1
             continue
 
-        # Ensure full SP coverage for active runners
-        valid_sp = [
-            h for h in active_runners
-            if h['result'].sp and h['result'].sp > 0
-        ]
+        # Sort by model score descending
+        horses_sorted = sorted(horses, key=lambda x: x['prediction'].score, reverse=True)
 
-        if len(valid_sp) != len(active_runners):
-            price_analysis['skipped_incomplete_races'] += 1
-            continue
+        # ── Top-N picks overlay ───────────────────────────────────────────────
+        for rank_idx, runner in enumerate(horses_sorted[:top_n]):
+            pred   = runner['prediction']
+            result = runner['result']
 
-        # Sort by model score (for top-pick logic)
-        active_runners.sort(
-            key=lambda x: x['prediction'].score,
-            reverse=True
-        )
+            try:
+                predicted_odds = float((pred.predicted_odds or '').replace('$', '').strip())
+            except (ValueError, AttributeError):
+                continue
 
-        top_pick = active_runners[0]
-        pred = top_pick['prediction']
-        result = top_pick['result']
+            sp = result.sp
+            if not sp or sp <= 0 or predicted_odds <= 0:
+                continue
 
-        try:
-            predicted_odds = float(
-                (pred.predicted_odds or '').replace('$', '').strip()
-            )
-        except (ValueError, AttributeError):
-            continue
+            total_compared += 1
+            won    = result.finish_position == 1
+            profit = (sp * stake - stake) if won else -stake
+            edge   = ((sp - predicted_odds) / predicted_odds) * 100
 
-        sp = result.sp
+            # Existing tier buckets (top pick only — rank 0)
+            if rank_idx == 0:
+                if edge >= 10:
+                    if edge >= 50:
+                        tier = 'overlay_50_plus'
+                    elif edge >= 30:
+                        tier = 'overlay_30_50'
+                    elif edge >= 20:
+                        tier = 'overlay_20_30'
+                    else:
+                        tier = 'overlay_10_20'
 
-        if not sp or sp <= 0 or not predicted_odds or predicted_odds <= 0:
-            continue
+                    overlay_tiers[tier]['count']  += 1
+                    overlay_tiers[tier]['wins']   += (1 if won else 0)
+                    overlay_tiers[tier]['profit'] += profit
 
-        price_analysis['total_compared'] += 1
+                    overlay_tiers['total_overlays']['count']  += 1
+                    overlay_tiers['total_overlays']['wins']   += (1 if won else 0)
+                    overlay_tiers['total_overlays']['profit'] += profit
 
-        won = result.finish_position == 1
-        profit = (sp * stake - stake) if won else -stake
+                    overlay_examples.append({
+                        'horse':       runner['horse'].horse_name,
+                        'score':       pred.score,
+                        'your_price':  predicted_odds,
+                        'sp':          sp,
+                        'overlay_pct': round(edge, 1),
+                        'won':         won,
+                        'profit':      profit,
+                        'race_id':     race_key[0],
+                        'race_number': race_key[1]
+                    })
 
-        price_diff_pct = ((sp - predicted_odds) / predicted_odds) * 100
+            # Threshold tuning for top-n
+            for t in thresholds:
+                if edge >= t:
+                    topn_thresholds[t]['count']  += 1
+                    topn_thresholds[t]['wins']   += (1 if won else 0)
+                    topn_thresholds[t]['profit'] += profit
 
-        if price_diff_pct >= 10:
-
-            if price_diff_pct >= 50:
-                tier = 'overlay_50_plus'
-            elif price_diff_pct >= 30:
-                tier = 'overlay_30_50'
-            elif price_diff_pct >= 20:
-                tier = 'overlay_20_30'
-            else:
-                tier = 'overlay_10_20'
-
-            price_analysis[tier]['count'] += 1
-            if won:
-                price_analysis[tier]['wins'] += 1
-            price_analysis[tier]['profit'] += profit
-
-            price_analysis['total_overlays']['count'] += 1
-            if won:
-                price_analysis['total_overlays']['wins'] += 1
-            price_analysis['total_overlays']['profit'] += profit
-
-            price_analysis['overlay_examples'].append({
-                'horse': top_pick['horse'].horse_name,
-                'score': pred.score,
-                'your_price': predicted_odds,
-                'sp': sp,
-                'overlay_pct': price_diff_pct,
-                'won': won,
-                'profit': profit,
-                'race_id': race_key[0],
-                'race_number': race_key[1]
-            })
-
-        for runner in active_runners:
-            pred_all = runner['prediction']
+        # ── All runners overlay ───────────────────────────────────────────────
+        for runner in horses_sorted:
+            pred_all   = runner['prediction']
             result_all = runner['result']
 
             try:
-                predicted_odds_all = float(
-                    (pred_all.predicted_odds or '').replace('$', '').strip()
-                )
+                predicted_odds_all = float((pred_all.predicted_odds or '').replace('$', '').strip())
             except (ValueError, AttributeError):
                 continue
 
             sp_all = result_all.sp
-
-            if not sp_all or sp_all <= 0 or not predicted_odds_all or predicted_odds_all <= 0:
+            if not sp_all or sp_all <= 0 or predicted_odds_all <= 0:
                 continue
 
-            price_diff_pct_all = ((sp_all - predicted_odds_all) / predicted_odds_all) * 100
+            won_all    = result_all.finish_position == 1
+            profit_all = (sp_all * stake - stake) if won_all else -stake
+            edge_all   = ((sp_all - predicted_odds_all) / predicted_odds_all) * 100
 
-            if price_diff_pct_all >= 10:
-                won_all = result_all.finish_position == 1
-                profit_all = (sp_all * stake - stake) if won_all else -stake
+            # All-horse tier buckets
+            if edge_all >= 10:
+                if edge_all >= 50:
+                    tier_all = 'overlay_50_plus'
+                elif edge_all >= 30:
+                    tier_all = 'overlay_30_50'
+                elif edge_all >= 20:
+                    tier_all = 'overlay_20_30'
+                else:
+                    tier_all = 'overlay_10_20'
 
-                price_analysis['all_horse_overlays']['count'] += 1
-                if won_all:
-                    price_analysis['all_horse_overlays']['wins'] += 1
-                price_analysis['all_horse_overlays']['profit'] += profit_all
+                all_horse_tiers[tier_all]['count']  += 1
+                all_horse_tiers[tier_all]['wins']   += (1 if won_all else 0)
+                all_horse_tiers[tier_all]['profit'] += profit_all
 
-    for tier in [
-        'overlay_10_20',
-        'overlay_20_30',
-        'overlay_30_50',
-        'overlay_50_plus',
-        'total_overlays'
-    ]:
-        cat = price_analysis[tier]
-        cat['strike_rate'] = (cat['wins'] / cat['count'] * 100) if cat['count'] > 0 else 0
-        cat['roi'] = (cat['profit'] / (cat['count'] * stake) * 100) if cat['count'] > 0 else 0
+                all_horse_tiers['total_overlays']['count']  += 1
+                all_horse_tiers['total_overlays']['wins']   += (1 if won_all else 0)
+                all_horse_tiers['total_overlays']['profit'] += profit_all
 
-    all_overlay = price_analysis['all_horse_overlays']
-    if all_overlay['count'] > 0:
-        all_overlay['strike_rate'] = (
-            all_overlay['wins'] / all_overlay['count'] * 100
-        )
-        all_overlay['roi'] = (
-            all_overlay['profit'] / (all_overlay['count'] * stake) * 100
-        )
-    else:
-        all_overlay['strike_rate'] = 0
-        all_overlay['roi'] = 0
+            # Threshold tuning for all runners
+            for t in thresholds:
+                if edge_all >= t:
+                    all_thresholds[t]['count']  += 1
+                    all_thresholds[t]['wins']   += (1 if won_all else 0)
+                    all_thresholds[t]['profit'] += profit_all
 
-    # Sort overlay examples
-    price_analysis['overlay_examples'].sort(
-        key=lambda x: (x['race_id'], x['race_number']),
-        reverse=True
-    )
+    # ── Calculate rates ───────────────────────────────────────────────────────
+    def _calc(d, stake):
+        for v in d.values():
+            n = v['count']
+            v['strike_rate'] = round(v['wins'] / n * 100, 1) if n else 0
+            v['roi']         = round(v['profit'] / (n * stake) * 100, 1) if n else 0
 
-    price_analysis['overlay_examples'] = price_analysis['overlay_examples'][:10]
+    _calc(overlay_tiers, stake)
+    _calc(all_horse_tiers, stake)
 
-    for ex in price_analysis['overlay_examples']:
+    def _calc_threshold(d, stake):
+        result_list = []
+        for t in thresholds:
+            v = d[t]
+            n = v['count']
+            result_list.append({
+                'threshold':   t,
+                'count':       n,
+                'wins':        v['wins'],
+                'strike_rate': round(v['wins'] / n * 100, 1) if n else 0,
+                'roi':         round(v['profit'] / (n * stake) * 100, 1) if n else 0,
+                'profit':      round(v['profit'], 2)
+            })
+        return result_list
+
+    # ── Finalise overlay examples ─────────────────────────────────────────────
+    overlay_examples.sort(key=lambda x: (x['race_id'], x['race_number']), reverse=True)
+    overlay_examples = overlay_examples[:10]
+    for ex in overlay_examples:
         ex.pop('race_id', None)
         ex.pop('race_number', None)
 
-    result = jsonify(price_analysis) 
-    del all_results 
-    del races_data 
-    del price_analysis 
-    import gc 
-    gc.collect() 
+    payload = {
+        # Existing tier buckets (top pick)
+        **overlay_tiers,
+        'total_compared':          total_compared,
+        'skipped_incomplete_races': skipped,
+        'overlay_examples':        overlay_examples,
+
+        # All-horse tier breakdown (NEW — was a single aggregate before)
+        'all_horse_tiers':         all_horse_tiers,
+
+        # Threshold tuning tables (NEW)
+        'threshold_tuning': {
+            'top_n':      top_n,
+            'top_n_picks': _calc_threshold(topn_thresholds, stake),
+            'all_runners': _calc_threshold(all_thresholds, stake),
+        }
+    }
+
+    result = jsonify(payload)
+    del all_results, races_data, overlay_tiers, all_horse_tiers
+    del topn_thresholds, all_thresholds, overlay_examples
+    import gc
+    gc.collect()
     db.session.expunge_all()
     db.session.remove()
 
     return result
-
 @app.route("/api/data/pnl-over-time")
 @login_required
 def api_pnl_over_time():
