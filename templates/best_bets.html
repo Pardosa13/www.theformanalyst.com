@@ -1,4 +1,3 @@
-
 {% extends "base.html" %}
 
 {% block title %}Best Bets - The Form Analyst{% endblock %}
@@ -46,7 +45,6 @@
     border-color: var(--border-mid);
     box-shadow: 0 4px 20px rgba(0,0,0,0.3);
   }
-  /* Coloured top strip */
   .stat-tile::before {
     content: '';
     position: absolute;
@@ -127,6 +125,58 @@
     outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+
+  /* ── Mode toggle buttons ── */
+  .mode-toggle {
+    display: flex;
+    gap: 6px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 14px 20px;
+    margin-bottom: 20px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .mode-toggle .mode-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin-right: 6px;
+  }
+  .mode-btn {
+    padding: 7px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    border: 1px solid var(--border-mid);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: all 0.15s;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .mode-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .mode-btn.active {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border-color: transparent;
+    color: white;
+  }
+  .mode-desc {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
   }
 
   .filter-hint {
@@ -307,10 +357,15 @@
     --bs-table-hover-bg: transparent !important;
     --bs-table-active-bg: transparent !important;
   }
+  .bets-table tbody tr.row-top-pick {
+    border-left-color: #667eea;
+  }
+  .bets-table tbody tr.row-signal {
+    border-left-color: #f59e0b;
+  }
   .bets-table tbody tr:last-child { border-bottom: none; }
   .bets-table tbody tr:hover {
     background: rgba(102,126,234,0.1) !important;
-    border-left-color: var(--accent);
   }
   .bets-table tbody td {
     background-color: transparent !important;
@@ -333,6 +388,29 @@
     color: var(--text-muted);
     font-family: 'DM Mono', monospace;
     margin-top: 2px;
+  }
+
+  /* ── Rank badge ── */
+  .rank-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-family: 'DM Mono', monospace;
+    margin-top: 3px;
+  }
+  .rank-badge.top-pick {
+    background: rgba(102,126,234,0.15);
+    border: 1px solid rgba(102,126,234,0.35);
+    color: #a5b4fc;
+  }
+  .rank-badge.signal {
+    background: rgba(245,158,11,0.12);
+    border: 1px solid rgba(245,158,11,0.3);
+    color: #fbbf24;
   }
 
   /* Score badges */
@@ -412,6 +490,8 @@
       padding: 3px 0;
       border: none;
     }
+    .mode-toggle { gap: 6px; }
+    .mode-desc { display: none; }
   }
 
   @media (max-width: 480px) {
@@ -423,13 +503,13 @@
 <!-- Page header -->
 <div class="bets-header">
   <h2>🔥 Today's Best Bets</h2>
-  <p>Horses matching active positive ROI components</p>
+  <p>Horses matching active positive ROI components — including non-top-pick component signals</p>
 </div>
 
 <!-- Stat tiles -->
 <div class="stat-row">
   <div class="stat-tile s-primary">
-    <h5>Total Best Bets</h5>
+    <h5>Total Signals</h5>
     <h2>{{ total_bets }}</h2>
   </div>
   <div class="stat-tile s-info">
@@ -446,10 +526,43 @@
   </div>
 </div>
 
+<!-- Mode toggle -->
+<div class="mode-toggle">
+  <span class="mode-label">Mode:</span>
+
+  {# Build current query params without mode so we can override it #}
+  {% set base_params = [] %}
+  {% if hours_back %}{% set _ = base_params.append('hours=' ~ hours_back) %}{% endif %}
+  {% if min_score %}{% set _ = base_params.append('min_score=' ~ min_score) %}{% endif %}
+  {% if min_gap %}{% set _ = base_params.append('min_gap=' ~ min_gap) %}{% endif %}
+  {% set base_qs = base_params | join('&') %}
+
+  <a href="{{ url_for('best_bets') }}{% if base_qs %}?{{ base_qs }}&mode=all{% else %}?mode=all{% endif %}"
+     class="mode-btn {% if mode == 'all' %}active{% endif %}">
+    🔍 All Signals
+  </a>
+  <a href="{{ url_for('best_bets') }}{% if base_qs %}?{{ base_qs }}&mode=top_pick{% else %}?mode=top_pick{% endif %}"
+     class="mode-btn {% if mode == 'top_pick' %}active{% endif %}">
+    ⭐ Top Pick Only
+  </a>
+  <a href="{{ url_for('best_bets') }}{% if base_qs %}?{{ base_qs }}&mode=non_top_pick{% else %}?mode=non_top_pick{% endif %}"
+     class="mode-btn {% if mode == 'non_top_pick' %}active{% endif %}">
+    💡 Non-Top-Pick Signals
+  </a>
+
+  <span class="mode-desc">
+    {% if mode == 'all' %}Showing all horses matching active components{% endif %}
+    {% if mode == 'top_pick' %}Showing only horses ranked #1 in their race{% endif %}
+    {% if mode == 'non_top_pick' %}Component fires but horse is NOT your top pick — possible hidden value{% endif %}
+  </span>
+</div>
+
 <!-- Filter card -->
 <div class="filter-card">
-  <!-- GET form — name attributes and action unchanged -->
   <form method="GET" action="{{ url_for('best_bets') }}" class="filter-form">
+    <!-- Preserve mode across filter changes -->
+    <input type="hidden" name="mode" value="{{ mode }}">
+
     <span class="filter-label">Filters</span>
 
     <span class="filter-label" style="margin-left:8px;">Hours Back:</span>
@@ -509,12 +622,13 @@
 <!-- Best bets / empty state -->
 {% if total_bets == 0 %}
 <div class="no-bets-alert">
-  <h4>No Best Bets Found</h4>
-  <p>No horses in the last {{ hours_back }} hours match your active positive ROI components.</p>
+  <h4>No Signals Found</h4>
+  <p>No horses in the last {{ hours_back }} hours match your active positive ROI components{% if mode == 'top_pick' %} as top pick{% elif mode == 'non_top_pick' %} as non-top-pick signals{% endif %}.</p>
   <p style="margin-bottom:4px;">Try:</p>
   <ul>
     <li>Uploading a new meeting</li>
     <li>Increasing the time window</li>
+    <li>Switching mode to "All Signals"</li>
     <li>Activating more components in the Admin panel</li>
     <li>Lowering the minimum score filter</li>
   </ul>
@@ -522,7 +636,6 @@
 
 {% else %}
 
-<!-- POST form — action, method, id ALL unchanged -->
 <form method="POST" action="{{ url_for('post_best_bets_manual') }}" id="post-best-bets-form">
   {% for meeting_name, meeting_data in meetings_with_bets.items() %}
 
@@ -549,11 +662,11 @@
           <table class="bets-table">
             <thead>
               <tr>
-                <!-- id="select-all" preserved exactly -->
                 <th><input type="checkbox" id="select-all"></th>
                 <th>Horse</th>
+                <th>Rank</th>
                 <th>Score</th>
-                <th>Gap to 2nd</th>
+                <th>Gap to Above</th>
                 <th>Odds</th>
                 <th>Win %</th>
                 <th>Barrier</th>
@@ -564,10 +677,9 @@
               </tr>
             </thead>
             <tbody>
-              {% for bet in race_data.horses %}
-              <tr>
+              {% for bet in race_data.horses|sort(attribute='rank_in_race') %}
+              <tr class="{% if bet.is_top_pick %}row-top-pick{% else %}row-signal{% endif %}">
                 <td>
-                  <!-- name="bet_ids[]", value="{{ bet.horse_id }}", class="bet-checkbox" — all unchanged -->
                   <input type="checkbox" name="bet_ids[]" value="{{ bet.horse_id }}" class="bet-checkbox">
                 </td>
                 <td>
@@ -575,11 +687,19 @@
                   <div class="horse-form">{{ bet.form }}</div>
                 </td>
                 <td>
+                  {% if bet.is_top_pick %}
+                  <span class="rank-badge top-pick">⭐ #1 Pick</span>
+                  {% else %}
+                  <span class="rank-badge signal">💡 #{{ bet.rank_in_race }}</span>
+                  {% endif %}
+                </td>
+                <td>
                   <span class="badge badge-lg bg-{% if bet.score >= 130 %}success{% elif bet.score >= 100 %}warning{% else %}danger{% endif %}">
                     {{ bet.score|round(1) }}
                   </span>
                 </td>
                 <td>
+                  {% if bet.is_top_pick %}
                   <span class="badge badge-lg bg-{% if bet.score_gap >= 50 %}success{% elif bet.score_gap >= 30 %}warning{% else %}danger{% endif %}">
                     +{{ bet.score_gap|round(1) }}
                   </span>
@@ -590,6 +710,12 @@
                   {% else %}
                   <div class="conf-low">⚠️ Lower</div>
                   {% endif %}
+                  {% else %}
+                  <span class="badge badge-lg bg-secondary">
+                    -{{ bet.score_gap|round(1) }}
+                  </span>
+                  <div style="font-size:11px; color:var(--text-muted);">behind #{{ bet.rank_in_race - 1 }}</div>
+                  {% endif %}
                 </td>
                 <td>{{ bet.predicted_odds }}</td>
                 <td>{{ bet.win_probability }}</td>
@@ -599,7 +725,6 @@
                 <td>{{ bet.trainer }}</td>
                 <td>
                   <span class="badge bg-primary">{{ bet.component_count }} matched</span>
-                  <!-- data-bs-toggle, data-bs-target, id all unchanged -->
                   <button class="btn btn-sm btn-outline-info mt-1"
                           data-bs-toggle="collapse"
                           data-bs-target="#components-{{ bet.horse_id }}">
@@ -636,7 +761,6 @@
 </form>
 {% endif %}
 
-<!-- Post button — form="post-best-bets-form", id="post-btn" all unchanged -->
 {% if total_bets > 0 %}
 <div class="post-btn-area">
   <button type="submit" form="post-best-bets-form" class="btn btn-success btn-lg" id="post-btn">
@@ -646,7 +770,6 @@
 </div>
 {% endif %}
 
-<!-- JS — 100% identical to original -->
 <script>
 document.getElementById('select-all').addEventListener('change', function() {
     const checkboxes = document.querySelectorAll('.bet-checkbox');
