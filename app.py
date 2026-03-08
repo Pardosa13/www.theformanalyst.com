@@ -1051,7 +1051,11 @@ def parse_notes_components(notes):
         (r'\+\s*([\d.]+):\s*IMPROVING TREND', 'API Sectional - Improving Trend'),
 
         # ====== PFAI BLEND ======
-        (r'Final Blended Score:\s*([\d.]+)', 'PFAI Blend - Used'),
+        (r'PFAI Score:\s*(9[0-9]|100)\.', 'PFAI Score: 90+'),
+        (r'PFAI Score:\s*(8[0-9])\.', 'PFAI Score: 80-89'),
+        (r'PFAI Score:\s*(7[0-9])\.', 'PFAI Score: 70-79'),
+        (r'PFAI Score:\s*(6[0-9])\.', 'PFAI Score: 60-69'),
+        (r'PFAI Score:\s*([0-5][0-9])\.', 'PFAI Score: <60'),
 
         # ====== TRAINER TIERS ======
         (r'\+\s*20\.0\s*:\s*Elite value trainer', 'Elite Trainer'),
