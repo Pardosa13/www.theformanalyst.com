@@ -5303,11 +5303,12 @@ def best_bets():
     """Show today's best bets based on active positive ROI components"""
     from models import Component, Prediction
     from datetime import datetime, timedelta
-    
+
     # Get filter parameters
     hours_back = request.args.get('hours', default=80, type=int)
     min_score = request.args.get('min_score', type=float)
-    min_gap = request.args.get('min_gap', type=float)  # NEW: Score gap filter
+    min_gap = request.args.get('min_gap', type=float)
+    mode = request.args.get('mode', default='all')  # NEW: 'all', 'top_pick', 'non_top_pick'
 
     # Get all active components
     active_components = Component.query.filter_by(is_active=True).all()
@@ -5322,6 +5323,7 @@ def best_bets():
 
     for meeting in recent_meetings:
         for race in meeting.races:
+            # Build scored list for ALL horses in race
             horses_in_race = []
             for horse in race.horses:
                 total_horses_scanned += 1
@@ -5333,57 +5335,84 @@ def best_bets():
             horses_in_race.sort(key=lambda x: x['score'], reverse=True)
             if not horses_in_race:
                 continue
+
             top_score = horses_in_race[0]['score']
             second_score = horses_in_race[1]['score'] if len(horses_in_race) > 1 else 0
-            score_gap = top_score - second_score
-            if min_gap and score_gap < min_gap:
-                continue
-            top_horse = horses_in_race[0]['horse']
-            if not top_horse.prediction:
-                continue
-            if min_score and top_horse.prediction.score < min_score:
-                continue
-            components = parse_notes_components(top_horse.prediction.notes)
-            matched_components = []
-            for comp_name in components.keys():
-                if comp_name in component_names:
-                    comp_obj = next((c for c in active_components if c.component_name == comp_name), None)
-                    if comp_obj:
-                        matched_components.append({
-                            'name': comp_name,
-                            'roi': comp_obj.roi_percentage,
-                            'sr': comp_obj.strike_rate,
-                            'appearances': comp_obj.appearances
-                        })
-            if matched_components:
-                matched_components.sort(key=lambda x: x['roi'], reverse=True)
-                best_bets.append({
-                    'meeting_id': meeting.id,
-                    'meeting_name': meeting.meeting_name,
-                    'uploaded_at': meeting.uploaded_at,
-                    'race_id': race.id,
-                    'race_number': race.race_number,
-                    'distance': race.distance,
-                    'race_class': race.race_class,
-                    'track_condition': race.track_condition,
-                    'horse_id': top_horse.id,
-                    'horse_name': top_horse.horse_name,
-                    'score': top_horse.prediction.score,
-                    'score_gap': score_gap,
-                    'predicted_odds': top_horse.prediction.predicted_odds,
-                    'win_probability': top_horse.prediction.win_probability,
-                    'components': matched_components,
-                    'component_count': len(matched_components),
-                    'jockey': top_horse.jockey,
-                    'trainer': top_horse.trainer,
-                    'barrier': top_horse.barrier,
-                    'weight': top_horse.weight,
-                    'form': top_horse.form
-                })
+            score_gap = top_score - second_score  # gap still measured from top horse
+
+            # NEW: scan every horse, not just the top pick
+            for rank_idx, horse_data in enumerate(horses_in_race):
+                horse = horse_data['horse']
+                if not horse.prediction:
+                    continue
+
+                is_top_pick = (rank_idx == 0)
+                rank_in_race = rank_idx + 1
+
+                # Apply min_gap filter only to top pick (gap is a top-pick metric)
+                if min_gap and is_top_pick and score_gap < min_gap:
+                    continue
+
+                if min_score and horse.prediction.score < min_score:
+                    continue
+
+                # Mode filter
+                if mode == 'top_pick' and not is_top_pick:
+                    continue
+                if mode == 'non_top_pick' and is_top_pick:
+                    continue
+
+                components = parse_notes_components(horse.prediction.notes)
+                matched_components = []
+                for comp_name in components.keys():
+                    if comp_name in component_names:
+                        comp_obj = next((c for c in active_components if c.component_name == comp_name), None)
+                        if comp_obj:
+                            matched_components.append({
+                                'name': comp_name,
+                                'roi': comp_obj.roi_percentage,
+                                'sr': comp_obj.strike_rate,
+                                'appearances': comp_obj.appearances
+                            })
+
+                if matched_components:
+                    matched_components.sort(key=lambda x: x['roi'], reverse=True)
+
+                    # Score gap only meaningful for top pick; show 0 for others
+                    horse_score_gap = score_gap if is_top_pick else (
+                        horses_in_race[rank_idx - 1]['score'] - horse.prediction.score
+                        if rank_idx > 0 else 0
+                    )
+
+                    best_bets.append({
+                        'meeting_id': meeting.id,
+                        'meeting_name': meeting.meeting_name,
+                        'uploaded_at': meeting.uploaded_at,
+                        'race_id': race.id,
+                        'race_number': race.race_number,
+                        'distance': race.distance,
+                        'race_class': race.race_class,
+                        'track_condition': race.track_condition,
+                        'horse_id': horse.id,
+                        'horse_name': horse.horse_name,
+                        'score': horse.prediction.score,
+                        'score_gap': horse_score_gap,   # gap to horse above it
+                        'predicted_odds': horse.prediction.predicted_odds,
+                        'win_probability': horse.prediction.win_probability,
+                        'components': matched_components,
+                        'component_count': len(matched_components),
+                        'jockey': horse.jockey,
+                        'trainer': horse.trainer,
+                        'barrier': horse.barrier,
+                        'weight': horse.weight,
+                        'form': horse.form,
+                        'is_top_pick': is_top_pick,         # NEW
+                        'rank_in_race': rank_in_race,       # NEW
+                    })
 
     best_bets.sort(key=lambda x: x['score'], reverse=True)
 
-    # Group by meeting for better display
+    # Group by meeting → race
     meetings_with_bets = {}
     for bet in best_bets:
         meeting_key = bet['meeting_name']
@@ -5405,7 +5434,7 @@ def best_bets():
             }
         meetings_with_bets[meeting_key]['races'][race_key]['horses'].append(bet)
 
-    # Sort meetings by meeting name (which includes date in YYMMDD format)
+    # Sort meetings by name (YYMMDD prefix)
     meetings_with_bets = dict(sorted(meetings_with_bets.items(), key=lambda x: x[0]))
 
     return render_template("best_bets.html",
@@ -5416,7 +5445,8 @@ def best_bets():
         active_components=active_components,
         hours_back=hours_back,
         min_score=min_score,
-        min_gap=min_gap
+        min_gap=min_gap,
+        mode=mode,   # NEW
     )
 @app.route("/best-bets/post", methods=["POST"])
 @login_required
