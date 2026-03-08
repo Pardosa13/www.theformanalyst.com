@@ -1057,6 +1057,20 @@ def parse_notes_components(notes):
         (r'PFAI Score:\s*(6[0-9])\.', 'PFAI Score: 60-69'),
         (r'PFAI Score:\s*([0-5][0-9])\.', 'PFAI Score: <60'),
 
+        # ====== MARKET EXPECTATION ======
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(best market performer in field', 'Market Expectation - Best in Field'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(above field average', 'Market Expectation - Above Average'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(near field average', 'Market Expectation - Near Average'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(below field average', 'Market Expectation - Below Average'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(worst market performer in field', 'Market Expectation - Worst in Field'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(chronic overperformer', 'Market Expectation - Chronic Overperformer'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(strong overperformer', 'Market Expectation - Strong Overperformer'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(moderate outperformer', 'Market Expectation - Moderate Outperformer'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(meeting expectations', 'Market Expectation - Neutral'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(mild underperformer', 'Market Expectation - Mild Underperformer'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(significant underperformer', 'Market Expectation - Significant Underperformer'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(chronic underperformer', 'Market Expectation - Chronic Underperformer'),
+
         # ====== TRAINER TIERS ======
         (r'\+\s*20\.0\s*:\s*Elite value trainer', 'Elite Trainer'),
         (r'\+\s*15\.0\s*:\s*Strong value trainer', 'Strong Value Trainer'),
