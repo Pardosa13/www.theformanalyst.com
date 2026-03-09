@@ -325,9 +325,9 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     // Sex: Colt + Set Weight = +106.7% ROI (50 runners)
     // ==========================================
     const weightType = String(horseRow['weight type'] || horseRow['horse weight type'] || '').trim().toLowerCase();
-    if (weightType.includes('set weight')) {
+    if (horseSex === 'Colt' && weightType.includes('set weight')) {
         score += 5;
-        notes += '+ 5.0 : Set Weight race - strong combo signal (+172% ROI with colts)\n';
+        notes += '+ 5.0 : Colt in Set Weight race (+106.7% ROI, 50 runners)\n';
     }
     // Calculate recent form for last start context
     const last10 = String(horseRow['horse last10'] || '');
