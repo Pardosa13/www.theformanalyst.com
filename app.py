@@ -1147,7 +1147,7 @@ def aggregate_component_stats(all_results_data, stake=10.0):
     for entry in all_results_data:
         prediction = entry['prediction']
         result = entry['result']
-        horse = entry['horse']  # We now use the horse object too!
+        horse = entry['horse']
         
         if not prediction or not result:
             continue
@@ -1158,20 +1158,94 @@ def aggregate_component_stats(all_results_data, stake=10.0):
         placed = result.finish_position in [1, 2, 3]
         sp = result.sp or 0
         
-        # Calculate profit for this horse
         profit = (sp * stake - stake) if won else -stake
         
-        # ===== NEW: Extract age/sex demographics =====
         if horse.csv_data:
-            horse_age = horse.csv_data.get('horse age')
-            horse_sex = horse.csv_data.get('horse sex')
-            
-            # Add age/sex combination as a component
+            csv = horse.csv_data
+
+            # ====== AGE/SEX DEMOGRAPHICS ======
+            horse_age = csv.get('horse age')
+            horse_sex = csv.get('horse sex')
             if horse_age and horse_sex:
-                age_sex_combo = f"{horse_age}yo {horse_sex}"
-                components[age_sex_combo] = 1.0  # Use 1.0 as the score value
-        # ===== END NEW CODE =====
-        
+                components[f"{horse_age}yo {horse_sex}"] = 1.0
+
+            # ====== COUNTRY OF ORIGIN ======
+            country = csv.get('country', '').strip()
+            if country:
+                components[f"Country: {country}"] = 1.0
+
+            # ====== FORM POSITION (LAST START FINISH) ======
+            form_pos_raw = csv.get('form position', '')
+            try:
+                form_pos = int(str(form_pos_raw).strip())
+                if form_pos == 1:
+                    components['Last Finish: 1st'] = 1.0
+                elif form_pos <= 3:
+                    components['Last Finish: 2nd-3rd'] = 1.0
+                elif form_pos <= 6:
+                    components['Last Finish: 4th-6th'] = 1.0
+                elif form_pos <= 10:
+                    components['Last Finish: 7th-10th'] = 1.0
+                else:
+                    components['Last Finish: 11th+'] = 1.0
+            except (ValueError, TypeError):
+                components['Last Finish: No Recent Form'] = 1.0
+
+            # ====== FORM DISTANCE (LAST START vs TODAY) ======
+            try:
+                today_dist = int(str(csv.get('distance', '') or '').replace('m', '').strip())
+                form_dist = int(str(csv.get('form distance', '') or '').replace('m', '').strip())
+                dist_delta = today_dist - form_dist  # positive = stepping up
+
+                if abs(dist_delta) <= 200:
+                    components['Distance Last Start: Same (±200m)'] = 1.0
+                elif dist_delta > 400:
+                    components['Distance Last Start: Stepped Up 400m+'] = 1.0
+                elif dist_delta > 200:
+                    components['Distance Last Start: Stepped Up 200-400m'] = 1.0
+                elif dist_delta < -400:
+                    components['Distance Last Start: Dropped 400m+'] = 1.0
+                else:
+                    components['Distance Last Start: Dropped 200-400m'] = 1.0
+            except (ValueError, TypeError):
+                pass  # Skip if distance data missing
+
+            # ====== WEIGHT CHANGE (LAST START vs TODAY) ======
+            try:
+                today_weight = float(str(csv.get('horse weight', '') or '').strip())
+                form_weight = float(str(csv.get('form weight', '') or '').strip())
+
+                # Validate sensible weight range
+                if 49 <= today_weight <= 65 and 49 <= form_weight <= 65:
+                    weight_delta = form_weight - today_weight  # positive = dropped weight
+
+                    if weight_delta >= 5:
+                        components['Weight Change: Dropped 5kg+'] = 1.0
+                    elif weight_delta >= 3:
+                        components['Weight Change: Dropped 3-5kg'] = 1.0
+                    elif weight_delta >= 1:
+                        components['Weight Change: Dropped 1-3kg'] = 1.0
+                    elif weight_delta > -1:
+                        components['Weight Change: Similar (±1kg)'] = 1.0
+                    elif weight_delta > -3:
+                        components['Weight Change: Up 1-3kg'] = 1.0
+                    elif weight_delta > -5:
+                        components['Weight Change: Up 3-5kg'] = 1.0
+                    else:
+                        components['Weight Change: Up 5kg+'] = 1.0
+            except (ValueError, TypeError):
+                pass  # Skip if weight data missing
+
+            # ====== APPRENTICE CLAIM ======
+            try:
+                claim = float(str(csv.get('horse claim', '0') or '0').strip())
+                if claim >= 3:
+                    components['Apprentice Claim: 3kg+'] = 1.0
+                elif claim >= 1:
+                    components['Apprentice Claim: 1-2kg'] = 1.0
+            except (ValueError, TypeError):
+                pass  # No claim, skip
+
         for component_name, score_value in components.items():
             if component_name not in component_stats:
                 component_stats[component_name] = {
