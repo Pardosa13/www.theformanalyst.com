@@ -1253,7 +1253,38 @@ function checkJockeys(JockeyName) {
         note += '-15.0: Poor value jockey (destroys ROI)\n';
     }
     // All others get 0 points (market efficient)
-    
+
+    return [addScore, note];
+}
+
+function checkJockeyTrainerCombo(jockeyName, trainerName) {
+    // ==========================================
+    // JOCKEY + TRAINER COMBO SCORING - ADDED 2026-03-09
+    // Based on combination analysis across 23,743 horses
+    // ==========================================
+    var addScore = 0;
+    var note = '';
+
+    jockeyName = normalizeJockeyName(jockeyName);
+    trainerName = normalizeTrainerName(trainerName);
+
+    const combos = [
+        { jockey: 'Ethan Brown',      trainer: 'C Maher',                        bonus: 15, label: 'Ethan Brown × C Maher (+691.6% ROI, 28 races, 32.1% SR)' },
+        { jockey: 'Codi Jordan',      trainer: 'G J Stevenson',                  bonus: 10, label: 'Codi Jordan × G J Stevenson (+111.8% ROI, 20 races, 40% SR)' },
+        { jockey: 'Robert Whearty',   trainer: 'C Maher',                        bonus: 10, label: 'Robert Whearty × C Maher (+108% ROI, 20 races, 35% SR)' },
+        { jockey: 'Luke Cartwright',  trainer: 'C Maher',                        bonus: 8,  label: 'Luke Cartwright × C Maher (+231.7% ROI, 12 races, 16.7% SR)' },
+        { jockey: 'Dylan Gibbons',    trainer: 'John O\'Shea & Tom Charlton',    bonus: 7,  label: 'Dylan Gibbons × O\'Shea (+71.5% ROI, 34 races, 17.6% SR)' },
+        { jockey: 'B Melham',         trainer: 'C W McDonald',                   bonus: 7,  label: 'B Melham × C W McDonald (+79% ROI, 15 races, 40% SR)' },
+    ];
+
+    for (const combo of combos) {
+        if (jockeyName === combo.jockey && trainerName === combo.trainer) {
+            addScore += combo.bonus;
+            note += `+${combo.bonus}.0: Combo bonus - ${combo.label}\n`;
+            break;
+        }
+    }
+
     return [addScore, note];
 }
 
