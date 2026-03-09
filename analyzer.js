@@ -37,6 +37,27 @@ const jockeyMapping = {
     "J Allen": "John Allen",                // Tier 4
     "L Bates": "Logan Bates",               // Tier 4
     "C Sutherland": "Corey Sutherland",     // Tier 4
+    "L Campbell": "Luke Campbell",          // Tier 1 - NEW
+    "G Semmens": "Gabrielle Semmens",       // Tier 1 - NEW
+    "A Graham": "Amy Graham",               // Tier 1 - NEW
+    "Y Lewis": "Yvette Lewis",              // Tier 1 - NEW
+    "T McCarroll": "Tilly McCarroll",       // Tier 1 - NEW
+    "P Graham": "P Graham",                 // Tier 1 - maps directly
+    "W Price": "Will Price",               // Tier 1 - NEW
+    "J Watkins": "J Watkins",              // Tier 1 - maps directly
+    "W Egan": "W Egan",                    // Tier 2 - maps directly
+    "Ms K Yuill": "Ms K Yuill",            // Tier 2 - maps directly
+    "Ms W Costin": "Ms W Costin",          // Tier 2 - maps directly
+    "C Collis": "Cody Collis",             // Tier 2 - NEW
+    "T Voorham": "Teagan Voorham",         // Tier 2 - NEW
+    "J Stanley": "Jett Stanley",           // Tier 2 - NEW
+    "L Fiore": "Lucy Fiore",               // Tier 3 - NEW
+    "Ms G Cartwright": "Ms G Cartwright",  // Tier 3 - maps directly
+    "T Berry": "Tommy Berry",              // Tier 3 - updated (was neutral)
+    "C Bellamy": "Courtney Bellamy",       // Tier 3 - NEW
+    "C Frater": "Carly Frater",            // Tier 3 - NEW
+    "J W Stanley": "Justin W Stanley",     // Tier 3 - NEW
+    "N Palmer": "Nick Palmer",             // Tier 3 - NEW
     // Spelling normalization
     "T Nugent": "Theodore Nugent",          // neutral
     "Teodore Nugent": "Theodore Nugent",    // neutral
