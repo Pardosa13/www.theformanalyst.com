@@ -860,175 +860,233 @@ def parse_notes_components(notes):
     
     components = {}
     
-    # Define patterns to extract - (pattern, component_name, score_group)
     patterns = [
-        # Last 10 Form
+
+        # ====== LAST 10 FORM ======
         (r'([+-]?\s*[\d.]+)\s*:\s*Ran places:', 'Ran Places'),
-        (r'(-15\.0)\s*:\s*No wins in last 10', 'No Wins Last 10'),
-        
-        # Jockeys - FIXED to match analyzer.js output
-        (r'\+\s*25\.0\s*:\s*Elite value jockey', 'Elite Jockey'),
-        (r'\+\s*20\.0\s*:\s*Strong value jockey', 'Strong Value Jockey'),
-        (r'\+\s*10\.0\s*:\s*Profitable jockey', 'Good Jockey'),
-        (r'-\s*15\.0\s*:\s*Poor value jockey', 'Negative Jockey'),
-        
-        # Trainers
-        (r'\+\s*5\.0\s*:\s*Like the Trainer', 'Good Trainer'),
-        
-        # Track Record
-        (r'([+-]?\s*[\d.]+)\s*:\s*Exceptional win rate.*at this track\n', 'Track Win Rate - Exceptional'),
-        (r'([+-]?\s*[\d.]+)\s*:\s*Strong win rate.*at this track\n', 'Track Win Rate - Strong'),
-        (r'([+-]?\s*[\d.]+)\s*:\s*Good win rate.*at this track\n', 'Track Win Rate - Good'),
-        (r'([+-]?\s*[\d.]+)\s*:\s*Moderate win rate.*at this track\n', 'Track Win Rate - Moderate'),
-        (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this track!', 'Undefeated at Track'),
-        
-        # Track+Distance
-        (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this track\+distance', 'Undefeated at Track+Distance'),
-        
-        # Distance
-        (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*at this distance', 'Undefeated at Distance'),
+
+        # ====== JOCKEYS ======
+        (r'\+\s*25\.0\s*:\s*Elite value jockey', 'Jockey - Elite (50%+ ROI)'),
+        (r'\+\s*20\.0\s*:\s*Strong value jockey', 'Jockey - Strong Value (20-50% ROI)'),
+        (r'\+\s*10\.0\s*:\s*Profitable jockey', 'Jockey - Profitable (0-20% ROI)'),
+        (r'-\s*15\.0\s*:\s*Poor value jockey', 'Jockey - Poor Value'),
+
+        # ====== TRAINERS ======
+        (r'\+\s*20\.0\s*:\s*Elite value trainer', 'Trainer - Elite (50%+ ROI)'),
+        (r'\+\s*15\.0\s*:\s*Strong value trainer', 'Trainer - Strong Value (20-50% ROI)'),
+        (r'\+\s*10\.0\s*:\s*Profitable trainer', 'Trainer - Profitable (0-20% ROI)'),
+        (r'-\s*15\.0\s*:\s*Poor value trainer', 'Trainer - Poor Value'),
+
+        # ====== TRACK RECORD - WIN RATES ======
+        (r'\+\s*6\.0\s*:\s*Exceptional win rate.*at this track', 'Track Win Rate - Exceptional (51%+)'),
+        (r'\+\s*5\.0\s*:\s*Strong win rate.*at this track', 'Track Win Rate - Strong (36-50%)'),
+        (r'\+\s*4\.0\s*:\s*Good win rate.*at this track', 'Track Win Rate - Good (26-35%)'),
+        (r'\+\s*2\.0\s*:\s*Moderate win rate.*at this track', 'Track Win Rate - Moderate (16-25%)'),
+        (r'\+\s*1\.0\s*:\s*Low win rate.*at this track', 'Track Win Rate - Low (1-15%)'),
+        (r'\+\s*0\.0\s*:\s*No wins at this track', 'Track Win Rate - No Wins'),
+        (r'\+\s*0\.0\s*:\s*No runs at this track\b', 'Track - No Runs'),
+
+        # ====== TRACK RECORD - PODIUM RATES ======
+        (r'\+\s*6\.0\s*:\s*Elite podium rate.*at this track', 'Track Podium Rate - Elite (85%+)'),
+        (r'\+\s*5\.0\s*:\s*Excellent podium rate.*at this track', 'Track Podium Rate - Excellent (70-84%)'),
+        (r'\+\s*4\.0\s*:\s*Strong podium rate.*at this track', 'Track Podium Rate - Strong (55-69%)'),
+        (r'\+\s*3\.0\s*:\s*Good podium rate.*at this track', 'Track Podium Rate - Good (40-54%)'),
+        (r'\+\s*1\.0\s*:\s*Moderate podium rate.*at this track', 'Track Podium Rate - Moderate (25-39%)'),
+        (r'-\s*5\.0\s*:\s*Poor performance at this track', 'Track - Poor Performance'),
+        (r'=\s*([\d.]+)\s*:\s*Total track score', 'Track Score Total'),
+
+        # ====== TRACK+DISTANCE RECORD - WIN RATES ======
+        (r'\+\s*8\.0\s*:\s*Exceptional win rate.*at this track\+distance', 'Track+Distance Win Rate - Exceptional'),
+        (r'\+\s*7\.0\s*:\s*Strong win rate.*at this track\+distance', 'Track+Distance Win Rate - Strong'),
+        (r'\+\s*5\.0\s*:\s*Good win rate.*at this track\+distance', 'Track+Distance Win Rate - Good'),
+        (r'\+\s*3\.0\s*:\s*Moderate win rate.*at this track\+distance', 'Track+Distance Win Rate - Moderate'),
+        (r'\+\s*1\.0\s*:\s*Low win rate.*at this track\+distance', 'Track+Distance Win Rate - Low'),
+        (r'\+\s*0\.0\s*:\s*No wins at this track\+distance', 'Track+Distance Win Rate - No Wins'),
+        (r'\+\s*0\.0\s*:\s*No runs at this track\+distance', 'Track+Distance - No Runs'),
+
+        # ====== TRACK+DISTANCE RECORD - PODIUM RATES ======
+        (r'\+\s*8\.0\s*:\s*Elite podium rate.*at this track\+distance', 'Track+Distance Podium Rate - Elite'),
+        (r'\+\s*7\.0\s*:\s*Excellent podium rate.*at this track\+distance', 'Track+Distance Podium Rate - Excellent'),
+        (r'\+\s*6\.0\s*:\s*Strong podium rate.*at this track\+distance', 'Track+Distance Podium Rate - Strong'),
+        (r'\+\s*4\.0\s*:\s*Good podium rate.*at this track\+distance', 'Track+Distance Podium Rate - Good'),
+        (r'\+\s*2\.0\s*:\s*Moderate podium rate.*at this track\+distance', 'Track+Distance Podium Rate - Moderate'),
+        (r'-\s*6\.0\s*:\s*Poor performance at this track\+distance', 'Track+Distance - Poor Performance'),
+        (r'=\s*([\d.]+)\s*:\s*Total track\+distance score', 'Track+Distance Score Total'),
+
+        # ====== DISTANCE RECORD - WIN RATES ======
+        (r'\+\s*8\.0\s*:\s*Exceptional win rate.*at this distance', 'Distance Win Rate - Exceptional (51%+)'),
+        (r'\+\s*7\.0\s*:\s*Strong win rate.*at this distance', 'Distance Win Rate - Strong (36-50%)'),
+        (r'\+\s*5\.0\s*:\s*Good win rate.*at this distance', 'Distance Win Rate - Good (26-35%)'),
+        (r'\+\s*3\.0\s*:\s*Moderate win rate.*at this distance', 'Distance Win Rate - Moderate (16-25%)'),
+        (r'\+\s*1\.0\s*:\s*Low win rate.*at this distance', 'Distance Win Rate - Low (1-15%)'),
+        (r'\+\s*0\.0\s*:\s*No wins at this distance', 'Distance Win Rate - No Wins'),
+        (r'\+\s*0\.0\s*:\s*No runs at this distance', 'Distance - No Runs'),
+
+        # ====== DISTANCE RECORD - PODIUM RATES ======
+        (r'\+\s*8\.0\s*:\s*Elite podium rate.*at this distance', 'Distance Podium Rate - Elite (85%+)'),
+        (r'\+\s*7\.0\s*:\s*Excellent podium rate.*at this distance', 'Distance Podium Rate - Excellent (70-84%)'),
+        (r'\+\s*6\.0\s*:\s*Strong podium rate.*at this distance', 'Distance Podium Rate - Strong (55-69%)'),
+        (r'\+\s*4\.0\s*:\s*Good podium rate.*at this distance', 'Distance Podium Rate - Good (40-54%)'),
+        (r'\+\s*2\.0\s*:\s*Moderate podium rate.*at this distance', 'Distance Podium Rate - Moderate (25-39%)'),
+        (r'-\s*6\.0\s*:\s*Poor performance at this distance', 'Distance - Poor Performance'),
         (r'=\s*([\d.]+)\s*:\s*Total distance score', 'Distance Score Total'),
-        
-        # Track Condition
-        (r'([+-]?\s*[\d.]+)\s*:\s*UNDEFEATED.*runs on (good|soft|heavy|firm|synthetic)', 'Undefeated on Condition'),
+
+        # ====== TRACK CONDITION - WIN RATES ======
+        (r'\+\s*12\.0\s*:\s*Exceptional win rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Win Rate - Exceptional (51%+)'),
+        (r'\+\s*10\.0\s*:\s*Strong win rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Win Rate - Strong (36-50%)'),
+        (r'\+\s*8\.0\s*:\s*Good win rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Win Rate - Good (26-35%)'),
+        (r'\+\s*5\.0\s*:\s*Moderate win rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Win Rate - Moderate (16-25%)'),
+        (r'\+\s*2\.0\s*:\s*Low win rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Win Rate - Low (1-15%)'),
+        (r'\+\s*0\.0\s*:\s*No wins on (good|soft|heavy|firm|synthetic)', 'Condition Win Rate - No Wins'),
+        (r'\+\s*0\.0\s*:\s*No runs on (good|soft|heavy|firm|synthetic)', 'Condition - No Runs'),
+
+        # ====== TRACK CONDITION - PODIUM RATES ======
+        (r'\+\s*12\.0\s*:\s*Elite podium rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Podium Rate - Elite (85%+)'),
+        (r'\+\s*10\.0\s*:\s*Excellent podium rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Podium Rate - Excellent (70-84%)'),
+        (r'\+\s*9\.0\s*:\s*Strong podium rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Podium Rate - Strong (55-69%)'),
+        (r'\+\s*6\.0\s*:\s*Good podium rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Podium Rate - Good (40-54%)'),
+        (r'\+\s*3\.0\s*:\s*Moderate podium rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Podium Rate - Moderate (25-39%)'),
+        (r'-\s*8\.0\s*:\s*Poor performance on (good|soft|heavy|firm|synthetic)', 'Condition - Poor Performance'),
         (r'=\s*([\d.]+)\s*:\s*Total track condition score', 'Track Condition Score Total'),
-        
-        # Distance Change
-        (r'\+\s*1\.0\s*:\s*Longer dist than previous', 'Longer Distance'),
-        (r'-\s*1\.0\s*:\s*Shorter dist than previous', 'Shorter Distance'),
-        
-        # Class Change
+
+        # ====== DISTANCE CHANGE ======
+        (r'-\s*5\.0\s*:\s*Stepping up \d+m in distance', 'Distance Change - Step Up Large (400m+)'),
+        (r'-\s*3\.0\s*:\s*Stepping up \d+m in distance', 'Distance Change - Step Up Moderate (200-400m)'),
+        (r'\+\s*3\.0\s*:\s*Dropping back \d+m in distance', 'Distance Change - Drop Back Large (400m+)'),
+        (r'\+\s*2\.0\s*:\s*Dropping back \d+m in distance', 'Distance Change - Drop Back Moderate (200-400m)'),
+
+        # ====== CLASS CHANGE ======
         (r'\+\s*([\d.]+):\s*Stepping DOWN', 'Class Drop'),
         (r'(-[\d.]+):\s*Stepping UP', 'Class Rise'),
-        
-        # Last Start Margin - Winners
-        (r'\+\s*10\.0\s*:\s*Dominant last start win', 'Last Start - Dominant Win'),
-        (r'\+\s*7\.0\s*:\s*Comfortable last start win', 'Last Start - Comfortable Win'),
-        (r'\+\s*5\.0\s*:\s*Narrow last start win', 'Last Start - Narrow Win'),
-        (r'\+\s*3\.0\s*:\s*Photo finish last start win', 'Last Start - Photo Win'),
-        
-        # Last Start Margin - Placed
-        (r'\+\s*5\.0\s*:\s*Narrow loss.*very competitive', 'Last Start - Competitive Loss'),
-        (r'\+\s*3\.0\s*:\s*Close loss', 'Last Start - Close Loss'),
-        
-        # Last Start Margin - Beaten
-        (r'-\s*3\.0\s*:\s*Beaten clearly', 'Last Start - Beaten Clearly'),
-        (r'-\s*7\.0\s*:\s*Well beaten', 'Last Start - Well Beaten'),
-        (r'-\s*15\.0\s*:\s*Demolished', 'Last Start - Demolished'),
-        
-        # Days Since Run
-        (r'\+\s*15\.0\s*:\s*Quick backup', 'Quick Backup'),
-        (r'(-[\d.]+)\s*:\s*Too fresh', 'Too Fresh'),
-        
-        # Form Price
-        (r'\+\s*([\d.]+)\.0\s*:\s*Form price.*well-backed', 'Form Price - Well Backed'),
-        (r'\+\s*0\.0\s*:\s*Form price.*neutral', 'Form Price - Neutral'),
-        (r'(-[\d.]+)\.0\s*:\s*Form price', 'Form Price - Negative'),
-        
-        # First/Second Up
-        (r'\+\s*4\.0\s*:\s*First-up winner', 'First Up Winner'),
-        (r'\+\s*3\.0\s*:\s*Strong first-up podium', 'First Up Strong Podium'),
-        (r'\+\s*3\.0\s*:\s*Second-up winner', 'Second Up Winner'),
-        (r'\+\s*2\.0\s*:\s*Strong second-up podium', 'Second Up Strong Podium'),
-        (r'\+\s*15\.0\s*:\s*First-up specialist \(UNDEFEATED\)', 'First Up Specialist'),
-        (r'\+\s*15\.0\s*:\s*Second-up specialist \(UNDEFEATED\)', 'Second Up Specialist'),
-        
-        # Sectionals
-        (r'\+\s*([\d.]+):\s*weighted avg \(z=([\d.]+)', 'Sectional Weighted Avg'),
-        (r'\+\s*([\d.]+):\s*best of last \d+ \(z=([\d.]+)', 'Sectional Best Recent'),
+
+        # ====== LAST START - WINNERS ======
+        (r'\+\s*10\.0\s*:\s*Dominant last start win', 'Last Start - Dominant Win (5L+)'),
+        (r'\+\s*7\.0\s*:\s*Comfortable last start win', 'Last Start - Comfortable Win (2-5L)'),
+        (r'\+\s*5\.0\s*:\s*Narrow last start win', 'Last Start - Narrow Win (0.5-2L)'),
+        (r'\+\s*3\.0\s*:\s*Photo finish last start win', 'Last Start - Photo Win (<0.5L)'),
+
+        # ====== LAST START - PLACED ======
+        (r'\+\s*5\.0\s*:\s*Narrow loss.*very competitive', 'Last Start - Narrow Loss (≤1L)'),
+        (r'\+\s*3\.0\s*:\s*Close loss \(.*nd.*\)', 'Last Start - Close Loss 2nd (1-2L)'),
+        (r'\+\s*3\.0\s*:\s*Close loss \(.*rd.*\)', 'Last Start - Close Loss 3rd (1-2L)'),
+
+        # ====== LAST START - BEATEN ======
+        (r'\+\s*0\.0\s*:\s*Competitive effort.*th.*by', 'Last Start - Competitive Effort (≤3L)'),
+        (r'-\s*3\.0\s*:\s*Beaten clearly', 'Last Start - Beaten Clearly (3-6L)'),
+        (r'-\s*5\.0\s*:\s*Beaten badly.*nd', 'Last Start - Beaten Badly Placed'),
+        (r'\+\s*5\.0\s*:\s*Well beaten.*BUT major class drop', 'Last Start - Well Beaten + Class Drop'),
+        (r'\+\s*5\.0\s*:\s*Beaten.*dropping in class significantly', 'Last Start - Beaten + Dropping Class'),
+        (r'\+\s*0\.0\s*:\s*Beaten clearly.*BUT dropping in class', 'Last Start - Beaten Clearly + Dropping'),
+        (r'-\s*7\.0\s*:\s*Well beaten', 'Last Start - Well Beaten (6-10L)'),
+        (r'-\s*25\.0\s*:\s*Demolished', 'Last Start - Demolished (10L+)'),
+
+        # ====== DAYS SINCE RUN ======
+        (r'\+\s*0\.0\s*:\s*Quick backup', 'Days Since Run - Quick Backup (≤7 days)'),
+        (r'-\s*20\.0\s*:\s*Too fresh.*150', 'Days Since Run - Too Fresh (150+ days)'),
+        (r'-\s*25\.0\s*:\s*Too fresh.*200', 'Days Since Run - Too Fresh (200+ days)'),
+        (r'-\s*30\.0\s*:\s*Too fresh.*250', 'Days Since Run - Too Fresh (250+ days)'),
+        (r'-\s*30\.0\s*:\s*Too fresh.*over 1 year', 'Days Since Run - Too Fresh (1+ year)'),
+
+        # ====== FORM PRICE ======
+        (r'\+\s*[3-9]\d\.0\s*:\s*Form price', 'Form Price - Very Short ($1-$2)'),
+        (r'\+\s*[12]\d\.0\s*:\s*Form price', 'Form Price - Short ($2-$5)'),
+        (r'\+\s*[2-9]\.0\s*:\s*Form price', 'Form Price - Backed ($5-$13)'),
+        (r'\+\s*1\.0\s*:\s*Form price', 'Form Price - Slight Value ($12-$14)'),
+        (r'\+\s*0\.0\s*:\s*Form price.*neutral', 'Form Price - Neutral (~$14)'),
+        (r'-\s*[\d.]+\.0\s*:\s*Form price', 'Form Price - Outsider ($15+)'),
+
+        # ====== FIRST UP / SECOND UP ======
+        (r'\+\s*0\.0\s*:\s*First-up winner', 'First Up - Has Won First Up'),
+        (r'\+\s*0\.0\s*:\s*Strong first-up podium', 'First Up - Strong Podium Rate'),
+        (r'\+\s*3\.0\s*:\s*Second-up winner', 'Second Up - Has Won Second Up'),
+        (r'\+\s*2\.0\s*:\s*Strong second-up podium', 'Second Up - Strong Podium Rate'),
+        (r'\+\s*15\.0\s*:\s*First-up specialist \(UNDEFEATED\)', 'First Up - Specialist Undefeated'),
+        (r'\+\s*15\.0\s*:\s*Second-up specialist \(UNDEFEATED\)', 'Second Up - Specialist Undefeated'),
+        (r'-\s*1\.0\s*:\s*Unclear spell', 'Spell Status - Unclear'),
+
+        # ====== WEIGHT ======
+        (r'\+\s*15\.0\s*:\s*Weight.*BELOW race avg', 'Weight vs Field - Well Below (3kg+)'),
+        (r'\+\s*10\.0\s*:\s*Weight.*below race avg', 'Weight vs Field - Below (2-3kg)'),
+        (r'\+\s*6\.0\s*:\s*Weight.*below race avg', 'Weight vs Field - Slightly Below (1-2kg)'),
+        (r'\+\s*3\.0\s*:\s*Weight.*below race avg', 'Weight vs Field - Marginally Below (0.5-1kg)'),
+        (r'0\.0\s*:\s*Weight.*near race avg', 'Weight vs Field - Near Average'),
+        (r'-\s*3\.0\s*:\s*Weight.*above race avg', 'Weight vs Field - Marginally Above'),
+        (r'-\s*6\.0\s*:\s*Weight.*above race avg', 'Weight vs Field - Above (1-2kg)'),
+        (r'-\s*10\.0\s*:\s*Weight.*above race avg', 'Weight vs Field - Well Above (2-3kg)'),
+        (r'-\s*15\.0\s*:\s*Weight.*ABOVE race avg', 'Weight vs Field - Well Above (3kg+)'),
+        (r'\+\s*15\.0\s*:\s*Dropped.*from last start', 'Weight Change - Dropped 3kg+'),
+        (r'\+\s*10\.0\s*:\s*Dropped.*from last start', 'Weight Change - Dropped 2-3kg'),
+        (r'\+\s*5\.0\s*:\s*Dropped.*from last start', 'Weight Change - Dropped 1-2kg'),
+        (r'-\s*5\.0\s*:\s*Up.*from last start', 'Weight Change - Up 1-2kg'),
+        (r'-\s*10\.0\s*:\s*Up.*from last start', 'Weight Change - Up 2-3kg'),
+        (r'-\s*15\.0\s*:\s*Up.*from last start', 'Weight Change - Up 3kg+'),
+
+        # ====== CAREER WIN RATE ======
+        (r'\+\s*0\.0\s*:\s*Elite career win rate', 'Career Win Rate - Elite 40%+'),
+        (r'\+\s*0\.0\s*:\s*Strong career win rate', 'Career Win Rate - Strong 30-40%'),
+        (r'-\s*15\.0\s*:\s*Poor career win rate', 'Career Win Rate - Poor <10%'),
+
+        # ====== AGE/SEX - BONUSES ======
+        (r'\+\s*25\.0\s*:\s*5yo horse', 'Age/Sex - 5yo Horse (Entire)'),
+        (r'\+\s*20\.0\s*:\s*8yo Mare', 'Age/Sex - 8yo Mare'),
+        (r'\+\s*3\.0\s*:\s*Prime age \(3yo\)', 'Age/Sex - 3yo'),
+        (r'\+\s*0\.0\s*:\s*\(4yo\)', 'Age/Sex - 4yo'),
+
+        # ====== AGE/SEX - MARE PENALTIES ======
+        (r'-\s*15\.0\s*:\s*5yo Mare', 'Age/Sex - 5yo Mare Penalty'),
+        (r'-\s*10\.0\s*:\s*6-7yo Mare', 'Age/Sex - 6-7yo Mare Penalty'),
+
+        # ====== AGE/SEX - OLD AGE PENALTIES ======
+        (r'-\s*25\.0\s*:\s*Old age \(7-8yo', 'Age/Sex - 7-8yo Penalty'),
+        (r'-\s*35\.0\s*:\s*9yo - ZERO WINS', 'Age/Sex - 9yo Penalty'),
+        (r'-\s*40\.0\s*:\s*10yo', 'Age/Sex - 10yo Penalty'),
+        (r'-\s*45\.0\s*:\s*11yo', 'Age/Sex - 11yo Penalty'),
+        (r'-\s*50\.0\s*:\s*12yo', 'Age/Sex - 12yo Penalty'),
+        (r'-\s*60\.0\s*:\s*13\+yo', 'Age/Sex - 13+yo Penalty'),
+
+        # ====== COLT BONUSES ======
+        (r'\+\s*20\.0\s*:\s*3yo COLT combo', 'Colt - 3yo Colt'),
+        (r'\+\s*20\.0\s*:\s*COLT\s*\(', 'Colt - Base Bonus'),
+        (r'\+\s*15\.0\s*:\s*Fast sectional \+ COLT combo', 'Colt - Fast Sectional + Colt'),
+
+        # ====== SPECIALIST / PERFECT RECORD ======
+        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED.*track\+distance.*specialist', 'Specialist - Undefeated Track+Distance'),
+        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED.*track.*specialist', 'Specialist - Undefeated Track'),
+        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED.*distance.*specialist', 'Specialist - Undefeated Distance'),
+        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED.*condition.*specialist', 'Specialist - Undefeated Condition'),
+        (r'\+\s*([\d.]+)\s*:\s*100% PODIUM.*track\+distance', 'Specialist - Perfect Podium Track+Distance'),
+        (r'\+\s*([\d.]+)\s*:\s*100% PODIUM.*track\b', 'Specialist - Perfect Podium Track'),
+        (r'\+\s*([\d.]+)\s*:\s*100% PODIUM.*distance', 'Specialist - Perfect Podium Distance'),
+        (r'\+\s*([\d.]+)\s*:\s*100% PODIUM.*condition', 'Specialist - Perfect Podium Condition'),
+
+        # ====== HISTORICAL SECTIONALS (CSV) ======
+        (r'\+\s*([\d.]+):\s*weighted avg \(z=[\d.]+', 'Sectional History - Weighted Avg'),
+        (r'[+-]\s*([\d.]+):\s*best of last \d+', 'Sectional History - Best Recent'),
         (r'\+\s*([\d.]+):\s*consistency - excellent', 'Sectional Consistency - Excellent'),
         (r'\+\s*([\d.]+):\s*consistency - good', 'Sectional Consistency - Good'),
         (r'\+\s*([\d.]+):\s*consistency - fair', 'Sectional Consistency - Fair'),
         (r'\+\s*([\d.]+):\s*consistency - poor', 'Sectional Consistency - Poor'),
-        
-        # Weight
-        (r'\+\s*([\d.]+)\s*:\s*Weight.*BELOW race avg', 'Weight - Well Below Avg'),
-        (r'\+\s*([\d.]+)\s*:\s*Weight.*below race avg', 'Weight - Below Avg'),
-        (r'(-[\d.]+)\s*:\s*Weight.*above race avg', 'Weight - Above Avg'),
-        (r'(-[\d.]+)\s*:\s*Weight.*ABOVE race avg', 'Weight - Well Above Avg'),
-        (r'\+\s*([\d.]+)\s*:\s*Dropped.*from last start', 'Weight Drop'),
-        (r'(-[\d.]+)\s*:\s*Up.*from last start', 'Weight Rise'),
-        
-        # Combo Bonus
-        (r'\+\s*15\.0\s*:\s*COMBO BONUS', 'Combo Bonus'),
-        # NEW PATTERNS - Add after the existing patterns, before the closing bracket ]
 
-        # Colt Bonus - FIXED to match analyzer.js output
-        (r'\+\s*20\.0\s*:\s*COLT\s*\(', 'Colt Bonus'),
-
-        # 5yo horse - NEW PATTERN
-        (r'\+\s*25\.0\s*:\s*5yo horse', '5yo horse (236% ROI, 36.4% SR - elite age)'),
-
-        # Age Bonuses
-        (r'\+\s*5\.0\s*:\s*Prime age \(3yo', 'Age - 3yo Prime'),
-        (r'\+\s*3\.0\s*:\s*Good age \(4yo', 'Age - 4yo Good'),
-        (r'-\s*10\.0\s*:\s*Old age \(7\+', 'Age - 7+ Old'),
-
-        # Sire Bonuses - SPECIFIC SIRES FIRST, THEN GENERIC
-        (r'([+-]?\s*[\d.]+)\.0\s*:\s*Sire\s+Wootton Bassett\s*\(', 'Sire - Wootton Bassett'),
-        (r'([+-]?\s*[\d.]+)\.0\s*:\s*Sire\s+Trapeze Artist\s*\(', 'Sire - Trapeze Artist'),
-        (r'([+-]?\s*[\d.]+)\.0\s*:\s*Sire\s+Starspangledbanner\s*\(', 'Sire - Starspangledbanner'),
-        (r'([+-]?\s*[\d.]+)\.0\s*:\s*Sire\s+Pierata\s*\(', 'Sire - Pierata'),
-        (r'([+-]?\s*[\d.]+)\.0\s*:\s*Sire\s+Lohnro\s*\(', 'Sire - Lohnro'),
-        (r'([+-]?\s*[\d.]+)\.0\s*:\s*Sire\s+Russian Revolution\s*\(', 'Sire - Russian Revolution'),
-        # Generic sire pattern LAST
-        (r'([+-]?\s*[\d.]+)\s*:\s*Sire\s+([A-Za-z\'\s]+?)\s+\(', 'Sire - \\2'),
-
-        # Career Win Rate
-        (r'\+\s*15\.0\s*:\s*Elite career win rate', 'Career Win Rate - Elite 40%+'),
-        (r'\+\s*8\.0\s*:\s*Strong career win rate', 'Career Win Rate - Strong 30-40%'),
-        (r'-\s*10\.0\s*:\s*Poor career win rate', 'Career Win Rate - Poor <10%'),
-
-        # Barrier Bonus
-        (r'\+\s*5\.0\s*:\s*Sweet spot barrier \(7-9', 'Barrier 7-9'),
-
-        # Close Loss Bonus
-        (r'\+\s*5\.0\s*:\s*Close loss last start \(0\.5-2L', 'Close Loss Bonus'),
-
-        # 3yo Colt Combo
-        (r'\+\s*20\.0\s*:\s*3yo COLT combo', '3yo Colt Combo'),
-        
-        # 4yo Mare Combo
-        (r'\+\s*15\.0\s*:\s*4yo MARE combo', '4yo Mare Combo'),
-
-        # Demolished + Class Drop Combo
-        (r'\+\s*15\.0\s*:\s*Demolished in elite company', 'Demolished + Major Class Drop'),
-
-        # Fast Sectional + Colt Combo
-        (r'\+\s*25\.0\s*:\s*Fast sectional \+ COLT combo', 'Fast Sectional + Colt'),
-
-        # Slow Sectional + Class Drop Combo
-        (r'\+\s*30\.0\s*:\s*Major class drop \+ slow sectional combo', 'Major Class Drop + Slow Sectional'),
-
-        # Class Drop Context Bonuses
-        (r'\+\s*10\.0\s*:\s*Demolished.*BUT MAJOR class drop', 'Context - Demolished with Major Drop'),
-        (r'\+\s*5\.0\s*:\s*Well beaten.*BUT major class drop', 'Context - Well Beaten with Drop'),
-        (r'\+\s*0\.0\s*:\s*Beaten clearly.*BUT dropping in class', 'Context - Beaten Clearly with Drop'),
-        
-        # Specialist Bonuses
-        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(track\)', 'Specialist - Track'),
-        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(distance\)', 'Specialist - Distance'),
-        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(track\+distance\)', 'Specialist - Track+Distance'),
-        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED \(.*condition\)', 'Specialist - Condition'),
-        (r'\+\s*([\d.]+)\s*:\s*100% PODIUM', 'Specialist - Perfect Podium'),
-        
-       # ====== RACE-DAY SECTIONAL BONUSES ======
-        # Base Race-Day Bonuses
-        (r'\+\s*12\.0\s*:\s*Fastest sectional in race.*', 'Race-Day - Fastest in Race'),
-        (r'\+\s*(?:18|35)(?:\.\d+)?\s*:\s*Mile\s*\+\s*Fastest(?:\s+sectional)?', 'Race-Day - Mile + Fastest'),
-        (r'\+\s*18\.0\s*:\s*Mile\s*\+\s*Fastest sectional.*', 'Race-Day - Mile + Fastest'),
-        (r'-\s*8\.0\s*:\s*Long distance.*negates sectional.*', 'Race-Day - Long Distance Penalty'),
-        # Weight Advantage + Fast Sectional
-        (r'\+\s*50\.0\s*:\s*Big weight advantage \(3kg\+\)\s*\+\s*Fastest.*', 'Race-Day - Big Weight Adv + Fastest'),
-        # MEGA COMBOS
-        (r'\+\s*30\.0\s*:\s*🔥🔥🔥 MEGA COMBO: 4yo\s*\+\s*Soft\s*\+\s*Fastest\s*\+\s*Weight adv.*', 'MEGA - 4yo+Soft+Fast+Weight'),
-        (r'\+\s*24\.0\s*:\s*🔥🔥 Sprint\s*\+\s*Weight adv\s*\+\s*Fastest.*', 'MEGA - Sprint+Weight+Fastest'),
-        (r'\+\s*16\.0\s*:\s*🔥 Mile\s*\+\s*Weight adv\s*\+\s*Fastest.*', 'MEGA - Mile+Weight+Fastest'),
-        (r'\+\s*12\.0\s*:\s*4yo Mare\s*\+\s*Top 20% sectional.*', 'MEGA - 4yo Mare + Top 20%'),
+        # ====== API SECTIONALS ======
+        (r'\+\s*([\d.]+):\s*Last 200m \(Rank \d+.*ELITE', 'API Sectional - Last 200m Elite'),
+        (r'\+\s*([\d.]+):\s*Last 200m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 200m Very Good'),
+        (r'\+\s*([\d.]+):\s*Last 200m \(Rank \d+.*GOOD', 'API Sectional - Last 200m Good'),
+        (r'[\d.]+:\s*Last 200m \(Rank \d+.*AVERAGE', 'API Sectional - Last 200m Average'),
+        (r'[\d.]+:\s*Last 200m \(Rank \d+.*POOR', 'API Sectional - Last 200m Poor'),
+        (r'\+\s*([\d.]+):\s*Last 400m \(Rank \d+.*ELITE', 'API Sectional - Last 400m Elite'),
+        (r'\+\s*([\d.]+):\s*Last 400m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 400m Very Good'),
+        (r'\+\s*([\d.]+):\s*Last 400m \(Rank \d+.*GOOD', 'API Sectional - Last 400m Good'),
+        (r'[\d.]+:\s*Last 400m \(Rank \d+.*AVERAGE', 'API Sectional - Last 400m Average'),
+        (r'[\d.]+:\s*Last 400m \(Rank \d+.*POOR', 'API Sectional - Last 400m Poor'),
+        (r'\+\s*([\d.]+):\s*Last 600m \(Rank \d+.*ELITE', 'API Sectional - Last 600m Elite'),
+        (r'\+\s*([\d.]+):\s*Last 600m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 600m Very Good'),
+        (r'\+\s*([\d.]+):\s*Last 600m \(Rank \d+.*GOOD', 'API Sectional - Last 600m Good'),
+        (r'\+\s*([\d.]+):\s*IMPROVING TREND', 'API Sectional - Improving Trend'),
 
         # ====== RUNNING POSITION (SPEEDMAP) ======
         (r'\+\s*12\.0\s*:\s*LEADER in Sprint', 'Running Position - Leader Sprint'),
         (r'\+\s*8\.0\s*:\s*ONPACE in Sprint', 'Running Position - OnPace Sprint'),
+        (r'0\.0\s*:\s*MIDFIELD in Sprint', 'Running Position - Midfield Sprint'),
         (r'-\s*8\.0\s*:\s*BACKMARKER in Sprint', 'Running Position - Backmarker Sprint'),
         (r'\+\s*6\.0\s*:\s*LEADER in Mile', 'Running Position - Leader Mile'),
         (r'\+\s*8\.0\s*:\s*ONPACE in Mile', 'Running Position - OnPace Mile'),
@@ -1037,25 +1095,18 @@ def parse_notes_components(notes):
         (r'-\s*5\.0\s*:\s*LEADER in Middle distance', 'Running Position - Leader Middle'),
         (r'\+\s*5\.0\s*:\s*ONPACE in Middle distance', 'Running Position - OnPace Middle'),
         (r'\+\s*3\.0\s*:\s*MIDFIELD in Middle distance', 'Running Position - Midfield Middle'),
+        (r'0\.0\s*:\s*BACKMARKER in Middle distance', 'Running Position - Backmarker Middle'),
         (r'-\s*8\.0\s*:\s*LEADER in Staying race', 'Running Position - Leader Staying'),
+        (r'\+\s*3\.0\s*:\s*ONPACE in Staying race', 'Running Position - OnPace Staying'),
         (r'\+\s*5\.0\s*:\s*MIDFIELD in Staying race', 'Running Position - Midfield Staying'),
-
-        # ====== API SECTIONAL ANALYSIS ======
-        (r'\+\s*([\d.]+):\s*Last 200m \(Rank \d+.*ELITE', 'API Sectional - Last 200m Elite'),
-        (r'\+\s*([\d.]+):\s*Last 200m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 200m Very Good'),
-        (r'\+\s*([\d.]+):\s*Last 200m \(Rank \d+.*GOOD', 'API Sectional - Last 200m Good'),
-        (r'\+\s*([\d.]+):\s*Last 400m \(Rank \d+.*ELITE', 'API Sectional - Last 400m Elite'),
-        (r'\+\s*([\d.]+):\s*Last 400m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 400m Very Good'),
-        (r'\+\s*([\d.]+):\s*Last 400m \(Rank \d+.*GOOD', 'API Sectional - Last 400m Good'),
-        (r'\+\s*([\d.]+):\s*Last 600m \(Rank \d+.*ELITE', 'API Sectional - Last 600m Elite'),
-        (r'\+\s*([\d.]+):\s*IMPROVING TREND', 'API Sectional - Improving Trend'),
+        (r'\+\s*2\.0\s*:\s*BACKMARKER in Staying race', 'Running Position - Backmarker Staying'),
 
         # ====== PFAI BLEND ======
-        (r'PFAI Score:\s*(9[0-9]|100)\.', 'PFAI Score: 90+'),
-        (r'PFAI Score:\s*(8[0-9])\.', 'PFAI Score: 80-89'),
-        (r'PFAI Score:\s*(7[0-9])\.', 'PFAI Score: 70-79'),
-        (r'PFAI Score:\s*(6[0-9])\.', 'PFAI Score: 60-69'),
-        (r'PFAI Score:\s*([0-5][0-9])\.', 'PFAI Score: <60'),
+        (r'PFAI Score:\s*(9[0-9]|100)[\. ]', 'PFAI Score - 90+'),
+        (r'PFAI Score:\s*(8[0-9])[\. ]', 'PFAI Score - 80-89'),
+        (r'PFAI Score:\s*(7[0-9])[\. ]', 'PFAI Score - 70-79'),
+        (r'PFAI Score:\s*(6[0-9])[\. ]', 'PFAI Score - 60-69'),
+        (r'PFAI Score:\s*([0-5][0-9])[\. ]', 'PFAI Score - <60'),
 
         # ====== MARKET EXPECTATION ======
         (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(best market performer in field', 'Market Expectation - Best in Field'),
@@ -1071,31 +1122,18 @@ def parse_notes_components(notes):
         (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(significant underperformer', 'Market Expectation - Significant Underperformer'),
         (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(chronic underperformer', 'Market Expectation - Chronic Underperformer'),
 
-        # ====== TRAINER TIERS ======
-        (r'\+\s*20\.0\s*:\s*Elite value trainer', 'Elite Trainer'),
-        (r'\+\s*15\.0\s*:\s*Strong value trainer', 'Strong Value Trainer'),
-        (r'\+\s*10\.0\s*:\s*Profitable trainer', 'Good Trainer'),
-        (r'-\s*15\.0\s*:\s*Poor value trainer', 'Negative Trainer'),
+    ]
 
-        # ====== AGE PENALTIES ======
-        (r'-\s*15\.0\s*:\s*5yo Mare', 'Age - 5yo Mare Penalty'),
-        (r'-\s*10\.0\s*:\s*6-7yo Mare', 'Age - 6-7yo Mare Penalty'),
-        (r'-\s*25\.0\s*:\s*Old age \(7-8yo', 'Age - 7-8yo Penalty'),
-        (r'-\s*35\.0\s*:\s*9yo - ZERO WINS', 'Age - 9yo Penalty'),
-        ]
-    
     for pattern, name in patterns:
-        match = re.search(pattern, notes, re.IGNORECASE)
+        match = re.search(pattern, notes, re.IGNORECASE | re.DOTALL)
         if match:
-            # Try to extract the score value
             try:
                 score_str = match.group(1).replace(' ', '').replace('+', '')
                 score = float(score_str)
             except (IndexError, ValueError):
-                # Pattern matched but no numeric group - use 1 as indicator
                 score = 1.0
             components[name] = score
-    
+
     return components
 
 
