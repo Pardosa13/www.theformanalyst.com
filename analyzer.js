@@ -996,6 +996,7 @@ function checkJockeys(JockeyName) {
         'Teagan Voorham',         // 37.4% ROI, 14.1% SR, 85 rides - BIG SAMPLE
         'Zac Wadick',             // 33.3% ROI, 4.8% SR, 42 rides
         'Boris Thornton',         // 32.3% ROI, 12.8% SR, 47 rides
+        'Jett Newman',            // 38.2% ROI, 22.7% SR, 44 rides
         'R Mc Leod',              // 28.5% ROI, 8.3% SR, 72 rides - BIG SAMPLE
         'Ms K Yuill',             // 30.6% ROI, 27.8% SR, 18 rides
         'Ella Bent',              // 26.0% ROI, 20.0% SR, 25 rides
