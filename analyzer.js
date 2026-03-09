@@ -1111,7 +1111,6 @@ function checkJockeys(JockeyName) {
         'J Parr',                 // -53.1% ROI, 12.3% SR, 57 rides
         'Leslie Tilley',          // -39.3% ROI, 11.3% SR, 53 rides
         'Cejay Graham',           // -53.1% ROI, 8.5% SR, 153 rides - BIG SAMPLE
-        'K S Latham',             // removed from profitable - check data
         'S O\'Donnell',           // -57.2% ROI, 7.9% SR, 76 rides
         'Bailey Kinninmont',      // -33.7% ROI, 7.7% SR, 78 rides
         'T Turner',               // -54.6% ROI, 6.0% SR, 84 rides
@@ -1173,7 +1172,6 @@ function checkJockeys(JockeyName) {
         'Natasha Faithfull',      // -2.7% ROI, 15.7% SR, 102 rides - borderline
         'M Aitken',               // -1.6% ROI, 9.4% SR, 32 rides - borderline
         'Ms C Keatings',          // -1.9% ROI, 13.8% SR, 58 rides - borderline
-        'Jett Newman',            // 9.7% ROI - moved here from T2, check latest data
     ];
     
     // Apply scoring
