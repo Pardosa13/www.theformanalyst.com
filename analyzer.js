@@ -190,6 +190,11 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     score += a;
     notes += b;
 
+    // Check jockey + trainer combo bonuses
+    [a, b] = checkJockeyTrainerCombo(horseRow['horse jockey'], horseRow['horse trainer']);
+    score += a;
+    notes += b;
+
     // Check if horse trainer is someone we like or not
     [a, b] = checkTrainers(horseRow['horse trainer']);
     score += a;
