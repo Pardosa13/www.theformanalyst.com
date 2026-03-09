@@ -568,7 +568,6 @@ const sireData = {
     'Russian Revolution': { runners: 159, roi: -1.9, strikeRate: 12.6 },
     'Showtime': { runners: 87, roi: 16.0, strikeRate: 14.5 },           // updated - moved to good value range
     'Rothesay': { runners: 63, roi: -3.8, strikeRate: 15.9 },
-    'Brave Smash': { runners: 76, roi: 39.0, strikeRate: 13.8 },        // duplicate - handled above, remove this line
     'Safeguard': { runners: 32, roi: -4.7, strikeRate: 12.5 },
     'Snitzel': { runners: 303, roi: 2.4, strikeRate: 11.7 },            // updated - larger sample, now slightly positive
     'Tosen Stardom': { runners: 56, roi: -6.3, strikeRate: 7.1 },
@@ -585,7 +584,6 @@ const sireData = {
     'Hellbent': { runners: 181, roi: -15.3, strikeRate: 12.7 },
     'Tivaci': { runners: 57, roi: -16.1, strikeRate: 10.5 },
     'Super Seth': { runners: 41, roi: -16.7, strikeRate: 22.0 },
-    'Savabeel': { runners: 150, roi: -41.0, strikeRate: 11.9 },         // updated - significantly worse, moved to moderate negative
     'Epaulette': { runners: 87, roi: -21.8, strikeRate: 10.3 },
     'Sessions': { runners: 74, roi: -22.0, strikeRate: 13.5 },
     'Exceed And Excel': { runners: 104, roi: -22.3, strikeRate: 12.5 },
