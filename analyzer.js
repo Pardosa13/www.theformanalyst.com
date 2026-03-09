@@ -323,17 +323,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             notes += '+ 5.0 : USA-bred (+100% ROI, 9 runners - small sample)\n';
         }
     }
-// ==========================================
-    // WEIGHT TYPE SCORING - ADDED 2026-03-09
-    // Set Weight With Penalties fires strongly in combos
-    // 3yo Colt + Set Weight = +172.4% ROI (34 runners)
-    // Sex: Colt + Set Weight = +106.7% ROI (50 runners)
-    // ==========================================
-    const weightType = String(horseRow['weight type'] || horseRow['horse weight type'] || '').trim().toLowerCase();
-    if (horseSex === 'Colt' && weightType.includes('set weight')) {
-        score += 5;
-        notes += '+ 5.0 : Colt in Set Weight race (+106.7% ROI, 50 runners)\n';
-    }
+
     // Calculate recent form for last start context
     const last10 = String(horseRow['horse last10'] || '');
     let winsBeforeLast = 0;
