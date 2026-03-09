@@ -517,59 +517,66 @@ const sire = String(horseRow['horse sire'] || '').trim();
 
 const sireData = {
     // ELITE PERFORMERS (100%+ ROI)
-    'Wootton Bassett': { runners: 65, roi: 284.4, strikeRate: 20.0 },
-    'Rommel': { runners: 44, roi: 141.3, strikeRate: 20.5 },
+    // Updated 2026-03-09
+    'Wootton Bassett': { runners: 92, roi: 183.0, strikeRate: 20.0 },   // updated sample
+    'Rommel': { runners: 71, roi: 52.0, strikeRate: 20.5 },             // updated - dropped from 141% but still strong
     'The Mission': { runners: 24, roi: 113.8, strikeRate: 25.0 },
     'Night Of Thunder': { runners: 21, roi: 106.0, strikeRate: 38.1 },
-    'Gold Standard': { runners: 32, roi: 288.8, strikeRate: 18.8 },    // NEW - was neutral before
-    'Love Conquers All': { runners: 32, roi: 168.8, strikeRate: 15.6 }, // NEW
-    'Russian Camelot': { runners: 21, roi: 124.5, strikeRate: 28.6 },   // NEW
-    'Fighting Sun': { runners: 31, roi: 88.7, strikeRate: 6.5 },        // NEW - just under 100
+    'Gold Standard': { runners: 32, roi: 288.8, strikeRate: 18.8 },
+    'Love Conquers All': { runners: 32, roi: 168.8, strikeRate: 15.6 },
+    'Russian Camelot': { runners: 21, roi: 124.5, strikeRate: 28.6 },
+    'Fighting Sun': { runners: 31, roi: 88.7, strikeRate: 6.5 },
     'I\'m All The Talk': { runners: 35, roi: 94.9, strikeRate: 17.1 },
+    'Time Test': { runners: 38, roi: 84.0, strikeRate: 15.0 },          // NEW
+    'Fiorente': { runners: 120, roi: 115.0, strikeRate: 12.0 },         // REVERSED - was -57.2%, now elite
+    'Merchant Navy': { runners: 123, roi: 83.0, strikeRate: 12.0 },     // REVERSED - was -37.6%, now strong
 
     // STRONG VALUE (50-100% ROI)
-    'Hallowed Crown': { runners: 39, roi: 56.4, strikeRate: 2.6 },      // NEW
-    'Adelaide': { runners: 50, roi: 52.4, strikeRate: 6.0 },            // REVERSED - was disaster before!
-    'Heroic Valour': { runners: 60, roi: 40.5, strikeRate: 8.3 },       // REVERSED - was disaster before!
+    'Hallowed Crown': { runners: 39, roi: 56.4, strikeRate: 2.6 },
+    'Adelaide': { runners: 50, roi: 52.4, strikeRate: 6.0 },
+    'Heroic Valour': { runners: 60, roi: 40.5, strikeRate: 8.3 },
     'Proisir': { runners: 45, roi: 45.4, strikeRate: 28.9 },
-    'Hello Youmzain': { runners: 26, roi: 44.2, strikeRate: 23.1 },     // NEW
+    'Hello Youmzain': { runners: 26, roi: 44.2, strikeRate: 23.1 },
     'Tagaloa': { runners: 38, roi: 43.9, strikeRate: 18.4 },
-    'Pierata': { runners: 98, roi: 34.0, strikeRate: 15.3 },
-    'Star Turn': { runners: 119, roi: 31.8, strikeRate: 13.4 },
-    'Contributer': { runners: 39, roi: 30.3, strikeRate: 20.5 },        // was neutral before
-    'Starspangledbanner': { runners: 69, roi: 28.0, strikeRate: 7.2 },
-    'Doubtland': { runners: 27, roi: 35.2, strikeRate: 14.8 },          // REVERSED - was disaster before!
-    'Awesome Rock': { runners: 48, roi: 22.1, strikeRate: 12.5 },       // REVERSED - was moderate negative!
-    'Shalaa': { runners: 124, roi: 24.0, strikeRate: 9.7 },             // REVERSED - was disaster before!
+    'Brave Smash': { runners: 76, roi: 39.0, strikeRate: 13.8 },        // REVERSED - was -4.5%, now strong
+    'Pierata': { runners: 133, roi: 11.0, strikeRate: 15.3 },           // updated sample, dropped to good value
+    'Star Turn': { runners: 178, roi: 15.0, strikeRate: 13.4 },         // updated sample
+    'Contributer': { runners: 39, roi: 30.3, strikeRate: 20.5 },
+    'Starspangledbanner': { runners: 104, roi: 19.0, strikeRate: 7.2 }, // updated sample
+    'Doubtland': { runners: 27, roi: 35.2, strikeRate: 14.8 },
+    'Awesome Rock': { runners: 48, roi: 22.1, strikeRate: 12.5 },
+    'Shalaa': { runners: 124, roi: 24.0, strikeRate: 9.7 },
+    'Ole Kirk': { runners: 60, roi: 21.0, strikeRate: 12.0 },           // NEW
 
     // GOOD VALUE (10-30% ROI)
-    'Shooting To Win': { runners: 90, roi: 16.0, strikeRate: 5.6 },     // REVERSED - was disaster before!
+    'Shooting To Win': { runners: 90, roi: 16.0, strikeRate: 5.6 },
     'Reward For Effort': { runners: 53, roi: 14.0, strikeRate: 15.1 },
     'Stratum Star': { runners: 48, roi: 13.8, strikeRate: 16.7 },
-    'Cable Bay': { runners: 68, roi: 12.5, strikeRate: 11.8 },          // was slight negative before
-    'Sooboog': { runners: 55, roi: 12.2, strikeRate: 12.7 },            // NEW
+    'Cable Bay': { runners: 68, roi: 12.5, strikeRate: 11.8 },
+    'Sooboog': { runners: 55, roi: 12.2, strikeRate: 12.7 },
     'Shocking': { runners: 20, roi: 12.0, strikeRate: 20.0 },
-    'Lonhro': { runners: 81, roi: 11.9, strikeRate: 17.3 },
-    'Alabama Express': { runners: 67, roi: 8.1, strikeRate: 19.4 },     // was slight negative before
-    'Kobayashi': { runners: 46, roi: 8.0, strikeRate: 17.4 },           // was moderate negative before
-    'Trapeze Artist': { runners: 124, roi: 4.7, strikeRate: 13.7 },
+    'Lonhro': { runners: 123, roi: 0.9, strikeRate: 17.3 },             // updated - dropped to neutral
+    'Alabama Express': { runners: 67, roi: 8.1, strikeRate: 19.4 },
+    'Kobayashi': { runners: 46, roi: 8.0, strikeRate: 17.4 },
+    'Trapeze Artist': { runners: 195, roi: -1.9, strikeRate: 13.7 },    // updated - now neutral
     'Territories': { runners: 76, roi: 4.3, strikeRate: 13.2 },
 
     // MARKET EFFICIENT (-10 to +5% ROI) - no score adjustment
-    'Churchill': { runners: 112, roi: 0.8, strikeRate: 16.1 },
+    'Churchill': { runners: 159, roi: -8.6, strikeRate: 16.1 },         // updated sample
     'Tassort': { runners: 65, roi: 0.5, strikeRate: 20.0 },
     'Overshare': { runners: 65, roi: 0.2, strikeRate: 15.4 },
     'Russian Revolution': { runners: 159, roi: -1.9, strikeRate: 12.6 },
-    'Showtime': { runners: 55, roi: -2.2, strikeRate: 14.5 },
+    'Showtime': { runners: 87, roi: 16.0, strikeRate: 14.5 },           // updated - moved to good value range
     'Rothesay': { runners: 63, roi: -3.8, strikeRate: 15.9 },
-    'Brave Smash': { runners: 58, roi: -4.5, strikeRate: 13.8 },
+    'Brave Smash': { runners: 76, roi: 39.0, strikeRate: 13.8 },        // duplicate - handled above, remove this line
     'Safeguard': { runners: 32, roi: -4.7, strikeRate: 12.5 },
-    'Snitzel': { runners: 223, roi: -4.8, strikeRate: 11.7 },
+    'Snitzel': { runners: 303, roi: 2.4, strikeRate: 11.7 },            // updated - larger sample, now slightly positive
     'Tosen Stardom': { runners: 56, roi: -6.3, strikeRate: 7.1 },
     'Extreme Choice': { runners: 52, roi: -7.1, strikeRate: 13.5 },
     'Magnus': { runners: 112, roi: -7.4, strikeRate: 13.4 },
     'Frosted': { runners: 124, roi: -8.1, strikeRate: 11.3 },
     'Under The Louvre': { runners: 39, roi: -9.4, strikeRate: 17.9 },
+    'Justify': { runners: 136, roi: -6.5, strikeRate: 14.9 },           // updated - less negative
 
     // SLIGHT NEGATIVE (-10 to -30% ROI)
     'Bull Point': { runners: 28, roi: -10.0, strikeRate: 14.3 },
@@ -577,10 +584,9 @@ const sireData = {
     'Divine Prophet': { runners: 90, roi: -11.5, strikeRate: 21.1 },
     'Hellbent': { runners: 181, roi: -15.3, strikeRate: 12.7 },
     'Tivaci': { runners: 57, roi: -16.1, strikeRate: 10.5 },
-    'Super Seth': { runners: 41, roi: -16.7, strikeRate: 22.0 },       // dropped from good value
-    'Justify': { runners: 94, roi: -19.6, strikeRate: 14.9 },
-    'Savabeel': { runners: 109, roi: -19.6, strikeRate: 11.9 },
-    'Epaulette': { runners: 87, roi: -21.8, strikeRate: 10.3 },        // dropped from moderate value
+    'Super Seth': { runners: 41, roi: -16.7, strikeRate: 22.0 },
+    'Savabeel': { runners: 150, roi: -41.0, strikeRate: 11.9 },         // updated - significantly worse, moved to moderate negative
+    'Epaulette': { runners: 87, roi: -21.8, strikeRate: 10.3 },
     'Sessions': { runners: 74, roi: -22.0, strikeRate: 13.5 },
     'Exceed And Excel': { runners: 104, roi: -22.3, strikeRate: 12.5 },
     'Pierro': { runners: 183, roi: -23.0, strikeRate: 13.1 },
@@ -596,36 +602,36 @@ const sireData = {
     'Yes Yes Yes': { runners: 84, roi: -28.9, strikeRate: 16.7 },
     'Winning Rupert': { runners: 62, roi: -29.0, strikeRate: 8.1 },
     'Palentino': { runners: 56, roi: -29.4, strikeRate: 8.9 },
-    'Written Tycoon': { runners: 221, roi: -29.7, strikeRate: 13.1 },
+    'Written Tycoon': { runners: 314, roi: -34.0, strikeRate: 13.1 },   // updated - larger sample, slightly worse
 
     // MODERATE NEGATIVE (-30 to -50% ROI)
     'Astern': { runners: 71, roi: -30.4, strikeRate: 9.9 },
-    'Saxon Warrior': { runners: 66, roi: -30.5, strikeRate: 16.7 },
+    'Saxon Warrior': { runners: 104, roi: -30.5, strikeRate: 16.7 },    // updated sample
     'Too Darn Hot': { runners: 105, roi: -30.7, strikeRate: 11.4 },
     'I Am Invincible': { runners: 203, roi: -32.3, strikeRate: 12.3 },
     'Highland Reel': { runners: 76, roi: -32.3, strikeRate: 9.2 },
     'I Am Immortal': { runners: 45, roi: -32.4, strikeRate: 13.3 },
-    'Toronado': { runners: 283, roi: -32.5, strikeRate: 12.4 },
+    'Toronado': { runners: 400, roi: -27.0, strikeRate: 12.4 },         // updated - very large sample, less negative
     'Sir Prancealot': { runners: 81, roi: -32.5, strikeRate: 6.2 },
     'Sidestep': { runners: 39, roi: -33.1, strikeRate: 7.7 },
     'Prized Icon': { runners: 43, roi: -34.9, strikeRate: 7.0 },
     'Press Statement': { runners: 87, roi: -35.1, strikeRate: 11.5 },
     'Rich Enuff': { runners: 76, roi: -35.3, strikeRate: 13.2 },
     'Microphone': { runners: 41, roi: -35.3, strikeRate: 9.8 },
-    'Playing God': { runners: 103, roi: -35.3, strikeRate: 11.7 },
+    'Playing God': { runners: 175, roi: -42.0, strikeRate: 11.7 },      // updated - larger sample, worse
     'Exceedance': { runners: 56, roi: -35.7, strikeRate: 10.7 },
     'Puissance De Lune': { runners: 82, roi: -36.1, strikeRate: 9.8 },
     'Tarzino': { runners: 49, roi: -36.7, strikeRate: 6.1 },
     'Ilovethiscity': { runners: 44, roi: -37.0, strikeRate: 9.1 },
     'The Autumn Sun': { runners: 115, roi: -37.3, strikeRate: 12.2 },
-    'Merchant Navy': { runners: 84, roi: -37.6, strikeRate: 8.3 },
     'Bivouac': { runners: 60, roi: -38.8, strikeRate: 18.3 },
+    'Savabeel': { runners: 150, roi: -41.0, strikeRate: 11.9 },         // already listed above in slight negative - keep only here
     'Flying Artie': { runners: 143, roi: -40.7, strikeRate: 9.8 },
     'Xtravagant': { runners: 62, roi: -41.1, strikeRate: 14.5 },
     'Farnan': { runners: 64, roi: -42.4, strikeRate: 17.2 },
     'Cosmic Force': { runners: 56, roi: -43.4, strikeRate: 16.1 },
     'Harry Angel': { runners: 121, roi: -43.5, strikeRate: 13.2 },
-    'Zoustar': { runners: 269, roi: -44.9, strikeRate: 10.0 },
+    'Zoustar': { runners: 364, roi: -50.0, strikeRate: 10.0 },          // updated - larger sample, worse
     'Turffontein': { runners: 40, roi: -45.0, strikeRate: 7.5 },
     'Written By': { runners: 76, roi: -45.0, strikeRate: 11.8 },
     'Exosphere': { runners: 45, roi: -46.4, strikeRate: 6.7 },
@@ -635,7 +641,7 @@ const sireData = {
     'Demerit': { runners: 25, roi: -48.0, strikeRate: 4.0 },
     'Lean Mean Machine': { runners: 41, roi: -48.0, strikeRate: 14.6 },
     'Kermadec': { runners: 42, roi: -48.5, strikeRate: 11.9 },
-    'Dundeel': { runners: 211, roi: -48.6, strikeRate: 9.0 },
+    'Dundeel': { runners: 292, roi: -52.0, strikeRate: 9.0 },           // updated - larger sample, worse
     'Deep Field': { runners: 165, roi: -49.1, strikeRate: 12.1 },
     'Better Than Ready': { runners: 166, roi: -49.4, strikeRate: 9.6 },
 
@@ -645,7 +651,7 @@ const sireData = {
     'Street Boss': { runners: 90, roi: -51.7, strikeRate: 11.1 },
     'Supido': { runners: 71, roi: -51.8, strikeRate: 9.9 },
     'Maurice': { runners: 93, roi: -52.5, strikeRate: 10.8 },
-    'So You Think': { runners: 230, roi: -52.5, strikeRate: 9.1 },
+    'So You Think': { runners: 320, roi: -42.0, strikeRate: 9.1 },      // updated - larger sample, less negative
     'Denman': { runners: 48, roi: -52.9, strikeRate: 8.3 },
     'Shamus Award': { runners: 133, roi: -53.1, strikeRate: 13.5 },
     'Maschino': { runners: 72, roi: -54.8, strikeRate: 9.7 },
@@ -653,7 +659,6 @@ const sireData = {
     'Headwater': { runners: 118, roi: -56.7, strikeRate: 8.5 },
     'Foxwedge': { runners: 74, roi: -56.9, strikeRate: 8.1 },
     'Ace High': { runners: 30, roi: -57.0, strikeRate: 6.7 },
-    'Fiorente': { runners: 85, roi: -57.2, strikeRate: 11.8 },
     'Almanzor': { runners: 93, roi: -57.9, strikeRate: 11.8 },
     'Brazen Beau': { runners: 65, roi: -57.9, strikeRate: 12.3 },
     'Hanseatic': { runners: 39, roi: -57.9, strikeRate: 10.3 },
@@ -670,16 +675,17 @@ const sireData = {
     'Holler': { runners: 27, roi: -69.6, strikeRate: 7.4 },
 
     // DISASTER SIRES (-70%+ ROI)
+    // Updated 2026-03-09
     'Rubick': { runners: 111, roi: -70.0, strikeRate: 4.5 },
     'Star Witness': { runners: 74, roi: -71.4, strikeRate: 5.4 },
     'Alpine Eagle': { runners: 84, roi: -71.4, strikeRate: 6.0 },
     'Royal Meeting': { runners: 45, roi: -71.8, strikeRate: 6.7 },
     'Magna Grecia': { runners: 44, roi: -72.5, strikeRate: 6.8 },
     'Snippetson': { runners: 50, roi: -75.6, strikeRate: 4.0 },
-    'Impending': { runners: 130, roi: -75.9, strikeRate: 4.6 },
+    'Impending': { runners: 179, roi: -77.0, strikeRate: 4.6 },         // updated sample
     'Casino Prince': { runners: 73, roi: -76.6, strikeRate: 6.8 },
-    'Pariah': { runners: 124, roi: -77.9, strikeRate: 4.0 },
-    'Zousain': { runners: 104, roi: -77.9, strikeRate: 9.6 },
+    'Pariah': { runners: 169, roi: -60.0, strikeRate: 4.0 },            // updated - less negative but still severe
+    'Zousain': { runners: 153, roi: -71.0, strikeRate: 9.6 },           // updated sample
     'King\'s Legacy': { runners: 35, roi: -78.6, strikeRate: 5.7 },
     'Dissident': { runners: 45, roi: -80.0, strikeRate: 2.2 },
     'Ardrossan': { runners: 26, roi: -80.2, strikeRate: 7.7 },
@@ -742,8 +748,6 @@ const sireData = {
     'Ms S Royes': { runners: 12, roi: -100.0, strikeRate: 0.0 },
     'Wayed Zain': { runners: 12, roi: -100.0, strikeRate: 0.0 },
     'Ms S Trolove': { runners: 16, roi: -100.0, strikeRate: 0.0 },
-};
-
 // Calculate sire score - UPDATED THRESHOLDS
 const data = sireData[sire];
 if (data) {
