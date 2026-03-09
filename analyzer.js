@@ -289,6 +289,36 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     score += a;
     notes += b;
 
+    // ==========================================
+    // COUNTRY SCORING - ADDED 2026-03-09
+    // Based on ROI analysis across 23,743 horses
+    // ==========================================
+    const horseCountry = String(horseRow['country'] || '').trim().toUpperCase();
+    if (horseCountry && horseCountry !== 'AUS') {
+        if (horseCountry === 'FR') {
+            score -= 8;
+            notes += '- 8.0 : French-bred (-67.7% ROI, 77 runners)\n';
+        } else if (horseCountry === 'GB') {
+            score -= 5;
+            notes += '- 5.0 : GB-bred (-45.7% ROI, 187 runners)\n';
+        } else if (horseCountry === 'JPN') {
+            score -= 10;
+            notes += '- 10.0 : Japan-bred (-100% ROI, 17 runners)\n';
+        } else if (horseCountry === 'GER') {
+            score -= 10;
+            notes += '- 10.0 : German-bred (-100% ROI, 7 runners)\n';
+        } else if (horseCountry === 'NZ') {
+            score -= 3;
+            notes += '- 3.0 : NZ-bred (-23.7% ROI, 1925 runners)\n';
+        } else if (horseCountry === 'IRE') {
+            score -= 2;
+            notes += '- 2.0 : Irish-bred (-11.0% ROI, 350 runners)\n';
+        } else if (horseCountry === 'USA') {
+            score += 5;
+            notes += '+ 5.0 : USA-bred (+100% ROI, 9 runners - small sample)\n';
+        }
+    }
+
     // Calculate recent form for last start context
     const last10 = String(horseRow['horse last10'] || '');
     let winsBeforeLast = 0;
