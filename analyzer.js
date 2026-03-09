@@ -872,6 +872,13 @@ if (horseSex === 'Colt') {
         score += 20;
         notes += '+20.0 : COLT (82.7% ROI)\n';
     }
+
+    // Set Weight bonus (applies in addition to above)
+    const weightType = String(horseRow['weight type'] || horseRow['horse weight type'] || '').trim().toLowerCase();
+    if (weightType.includes('set weight')) {
+        score += 5;
+        notes += '+ 5.0 : Colt in Set Weight race (+106.7% ROI, 50 runners)\n';
+    }
 }
 
     return [score, notes]; // Return the score and notes
