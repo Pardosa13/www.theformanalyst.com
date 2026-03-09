@@ -791,6 +791,7 @@ const sireData = {
     'Ms S Royes': { runners: 12, roi: -100.0, strikeRate: 0.0 },
     'Wayed Zain': { runners: 12, roi: -100.0, strikeRate: 0.0 },
     'Ms S Trolove': { runners: 16, roi: -100.0, strikeRate: 0.0 },
+    };
 // Calculate sire score - UPDATED THRESHOLDS
 const data = sireData[sire];
 if (data) {
