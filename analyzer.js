@@ -862,22 +862,19 @@ function checkLastDistance(horseRow) {
     const distanceChange = currentDistance - lastDistance;
     
     if (distanceChange > 400) {
-        // Stepping up significantly in distance
-        addScore = -5;
-        note += `- 5.0 : Stepping up ${distanceChange}m in distance (${lastDistance}m → ${currentDistance}m)\n`;
-    } else if (distanceChange > 200) {
-        // Moderate step up
-        addScore = -3;
-        note += `- 3.0 : Stepping up ${distanceChange}m in distance (${lastDistance}m → ${currentDistance}m)\n`;
-    } else if (distanceChange < -400) {
-        // Dropping back significantly in distance
-        addScore = 3;
-        note += `+ 3.0 : Dropping back ${Math.abs(distanceChange)}m in distance (${lastDistance}m → ${currentDistance}m)\n`;
-    } else if (distanceChange < -200) {
-        // Moderate drop back
-        addScore = 2;
-        note += `+ 2.0 : Dropping back ${Math.abs(distanceChange)}m in distance (${lastDistance}m → ${currentDistance}m)\n`;
-    }
+            // Data: Stepped Up 400m+ = -16.2% ROI (better than baseline -27%)
+            // No penalty - actually performs above average
+            notes += '~ 0.0 : Big step up in distance (400m+) - data shows no penalty\n';
+        } else if (distanceChange > 200) {
+            // Data: Stepped Up 200-400m = -25.9% ROI (near baseline)
+            notes += '~ 0.0 : Step up in distance (200-400m) - near baseline\n';
+        } else if (distanceChange < -400) {
+            score -= 5;
+            notes += '- 5.0 : Big drop back in distance (400m+) - confirmed -34% ROI\n';
+        } else if (distanceChange < -200) {
+            // Data: Dropped 200-400m = -25.9% ROI (near baseline)
+            notes += '~ 0.0 : Drop back in distance (200-400m) - near baseline\n';
+        }
     // Else: similar distance (-200 to +200), no bonus/penalty
     
     return [addScore, note];
