@@ -4672,13 +4672,21 @@ def api_combination_analysis():
         return '10+'
 
     def _days_bucket(days):
-        if days is None:  return None
+        if days is None:  return 'Unknown'
+        if days == 0:     return 'First Start'
         if days <= 7:     return 'Quick Back-up (≤7d)'
         if days <= 14:    return 'Short (8-14d)'
-        if days <= 28:    return 'Normal (15-28d)'
-        if days <= 59:    return 'Fresh (29-59d)'
+        if days <= 21:    return 'Normal (15-21d)'
+        if days <= 28:    return 'Normal (22-28d)'
+        if days <= 44:    return 'Fresh (29-44d)'
+        if days <= 59:    return 'Fresh (45-59d)'
         if days <= 89:    return 'Resuming (60-89d)'
-        return 'Long Spell (90d+)'
+        if days <= 119:   return 'Spell (90-119d)'
+        if days <= 149:   return 'Spell (120-149d)'
+        if days <= 199:   return 'Long Spell (150-199d)'
+        if days <= 249:   return 'Long Spell (200-249d)'
+        if days <= 364:   return 'Extended (250-364d)'
+        return 'Extended (365d+)'
 
     def _weight_bucket(w):
         try:
