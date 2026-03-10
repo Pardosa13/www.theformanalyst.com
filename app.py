@@ -4301,19 +4301,35 @@ def api_days_since_run():
                     pass
 
         if days is None:
-            bucket = 'First Start / Unknown'
+            bucket = 'Unknown'
+        elif days == 0:
+            bucket = 'First Start'
         elif days <= 7:
             bucket = 'Quick Back-up (≤7d)'
         elif days <= 14:
             bucket = 'Short (8-14d)'
+        elif days <= 21:
+            bucket = 'Normal (15-21d)'
         elif days <= 28:
-            bucket = 'Normal (15-28d)'
+            bucket = 'Normal (22-28d)'
+        elif days <= 44:
+            bucket = 'Fresh (29-44d)'
         elif days <= 59:
-            bucket = 'Fresh (29-59d)'
+            bucket = 'Fresh (45-59d)'
         elif days <= 89:
             bucket = 'Resuming (60-89d)'
+        elif days <= 119:
+            bucket = 'Spell (90-119d)'
+        elif days <= 149:
+            bucket = 'Spell (120-149d)'
+        elif days <= 199:
+            bucket = 'Long Spell (150-199d)'
+        elif days <= 249:
+            bucket = 'Long Spell (200-249d)'
+        elif days <= 364:
+            bucket = 'Extended (250-364d)'
         else:
-            bucket = 'Long Spell (90d+)'
+            bucket = 'Extended (365d+)'
 
         buckets[bucket]['runs'] += 1
         if won:
