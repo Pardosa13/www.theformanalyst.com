@@ -860,17 +860,17 @@ if (horseSex === 'Colt') {
     // Priority 1: Fast sectional Colt (most valuable)
     if (rawSectional && rawSectional < 34) {
         score += 15;
-        notes += '+15.0 : Fast sectional + COLT combo (44.4% SR, +33% ROI)\n';
+        notes += '+15.0 : Fast sectional + COLT combo (13% SR, +8.4% ROI - sectional edge)\n';
     }
     // Priority 2: 3yo Colt (age advantage)
     else if (horseAge === 3) {
         score += 20;
-        notes += '+20.0 : 3yo COLT combo (44.4% SR, +33% ROI)\n';
+        notes += '+20.0 : 3yo COLT (18.2% SR, +50% ROI, 203 races - strong confirmed edge)\n';
     }
     // Priority 3: Base Colt bonus
     else {
         score += 20;
-        notes += '+20.0 : COLT (82.7% ROI)\n';
+        notes += '+20.0 : COLT base bonus (14.3% SR, +66.1% ROI, 84 races)\n';
     }
 
     // Set Weight bonus (applies in addition to above)
