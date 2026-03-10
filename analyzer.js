@@ -544,6 +544,44 @@ if (!isNaN(horseAge)) {
     }
 }
     
+   // ==========================================
+    // DAM BONUSES/PENALTIES - UPDATED 2026-03-10
+    // Based on expanded dataset analysis
+    // ==========================================
+    const dam = String(horseRow['horse dam'] || '').trim();
+    const damData = {
+        // POSITIVE ROI DAMS (10+ runners, 80%+ ROI)
+        'Dixie Chick':      { runners: 12, roi: 266.7, strikeRate: 25.0 },
+        'Funtantes':        { runners: 11, roi: 109.1, strikeRate: 36.4 },
+        'Full Of Beans':    { runners: 11, roi: 90.9,  strikeRate: 27.3 },
+        'Fire Opal':        { runners: 10, roi: 80.0,  strikeRate: 20.0 },
+
+        // NEGATIVE ROI DAMS (10+ runners, -62%+ ROI)
+        'Novel Idea':       { runners: 15, roi: -72.0, strikeRate: 13.3 },
+        'Ballet Blanc':     { runners: 10, roi: -66.0, strikeRate: 10.0 },
+        'Diva Express':     { runners: 11, roi: -68.2, strikeRate:  9.1 },
+        'Scarlet\'s Secret':{ runners: 11, roi: -68.2, strikeRate:  9.1 },
+        'Banish':           { runners: 10, roi: -62.0, strikeRate: 10.0 },
+        'Dream Genie':      { runners: 10, roi: -62.0, strikeRate: 10.0 },
+    };
+
+    // Calculate dam score
+    const damEntry = damData[dam];
+    let damScore = 0;
+    let damNote = '';
+    if (damEntry) {
+        const { runners, roi, strikeRate } = damEntry;
+        if (roi >= 80) {
+            damScore = 5;
+            damNote = `+ 5.0 : Dam ${dam} bonus (${roi.toFixed(1)}% ROI, ${strikeRate}% SR, ${runners} runners)\n`;
+        } else if (roi <= -62) {
+            damScore = -5;
+            damNote = `- 5.0 : Dam ${dam} penalty (${roi.toFixed(1)}% ROI, ${strikeRate}% SR, ${runners} runners)\n`;
+        }
+    }
+    score += damScore;
+    notes += damNote;
+    
     // ==========================================
 // SIRE BONUSES/PENALTIES - UPDATED 2025-01-30
 // Based on 1203 race analysis
