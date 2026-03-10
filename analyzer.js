@@ -880,7 +880,15 @@ if (horseSex === 'Colt') {
         notes += '+ 5.0 : Colt in Set Weight race (+106.7% ROI, 50 runners)\n';
     }
 }
-
+// ==========================================
+// SNITZEL × COLT COMBO
+// Sex: Colt + Sire: Snitzel = +215% ROI, 17 races, 29.4% SR
+// Snitzel alone is neutral (0 score) but Colt+Snitzel is a confirmed edge
+// ==========================================
+if (horseSex === 'Colt' && sire === 'Snitzel') {
+    score += 5;
+    notes += '+ 5.0 : Snitzel × Colt combo (+215% ROI, 17 races, 29.4% SR)\n';
+}
     return [score, notes]; // Return the score and notes
 }
 
