@@ -191,7 +191,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     notes += b;
 
     // Check jockey + trainer combo bonuses
-    [a, b] = checkJockeyTrainerCombo(horseRow['horse jockey'], horseRow['horse trainer']);
+    [a, b] = checkJockeyTrainerCombo(horseRow['horse jockey'], horseRow['horse trainer'], horseSex);
     score += a;
     notes += b;
 
@@ -1260,7 +1260,7 @@ function checkJockeys(JockeyName) {
     return [addScore, note];
 }
 
-function checkJockeyTrainerCombo(jockeyName, trainerName) {
+function checkJockeyTrainerCombo(jockeyName, trainerName, horseSex) {
     // ==========================================
     // JOCKEY + TRAINER COMBO SCORING - ADDED 2026-03-09
     // Based on combination analysis across 23,743 horses
@@ -1287,7 +1287,13 @@ function checkJockeyTrainerCombo(jockeyName, trainerName) {
             break;
         }
     }
-
+    
+    // Jockey × Sex combos
+    if (jockeyName === 'Tommy Berry' && horseSex === 'Colt') {
+        addScore += 8;
+        note += '+8.0: Combo bonus - Tommy Berry × Colt (+205% ROI, 16 races, 25% SR)\n';
+    }
+    
     return [addScore, note];
 }
 
