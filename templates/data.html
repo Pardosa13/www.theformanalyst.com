@@ -1404,7 +1404,7 @@ function renderFieldSize(data) {
 
 function renderDaysSinceRun(data) {
     const container = document.getElementById('daysSinceRun');
-    const order = ['Quick Back-up (≤7d)','Short (8-14d)','Normal (15-28d)','Fresh (29-59d)','Resuming (60-89d)','Long Spell (90d+)','First Start / Unknown'];
+    const order = ['Quick Back-up (≤7d)','Short (8-14d)','Normal (15-21d)','Normal (22-28d)','Fresh (29-44d)','Fresh (45-59d)','Resuming (60-89d)','Spell (90-119d)','Spell (120-149d)','Long Spell (150-199d)','Long Spell (200-249d)','Extended (250-364d)','Extended (365d+)','First Start','Unknown'];
     const dsr = {};
     (data.buckets || []).forEach(item => { dsr[item.label] = item; });
 
