@@ -4261,14 +4261,22 @@ def api_days_since_run():
     stake = 10.0
 
     buckets = {
-        'Quick Back-up (≤7d)':  {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
-        'Short (8-14d)':        {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
-        'Normal (15-28d)':      {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
-        'Fresh (29-59d)':       {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
-        'Resuming (60-89d)':    {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
-        'Long Spell (90d+)':    {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
-        'First Start / Unknown':{'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
-    }
+    'First Start':          {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Quick Back-up (≤7d)':  {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Short (8-14d)':        {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Normal (15-21d)':      {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Normal (22-28d)':      {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Fresh (29-44d)':       {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Fresh (45-59d)':       {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Resuming (60-89d)':    {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Spell (90-119d)':      {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Spell (120-149d)':     {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Long Spell (150-199d)':{'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Long Spell (200-249d)':{'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Extended (250-364d)':  {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Extended (365d+)':     {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    'Unknown':              {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+}
 
     for horse, pred, result in all_results:
         won = result.finish_position == 1
