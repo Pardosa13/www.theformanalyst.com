@@ -998,83 +998,84 @@ function checkJockeys(JockeyName) {
     JockeyName = normalizeJockeyName(JockeyName);
     
     // TIER 1: Elite Value (50%+ ROI) - MASSIVE EDGE
-    // Updated 2026-03-09 based on expanded dataset
+    // Updated 2026-03-10 based on expanded dataset
     const eliteValueJockeys = [
         'Amy Jo Hayes',           // 450.0% ROI, 21.1% SR, 19 rides
         'Tom Orr',                // 366.9% ROI, 12.5% SR, 16 rides
         'Liana Wood',             // 326.3% ROI, 5.3% SR, 19 rides
         'Ethan Brown',            // 257.6% ROI, 22.7% SR, 75 rides - BIG SAMPLE
-        'Ms L Stojakovic',        // 250.0% ROI, 9.1% SR, 33 rides
+        'Ms L Stojakovic',        // 230.0% ROI, 8.6% SR, 35 rides
         'J L Taylor',             // 236.7% ROI, 3.3% SR, 30 rides
         'Luke Campbell',          // 233.9% ROI, 3.2% SR, 62 rides - BIG SAMPLE
         'Ms K Adams',             // 231.8% ROI, 21.4% SR, 28 rides
         'Gabrielle Semmens',      // 212.0% ROI, 18.2% SR, 22 rides
         'Amy Graham',             // 199.3% ROI, 20.0% SR, 15 rides
-        'Yvette Lewis',           // 186.7% ROI, 20.0% SR, 15 rides
+        'Yvette Lewis',           // 152.9% ROI, 17.6% SR, 17 rides
         'Jai Williams',           // 150.1% ROI, 25.9% SR, 54 rides - BIG SAMPLE
         'Tilly McCarroll',        // 145.5% ROI, 18.2% SR, 11 rides
         'Ms C Jones',             // 135.5% ROI, 18.4% SR, 38 rides
-        'P Graham',               // 121.5% ROI, 17.4% SR, 23 rides
+        'P Graham',               // 103.8% ROI, 16.0% SR, 25 rides
         'Alana Livesey',          // 117.7% ROI, 11.7% SR, 60 rides - BIG SAMPLE
         'B P Ward',               // 110.9% ROI, 6.3% SR, 32 rides
         'Robert Whearty',         // 108.0% ROI, 35.0% SR, 20 rides
         'Sam Kennedy',            // 97.0% ROI, 12.0% SR, 50 rides
         'Ms C Puls',              // 96.2% ROI, 3.8% SR, 26 rides
         'W G Satherley',          // 90.5% ROI, 28.6% SR, 28 rides
-        'G Spokes',               // 82.3% ROI, 10.9% SR, 46 rides
+        'G Spokes',               // 83.7% ROI, 12.0% SR, 50 rides
         'Gabrielle Johnston',     // 76.2% ROI, 9.5% SR, 21 rides
         'Damien Boche',           // 76.0% ROI, 25.5% SR, 51 rides
-        'Teaghan Martin',         // 75.9% ROI, 7.7% SR, 39 rides
+        'Teaghan Martin',         // 71.5% ROI, 7.5% SR, 40 rides
         'Liam Riordan',           // 75.5% ROI, 8.7% SR, 69 rides - BIG SAMPLE
-        'Will Price',             // 68.8% ROI, 10.3% SR, 39 rides
+        'Will Price',             // 53.1% ROI, 9.3% SR, 43 rides
         'S Tsaikos',              // 67.5% ROI, 10.0% SR, 20 rides
-        'J Watkins',              // 60.0% ROI, 10.5% SR, 19 rides
+        'J Watkins',              // 38.2% ROI, 9.1% SR, 22 rides - DROPPED to T2 borderline, keeping T1
         'C J Hillier',            // 58.9% ROI, 24.3% SR, 37 rides
         'L Magorrian',            // 57.4% ROI, 16.2% SR, 68 rides - BIG SAMPLE
-        'Luke Cartwright',        // 52.6% ROI, 13.5% SR, 200 rides - MASSIVE SAMPLE
         'Madeline Owen',          // 52.4% ROI, 9.5% SR, 21 rides
+        'Ms E Finnegan',          // 52.5% ROI, 12.5% SR, 24 rides
     ];
 
     // TIER 2: Strong Value (20-50% ROI) - PROVEN EDGE
-    // Updated 2026-03-09
+    // Updated 2026-03-10
     const strongValueJockeys = [
-        'W Egan',                 // 42.1% ROI, 19.2% SR, 52 rides
-        'Kody Nestor',            // 41.8% ROI, 16.3% SR, 49 rides
-        'Codi Jordan',            // 41.4% ROI, 25.6% SR, 39 rides
+        'Luke Cartwright',        // 49.6% ROI, 13.2% SR, 204 rides - MASSIVE SAMPLE (dropped from T1)
+        'W Egan',                 // 39.4% ROI, 18.9% SR, 53 rides
+        'Kody Nestor',            // 39.0% ROI, 16.0% SR, 50 rides
         'Natika Riordan',         // 39.9% ROI, 16.7% SR, 72 rides - BIG SAMPLE
+        'Jett Stanley',           // 39.8% ROI, 12.9% SR, 93 rides - BIG SAMPLE
         'V Duric',                // 38.9% ROI, 22.2% SR, 45 rides
-        'Teagan Voorham',         // 37.4% ROI, 14.1% SR, 85 rides - BIG SAMPLE
-        'Zac Wadick',             // 33.3% ROI, 4.8% SR, 42 rides
+        'Teagan Voorham',         // 29.7% ROI, 13.3% SR, 90 rides - BIG SAMPLE
         'Boris Thornton',         // 32.3% ROI, 12.8% SR, 47 rides
-        'Jett Newman',            // 38.2% ROI, 22.7% SR, 44 rides
         'R Mc Leod',              // 28.5% ROI, 8.3% SR, 72 rides - BIG SAMPLE
         'Ms K Yuill',             // 30.6% ROI, 27.8% SR, 18 rides
+        'Zac Wadick',             // 19.1% ROI, 4.3% SR, 47 rides - DROPPED to T3 borderline, keeping T2
         'Ella Bent',              // 26.0% ROI, 20.0% SR, 25 rides
         'Ms W Costin',            // 25.7% ROI, 13.4% SR, 67 rides - BIG SAMPLE
         'Cody Collis',            // 25.6% ROI, 14.1% SR, 71 rides - BIG SAMPLE
         'Adin Thompson',          // 23.8% ROI, 10.8% SR, 37 rides
-        'Tim Clark',              // 23.0% ROI, 23.0% SR, 122 rides - BIG SAMPLE
-        'Jett Stanley',           // 22.5% ROI, 12.4% SR, 89 rides - BIG SAMPLE
-        'E J Walsh',              // 21.0% ROI, 15.1% SR, 53 rides
-        'A Stead',                // 20.0% ROI, 10.0% SR, 20 rides
+        'Tim Clark',              // 21.0% ROI, 22.6% SR, 124 rides - BIG SAMPLE
+        'Codi Jordan',            // 27.5% ROI, 23.9% SR, 46 rides
+        'Brooke King',            // 22.7% ROI, 10.7% SR, 84 rides - BIG SAMPLE (promoted from T3)
+        'E J Walsh',              // 16.6% ROI, 14.5% SR, 55 rides - DROPPED to T3 borderline, keeping T2
+        'A Stead',                // 14.3% ROI, 9.5% SR, 21 rides - DROPPED to T3 borderline, keeping T2
         'Jordan Turner',          // 20.0% ROI, 10.0% SR, 20 rides
     ];
 
     // TIER 3: Profitable (0-20% ROI) - SMALL EDGE
-    // Updated 2026-03-09
+    // Updated 2026-03-10
     const profitableJockeys = [
         'J Noonan',               // 19.7% ROI, 12.8% SR, 117 rides - BIG SAMPLE
+        'Jett Newman',            // 9.7% ROI, 18.3% SR, 60 rides (demoted from T2)
         'A Adkins',               // 18.9% ROI, 10.8% SR, 93 rides - BIG SAMPLE
-        'Lucy Fiore',             // 18.5% ROI, 19.3% SR, 109 rides - BIG SAMPLE
+        'Lucy Fiore',             // 16.4% ROI, 18.9% SR, 111 rides - BIG SAMPLE
         'M R Du Plessis',         // 18.4% ROI, 12.7% SR, 102 rides - BIG SAMPLE
-        'Leanne Boyd',            // 18.2% ROI, 9.1% SR, 22 rides
+        'Leanne Boyd',            // 8.3% ROI, 8.3% SR, 24 rides
         'W Gordon',               // 17.7% ROI, 15.6% SR, 122 rides - BIG SAMPLE
-        'Brooke King',            // 16.9% ROI, 8.9% SR, 79 rides - BIG SAMPLE
         'B Melham',               // 15.8% ROI, 22.0% SR, 59 rides
         'A Hyeronimus',           // 15.7% ROI, 13.6% SR, 81 rides - BIG SAMPLE
         'Zoe Hunt',               // 15.4% ROI, 8.6% SR, 35 rides
         'Courtney Bellamy',       // 14.7% ROI, 10.5% SR, 19 rides
-        'Carly Frater',           // 13.1% ROI, 18.8% SR, 16 rides
+        'Carly Frater',           // 0.6% ROI, 16.7% SR, 18 rides
         'S Clipperton',           // 12.1% ROI, 13.5% SR, 74 rides - BIG SAMPLE
         'Keshaw Dhurun',          // 11.4% ROI, 14.3% SR, 35 rides
         'Justin W Stanley',       // 11.2% ROI, 17.6% SR, 17 rides
@@ -1085,165 +1086,168 @@ function checkJockeys(JockeyName) {
         'Ms G Cartwright',        // 5.4% ROI, 13.0% SR, 77 rides - BIG SAMPLE
         'Nick Palmer',            // 5.3% ROI, 13.3% SR, 15 rides
         'K S Latham',             // 5.3% ROI, 19.1% SR, 68 rides - BIG SAMPLE
-        'Caitlin Tootell',        // 5.0% ROI, 20.0% SR, 75 rides - BIG SAMPLE
+        'Caitlin Tootell',        // 0.9% ROI, 19.2% SR, 78 rides - BIG SAMPLE
         'Martin Harley',          // 4.8% ROI, 10.6% SR, 66 rides
         'W D\'Avila',             // 4.4% ROI, 11.8% SR, 34 rides
         'Ms S Tierney',           // 2.4% ROI, 25.9% SR, 27 rides
-        'Teodore Nugent',         // 2.3% ROI, 8.8% SR, 171 rides - MASSIVE SAMPLE
+        'Teodore Nugent',         // 1.2% ROI, 8.7% SR, 173 rides - MASSIVE SAMPLE
         'J B Mc Donald',          // 1.0% ROI, 29.4% SR, 102 rides - BIG SAMPLE
         'Rocky Cheung',           // 0.8% ROI, 5.0% SR, 60 rides
-        'L P Rolls',              // 0.2% ROI, 12.4% SR, 97 rides - BIG SAMPLE
+        'L P Rolls',              // -1.5% ROI, 12.7% SR, 102 rides - borderline, keeping T3
+        'Ms D Keane',             // 9.8% ROI, 9.1% SR, 44 rides - NEW
+        'R Vigar',                // 10.0% ROI, 33.3% SR, 12 rides - NEW (small sample)
     ];
 
     // TIER 4: Value Destroyers (negative ROI) - AVOID
-    // Updated 2026-03-09
+    // Updated 2026-03-10
     const badJockeys = [
         // Catastrophic (-80%+ ROI)
         'K Mc Evoy',              // -88.8% ROI, 3.8% SR, 52 rides
         'Deanne Panya',           // -90.8% ROI, 4.0% SR, 25 rides
         'Brayden Gaerth',         // -72.1% ROI, 4.4% SR, 68 rides
-        'Christopher Pang',       // -91.8% ROI, 2.6% SR, 39 rides
+        'Christopher Pang',       // -92.2% ROI, 2.4% SR, 41 rides
         'Nadia Daniels',          // -93.2% ROI, 3.2% SR, 31 rides
         'Billy Owen',             // -46.8% ROI, 9.7% SR, 31 rides
         'Tala Hutchinson',        // -76.7% ROI, 6.7% SR, 45 rides
         'R Dolan',                // -93.4% ROI, 2.7% SR, 37 rides
-        'Olivia Chambers',        // -85.8% ROI, 8.6% SR, 35 rides
-        // Very Bad (-70% to -90% ROI)
-        'Chloe Azzopardi',        // -52.4% ROI, 13.5% SR, 37 rides
-        'Ron Stewart',            // -62.0% ROI, 8.6% SR, 35 rides
-        'S Guymer',               // -18.6% ROI, 3.6% SR, 56 rides
-        'Sarah Field',            // -90.1% ROI, 3.8% SR, 52 rides
-        'P Carbery',              // -53.8% ROI, 9.4% SR, 32 rides
-        'Ms M Weir',              // -75.3% ROI, 7.8% SR, 77 rides - BIG SAMPLE
-        'Reece Jones',            // -63.3% ROI, 4.5% SR, 133 rides - BIG SAMPLE
-        'Alana Kelly',            // -26.0% ROI, 7.9% SR, 63 rides
-        'B Looker',               // -52.1% ROI, 9.5% SR, 74 rides
-        'V Le Boeuf',             // -88.4% ROI, 2.3% SR, 43 rides
-        'D L Turner',             // -28.7% ROI, 15.4% SR, 52 rides
-        'Caitlyn Munro',          // -65.6% ROI, 8.0% SR, 25 rides
+        'Olivia Chambers',        // -83.1% ROI, 10.5% SR, 38 rides
+        'Sarah Field',            // -90.6% ROI, 3.6% SR, 55 rides
         'C Mc Iver',              // -90.6% ROI, 3.0% SR, 33 rides
-        'Jenny Duggan',           // -80.9% ROI, 4.7% SR, 64 rides
+        'V Le Boeuf',             // -88.4% ROI, 2.3% SR, 43 rides
+        'Jenny Duggan',           // -81.5% ROI, 4.5% SR, 66 rides
+        'Dylan Dunn',             // -86.5% ROI, 1.9% SR, 52 rides
         'J Ford',                 // -85.5% ROI, 3.9% SR, 103 rides - BIG SAMPLE
-        'Dylan Dunn',             // -85.7% ROI, 2.0% SR, 49 rides
-        'Patrick Moloney',        // -53.3% ROI, 3.3% SR, 60 rides
-        'S Parnham',              // -44.9% ROI, 6.5% SR, 93 rides - BIG SAMPLE
-        'Jack Martin',            // -40.4% ROI, 4.3% SR, 47 rides
-        'Jacob Stiff',            // -71.0% ROI, 4.5% SR, 67 rides
-        'Sairyn Fawke',           // -56.7% ROI, 5.6% SR, 72 rides
-        'Jag Guthmann-Chester',   // -66.3% ROI, 11.3% SR, 62 rides
-        'S Mc Gruddy',            // -48.3% ROI, 5.6% SR, 54 rides
-        'Jefferson Tsang',        // -57.3% ROI, 9.1% SR, 55 rides
-        'Leeshelle Small',        // -68.5% ROI, 7.4% SR, 68 rides
+        'J Grisedale',            // -78.1% ROI, 6.4% SR, 47 rides
         'Zac Spain',              // -79.7% ROI, 4.5% SR, 89 rides - BIG SAMPLE
-        'J Grisedale',            // -85.1% ROI, 4.7% SR, 43 rides
-        'Rochelle Milnes',        // -70.7% ROI, 8.2% SR, 97 rides - BIG SAMPLE
-        'Ms T Johnstone',         // -79.7% ROI, 5.7% SR, 70 rides
-        'Justin Huxtable',        // -70.0% ROI, 5.0% SR, 20 rides
-        'Ms T Chambers',          // -71.1% ROI, 5.3% SR, 19 rides
-        'Benjamin Osmond',        // -16.4% ROI, 3.3% SR, 61 rides
+        'Ms T Johnstone',         // -80.8% ROI, 5.4% SR, 74 rides
         'Grace Palmer',           // -80.0% ROI, 5.0% SR, 20 rides
-        'Austin Galati',          // -70.4% ROI, 11.8% SR, 68 rides
-        'D Pires',                // -65.2% ROI, 9.1% SR, 33 rides
-        'P Gatt',                 // -72.6% ROI, 3.2% SR, 31 rides
-        'Milos Bunjevac',         // -18.9% ROI, 11.4% SR, 35 rides
-        'Ella Drew',              // -70.0% ROI, 9.6% SR, 52 rides
-        'Craig Williams',         // -13.1% ROI, 16.8% SR, 125 rides - borderline, keep for now
-        'Jean Van Overmeire',     // -73.6% ROI, 6.7% SR, 45 rides
-        'William Stanley',        // -60.4% ROI, 8.6% SR, 81 rides
+        'Ms T Chambers',          // -71.1% ROI, 5.3% SR, 19 rides
         'Caitlin Hollowood',      // -73.2% ROI, 3.6% SR, 28 rides
+        'Jean Van Overmeire',     // -70.9% ROI, 8.3% SR, 48 rides
         'A J Calder',             // -70.6% ROI, 6.5% SR, 31 rides
-        'S H Sit',                // -48.3% ROI, 6.7% SR, 30 rides
-        'J Holder',               // -51.9% ROI, 10.3% SR, 87 rides - BIG SAMPLE
-        // Bad (-40% to -66% ROI) - larger samples worth flagging
-        'Anna Roper',             // -47.0% ROI, 7.5% SR, 161 rides - BIG SAMPLE
-        'J R Collett',            // -66.2% ROI, 11.0% SR, 155 rides - BIG SAMPLE
-        'Beau Mertens',           // -67.4% ROI, 7.9% SR, 140 rides - BIG SAMPLE
-        'A B Collett',            // -63.1% ROI, 6.2% SR, 162 rides - BIG SAMPLE
-        'Corey Sutherland',       // -46.3% ROI, 6.4% SR, 94 rides
-        'Damien Thornton',        // -58.6% ROI, 10.2% SR, 127 rides - BIG SAMPLE
-        'Ashley Morgan',          // -53.2% ROI, 14.3% SR, 119 rides - BIG SAMPLE
-        'Regan Bayliss',          // -44.2% ROI, 11.0% SR, 91 rides
-        'Kayla Crowther',         // -54.3% ROI, 8.2% SR, 85 rides
-        'Celine Gaudray',         // -48.6% ROI, 9.5% SR, 63 rides
-        'Ryan Houston',           // -51.4% ROI, 10.7% SR, 122 rides - BIG SAMPLE
-        'Tom Sherry',             // -52.0% ROI, 10.3% SR, 117 rides - BIG SAMPLE
-        'B Rawiller',             // -34.8% ROI, 10.6% SR, 85 rides
-        'Holly Watson',           // -49.1% ROI, 6.9% SR, 87 rides - BIG SAMPLE
-        'Carleen Hefel',          // -60.0% ROI, 12.2% SR, 41 rides
-        'D Caboche',              // -70.2% ROI, 4.2% SR, 48 rides
-        'Ms J Taylor',            // -72.6% ROI, 6.7% SR, 60 rides
-        'Chelsea Baker',          // -59.4% ROI, 10.6% SR, 47 rides
-        'Brittany Button',        // -40.8% ROI, 9.6% SR, 52 rides
-        'Rose Hammond',           // -66.7% ROI, 5.1% SR, 39 rides
+        'Austin Galati',          // -70.4% ROI, 11.8% SR, 68 rides
+        'Ella Drew',              // -70.0% ROI, 9.6% SR, 52 rides
+        'Justin Huxtable',        // -70.0% ROI, 5.0% SR, 20 rides
         'Olivia Webb',            // -70.0% ROI, 2.5% SR, 40 rides
-        'M J Dee',                // -36.3% ROI, 7.8% SR, 129 rides - BIG SAMPLE
-        'Jake Toeroek',           // -50.6% ROI, 11.5% SR, 78 rides
-        'Jabez Johnstone',        // -55.7% ROI, 11.5% SR, 61 rides
-        'J Penza',                // -58.7% ROI, 7.4% SR, 68 rides
-        'J Parr',                 // -53.1% ROI, 12.3% SR, 57 rides
-        'Leslie Tilley',          // -39.3% ROI, 11.3% SR, 53 rides
-        'Cejay Graham',           // -53.1% ROI, 8.5% SR, 153 rides - BIG SAMPLE
+        'Rochelle Milnes',        // -70.7% ROI, 8.2% SR, 97 rides - BIG SAMPLE
+        'Jacob Stiff',            // -71.0% ROI, 4.5% SR, 67 rides
+        'Brayden Gaerth',         // -72.1% ROI, 4.4% SR, 68 rides
+        'Ms J Taylor',            // -72.6% ROI, 6.7% SR, 60 rides
+        'P Gatt',                 // -74.2% ROI, 3.0% SR, 33 rides
+        'Ms M Weir',              // -75.3% ROI, 7.8% SR, 77 rides - BIG SAMPLE
+        'Tala Hutchinson',        // -76.7% ROI, 6.7% SR, 45 rides
+        'Beau Mertens',           // -67.4% ROI, 7.9% SR, 140 rides - BIG SAMPLE
+        'J R Collett',            // -66.2% ROI, 11.0% SR, 155 rides - BIG SAMPLE
+        'Harrison Shaw',          // -67.3% ROI, 7.8% SR, 51 rides
+        'Rose Hammond',           // -66.7% ROI, 5.1% SR, 39 rides
+        'Caitlyn Munro',          // -66.9% ROI, 7.7% SR, 26 rides
+        'Jag Guthmann-Chester',   // -66.3% ROI, 11.3% SR, 62 rides
+        'Reece Jones',            // -64.2% ROI, 4.4% SR, 136 rides - BIG SAMPLE
+        'A B Collett',            // -63.1% ROI, 6.2% SR, 162 rides - BIG SAMPLE
+        'Ron Stewart',            // -62.0% ROI, 8.6% SR, 35 rides
+        'Lauryn Bingley',         // -69.5% ROI, 4.7% SR, 43 rides
+        'D Caboche',              // -70.8% ROI, 4.1% SR, 49 rides
+        'William Stanley',        // -60.4% ROI, 8.6% SR, 81 rides
+        'Carleen Hefel',          // -60.0% ROI, 12.2% SR, 41 rides
+        'Jabez Johnstone',        // -60.3% ROI, 10.3% SR, 68 rides
+        'Patrick Moloney',        // -54.8% ROI, 3.2% SR, 62 rides
+        'B Parnham',              // -50.6% ROI, 8.5% SR, 106 rides - BIG SAMPLE
+        'Tiffani Brooker',        // -55.5% ROI, 8.6% SR, 58 rides
+        'Sairyn Fawke',           // -57.3% ROI, 5.5% SR, 73 rides
+        'Jefferson Tsang',        // -57.3% ROI, 9.1% SR, 55 rides
+        'Ms J Beriman',           // -57.3% ROI, 10.0% SR, 40 rides
+        'Tom Madden',             // -56.9% ROI, 9.0% SR, 67 rides
+        'Lachlan King',           // -56.5% ROI, 9.7% SR, 103 rides - BIG SAMPLE
+        'Madi Derrick',           // -57.8% ROI, 6.7% SR, 45 rides
+        'A Darmanin',             // -57.8% ROI, 16.7% SR, 18 rides
         'S O\'Donnell',           // -57.2% ROI, 7.9% SR, 76 rides
-        'Bailey Kinninmont',      // -33.7% ROI, 7.7% SR, 78 rides
+        'Damien Thornton',        // -58.6% ROI, 10.2% SR, 127 rides - BIG SAMPLE
+        'J Penza',                // -58.7% ROI, 7.4% SR, 68 rides
+        'Chelsea Baker',          // -59.4% ROI, 10.6% SR, 47 rides
+        'Ryan Houston',           // -52.2% ROI, 10.5% SR, 124 rides - BIG SAMPLE
+        'Tom Sherry',             // -52.0% ROI, 10.3% SR, 117 rides - BIG SAMPLE
+        'Chloe Azzopardi',        // -52.4% ROI, 13.5% SR, 37 rides
+        'B Looker',               // -52.1% ROI, 9.5% SR, 74 rides
+        'Jake Toeroek',           // -53.0% ROI, 11.0% SR, 82 rides
+        'J Parr',                 // -53.1% ROI, 12.3% SR, 57 rides
+        'Cejay Graham',           // -53.1% ROI, 8.5% SR, 153 rides - BIG SAMPLE
+        'Ashley Morgan',          // -53.5% ROI, 14.2% SR, 120 rides - BIG SAMPLE
+        'P Carbery',              // -53.8% ROI, 9.4% SR, 32 rides
+        'J Holder',               // -54.0% ROI, 9.9% SR, 91 rides - BIG SAMPLE
+        'Kayla Crowther',         // -54.2% ROI, 8.8% SR, 91 rides
         'T Turner',               // -54.6% ROI, 6.0% SR, 84 rides
+        'J Pracey-Holmes',        // -51.5% ROI, 9.5% SR, 105 rides - BIG SAMPLE
+        'S Parnham',              // -44.9% ROI, 6.5% SR, 93 rides - BIG SAMPLE
+        'Regan Bayliss',          // -44.2% ROI, 11.0% SR, 91 rides
+        'Celine Gaudray',         // -48.6% ROI, 9.5% SR, 63 rides
+        'Holly Watson',           // -49.1% ROI, 6.9% SR, 87 rides - BIG SAMPLE
+        'Anna Roper',             // -47.0% ROI, 7.5% SR, 161 rides - BIG SAMPLE
+        'A Gibbons',              // -49.6% ROI, 7.5% SR, 80 rides
+        'Corey Sutherland',       // -46.3% ROI, 6.4% SR, 94 rides
+        'Billy Owen',             // -46.8% ROI, 9.7% SR, 31 rides
+        'Leeshelle Small',        // -68.5% ROI, 7.4% SR, 68 rides
+        'S Mc Gruddy',            // -48.3% ROI, 5.6% SR, 54 rides
+        'S H Sit',                // -50.0% ROI, 6.5% SR, 31 rides
+        'B Rawiller',             // -20.9% ROI, 11.2% SR, 89 rides
+        'Holly Watson',           // -49.1% ROI, 6.9% SR, 87 rides - BIG SAMPLE
+        'M J Dee',                // -36.3% ROI, 7.8% SR, 129 rides - BIG SAMPLE
+        'Leslie Tilley',          // -39.3% ROI, 11.3% SR, 53 rides
+        'Bailey Kinninmont',      // -33.7% ROI, 7.7% SR, 78 rides
         'Logan Bates',            // -42.9% ROI, 14.1% SR, 128 rides - BIG SAMPLE
         'Shannen Llewellyn',      // -15.8% ROI, 9.5% SR, 95 rides
-        'A Gibbons',              // -46.9% ROI, 7.9% SR, 76 rides
         'Jackson Radley',         // -28.7% ROI, 15.0% SR, 120 rides - BIG SAMPLE
         'Jordan Childs',          // -36.6% ROI, 15.2% SR, 105 rides - BIG SAMPLE
         'Damian Lane',            // -39.7% ROI, 14.3% SR, 77 rides
         'B Mc Dougall',           // -31.3% ROI, 12.5% SR, 64 rides
         'R Wiggins',              // -30.3% ROI, 13.6% SR, 81 rides
-        'Tom Madden',             // -53.4% ROI, 9.7% SR, 62 rides
-        'J Pracey-Holmes',        // -49.1% ROI, 10.0% SR, 100 rides - BIG SAMPLE
         'Connor Murtagh',         // -35.6% ROI, 11.1% SR, 63 rides
         'John Allen',             // -35.0% ROI, 11.5% SR, 148 rides - BIG SAMPLE
-        'Lauryn Bingley',         // -65.5% ROI, 5.3% SR, 38 rides
-        'Ms J Beriman',           // -57.3% ROI, 10.0% SR, 40 rides
-        'B Parnham',              // -50.6% ROI, 8.5% SR, 106 rides - BIG SAMPLE
-        'Tiffani Brooker',        // -55.5% ROI, 8.6% SR, 58 rides
-        'A Darmanin',             // -57.8% ROI, 16.7% SR, 18 rides
-        'Madi Derrick',           // -57.8% ROI, 6.7% SR, 45 rides
-        'Chris Parnham',          // -28.5% ROI, 13.9% SR, 108 rides - BIG SAMPLE
-        'Thomas Stockdale',       // -36.1% ROI, 12.2% SR, 98 rides - BIG SAMPLE
-        'Lachlan Neindorf',       // -19.2% ROI, 15.5% SR, 148 rides - BIG SAMPLE
+        'Jack Hill',              // -35.3% ROI, 10.3% SR, 68 rides
+        'Amy Mc Lucas',           // -39.7% ROI, 8.3% SR, 60 rides
+        'Jake Bayliss',           // -33.4% ROI, 6.3% SR, 64 rides
+        'Mitch Stapleford',       // -33.6% ROI, 10.9% SR, 55 rides
+        'Frederick Larson',       // -33.7% ROI, 12.3% SR, 57 rides
         'Kyle Wilson-Taylor',     // -30.3% ROI, 8.9% SR, 79 rides
-        'Jack Hill',              // -31.3% ROI, 10.9% SR, 64 rides
-        'Amy Mc Lucas',           // -36.5% ROI, 8.8% SR, 57 rides
-        'G Buckley',              // -4.1% ROI, 12.6% SR, 135 rides - borderline, keep for caution
-        'A Mallyon',              // -28.3% ROI, 10.1% SR, 89 rides
+        'C Schofield',            // -31.2% ROI, 16.3% SR, 123 rides - BIG SAMPLE
+        'Ryan Maloney',           // -34.3% ROI, 21.1% SR, 114 rides - BIG SAMPLE
+        'N Thomas',               // -40.7% ROI, 7.0% SR, 43 rides
+        'Emily Lang',             // -41.2% ROI, 8.5% SR, 82 rides
+        'C Johnston-Porter',      // -43.1% ROI, 12.8% SR, 94 rides
+        'Jack Martin',            // -34.2% ROI, 6.3% SR, 48 rides
+        'Milos Bunjevac',         // -18.9% ROI, 11.4% SR, 35 rides
         'N Rawiller',             // -28.8% ROI, 12.3% SR, 122 rides - BIG SAMPLE
         'Jye McNeil',             // -6.6% ROI, 11.6% SR, 138 rides - BIG SAMPLE
-        'Ryan Maloney',           // -34.3% ROI, 21.1% SR, 114 rides - BIG SAMPLE
-        'Pierre Boudvillain',     // -27.5% ROI, 18.0% SR, 111 rides - BIG SAMPLE
-        'C Johnston-Porter',      // -43.1% ROI, 12.8% SR, 94 rides
+        'Pierre Boudvillain',     // -27.4% ROI, 18.1% SR, 116 rides - BIG SAMPLE
         'Siena Grima',            // -49.5% ROI, 9.1% SR, 143 rides - BIG SAMPLE
         'H Coffey',               // -24.6% ROI, 13.0% SR, 131 rides - BIG SAMPLE
         'L Currie',               // -19.0% ROI, 13.5% SR, 148 rides - BIG SAMPLE
-        'Frederick Larson',       // -33.7% ROI, 12.3% SR, 57 rides
-        'C Newitt',               // -17.9% ROI, 13.6% SR, 140 rides - BIG SAMPLE
-        'C Schofield',            // -31.2% ROI, 16.3% SR, 123 rides - BIG SAMPLE
+        'C Newitt',               // -14.6% ROI, 14.5% SR, 145 rides - BIG SAMPLE
         'Braith Nock',            // -24.4% ROI, 15.1% SR, 106 rides - BIG SAMPLE
         'Zac Lloyd',              // -27.4% ROI, 17.4% SR, 178 rides - BIG SAMPLE
-        'Ms L J Meech',           // -13.2% ROI, 21.3% SR, 94 rides
-        'N Thomas',               // -40.7% ROI, 7.0% SR, 43 rides
-        'Deon Le Roux',           // -10.8% ROI, 14.6% SR, 48 rides
-        'Harrison Shaw',          // -67.3% ROI, 7.8% SR, 51 rides
-        'Emily Lang',             // -41.2% ROI, 8.5% SR, 82 rides
+        'Ms L J Meech',           // -12.4% ROI, 22.4% SR, 98 rides
+        'Deon Le Roux',           // -12.4% ROI, 15.7% SR, 51 rides
         'Holly Nottle',           // -21.2% ROI, 12.7% SR, 126 rides - BIG SAMPLE
-        'Alysha Warren',          // -19.8% ROI, 13.2% SR, 91 rides - BIG SAMPLE
+        'Alysha Warren',          // -20.7% ROI, 13.0% SR, 92 rides - BIG SAMPLE
         'Mitchell Bell',          // -16.6% ROI, 16.4% SR, 73 rides
-        'Jake Bayliss',           // -33.4% ROI, 6.3% SR, 64 rides
-        'Mitch Stapleford',       // -33.6% ROI, 10.9% SR, 55 rides
-        'Todd Pannell',           // -19.6% ROI, 12.1% SR, 66 rides
-        'D Yendall',              // -7.7% ROI, 15.2% SR, 66 rides
+        'Todd Pannell',           // -24.2% ROI, 11.4% SR, 70 rides
+        'D Yendall',              // -9.1% ROI, 14.9% SR, 67 rides
         'Laqdar Ramoly',          // -5.0% ROI, 7.4% SR, 68 rides
         'Tyler Schiller',         // -9.0% ROI, 11.3% SR, 141 rides - BIG SAMPLE
         'D Moor',                 // -17.2% ROI, 9.6% SR, 136 rides - BIG SAMPLE
         'J Duffy',                // -28.9% ROI, 7.9% SR, 63 rides
+        'G Buckley',              // -4.1% ROI, 12.6% SR, 135 rides - borderline
         'Natasha Faithfull',      // -2.7% ROI, 15.7% SR, 102 rides - borderline
         'M Aitken',               // -1.6% ROI, 9.4% SR, 32 rides - borderline
         'Ms C Keatings',          // -1.9% ROI, 13.8% SR, 58 rides - borderline
+        // NEW ADDITIONS from expanded dataset
+        'Angela Jones',           // -5.3% ROI, 16.5% SR, 121 rides - BIG SAMPLE
+        'Ben Thompson',           // -5.9% ROI, 17.9% SR, 134 rides - BIG SAMPLE
+        'A Bullock',              // -38.8% ROI, 22.0% SR, 118 rides - BIG SAMPLE
+        'J Mott',                 // -9.6% ROI, 15.9% SR, 176 rides - BIG SAMPLE
+        'S Guymer',               // -18.6% ROI, 3.6% SR, 56 rides
+        'Benjamin Osmond',        // -16.4% ROI, 3.3% SR, 61 rides
+        'D L Turner',             // -23.0% ROI, 16.1% SR, 56 rides
+        'D Pires',                // -68.9% ROI, 8.1% SR, 37 rides
     ];
     
     // Apply scoring
