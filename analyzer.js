@@ -554,6 +554,7 @@ const sireData = {
     // ELITE PERFORMERS (100%+ ROI)
     // Updated 2026-03-10 based on expanded dataset
     'Gold Standard': { runners: 45, roi: 320.4, strikeRate: 17.8 },
+    'Satono Aladdin': { runners: 18, roi: 478.3, strikeRate: 16.7 },
     'Admire Mars': { runners: 31, roi: 271.0, strikeRate: 12.9 },
     'Wootton Bassett': { runners: 93, roi: 180.1, strikeRate: 17.2 },
     'Cliff\'s Edge': { runners: 23, roi: 160.4, strikeRate: 13.0 },
