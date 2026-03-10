@@ -3007,7 +3007,7 @@ def data_analytics():
     min_score_filter = request.args.get('min_score', type=float)
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    limit_param = request.args.get('limit', '200')
+    limit_param = request.args.get('limit', 'all')
 
     tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
@@ -3168,7 +3168,7 @@ def api_score_analysis():
     min_score_filter = request.args.get('min_score', type=float)
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    limit_param = request.args.get('limit', '200')
+    limit_param = request.args.get('limit', 'all')
 
     from collections import defaultdict
 
@@ -3407,7 +3407,7 @@ def api_component_analysis():
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
     
-    limit_param = request.args.get('limit', '200')
+    limit_param = request.args.get('limit', 'all')
     all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
     
     if limit_param == 'all':
@@ -3507,7 +3507,7 @@ def api_external_factors():
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
     
-    limit_param = request.args.get('limit', '200')
+    limit_param = request.args.get('limit', 'all')
     all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
     
     if limit_param == 'all':
@@ -4101,7 +4101,7 @@ def api_field_size():
     track_filter = request.args.get('track', '')
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    limit_param = request.args.get('limit', '200')
+    limit_param = request.args.get('limit', 'all')
 
     race_id_query = db.session.query(Race.id).join(
         Meeting, Race.meeting_id == Meeting.id
@@ -4217,7 +4217,7 @@ def api_days_since_run():
     track_filter = request.args.get('track', '')
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    limit_param = request.args.get('limit', '200')
+    limit_param = request.args.get('limit', 'all')
 
     race_id_query = db.session.query(Race.id).join(
         Meeting, Race.meeting_id == Meeting.id
@@ -4561,7 +4561,7 @@ def api_combination_analysis():
     track_filter    = request.args.get('track', '')
     date_from       = request.args.get('date_from', '')
     date_to         = request.args.get('date_to', '')
-    limit_param     = request.args.get('limit', '200')
+    limit_param     = request.args.get('limit', 'all')
     min_appearances = int(request.args.get('min_appearances', 10))
     stake           = 10.0
 
