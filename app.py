@@ -4260,7 +4260,7 @@ def api_days_since_run():
     import re as _re
     stake = 10.0
 
-    buckets = {
+buckets = {
     'First Start':          {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
     'Quick Back-up (≤7d)':  {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
     'Short (8-14d)':        {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
