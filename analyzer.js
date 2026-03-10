@@ -185,6 +185,9 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     score += a;
     notes += b;
 
+    // Declare horseSex early — needed for jockey/trainer combo and age/sex scoring
+    const horseSex = String(horseRow['horse sex'] || '').trim();
+
     // Check if horse jockey is someone we like or not
     [a, b] = checkJockeys(horseRow['horse jockey']);
     score += a;
@@ -459,7 +462,6 @@ notes += b;
 // ==========================================
 
 const horseAge = parseInt(horseRow['horse age']);
-const horseSex = String(horseRow['horse sex'] || '').trim();
 
 if (!isNaN(horseAge)) {
     
