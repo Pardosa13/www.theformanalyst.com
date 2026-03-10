@@ -2072,25 +2072,25 @@ function checkDaysSinceLastRun(meetingDate, formMeetingDate) {
 
     // Apply penalties/bonuses based on days since last run
     if (daysSinceLastRun >= 365) {
-        // Over a year - massive penalty
-        addScore = -30;
-        note += `-30.0 : Too fresh - ${daysSinceLastRun} days since last run (over 1 year!)\n`;
+        // Over a year - small penalty (still negative ROI at -71.9% on 153 races)
+        addScore = -10;
+        note += `-10.0 : Very long absence - ${daysSinceLastRun} days since last run (1+ year, -71.9% ROI)\n`;
     } else if (daysSinceLastRun >= 250) {
-        // 250+ days - MASSIVE penalty
-        addScore = -30;  // WAS -25
-        note += `-30.0 : Too fresh - ${daysSinceLastRun} days since last run (250+ days)\n`;
+        // 250+ days - POSITIVE ROI confirmed (+34.5% ROI, 194 races - statistically solid)
+        addScore = 5;
+        note += `+ 5.0 : Long absence - ${daysSinceLastRun} days since last run (250+ days, +34.5% ROI, 194 races)\n`;
     } else if (daysSinceLastRun >= 200) {
-        // 200+ days - very big penalty
-        addScore = -25;  // WAS -20
-        note += `-25.0 : Too fresh - ${daysSinceLastRun} days since last run\n`;
+        // 200+ days - slight negative (-31.5% ROI, 68 races)
+        addScore = -5;
+        note += `- 5.0 : Long absence - ${daysSinceLastRun} days since last run (200-249 days, -31.5% ROI)\n`;
     } else if (daysSinceLastRun >= 150) {
-        // 150+ days - significant penalty
-        addScore = -20;  // WAS -15
-        note += `-20.0 : Too fresh - ${daysSinceLastRun} days since last run\n`;
+        // 150+ days - POSITIVE ROI confirmed (+193.1% ROI, 16 races - small but striking)
+        addScore = 8;
+        note += `+ 8.0 : Fresh return - ${daysSinceLastRun} days since last run (150-199 days, +193.1% ROI)\n`;
     } else if (daysSinceLastRun <= 7) {
-        // 7 days or less - quick backup, BIG bonus (strongly outperforms market)
+        // 7 days or less - quick backup, neutral
         addScore = 0;
-        note += `+0.0 : Quick backup - only ${daysSinceLastRun} days since last run (no longer positive roi!)\n`;
+        note += `+0.0 : Quick backup - only ${daysSinceLastRun} days since last run\n`;
     }
     // 8-149 days is the sweet spot - no penalty or bonus
     return [addScore, note];
