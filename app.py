@@ -2346,24 +2346,33 @@ def update_scratchings(meeting_id):
         except Exception as e:
             logger.warning(f"Could not fetch scratchings: {e}")
 
-        # ── 4. Mark is_scratched in DB ──
-        scratched_count = 0
+        # ── 4. Get ALL scratched horses (existing + new) ──
+        all_scratched_names = set(scratched_names)  # Start with new scratchings
         all_races = Race.query.filter_by(meeting_id=meeting_id).all()
+        
+        # Add existing scratched horses to the set
+        for race in all_races:
+            for horse in race.horses:
+                if horse.is_scratched:
+                    all_scratched_names.add(normalize_runner_name(horse.horse_name))
+
+        # ── 5. Mark ALL scratched horses in DB ──
+        scratched_count = 0
         for race in all_races:
             for horse in race.horses:
                 norm = normalize_runner_name(horse.horse_name)
                 was_scratched = horse.is_scratched
-                horse.is_scratched = norm in scratched_names
+                horse.is_scratched = norm in all_scratched_names
                 if horse.is_scratched and not was_scratched:
                     scratched_count += 1
         db.session.flush()
 
-        # ── 5. Fetch fresh CSV from PuntingForm (identical to import) ──
+        # ── 6. Fetch fresh CSV from PuntingForm ──
         csv_data = pf_service.get_fields_csv(track_name, date_str)
         if not csv_data:
             return jsonify({'success': False, 'error': 'No CSV data returned from PuntingForm'}), 400
 
-        # ── 6. Fetch sectionals/ratings (identical endpoint to import) ──
+        # ── 7. Fetch sectionals/ratings ──
         sectionals_data = None
         try:
             sec_url = f"https://api.puntingform.com.au/v2/Ratings/MeetingRatings?meetingId={pf_meeting_id}&apiKey={pf_service.api_key}"
@@ -2374,7 +2383,7 @@ def update_scratchings(meeting_id):
         except Exception as e:
             logger.warning(f"Could not fetch sectionals: {e}")
 
-        # ── 7. Fetch speedmaps per race (identical loop to import) ──
+        # ── 8. Fetch speedmaps per race ──
         import io as _io
         import csv as _csv
         csv_reader = _csv.DictReader(_io.StringIO(csv_data))
@@ -2401,17 +2410,17 @@ def update_scratchings(meeting_id):
             except Exception as e:
                 logger.warning(f"Could not fetch speedmap for race {rn}: {e}")
 
-        # ── 8. Parse CSV and remove scratched horses ──
+        # ── 9. Parse CSV and remove ALL scratched horses ──
         parsed_csv = parseCSV(csv_data)
         parsed_csv = [
             row for row in parsed_csv
-            if normalize_runner_name(row.get('horse name', '')) not in scratched_names
+            if normalize_runner_name(row.get('horse name', '')) not in all_scratched_names
         ]
 
         if not parsed_csv:
             return jsonify({'success': False, 'error': 'No active runners after scratchings'}), 400
 
-        # ── 9. Inject sectionals (identical to process_and_store_results) ──
+        # ── 10. Inject sectionals ──
         if sectionals_data:
             sectionals_payload = sectionals_data.get('payLoad', [])
             for row in parsed_csv:
@@ -2429,7 +2438,7 @@ def update_scratchings(meeting_id):
                         row['last600TimeRank'] = str(runner.get('last600TimeRank', ''))
                         break
 
-        # ── 10. Inject PFAI scores (identical to process_and_store_results) ──
+        # ── 11. Inject PFAI scores ──
         if sectionals_data:
             ratings_payload = sectionals_data.get('payLoad', [])
             for row in parsed_csv:
@@ -2443,7 +2452,7 @@ def update_scratchings(meeting_id):
                         row['pfaiScore'] = str(runner.get('pfaiScore', ''))
                         break
 
-        # ── 11. Inject running positions (identical to process_and_store_results) ──
+        # ── 12. Inject running positions ──
         speed_maps_data = combined_speedmap if combined_speedmap['payLoad'] else None
         if speed_maps_data:
             for row in parsed_csv:
@@ -2480,7 +2489,7 @@ def update_scratchings(meeting_id):
                 if key in speedmap_lookup:
                     row['runningPosition'] = speedmap_lookup[key]
 
-        # ── 12. Rebuild CSV and run analyzer ──
+        # ── 13. Rebuild CSV and run analyzer ──
         fresh_csv = rebuildCSV(parsed_csv)
         track_condition = all_races[0].track_condition if all_races else 'good'
 
@@ -2488,7 +2497,7 @@ def update_scratchings(meeting_id):
         if not analysis_results:
             return jsonify({'success': False, 'error': 'Analyzer returned no results'}), 500
 
-        # ── 13. Group results by race ──
+        # ── 14. Group results by race ──
         races_data = {}
         for result in analysis_results:
             race_num = result['horse'].get('race number', '0')
@@ -2498,7 +2507,15 @@ def update_scratchings(meeting_id):
                 races_data[race_num] = []
             races_data[race_num].append(result)
 
-        # ── 14. Upsert predictions (never create new Meeting/Race/Horse records) ──
+        # ── 15. DELETE ALL existing predictions first ──
+        from sqlalchemy import delete
+        for race in all_races:
+            for horse in race.horses:
+                if horse.prediction:
+                    db.session.delete(horse.prediction)
+        db.session.flush()
+
+        # ── 16. Create ALL new predictions (including existing non-scratched horses) ──
         rail_pos = meeting.rail_position or 0
         pace_bias = meeting.pace_bias or 0
         races_updated = 0
@@ -2515,18 +2532,21 @@ def update_scratchings(meeting_id):
                 if name:
                     result_lookup[normalize_runner_name(name)] = r
 
-            active_horses = [h for h in race.horses if not h.is_scratched]
+            # Process ALL horses in this race (scratched and active)
             updated_any = False
 
-            for horse in active_horses:
-                r = result_lookup.get(horse.horse_name.lower())
+            for horse in race.horses:
+                horse_norm = normalize_runner_name(horse.horse_name)
+                r = result_lookup.get(horse_norm)
+                
                 if not r:
+                    # Horse not in analysis results (likely scratched)
                     continue
 
                 base_score = r.get('adjustedScore', r.get('score', 0))
                 running_position = r['horse'].get('runningposition', '')
 
-                # Apply rail bias (identical to process_and_store_results)
+                # Apply rail bias
                 if running_position and rail_pos:
                     base_score = apply_track_bias(base_score, running_position, rail_pos, 0)
 
@@ -2534,26 +2554,17 @@ def update_scratchings(meeting_id):
                 if running_position and pace_bias:
                     base_score = round(base_score + _bias_adjustment(running_position, rail_pos, pace_bias), 1)
 
-                pred = horse.prediction
-                if pred:
-                    pred.score = base_score
-                    pred.predicted_odds = r.get('trueOdds', '')
-                    pred.win_probability = r.get('winProbability', '')
-                    pred.performance_component = r.get('performanceComponent', '')
-                    pred.base_probability = r.get('baseProbability', '')
-                    pred.notes = r.get('notes', '')
-                else:
-                    pred = Prediction(
-                        horse_id=horse.id,
-                        score=base_score,
-                        predicted_odds=r.get('trueOdds', ''),
-                        win_probability=r.get('winProbability', ''),
-                        performance_component=r.get('performanceComponent', ''),
-                        base_probability=r.get('baseProbability', ''),
-                        notes=r.get('notes', '')
-                    )
-                    db.session.add(pred)
-
+                # Create new prediction (we deleted all existing ones above)
+                pred = Prediction(
+                    horse_id=horse.id,
+                    score=base_score,
+                    predicted_odds=r.get('trueOdds', ''),
+                    win_probability=r.get('winProbability', ''),
+                    performance_component=r.get('performanceComponent', ''),
+                    base_probability=r.get('baseProbability', ''),
+                    notes=r.get('notes', '')
+                )
+                db.session.add(pred)
                 updated_any = True
 
             if updated_any:
@@ -2568,7 +2579,8 @@ def update_scratchings(meeting_id):
             'success': True,
             'scratched_count': scratched_count,
             'races_updated': races_updated,
-            'message': f'Marked {scratched_count} scratching(s), repriced {races_updated} race(s)'
+            'total_scratched': len(all_scratched_names),
+            'message': f'Updated {scratched_count} new scratching(s), repriced {races_updated} race(s). Total scratched: {len(all_scratched_names)}'
         })
 
     except Exception as e:
