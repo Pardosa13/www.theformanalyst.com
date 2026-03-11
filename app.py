@@ -2311,12 +2311,11 @@ def update_scratchings(meeting_id):
 
         if pf_meeting_id:
             try:
-                sec_url = f"https://api.puntingform.com.au/v2/User/Sectionals?meetingId={pf_meeting_id}&apiKey={pf_service.api_key}"
+                sec_url = f"https://api.puntingform.com.au/v2/Ratings/MeetingRatings?meetingId={pf_meeting_id}&apiKey={pf_service.api_key}"
                 sec_response = requests.get(sec_url, headers=headers, timeout=30)
                 if sec_response.ok:
                     sectionals_data = sec_response.json()
-                    ratings_data = sectionals_data  # same endpoint as import
-                    logger.info(f"✅ Fetched sectionals/ratings for meeting {pf_meeting_id}")
+                    ratings_data = sectionals_data
             except Exception as e:
                 logger.warning(f"Could not fetch sectionals: {e}")
 
@@ -2385,37 +2384,38 @@ def update_scratchings(meeting_id):
                 row['runningPosition'] = ''
 
             if race.speed_maps_json:
+    try:
+        speed_data = json.loads(race.speed_maps_json) if isinstance(race.speed_maps_json, str) else race.speed_maps_json
+        speedmap_lookup = {}
+        # stored speed_maps_json is a single race payload, items are directly in payLoad[0].items
+        payload = speed_data.get('payLoad', [])
+        for payload_item in payload:
+            for item in payload_item.get('items', []):
+                runner_name = normalize_runner_name(item.get('runnerName') or '')
+                settle_val = item.get('settle')
                 try:
-                    speed_data = json.loads(race.speed_maps_json) if isinstance(race.speed_maps_json, str) else race.speed_maps_json
-                    payload = speed_data.get('payLoad', [])
-                    speedmap_lookup = {}
-                    for race_sm in payload:
-                        for item in race_sm.get('items', []):
-                            runner_name = normalize_runner_name(item.get('runnerName') or '')
-                            settle_val = item.get('settle')
-                            try:
-                                settle_num = int(str(settle_val).split('/')[0].strip())
-                            except Exception:
-                                settle_num = None
-                            if settle_num == 1:
-                                pos = 'LEADER'
-                            elif settle_num is not None and 2 <= settle_num <= 3:
-                                pos = 'ONPACE'
-                            elif settle_num is not None and 4 <= settle_num <= 7:
-                                pos = 'MIDFIELD'
-                            elif settle_num is not None:
-                                pos = 'BACKMARKER'
-                            else:
-                                pos = None
-                            if runner_name and pos:
-                                speedmap_lookup[runner_name] = pos
+                    settle_num = int(str(settle_val).split('/')[0].strip())
+                except Exception:
+                    settle_num = None
+                if settle_num == 1:
+                    pos = 'LEADER'
+                elif settle_num is not None and 2 <= settle_num <= 3:
+                    pos = 'ONPACE'
+                elif settle_num is not None and 4 <= settle_num <= 7:
+                    pos = 'MIDFIELD'
+                elif settle_num is not None:
+                    pos = 'BACKMARKER'
+                else:
+                    pos = None
+                if runner_name and pos:
+                    speedmap_lookup[runner_name] = pos
 
-                    for row in parsed_csv:
-                        norm = normalize_runner_name(row.get('horse name', ''))
-                        if norm in speedmap_lookup:
-                            row['runningPosition'] = speedmap_lookup[norm]
-                except Exception as e:
-                    logger.warning(f"Speed map injection failed for race {race.race_number}: {e}")
+        for row in parsed_csv:
+            norm = normalize_runner_name(row.get('horse name', ''))
+            if norm in speedmap_lookup:
+                row['runningPosition'] = speedmap_lookup[norm]
+    except Exception as e:
+        logger.warning(f"Speed map injection failed for race {race.race_number}: {e}")
 
             # ── 10. Rebuild CSV and run analyzer ──
             csv_string = rebuildCSV(parsed_csv)
