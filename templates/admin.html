@@ -622,7 +622,8 @@
                 <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#editComponentModal{{ comp.id }}">
                   Edit
                 </button>
-                <form method="POST" style="display:inline;">
+                <!-- FIX: added action attribute to prevent iOS Safari freeze -->
+                <form method="POST" action="{{ url_for('admin_panel') }}" style="display:inline;">
                   <input type="hidden" name="action" value="toggle_component">
                   <input type="hidden" name="component_id" value="{{ comp.id }}">
                   <button type="submit" class="btn btn-sm btn-{% if comp.is_active %}warning{% else %}success{% endif %}">
@@ -647,11 +648,11 @@
   </div>
 </div>
 
-<!-- Create Component Modal — all names/IDs UNCHANGED -->
+<!-- Create Component Modal — FIX: added action attribute to prevent iOS Safari freeze -->
 <div class="modal fade" id="createComponentModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
-      <form method="POST">
+      <form method="POST" action="{{ url_for('admin_panel') }}">
         <input type="hidden" name="action" value="create_component">
         <div class="modal-header">
           <h5 class="modal-title">Create New Component</h5>
@@ -693,12 +694,12 @@
   </div>
 </div>
 
-<!-- Edit Component Modals — all names/IDs UNCHANGED -->
+<!-- Edit/Delete Component Modals — FIX: added action attribute to both forms to prevent iOS Safari freeze -->
 {% for comp in stats.components %}
 <div class="modal fade" id="editComponentModal{{ comp.id }}" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
-      <form method="POST">
+      <form method="POST" action="{{ url_for('admin_panel') }}">
         <input type="hidden" name="action" value="edit_component">
         <input type="hidden" name="component_id" value="{{ comp.id }}">
         <div class="modal-header">
@@ -744,11 +745,10 @@
   </div>
 </div>
 
-<!-- Delete Component Modal — all names/IDs UNCHANGED -->
 <div class="modal fade" id="deleteComponentModal{{ comp.id }}" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
-      <form method="POST">
+      <form method="POST" action="{{ url_for('admin_panel') }}">
         <input type="hidden" name="action" value="delete_component">
         <input type="hidden" name="component_id" value="{{ comp.id }}">
         <div class="modal-header bg-danger">
