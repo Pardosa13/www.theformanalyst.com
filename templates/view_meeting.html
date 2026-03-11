@@ -883,7 +883,41 @@ details pre {
         Current: Neutral
       </div>
     </div>
+<button id="updateScratchingsBtn" 
+        onclick="updateScratchings({{ meeting.id }})"
+        class="btn btn-warning btn-sm">
+    🔄 Update Scratchings & Reprice
+</button>
+<span id="scratchingsStatus" style="display:none; margin-left:10px;"></span>
 
+<script>
+function updateScratchings(meetingId) {
+    const btn = document.getElementById('updateScratchingsBtn');
+    const status = document.getElementById('scratchingsStatus');
+    btn.disabled = true;
+    btn.textContent = '⏳ Updating...';
+    status.style.display = 'inline';
+    status.textContent = '';
+
+    fetch(`/api/meetings/${meetingId}/update-scratchings`, {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                status.textContent = data.message;
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                status.textContent = '✗ ' + data.error;
+                btn.disabled = false;
+                btn.textContent = '🔄 Update Scratchings & Reprice';
+            }
+        })
+        .catch(e => {
+            status.textContent = '✗ Request failed';
+            btn.disabled = false;
+            btn.textContent = '🔄 Update Scratchings & Reprice';
+        });
+}
+</script>
     <button onclick="window.print()" class="btn btn-primary">📄 Print / Save PDF</button>
   </div>
 </div>
