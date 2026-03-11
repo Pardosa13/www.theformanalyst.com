@@ -857,9 +857,10 @@ def parse_notes_components(notes):
     """
     if not notes:
         return {}
-    
+
+    import re
     components = {}
-    
+
     patterns = [
 
         # ====== LAST 10 FORM ======
@@ -875,24 +876,26 @@ def parse_notes_components(notes):
         (r'\+\s*20\.0\s*:\s*Elite value trainer', 'Trainer - Elite (50%+ ROI)'),
         (r'\+\s*15\.0\s*:\s*Strong value trainer', 'Trainer - Strong Value (20-50% ROI)'),
         (r'\+\s*10\.0\s*:\s*Profitable trainer', 'Trainer - Profitable (0-20% ROI)'),
-        (r'-\s*15\.0\s*:\s*Poor value trainer', 'Trainer - Poor Value'),
+        # FIX: also catches "destroys ROI" phrasing
+        (r'-\s*15\.0\s*:\s*Poor value trainer|Poor value trainer.*destroys ROI', 'Trainer - Poor Value'),
 
         # ====== TRACK RECORD - WIN RATES ======
-        (r'\+\s*6\.0\s*:\s*Exceptional win rate.*at this track', 'Track Win Rate - Exceptional (51%+)'),
-        (r'\+\s*5\.0\s*:\s*Strong win rate.*at this track', 'Track Win Rate - Strong (36-50%)'),
-        (r'\+\s*4\.0\s*:\s*Good win rate.*at this track', 'Track Win Rate - Good (26-35%)'),
-        (r'\+\s*2\.0\s*:\s*Moderate win rate.*at this track', 'Track Win Rate - Moderate (16-25%)'),
-        (r'\+\s*1\.0\s*:\s*Low win rate.*at this track', 'Track Win Rate - Low (1-15%)'),
-        (r'\+\s*0\.0\s*:\s*No wins at this track', 'Track Win Rate - No Wins'),
+        (r'\+\s*6\.0\s*:\s*Exceptional win rate.*at this track\b', 'Track Win Rate - Exceptional (51%+)'),
+        (r'\+\s*5\.0\s*:\s*Strong win rate.*at this track\b', 'Track Win Rate - Strong (36-50%)'),
+        (r'\+\s*4\.0\s*:\s*Good win rate.*at this track\b', 'Track Win Rate - Good (26-35%)'),
+        (r'\+\s*2\.0\s*:\s*Moderate win rate.*at this track\b', 'Track Win Rate - Moderate (16-25%)'),
+        (r'\+\s*1\.0\s*:\s*Low win rate.*at this track\b', 'Track Win Rate - Low (1-15%)'),
+        (r'\+\s*0\.0\s*:\s*No wins at this track\b', 'Track Win Rate - No Wins'),
         (r'\+\s*0\.0\s*:\s*No runs at this track\b', 'Track - No Runs'),
 
         # ====== TRACK RECORD - PODIUM RATES ======
-        (r'\+\s*6\.0\s*:\s*Elite podium rate.*at this track', 'Track Podium Rate - Elite (85%+)'),
-        (r'\+\s*5\.0\s*:\s*Excellent podium rate.*at this track', 'Track Podium Rate - Excellent (70-84%)'),
-        (r'\+\s*4\.0\s*:\s*Strong podium rate.*at this track', 'Track Podium Rate - Strong (55-69%)'),
-        (r'\+\s*3\.0\s*:\s*Good podium rate.*at this track', 'Track Podium Rate - Good (40-54%)'),
-        (r'\+\s*1\.0\s*:\s*Moderate podium rate.*at this track', 'Track Podium Rate - Moderate (25-39%)'),
-        (r'-\s*5\.0\s*:\s*Poor performance at this track', 'Track - Poor Performance'),
+        (r'\+\s*6\.0\s*:\s*Elite podium rate.*at this track\b', 'Track Podium Rate - Elite (85%+)'),
+        (r'\+\s*5\.0\s*:\s*Excellent podium rate.*at this track\b', 'Track Podium Rate - Excellent (70-84%)'),
+        (r'\+\s*4\.0\s*:\s*Strong podium rate.*at this track\b', 'Track Podium Rate - Strong (55-69%)'),
+        (r'\+\s*3\.0\s*:\s*Good podium rate.*at this track\b', 'Track Podium Rate - Good (40-54%)'),
+        (r'\+\s*1\.0\s*:\s*Moderate podium rate.*at this track\b', 'Track Podium Rate - Moderate (25-39%)'),
+        # FIX: also catches "Poor podium rate" phrasing
+        (r'-\s*5\.0\s*:\s*Poor performance at this track|Poor podium rate.*at this track', 'Track - Poor Performance'),
         (r'=\s*([\d.]+)\s*:\s*Total track score', 'Track Score Total'),
 
         # ====== TRACK+DISTANCE RECORD - WIN RATES ======
@@ -914,21 +917,21 @@ def parse_notes_components(notes):
         (r'=\s*([\d.]+)\s*:\s*Total track\+distance score', 'Track+Distance Score Total'),
 
         # ====== DISTANCE RECORD - WIN RATES ======
-        (r'\+\s*8\.0\s*:\s*Exceptional win rate.*at this distance', 'Distance Win Rate - Exceptional (51%+)'),
-        (r'\+\s*7\.0\s*:\s*Strong win rate.*at this distance', 'Distance Win Rate - Strong (36-50%)'),
-        (r'\+\s*5\.0\s*:\s*Good win rate.*at this distance', 'Distance Win Rate - Good (26-35%)'),
-        (r'\+\s*3\.0\s*:\s*Moderate win rate.*at this distance', 'Distance Win Rate - Moderate (16-25%)'),
-        (r'\+\s*1\.0\s*:\s*Low win rate.*at this distance', 'Distance Win Rate - Low (1-15%)'),
-        (r'\+\s*0\.0\s*:\s*No wins at this distance', 'Distance Win Rate - No Wins'),
-        (r'\+\s*0\.0\s*:\s*No runs at this distance', 'Distance - No Runs'),
+        (r'\+\s*8\.0\s*:\s*Exceptional win rate.*at this distance\b', 'Distance Win Rate - Exceptional (51%+)'),
+        (r'\+\s*7\.0\s*:\s*Strong win rate.*at this distance\b', 'Distance Win Rate - Strong (36-50%)'),
+        (r'\+\s*5\.0\s*:\s*Good win rate.*at this distance\b', 'Distance Win Rate - Good (26-35%)'),
+        (r'\+\s*3\.0\s*:\s*Moderate win rate.*at this distance\b', 'Distance Win Rate - Moderate (16-25%)'),
+        (r'\+\s*1\.0\s*:\s*Low win rate.*at this distance\b', 'Distance Win Rate - Low (1-15%)'),
+        (r'\+\s*0\.0\s*:\s*No wins at this distance\b', 'Distance Win Rate - No Wins'),
+        (r'\+\s*0\.0\s*:\s*No runs at this distance\b', 'Distance - No Runs'),
 
         # ====== DISTANCE RECORD - PODIUM RATES ======
-        (r'\+\s*8\.0\s*:\s*Elite podium rate.*at this distance', 'Distance Podium Rate - Elite (85%+)'),
-        (r'\+\s*7\.0\s*:\s*Excellent podium rate.*at this distance', 'Distance Podium Rate - Excellent (70-84%)'),
-        (r'\+\s*6\.0\s*:\s*Strong podium rate.*at this distance', 'Distance Podium Rate - Strong (55-69%)'),
-        (r'\+\s*4\.0\s*:\s*Good podium rate.*at this distance', 'Distance Podium Rate - Good (40-54%)'),
-        (r'\+\s*2\.0\s*:\s*Moderate podium rate.*at this distance', 'Distance Podium Rate - Moderate (25-39%)'),
-        (r'-\s*6\.0\s*:\s*Poor performance at this distance', 'Distance - Poor Performance'),
+        (r'\+\s*8\.0\s*:\s*Elite podium rate.*at this distance\b', 'Distance Podium Rate - Elite (85%+)'),
+        (r'\+\s*7\.0\s*:\s*Excellent podium rate.*at this distance\b', 'Distance Podium Rate - Excellent (70-84%)'),
+        (r'\+\s*6\.0\s*:\s*Strong podium rate.*at this distance\b', 'Distance Podium Rate - Strong (55-69%)'),
+        (r'\+\s*4\.0\s*:\s*Good podium rate.*at this distance\b', 'Distance Podium Rate - Good (40-54%)'),
+        (r'\+\s*2\.0\s*:\s*Moderate podium rate.*at this distance\b', 'Distance Podium Rate - Moderate (25-39%)'),
+        (r'-\s*6\.0\s*:\s*Poor performance at this distance\b', 'Distance - Poor Performance'),
         (r'=\s*([\d.]+)\s*:\s*Total distance score', 'Distance Score Total'),
 
         # ====== TRACK CONDITION - WIN RATES ======
@@ -950,20 +953,22 @@ def parse_notes_components(notes):
         (r'=\s*([\d.]+)\s*:\s*Total track condition score', 'Track Condition Score Total'),
 
         # ====== DISTANCE CHANGE ======
-        (r'-\s*5\.0\s*:\s*Stepping up \d+m in distance', 'Distance Change - Step Up Large (400m+)'),
-        (r'-\s*3\.0\s*:\s*Stepping up \d+m in distance', 'Distance Change - Step Up Moderate (200-400m)'),
-        (r'\+\s*3\.0\s*:\s*Dropping back \d+m in distance', 'Distance Change - Drop Back Large (400m+)'),
-        (r'\+\s*2\.0\s*:\s*Dropping back \d+m in distance', 'Distance Change - Drop Back Moderate (200-400m)'),
+        # FIX: old patterns matched "Stepping up Xm in distance" — new format uses bracketed ranges
+        # Also handle ~ prefix for near-baseline
+        (r'[~+\-]\s*[\d.]+\s*:\s*Step(?:ping)? up.*\(400m\+\)', 'Distance Change - Step Up Large (400m+)'),
+        (r'[~+\-]\s*[\d.]+\s*:\s*Step(?:ping)? up.*\(200-400m\)', 'Distance Change - Step Up Moderate (200-400m)'),
+        (r'[~+\-]\s*[\d.]+\s*:\s*Drop(?:ping)? back.*\(400m\+\)', 'Distance Change - Drop Back Large (400m+)'),
+        (r'[~+\-]\s*[\d.]+\s*:\s*Drop(?:ping)? back.*\(200-400m\)', 'Distance Change - Drop Back Moderate (200-400m)'),
 
         # ====== CLASS CHANGE ======
         (r'\+\s*([\d.]+):\s*Stepping DOWN', 'Class Drop'),
         (r'(-[\d.]+):\s*Stepping UP', 'Class Rise'),
 
         # ====== LAST START - WINNERS ======
-        (r'\+\s*10\.0\s*:\s*Dominant last start win', 'Last Start - Dominant Win (5L+)'),
-        (r'\+\s*7\.0\s*:\s*Comfortable last start win', 'Last Start - Comfortable Win (2-5L)'),
-        (r'\+\s*5\.0\s*:\s*Narrow last start win', 'Last Start - Narrow Win (0.5-2L)'),
-        (r'\+\s*3\.0\s*:\s*Photo finish last start win', 'Last Start - Photo Win (<0.5L)'),
+        (r'\+\s*10\.0\s*:\s*Dominant last.?start win', 'Last Start - Dominant Win (5L+)'),
+        (r'\+\s*7\.0\s*:\s*Comfortable last.?start win', 'Last Start - Comfortable Win (2-5L)'),
+        (r'\+\s*5\.0\s*:\s*Narrow last.?start win', 'Last Start - Narrow Win (0.5-2L)'),
+        (r'\+\s*3\.0\s*:\s*Photo finish last.?start win', 'Last Start - Photo Win (<0.5L)'),
 
         # ====== LAST START - PLACED ======
         (r'\+\s*5\.0\s*:\s*Narrow loss.*very competitive', 'Last Start - Narrow Loss (≤1L)'),
@@ -971,7 +976,7 @@ def parse_notes_components(notes):
         (r'\+\s*3\.0\s*:\s*Close loss \(.*rd.*\)', 'Last Start - Close Loss 3rd (1-2L)'),
 
         # ====== LAST START - BEATEN ======
-        (r'\+\s*0\.0\s*:\s*Competitive effort.*th.*by', 'Last Start - Competitive Effort (≤3L)'),
+        (r'\+\s*0\.0\s*:\s*Competitive effort', 'Last Start - Competitive Effort (≤3L)'),
         (r'-\s*3\.0\s*:\s*Beaten clearly', 'Last Start - Beaten Clearly (3-6L)'),
         (r'-\s*5\.0\s*:\s*Beaten badly.*nd', 'Last Start - Beaten Badly Placed'),
         (r'\+\s*5\.0\s*:\s*Well beaten.*BUT major class drop', 'Last Start - Well Beaten + Class Drop'),
@@ -981,31 +986,31 @@ def parse_notes_components(notes):
         (r'-\s*25\.0\s*:\s*Demolished', 'Last Start - Demolished (10L+)'),
 
         # ====== DAYS SINCE RUN ======
+        # FIX: new format is "Fresh return - X days since last run (150-199 days, +ROI%)"
+        # not "Too fresh (150+ days)" — match on the bracket ranges and also the old format
         (r'\+\s*0\.0\s*:\s*Quick backup', 'Days Since Run - Quick Backup (≤7 days)'),
-        (r'-\s*20\.0\s*:\s*Too fresh.*150', 'Days Since Run - Too Fresh (150+ days)'),
-        (r'-\s*25\.0\s*:\s*Too fresh.*200', 'Days Since Run - Too Fresh (200+ days)'),
-        (r'-\s*30\.0\s*:\s*Too fresh.*250', 'Days Since Run - Too Fresh (250+ days)'),
-        (r'-\s*30\.0\s*:\s*Too fresh.*over 1 year', 'Days Since Run - Too Fresh (1+ year)'),
+        (r'[\d.]+\s*days?\s*since last run.*150-199 days|Too fresh.*150', 'Days Since Run - Fresh Return (150-199 days)'),
+        (r'[\d.]+\s*days?\s*since last run.*200-249 days|Too fresh.*200', 'Days Since Run - Too Fresh (200+ days)'),
+        (r'[\d.]+\s*days?\s*since last run.*250|Too fresh.*250', 'Days Since Run - Too Fresh (250+ days)'),
+        (r'[\d.]+\s*days?\s*since last run.*(?:365|year|1\+\s*year)|Too fresh.*over 1 year', 'Days Since Run - Too Fresh (1+ year)'),
 
         # ====== FORM PRICE ======
-        (r'\+\s*[3-9]\d\.0\s*:\s*Form price', 'Form Price - Very Short ($1-$2)'),
-        (r'\+\s*[12]\d\.0\s*:\s*Form price', 'Form Price - Short ($2-$5)'),
-        (r'\+\s*[2-9]\.0\s*:\s*Form price', 'Form Price - Backed ($5-$13)'),
-        (r'\+\s*1\.0\s*:\s*Form price', 'Form Price - Slight Value ($12-$14)'),
-        (r'\+\s*0\.0\s*:\s*Form price.*neutral', 'Form Price - Neutral (~$14)'),
-        (r'-\s*[\d.]+\.0\s*:\s*Form price', 'Form Price - Outsider ($15+)'),
+        # FIX: old patterns used score magnitude to infer price bracket — unreliable.
+        # Match on the price value directly from notes text instead.
+        (r'Form price \$(\d+\.\d+)', '_form_price_dynamic'),
 
         # ====== FIRST UP / SECOND UP ======
-        (r'\+\s*0\.0\s*:\s*First-up winner', 'First Up - Has Won First Up'),
-        (r'\+\s*0\.0\s*:\s*Strong first-up podium', 'First Up - Strong Podium Rate'),
-        (r'\+\s*3\.0\s*:\s*Second-up winner', 'Second Up - Has Won Second Up'),
-        (r'\+\s*2\.0\s*:\s*Strong second-up podium', 'Second Up - Strong Podium Rate'),
-        (r'\+\s*15\.0\s*:\s*First-up specialist \(UNDEFEATED\)', 'First Up - Specialist Undefeated'),
-        (r'\+\s*15\.0\s*:\s*Second-up specialist \(UNDEFEATED\)', 'Second Up - Specialist Undefeated'),
+        (r'\+\s*0\.0\s*:\s*First-?up winner', 'First Up - Has Won First Up'),
+        (r'\+\s*0\.0\s*:\s*Strong first-?up podium', 'First Up - Strong Podium Rate'),
+        (r'\+\s*3\.0\s*:\s*Second-?up winner', 'Second Up - Has Won Second Up'),
+        (r'\+\s*2\.0\s*:\s*Strong second-?up podium', 'Second Up - Strong Podium Rate'),
+        # FIX: old pattern required literal "(UNDEFEATED)" — new format is "(UNDEFEATED: 3:3-0-0)"
+        (r'\+\s*15\.0\s*:\s*First-?up specialist.*UNDEFEATED', 'First Up - Specialist Undefeated'),
+        (r'\+\s*15\.0\s*:\s*Second-?up specialist.*UNDEFEATED', 'Second Up - Specialist Undefeated'),
         (r'-\s*1\.0\s*:\s*Unclear spell', 'Spell Status - Unclear'),
 
         # ====== WEIGHT ======
-        (r'\+\s*15\.0\s*:\s*Weight.*BELOW race avg', 'Weight vs Field - Well Below (3kg+)'),
+        (r'\+\s*15\.0\s*:\s*Weight.*(?:BELOW|well below) race avg', 'Weight vs Field - Well Below (3kg+)'),
         (r'\+\s*10\.0\s*:\s*Weight.*below race avg', 'Weight vs Field - Below (2-3kg)'),
         (r'\+\s*6\.0\s*:\s*Weight.*below race avg', 'Weight vs Field - Slightly Below (1-2kg)'),
         (r'\+\s*3\.0\s*:\s*Weight.*below race avg', 'Weight vs Field - Marginally Below (0.5-1kg)'),
@@ -1013,7 +1018,7 @@ def parse_notes_components(notes):
         (r'-\s*3\.0\s*:\s*Weight.*above race avg', 'Weight vs Field - Marginally Above'),
         (r'-\s*6\.0\s*:\s*Weight.*above race avg', 'Weight vs Field - Above (1-2kg)'),
         (r'-\s*10\.0\s*:\s*Weight.*above race avg', 'Weight vs Field - Well Above (2-3kg)'),
-        (r'-\s*15\.0\s*:\s*Weight.*ABOVE race avg', 'Weight vs Field - Well Above (3kg+)'),
+        (r'-\s*15\.0\s*:\s*Weight.*(?:ABOVE|well above) race avg', 'Weight vs Field - Well Above (3kg+)'),
         (r'\+\s*15\.0\s*:\s*Dropped.*from last start', 'Weight Change - Dropped 3kg+'),
         (r'\+\s*10\.0\s*:\s*Dropped.*from last start', 'Weight Change - Dropped 2-3kg'),
         (r'\+\s*5\.0\s*:\s*Dropped.*from last start', 'Weight Change - Dropped 1-2kg'),
@@ -1045,9 +1050,19 @@ def parse_notes_components(notes):
         (r'-\s*60\.0\s*:\s*13\+yo', 'Age/Sex - 13+yo Penalty'),
 
         # ====== COLT BONUSES ======
-        (r'\+\s*20\.0\s*:\s*3yo COLT combo', 'Colt - 3yo Colt'),
-        (r'\+\s*20\.0\s*:\s*COLT\s*\(', 'Colt - Base Bonus'),
+        # FIX: new format is "3yo COLT (" not "3yo COLT combo"
+        (r'\+\s*20\.0\s*:\s*3yo COLT', 'Colt - 3yo Colt'),
+        # FIX: "COLT (" pattern — make sure this comes AFTER 3yo COLT so it doesn't double-match
+        (r'\+\s*20\.0\s*:\s*COLT\s*\((?!.*3yo)', 'Colt - Base Bonus'),
         (r'\+\s*15\.0\s*:\s*Fast sectional \+ COLT combo', 'Colt - Fast Sectional + Colt'),
+
+        # ====== SIRE SCORING ======
+        # NEW: e.g. "+6.0: Sire Night Of Thunder (66.3% ROI, 26 runners)"
+        (r'[+-][\d.]+\s*:\s*Sire\s+.+?\(([-\d.]+)%\s*ROI', '_sire_dynamic'),
+
+        # ====== COUNTRY OF ORIGIN ======
+        # NEW: e.g. "- 2.0 : Irish-bred (-11.0% ROI, 350 runners)"
+        (r':\s*([\w][\w -]*?bred)\s*\(([-+\d.]+)%\s*ROI', '_country_dynamic'),
 
         # ====== SPECIALIST / PERFECT RECORD ======
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED.*track\+distance.*specialist', 'Specialist - Undefeated Track+Distance'),
@@ -1060,46 +1075,47 @@ def parse_notes_components(notes):
         (r'\+\s*([\d.]+)\s*:\s*100% PODIUM.*condition', 'Specialist - Perfect Podium Condition'),
 
         # ====== HISTORICAL SECTIONALS (CSV) ======
-        (r'\+\s*([\d.]+):\s*weighted avg \(z=[\d.]+', 'Sectional History - Weighted Avg'),
-        (r'[+-]\s*([\d.]+):\s*best of last \d+', 'Sectional History - Best Recent'),
+        # FIX: old pattern required leading + but new format uses +- prefix for negative z-scores
+        (r'[+\-]?[\d.]+\s*:\s*weighted avg \(z=', 'Sectional History - Weighted Avg'),
+        (r'[+\-][\d.]+\s*:\s*best of last \d+', 'Sectional History - Best Recent'),
         (r'\+\s*([\d.]+):\s*consistency - excellent', 'Sectional Consistency - Excellent'),
         (r'\+\s*([\d.]+):\s*consistency - good', 'Sectional Consistency - Good'),
-        (r'\+\s*([\d.]+):\s*consistency - fair', 'Sectional Consistency - Fair'),
-        (r'\+\s*([\d.]+):\s*consistency - poor', 'Sectional Consistency - Poor'),
+        (r'[+\-]?\s*([\d.]+):\s*consistency - fair', 'Sectional Consistency - Fair'),
+        (r'[+\-]?\s*([\d.]+):\s*consistency - poor', 'Sectional Consistency - Poor'),
 
         # ====== API SECTIONALS ======
-        (r'\+\s*([\d.]+):\s*Last 200m \(Rank \d+.*ELITE', 'API Sectional - Last 200m Elite'),
-        (r'\+\s*([\d.]+):\s*Last 200m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 200m Very Good'),
-        (r'\+\s*([\d.]+):\s*Last 200m \(Rank \d+.*GOOD', 'API Sectional - Last 200m Good'),
-        (r'[\d.]+:\s*Last 200m \(Rank \d+.*AVERAGE', 'API Sectional - Last 200m Average'),
-        (r'[\d.]+:\s*Last 200m \(Rank \d+.*POOR', 'API Sectional - Last 200m Poor'),
-        (r'\+\s*([\d.]+):\s*Last 400m \(Rank \d+.*ELITE', 'API Sectional - Last 400m Elite'),
-        (r'\+\s*([\d.]+):\s*Last 400m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 400m Very Good'),
-        (r'\+\s*([\d.]+):\s*Last 400m \(Rank \d+.*GOOD', 'API Sectional - Last 400m Good'),
-        (r'[\d.]+:\s*Last 400m \(Rank \d+.*AVERAGE', 'API Sectional - Last 400m Average'),
-        (r'[\d.]+:\s*Last 400m \(Rank \d+.*POOR', 'API Sectional - Last 400m Poor'),
-        (r'\+\s*([\d.]+):\s*Last 600m \(Rank \d+.*ELITE', 'API Sectional - Last 600m Elite'),
-        (r'\+\s*([\d.]+):\s*Last 600m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 600m Very Good'),
-        (r'\+\s*([\d.]+):\s*Last 600m \(Rank \d+.*GOOD', 'API Sectional - Last 600m Good'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 200m \(Rank \d+.*ELITE', 'API Sectional - Last 200m Elite'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 200m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 200m Very Good'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 200m \(Rank \d+.*\bGOOD\b', 'API Sectional - Last 200m Good'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 200m \(Rank \d+(?!.*(?:ELITE|VERY GOOD|GOOD)).*AVERAGE', 'API Sectional - Last 200m Average'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 200m \(Rank \d+(?!.*(?:ELITE|VERY GOOD|GOOD|AVERAGE)).*POOR', 'API Sectional - Last 200m Poor'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 400m \(Rank \d+.*ELITE', 'API Sectional - Last 400m Elite'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 400m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 400m Very Good'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 400m \(Rank \d+.*\bGOOD\b', 'API Sectional - Last 400m Good'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 400m \(Rank \d+(?!.*(?:ELITE|VERY GOOD|GOOD)).*AVERAGE', 'API Sectional - Last 400m Average'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 400m \(Rank \d+(?!.*(?:ELITE|VERY GOOD|GOOD|AVERAGE)).*POOR', 'API Sectional - Last 400m Poor'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 600m \(Rank \d+.*ELITE', 'API Sectional - Last 600m Elite'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 600m \(Rank \d+.*VERY GOOD', 'API Sectional - Last 600m Very Good'),
+        (r'[+\-]?\s*[\d.]+:\s*Last 600m \(Rank \d+.*\bGOOD\b', 'API Sectional - Last 600m Good'),
         (r'\+\s*([\d.]+):\s*IMPROVING TREND', 'API Sectional - Improving Trend'),
 
         # ====== RUNNING POSITION (SPEEDMAP) ======
-        (r'\+\s*12\.0\s*:\s*LEADER in Sprint', 'Running Position - Leader Sprint'),
-        (r'\+\s*8\.0\s*:\s*ONPACE in Sprint', 'Running Position - OnPace Sprint'),
-        (r'0\.0\s*:\s*MIDFIELD in Sprint', 'Running Position - Midfield Sprint'),
-        (r'-\s*8\.0\s*:\s*BACKMARKER in Sprint', 'Running Position - Backmarker Sprint'),
-        (r'\+\s*6\.0\s*:\s*LEADER in Mile', 'Running Position - Leader Mile'),
-        (r'\+\s*8\.0\s*:\s*ONPACE in Mile', 'Running Position - OnPace Mile'),
-        (r'\+\s*2\.0\s*:\s*MIDFIELD in Mile', 'Running Position - Midfield Mile'),
-        (r'-\s*5\.0\s*:\s*BACKMARKER in Mile', 'Running Position - Backmarker Mile'),
-        (r'-\s*5\.0\s*:\s*LEADER in Middle distance', 'Running Position - Leader Middle'),
-        (r'\+\s*5\.0\s*:\s*ONPACE in Middle distance', 'Running Position - OnPace Middle'),
-        (r'\+\s*3\.0\s*:\s*MIDFIELD in Middle distance', 'Running Position - Midfield Middle'),
-        (r'0\.0\s*:\s*BACKMARKER in Middle distance', 'Running Position - Backmarker Middle'),
-        (r'-\s*8\.0\s*:\s*LEADER in Staying race', 'Running Position - Leader Staying'),
-        (r'\+\s*3\.0\s*:\s*ONPACE in Staying race', 'Running Position - OnPace Staying'),
-        (r'\+\s*5\.0\s*:\s*MIDFIELD in Staying race', 'Running Position - Midfield Staying'),
-        (r'\+\s*2\.0\s*:\s*BACKMARKER in Staying race', 'Running Position - Backmarker Staying'),
+        (r'[+\-]?\s*12\.0\s*:\s*LEADER in Sprint', 'Running Position - Leader Sprint'),
+        (r'[+\-]?\s*8\.0\s*:\s*ONPACE in Sprint', 'Running Position - OnPace Sprint'),
+        (r'[+\-]?\s*0\.0\s*:\s*MIDFIELD in Sprint', 'Running Position - Midfield Sprint'),
+        (r'[+\-]?\s*8\.0\s*:\s*BACKMARKER in Sprint', 'Running Position - Backmarker Sprint'),
+        (r'[+\-]?\s*6\.0\s*:\s*LEADER in Mile', 'Running Position - Leader Mile'),
+        (r'[+\-]?\s*8\.0\s*:\s*ONPACE in Mile', 'Running Position - OnPace Mile'),
+        (r'[+\-]?\s*2\.0\s*:\s*MIDFIELD in Mile', 'Running Position - Midfield Mile'),
+        (r'[+\-]?\s*5\.0\s*:\s*BACKMARKER in Mile', 'Running Position - Backmarker Mile'),
+        (r'[+\-]?\s*5\.0\s*:\s*LEADER in Middle distance', 'Running Position - Leader Middle'),
+        (r'[+\-]?\s*5\.0\s*:\s*ONPACE in Middle distance', 'Running Position - OnPace Middle'),
+        (r'[+\-]?\s*3\.0\s*:\s*MIDFIELD in Middle distance', 'Running Position - Midfield Middle'),
+        (r'[+\-]?\s*0\.0\s*:\s*BACKMARKER in Middle distance', 'Running Position - Backmarker Middle'),
+        (r'[+\-]?\s*8\.0\s*:\s*LEADER in Staying', 'Running Position - Leader Staying'),
+        (r'[+\-]?\s*3\.0\s*:\s*ONPACE in Staying', 'Running Position - OnPace Staying'),
+        (r'[+\-]?\s*5\.0\s*:\s*MIDFIELD in Staying', 'Running Position - Midfield Staying'),
+        (r'[+\-]?\s*2\.0\s*:\s*BACKMARKER in Staying', 'Running Position - Backmarker Staying'),
 
         # ====== PFAI BLEND ======
         (r'PFAI Score:\s*(9[0-9]|100)[\. ]', 'PFAI Score - 90+'),
@@ -1109,24 +1125,68 @@ def parse_notes_components(notes):
         (r'PFAI Score:\s*([0-5][0-9])[\. ]', 'PFAI Score - <60'),
 
         # ====== MARKET EXPECTATION ======
-        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(best market performer in field', 'Market Expectation - Best in Field'),
-        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(above field average', 'Market Expectation - Above Average'),
-        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(near field average', 'Market Expectation - Near Average'),
-        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(below field average', 'Market Expectation - Below Average'),
-        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(worst market performer in field', 'Market Expectation - Worst in Field'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(best market performer', 'Market Expectation - Best in Field'),
         (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(chronic overperformer', 'Market Expectation - Chronic Overperformer'),
         (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(strong overperformer', 'Market Expectation - Strong Overperformer'),
         (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(moderate outperformer', 'Market Expectation - Moderate Outperformer'),
-        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(meeting expectations', 'Market Expectation - Neutral'),
-        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(mild underperformer', 'Market Expectation - Mild Underperformer'),
-        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(significant underperformer', 'Market Expectation - Significant Underperformer'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(above field average', 'Market Expectation - Above Average'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(worst market performer', 'Market Expectation - Worst in Field'),
         (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(chronic underperformer', 'Market Expectation - Chronic Underperformer'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(significant underperformer', 'Market Expectation - Significant Underperformer'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(mild underperformer', 'Market Expectation - Mild Underperformer'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(below field average', 'Market Expectation - Below Average'),
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(meeting expectations', 'Market Expectation - Neutral'),
+        # FIX: "near field average" maps to Neutral (it's not a named bucket in old patterns)
+        (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(near field average', 'Market Expectation - Neutral'),
 
     ]
 
     for pattern, name in patterns:
         match = re.search(pattern, notes, re.IGNORECASE | re.DOTALL)
         if match:
+            # ---- Dynamic handlers ----
+            if name == '_form_price_dynamic':
+                try:
+                    price = float(match.group(1))
+                    if price <= 2.0:
+                        components['Form Price - Very Short ($1-$2)'] = price
+                    elif price <= 5.0:
+                        components['Form Price - Short ($2-$5)'] = price
+                    elif price <= 13.0:
+                        components['Form Price - Backed ($5-$13)'] = price
+                    elif price <= 14.5:
+                        components['Form Price - Slight Value ($12-$14)'] = price
+                    else:
+                        components['Form Price - Outsider ($15+)'] = price
+                except (ValueError, IndexError):
+                    pass
+                continue
+
+            if name == '_sire_dynamic':
+                try:
+                    roi = float(match.group(1))
+                    if roi >= 50:
+                        components['Sire - Elite ROI (50%+)'] = roi
+                    elif roi >= 20:
+                        components['Sire - Strong ROI (20-50%)'] = roi
+                    elif roi >= 0:
+                        components['Sire - Positive ROI (0-20%)'] = roi
+                    else:
+                        components['Sire - Negative ROI'] = roi
+                except (ValueError, IndexError):
+                    pass
+                continue
+
+            if name == '_country_dynamic':
+                try:
+                    country = match.group(1).strip()
+                    roi = float(match.group(2))
+                    components[f'Country: {country}'] = roi
+                except (ValueError, IndexError):
+                    pass
+                continue
+
+            # ---- Standard score extraction ----
             try:
                 score_str = match.group(1).replace(' ', '').replace('+', '')
                 score = float(score_str)
