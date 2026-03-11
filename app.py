@@ -2260,6 +2260,134 @@ def import_from_api():
     from datetime import date
     today = date.today().strftime('%Y-%m-%d')
     return render_template("import_from_api.html", today=today)
+
+@app.route("/api/meetings/<int:meeting_id>/update-scratchings", methods=["POST"])
+@login_required
+def update_scratchings(meeting_id):
+    """Fetch latest scratchings, mark horses, re-run analyzer, update predictions."""
+    try:
+        meeting = Meeting.query.get_or_404(meeting_id)
+
+        # 1. Fetch scratchings from PuntingForm API
+        scratching_url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
+        response = requests.get(scratching_url, headers={'accept': 'application/json'}, timeout=30)
+        if not response.ok:
+            return jsonify({'success': False, 'error': f'Scratchings API error {response.status_code}'}), 500
+
+        data = response.json()
+        items = data.get('payLoad') or []
+
+        # Build set of scratched runner names (normalised)
+        scratched_names = set()
+        for s in items:
+            if not isinstance(s, dict):
+                continue
+            name = s.get('runnerName') or s.get('name') or ''
+            if name:
+                scratched_names.add(normalize_runner_name(name))
+
+        scratched_count = 0
+        races_updated = 0
+
+        races = Race.query.filter_by(meeting_id=meeting_id).all()
+
+        for race in races:
+            # 2. Update is_scratched on each horse
+            for horse in race.horses:
+                norm = normalize_runner_name(horse.horse_name)
+                was_scratched = horse.is_scratched
+                horse.is_scratched = norm in scratched_names
+                if horse.is_scratched and not was_scratched:
+                    scratched_count += 1
+
+            db.session.flush()
+
+            # 3. Get active horses
+            active_horses = [h for h in race.horses if not h.is_scratched]
+            if len(active_horses) < 2:
+                continue
+
+            # 4. Rebuild CSV from horse.csv_data dicts
+            all_rows = [h.csv_data for h in active_horses if h.csv_data]
+            if not all_rows:
+                continue
+
+            csv_string = rebuildCSV(all_rows)
+
+            # 5. Re-run analyzer
+            track_condition = race.track_condition or 'good'
+            try:
+                analysis_results = run_analyzer(csv_string, track_condition, False)
+            except Exception as e:
+                logger.warning(f"Analyzer failed for race {race.race_number}: {e}")
+                continue
+
+            if not analysis_results:
+                continue
+
+            # 6. Build lookup: horse_name -> analyzer result
+            result_lookup = {}
+            for r in analysis_results:
+                name = r.get('horse', {}).get('horse name', '')
+                if name:
+                    result_lookup[name.lower()] = r
+
+            # 7. Update predictions
+            rail_pos = meeting.rail_position or 0
+            pace_bias = meeting.pace_bias or 0
+
+            for horse in active_horses:
+                r = result_lookup.get(horse.horse_name.lower())
+                if not r:
+                    continue
+
+                base_score = r.get('adjustedScore', r.get('score', 0))
+                running_position = (horse.csv_data or {}).get('runningPosition', '')
+
+                # Apply rail bias (rail fixed at import)
+                if running_position and rail_pos:
+                    base_score = apply_track_bias(base_score, running_position, rail_pos, 0)
+
+                # Apply current pace bias
+                if running_position and pace_bias:
+                    base_score = round(base_score + _bias_adjustment(running_position, rail_pos, pace_bias), 1)
+
+                pred = horse.prediction
+                if pred:
+                    pred.score = base_score
+                    pred.predicted_odds = r.get('trueOdds', '')
+                    pred.win_probability = r.get('winProbability', '')
+                    pred.performance_component = r.get('performanceComponent', '')
+                    pred.base_probability = r.get('baseProbability', '')
+                    pred.notes = r.get('notes', '')
+                    pred.calculated_at = datetime.utcnow()
+                else:
+                    pred = Prediction(
+                        horse_id=horse.id,
+                        score=base_score,
+                        predicted_odds=r.get('trueOdds', ''),
+                        win_probability=r.get('winProbability', ''),
+                        performance_component=r.get('performanceComponent', ''),
+                        base_probability=r.get('baseProbability', ''),
+                        notes=r.get('notes', '')
+                    )
+                    db.session.add(pred)
+
+            races_updated += 1
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'scratched_count': scratched_count,
+            'races_updated': races_updated,
+            'message': f'Marked {scratched_count} scratching(s), repriced {races_updated} race(s)'
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"update_scratchings failed: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
     
 @app.route("/results/<int:meeting_id>/fetch-auto", methods=["POST"])
 @login_required
