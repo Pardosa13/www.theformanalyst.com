@@ -1034,9 +1034,10 @@ function updateScratchings(meetingId) {
         </tr>
       </thead>
       <tbody>
-        {% set active_horses = race.horses|rejectattr('is_scratched')|sort(attribute='prediction.score', reverse=true)|list %}
-{% set scratched_horses = race.horses|selectattr('is_scratched')|list %}
-{% set all_horses = active_horses + scratched_horses %}
+        {% for horse in race.horses|sort(attribute='prediction.score', reverse=true) %}
+        <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
+            data-horse-id="{{ horse.horse_id }}"
+            class="{% if horse.is_scratched %}horse-scratched{% endif %}">
 
 {% for horse in all_horses %}
         <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
