@@ -238,12 +238,15 @@ with app.app_context():
             print("Seeding initial components...")
             
             starter_components = [
-                {'component_name': '3yo Colt Combo', 'appearances': 38, 'wins': 8, 'strike_rate': 21.1, 'roi_percentage': 109.6, 'is_active': True},
-                {'component_name': 'Major Class Drop + Slow Sectional', 'appearances': 5, 'wins': 2, 'strike_rate': 40.0, 'roi_percentage': 720.0, 'is_active': False, 'notes': 'Sample size too small'},
-                {'component_name': 'Fast Sectional + Colt', 'appearances': 9, 'wins': 4, 'strike_rate': 44.4, 'roi_percentage': 10.6, 'is_active': True},
-                {'component_name': 'Race-Day - Mile + Fastest', 'appearances': 7, 'wins': 3, 'strike_rate': 42.9, 'roi_percentage': 81.4, 'is_active': False, 'notes': 'Borderline sample size'},
-                {'component_name': 'Colt Bonus', 'appearances': 45, 'wins': 9, 'strike_rate': 20.0, 'roi_percentage': 82.7, 'is_active': True},
-                {'component_name': 'Undefeated on Condition', 'appearances': 26, 'wins': 6, 'strike_rate': 23.1, 'roi_percentage': 46.5, 'is_active': True},
+                {'component_name': 'Age/Sex - 5yo Horse (Entire)',                 'appearances': 21,   'wins': 6,   'strike_rate': 28.6, 'roi_percentage': 224.8, 'is_active': True},
+                {'component_name': 'Days Since Run - Fresh Return (150-199 days)', 'appearances': 16,   'wins': 3,   'strike_rate': 18.8, 'roi_percentage': 193.1, 'is_active': True},
+                {'component_name': 'Colt - Base Bonus',                            'appearances': 841,  'wins': 120, 'strike_rate': 14.3, 'roi_percentage': 66.1,  'is_active': True},
+                {'component_name': 'Country: USA-bred',                            'appearances': 11,   'wins': 1,   'strike_rate': 9.1,  'roi_percentage': 63.6,  'is_active': True},
+                {'component_name': 'Market Expectation - Worst in Field',          'appearances': 8,    'wins': 2,   'strike_rate': 25.0, 'roi_percentage': 62.5,  'is_active': True},
+                {'component_name': 'Colt - 3yo Colt',                             'appearances': 2043, 'wins': 370, 'strike_rate': 18.1, 'roi_percentage': 49.2,  'is_active': True},
+                {'component_name': 'Running Position - Leader Staying',            'appearances': 14,   'wins': 2,   'strike_rate': 14.3, 'roi_percentage': 42.9,  'is_active': True},
+                {'component_name': 'Days Since Run - Too Fresh (250+ days)',       'appearances': 198,  'wins': 28,  'strike_rate': 14.1, 'roi_percentage': 31.8,  'is_active': True},
+                {'component_name': 'Age/Sex - 3yo',                               'appearances': 286,  'wins': 55,  'strike_rate': 19.2, 'roi_percentage': 27.7,  'is_active': True},
             ]
             
             for comp_data in starter_components:
