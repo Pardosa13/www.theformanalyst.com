@@ -697,94 +697,22 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                 injected_count += 1
 
         logger.info(f"✅ SPEEDMAP: Injected running position for {injected_count} horses")
-
-    # ===== IDENTIFY SCRATCHED HORSES =====
-    scratched_names = set()
-    if puntingform_id:  # Only check for scratched horses on API imports
-        try:
-            # Get the track name from the filename/meeting name
-            track_name = filename.replace('.csv', '').split('_')[-1] if '_' in filename else puntingform_id
-            
-            url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
-            response = requests.get(url, headers={'accept': 'application/json'}, timeout=30)
-
-            if response.ok:
-                data = response.json()
-                items = data.get('payLoad') if isinstance(data, dict) else data
-                items = items or []
-
-                # Build tab->horseName lookup from speed map data
-                tab_name_lookup = {}
-                if speed_maps_data:
-                    payload = speed_maps_data.get('payLoad', [])
-                    for race_sm in payload:
-                        race_no = race_sm.get('raceNo')
-                        for item in race_sm.get('items', []):
-                            tab_no = item.get('tabNo', 0)
-                            try:
-                                tab_no = int(tab_no)
-                            except Exception:
-                                tab_no = 0
-                            tab_name_lookup[(race_no, tab_no)] = item.get('runnerName', '') or ''
-
-                # Check scratchings against our meeting
-                for s in items:
-                    if not isinstance(s, dict):
-                        continue
-
-                    track = s.get('track') or s.get('Track') or s.get('trackName') or s.get('TrackName')
-                    race_no = s.get('raceNo') or s.get('RaceNo') or s.get('raceNumber') or s.get('RaceNumber')
-                    tab_no = s.get('tabNo') or s.get('TabNo') or s.get('tabNumber') or s.get('TabNumber')
-
-                    if track is None or race_no is None or tab_no is None:
-                        continue
-
-                    # Filter to this meeting/track
-                    if str(track).strip().lower() != str(track_name).strip().lower():
-                        continue
-
-                    try:
-                        rn = int(race_no)
-                        tn = int(tab_no)
-                    except Exception:
-                        continue
-
-                    horse_name = tab_name_lookup.get((rn, tn), '')
-                    if horse_name:
-                        scratched_names.add(normalize_runner_name(horse_name))
-
-                logger.info(f"✅ Found {len(scratched_names)} scratched horses at import for track {track_name}")
-
-        except Exception as e:
-            logger.warning(f"Could not fetch scratchings during import: {e}")
-
-    # ===== SEPARATE ACTIVE AND SCRATCHED HORSES =====
-    active_csv = []
-    all_horses_csv = []  # Keep all horses for database storage
-    
-    for row in parsed_csv:
-        horse_name = normalize_runner_name(row.get('horse name', ''))
-        all_horses_csv.append(row)  # Keep all horses
-        if horse_name not in scratched_names:
-            active_csv.append(row)  # Only active horses for analysis
         
-    logger.info(f"✅ Analysis will run on {len(active_csv)} active horses (excluded {len(scratched_names)} scratched)")
-        
-    # Rebuild CSV with injected data (only active horses for analysis)
-    analysis_csv_data = rebuildCSV(active_csv)
-    logger.info("✅ Rebuilt CSV with API data injection (active horses only)")
+    # Rebuild CSV with injected data
+    csv_data = rebuildCSV(parsed_csv)
+    logger.info("✅ Rebuilt CSV with API data injection")
     
-    # Run the analyzer (only on active horses)
-    analysis_results = run_analyzer(analysis_csv_data, track_condition, is_advanced)
+    # Run the analyzer
+    analysis_results = run_analyzer(csv_data, track_condition, is_advanced)
     
     if not analysis_results:
         raise Exception("No results returned from analyzer")
     
-    # Create meeting record (store ALL horses)
+    # Create meeting record
     meeting = Meeting(
         user_id=user_id,
         meeting_name=filename.replace('.csv', ''),
-        csv_data=rebuildCSV(all_horses_csv),  # Store original CSV with all horses
+        csv_data=csv_data,
         puntingform_id=puntingform_id,
         auto_imported=puntingform_id is not None,
         rail_position=rail_position
@@ -805,26 +733,14 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
             races_data[race_num] = []
         races_data[race_num].append(result)
     
-    # Group ALL horses (including scratched) by race for database storage
-    all_horses_by_race = {}
-    for row in all_horses_csv:
-        race_num = str(row.get('race number', '')).strip()
-        if race_num and race_num.isdigit():
-            if race_num not in all_horses_by_race:
-                all_horses_by_race[race_num] = []
-            all_horses_by_race[race_num].append(row)
-    
     # Create race and horse records
-    for race_num in all_horses_by_race.keys():
-        horses_in_race = all_horses_by_race[race_num]
-        horses_results = races_data.get(race_num, [])
-        
+    for race_num, horses_results in races_data.items():
         # Get race info from first horse
-        first_horse = horses_in_race[0] if horses_in_race else {}
+        first_horse = horses_results[0]['horse'] if horses_results else {}
         
         race = Race(
             meeting_id=meeting.id,
-            race_number=int(race_num),
+            race_number=int(race_num) if race_num else 0,
             distance=first_horse.get('distance', ''),
             race_class=first_horse.get('class restrictions', ''),
             track_condition=track_condition,
@@ -835,75 +751,40 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
         db.session.add(race)
         db.session.flush()
         
-        # Create lookup for analysis results
-        result_lookup = {}
+        # Create horse and prediction records
         for result in horses_results:
-            horse_name = normalize_runner_name(result['horse'].get('horse name', ''))
-            result_lookup[horse_name] = result
-        
-        # Create horse and prediction records for ALL horses
-        for horse_data in horses_in_race:
-            horse_name = horse_data.get('horse name', 'Unknown')
-            horse_name_norm = normalize_runner_name(horse_name)
-            is_scratched = horse_name_norm in scratched_names
+            horse_data = result['horse']
             
             horse = Horse(
                 race_id=race.id,
-                horse_name=horse_name,
+                horse_name=horse_data.get('horse name', 'Unknown'),
                 barrier=int(horse_data.get('barrier', 0)) if horse_data.get('barrier') else None,
                 weight=float(horse_data.get('horse weight', 0)) if horse_data.get('horse weight') else None,
                 jockey=horse_data.get('horse jockey', ''),
                 trainer=horse_data.get('horse trainer', ''),
                 form=horse_data.get('horse last10', ''),
-                csv_data=horse_data,
-                is_scratched=is_scratched
+                csv_data=horse_data
             )
             db.session.add(horse)
             db.session.flush()
             
-            if is_scratched:
-                # Create zero prediction for scratched horse
-                prediction = Prediction(
-                    horse_id=horse.id,
-                    score=0.0,
-                    predicted_odds='',
-                    win_probability='',
-                    performance_component='',
-                    base_probability='',
-                    notes='Scratched'
-                )
-            else:
-                # Create normal prediction for active horse
-                result = result_lookup.get(horse_name_norm)
-                if result:
-                    base_score = result.get('adjustedScore', result.get('score', 0))
-                    running_position = horse_data.get('runningposition', '')
+            base_score = result.get('adjustedScore', result.get('score', 0))
+            running_position = horse_data.get('runningposition', '')
+            rail_pos = rail_position
 
-                    # Apply rail bias at import
-                    if running_position and rail_position:
-                        base_score = apply_track_bias(base_score, running_position, rail_position, 0)
+            # Apply rail bias at import (rail never changes during meeting)
+            if running_position and rail_pos:
+                base_score = apply_track_bias(base_score, running_position, rail_pos, 0)
 
-                    prediction = Prediction(
-                        horse_id=horse.id,
-                        score=base_score,
-                        predicted_odds=result.get('trueOdds', ''),
-                        win_probability=result.get('winProbability', ''),
-                        performance_component=result.get('performanceComponent', ''),
-                        base_probability=result.get('baseProbability', ''),
-                        notes=result.get('notes', '')
-                    )
-                else:
-                    # Fallback if no analysis result found
-                    prediction = Prediction(
-                        horse_id=horse.id,
-                        score=0.0,
-                        predicted_odds='',
-                        win_probability='',
-                        performance_component='',
-                        base_probability='',
-                        notes='No analysis data'
-                    )
-            
+            prediction = Prediction(
+                horse_id=horse.id,
+                score=base_score,
+                predicted_odds=result.get('trueOdds', ''),
+                win_probability=result.get('winProbability', ''),
+                performance_component=result.get('performanceComponent', ''),
+                base_probability=result.get('baseProbability', ''),
+                notes=result.get('notes', '')
+            )
             db.session.add(prediction)
     
     db.session.commit()
@@ -916,7 +797,6 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
     gc.collect()
     
     return meeting
-
 
 def get_meeting_results(meeting_id):
     """
