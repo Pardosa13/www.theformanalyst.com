@@ -2501,7 +2501,7 @@ except Exception as e:
             for r in horses_results:
                 name = r.get('horse', {}).get('horse name', '')
                 if name:
-                    result_lookup[name.lower()] = r
+                    result_lookup[normalize_runner_name(name)] = r
 
             active_horses = [h for h in race.horses if not h.is_scratched]
             updated_any = False
