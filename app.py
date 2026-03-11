@@ -2294,22 +2294,45 @@ def update_scratchings(meeting_id):
         if not pf_meeting_id:
             return jsonify({'success': False, 'error': f'Could not find meeting ID for {track_name} on {date_str}'}), 400
 
-        # ── 3. Fetch scratchings ──
-        scratched_names = set()
-        try:
-            scratch_url = f"https://www.puntingform.com.au/api/ScratchingsService/GetAllScratchings?apikey={pf_service.api_key}"
-            scratch_response = requests.get(scratch_url, timeout=30)
-            if scratch_response.ok:
-                scratch_data = scratch_response.json()
-                items = scratch_data if isinstance(scratch_data, list) else scratch_data.get('payLoad', [])
-                for s in (items or []):
-                    if not isinstance(s, dict):
-                        continue
-                    name = s.get('runnerName') or s.get('RunnerName') or s.get('name') or s.get('Name') or s.get('horseName') or s.get('HorseName') or ''
-                    if name:
-                        scratched_names.add(normalize_runner_name(name))
-        except Exception as e:
-            logger.warning(f"Could not fetch scratchings: {e}")
+        # ── 3. Fetch scratchings (use same logic as api_get_scratchings) ──
+scratched_names = set()
+try:
+    url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
+    response = requests.get(url, headers={'accept': 'application/json'}, timeout=30)
+    if response.ok:
+        data = response.json()
+        items = data.get('payLoad') or [] if isinstance(data, dict) else data if isinstance(data, list) else []
+
+        # build tab->horseName lookup from DB speedmaps
+        tab_name_lookup = {}
+        for race in meeting.races:
+            if race.speed_maps_json:
+                sm = race.speed_maps_json if isinstance(race.speed_maps_json, dict) else json.loads(race.speed_maps_json)
+                for it in sm.get('payLoad', [{}])[0].get('items', []):
+                    tab_name_lookup[(race.race_number, int(it.get('tabNo', 0)))] = it.get('runnerName', '')
+
+        for s in items:
+            track = s.get('track') or s.get('Track') or s.get('trackName') or s.get('TrackName')
+            race_no = s.get('raceNo') or s.get('RaceNo') or s.get('raceNumber') or s.get('RaceNumber')
+            tab_no  = s.get('tabNo')  or s.get('TabNo')  or s.get('tabNumber')  or s.get('TabNumber')
+            if track is None or race_no is None or tab_no is None:
+                continue
+
+            # IMPORTANT: filter to this meeting's track
+            if str(track).strip().lower() != str(track_name).strip().lower():
+                continue
+
+            rn = int(race_no) if str(race_no).isdigit() else None
+            tn = int(tab_no) if str(tab_no).isdigit() else None
+            if rn is None or tn is None:
+                continue
+
+            horse_name = tab_name_lookup.get((rn, tn), '')
+            if horse_name:
+                scratched_names.add(normalize_runner_name(horse_name))
+
+except Exception as e:
+    logger.warning(f"Could not fetch scratchings: {e}")
 
         # ── 4. Mark is_scratched in DB ──
         scratched_count = 0
