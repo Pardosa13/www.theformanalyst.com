@@ -2461,7 +2461,6 @@ def update_scratchings(meeting_id):
                     pred.win_probability = r.get('winProbability', '')
                     pred.performance_component = r.get('performanceComponent', '')
                     pred.base_probability = r.get('baseProbability', '')
-                    pred.notes = r.get('notes', '')
                 else:
                     pred = Prediction(
                         horse_id=horse.id,
