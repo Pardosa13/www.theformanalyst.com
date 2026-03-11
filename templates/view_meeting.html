@@ -1039,21 +1039,6 @@ function updateScratchings(meetingId) {
             data-horse-id="{{ horse.horse_id }}"
             class="{% if horse.is_scratched %}horse-scratched{% endif %}">
 
-{% for horse in all_horses %}
-        <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
-            data-horse-id="{{ horse.horse_id }}"
-            class="{% if horse.is_scratched %}horse-scratched
-                   {% else %}
-                     {% set active_index = loop.index0 + 1 %}
-                     {% for ah in active_horses %}{% if ah.id == horse.id %}{% set active_index = loop.index %}{% endif %}{% endfor %}
-                     {% if active_index == 1 %}horse-first
-                     {% elif active_index == 2 %}horse-second  
-                     {% elif active_index == 3 %}horse-third
-                     {% elif loop.index % 2 == 0 %}horse-even
-                     {% else %}horse-odd
-                     {% endif %}
-                   {% endif %}">
-
           <td style="padding:12px; text-align:center; font-weight:bold; border-bottom:1px solid #e2e8f0;">
             {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
           </td>
