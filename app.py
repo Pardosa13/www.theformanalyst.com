@@ -2410,20 +2410,20 @@ def update_scratchings(meeting_id):
             except Exception as e:
                 logger.warning(f"Could not fetch speedmap for race {rn}: {e}")
 
-        # ── 9. Parse CSV and remove ALL scratched horses ──
+        # ── 9. Parse CSV and remove scratched horses for analysis ──
         parsed_csv = parseCSV(csv_data)
-        parsed_csv = [
+        active_csv = [
             row for row in parsed_csv
             if normalize_runner_name(row.get('horse name', '')) not in all_scratched_names
         ]
 
-        if not parsed_csv:
+        if not active_csv:
             return jsonify({'success': False, 'error': 'No active runners after scratchings'}), 400
 
-        # ── 10. Inject sectionals ──
+        # ── 10. Inject sectionals (only for active horses) ──
         if sectionals_data:
             sectionals_payload = sectionals_data.get('payLoad', [])
-            for row in parsed_csv:
+            for row in active_csv:
                 horse_name = row.get('horse name', '').strip()
                 race_num = row.get('race number', '').strip()
                 for runner in sectionals_payload:
@@ -2438,10 +2438,10 @@ def update_scratchings(meeting_id):
                         row['last600TimeRank'] = str(runner.get('last600TimeRank', ''))
                         break
 
-        # ── 11. Inject PFAI scores ──
+        # ── 11. Inject PFAI scores (only for active horses) ──
         if sectionals_data:
             ratings_payload = sectionals_data.get('payLoad', [])
-            for row in parsed_csv:
+            for row in active_csv:
                 row['pfaiScore'] = ''
                 horse_name = row.get('horse name', '').strip()
                 race_num = row.get('race number', '').strip()
@@ -2452,10 +2452,10 @@ def update_scratchings(meeting_id):
                         row['pfaiScore'] = str(runner.get('pfaiScore', ''))
                         break
 
-        # ── 12. Inject running positions ──
+        # ── 12. Inject running positions (only for active horses) ──
         speed_maps_data = combined_speedmap if combined_speedmap['payLoad'] else None
         if speed_maps_data:
-            for row in parsed_csv:
+            for row in active_csv:
                 row['runningPosition'] = ''
 
             speedmap_lookup = {}
@@ -2482,15 +2482,15 @@ def update_scratchings(meeting_id):
                     if race_no and runner_name and pos_category:
                         speedmap_lookup[(race_no, runner_name)] = pos_category
 
-            for row in parsed_csv:
+            for row in active_csv:
                 horse_name = normalize_runner_name(row.get('horse name', ''))
                 race_num = str(row.get('race number', '')).strip()
                 key = (race_num, horse_name)
                 if key in speedmap_lookup:
                     row['runningPosition'] = speedmap_lookup[key]
 
-        # ── 13. Rebuild CSV and run analyzer ──
-        fresh_csv = rebuildCSV(parsed_csv)
+        # ── 13. Rebuild CSV and run analyzer (only active horses) ──
+        fresh_csv = rebuildCSV(active_csv)
         track_condition = all_races[0].track_condition if all_races else 'good'
 
         analysis_results = run_analyzer(fresh_csv, track_condition, False)
@@ -2508,64 +2508,72 @@ def update_scratchings(meeting_id):
             races_data[race_num].append(result)
 
         # ── 15. DELETE ALL existing predictions first ──
-        from sqlalchemy import delete
         for race in all_races:
             for horse in race.horses:
                 if horse.prediction:
                     db.session.delete(horse.prediction)
         db.session.flush()
 
-        # ── 16. Create ALL new predictions (including existing non-scratched horses) ──
+        # ── 16. Create predictions for ALL horses ──
         rail_pos = meeting.rail_position or 0
         pace_bias = meeting.pace_bias or 0
         races_updated = 0
 
         for race in all_races:
             race_num_str = str(race.race_number)
-            if race_num_str not in races_data:
-                continue
-
-            horses_results = races_data[race_num_str]
+            horses_results = races_data.get(race_num_str, [])
             result_lookup = {}
             for r in horses_results:
                 name = r.get('horse', {}).get('horse name', '')
                 if name:
                     result_lookup[normalize_runner_name(name)] = r
 
-            # Process ALL horses in this race (scratched and active)
             updated_any = False
 
             for horse in race.horses:
                 horse_norm = normalize_runner_name(horse.horse_name)
-                r = result_lookup.get(horse_norm)
                 
-                if not r:
-                    # Horse not in analysis results (likely scratched)
-                    continue
+                if horse.is_scratched:
+                    # Create zero prediction for scratched horses
+                    pred = Prediction(
+                        horse_id=horse.id,
+                        score=0.0,
+                        predicted_odds='',
+                        win_probability='',
+                        performance_component='',
+                        base_probability='',
+                        notes='Scratched'
+                    )
+                    db.session.add(pred)
+                    updated_any = True
+                else:
+                    # Create normal prediction for active horses
+                    r = result_lookup.get(horse_norm)
+                    if not r:
+                        continue
 
-                base_score = r.get('adjustedScore', r.get('score', 0))
-                running_position = r['horse'].get('runningposition', '')
+                    base_score = r.get('adjustedScore', r.get('score', 0))
+                    running_position = r['horse'].get('runningposition', '')
 
-                # Apply rail bias
-                if running_position and rail_pos:
-                    base_score = apply_track_bias(base_score, running_position, rail_pos, 0)
+                    # Apply rail bias
+                    if running_position and rail_pos:
+                        base_score = apply_track_bias(base_score, running_position, rail_pos, 0)
 
-                # Apply current pace bias
-                if running_position and pace_bias:
-                    base_score = round(base_score + _bias_adjustment(running_position, rail_pos, pace_bias), 1)
+                    # Apply current pace bias
+                    if running_position and pace_bias:
+                        base_score = round(base_score + _bias_adjustment(running_position, rail_pos, pace_bias), 1)
 
-                # Create new prediction (we deleted all existing ones above)
-                pred = Prediction(
-                    horse_id=horse.id,
-                    score=base_score,
-                    predicted_odds=r.get('trueOdds', ''),
-                    win_probability=r.get('winProbability', ''),
-                    performance_component=r.get('performanceComponent', ''),
-                    base_probability=r.get('baseProbability', ''),
-                    notes=r.get('notes', '')
-                )
-                db.session.add(pred)
-                updated_any = True
+                    pred = Prediction(
+                        horse_id=horse.id,
+                        score=base_score,
+                        predicted_odds=r.get('trueOdds', ''),
+                        win_probability=r.get('winProbability', ''),
+                        performance_component=r.get('performanceComponent', ''),
+                        base_probability=r.get('baseProbability', ''),
+                        notes=r.get('notes', '')
+                    )
+                    db.session.add(pred)
+                    updated_any = True
 
             if updated_any:
                 races_updated += 1
