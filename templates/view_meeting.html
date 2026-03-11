@@ -1034,20 +1034,24 @@ function updateScratchings(meetingId) {
         </tr>
       </thead>
       <tbody>
-        {% for horse in race.horses %}
+        {% set active_horses = race.horses|rejectattr('is_scratched')|sort(attribute='prediction.score', reverse=true)|list %}
+{% set scratched_horses = race.horses|selectattr('is_scratched')|list %}
+{% set all_horses = active_horses + scratched_horses %}
+
+{% for horse in all_horses %}
         <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
             data-horse-id="{{ horse.horse_id }}"
-            {% if horse.is_scratched %}
-              style="background-color: #e9ecef; opacity: 0.6; text-decoration: line-through;"
-            {% elif loop.index == 1 %}
-              style="background-color: #d4edda;"
-            {% elif loop.index == 2 %}
-              style="background-color: #fff3cd;"
-            {% elif loop.index == 3 %}
-              style="background-color: #ffe4b3;"
-            {% else %}
-              style="background-color: {% if loop.index is odd %}#f8f9fa{% else %}#ffffff{% endif %};"
-            {% endif %}>
+            class="{% if horse.is_scratched %}horse-scratched
+                   {% else %}
+                     {% set active_index = loop.index0 + 1 %}
+                     {% for ah in active_horses %}{% if ah.id == horse.id %}{% set active_index = loop.index %}{% endif %}{% endfor %}
+                     {% if active_index == 1 %}horse-first
+                     {% elif active_index == 2 %}horse-second  
+                     {% elif active_index == 3 %}horse-third
+                     {% elif loop.index % 2 == 0 %}horse-even
+                     {% else %}horse-odd
+                     {% endif %}
+                   {% endif %}">
 
           <td style="padding:12px; text-align:center; font-weight:bold; border-bottom:1px solid #e2e8f0;">
             {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
