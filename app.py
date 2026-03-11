@@ -2305,7 +2305,7 @@ def update_scratchings(meeting_id):
                 for s in (items or []):
                     if not isinstance(s, dict):
                         continue
-                    name = s.get('runnerName') or s.get('name') or ''
+                    name = s.get('runnerName') or s.get('RunnerName') or s.get('name') or s.get('Name') or s.get('horseName') or s.get('HorseName') or ''
                     if name:
                         scratched_names.add(normalize_runner_name(name))
         except Exception as e:
