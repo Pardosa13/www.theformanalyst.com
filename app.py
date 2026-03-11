@@ -2269,7 +2269,7 @@ def update_scratchings(meeting_id):
         meeting = Meeting.query.get_or_404(meeting_id)
         headers = {'Authorization': f'Bearer {pf_service.api_key}', 'accept': 'application/json'}
 
-        # ── 1. Get meeting_id (puntingform_id) and date from meeting name ──
+        # ── 1. Get puntingform_id and date from meeting name ──
         pf_meeting_id = None
         date_str = None
         if meeting.meeting_name and '_' in meeting.meeting_name:
@@ -2279,7 +2279,6 @@ def update_scratchings(meeting_id):
             day = date_part[4:6]
             date_str = f"{year}-{month}-{day}"
 
-        # Get puntingform meeting_id via meetings list
         if date_str:
             try:
                 meetings_data = pf_service.get_meetings_list(date_str)
@@ -2305,7 +2304,7 @@ def update_scratchings(meeting_id):
                 if name:
                     scratched_names.add(normalize_runner_name(name))
 
-        # ── 3. Fetch V2 API data (same as import) ──
+        # ── 3. Fetch V2 sectionals/ratings (same endpoint as import) ──
         sectionals_data = None
         ratings_data = None
 
@@ -2316,6 +2315,7 @@ def update_scratchings(meeting_id):
                 if sec_response.ok:
                     sectionals_data = sec_response.json()
                     ratings_data = sectionals_data
+                    logger.info(f"✅ Fetched sectionals/ratings for meeting {pf_meeting_id}")
             except Exception as e:
                 logger.warning(f"Could not fetch sectionals: {e}")
 
@@ -2326,18 +2326,16 @@ def update_scratchings(meeting_id):
         for race in races:
 
             # ── 4. Update is_scratched ──
-            scratch_changed = False
             for horse in race.horses:
                 norm = normalize_runner_name(horse.horse_name)
                 was_scratched = horse.is_scratched
                 horse.is_scratched = norm in scratched_names
-                if horse.is_scratched != was_scratched:
-                    scratch_changed = True
-                    if horse.is_scratched:
-                        scratched_count += 1
+                if horse.is_scratched and not was_scratched:
+                    scratched_count += 1
 
             db.session.flush()
 
+            # ── 5. Get active horses ──
             active_horses = [h for h in race.horses if not h.is_scratched]
             if len(active_horses) < 2:
                 continue
@@ -2384,38 +2382,37 @@ def update_scratchings(meeting_id):
                 row['runningPosition'] = ''
 
             if race.speed_maps_json:
-    try:
-        speed_data = json.loads(race.speed_maps_json) if isinstance(race.speed_maps_json, str) else race.speed_maps_json
-        speedmap_lookup = {}
-        # stored speed_maps_json is a single race payload, items are directly in payLoad[0].items
-        payload = speed_data.get('payLoad', [])
-        for payload_item in payload:
-            for item in payload_item.get('items', []):
-                runner_name = normalize_runner_name(item.get('runnerName') or '')
-                settle_val = item.get('settle')
                 try:
-                    settle_num = int(str(settle_val).split('/')[0].strip())
-                except Exception:
-                    settle_num = None
-                if settle_num == 1:
-                    pos = 'LEADER'
-                elif settle_num is not None and 2 <= settle_num <= 3:
-                    pos = 'ONPACE'
-                elif settle_num is not None and 4 <= settle_num <= 7:
-                    pos = 'MIDFIELD'
-                elif settle_num is not None:
-                    pos = 'BACKMARKER'
-                else:
-                    pos = None
-                if runner_name and pos:
-                    speedmap_lookup[runner_name] = pos
+                    speed_data = json.loads(race.speed_maps_json) if isinstance(race.speed_maps_json, str) else race.speed_maps_json
+                    speedmap_lookup = {}
+                    payload = speed_data.get('payLoad', [])
+                    for payload_item in payload:
+                        for item in payload_item.get('items', []):
+                            runner_name = normalize_runner_name(item.get('runnerName') or '')
+                            settle_val = item.get('settle')
+                            try:
+                                settle_num = int(str(settle_val).split('/')[0].strip())
+                            except Exception:
+                                settle_num = None
+                            if settle_num == 1:
+                                pos = 'LEADER'
+                            elif settle_num is not None and 2 <= settle_num <= 3:
+                                pos = 'ONPACE'
+                            elif settle_num is not None and 4 <= settle_num <= 7:
+                                pos = 'MIDFIELD'
+                            elif settle_num is not None:
+                                pos = 'BACKMARKER'
+                            else:
+                                pos = None
+                            if runner_name and pos:
+                                speedmap_lookup[runner_name] = pos
 
-        for row in parsed_csv:
-            norm = normalize_runner_name(row.get('horse name', ''))
-            if norm in speedmap_lookup:
-                row['runningPosition'] = speedmap_lookup[norm]
-    except Exception as e:
-        logger.warning(f"Speed map injection failed for race {race.race_number}: {e}")
+                    for row in parsed_csv:
+                        norm = normalize_runner_name(row.get('horse name', ''))
+                        if norm in speedmap_lookup:
+                            row['runningPosition'] = speedmap_lookup[norm]
+                except Exception as e:
+                    logger.warning(f"Speed map injection failed for race {race.race_number}: {e}")
 
             # ── 10. Rebuild CSV and run analyzer ──
             csv_string = rebuildCSV(parsed_csv)
