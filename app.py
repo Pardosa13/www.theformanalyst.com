@@ -2264,178 +2264,224 @@ def import_from_api():
 @app.route("/api/meetings/<int:meeting_id>/update-scratchings", methods=["POST"])
 @login_required
 def update_scratchings(meeting_id):
-    """Fetch latest scratchings, re-fetch V2 API data, re-run analyzer, update predictions."""
+    """Re-fetch fresh CSV + V2 data, exclude scratched horses, re-run analyzer, upsert predictions."""
     try:
         meeting = Meeting.query.get_or_404(meeting_id)
-        headers = {'Authorization': f'Bearer {pf_service.api_key}', 'accept': 'application/json'}
+        headers = {
+            'Authorization': f'Bearer {pf_service.api_key}',
+            'Content-Type': 'application/json'
+        }
 
-        # ── 1. Get puntingform_id and date from meeting name ──
+        # ── 1. Parse date and track from meeting name (format: YYMMDD_TrackName) ──
+        if not meeting.meeting_name or '_' not in meeting.meeting_name:
+            return jsonify({'success': False, 'error': 'Cannot determine meeting date from name'}), 400
+
+        date_part = meeting.meeting_name.split('_')[0]
+        date_str = f"20{date_part[:2]}-{date_part[2:4]}-{date_part[4:6]}"
+        track_name = meeting.puntingform_id or ''
+
+        # ── 2. Resolve puntingform meeting_id ──
         pf_meeting_id = None
-        date_str = None
-        if meeting.meeting_name and '_' in meeting.meeting_name:
-            date_part = meeting.meeting_name.split('_')[0]
-            year = '20' + date_part[:2]
-            month = date_part[2:4]
-            day = date_part[4:6]
-            date_str = f"{year}-{month}-{day}"
+        try:
+            meetings_data = pf_service.get_meetings_list(date_str)
+            for m in meetings_data.get('meetings', []):
+                if m['track_name'].lower() == track_name.lower():
+                    pf_meeting_id = m['meeting_id']
+                    break
+        except Exception as e:
+            logger.warning(f"Could not resolve puntingform meeting_id: {e}")
 
-        if date_str:
-            try:
-                meetings_data = pf_service.get_meetings_list(date_str)
-                track_name = meeting.puntingform_id or ''
-                for m in meetings_data.get('meetings', []):
-                    if m['track_name'].lower() == track_name.lower():
-                        pf_meeting_id = m['meeting_id']
-                        break
-            except Exception as e:
-                logger.warning(f"Could not resolve puntingform meeting_id: {e}")
+        if not pf_meeting_id:
+            return jsonify({'success': False, 'error': f'Could not find meeting ID for {track_name} on {date_str}'}), 400
 
-        # ── 2. Fetch scratchings ──
-        scratching_url = f"https://www.puntingform.com.au/api/ScratchingsService/GetAllScratchings?apikey={pf_service.api_key}"
-        scratch_response = requests.get(scratching_url, timeout=30)
+        # ── 3. Fetch scratchings ──
         scratched_names = set()
-        if scratch_response.ok:
-            scratch_data = scratch_response.json()
-            items = scratch_data if isinstance(scratch_data, list) else scratch_data.get('payLoad', [])
-            for s in (items or []):
-                if not isinstance(s, dict):
-                    continue
-                name = s.get('runnerName') or s.get('name') or ''
-                if name:
-                    scratched_names.add(normalize_runner_name(name))
+        try:
+            scratch_url = f"https://www.puntingform.com.au/api/ScratchingsService/GetAllScratchings?apikey={pf_service.api_key}"
+            scratch_response = requests.get(scratch_url, timeout=30)
+            if scratch_response.ok:
+                scratch_data = scratch_response.json()
+                items = scratch_data if isinstance(scratch_data, list) else scratch_data.get('payLoad', [])
+                for s in (items or []):
+                    if not isinstance(s, dict):
+                        continue
+                    name = s.get('runnerName') or s.get('name') or ''
+                    if name:
+                        scratched_names.add(normalize_runner_name(name))
+        except Exception as e:
+            logger.warning(f"Could not fetch scratchings: {e}")
 
-        # ── 3. Fetch V2 sectionals/ratings (same endpoint as import) ──
-        sectionals_data = None
-        ratings_data = None
-
-        if pf_meeting_id:
-            try:
-                sec_url = f"https://api.puntingform.com.au/v2/Ratings/MeetingRatings?meetingId={pf_meeting_id}&apiKey={pf_service.api_key}"
-                sec_response = requests.get(sec_url, headers=headers, timeout=30)
-                if sec_response.ok:
-                    sectionals_data = sec_response.json()
-                    ratings_data = sectionals_data
-                    logger.info(f"✅ Fetched sectionals/ratings for meeting {pf_meeting_id}")
-            except Exception as e:
-                logger.warning(f"Could not fetch sectionals: {e}")
-
+        # ── 4. Mark is_scratched in DB ──
         scratched_count = 0
-        races_updated = 0
-        races = Race.query.filter_by(meeting_id=meeting_id).all()
-
-        for race in races:
-
-            # ── 4. Update is_scratched ──
+        all_races = Race.query.filter_by(meeting_id=meeting_id).all()
+        for race in all_races:
             for horse in race.horses:
                 norm = normalize_runner_name(horse.horse_name)
                 was_scratched = horse.is_scratched
                 horse.is_scratched = norm in scratched_names
                 if horse.is_scratched and not was_scratched:
                     scratched_count += 1
+        db.session.flush()
 
-            db.session.flush()
+        # ── 5. Fetch fresh CSV from PuntingForm (identical to import) ──
+        csv_data = pf_service.get_fields_csv(track_name, date_str)
+        if not csv_data:
+            return jsonify({'success': False, 'error': 'No CSV data returned from PuntingForm'}), 400
 
-            # ── 5. Get active horses ──
-            active_horses = [h for h in race.horses if not h.is_scratched]
-            if len(active_horses) < 2:
-                continue
+        # ── 6. Fetch sectionals/ratings (identical endpoint to import) ──
+        sectionals_data = None
+        try:
+            sec_url = f"https://api.puntingform.com.au/v2/Ratings/MeetingRatings?meetingId={pf_meeting_id}&apiKey={pf_service.api_key}"
+            sec_response = requests.get(sec_url, headers=headers, timeout=30)
+            if sec_response.ok:
+                sectionals_data = sec_response.json()
+                logger.info(f"✅ Fetched sectionals/ratings for meeting {pf_meeting_id}")
+        except Exception as e:
+            logger.warning(f"Could not fetch sectionals: {e}")
 
-            # ── 6. Rebuild CSV from saved horse.csv_data ──
-            parsed_csv = [dict(h.csv_data) for h in active_horses if h.csv_data]
-            if not parsed_csv:
-                continue
+        # ── 7. Fetch speedmaps per race (identical loop to import) ──
+        import io as _io
+        import csv as _csv
+        csv_reader = _csv.DictReader(_io.StringIO(csv_data))
+        race_numbers = set()
+        for csv_row in csv_reader:
+            rn = csv_row.get('race number', '').strip()
+            if rn and rn.isdigit():
+                race_numbers.add(int(rn))
 
-            # ── 7. Re-inject sectionals (mirrors process_and_store_results exactly) ──
-            if sectionals_data:
-                sectionals_payload = sectionals_data.get('payLoad', [])
-                for row in parsed_csv:
-                    horse_name = row.get('horse name', '').strip()
-                    race_num = str(row.get('race number', '')).strip()
-                    for runner in sectionals_payload:
-                        runner_name = runner.get('runnerName', '') or runner.get('name', '')
-                        if (str(runner.get('raceNo')) == race_num and
-                                runner_name.strip().lower() == horse_name.lower()):
-                            row['last200TimePrice'] = str(runner.get('last200TimePrice', ''))
-                            row['last200TimeRank'] = str(runner.get('last200TimeRank', ''))
-                            row['last400TimePrice'] = str(runner.get('last400TimePrice', ''))
-                            row['last400TimeRank'] = str(runner.get('last400TimeRank', ''))
-                            row['last600TimePrice'] = str(runner.get('last600TimePrice', ''))
-                            row['last600TimeRank'] = str(runner.get('last600TimeRank', ''))
-                            break
+        combined_speedmap = {'payLoad': []}
+        all_speedmap_data = {}
 
-            # ── 8. Re-inject PFAI scores ──
-            if ratings_data:
-                ratings_payload = ratings_data.get('payLoad', [])
-                for row in parsed_csv:
-                    row['pfaiScore'] = ''
-                    horse_name = row.get('horse name', '').strip()
-                    race_num = str(row.get('race number', '')).strip()
-                    for runner in ratings_payload:
-                        runner_name = runner.get('runnerName', '').strip()
-                        if (str(runner.get('raceNo')) == race_num and
-                                runner_name.lower() == horse_name.lower()):
-                            row['pfaiScore'] = str(runner.get('pfaiScore', ''))
-                            break
+        for rn in sorted(race_numbers):
+            try:
+                speed_url = f"https://api.puntingform.com.au/v2/User/Speedmaps?meetingId={pf_meeting_id}&raceNo={rn}&apiKey={pf_service.api_key}"
+                speed_response = requests.get(speed_url, headers=headers, timeout=30)
+                if speed_response.ok:
+                    speed_data = speed_response.json()
+                    if isinstance(speed_data, dict) and speed_data.get('payLoad'):
+                        all_speedmap_data[rn] = speed_data
+                        for item in speed_data.get('payLoad', []):
+                            combined_speedmap['payLoad'].append(item)
+                        logger.info(f"   ✅ Fetched speedmap for race {rn}")
+            except Exception as e:
+                logger.warning(f"Could not fetch speedmap for race {rn}: {e}")
 
-            # ── 9. Re-inject running positions from stored speed_maps_json ──
+        # ── 8. Parse CSV and remove scratched horses ──
+        parsed_csv = parseCSV(csv_data)
+        parsed_csv = [
+            row for row in parsed_csv
+            if normalize_runner_name(row.get('horse name', '')) not in scratched_names
+        ]
+
+        if not parsed_csv:
+            return jsonify({'success': False, 'error': 'No active runners after scratchings'}), 400
+
+        # ── 9. Inject sectionals (identical to process_and_store_results) ──
+        if sectionals_data:
+            sectionals_payload = sectionals_data.get('payLoad', [])
+            for row in parsed_csv:
+                horse_name = row.get('horse name', '').strip()
+                race_num = row.get('race number', '').strip()
+                for runner in sectionals_payload:
+                    runner_name = runner.get('runnerName', '') or runner.get('name', '')
+                    if (str(runner.get('raceNo')) == str(race_num) and
+                            runner_name.strip().lower() == horse_name.lower()):
+                        row['last200TimePrice'] = str(runner.get('last200TimePrice', ''))
+                        row['last200TimeRank'] = str(runner.get('last200TimeRank', ''))
+                        row['last400TimePrice'] = str(runner.get('last400TimePrice', ''))
+                        row['last400TimeRank'] = str(runner.get('last400TimeRank', ''))
+                        row['last600TimePrice'] = str(runner.get('last600TimePrice', ''))
+                        row['last600TimeRank'] = str(runner.get('last600TimeRank', ''))
+                        break
+
+        # ── 10. Inject PFAI scores (identical to process_and_store_results) ──
+        if sectionals_data:
+            ratings_payload = sectionals_data.get('payLoad', [])
+            for row in parsed_csv:
+                row['pfaiScore'] = ''
+                horse_name = row.get('horse name', '').strip()
+                race_num = row.get('race number', '').strip()
+                for runner in ratings_payload:
+                    runner_name = runner.get('runnerName', '').strip()
+                    if (str(runner.get('raceNo')) == str(race_num) and
+                            runner_name.lower() == horse_name.lower()):
+                        row['pfaiScore'] = str(runner.get('pfaiScore', ''))
+                        break
+
+        # ── 11. Inject running positions (identical to process_and_store_results) ──
+        speed_maps_data = combined_speedmap if combined_speedmap['payLoad'] else None
+        if speed_maps_data:
             for row in parsed_csv:
                 row['runningPosition'] = ''
 
-            if race.speed_maps_json:
-                try:
-                    speed_data = json.loads(race.speed_maps_json) if isinstance(race.speed_maps_json, str) else race.speed_maps_json
-                    speedmap_lookup = {}
-                    payload = speed_data.get('payLoad', [])
-                    for payload_item in payload:
-                        for item in payload_item.get('items', []):
-                            runner_name = normalize_runner_name(item.get('runnerName') or '')
-                            settle_val = item.get('settle')
-                            try:
-                                settle_num = int(str(settle_val).split('/')[0].strip())
-                            except Exception:
-                                settle_num = None
-                            if settle_num == 1:
-                                pos = 'LEADER'
-                            elif settle_num is not None and 2 <= settle_num <= 3:
-                                pos = 'ONPACE'
-                            elif settle_num is not None and 4 <= settle_num <= 7:
-                                pos = 'MIDFIELD'
-                            elif settle_num is not None:
-                                pos = 'BACKMARKER'
-                            else:
-                                pos = None
-                            if runner_name and pos:
-                                speedmap_lookup[runner_name] = pos
+            speedmap_lookup = {}
+            payload = speed_maps_data.get('payLoad', [])
+            for race_sm in payload:
+                race_no = str(race_sm.get('raceNo', '')).strip()
+                for item in race_sm.get('items', []):
+                    runner_name = normalize_runner_name(item.get('runnerName') or '')
+                    settle_val = item.get('settle')
+                    try:
+                        settle_num = int(str(settle_val).split('/')[0].strip())
+                    except Exception:
+                        settle_num = None
+                    if settle_num == 1:
+                        pos_category = 'LEADER'
+                    elif settle_num is not None and 2 <= settle_num <= 3:
+                        pos_category = 'ONPACE'
+                    elif settle_num is not None and 4 <= settle_num <= 7:
+                        pos_category = 'MIDFIELD'
+                    elif settle_num is not None:
+                        pos_category = 'BACKMARKER'
+                    else:
+                        pos_category = None
+                    if race_no and runner_name and pos_category:
+                        speedmap_lookup[(race_no, runner_name)] = pos_category
 
-                    for row in parsed_csv:
-                        norm = normalize_runner_name(row.get('horse name', ''))
-                        if norm in speedmap_lookup:
-                            row['runningPosition'] = speedmap_lookup[norm]
-                except Exception as e:
-                    logger.warning(f"Speed map injection failed for race {race.race_number}: {e}")
+            for row in parsed_csv:
+                horse_name = normalize_runner_name(row.get('horse name', ''))
+                race_num = str(row.get('race number', '')).strip()
+                key = (race_num, horse_name)
+                if key in speedmap_lookup:
+                    row['runningPosition'] = speedmap_lookup[key]
 
-            # ── 10. Rebuild CSV and run analyzer ──
-            csv_string = rebuildCSV(parsed_csv)
-            track_condition = race.track_condition or 'good'
-            try:
-                analysis_results = run_analyzer(csv_string, track_condition, False)
-            except Exception as e:
-                logger.warning(f"Analyzer failed for race {race.race_number}: {e}")
+        # ── 12. Rebuild CSV and run analyzer ──
+        fresh_csv = rebuildCSV(parsed_csv)
+        track_condition = all_races[0].track_condition if all_races else 'good'
+
+        analysis_results = run_analyzer(fresh_csv, track_condition, False)
+        if not analysis_results:
+            return jsonify({'success': False, 'error': 'Analyzer returned no results'}), 500
+
+        # ── 13. Group results by race ──
+        races_data = {}
+        for result in analysis_results:
+            race_num = result['horse'].get('race number', '0')
+            if not race_num or not str(race_num).isdigit():
+                continue
+            if race_num not in races_data:
+                races_data[race_num] = []
+            races_data[race_num].append(result)
+
+        # ── 14. Upsert predictions (never create new Meeting/Race/Horse records) ──
+        rail_pos = meeting.rail_position or 0
+        pace_bias = meeting.pace_bias or 0
+        races_updated = 0
+
+        for race in all_races:
+            race_num_str = str(race.race_number)
+            if race_num_str not in races_data:
                 continue
 
-            if not analysis_results:
-                continue
-
-            # ── 11. Build result lookup ──
+            horses_results = races_data[race_num_str]
             result_lookup = {}
-            for r in analysis_results:
+            for r in horses_results:
                 name = r.get('horse', {}).get('horse name', '')
                 if name:
                     result_lookup[name.lower()] = r
 
-            # ── 12. Update predictions ──
-            rail_pos = meeting.rail_position or 0
-            pace_bias = meeting.pace_bias or 0
+            active_horses = [h for h in race.horses if not h.is_scratched]
+            updated_any = False
 
             for horse in active_horses:
                 r = result_lookup.get(horse.horse_name.lower())
@@ -2443,11 +2489,13 @@ def update_scratchings(meeting_id):
                     continue
 
                 base_score = r.get('adjustedScore', r.get('score', 0))
-                running_position = (horse.csv_data or {}).get('runningPosition', '')
+                running_position = r['horse'].get('runningposition', '')
 
+                # Apply rail bias (identical to process_and_store_results)
                 if running_position and rail_pos:
                     base_score = apply_track_bias(base_score, running_position, rail_pos, 0)
 
+                # Apply current pace bias
                 if running_position and pace_bias:
                     base_score = round(base_score + _bias_adjustment(running_position, rail_pos, pace_bias), 1)
 
@@ -2458,6 +2506,7 @@ def update_scratchings(meeting_id):
                     pred.win_probability = r.get('winProbability', '')
                     pred.performance_component = r.get('performanceComponent', '')
                     pred.base_probability = r.get('baseProbability', '')
+                    pred.notes = r.get('notes', '')
                 else:
                     pred = Prediction(
                         horse_id=horse.id,
@@ -2470,9 +2519,15 @@ def update_scratchings(meeting_id):
                     )
                     db.session.add(pred)
 
-            races_updated += 1
+                updated_any = True
+
+            if updated_any:
+                races_updated += 1
 
         db.session.commit()
+
+        import gc
+        gc.collect()
 
         return jsonify({
             'success': True,
