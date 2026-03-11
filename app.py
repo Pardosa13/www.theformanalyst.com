@@ -626,7 +626,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                     logger.debug(f"Injected API data for {horse_name} (R{race_num}): PFAI={runner.get('pfaiScore', 'N/A')}")
                     break
 
-        # ===== INJECT PFAI SCORE FROM RATINGS DATA =====
+    # ===== INJECT PFAI SCORE FROM RATINGS DATA =====
     if ratings_data:
         ratings_payload = ratings_data.get('payLoad', [])
         logged_horses = set()
@@ -697,12 +697,82 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                 injected_count += 1
 
         logger.info(f"✅ SPEEDMAP: Injected running position for {injected_count} horses")
-        
-    # Rebuild CSV with injected data
-    csv_data = rebuildCSV(parsed_csv)
-    logger.info("✅ Rebuilt CSV with API data injection")
+
+    # ===== IDENTIFY SCRATCHED HORSES =====
+    # ADD THIS NEW SECTION HERE
+    scratched_names = set()
+    if puntingform_id:  # Only check for scratched horses on API imports
+        try:
+            url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
+            response = requests.get(url, headers={'accept': 'application/json'}, timeout=30)
+
+            if response.ok:
+                data = response.json()
+                items = data.get('payLoad') if isinstance(data, dict) else data
+                items = items or []
+
+                # Build tab->horseName lookup from speed map data
+                tab_name_lookup = {}
+                if speed_maps_data:
+                    payload = speed_maps_data.get('payLoad', [])
+                    for race_sm in payload:
+                        race_no = race_sm.get('raceNo')
+                        for item in race_sm.get('items', []):
+                            tab_no = item.get('tabNo', 0)
+                            try:
+                                tab_no = int(tab_no)
+                            except Exception:
+                                tab_no = 0
+                            tab_name_lookup[(race_no, tab_no)] = item.get('runnerName', '') or ''
+
+                # Check scratchings against our meeting
+                track_name = puntingform_id  # Assuming puntingform_id is the track name
+                for s in items:
+                    if not isinstance(s, dict):
+                        continue
+
+                    track = s.get('track') or s.get('Track') or s.get('trackName') or s.get('TrackName')
+                    race_no = s.get('raceNo') or s.get('RaceNo') or s.get('raceNumber') or s.get('RaceNumber')
+                    tab_no = s.get('tabNo') or s.get('TabNo') or s.get('tabNumber') or s.get('TabNumber')
+
+                    if track is None or race_no is None or tab_no is None:
+                        continue
+
+                    # Filter to this meeting/track
+                    if str(track).strip().lower() != str(track_name).strip().lower():
+                        continue
+
+                    try:
+                        rn = int(race_no)
+                        tn = int(tab_no)
+                    except Exception:
+                        continue
+
+                    horse_name = tab_name_lookup.get((rn, tn), '')
+                    if horse_name:
+                        scratched_names.add(normalize_runner_name(horse_name))
+
+                logger.info(f"✅ Found {len(scratched_names)} scratched horses at import")
+
+        except Exception as e:
+            logger.warning(f"Could not fetch scratchings during import: {e}")
+
+    # ===== SEPARATE ACTIVE AND SCRATCHED HORSES =====
+    active_csv = []
+    scratched_csv = []
     
-    # Run the analyzer
+    for row in parsed_csv:
+        horse_name = normalize_runner_name(row.get('horse name', ''))
+        if horse_name in scratched_names:
+            scratched_csv.append(row)
+        else:
+            active_csv.append(row)
+        
+    # Rebuild CSV with injected data (only active horses for analysis)
+    csv_data = rebuildCSV(active_csv)
+    logger.info("✅ Rebuilt CSV with API data injection (active horses only)")
+    
+    # Run the analyzer (only on active horses)
     analysis_results = run_analyzer(csv_data, track_condition, is_advanced)
     
     if not analysis_results:
@@ -712,7 +782,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
     meeting = Meeting(
         user_id=user_id,
         meeting_name=filename.replace('.csv', ''),
-        csv_data=csv_data,
+        csv_data=rebuildCSV(parsed_csv),  # Store original CSV with all horses
         puntingform_id=puntingform_id,
         auto_imported=puntingform_id is not None
     )
@@ -750,7 +820,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
         db.session.add(race)
         db.session.flush()
         
-        # Create horse and prediction records
+        # Create horse and prediction records for ACTIVE horses
         for result in horses_results:
             horse_data = result['horse']
             
@@ -762,7 +832,8 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                 jockey=horse_data.get('horse jockey', ''),
                 trainer=horse_data.get('horse trainer', ''),
                 form=horse_data.get('horse last10', ''),
-                csv_data=horse_data
+                csv_data=horse_data,
+                is_scratched=False  # These are active horses
             )
             db.session.add(horse)
             db.session.flush()
@@ -783,6 +854,35 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                 performance_component=result.get('performanceComponent', ''),
                 base_probability=result.get('baseProbability', ''),
                 notes=result.get('notes', '')
+            )
+            db.session.add(prediction)
+
+        # CREATE HORSE RECORDS FOR SCRATCHED HORSES WITH ZERO PREDICTIONS
+        scratched_in_race = [row for row in scratched_csv if str(row.get('race number', '')).strip() == str(race_num)]
+        for scratched_row in scratched_in_race:
+            horse = Horse(
+                race_id=race.id,
+                horse_name=scratched_row.get('horse name', 'Unknown'),
+                barrier=int(scratched_row.get('barrier', 0)) if scratched_row.get('barrier') else None,
+                weight=float(scratched_row.get('horse weight', 0)) if scratched_row.get('horse weight') else None,
+                jockey=scratched_row.get('horse jockey', ''),
+                trainer=scratched_row.get('horse trainer', ''),
+                form=scratched_row.get('horse last10', ''),
+                csv_data=scratched_row,
+                is_scratched=True  # Mark as scratched
+            )
+            db.session.add(horse)
+            db.session.flush()
+            
+            # Create zero prediction for scratched horse
+            prediction = Prediction(
+                horse_id=horse.id,
+                score=0.0,
+                predicted_odds='',
+                win_probability='',
+                performance_component='',
+                base_probability='',
+                notes='Scratched'
             )
             db.session.add(prediction)
     
