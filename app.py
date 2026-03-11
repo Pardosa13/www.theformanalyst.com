@@ -260,7 +260,44 @@ with app.app_context():
             
     except Exception as e:
         print(f"Component migration check: {e}")
+    # Migration: Upsert profitable components into live DB
+    try:
+        from models import Component
 
+        profitable_components = [
+            {'component_name': 'Age/Sex - 5yo Horse (Entire)',                 'appearances': 21,   'wins': 6,   'strike_rate': 28.6, 'roi_percentage': 224.8, 'is_active': True},
+            {'component_name': 'Days Since Run - Fresh Return (150-199 days)', 'appearances': 16,   'wins': 3,   'strike_rate': 18.8, 'roi_percentage': 193.1, 'is_active': True},
+            {'component_name': 'Colt - Base Bonus',                            'appearances': 841,  'wins': 120, 'strike_rate': 14.3, 'roi_percentage': 66.1,  'is_active': True},
+            {'component_name': 'Country: USA-bred',                            'appearances': 11,   'wins': 1,   'strike_rate': 9.1,  'roi_percentage': 63.6,  'is_active': True},
+            {'component_name': 'Market Expectation - Worst in Field',          'appearances': 8,    'wins': 2,   'strike_rate': 25.0, 'roi_percentage': 62.5,  'is_active': True},
+            {'component_name': 'Colt - 3yo Colt',                             'appearances': 2043, 'wins': 370, 'strike_rate': 18.1, 'roi_percentage': 49.2,  'is_active': True},
+            {'component_name': 'Running Position - Leader Staying',            'appearances': 14,   'wins': 2,   'strike_rate': 14.3, 'roi_percentage': 42.9,  'is_active': True},
+            {'component_name': 'Days Since Run - Too Fresh (250+ days)',       'appearances': 198,  'wins': 28,  'strike_rate': 14.1, 'roi_percentage': 31.8,  'is_active': True},
+            {'component_name': 'Age/Sex - 3yo',                               'appearances': 286,  'wins': 55,  'strike_rate': 19.2, 'roi_percentage': 27.7,  'is_active': True},
+        ]
+
+        added = 0
+        for comp_data in profitable_components:
+            existing = Component.query.filter_by(component_name=comp_data['component_name']).first()
+            if not existing:
+                component = Component(**comp_data)
+                db.session.add(component)
+                added += 1
+            else:
+                existing.appearances    = comp_data['appearances']
+                existing.wins           = comp_data['wins']
+                existing.strike_rate    = comp_data['strike_rate']
+                existing.roi_percentage = comp_data['roi_percentage']
+
+        db.session.commit()
+        if added > 0:
+            print(f"✓ Seeded {added} new profitable components")
+        else:
+            print("✓ Profitable components already present — stats updated")
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Profitable component migration error: {e}")
     # Create default admin if doesn't exist
     admin = User.query.filter_by(username='admin').first()
     if not admin:
