@@ -2339,10 +2339,6 @@ def update_scratchings(meeting_id):
 
             db.session.flush()
 
-            # ── 5. Only reprice if something changed ──
-            if not scratch_changed:
-                continue
-
             active_horses = [h for h in race.horses if not h.is_scratched]
             if len(active_horses) < 2:
                 continue
