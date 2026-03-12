@@ -4,11 +4,10 @@ Flask-Login==0.6.3
 Flask-Migrate==4.0.5
 Werkzeug==3.0.0
 python-dotenv==1.0.0
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.10
 gunicorn==21.2.0
 requests
 tweepy
 gevent==24.11.1
 anthropic
 Flask-Limiter
-betfairlightweight
