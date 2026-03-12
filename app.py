@@ -597,14 +597,13 @@ def apply_track_bias(speed_map_score, running_position, rail_position, pace_bias
 def process_and_store_results(csv_data, filename, track_condition, user_id, 
                               is_advanced=False, puntingform_id=None,
                               speed_maps_data=None, ratings_data=None, 
-                              sectionals_data=None, rail_position=0, **kwargs):
+                              sectionals_data=None, rail_position=0,
+                              scratched_set=None, **kwargs):
     kwargs['rail_position'] = rail_position
 
     # ===== INJECT API SECTIONAL DATA INTO CSV =====
-    # Parse the CSV first
     parsed_csv = parseCSV(csv_data)
 
-    # If we have sectionals data, inject it
     if sectionals_data:
         sectionals_payload = sectionals_data.get('payLoad', [])
         logger.info(f"Injecting API data for {len(sectionals_payload)} runners")
@@ -651,11 +650,10 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
     if speed_maps_data:
         logger.info("✅ SPEEDMAP: starting runningPosition injection")
 
-        # Ensure the key exists on every row (prevents missing-key issues in analyzer)
         for row in parsed_csv:
             row['runningPosition'] = ''
 
-        speedmap_lookup = {}  # { (race_no_str, horse_name_norm): position_category }
+        speedmap_lookup = {}
 
         payload = speed_maps_data.get('payLoad', [])
         logger.info(f"✅ SPEEDMAP: payLoad races={len(payload)}")
@@ -665,8 +663,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
 
             for item in race_sm.get('items', []):
                 runner_name = normalize_runner_name(item.get('runnerName') or '')
-
-                settle_val = item.get('settle')  # <-- correct key
+                settle_val = item.get('settle')
                 try:
                     settle_num = int(str(settle_val).split('/')[0].strip())
                 except Exception:
@@ -691,17 +688,37 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
             horse_name = normalize_runner_name(row.get('horse name', ''))
             race_num = str(row.get('race number', '')).strip()
             key = (race_num, horse_name)
-
             if key in speedmap_lookup:
                 row['runningPosition'] = speedmap_lookup[key]
                 injected_count += 1
 
         logger.info(f"✅ SPEEDMAP: Injected running position for {injected_count} horses")
-        
-    # Rebuild CSV with injected data
+
+    # ==========================================
+    # SPLIT OUT SCRATCHED HORSES BEFORE ANALYSIS
+    # ==========================================
+    scratched_rows = []
+    if scratched_set:
+        active_rows = []
+        for row in parsed_csv:
+            try:
+                horse_num = int(str(row.get('horse number', '')).strip())
+                race_num = int(str(row.get('race number', '')).strip())
+            except (ValueError, TypeError):
+                active_rows.append(row)
+                continue
+            if (race_num, horse_num) in scratched_set:
+                scratched_rows.append(row)
+                logger.info(f"✂️  Scratched: {row.get('horse name')} R{race_num} #{horse_num}")
+            else:
+                active_rows.append(row)
+        parsed_csv = active_rows
+        logger.info(f"✅ {len(scratched_rows)} scratched horses removed before analysis")
+
+    # Rebuild CSV with active horses only
     csv_data = rebuildCSV(parsed_csv)
     logger.info("✅ Rebuilt CSV with API data injection")
-    
+
     # Run the analyzer
     analysis_results = run_analyzer(csv_data, track_condition, is_advanced)
     
@@ -718,24 +735,20 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
         rail_position=rail_position
     )
     db.session.add(meeting)
-    db.session.flush()  # Get meeting ID
-    
+    db.session.flush()
+
     # Group results by race
     races_data = {}
     for result in analysis_results:
         race_num = result['horse'].get('race number', '0')
-        
-        # Skip invalid rows (header rows that slipped through)
         if not race_num or not str(race_num).isdigit():
             continue
-            
         if race_num not in races_data:
             races_data[race_num] = []
         races_data[race_num].append(result)
-    
+
     # Create race and horse records
     for race_num, horses_results in races_data.items():
-        # Get race info from first horse
         first_horse = horses_results[0]['horse'] if horses_results else {}
         
         race = Race(
@@ -750,8 +763,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
         )
         db.session.add(race)
         db.session.flush()
-        
-        # Create horse and prediction records
+
         for result in horses_results:
             horse_data = result['horse']
             
@@ -767,12 +779,11 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
             )
             db.session.add(horse)
             db.session.flush()
-            
+
             base_score = result.get('adjustedScore', result.get('score', 0))
             running_position = horse_data.get('runningposition', '')
             rail_pos = rail_position
 
-            # Apply rail bias at import (rail never changes during meeting)
             if running_position and rail_pos:
                 base_score = apply_track_bias(base_score, running_position, rail_pos, 0)
 
@@ -786,16 +797,72 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                 notes=result.get('notes', '')
             )
             db.session.add(prediction)
-    
+
+    # ==========================================
+    # SAVE SCRATCHED HORSES WITH ZERO SCORES
+    # ==========================================
+    if scratched_rows:
+        race_id_lookup = {}
+        for race_num_str in races_data.keys():
+            race = Race.query.filter_by(
+                meeting_id=meeting.id,
+                race_number=int(race_num_str)
+            ).first()
+            if race:
+                race_id_lookup[int(race_num_str)] = race.id
+
+        for row in scratched_rows:
+            try:
+                s_race_num = int(str(row.get('race number', '')).strip())
+            except (ValueError, TypeError):
+                continue
+
+            race_id = race_id_lookup.get(s_race_num)
+            if not race_id:
+                race = Race.query.filter_by(
+                    meeting_id=meeting.id,
+                    race_number=s_race_num
+                ).first()
+                if not race:
+                    continue
+                race_id = race.id
+
+            s_horse = Horse(
+                race_id=race_id,
+                horse_name=row.get('horse name', 'Unknown'),
+                barrier=int(row.get('horse barrier', 0)) if row.get('horse barrier') else None,
+                weight=float(row.get('horse weight', 0)) if row.get('horse weight') else None,
+                jockey=row.get('horse jockey', ''),
+                trainer=row.get('horse trainer', ''),
+                form=row.get('horse last10', ''),
+                csv_data=row,
+                is_scratched=True
+            )
+            db.session.add(s_horse)
+            db.session.flush()
+
+            s_prediction = Prediction(
+                horse_id=s_horse.id,
+                score=0.0,
+                predicted_odds='',
+                win_probability='',
+                performance_component='',
+                base_probability='',
+                notes='Scratched'
+            )
+            db.session.add(s_prediction)
+
+        logger.info(f"✅ Saved {len(scratched_rows)} scratched horses with zero scores")
+
     db.session.commit()
-    
-    # CLEANUP - Free memory after processing
+
+    # CLEANUP
     csv_data = None
     analysis_results = None
     races_data = None
     import gc
     gc.collect()
-    
+
     return meeting
 
 def get_meeting_results(meeting_id):
