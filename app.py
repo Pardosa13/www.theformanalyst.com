@@ -2293,13 +2293,14 @@ def api_import_meeting(meeting_id):
                         .filter(db.func.lower(Horse.horse_name) == horse_name.lower()).first()
                     if horse:
                         horse.is_scratched = True
-                        if horse.prediction:
-                            horse.prediction.score = 0.0
-                            horse.prediction.predicted_odds = ''
-                            horse.prediction.win_probability = ''
-                            horse.prediction.performance_component = ''
-                            horse.prediction.base_probability = ''
-                            horse.prediction.notes = 'Scratched'
+                        pred = Prediction.query.filter_by(horse_id=horse.id).first()
+                        if pred:
+                            pred.score = 0.0
+                            pred.predicted_odds = ''
+                            pred.win_probability = ''
+                            pred.performance_component = ''
+                            pred.base_probability = ''
+                            pred.notes = 'Scratched'
                 db.session.commit()
                 logger.info("✅ Zeroed scratched-at-import horses")
         except Exception as e:
