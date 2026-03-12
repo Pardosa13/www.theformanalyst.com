@@ -807,7 +807,10 @@ function showResetPassword(userId, username) {
 
 /* ── Component management ── */
 function openCreateComponent() {
-    new bootstrap.Modal(document.getElementById('createComponentModal')).show();
+    var el = document.getElementById('createComponentModal'));
+    var existing = bootstrap.Modal.getInstance(el);
+    if (existing) existing.dispose();
+    new bootstrap.Modal(el).show();
 }
 
 function openEditComponent(id, name, appearances, wins, roi, notes, strikeRate, status, lastUpdated) {
