@@ -824,7 +824,7 @@ def get_meeting_results(meeting_id):
             'horses': []
         }
         
-        for horse in horses:
+for horse in horses:
     pred = horse.prediction
     horse_data = {
         'horse_id': horse.id,
