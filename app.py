@@ -2248,7 +2248,62 @@ def api_import_meeting(meeting_id):
         db.session.commit()
         
         logger.info(f"✓ Imported {meeting_name} with V2 API data (speed maps, ratings, sectionals)")
-        
+        # ==========================================
+        # ZERO OUT HORSES ALREADY SCRATCHED AT IMPORT
+        # ==========================================
+        try:
+            scratch_url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
+            scratch_response = requests.get(scratch_url, headers={'accept': 'application/json'}, timeout=30)
+            if scratch_response.ok:
+                scratch_data = scratch_response.json()
+                items = scratch_data.get('payLoad') or []
+                tab_name_lookup = {}
+                fresh_races = Race.query.filter_by(meeting_id=meeting.id).all()
+                for race in fresh_races:
+                    if race.speed_maps_json:
+                        sm = race.speed_maps_json if isinstance(race.speed_maps_json, dict) else json.loads(race.speed_maps_json)
+                        for it in sm.get('payLoad', [{}])[0].get('items', []):
+                            try:
+                                tab_no = int(it.get('tabNo', 0))
+                            except Exception:
+                                tab_no = 0
+                            tab_name_lookup[(race.race_number, tab_no)] = it.get('runnerName', '') or ''
+                for s in items:
+                    if not isinstance(s, dict):
+                        continue
+                    track = s.get('track') or s.get('Track') or s.get('trackName') or s.get('TrackName')
+                    race_no = s.get('raceNo') or s.get('RaceNo') or s.get('raceNumber') or s.get('RaceNumber')
+                    tab_no = s.get('tabNo') or s.get('TabNo') or s.get('tabNumber') or s.get('TabNumber')
+                    if track is None or race_no is None or tab_no is None:
+                        continue
+                    if str(track).strip().lower() != str(track_name).strip().lower():
+                        continue
+                    try:
+                        rn = int(race_no)
+                        tn = int(tab_no)
+                    except Exception:
+                        continue
+                    horse_name = tab_name_lookup.get((rn, tn), '')
+                    if not horse_name:
+                        continue
+                    race = next((r for r in fresh_races if r.race_number == rn), None)
+                    if not race:
+                        continue
+                    horse = Horse.query.filter_by(race_id=race.id)\
+                        .filter(db.func.lower(Horse.horse_name) == horse_name.lower()).first()
+                    if horse:
+                        horse.is_scratched = True
+                        if horse.prediction:
+                            horse.prediction.score = 0.0
+                            horse.prediction.predicted_odds = ''
+                            horse.prediction.win_probability = ''
+                            horse.prediction.performance_component = ''
+                            horse.prediction.base_probability = ''
+                            horse.prediction.notes = 'Scratched'
+                db.session.commit()
+                logger.info("✅ Zeroed scratched-at-import horses")
+        except Exception as e:
+            logger.warning(f"Could not zero import-time scratchings: {e}")
         return jsonify({
             'success': True,
             'meeting_id': meeting.id,
