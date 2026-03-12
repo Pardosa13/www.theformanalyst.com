@@ -2198,7 +2198,7 @@ def api_import_meeting(meeting_id):
         except Exception as e:
             logger.warning(f"Could not fetch sectionals: {str(e)}")
         
-               # ==========================================
+                      # ==========================================
         # FETCH CSV DATA
         # ==========================================
         csv_data = pf_service.get_fields_csv(track_name, date_str)
@@ -2265,6 +2265,10 @@ def api_import_meeting(meeting_id):
                     scratched_set.add((int(race_no), int(horse_no)))
                 except (ValueError, TypeError):
                     continue
+
+            # Log first 3 items to see field names and track name format
+            for item in scratch_items[:3]:
+                logger.info(f"SCRATCH ITEM: {item}")
 
             logger.info(f"✅ Found {len(scratched_set)} scratchings for {track_name}")
 
