@@ -812,7 +812,7 @@ def get_meeting_results(meeting_id):
     }
     
     for race in races:
-        horses = Horse.query.filter_by(race_id=race.id).all()
+        horses = Horse.query.filter_by(race_id=race.id).distinct(Horse.horse_name).all()
         
         race_data = {
             'race_number': race.race_number,
