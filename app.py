@@ -2131,13 +2131,80 @@ def api_import_meeting(meeting_id):
         except Exception as e:
             logger.warning(f"Could not fetch sectionals: {str(e)}")
         
-        # ==========================================
+               # ==========================================
         # FETCH CSV DATA
         # ==========================================
         csv_data = pf_service.get_fields_csv(track_name, date_str)
         if not csv_data:
             return jsonify({'success': False, 'error': 'No data available for this meeting'}), 400
 
+        # ==========================================
+        # FETCH SCRATCHINGS BEFORE ANALYSIS
+        # ==========================================
+        scratched_set = set()  # Will hold (race_number_int, horse_number_int) pairs
+
+        try:
+            scratch_data = pf_service.get_scratchings()
+
+            # Handle both list and dict responses
+            if isinstance(scratch_data, list):
+                scratch_items = scratch_data
+            else:
+                scratch_items = (
+                    scratch_data.get('Result')
+                    or scratch_data.get('result')
+                    or scratch_data.get('payLoad')
+                    or scratch_data.get('Scratchings')
+                    or []
+                )
+
+            for item in scratch_items:
+                if not isinstance(item, dict):
+                    continue
+
+                # Match on track name
+                item_track = (
+                    item.get('Track')
+                    or item.get('track')
+                    or item.get('TrackName')
+                    or item.get('trackName')
+                    or ''
+                )
+
+                if str(item_track).strip().lower() != str(track_name).strip().lower():
+                    continue
+
+                # Get race number and horse number
+                race_no = (
+                    item.get('RaceNo')
+                    or item.get('raceNo')
+                    or item.get('RaceNumber')
+                    or item.get('raceNumber')
+                )
+
+                horse_no = (
+                    item.get('HorseNo')
+                    or item.get('horseNo')
+                    or item.get('TabNo')
+                    or item.get('tabNo')
+                    or item.get('HorseNumber')
+                    or item.get('horseNumber')
+                )
+
+                if race_no is None or horse_no is None:
+                    continue
+
+                try:
+                    scratched_set.add((int(race_no), int(horse_no)))
+                except (ValueError, TypeError):
+                    continue
+
+            logger.info(f"✅ Found {len(scratched_set)} scratchings for {track_name}")
+
+        except Exception as e:
+            logger.warning(f"Could not fetch scratchings: {e}")
+            scratched_set = set()
+    
         # ==========================================
         # PRE-FETCH SPEED MAPS (needed before analysis for running position injection)
         # ==========================================
