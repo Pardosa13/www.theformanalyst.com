@@ -629,7 +629,9 @@
         @media (max-width: 480px) {
             .main-container { padding: 0.75rem; }
         }
-
+body.modal-open .main-container {
+            animation: none !important;
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
