@@ -855,7 +855,7 @@ for horse in horses:
 race_data['horses'].sort(key=lambda x: x['score'], reverse=True)
 results['races'].append(race_data)
 
-return results
+ return results
 
 
 # ----- Routes -----
