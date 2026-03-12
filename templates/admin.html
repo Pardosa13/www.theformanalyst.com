@@ -7,9 +7,6 @@
 <style>
 /* ══════════════════════════════════════════
    ADMIN PANEL — dark premium theme
-   
-   All form actions, input names, IDs, JS
-   functions, modal IDs 100% UNCHANGED
 ══════════════════════════════════════════ */
 
 .admin-header {
@@ -309,7 +306,7 @@
   </div>
 </div>
 
-<!-- Tab Navigation — all IDs/data-bs UNCHANGED -->
+<!-- Tab Navigation -->
 <ul class="nav nav-tabs" id="adminTabs" role="tablist">
   <li class="nav-item" role="presentation">
     <button class="nav-link active" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button">
@@ -328,7 +325,7 @@
   </li>
 </ul>
 
-<!-- Tab Content — all form actions/names/IDs UNCHANGED -->
+<!-- Tab Content -->
 <div class="tab-content" id="adminTabContent">
 
   <!-- ══ Manage Users Tab ══ -->
@@ -504,7 +501,7 @@
 
 </div>
 
-<!-- Hidden Forms — all IDs/names UNCHANGED -->
+<!-- Hidden Forms (user management) -->
 <form id="deleteUserForm" method="POST" action="{{ url_for('admin_panel') }}" style="display:none;">
   <input type="hidden" name="action" value="delete_user">
   <input type="hidden" name="user_id" id="deleteUserId">
@@ -518,7 +515,7 @@
   <input type="hidden" name="user_id" id="toggleActiveUserId">
 </form>
 
-<!-- Reset Password Modal — all IDs/names UNCHANGED -->
+<!-- Reset Password Modal -->
 <div class="modal fade" id="resetPasswordModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -555,7 +552,7 @@
   <p>Manage betting components for the Best Bets feature</p>
 
   <div style="margin-bottom:18px;">
-    <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#createComponentModal">
+    <button class="btn btn-success" onclick="openCreateComponent()">
       + Create New Component
     </button>
   </div>
@@ -619,10 +616,17 @@
                 {% endif %}
               </td>
               <td>
-                <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#editComponentModal{{ comp.id }}">
-                  Edit
-                </button>
-                <!-- FIX: added action attribute to prevent iOS Safari freeze -->
+                <button class="btn btn-sm btn-primary" onclick="openEditComponent(
+                  {{ comp.id }},
+                  {{ comp.name | tojson }},
+                  {{ comp.appearances }},
+                  {{ comp.wins }},
+                  {{ comp.roi }},
+                  {{ (comp.notes or '') | tojson }},
+                  {{ comp.strike_rate | round(1) }},
+                  '{% if comp.is_active %}Active{% else %}Inactive{% endif %}',
+                  '{% if comp.last_updated %}{{ comp.last_updated.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}'
+                )">Edit</button>
                 <form method="POST" action="{{ url_for('admin_panel') }}" style="display:inline;">
                   <input type="hidden" name="action" value="toggle_component">
                   <input type="hidden" name="component_id" value="{{ comp.id }}">
@@ -630,7 +634,7 @@
                     {% if comp.is_active %}Deactivate{% else %}Activate{% endif %}
                   </button>
                 </form>
-                <button class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#deleteComponentModal{{ comp.id }}">
+                <button class="btn btn-sm btn-danger" onclick="openDeleteComponent({{ comp.id }}, {{ comp.name | tojson }})">
                   Delete
                 </button>
               </td>
@@ -648,7 +652,7 @@
   </div>
 </div>
 
-<!-- Create Component Modal — FIX: added action attribute to prevent iOS Safari freeze -->
+<!-- ══ SHARED: Create Component Modal ══ -->
 <div class="modal fade" id="createComponentModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -694,14 +698,13 @@
   </div>
 </div>
 
-<!-- Edit/Delete Component Modals — FIX: added action attribute to both forms to prevent iOS Safari freeze -->
-{% for comp in stats.components %}
-<div class="modal fade" id="editComponentModal{{ comp.id }}" tabindex="-1">
+<!-- ══ SHARED: Edit Component Modal ══ -->
+<div class="modal fade" id="editComponentModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
       <form method="POST" action="{{ url_for('admin_panel') }}">
         <input type="hidden" name="action" value="edit_component">
-        <input type="hidden" name="component_id" value="{{ comp.id }}">
+        <input type="hidden" name="component_id" id="editComponentId">
         <div class="modal-header">
           <h5 class="modal-title">Edit Component</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -709,31 +712,26 @@
         <div class="modal-body">
           <div class="mb-3">
             <label class="form-label">Component Name</label>
-            <input type="text" name="component_name" class="form-control" value="{{ comp.name }}" required>
+            <input type="text" name="component_name" id="editComponentName" class="form-control" required>
           </div>
           <div class="mb-3">
             <label class="form-label">Appearances</label>
-            <input type="number" name="appearances" class="form-control" value="{{ comp.appearances }}" min="0">
+            <input type="number" name="appearances" id="editAppearances" class="form-control" min="0">
           </div>
           <div class="mb-3">
             <label class="form-label">Wins</label>
-            <input type="number" name="wins" class="form-control" value="{{ comp.wins }}" min="0">
+            <input type="number" name="wins" id="editWins" class="form-control" min="0">
           </div>
           <div class="mb-3">
             <label class="form-label">ROI %</label>
-            <input type="number" step="0.1" name="roi" class="form-control" value="{{ comp.roi }}">
+            <input type="number" step="0.1" name="roi" id="editRoi" class="form-control">
           </div>
           <div class="mb-3">
             <label class="form-label">Notes</label>
-            <textarea name="notes" class="form-control" rows="2">{{ comp.notes }}</textarea>
+            <textarea name="notes" id="editNotes" class="form-control" rows="2"></textarea>
           </div>
           <div class="alert alert-info">
-            <small>
-              <strong>Current Stats:</strong><br>
-              Strike Rate: {{ comp.strike_rate|round(1) }}%<br>
-              Status: {% if comp.is_active %}Active{% else %}Inactive{% endif %}<br>
-              Last Updated: {% if comp.last_updated %}{{ comp.last_updated.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}
-            </small>
+            <small id="editStatsText"></small>
           </div>
         </div>
         <div class="modal-footer">
@@ -745,19 +743,20 @@
   </div>
 </div>
 
-<div class="modal fade" id="deleteComponentModal{{ comp.id }}" tabindex="-1">
+<!-- ══ SHARED: Delete Component Modal ══ -->
+<div class="modal fade" id="deleteComponentModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
       <form method="POST" action="{{ url_for('admin_panel') }}">
         <input type="hidden" name="action" value="delete_component">
-        <input type="hidden" name="component_id" value="{{ comp.id }}">
+        <input type="hidden" name="component_id" id="deleteComponentId">
         <div class="modal-header bg-danger">
           <h5 class="modal-title">Delete Component</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
           <p>Are you sure you want to delete the component:</p>
-          <p class="text-center"><strong>{{ comp.name }}</strong></p>
+          <p class="text-center"><strong id="deleteComponentName"></strong></p>
           <p class="text-danger">This action cannot be undone!</p>
         </div>
         <div class="modal-footer">
@@ -768,15 +767,14 @@
     </div>
   </div>
 </div>
-{% endfor %}
 
 <!-- Back button -->
 <div style="margin-top:32px;">
   <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">← Back to Dashboard</a>
 </div>
 
-<!-- JS functions — 100% UNCHANGED -->
 <script>
+/* ── User management (unchanged) ── */
 function confirmDelete(userId, username) {
     if (confirm(`Are you sure you want to delete user '${username}'?\n\nThis will also delete ALL their meeting analyses.\n\nThis action cannot be undone!`)) {
         document.getElementById('deleteUserId').value = userId;
@@ -805,6 +803,32 @@ function showResetPassword(userId, username) {
     document.getElementById('resetUsernameDisplay').textContent = username;
     document.getElementById('new_password_reset').value = '';
     new bootstrap.Modal(document.getElementById('resetPasswordModal')).show();
+}
+
+/* ── Component management ── */
+function openCreateComponent() {
+    new bootstrap.Modal(document.getElementById('createComponentModal')).show();
+}
+
+function openEditComponent(id, name, appearances, wins, roi, notes, strikeRate, status, lastUpdated) {
+    document.getElementById('editComponentId').value = id;
+    document.getElementById('editComponentName').value = name;
+    document.getElementById('editAppearances').value = appearances;
+    document.getElementById('editWins').value = wins;
+    document.getElementById('editRoi').value = roi;
+    document.getElementById('editNotes').value = notes;
+    document.getElementById('editStatsText').innerHTML =
+        '<strong>Current Stats:</strong><br>' +
+        'Strike Rate: ' + strikeRate + '%<br>' +
+        'Status: ' + status + '<br>' +
+        'Last Updated: ' + lastUpdated;
+    new bootstrap.Modal(document.getElementById('editComponentModal')).show();
+}
+
+function openDeleteComponent(id, name) {
+    document.getElementById('deleteComponentId').value = id;
+    document.getElementById('deleteComponentName').textContent = name;
+    new bootstrap.Modal(document.getElementById('deleteComponentModal')).show();
 }
 </script>
 
