@@ -625,7 +625,7 @@
                   {{ (comp.notes or '') | tojson }},
                   {{ comp.strike_rate | round(1) }},
                   '{% if comp.is_active %}Active{% else %}Inactive{% endif %}',
-                  '{% if comp.last_updated %}{{ comp.last_updated.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}'
+                  '{% if comp.last_updated %}{{ comp.last_updated.strftime("%Y-%m-%d %H:%M") }}{% else %}Never{% endif %}'
                 )">Edit</button>
                 <form method="POST" action="{{ url_for('admin_panel') }}" style="display:inline;">
                   <input type="hidden" name="action" value="toggle_component">
