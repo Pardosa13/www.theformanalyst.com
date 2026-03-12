@@ -2303,7 +2303,7 @@ def api_import_meeting(meeting_id):
                             performance_component='',
                             base_probability='',
                             notes='Scratched'
-                        ))
+                        
                 db.session.commit()
                 logger.info("✅ Zeroed scratched-at-import horses")
         except Exception as e:
