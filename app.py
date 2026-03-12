@@ -2287,7 +2287,7 @@ def api_import_meeting(meeting_id):
             speed_maps_data=combined_speedmap if combined_speedmap['payLoad'] else None,
             ratings_data=sectionals_data,
             sectionals_data=sectionals_data,
-            rail_position=rail_position
+            rail_position=rail_position,
             scratched_set=scratched_set
         )
 
