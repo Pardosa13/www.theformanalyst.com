@@ -2208,70 +2208,33 @@ def api_import_meeting(meeting_id):
         # ==========================================
         # FETCH SCRATCHINGS BEFORE ANALYSIS
         # ==========================================
-        scratched_set = set()  # Will hold (race_number_int, horse_number_int) pairs
-
+        scratched_set = set()
         try:
             scratch_data = pf_service.get_scratchings()
-
-            # Handle both list and dict responses
             if isinstance(scratch_data, list):
                 scratch_items = scratch_data
             else:
-                scratch_items = (
-                    scratch_data.get('Result')
-                    or scratch_data.get('result')
-                    or scratch_data.get('payLoad')
-                    or scratch_data.get('Scratchings')
-                    or []
-                )
+                scratch_items = (scratch_data.get('Result') or
+                                scratch_data.get('result') or
+                                scratch_data.get('payLoad') or
+                                scratch_data.get('Scratchings') or [])
 
             for item in scratch_items:
                 if not isinstance(item, dict):
                     continue
-
-                # Match on track name
-                item_track = (
-                    item.get('Track')
-                    or item.get('track')
-                    or item.get('TrackName')
-                    or item.get('trackName')
-                    or ''
-                )
-
-                if str(item_track).strip().lower() != str(track_name).strip().lower():
+                item_track = str(item.get('TrackName') or item.get('trackName') or '').strip()
+                if item_track.lower() != str(track_name).strip().lower():
                     continue
-
-                # Get race number and horse number
-                race_no = (
-                    item.get('RaceNo')
-                    or item.get('raceNo')
-                    or item.get('RaceNumber')
-                    or item.get('raceNumber')
-                )
-
-                horse_no = (
-                    item.get('HorseNo')
-                    or item.get('horseNo')
-                    or item.get('TabNo')
-                    or item.get('tabNo')
-                    or item.get('HorseNumber')
-                    or item.get('horseNumber')
-                )
-
-                if race_no is None or horse_no is None:
-                    continue
-
-                try:
-                    scratched_set.add((int(race_no), int(horse_no)))
-                except (ValueError, TypeError):
-                    continue
-
-            # Log first 3 items to see field names and track name format
-            for item in scratch_items[:3]:
-                logger.info(f"SCRATCH ITEM: {item}")
+                for entry in item.get('Scratchings', []):
+                    try:
+                        parts = str(entry).split(',', 2)
+                        if len(parts) >= 2:
+                            scratched_set.add((int(parts[0]), int(parts[1])))
+                    except (ValueError, TypeError):
+                        continue
+                break
 
             logger.info(f"✅ Found {len(scratched_set)} scratchings for {track_name}")
-
         except Exception as e:
             logger.warning(f"Could not fetch scratchings: {e}")
             scratched_set = set()
