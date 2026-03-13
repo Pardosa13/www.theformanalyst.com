@@ -1213,6 +1213,10 @@ def parse_notes_components(notes):
         (r'\+\s*([\d.]+):\s*IMPROVING TREND', 'API Sectional - Improving Trend'),
 
         # ====== RUNNING POSITION (SPEEDMAP) ======
+        # ====== SPRINT LEADER RUN DOWN BONUS ======
+        (r'\+\s*15\.0\s*:\s*Sprint Leader Run Down Bonus', 'Pace Angle - Sprint Leader Run Down'),
+
+        # ====== RUNNING POSITION (SPEEDMAP) ======
         (r'[+\-]?\s*12\.0\s*:\s*LEADER in Sprint', 'Running Position - Leader Sprint'),
         (r'[+\-]?\s*8\.0\s*:\s*ONPACE in Sprint', 'Running Position - OnPace Sprint'),
         (r'[+\-]?\s*0\.0\s*:\s*MIDFIELD in Sprint', 'Running Position - Midfield Sprint'),
