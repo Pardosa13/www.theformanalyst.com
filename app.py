@@ -6038,6 +6038,7 @@ def api_combination_analysis():
 
     return jsonify({
         'combinations':          results_list,
+        'hidden_edges':          hidden_list,
         'total_found':           len(results_list),
         'total_horses_analysed': len(all_horse_rows),
         'pace_angle':            pace_angle,
