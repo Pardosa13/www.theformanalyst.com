@@ -5756,6 +5756,195 @@ def api_combination_analysis():
     results_list.sort(key=lambda x: (-x['factor_count'], -x['roi']))
     results_list = results_list[:300]
 
+    # ── 7b. Hidden edge combinations ──────────────────────────────────────────
+    # Tag every horse with ALL factors regardless of individual ROI
+    # Then find pairs/triples that flip positive despite both being negative alone
+    all_neg_tagged = []
+
+    for row in all_horse_rows:
+        won      = row.finish_position == 1
+        sp       = row.sp or 0
+        csv_data = row.csv_data or {}
+        factors  = set()
+
+        # Score tier — tag all
+        factors.add(f"Score: {_score_tier(row.score)}")
+
+        # Distance
+        db_val = _dist_bucket(csv_data.get('distance') or row.distance)
+        if db_val:
+            factors.add(f"Distance: {db_val}")
+
+        # Track condition
+        factors.add(f"Condition: {row.track_condition or 'Unknown'}")
+
+        # Barrier
+        bb = _barrier_bucket(csv_data.get('horse barrier') or csv_data.get('barrier'))
+        if bb:
+            factors.add(f"Barrier: {bb}")
+
+        # Track
+        factors.add(f"Track: {_track_from_name(row.meeting_name)}")
+
+        # Race class
+        factors.add(f"Class: {row.race_class or 'Unknown'}")
+
+        # Days since run
+        days = _parse_days(row)
+        db_days = _days_bucket(days)
+        if db_days:
+            factors.add(f"Days: {db_days}")
+
+        # Jockey
+        j = (row.jockey or '').strip()
+        if j:
+            factors.add(f"Jockey: {j}")
+
+        # Trainer
+        t = (row.trainer or '').strip()
+        if t:
+            factors.add(f"Trainer: {t}")
+
+        # Sire
+        s = csv_data.get('horse sire', '').strip()
+        if s:
+            factors.add(f"Sire: {s}")
+
+        # Age / Sex
+        age = csv_data.get('horse age')
+        sex = csv_data.get('horse sex', '').strip()
+        if age and sex:
+            factors.add(f"AgeSex: {age}yo {sex}")
+        if age:
+            factors.add(f"Age: {age}yo")
+        if sex:
+            factors.add(f"Sex: {sex}")
+
+        # Weight
+        hw = csv_data.get('horse weight')
+        wb = _weight_bucket(hw)
+        if wb:
+            factors.add(f"Weight: {wb}")
+
+        # Claim
+        claim = csv_data.get('horse claim')
+        cb = _claim_bucket(claim)
+        if cb:
+            factors.add(f"Claim: {cb}")
+
+        # Country
+        country = csv_data.get('country', '').strip()
+        if country:
+            if country.upper() in ('AUS', 'AUSTRALIA'):
+                factors.add('Country: AUS')
+            elif country.upper() in ('NZ', 'NEW ZEALAND'):
+                factors.add('Country: NZ')
+            else:
+                factors.add('Country: Other')
+
+        # Weight type
+        wt = csv_data.get('weight type', '').strip()
+        if wt:
+            factors.add(f"WeightType: {wt}")
+
+        # Form price
+        fp = csv_data.get('form price')
+        fpb = _form_price_bucket(fp)
+        if fpb:
+            factors.add(f"FormPrice: {fpb}")
+
+        # Weight change
+        fw = csv_data.get('form weight')
+        wcb = _weight_change_bucket(fw, hw)
+        if wcb:
+            factors.add(f"WeightChange: {wcb}")
+
+        # Components — tag all regardless of ROI
+        if row.notes:
+            components = parse_notes_components(row.notes)
+            for cname, val in components.items():
+                if val:
+                    factors.add(f"Component: {cname}")
+
+        # Cap to 15 factors to avoid explosion
+        if len(factors) > 15:
+            priority = [f for f in factors if any(f.startswith(p) for p in (
+                'Component:', 'Jockey:', 'Trainer:', 'Sire:', 'AgeSex:', 'FormPrice:'
+            ))]
+            generic  = [f for f in factors if f not in priority]
+            factors  = set((priority + generic)[:15])
+
+        all_neg_tagged.append({
+            'factors': factors,
+            'won':     won,
+            'sp':      sp,
+        })
+
+    # Build single factor ROI lookup across ALL factors
+    all_single_buckets = defaultdict(lambda: {'races': 0, 'wins': 0, 'profit': 0.0})
+    for horse in all_neg_tagged:
+        won    = horse['won']
+        sp     = horse['sp']
+        profit = (sp * stake - stake) if won else -stake
+        for f in horse['factors']:
+            all_single_buckets[f]['races']  += 1
+            all_single_buckets[f]['wins']   += 1 if won else 0
+            all_single_buckets[f]['profit'] += profit
+
+    # Identify factors that are NOT positive ROI individually (negative or neutral)
+    def _is_not_positive(factor):
+        b = all_single_buckets[factor]
+        if b['races'] < 20:
+            return True  # too small to trust — treat as non-positive
+        roi = b['profit'] / (b['races'] * stake) * 100
+        return roi <= 0
+
+    # Count all pairs and triples across all_neg_tagged
+    hidden_combo_stats = defaultdict(lambda: {'races': 0, 'wins': 0, 'profit': 0.0})
+
+    for horse in all_neg_tagged:
+        factors = sorted(horse['factors'])
+        won     = horse['won']
+        sp      = horse['sp']
+        profit  = (sp * stake - stake) if won else -stake
+
+        for pair in itertools.combinations(factors, 2):
+            # Only count if BOTH factors are individually non-positive
+            if _is_not_positive(pair[0]) and _is_not_positive(pair[1]):
+                hidden_combo_stats[pair]['races']  += 1
+                hidden_combo_stats[pair]['wins']   += 1 if won else 0
+                hidden_combo_stats[pair]['profit'] += profit
+
+        for triple in itertools.combinations(factors, 3):
+            # Only count if ALL three factors are individually non-positive
+            if all(_is_not_positive(f) for f in triple):
+                hidden_combo_stats[triple]['races']  += 1
+                hidden_combo_stats[triple]['wins']   += 1 if won else 0
+                hidden_combo_stats[triple]['profit'] += profit
+
+    # Filter: 50+ races, positive ROI, sort by ROI
+    hidden_list = []
+    for combo, stats in hidden_combo_stats.items():
+        n = stats['races']
+        if n < 50:
+            continue
+        roi = stats['profit'] / (n * stake) * 100
+        if roi <= 0:
+            continue
+        sr = stats['wins'] / n * 100
+        hidden_list.append({
+            'factors':      list(combo),
+            'factor_count': len(combo),
+            'races':        n,
+            'wins':         stats['wins'],
+            'strike_rate':  round(sr, 1),
+            'roi':          round(roi, 1),
+            'profit':       round(stats['profit'], 2),
+        })
+
+    hidden_list.sort(key=lambda x: (-x['factor_count'], -x['roi']))
+    hidden_list = hidden_list[:200]
+
     # ── 8. Pace angle analysis (bypasses positive ROI gate entirely) ──────────
     leader_patterns = {
         'Sprint':  'Running Position - Leader Sprint',
