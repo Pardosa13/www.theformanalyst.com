@@ -1699,7 +1699,58 @@ function renderCombinationAnalysis(data) {
         return t;
     }
 
+    // ── Pace Angle Section ─────────────────────────────────────────────────
+    const pa = data.pace_angle || {};
+
+    function paceCard(label, key, highlight) {
+        const b = pa[key];
+        if (!b) return '';
+        const roiColour = b.roi > 0 ? '#28a745' : b.roi < 0 ? '#dc3545' : '#aaa';
+        const border    = highlight ? 'border: 2px solid #ffc107;' : 'border: 1px solid rgba(255,255,255,0.1);';
+        return `
+            <div style="flex:1;min-width:160px;background:var(--card-bg);${border}border-radius:8px;padding:14px;text-align:center;">
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">${label}</div>
+                <div style="font-size:22px;font-weight:700;color:${roiColour}">${b.roi >= 0 ? '+' : ''}${b.roi}%</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${b.races} races · ${b.strike_rate}% SR</div>
+                <div style="font-size:11px;color:${roiColour};margin-top:2px">P&L $${b.profit.toFixed(2)}</div>
+            </div>`;
+    }
+
+    let paceHtml = `
+        <div style="background:rgba(255,193,7,0.05);border:1px solid rgba(255,193,7,0.3);border-radius:10px;padding:16px;margin-bottom:24px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                <span style="font-size:16px">🏇</span>
+                <strong style="color:#ffc107">Pace Angle — Led &amp; Run Down</strong>
+            </div>
+            <p style="font-size:11px;color:var(--text-muted);margin-bottom:14px">
+                Horses mapped to lead this start who had a narrow loss last start. Tests whether the market undervalues front-runners that were caught late.
+            </p>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+                ${paceCard('Led + Narrow Loss', 'both', true)}
+                ${paceCard('Leader Only', 'leader_only', false)}
+                ${paceCard('Narrow Loss Only', 'narrow_loss_only', false)}
+                ${paceCard('Neither', 'neither', false)}
+            </div>`;
+
+    // Distance sub-breakdown — only if data returned (50+ race minimum)
+    const distKeys = [
+        ['Sprint', 'both_sprint'],
+        ['Mile',   'both_mile'],
+        ['Middle', 'both_middle'],
+        ['Staying','both_staying'],
+    ].filter(([, k]) => pa[k] !== null && pa[k] !== undefined);
+
+    if (distKeys.length > 0) {
+        paceHtml += `<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Both — by distance type (50+ races only)</div>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;">
+                ${distKeys.map(([label, key]) => paceCard(label, key, false)).join('')}
+            </div>`;
+    }
+
+    paceHtml += `</div>`;
+
     let html = `<div class="card-body">
+        ${paceHtml}
         <p class="text-muted" style="font-size:12px">Multi-factor combinations with positive ROI across <strong style="color:var(--text-primary)">${data.total_horses_analysed.toLocaleString()}</strong> horses analysed. These are patterns your scoring model may be underweighting — factors that predict winners regardless of current score.</p>`;
     
     if (fives.length > 0) {
