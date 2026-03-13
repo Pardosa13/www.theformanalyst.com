@@ -5915,13 +5915,6 @@ def api_combination_analysis():
                 hidden_combo_stats[pair]['wins']   += 1 if won else 0
                 hidden_combo_stats[pair]['profit'] += profit
 
-        for triple in itertools.combinations(factors, 3):
-            # Only count if ALL three factors are individually non-positive
-            if all(_is_not_positive(f) for f in triple):
-                hidden_combo_stats[triple]['races']  += 1
-                hidden_combo_stats[triple]['wins']   += 1 if won else 0
-                hidden_combo_stats[triple]['profit'] += profit
-
     # Filter: 50+ races, positive ROI, sort by ROI
     hidden_list = []
     for combo, stats in hidden_combo_stats.items():
