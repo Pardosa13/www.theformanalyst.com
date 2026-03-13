@@ -5756,6 +5756,92 @@ def api_combination_analysis():
     results_list.sort(key=lambda x: (-x['factor_count'], -x['roi']))
     results_list = results_list[:300]
 
+    # ── 8. Pace angle analysis (bypasses positive ROI gate entirely) ──────────
+    leader_patterns = {
+        'Sprint':  'Running Position - Leader Sprint',
+        'Mile':    'Running Position - Leader Mile',
+        'Middle':  'Running Position - Leader Middle',
+        'Staying': 'Running Position - Leader Staying',
+    }
+    narrow_loss_patterns = [
+        'Last Start - Narrow Loss (≤1L)',
+        'Last Start - Close Loss 2nd (1-2L)',
+        'Last Start - Close Loss 3rd (1-2L)',
+        'Last Start - Competitive Effort (≤3L)',
+    ]
+
+    def _empty_pace():
+        return {'races': 0, 'wins': 0, 'profit': 0.0}
+
+    pace_buckets = {
+        'leader_only':      _empty_pace(),
+        'narrow_loss_only': _empty_pace(),
+        'both':             _empty_pace(),
+        'neither':          _empty_pace(),
+        'both_sprint':      _empty_pace(),
+        'both_mile':        _empty_pace(),
+        'both_middle':      _empty_pace(),
+        'both_staying':     _empty_pace(),
+    }
+
+    for row in all_horse_rows:
+        won    = row.finish_position == 1
+        sp     = row.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        comps  = parse_notes_components(row.notes or '')
+
+        is_leader      = any(p in comps for p in leader_patterns.values())
+        is_narrow_loss = any(p in comps for p in narrow_loss_patterns)
+
+        if is_leader and is_narrow_loss:
+            key = 'both'
+        elif is_leader:
+            key = 'leader_only'
+        elif is_narrow_loss:
+            key = 'narrow_loss_only'
+        else:
+            key = 'neither'
+
+        pace_buckets[key]['races']  += 1
+        pace_buckets[key]['wins']   += 1 if won else 0
+        pace_buckets[key]['profit'] += profit
+
+        # Distance sub-breakdown — only for 'both'
+        if is_leader and is_narrow_loss:
+            for dist_label, pattern in leader_patterns.items():
+                if pattern in comps:
+                    sub_key = f'both_{dist_label.lower()}'
+                    pace_buckets[sub_key]['races']  += 1
+                    pace_buckets[sub_key]['wins']   += 1 if won else 0
+                    pace_buckets[sub_key]['profit'] += profit
+
+    def _fmt_pace(b, min_races=0):
+        n = b['races']
+        if n < min_races:
+            return None
+        if n == 0:
+            return {'races': 0, 'wins': 0, 'strike_rate': 0, 'roi': 0, 'profit': 0}
+        return {
+            'races':       n,
+            'wins':        b['wins'],
+            'strike_rate': round(b['wins'] / n * 100, 1),
+            'roi':         round(b['profit'] / (n * stake) * 100, 1),
+            'profit':      round(b['profit'], 2),
+        }
+
+    pace_angle = {
+        # These four always show regardless of sample size
+        'leader_only':      _fmt_pace(pace_buckets['leader_only']),
+        'narrow_loss_only': _fmt_pace(pace_buckets['narrow_loss_only']),
+        'both':             _fmt_pace(pace_buckets['both']),
+        'neither':          _fmt_pace(pace_buckets['neither']),
+        # Distance sub-buckets only show if 50+ races
+        'both_sprint':      _fmt_pace(pace_buckets['both_sprint'],  min_races=50),
+        'both_mile':        _fmt_pace(pace_buckets['both_mile'],    min_races=50),
+        'both_middle':      _fmt_pace(pace_buckets['both_middle'],  min_races=50),
+        'both_staying':     _fmt_pace(pace_buckets['both_staying'], min_races=50),
+    }
+
     import gc
     gc.collect()
     db.session.expunge_all()
@@ -5765,6 +5851,7 @@ def api_combination_analysis():
         'combinations':          results_list,
         'total_found':           len(results_list),
         'total_horses_analysed': len(all_horse_rows),
+        'pace_angle':            pace_angle,
         'positive_single_factors': {
             'score_tiers':   sorted(pos_scores),
             'distances':     sorted(pos_dists),
