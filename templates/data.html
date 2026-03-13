@@ -1775,7 +1775,43 @@ function renderCombinationAnalysis(data) {
 
     html += `<div class="alert alert-info mt-3">
         <strong>💡 How to use this:</strong> These combinations reveal factors that consistently predict winners across all horses — not just your top picks. If a jockey, trainer, sire, weight or condition keeps appearing here, consider increasing its weight in your analyzer.
-    </div></div>`;
+    </div>`;
+
+    // ── Section 3: Hidden Edge Combinations ───────────────────────────────────
+    const hidden = data.hidden_edges || [];
+    const hiddenTwos   = hidden.filter(c => c.factor_count === 2);
+    const hiddenThrees = hidden.filter(c => c.factor_count === 3);
+
+    html += `
+        <div style="margin-top:32px;border-top:1px solid rgba(255,255,255,0.1);padding-top:24px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                <span style="font-size:18px">🔍</span>
+                <strong style="font-size:16px;color:var(--text-primary)">Hidden Edge Combinations</strong>
+            </div>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">
+                Neither factor was profitable on its own — but together they flip positive with 50+ races. 
+                These are combinations your scoring model <em>and</em> the market are both missing.
+                Unlike the confirmed edges above, these have not been pre-filtered by individual ROI.
+            </p>`;
+
+    if (hidden.length === 0) {
+        html += `<p class="text-muted" style="font-size:13px">No hidden edge combinations found with 50+ appearances yet. More race data will improve results.</p>`;
+    } else {
+        if (hiddenThrees.length > 0) {
+            html += `<h5 style="margin-bottom:12px;color:#ffc107">3-Factor Hidden Edges <span style="font-size:12px;color:var(--text-muted);font-weight:400">(${hiddenThrees.length} found)</span></h5>`;
+            html += comboTable(hiddenThrees);
+        }
+        if (hiddenTwos.length > 0) {
+            html += `<h5 style="margin:20px 0 12px;color:#ffc107">2-Factor Hidden Edges <span style="font-size:12px;color:var(--text-muted);font-weight:400">(${hiddenTwos.length} found)</span></h5>`;
+            html += comboTable(hiddenTwos);
+        }
+        html += `<div class="alert mt-3" style="background:rgba(255,193,7,0.1);border:1px solid rgba(255,193,7,0.3);color:var(--text-primary)">
+            <strong>⚠️ Use with caution:</strong> These combinations flipped positive together despite being individually unprofitable. 
+            Treat as leads to investigate further, not confirmed betting angles. Consider whether there is a logical reason the combination works before acting on it.
+        </div>`;
+    }
+
+    html += `</div></div>`;
 
     container.innerHTML = html;
 }
