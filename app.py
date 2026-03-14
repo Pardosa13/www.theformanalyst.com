@@ -1233,7 +1233,14 @@ def parse_notes_components(notes):
         (r'[+\-]?\s*3\.0\s*:\s*ONPACE in Staying', 'Running Position - OnPace Staying'),
         (r'[+\-]?\s*5\.0\s*:\s*MIDFIELD in Staying', 'Running Position - Midfield Staying'),
         (r'[+\-]?\s*2\.0\s*:\s*BACKMARKER in Staying', 'Running Position - Backmarker Staying'),
-
+        
+        # ====== HIDDEN EDGE COMBINATION BONUSES ======
+        (r'\+\s*10\.0\s*:\s*Hidden Edge.*Short price.*competitive effort', 'Hidden Edge - Short Price + Competitive Effort'),
+        (r'\+\s*10\.0\s*:\s*Hidden Edge.*Elite last 600m.*marginally below weight', 'Hidden Edge - Elite 600m + Marginally Below Weight'),
+        (r'\+\s*10\.0\s*:\s*Hidden Edge.*Good condition win rate.*narrow win', 'Hidden Edge - Good Condition WR + Narrow Win'),
+        (r'\+\s*15\.0\s*:\s*Hidden Edge.*Short price.*slightly below weight', 'Hidden Edge - Short Price + Slightly Below Weight'),
+        (r'\+\s*15\.0\s*:\s*Hidden Edge.*Short price.*best recent sectional', 'Hidden Edge - Short Price + Best Recent Sectional'),
+        
         # ====== PFAI BLEND ======
         (r'PFAI Score:\s*(9[0-9]|100)[\. ]', 'PFAI Score - 90+'),
         (r'PFAI Score:\s*(8[0-9])[\. ]', 'PFAI Score - 80-89'),
