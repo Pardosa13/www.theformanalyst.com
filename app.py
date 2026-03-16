@@ -6081,21 +6081,18 @@ def api_combination_analysis():
 @login_required
 def export_ml_data():
     """Export all race data with parsed scoring components AND raw CSV data for ML analysis"""
-    # Add admin check at the very top
     if not current_user.is_admin:
         flash('Access denied. Admin privileges required to download ML training data.', 'error')
         return redirect(url_for('analytics'))
     import csv
     from io import StringIO
     from flask import make_response
-    
-    # Apply same filters as data page
-    track_filter = request.args.get('track', '')
+
+    track_filter     = request.args.get('track', '')
     min_score_filter = request.args.get('min_score', type=float)
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-    
-    # Query all horses with predictions and results
+    date_from        = request.args.get('date_from', '')
+    date_to          = request.args.get('date_to', '')
+
     base_query = db.session.query(
         Meeting.date,
         Meeting.meeting_name,
@@ -6117,71 +6114,144 @@ def export_ml_data():
         Prediction.notes,
         Result.finish_position,
         Result.sp
-    ).join(Race, Horse.race_id == Race.id)\
-     .join(Meeting, Race.meeting_id == Meeting.id)\
-     .join(Prediction, Horse.id == Prediction.horse_id)\
-     .join(Result, Horse.id == Result.horse_id)\
+    ).join(Race,       Horse.race_id        == Race.id)\
+     .join(Meeting,    Race.meeting_id      == Meeting.id)\
+     .join(Prediction, Horse.id             == Prediction.horse_id)\
+     .join(Result,     Horse.id             == Result.horse_id)\
      .filter(Result.finish_position > 0)
-    
-    # Apply filters
+
     if track_filter:
         base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
         base_query = base_query.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         base_query = base_query.filter(Meeting.uploaded_at <= date_to)
-    
+
     query_results = base_query.order_by(Meeting.date.desc(), Race.race_number.asc()).limit(50000).all()
-    
+
     # First pass: collect all unique CSV field names
     all_csv_fields = set()
     for row in query_results:
-        csv_data = row[13]  # Horse.csv_data is at index 13
+        csv_data = row[13]
         if csv_data and isinstance(csv_data, dict):
             all_csv_fields.update(csv_data.keys())
-    
-    # Sort CSV fields alphabetically for consistent column ordering
     csv_field_names = sorted(list(all_csv_fields))
-    
-    # Create CSV in memory
+
     si = StringIO()
     writer = csv.writer(si)
-    
-    # Define parsed component columns
+
     component_columns = [
-        'ran_places', 'no_wins_last_10', 'elite_jockey', 'good_jockey', 'negative_jockey',
-        'good_trainer', 'track_win_rate', 'track_distance_form', 'distance_form',
-        'track_condition_score', 'distance_change', 'class_change',
-        'last_start_margin', 'days_since_run', 'form_price',
-        'first_second_up', 'sectional_weighted_avg', 'sectional_best_recent',
-        'sectional_consistency', 'weight_vs_avg', 'weight_change',
-        'combo_bonus', 'specialist_bonus','4yo_mare_combo',
-        # NEW: Race-day sectional bonuses
-        'raceday_fastest_in_race', 'raceday_sprint_fastest', 'raceday_mile_fastest',
-        'raceday_long_penalty', 'raceday_big_weight_fastest', 'raceday_weight_fastest',
-        'raceday_4yo_top20', 'raceday_mare_top20', 'raceday_soft_fastest',
-        'mega_4yo_soft_fast_weight', 'mega_sprint_weight_fastest', 
-        'mega_mile_weight_fastest', 'mega_4yo_mare_top20',
-        'raceday_bonus_total'
+        # Form
+        'ran_places',
+        # Jockey
+        'jockey_elite', 'jockey_strong', 'jockey_profitable', 'jockey_poor',
+        # Trainer
+        'trainer_elite', 'trainer_strong', 'trainer_profitable', 'trainer_poor',
+        # Track record
+        'track_win_exceptional', 'track_win_strong', 'track_win_good', 'track_win_moderate', 'track_win_low',
+        'track_no_wins', 'track_no_runs',
+        'track_podium_elite', 'track_podium_excellent', 'track_podium_strong', 'track_podium_good',
+        'track_podium_moderate', 'track_poor',
+        # Track+Distance
+        'td_win_exceptional', 'td_win_strong', 'td_win_good', 'td_win_moderate', 'td_win_low',
+        'td_no_wins', 'td_no_runs',
+        'td_podium_elite', 'td_podium_excellent', 'td_podium_strong', 'td_podium_good',
+        'td_podium_moderate', 'td_poor',
+        # Distance record
+        'dist_win_exceptional', 'dist_win_strong', 'dist_win_good', 'dist_win_moderate', 'dist_win_low',
+        'dist_no_wins', 'dist_no_runs',
+        'dist_podium_elite', 'dist_podium_excellent', 'dist_podium_strong', 'dist_podium_good',
+        'dist_podium_moderate', 'dist_poor',
+        # Condition
+        'cond_win_exceptional', 'cond_win_strong', 'cond_win_good', 'cond_win_moderate', 'cond_win_low',
+        'cond_no_wins', 'cond_no_runs',
+        'cond_podium_elite', 'cond_podium_excellent', 'cond_podium_strong', 'cond_podium_good',
+        'cond_podium_moderate', 'cond_poor',
+        # Distance change
+        'dist_change_step_up_large', 'dist_change_step_up_moderate',
+        'dist_change_drop_large', 'dist_change_drop_moderate',
+        # Class change
+        'class_drop', 'class_rise',
+        # Last start
+        'ls_dominant_win', 'ls_comfortable_win', 'ls_narrow_win', 'ls_photo_win',
+        'ls_narrow_loss', 'ls_close_loss_2nd', 'ls_close_loss_3rd',
+        'ls_competitive_effort', 'ls_beaten_clearly', 'ls_beaten_badly',
+        'ls_well_beaten_class_drop', 'ls_beaten_dropping', 'ls_beaten_clearly_dropping',
+        'ls_well_beaten', 'ls_demolished',
+        # Days since run
+        'days_quick_backup', 'days_fresh_return', 'days_too_fresh_200',
+        'days_too_fresh_250', 'days_too_fresh_1yr',
+        # Form price
+        'form_price_very_short', 'form_price_short', 'form_price_backed',
+        'form_price_slight_value', 'form_price_outsider',
+        # First/Second up
+        'first_up_winner', 'first_up_podium', 'second_up_winner', 'second_up_podium',
+        'first_up_undefeated', 'second_up_undefeated', 'spell_unclear',
+        # Weight vs field
+        'weight_well_below', 'weight_below', 'weight_slightly_below', 'weight_marginally_below',
+        'weight_near_avg', 'weight_marginally_above', 'weight_above',
+        'weight_well_above_2kg', 'weight_well_above_3kg',
+        # Weight change
+        'weight_dropped_3kg', 'weight_dropped_2kg', 'weight_dropped_1kg',
+        'weight_up_1kg', 'weight_up_2kg', 'weight_up_3kg',
+        # Career win rate
+        'career_win_elite', 'career_win_strong', 'career_win_poor',
+        # Age/Sex
+        'age_5yo_entire', 'age_8yo_mare', 'age_3yo', 'age_4yo',
+        'age_5yo_mare_penalty', 'age_67yo_mare_penalty',
+        'age_78yo_penalty', 'age_9yo_penalty', 'age_10yo_penalty',
+        'age_11yo_penalty', 'age_12yo_penalty', 'age_13yo_penalty',
+        # Colt
+        'colt_3yo', 'colt_base', 'colt_fast_sectional',
+        # Sire
+        'sire_elite_roi', 'sire_strong_roi', 'sire_positive_roi', 'sire_negative_roi',
+        # Specialist
+        'specialist_undefeated_td', 'specialist_undefeated_track',
+        'specialist_undefeated_dist', 'specialist_undefeated_cond',
+        'specialist_podium_td', 'specialist_podium_track',
+        'specialist_podium_dist', 'specialist_podium_cond',
+        # Historical sectionals
+        'sectional_weighted_avg', 'sectional_best_recent',
+        'sectional_consistency_excellent', 'sectional_consistency_good',
+        'sectional_consistency_fair', 'sectional_consistency_poor',
+        # API sectionals
+        'api_200m_elite', 'api_200m_very_good', 'api_200m_good', 'api_200m_average', 'api_200m_poor',
+        'api_400m_elite', 'api_400m_very_good', 'api_400m_good', 'api_400m_average', 'api_400m_poor',
+        'api_600m_elite', 'api_600m_very_good', 'api_600m_good', 'api_improving_trend',
+        # Running position
+        'pos_leader_sprint', 'pos_onpace_sprint', 'pos_midfield_sprint', 'pos_backmarker_sprint',
+        'pos_leader_mile', 'pos_onpace_mile', 'pos_midfield_mile', 'pos_backmarker_mile',
+        'pos_leader_middle', 'pos_onpace_middle', 'pos_midfield_middle', 'pos_backmarker_middle',
+        'pos_leader_staying', 'pos_onpace_staying', 'pos_midfield_staying', 'pos_backmarker_staying',
+        # Pace angle
+        'pace_sprint_leader_rundown',
+        # Hidden edges
+        'hidden_short_price_competitive', 'hidden_600m_elite_marginally_below',
+        'hidden_400m_elite_competitive', 'hidden_400m_elite_marginally_below',
+        'hidden_600m_elite_competitive', 'hidden_condition_win_narrow_win',
+        'hidden_short_price_slightly_below', 'hidden_short_price_best_sectional',
+        # PFAI
+        'pfai_90plus', 'pfai_80_89', 'pfai_70_79', 'pfai_60_69', 'pfai_sub60',
+        # Market expectation
+        'me_best_in_field', 'me_chronic_over', 'me_strong_over', 'me_moderate_out', 'me_above_avg',
+        'me_worst_in_field', 'me_chronic_under', 'me_significant_under', 'me_mild_under',
+        'me_below_avg', 'me_neutral',
     ]
-    
-    # Write header: basic info + predictions + results + parsed components + ALL raw CSV fields
+
     header = [
         'date', 'meeting_name', 'track', 'race_number', 'distance', 'race_class', 'track_condition',
         'horse_name', 'barrier', 'weight', 'jockey', 'trainer', 'form',
         'total_score', 'predicted_odds', 'win_probability',
-        'finish_position', 'sp', 'won', 'placed', 'roi'
+        'finish_position', 'sp', 'won', 'placed', 'roi',
     ] + component_columns + csv_field_names
-    
+
     writer.writerow(header)
-    
-    # Write data rows
+
     for row in query_results:
         date, meeting_name, race_num, distance, race_class, track_cond, \
         horse_id, horse_name, barrier, weight, jockey, trainer, form, csv_data, \
         score, pred_odds, win_prob, notes, finish_pos, sp = row
-        
-        # SAFE: Extract track from meeting name
+
         track = ''
         if meeting_name:
             if '_' in meeting_name:
@@ -6189,127 +6259,232 @@ def export_ml_data():
                 track = parts[1] if len(parts) > 1 else meeting_name
             else:
                 track = meeting_name
-        
-        # SAFE: Format date
+
         date_str = date.strftime('%Y-%m-%d') if date else ''
-        
-        # SAFE: Clean predicted odds
+
         try:
-            pred_odds_str = str(pred_odds or '').replace('$', '').strip()
-            pred_odds_clean = pred_odds_str if pred_odds_str else ''
+            pred_odds_clean = str(pred_odds or '').replace('$', '').strip()
         except:
             pred_odds_clean = ''
-        
-        # SAFE: Calculate derived fields
-        won = 1 if finish_pos == 1 else 0
+
+        won    = 1 if finish_pos == 1 else 0
         placed = 1 if finish_pos <= 3 else 0
-        
-        # SAFE: Calculate ROI
+
         try:
             roi = ((float(sp) - 1) * 100) if (finish_pos == 1 and sp) else -100
         except (ValueError, TypeError):
             roi = -100
-        
-        # Parse components from notes
+
         components = parse_notes_components(notes or '')
-        
-        # Map parsed components to simplified column names
+
         component_values = {
-            'ran_places': components.get('Ran Places', 0),
-            'no_wins_last_10': components.get('No Wins Last 10', 0),
-            'elite_jockey': components.get('Elite Jockey', 0),
-            '4yo_mare_combo': components.get('4yo Mare Combo', 0),
-            'good_jockey': components.get('Good Jockey', 0),
-            'negative_jockey': components.get('Negative Jockey', 0),
-            'good_trainer': components.get('Good Trainer', 0),
-            'track_win_rate': sum([
-                components.get('Track Win Rate - Exceptional', 0),
-                components.get('Track Win Rate - Strong', 0),
-                components.get('Track Win Rate - Good', 0),
-                components.get('Track Win Rate - Moderate', 0),
-                components.get('Undefeated at Track', 0)
-            ]),
-            'track_distance_form': components.get('Undefeated at Track+Distance', 0) or components.get('Distance Score Total', 0),
-            'distance_form': components.get('Undefeated at Distance', 0) or components.get('Distance Score Total', 0),
-            'track_condition_score': components.get('Track Condition Score Total', 0) or components.get('Undefeated on Condition', 0),
-            'distance_change': components.get('Longer Distance', 0) + components.get('Shorter Distance', 0),
-            'class_change': components.get('Class Drop', 0) + components.get('Class Rise', 0),
-            'last_start_margin': sum([
-                components.get('Last Start - Dominant Win', 0),
-                components.get('Last Start - Comfortable Win', 0),
-                components.get('Last Start - Narrow Win', 0),
-                components.get('Last Start - Photo Win', 0),
-                components.get('Last Start - Competitive Loss', 0),
-                components.get('Last Start - Close Loss', 0),
-                components.get('Last Start - Beaten Clearly', 0),
-                components.get('Last Start - Well Beaten', 0),
-                components.get('Last Start - Demolished', 0)
-            ]),
-            'days_since_run': components.get('Quick Backup', 0) + components.get('Too Fresh', 0),
-            'form_price': components.get('Form Price - Well Backed', 0) + components.get('Form Price - Neutral', 0) + components.get('Form Price - Negative', 0),
-            'first_second_up': sum([
-                components.get('First Up Winner', 0),
-                components.get('First Up Strong Podium', 0),
-                components.get('Second Up Winner', 0),
-                components.get('Second Up Strong Podium', 0),
-                components.get('First Up Specialist', 0),
-                components.get('Second Up Specialist', 0)
-            ]),
-            'sectional_weighted_avg': components.get('Sectional Weighted Avg', 0),
-            'sectional_best_recent': components.get('Sectional Best Recent', 0),
-            'sectional_consistency': sum([
-                components.get('Sectional Consistency - Excellent', 0),
-                components.get('Sectional Consistency - Good', 0),
-                components.get('Sectional Consistency - Fair', 0),
-                components.get('Sectional Consistency - Poor', 0)
-            ]),
-            'weight_vs_avg': sum([
-                components.get('Weight - Well Below Avg', 0),
-                components.get('Weight - Below Avg', 0),
-                components.get('Weight - Above Avg', 0),
-                components.get('Weight - Well Above Avg', 0)
-            ]),
-            'weight_change': components.get('Weight Drop', 0) + components.get('Weight Rise', 0),
-            'combo_bonus': components.get('Combo Bonus', 0),
-            'specialist_bonus': sum([
-                components.get('Specialist - Track', 0),
-                components.get('Specialist - Distance', 0),
-                components.get('Specialist - Track+Distance', 0),
-                components.get('Specialist - Condition', 0),
-                components.get('Specialist - Perfect Podium', 0)
-            ]),
-            # NEW: Race-day sectional bonuses
-            'raceday_fastest_in_race': components.get('Race-Day - Fastest in Race', 0),
-            'raceday_sprint_fastest': components.get('Race-Day - Sprint + Fastest', 0),
-            'raceday_mile_fastest': components.get('Race-Day - Mile + Fastest', 0),
-            'raceday_long_penalty': components.get('Race-Day - Long Distance Penalty', 0),
-            'raceday_big_weight_fastest': components.get('Race-Day - Big Weight Adv + Fastest', 0),
-            'raceday_weight_fastest': components.get('Race-Day - Weight Adv + Fastest', 0),
-            'raceday_4yo_top20': components.get('Race-Day - 4yo + Top 20%', 0),
-            'raceday_mare_top20': components.get('Race-Day - Mare + Top 20%', 0),
-            'raceday_soft_fastest': components.get('Race-Day - Soft + Fastest', 0),
-            'mega_4yo_soft_fast_weight': components.get('MEGA - 4yo+Soft+Fast+Weight', 0),
-            'mega_sprint_weight_fastest': components.get('MEGA - Sprint+Weight+Fastest', 0),
-            'mega_mile_weight_fastest': components.get('MEGA - Mile+Weight+Fastest', 0),
-            'mega_4yo_mare_top20': components.get('MEGA - 4yo Mare + Top 20%', 0),
-            'raceday_bonus_total': sum([
-                components.get('Race-Day - Fastest in Race', 0),
-                components.get('Race-Day - Sprint + Fastest', 0),
-                components.get('Race-Day - Mile + Fastest', 0),
-                components.get('Race-Day - Long Distance Penalty', 0),
-                components.get('Race-Day - Big Weight Adv + Fastest', 0),
-                components.get('Race-Day - Weight Adv + Fastest', 0),
-                components.get('Race-Day - 4yo + Top 20%', 0),
-                components.get('Race-Day - Mare + Top 20%', 0),
-                components.get('Race-Day - Soft + Fastest', 0),
-                components.get('MEGA - 4yo+Soft+Fast+Weight', 0),
-                components.get('MEGA - Sprint+Weight+Fastest', 0),
-                components.get('MEGA - Mile+Weight+Fastest', 0),
-                components.get('MEGA - 4yo Mare + Top 20%', 0)
-            ])
+            'ran_places':                         components.get('Ran Places', 0),
+            'jockey_elite':                       components.get('Jockey - Elite (50%+ ROI)', 0),
+            'jockey_strong':                      components.get('Jockey - Strong Value (20-50% ROI)', 0),
+            'jockey_profitable':                  components.get('Jockey - Profitable (0-20% ROI)', 0),
+            'jockey_poor':                        components.get('Jockey - Poor Value', 0),
+            'trainer_elite':                      components.get('Trainer - Elite (50%+ ROI)', 0),
+            'trainer_strong':                     components.get('Trainer - Strong Value (20-50% ROI)', 0),
+            'trainer_profitable':                 components.get('Trainer - Profitable (0-20% ROI)', 0),
+            'trainer_poor':                       components.get('Trainer - Poor Value', 0),
+            'track_win_exceptional':              components.get('Track Win Rate - Exceptional (51%+)', 0),
+            'track_win_strong':                   components.get('Track Win Rate - Strong (36-50%)', 0),
+            'track_win_good':                     components.get('Track Win Rate - Good (26-35%)', 0),
+            'track_win_moderate':                 components.get('Track Win Rate - Moderate (16-25%)', 0),
+            'track_win_low':                      components.get('Track Win Rate - Low (1-15%)', 0),
+            'track_no_wins':                      components.get('Track Win Rate - No Wins', 0),
+            'track_no_runs':                      components.get('Track - No Runs', 0),
+            'track_podium_elite':                 components.get('Track Podium Rate - Elite (85%+)', 0),
+            'track_podium_excellent':             components.get('Track Podium Rate - Excellent (70-84%)', 0),
+            'track_podium_strong':                components.get('Track Podium Rate - Strong (55-69%)', 0),
+            'track_podium_good':                  components.get('Track Podium Rate - Good (40-54%)', 0),
+            'track_podium_moderate':              components.get('Track Podium Rate - Moderate (25-39%)', 0),
+            'track_poor':                         components.get('Track - Poor Performance', 0),
+            'td_win_exceptional':                 components.get('Track+Distance Win Rate - Exceptional', 0),
+            'td_win_strong':                      components.get('Track+Distance Win Rate - Strong', 0),
+            'td_win_good':                        components.get('Track+Distance Win Rate - Good', 0),
+            'td_win_moderate':                    components.get('Track+Distance Win Rate - Moderate', 0),
+            'td_win_low':                         components.get('Track+Distance Win Rate - Low', 0),
+            'td_no_wins':                         components.get('Track+Distance Win Rate - No Wins', 0),
+            'td_no_runs':                         components.get('Track+Distance - No Runs', 0),
+            'td_podium_elite':                    components.get('Track+Distance Podium Rate - Elite', 0),
+            'td_podium_excellent':                components.get('Track+Distance Podium Rate - Excellent', 0),
+            'td_podium_strong':                   components.get('Track+Distance Podium Rate - Strong', 0),
+            'td_podium_good':                     components.get('Track+Distance Podium Rate - Good', 0),
+            'td_podium_moderate':                 components.get('Track+Distance Podium Rate - Moderate', 0),
+            'td_poor':                            components.get('Track+Distance - Poor Performance', 0),
+            'dist_win_exceptional':               components.get('Distance Win Rate - Exceptional (51%+)', 0),
+            'dist_win_strong':                    components.get('Distance Win Rate - Strong (36-50%)', 0),
+            'dist_win_good':                      components.get('Distance Win Rate - Good (26-35%)', 0),
+            'dist_win_moderate':                  components.get('Distance Win Rate - Moderate (16-25%)', 0),
+            'dist_win_low':                       components.get('Distance Win Rate - Low (1-15%)', 0),
+            'dist_no_wins':                       components.get('Distance Win Rate - No Wins', 0),
+            'dist_no_runs':                       components.get('Distance - No Runs', 0),
+            'dist_podium_elite':                  components.get('Distance Podium Rate - Elite (85%+)', 0),
+            'dist_podium_excellent':              components.get('Distance Podium Rate - Excellent (70-84%)', 0),
+            'dist_podium_strong':                 components.get('Distance Podium Rate - Strong (55-69%)', 0),
+            'dist_podium_good':                   components.get('Distance Podium Rate - Good (40-54%)', 0),
+            'dist_podium_moderate':               components.get('Distance Podium Rate - Moderate (25-39%)', 0),
+            'dist_poor':                          components.get('Distance - Poor Performance', 0),
+            'cond_win_exceptional':               components.get('Condition Win Rate - Exceptional (51%+)', 0),
+            'cond_win_strong':                    components.get('Condition Win Rate - Strong (36-50%)', 0),
+            'cond_win_good':                      components.get('Condition Win Rate - Good (26-35%)', 0),
+            'cond_win_moderate':                  components.get('Condition Win Rate - Moderate (16-25%)', 0),
+            'cond_win_low':                       components.get('Condition Win Rate - Low (1-15%)', 0),
+            'cond_no_wins':                       components.get('Condition Win Rate - No Wins', 0),
+            'cond_no_runs':                       components.get('Condition - No Runs', 0),
+            'cond_podium_elite':                  components.get('Condition Podium Rate - Elite (85%+)', 0),
+            'cond_podium_excellent':              components.get('Condition Podium Rate - Excellent (70-84%)', 0),
+            'cond_podium_strong':                 components.get('Condition Podium Rate - Strong (55-69%)', 0),
+            'cond_podium_good':                   components.get('Condition Podium Rate - Good (40-54%)', 0),
+            'cond_podium_moderate':               components.get('Condition Podium Rate - Moderate (25-39%)', 0),
+            'cond_poor':                          components.get('Condition - Poor Performance', 0),
+            'dist_change_step_up_large':          components.get('Distance Change - Step Up Large (400m+)', 0),
+            'dist_change_step_up_moderate':       components.get('Distance Change - Step Up Moderate (200-400m)', 0),
+            'dist_change_drop_large':             components.get('Distance Change - Drop Back Large (400m+)', 0),
+            'dist_change_drop_moderate':          components.get('Distance Change - Drop Back Moderate (200-400m)', 0),
+            'class_drop':                         components.get('Class Drop', 0),
+            'class_rise':                         components.get('Class Rise', 0),
+            'ls_dominant_win':                    components.get('Last Start - Dominant Win (5L+)', 0),
+            'ls_comfortable_win':                 components.get('Last Start - Comfortable Win (2-5L)', 0),
+            'ls_narrow_win':                      components.get('Last Start - Narrow Win (0.5-2L)', 0),
+            'ls_photo_win':                       components.get('Last Start - Photo Win (<0.5L)', 0),
+            'ls_narrow_loss':                     components.get('Last Start - Narrow Loss (≤1L)', 0),
+            'ls_close_loss_2nd':                  components.get('Last Start - Close Loss 2nd (1-2L)', 0),
+            'ls_close_loss_3rd':                  components.get('Last Start - Close Loss 3rd (1-2L)', 0),
+            'ls_competitive_effort':              components.get('Last Start - Competitive Effort (≤3L)', 0),
+            'ls_beaten_clearly':                  components.get('Last Start - Beaten Clearly (3-6L)', 0),
+            'ls_beaten_badly':                    components.get('Last Start - Beaten Badly Placed', 0),
+            'ls_well_beaten_class_drop':          components.get('Last Start - Well Beaten + Class Drop', 0),
+            'ls_beaten_dropping':                 components.get('Last Start - Beaten + Dropping Class', 0),
+            'ls_beaten_clearly_dropping':         components.get('Last Start - Beaten Clearly + Dropping', 0),
+            'ls_well_beaten':                     components.get('Last Start - Well Beaten (6-10L)', 0),
+            'ls_demolished':                      components.get('Last Start - Demolished (10L+)', 0),
+            'days_quick_backup':                  components.get('Days Since Run - Quick Backup (≤7 days)', 0),
+            'days_fresh_return':                  components.get('Days Since Run - Fresh Return (150-199 days)', 0),
+            'days_too_fresh_200':                 components.get('Days Since Run - Too Fresh (200+ days)', 0),
+            'days_too_fresh_250':                 components.get('Days Since Run - Too Fresh (250+ days)', 0),
+            'days_too_fresh_1yr':                 components.get('Days Since Run - Too Fresh (1+ year)', 0),
+            'form_price_very_short':              components.get('Form Price - Very Short ($1-$2)', 0),
+            'form_price_short':                   components.get('Form Price - Short ($2-$5)', 0),
+            'form_price_backed':                  components.get('Form Price - Backed ($5-$13)', 0),
+            'form_price_slight_value':            components.get('Form Price - Slight Value ($12-$14)', 0),
+            'form_price_outsider':                components.get('Form Price - Outsider ($15+)', 0),
+            'first_up_winner':                    components.get('First Up - Has Won First Up', 0),
+            'first_up_podium':                    components.get('First Up - Strong Podium Rate', 0),
+            'second_up_winner':                   components.get('Second Up - Has Won Second Up', 0),
+            'second_up_podium':                   components.get('Second Up - Strong Podium Rate', 0),
+            'first_up_undefeated':                components.get('First Up - Specialist Undefeated', 0),
+            'second_up_undefeated':               components.get('Second Up - Specialist Undefeated', 0),
+            'spell_unclear':                      components.get('Spell Status - Unclear', 0),
+            'weight_well_below':                  components.get('Weight vs Field - Well Below (3kg+)', 0),
+            'weight_below':                       components.get('Weight vs Field - Below (2-3kg)', 0),
+            'weight_slightly_below':              components.get('Weight vs Field - Slightly Below (1-2kg)', 0),
+            'weight_marginally_below':            components.get('Weight vs Field - Marginally Below (0.5-1kg)', 0),
+            'weight_near_avg':                    components.get('Weight vs Field - Near Average', 0),
+            'weight_marginally_above':            components.get('Weight vs Field - Marginally Above', 0),
+            'weight_above':                       components.get('Weight vs Field - Above (1-2kg)', 0),
+            'weight_well_above_2kg':              components.get('Weight vs Field - Well Above (2-3kg)', 0),
+            'weight_well_above_3kg':              components.get('Weight vs Field - Well Above (3kg+)', 0),
+            'weight_dropped_3kg':                 components.get('Weight Change - Dropped 3kg+', 0),
+            'weight_dropped_2kg':                 components.get('Weight Change - Dropped 2-3kg', 0),
+            'weight_dropped_1kg':                 components.get('Weight Change - Dropped 1-2kg', 0),
+            'weight_up_1kg':                      components.get('Weight Change - Up 1-2kg', 0),
+            'weight_up_2kg':                      components.get('Weight Change - Up 2-3kg', 0),
+            'weight_up_3kg':                      components.get('Weight Change - Up 3kg+', 0),
+            'career_win_elite':                   components.get('Career Win Rate - Elite 40%+', 0),
+            'career_win_strong':                  components.get('Career Win Rate - Strong 30-40%', 0),
+            'career_win_poor':                    components.get('Career Win Rate - Poor <10%', 0),
+            'age_5yo_entire':                     components.get('Age/Sex - 5yo Horse (Entire)', 0),
+            'age_8yo_mare':                       components.get('Age/Sex - 8yo Mare', 0),
+            'age_3yo':                            components.get('Age/Sex - 3yo', 0),
+            'age_4yo':                            components.get('Age/Sex - 4yo', 0),
+            'age_5yo_mare_penalty':               components.get('Age/Sex - 5yo Mare Penalty', 0),
+            'age_67yo_mare_penalty':              components.get('Age/Sex - 6-7yo Mare Penalty', 0),
+            'age_78yo_penalty':                   components.get('Age/Sex - 7-8yo Penalty', 0),
+            'age_9yo_penalty':                    components.get('Age/Sex - 9yo Penalty', 0),
+            'age_10yo_penalty':                   components.get('Age/Sex - 10yo Penalty', 0),
+            'age_11yo_penalty':                   components.get('Age/Sex - 11yo Penalty', 0),
+            'age_12yo_penalty':                   components.get('Age/Sex - 12yo Penalty', 0),
+            'age_13yo_penalty':                   components.get('Age/Sex - 13+yo Penalty', 0),
+            'colt_3yo':                           components.get('Colt - 3yo Colt', 0),
+            'colt_base':                          components.get('Colt - Base Bonus', 0),
+            'colt_fast_sectional':                components.get('Colt - Fast Sectional + Colt', 0),
+            'sire_elite_roi':                     components.get('Sire - Elite ROI (50%+)', 0),
+            'sire_strong_roi':                    components.get('Sire - Strong ROI (20-50%)', 0),
+            'sire_positive_roi':                  components.get('Sire - Positive ROI (0-20%)', 0),
+            'sire_negative_roi':                  components.get('Sire - Negative ROI', 0),
+            'specialist_undefeated_td':           components.get('Specialist - Undefeated Track+Distance', 0),
+            'specialist_undefeated_track':        components.get('Specialist - Undefeated Track', 0),
+            'specialist_undefeated_dist':         components.get('Specialist - Undefeated Distance', 0),
+            'specialist_undefeated_cond':         components.get('Specialist - Undefeated Condition', 0),
+            'specialist_podium_td':               components.get('Specialist - Perfect Podium Track+Distance', 0),
+            'specialist_podium_track':            components.get('Specialist - Perfect Podium Track', 0),
+            'specialist_podium_dist':             components.get('Specialist - Perfect Podium Distance', 0),
+            'specialist_podium_cond':             components.get('Specialist - Perfect Podium Condition', 0),
+            'sectional_weighted_avg':             components.get('Sectional History - Weighted Avg', 0),
+            'sectional_best_recent':              components.get('Sectional History - Best Recent', 0),
+            'sectional_consistency_excellent':    components.get('Sectional Consistency - Excellent', 0),
+            'sectional_consistency_good':         components.get('Sectional Consistency - Good', 0),
+            'sectional_consistency_fair':         components.get('Sectional Consistency - Fair', 0),
+            'sectional_consistency_poor':         components.get('Sectional Consistency - Poor', 0),
+            'api_200m_elite':                     components.get('API Sectional - Last 200m Elite', 0),
+            'api_200m_very_good':                 components.get('API Sectional - Last 200m Very Good', 0),
+            'api_200m_good':                      components.get('API Sectional - Last 200m Good', 0),
+            'api_200m_average':                   components.get('API Sectional - Last 200m Average', 0),
+            'api_200m_poor':                      components.get('API Sectional - Last 200m Poor', 0),
+            'api_400m_elite':                     components.get('API Sectional - Last 400m Elite', 0),
+            'api_400m_very_good':                 components.get('API Sectional - Last 400m Very Good', 0),
+            'api_400m_good':                      components.get('API Sectional - Last 400m Good', 0),
+            'api_400m_average':                   components.get('API Sectional - Last 400m Average', 0),
+            'api_400m_poor':                      components.get('API Sectional - Last 400m Poor', 0),
+            'api_600m_elite':                     components.get('API Sectional - Last 600m Elite', 0),
+            'api_600m_very_good':                 components.get('API Sectional - Last 600m Very Good', 0),
+            'api_600m_good':                      components.get('API Sectional - Last 600m Good', 0),
+            'api_improving_trend':                components.get('API Sectional - Improving Trend', 0),
+            'pos_leader_sprint':                  components.get('Running Position - Leader Sprint', 0),
+            'pos_onpace_sprint':                  components.get('Running Position - OnPace Sprint', 0),
+            'pos_midfield_sprint':                components.get('Running Position - Midfield Sprint', 0),
+            'pos_backmarker_sprint':              components.get('Running Position - Backmarker Sprint', 0),
+            'pos_leader_mile':                    components.get('Running Position - Leader Mile', 0),
+            'pos_onpace_mile':                    components.get('Running Position - OnPace Mile', 0),
+            'pos_midfield_mile':                  components.get('Running Position - Midfield Mile', 0),
+            'pos_backmarker_mile':                components.get('Running Position - Backmarker Mile', 0),
+            'pos_leader_middle':                  components.get('Running Position - Leader Middle', 0),
+            'pos_onpace_middle':                  components.get('Running Position - OnPace Middle', 0),
+            'pos_midfield_middle':                components.get('Running Position - Midfield Middle', 0),
+            'pos_backmarker_middle':              components.get('Running Position - Backmarker Middle', 0),
+            'pos_leader_staying':                 components.get('Running Position - Leader Staying', 0),
+            'pos_onpace_staying':                 components.get('Running Position - OnPace Staying', 0),
+            'pos_midfield_staying':               components.get('Running Position - Midfield Staying', 0),
+            'pos_backmarker_staying':             components.get('Running Position - Backmarker Staying', 0),
+            'pace_sprint_leader_rundown':         components.get('Pace Angle - Sprint Leader Run Down', 0),
+            'hidden_short_price_competitive':     components.get('Hidden Edge - Short Price + Competitive Effort', 0),
+            'hidden_600m_elite_marginally_below': components.get('Hidden Edge - Elite 600m + Marginally Below Weight', 0),
+            'hidden_400m_elite_competitive':      components.get('Hidden Edge - Elite 400m + Competitive Effort', 0),
+            'hidden_400m_elite_marginally_below': components.get('Hidden Edge - Elite 400m + Marginally Below Weight', 0),
+            'hidden_600m_elite_competitive':      components.get('Hidden Edge - Elite 600m + Competitive Effort', 0),
+            'hidden_condition_win_narrow_win':    components.get('Hidden Edge - Good Condition WR + Narrow Win', 0),
+            'hidden_short_price_slightly_below':  components.get('Hidden Edge - Short Price + Slightly Below Weight', 0),
+            'hidden_short_price_best_sectional':  components.get('Hidden Edge - Short Price + Best Recent Sectional', 0),
+            'pfai_90plus':                        components.get('PFAI Score - 90+', 0),
+            'pfai_80_89':                         components.get('PFAI Score - 80-89', 0),
+            'pfai_70_79':                         components.get('PFAI Score - 70-79', 0),
+            'pfai_60_69':                         components.get('PFAI Score - 60-69', 0),
+            'pfai_sub60':                         components.get('PFAI Score - <60', 0),
+            'me_best_in_field':                   components.get('Market Expectation - Best in Field', 0),
+            'me_chronic_over':                    components.get('Market Expectation - Chronic Overperformer', 0),
+            'me_strong_over':                     components.get('Market Expectation - Strong Overperformer', 0),
+            'me_moderate_out':                    components.get('Market Expectation - Moderate Outperformer', 0),
+            'me_above_avg':                       components.get('Market Expectation - Above Average', 0),
+            'me_worst_in_field':                  components.get('Market Expectation - Worst in Field', 0),
+            'me_chronic_under':                   components.get('Market Expectation - Chronic Underperformer', 0),
+            'me_significant_under':               components.get('Market Expectation - Significant Underperformer', 0),
+            'me_mild_under':                      components.get('Market Expectation - Mild Underperformer', 0),
+            'me_below_avg':                       components.get('Market Expectation - Below Average', 0),
+            'me_neutral':                         components.get('Market Expectation - Neutral', 0),
         }
-        
-        # Build row with safe defaults
+
         data_row = [
             date_str,
             meeting_name or '',
@@ -6331,21 +6506,18 @@ def export_ml_data():
             sp or '',
             won,
             placed,
-            roi
+            roi,
         ]
-        
-        # Add parsed component values
+
         for col in component_columns:
             data_row.append(component_values.get(col, 0))
-        
-        # Add ALL raw CSV field values (in same order as header)
+
         csv_data_dict = csv_data if isinstance(csv_data, dict) else {}
         for field_name in csv_field_names:
             data_row.append(csv_data_dict.get(field_name, ''))
-        
+
         writer.writerow(data_row)
-    
-    # Create response
+
     output = make_response(si.getvalue())
     filename = f"ml_complete_data_{datetime.now().strftime('%Y%m%d')}"
     if track_filter:
@@ -6353,11 +6525,10 @@ def export_ml_data():
     if min_score_filter:
         filename += f"_min{int(min_score_filter)}"
     filename += ".csv"
-    
+
     output.headers["Content-Disposition"] = f"attachment; filename={filename}"
     output.headers["Content-type"] = "text/csv"
-    
-    # CLEANUP before return
+
     del query_results
     del si
     del writer
