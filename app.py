@@ -977,7 +977,7 @@ def parse_notes_components(notes):
     patterns = [
 
         # ====== LAST 10 FORM ======
-        (r'([+-]?\s*[\d.]+)\s*:\s*Ran places:', 'Ran Places'),
+        (r'([+-]?\s*[\d.]+)\s*:\s*Ran places:', '_ran_places_dynamic'),
 
         # ====== JOCKEYS ======
         (r'\+\s*25\.0\s*:\s*Elite value jockey', 'Jockey - Elite (50%+ ROI)'),
@@ -1074,8 +1074,8 @@ def parse_notes_components(notes):
         (r'[~+\-]\s*[\d.]+\s*:\s*Drop(?:ping)? back.*\(200-400m\)', 'Distance Change - Drop Back Moderate (200-400m)'),
 
         # ====== CLASS CHANGE ======
-        (r'\+\s*([\d.]+):\s*Stepping DOWN', 'Class Drop'),
-        (r'(-[\d.]+):\s*Stepping UP', 'Class Rise'),
+        (r'\+\s*([\d.]+):\s*Stepping DOWN', '_class_drop_dynamic'),
+        (r'(-[\d.]+):\s*Stepping UP', '_class_rise_dynamic'),
 
         # ====== LAST START - WINNERS ======
         (r'\+\s*10\.0\s*:\s*Dominant last.?start win', 'Last Start - Dominant Win (5L+)'),
@@ -1242,7 +1242,8 @@ def parse_notes_components(notes):
         (r'\+\s*10\.0\s*:\s*Hidden Edge.*Elite last 600m.*competitive effort', 'Hidden Edge - Elite 600m + Competitive Effort'),
         (r'\+\s*10\.0\s*:\s*Hidden Edge.*Good condition win rate.*narrow win', 'Hidden Edge - Good Condition WR + Narrow Win'),
         (r'\+\s*15\.0\s*:\s*Hidden Edge.*Short price.*slightly below weight', 'Hidden Edge - Short Price + Slightly Below Weight'),
-        (r'\+\s*10\.0\s*:\s*Hidden Edge.*Short price.*best recent sectional', 'Hidden Edge - Short Price + Best Recent Sectional'),
+        (r'\+\s*10\.0\s*:\s*Hidden Edge.*Short price.*best recent sectional strong', 'Hidden Edge - Short Price + Best Recent Sectional Strong'),
+        (r'\+\s*5\.0\s*:\s*Hidden Edge.*Short price.*best recent sectional weak', 'Hidden Edge - Short Price + Best Recent Sectional Weak'),
         
         # ====== PFAI BLEND ======
         (r'PFAI Score:\s*(9[0-9]|100)[\. ]', 'PFAI Score - 90+'),
@@ -1360,6 +1361,41 @@ def parse_notes_components(notes):
                         components['Track Condition Score Total - Moderate (4-7)'] = val
                     else:
                         components['Track Condition Score Total - Low (0-3)'] = val
+                except (ValueError, IndexError):
+                    pass
+                continue
+
+            if name == '_ran_places_dynamic':
+                try:
+                    val = float(match.group(1).replace(' ', '').replace('+', ''))
+                    if val >= 8:
+                        components['Ran Places - Strong (8+)'] = val
+                    elif val >= 3:
+                        components['Ran Places - Moderate (3-7)'] = val
+                    else:
+                        components['Ran Places - Low (0-2)'] = val
+                except (ValueError, IndexError):
+                    pass
+                continue
+
+            if name == '_class_drop_dynamic':
+                try:
+                    val = float(match.group(1))
+                    if val >= 10:
+                        components['Class Drop - Large (10+)'] = val
+                    else:
+                        components['Class Drop - Small (0-9)'] = val
+                except (ValueError, IndexError):
+                    pass
+                continue
+
+            if name == '_class_rise_dynamic':
+                try:
+                    val = float(match.group(1))
+                    if val <= -10:
+                        components['Class Rise - Large (10+)'] = val
+                    else:
+                        components['Class Rise - Small (0-9)'] = val
                 except (ValueError, IndexError):
                     pass
                 continue
