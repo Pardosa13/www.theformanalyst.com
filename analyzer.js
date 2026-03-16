@@ -4393,7 +4393,6 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
 
         // Best recent sectional — POSITIVE score only, split by strength
         const hasBestRecentStrong = /\+\s*([5-9][\d.]*|[1-9]\d[\d.]*)\s*:\s*best of last \d+/i.test(allNotes);
-        const hasBestRecentWeak   = /\+\s*([1-4][\d.]*)\s*:\s*best of last \d+/i.test(allNotes);
 
         // Form price — raw CSV field ($2.01-$5.00)
         const isFormPriceShort    = (() => {
