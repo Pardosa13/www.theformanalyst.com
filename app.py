@@ -1009,7 +1009,7 @@ def parse_notes_components(notes):
         (r'\+\s*1\.0\s*:\s*Moderate podium rate.*at this track\b', 'Track Podium Rate - Moderate (25-39%)'),
         # FIX: also catches "Poor podium rate" phrasing
         (r'-\s*5\.0\s*:\s*Poor performance at this track|Poor podium rate.*at this track', 'Track - Poor Performance'),
-        (r'=\s*([\d.]+)\s*:\s*Total track score', 'Track Score Total'),
+        (r'=\s*([\d.]+)\s*:\s*Total track score', '_track_score_dynamic'),
 
         # ====== TRACK+DISTANCE RECORD - WIN RATES ======
         (r'\+\s*8\.0\s*:\s*Exceptional win rate.*at this track\+distance', 'Track+Distance Win Rate - Exceptional'),
@@ -1027,7 +1027,7 @@ def parse_notes_components(notes):
         (r'\+\s*4\.0\s*:\s*Good podium rate.*at this track\+distance', 'Track+Distance Podium Rate - Good'),
         (r'\+\s*2\.0\s*:\s*Moderate podium rate.*at this track\+distance', 'Track+Distance Podium Rate - Moderate'),
         (r'-\s*6\.0\s*:\s*Poor performance at this track\+distance', 'Track+Distance - Poor Performance'),
-        (r'=\s*([\d.]+)\s*:\s*Total track\+distance score', 'Track+Distance Score Total'),
+        (r'=\s*([\d.]+)\s*:\s*Total track\+distance score', '_td_score_dynamic'),
 
         # ====== DISTANCE RECORD - WIN RATES ======
         (r'\+\s*8\.0\s*:\s*Exceptional win rate.*at this distance\b', 'Distance Win Rate - Exceptional (51%+)'),
@@ -1045,7 +1045,7 @@ def parse_notes_components(notes):
         (r'\+\s*4\.0\s*:\s*Good podium rate.*at this distance\b', 'Distance Podium Rate - Good (40-54%)'),
         (r'\+\s*2\.0\s*:\s*Moderate podium rate.*at this distance\b', 'Distance Podium Rate - Moderate (25-39%)'),
         (r'-\s*6\.0\s*:\s*Poor performance at this distance\b', 'Distance - Poor Performance'),
-        (r'=\s*([\d.]+)\s*:\s*Total distance score', 'Distance Score Total'),
+        (r'=\s*([\d.]+)\s*:\s*Total distance score', '_dist_score_dynamic'),
 
         # ====== TRACK CONDITION - WIN RATES ======
         (r'\+\s*12\.0\s*:\s*Exceptional win rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Win Rate - Exceptional (51%+)'),
@@ -1063,7 +1063,7 @@ def parse_notes_components(notes):
         (r'\+\s*6\.0\s*:\s*Good podium rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Podium Rate - Good (40-54%)'),
         (r'\+\s*3\.0\s*:\s*Moderate podium rate.*on (good|soft|heavy|firm|synthetic)', 'Condition Podium Rate - Moderate (25-39%)'),
         (r'-\s*8\.0\s*:\s*Poor performance on (good|soft|heavy|firm|synthetic)', 'Condition - Poor Performance'),
-        (r'=\s*([\d.]+)\s*:\s*Total track condition score', 'Track Condition Score Total'),
+        (r'=\s*([\d.]+)\s*:\s*Total track condition score', '_cond_score_dynamic'),
 
         # ====== DISTANCE CHANGE ======
         # FIX: old patterns matched "Stepping up Xm in distance" — new format uses bracketed ranges
@@ -1189,8 +1189,8 @@ def parse_notes_components(notes):
 
         # ====== HISTORICAL SECTIONALS (CSV) ======
         # FIX: old pattern required leading + but new format uses +- prefix for negative z-scores
-        (r'[+\-]?[\d.]+\s*:\s*weighted avg \(z=', 'Sectional History - Weighted Avg'),
-        (r'[+\-][\d.]+\s*:\s*best of last \d+', 'Sectional History - Best Recent'),
+        (r'(\+[\d.]+)\s*:\s*weighted avg \(z=', 'Sectional History - Weighted Avg'),
+        (r'(\+[\d.]+)\s*:\s*best of last \d+', 'Sectional History - Best Recent'),
         (r'\+\s*([\d.]+):\s*consistency - excellent', 'Sectional Consistency - Excellent'),
         (r'\+\s*([\d.]+):\s*consistency - good', 'Sectional Consistency - Good'),
         (r'[+\-]?\s*([\d.]+):\s*consistency - fair', 'Sectional Consistency - Fair'),
