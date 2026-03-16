@@ -1237,9 +1237,12 @@ def parse_notes_components(notes):
         # ====== HIDDEN EDGE COMBINATION BONUSES ======
         (r'\+\s*10\.0\s*:\s*Hidden Edge.*Short price.*competitive effort', 'Hidden Edge - Short Price + Competitive Effort'),
         (r'\+\s*10\.0\s*:\s*Hidden Edge.*Elite last 600m.*marginally below weight', 'Hidden Edge - Elite 600m + Marginally Below Weight'),
+        (r'\+\s*10\.0\s*:\s*Hidden Edge.*Elite last 400m.*competitive effort', 'Hidden Edge - Elite 400m + Competitive Effort'),
+        (r'\+\s*10\.0\s*:\s*Hidden Edge.*Elite last 400m.*marginally below weight', 'Hidden Edge - Elite 400m + Marginally Below Weight'),
+        (r'\+\s*10\.0\s*:\s*Hidden Edge.*Elite last 600m.*competitive effort', 'Hidden Edge - Elite 600m + Competitive Effort'),
         (r'\+\s*10\.0\s*:\s*Hidden Edge.*Good condition win rate.*narrow win', 'Hidden Edge - Good Condition WR + Narrow Win'),
         (r'\+\s*15\.0\s*:\s*Hidden Edge.*Short price.*slightly below weight', 'Hidden Edge - Short Price + Slightly Below Weight'),
-        (r'\+\s*15\.0\s*:\s*Hidden Edge.*Short price.*best recent sectional', 'Hidden Edge - Short Price + Best Recent Sectional'),
+        (r'\+\s*10\.0\s*:\s*Hidden Edge.*Short price.*best recent sectional', 'Hidden Edge - Short Price + Best Recent Sectional'),
         
         # ====== PFAI BLEND ======
         (r'PFAI Score:\s*(9[0-9]|100)[\. ]', 'PFAI Score - 90+'),
