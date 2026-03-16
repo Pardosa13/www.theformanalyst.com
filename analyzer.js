@@ -194,42 +194,41 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     // Form price $2-$5 check (used in multiple combos below)
     const formPrice = parseFloat(horseRow['form price']) || 0;
     const isFormPriceShort = formPrice >= 2.0 && formPrice <= 5.0;
-    // Last start checks
+
+    // Last start checks — read directly from raw data (always available here)
     const isCompetitiveEffort = (lastStartPosition >= 4 && lastStartMargin <= 3.0);
     const isNarrowWin = (lastStartPosition === 1 && lastStartMargin >= 0.5 && lastStartMargin <= 2.0);
-    // Weight vs field checks — regex to handle variable spacing in notes
-    const isWeightMarginallyBelow = /\+\s*3\.0\s*:\s*Weight.*below race avg/i.test(notes);
-    const isWeightSlightlyBelow   = /\+\s*6\.0\s*:\s*Weight.*below race avg/i.test(notes);
-    // Sectional checks
-    const isLast600Elite          = /Last 600m.*ELITE/i.test(notes);
-    const isSectionalBestRecent   = /best of last \d+/i.test(notes);
-    // Condition win rate good check
-    const isConditionWinGood      = /\+\s*8\.0\s*:\s*Good win rate.*on (good|soft|heavy|firm|synthetic)/i.test(notes);
+
+    // API Last 600m Elite — read directly from horseRow (available here)
+    const last600Rank = parseInt(horseRow['last600timerank']) || 99;
+    const isLast600Elite = last600Rank >= 1 && last600Rank <= 3;
+
+    // Condition win rate good — parse directly from horse record (available here)
+    const conditionRecordRaw = horseRow['horse record ' + trackCondition];
+    const isConditionWinGood = (() => {
+        if (!conditionRecordRaw || typeof conditionRecordRaw !== 'string') return false;
+        const nums = conditionRecordRaw.split(/[:\-]/).map(s => Number(s.trim()));
+        if (nums.length !== 4 || nums[0] === 0) return false;
+        const winRate = nums[1] / nums[0];
+        return winRate >= 0.26 && winRate < 0.36; // matches +8.0 : Good win rate band
+    })();
+
+    // Weight and sectional combos cannot run here — those scores are calculated
+    // after calculateScore() returns. They are handled in analyzeCSV() below.
+
     // 1. Form Price Short + Competitive Effort — 179 races +102.3% → +10
     if (isFormPriceShort && isCompetitiveEffort) {
         score += 10;
         notes += `+10.0 : Hidden Edge — Short price ($2-$5) + competitive effort last start (+102.3% ROI pattern)\n`;
     }
-    // 2. API Sectional Last 600m Elite + Weight Marginally Below — 167 races +66.7% → +10
-    if (isLast600Elite && isWeightMarginallyBelow) {
-        score += 10;
-        notes += `+10.0 : Hidden Edge — Elite last 600m sectional + marginally below weight (+66.7% ROI pattern)\n`;
-    }
+    // 2. API Sectional Last 600m Elite + Weight Marginally Below — handled in analyzeCSV()
     // 3. Condition Win Rate Good + Narrow Win Last Start — 152 races +62.1% → +10
     if (isConditionWinGood && isNarrowWin) {
         score += 10;
         notes += `+10.0 : Hidden Edge — Good condition win rate + narrow win last start (+62.1% ROI pattern)\n`;
     }
-    // 4. Form Price Short + Weight Slightly Below — 238 races +59.3% → +15
-    if (isFormPriceShort && isWeightSlightlyBelow) {
-        score += 15;
-        notes += `+15.0 : Hidden Edge — Short price ($2-$5) + slightly below weight (+59.3% ROI pattern)\n`;
-    }
-    // 5. Form Price Short + Sectional History Best Recent — 286 races +49.9% → +15
-    if (isFormPriceShort && isSectionalBestRecent) {
-        score += 15;
-        notes += `+15.0 : Hidden Edge — Short price ($2-$5) + best recent sectional (+49.9% ROI pattern)\n`;
-    }
+    // 4. Form Price Short + Weight Slightly Below — handled in analyzeCSV()
+    // 5. Form Price Short + Sectional History Best Recent — handled in analyzeCSV()
     
     // Check horse weight and score
     var [a, b] = checkWeight(horseRow['horse weight'], horseRow['horse claim']);
