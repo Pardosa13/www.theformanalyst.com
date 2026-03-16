@@ -4439,16 +4439,10 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             notes += `+15.0 : Hidden Edge — Short price ($2-$5) + slightly below weight (+59.3% ROI pattern)\n`;
         }
 
-        // 8. Form Price Short ($2-$5) + Best Recent Sectional Strong — fires on positive sectionals only
+        // 8. Form Price Short ($2-$5) + Best Recent Sectional
         if (isFormPriceShort && hasBestRecentStrong) {
             score += 10;
-            notes += `+10.0 : Hidden Edge — Short price ($2-$5) + best recent sectional strong (+49.9% ROI pattern)\n`;
-        }
-
-        // 9. Form Price Short ($2-$5) + Best Recent Sectional Weak — smaller bonus
-        if (isFormPriceShort && hasBestRecentWeak) {
-            score += 5;
-            notes += `+5.0 : Hidden Edge — Short price ($2-$5) + best recent sectional weak (+49.9% ROI pattern)\n`;
+            notes += `+10.0 : Hidden Edge — Short price ($2-$5) + best recent sectional\n`;
         }
         const matchingME = marketExpectationScores.find(m =>
     parseInt(m.race) === parseInt(raceNumber) &&
