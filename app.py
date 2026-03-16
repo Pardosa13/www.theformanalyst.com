@@ -1312,7 +1312,7 @@ def parse_notes_components(notes):
                 except (ValueError, IndexError):
                     pass
                 continue
-if name == '_track_score_dynamic':
+            if name == '_track_score_dynamic':
                 try:
                     val = float(match.group(1))
                     if val >= 8:
