@@ -4371,21 +4371,31 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
         // ==========================================
         // HIDDEN EDGE COMBINATION BONUSES
         // Exact note string matching from analyzer.js output
+        // Matched against allNotes which combines all note sources
         // ==========================================
 
-        // All notes assembled at this point
         const allNotes = notes + (matchingWeight ? matchingWeight.weightNote : '') + (matchingHorse ? matchingHorse.sectionalNote : '');
 
-        // Exact component detections
+        // API Sectional detections — selective (rank 1-3 only)
         const isLast600Elite      = /Last 600m \(Rank \d+[^)]*\)\s*-\s*ELITE/i.test(allNotes);
         const isLast400Elite      = /Last 400m \(Rank \d+[^)]*\)\s*-\s*ELITE/i.test(allNotes);
-        const isLast400VeryGood   = /Last 400m \(Rank \d+[^)]*\)\s*-\s*VERY GOOD/i.test(allNotes);
+
+        // Last start detections — specific note strings
         const isCompetitiveEffort = /\+\s*0\.0\s*:\s*Competitive effort \(\d+th\) by [\d.]+L/i.test(allNotes);
         const isNarrowWin         = /\+\s*5\.0\s*:\s*Narrow last.?start win by [\d.]+L/i.test(allNotes);
+
+        // Condition win rate — specific band (26-35%)
         const isConditionWinGood  = /\+\s*8\.0\s*:\s*Good win rate \(\d+%\) on (good|soft|heavy|firm|synthetic)/i.test(allNotes);
+
+        // Weight vs field — exact score bands
         const isMarginallyBelow   = /\+\s*3\.0\s*:\s*Weight [\d.]+kg is [\d.]+kg below race avg/i.test(allNotes);
         const isSlightlyBelow     = /\+\s*6\.0\s*:\s*Weight [\d.]+kg is [\d.]+kg below race avg/i.test(allNotes);
-        const hasBestRecent       = /\+[\d.]+:\s*best of last \d+/i.test(allNotes);
+
+        // Best recent sectional — POSITIVE score only, split by strength
+        const hasBestRecentStrong = /\+\s*([5-9][\d.]*|[1-9]\d[\d.]*)\s*:\s*best of last \d+/i.test(allNotes);
+        const hasBestRecentWeak   = /\+\s*([1-4][\d.]*)\s*:\s*best of last \d+/i.test(allNotes);
+
+        // Form price — raw CSV field ($2.01-$5.00)
         const isFormPriceShort    = (() => {
             const fp = parseFloat(horse['form price']) || 0;
             return fp > 2.0 && fp <= 5.0;
@@ -4433,10 +4443,16 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             notes += `+15.0 : Hidden Edge — Short price ($2-$5) + slightly below weight (+59.3% ROI pattern)\n`;
         }
 
-        // 8. Form Price Short ($2-$5) + Best Recent Sectional — 286 races +49.9% → +10
-        if (isFormPriceShort && hasBestRecent) {
+        // 8. Form Price Short ($2-$5) + Best Recent Sectional Strong — fires on positive sectionals only
+        if (isFormPriceShort && hasBestRecentStrong) {
             score += 10;
-            notes += `+10.0 : Hidden Edge — Short price ($2-$5) + best recent sectional (+49.9% ROI pattern)\n`;
+            notes += `+10.0 : Hidden Edge — Short price ($2-$5) + best recent sectional strong (+49.9% ROI pattern)\n`;
+        }
+
+        // 9. Form Price Short ($2-$5) + Best Recent Sectional Weak — smaller bonus
+        if (isFormPriceShort && hasBestRecentWeak) {
+            score += 5;
+            notes += `+5.0 : Hidden Edge — Short price ($2-$5) + best recent sectional weak (+49.9% ROI pattern)\n`;
         }
         const matchingME = marketExpectationScores.find(m =>
     parseInt(m.race) === parseInt(raceNumber) &&
