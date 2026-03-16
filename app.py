@@ -1242,8 +1242,7 @@ def parse_notes_components(notes):
         (r'\+\s*10\.0\s*:\s*Hidden Edge.*Elite last 600m.*competitive effort', 'Hidden Edge - Elite 600m + Competitive Effort'),
         (r'\+\s*10\.0\s*:\s*Hidden Edge.*Good condition win rate.*narrow win', 'Hidden Edge - Good Condition WR + Narrow Win'),
         (r'\+\s*15\.0\s*:\s*Hidden Edge.*Short price.*slightly below weight', 'Hidden Edge - Short Price + Slightly Below Weight'),
-        (r'\+\s*10\.0\s*:\s*Hidden Edge.*Short price.*best recent sectional strong', 'Hidden Edge - Short Price + Best Recent Sectional Strong'),
-        (r'\+\s*5\.0\s*:\s*Hidden Edge.*Short price.*best recent sectional weak', 'Hidden Edge - Short Price + Best Recent Sectional Weak'),
+        (r'\+\s*10\.0\s*:\s*Hidden Edge.*Short price.*best recent sectional', 'Hidden Edge - Short Price + Best Recent Sectional'),
         
         # ====== PFAI BLEND ======
         (r'PFAI Score:\s*(9[0-9]|100)[\. ]', 'PFAI Score - 90+'),
