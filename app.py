@@ -1312,7 +1312,57 @@ def parse_notes_components(notes):
                 except (ValueError, IndexError):
                     pass
                 continue
+if name == '_track_score_dynamic':
+                try:
+                    val = float(match.group(1))
+                    if val >= 8:
+                        components['Track Score Total - Strong (8+)'] = val
+                    elif val >= 4:
+                        components['Track Score Total - Moderate (4-7)'] = val
+                    else:
+                        components['Track Score Total - Low (0-3)'] = val
+                except (ValueError, IndexError):
+                    pass
+                continue
 
+            if name == '_td_score_dynamic':
+                try:
+                    val = float(match.group(1))
+                    if val >= 8:
+                        components['Track+Distance Score Total - Strong (8+)'] = val
+                    elif val >= 4:
+                        components['Track+Distance Score Total - Moderate (4-7)'] = val
+                    else:
+                        components['Track+Distance Score Total - Low (0-3)'] = val
+                except (ValueError, IndexError):
+                    pass
+                continue
+
+            if name == '_dist_score_dynamic':
+                try:
+                    val = float(match.group(1))
+                    if val >= 8:
+                        components['Distance Score Total - Strong (8+)'] = val
+                    elif val >= 4:
+                        components['Distance Score Total - Moderate (4-7)'] = val
+                    else:
+                        components['Distance Score Total - Low (0-3)'] = val
+                except (ValueError, IndexError):
+                    pass
+                continue
+
+            if name == '_cond_score_dynamic':
+                try:
+                    val = float(match.group(1))
+                    if val >= 8:
+                        components['Track Condition Score Total - Strong (8+)'] = val
+                    elif val >= 4:
+                        components['Track Condition Score Total - Moderate (4-7)'] = val
+                    else:
+                        components['Track Condition Score Total - Low (0-3)'] = val
+                except (ValueError, IndexError):
+                    pass
+                continue
             # ---- Standard score extraction ----
             try:
                 score_str = match.group(1).replace(' ', '').replace('+', '')
