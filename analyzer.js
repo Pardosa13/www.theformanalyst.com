@@ -4401,12 +4401,6 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             return fp > 2.0 && fp <= 5.0;
         })();
 
-        // 1. Form Price Short ($2-$5) + Competitive Effort — 179 races +102.3% → +10
-        if (isFormPriceShort && isCompetitiveEffort) {
-            score += 10;
-            notes += `+10.0 : Hidden Edge — Short price ($2-$5) + competitive effort last start (+102.3% ROI pattern)\n`;
-        }
-
         // 2. API Sectional Last 600m Elite + Weight Marginally Below — 167 races +66.7% → +10
         if (isLast600Elite && isMarginallyBelow) {
             score += 10;
@@ -4429,12 +4423,6 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
         if (isLast600Elite && isCompetitiveEffort) {
             score += 10;
             notes += `+10.0 : Hidden Edge — Elite last 600m sectional + competitive effort last start (+108.2% ROI pattern)\n`;
-        }
-
-        // 6. Condition Win Rate Good + Narrow Win Last Start — 152 races +62.1% → +10
-        if (isConditionWinGood && isNarrowWin) {
-            score += 10;
-            notes += `+10.0 : Hidden Edge — Good condition win rate + narrow win last start (+62.1% ROI pattern)\n`;
         }
 
         // 7. Form Price Short ($2-$5) + Weight Slightly Below — 238 races +59.3% → +15
