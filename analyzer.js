@@ -4438,12 +4438,6 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             score += 15;
             notes += `+15.0 : Hidden Edge — Short price ($2-$5) + slightly below weight (+59.3% ROI pattern)\n`;
         }
-
-        // 8. Form Price Short ($2-$5) + Best Recent Sectional
-        if (isFormPriceShort && hasBestRecentStrong) {
-            score += 10;
-            notes += `+10.0 : Hidden Edge — Short price ($2-$5) + best recent sectional\n`;
-        }
         const matchingME = marketExpectationScores.find(m =>
     parseInt(m.race) === parseInt(raceNumber) &&
     m.name.toLowerCase().trim() === horseName.toLowerCase().trim()
@@ -4455,6 +4449,39 @@ if (matchingME) {
         analysisResults.push({ horse, score, notes, pfaiScore: parseFloat(horse['pfaiscore']) || 0 });
     });
     
+    // Re-score: Hidden Edge Short Price + Best Recent Sectional (race-relative)
+    const raceGroups = {};
+    analysisResults.forEach(r => {
+        const raceNum = r.horse['race number'];
+        if (!raceGroups[raceNum]) raceGroups[raceNum] = [];
+        raceGroups[raceNum].push(r);
+    });
+
+    Object.values(raceGroups).forEach(raceHorses => {
+        let bestSectionalScore = -Infinity;
+        let bestHorse = null;
+
+        raceHorses.forEach(r => {
+            const match = (r.notes || '').match(/\+\s*([5-9][\d.]*|[1-9]\d[\d.]*)\s*:\s*best of last \d+/i);
+            if (match) {
+                const val = parseFloat(match[1]);
+                if (val > bestSectionalScore) {
+                    bestSectionalScore = val;
+                    bestHorse = r;
+                }
+            }
+        });
+
+        if (bestHorse) {
+            const fp = parseFloat(bestHorse.horse['form price']) || 0;
+            const isFormPriceShort = fp > 2.0 && fp <= 5.0;
+            if (isFormPriceShort) {
+                bestHorse.score += 10;
+                bestHorse.notes += `+10.0 : Hidden Edge — Short price ($2-$5) + best recent sectional\n`;
+            }
+        }
+    });
+
     return calculateTrueOdds(analysisResults, 0.05, false, 300);
 }
 
