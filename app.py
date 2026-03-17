@@ -1517,7 +1517,518 @@ def aggregate_component_stats(all_results_data, stake=10.0):
                     components['Apprentice Claim: 1-2kg'] = 1.0
             except (ValueError, TypeError):
                 pass  # No claim, skip
+            # ====== WEIGHT TYPE ======
+            weight_type = csv.get('weight type', '').strip()
+            if weight_type:
+                components[f"Weight Type: {weight_type}"] = 1.0
 
+            # ====== SEX RESTRICTIONS ======
+            sex_restrictions = csv.get('sex restrictions', '').strip()
+            if sex_restrictions:
+                components[f"Sex Restrictions: {sex_restrictions}"] = 1.0
+
+            # ====== AGE RESTRICTIONS ======
+            age_restrictions = csv.get('age restrictions', '').strip()
+            if age_restrictions:
+                components[f"Age Restrictions: {age_restrictions}"] = 1.0
+
+            # ====== CLASS RESTRICTIONS ======
+            class_restrictions = csv.get('class restrictions', '').strip()
+            if class_restrictions:
+                components[f"Class Restrictions: {class_restrictions}"] = 1.0
+
+            # ====== RACE PRIZEMONEY ======
+            try:
+                race_prize = float(str(csv.get('race prizemoney', '') or '').replace('$', '').replace(',', '').strip())
+                if race_prize > 0:
+                    if race_prize >= 500000:
+                        components['Race Prizemoney: $500k+'] = 1.0
+                    elif race_prize >= 200000:
+                        components['Race Prizemoney: $200k-500k'] = 1.0
+                    elif race_prize >= 100000:
+                        components['Race Prizemoney: $100k-200k'] = 1.0
+                    elif race_prize >= 50000:
+                        components['Race Prizemoney: $50k-100k'] = 1.0
+                    elif race_prize >= 25000:
+                        components['Race Prizemoney: $25k-50k'] = 1.0
+                    elif race_prize >= 10000:
+                        components['Race Prizemoney: $10k-25k'] = 1.0
+                    else:
+                        components['Race Prizemoney: <$10k'] = 1.0
+            except (ValueError, TypeError):
+                pass
+
+            # ====== PRIZEMONEY WON (CAREER EARNINGS) ======
+            try:
+                prize_won = float(str(csv.get('prizemoney won', '') or '').replace('$', '').replace(',', '').strip())
+                if prize_won >= 500000:
+                    components['Career Earnings: $500k+'] = 1.0
+                elif prize_won >= 200000:
+                    components['Career Earnings: $200k-500k'] = 1.0
+                elif prize_won >= 100000:
+                    components['Career Earnings: $100k-200k'] = 1.0
+                elif prize_won >= 50000:
+                    components['Career Earnings: $50k-100k'] = 1.0
+                elif prize_won >= 10000:
+                    components['Career Earnings: $10k-50k'] = 1.0
+                elif prize_won > 0:
+                    components['Career Earnings: <$10k'] = 1.0
+                else:
+                    components['Career Earnings: Unplaced/None'] = 1.0
+            except (ValueError, TypeError):
+                pass
+
+            # ====== HORSE PRIZE MONEY (RACE PRIZE WON) ======
+            try:
+                horse_prize = float(str(csv.get('horse prize money', '') or '').replace('$', '').replace(',', '').strip())
+                if horse_prize > 0:
+                    components['Horse Has Won Prizemoney'] = 1.0
+            except (ValueError, TypeError):
+                pass
+
+            # ====== PRIZEMONEY (THIS RACE ALLOCATION) ======
+            try:
+                prizemoney = float(str(csv.get('prizemoney', '') or '').replace('$', '').replace(',', '').strip())
+                if prizemoney > 0:
+                    if prizemoney >= 100000:
+                        components['Prizemoney Allocation: $100k+'] = 1.0
+                    elif prizemoney >= 50000:
+                        components['Prizemoney Allocation: $50k-100k'] = 1.0
+                    elif prizemoney >= 20000:
+                        components['Prizemoney Allocation: $20k-50k'] = 1.0
+                    else:
+                        components['Prizemoney Allocation: <$20k'] = 1.0
+            except (ValueError, TypeError):
+                pass
+
+            # ====== HORSE SIRE ======
+            sire = csv.get('horse sire', '').strip()
+            if sire:
+                components[f"Sire: {sire}"] = 1.0
+
+            # ====== HORSE DAM ======
+            dam = csv.get('horse dam', '').strip()
+            if dam:
+                components[f"Dam: {dam}"] = 1.0
+
+            # ====== HORSE NUMBER ======
+            try:
+                horse_num = int(str(csv.get('horse number', '') or '').strip())
+                if horse_num >= 1:
+                    if horse_num <= 4:
+                        components['Horse Number: 1-4'] = 1.0
+                    elif horse_num <= 8:
+                        components['Horse Number: 5-8'] = 1.0
+                    elif horse_num <= 12:
+                        components['Horse Number: 9-12'] = 1.0
+                    else:
+                        components['Horse Number: 13+'] = 1.0
+            except (ValueError, TypeError):
+                pass
+
+            # ====== JOCKEYS CAN CLAIM ======
+            can_claim = csv.get('jockeys can claim', '').strip()
+            if can_claim:
+                components[f"Jockeys Can Claim: {can_claim}"] = 1.0
+
+            # ====== WEIGHT RESTRICTIONS ======
+            weight_restrictions = csv.get('weight restrictions', '').strip()
+            if weight_restrictions:
+                components[f"Weight Restrictions: {weight_restrictions}"] = 1.0
+
+            # ====== FORM BARRIER ======
+            try:
+                form_barrier = int(str(csv.get('form barrier', '') or '').strip())
+                today_barrier = horse.barrier or 0
+                if form_barrier >= 1 and today_barrier >= 1:
+                    barrier_change = today_barrier - form_barrier
+                    if barrier_change <= -4:
+                        components['Barrier Change: Much Better (4+)'] = 1.0
+                    elif barrier_change <= -2:
+                        components['Barrier Change: Better (2-3)'] = 1.0
+                    elif barrier_change <= 1:
+                        components['Barrier Change: Similar'] = 1.0
+                    elif barrier_change <= 3:
+                        components['Barrier Change: Worse (2-3)'] = 1.0
+                    else:
+                        components['Barrier Change: Much Worse (4+)'] = 1.0
+            except (ValueError, TypeError):
+                pass
+
+            # ====== FORM CLASS ======
+            form_class = csv.get('form class', '').strip()
+            if form_class:
+                components[f"Last Start Class: {form_class}"] = 1.0
+
+            # ====== FORM JOCKEY (SAME AS TODAY?) ======
+            form_jockey = csv.get('form jockey', '').strip()
+            today_jockey = csv.get('horse jockey', '').strip()
+            if form_jockey and today_jockey:
+                if form_jockey.lower() == today_jockey.lower():
+                    components['Same Jockey As Last Start'] = 1.0
+                else:
+                    components['Different Jockey From Last Start'] = 1.0
+
+            # ====== FORM TRAINER (SAME AS TODAY?) ======
+            form_trainer = csv.get('form trainer', '').strip()
+            today_trainer = csv.get('horse trainer', '').strip()
+            if form_trainer and today_trainer:
+                if form_trainer.lower() == today_trainer.lower():
+                    components['Same Trainer As Last Start'] = 1.0
+                else:
+                    components['Different Trainer From Last Start'] = 1.0
+
+            # ====== FORM MARGIN ======
+            try:
+                form_margin = float(str(csv.get('form margin', '') or '').strip())
+                if form_margin == 0:
+                    components['Last Start Margin: Won'] = 1.0
+                elif form_margin <= 0.5:
+                    components['Last Start Margin: ≤0.5L'] = 1.0
+                elif form_margin <= 1.0:
+                    components['Last Start Margin: 0.5-1L'] = 1.0
+                elif form_margin <= 2.0:
+                    components['Last Start Margin: 1-2L'] = 1.0
+                elif form_margin <= 4.0:
+                    components['Last Start Margin: 2-4L'] = 1.0
+                elif form_margin <= 8.0:
+                    components['Last Start Margin: 4-8L'] = 1.0
+                else:
+                    components['Last Start Margin: 8L+'] = 1.0
+            except (ValueError, TypeError):
+                pass
+
+            # ====== FORM MEETING DATE (DAYS SINCE LAST RUN) ======
+            try:
+                from datetime import datetime as _dt
+                form_date_raw = csv.get('form meeting date', '').strip()
+                meeting_date_raw = csv.get('meeting date', '').strip()
+                if form_date_raw and meeting_date_raw:
+                    for fmt in ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d %b %Y'):
+                        try:
+                            form_date = _dt.strptime(form_date_raw, fmt)
+                            meeting_date = _dt.strptime(meeting_date_raw, fmt)
+                            days_since = (meeting_date - form_date).days
+                            if days_since <= 7:
+                                components['Days Since Run (Raw): ≤7'] = 1.0
+                            elif days_since <= 14:
+                                components['Days Since Run (Raw): 8-14'] = 1.0
+                            elif days_since <= 21:
+                                components['Days Since Run (Raw): 15-21'] = 1.0
+                            elif days_since <= 28:
+                                components['Days Since Run (Raw): 22-28'] = 1.0
+                            elif days_since <= 60:
+                                components['Days Since Run (Raw): 29-60'] = 1.0
+                            elif days_since <= 120:
+                                components['Days Since Run (Raw): 61-120'] = 1.0
+                            elif days_since <= 200:
+                                components['Days Since Run (Raw): 121-200'] = 1.0
+                            else:
+                                components['Days Since Run (Raw): 200+'] = 1.0
+                            break
+                        except ValueError:
+                            continue
+            except Exception:
+                pass
+
+            # ====== FORM NAME (LAST RACE NAME) ======
+            form_name = csv.get('form name', '').strip()
+            if form_name:
+                components[f"Last Race Name: {form_name}"] = 1.0
+
+            # ====== FORM OTHER RUNNERS ======
+            try:
+                form_runners = int(str(csv.get('form other runners', '') or '').strip())
+                if form_runners >= 1:
+                    if form_runners <= 7:
+                        components['Last Start Field Size: Small (≤7)'] = 1.0
+                    elif form_runners <= 11:
+                        components['Last Start Field Size: Medium (8-11)'] = 1.0
+                    elif form_runners <= 15:
+                        components['Last Start Field Size: Large (12-15)'] = 1.0
+                    else:
+                        components['Last Start Field Size: Very Large (16+)'] = 1.0
+            except (ValueError, TypeError):
+                pass
+
+            # ====== FORM PRICE ======
+            try:
+                form_price = float(str(csv.get('form price', '') or '').strip())
+                if form_price > 0:
+                    if form_price <= 2.0:
+                        components['Last Start SP: ≤$2 Fav'] = 1.0
+                    elif form_price <= 4.0:
+                        components['Last Start SP: $2-$4'] = 1.0
+                    elif form_price <= 8.0:
+                        components['Last Start SP: $4-$8'] = 1.0
+                    elif form_price <= 15.0:
+                        components['Last Start SP: $8-$15'] = 1.0
+                    elif form_price <= 30.0:
+                        components['Last Start SP: $15-$30'] = 1.0
+                    else:
+                        components['Last Start SP: $30+'] = 1.0
+            except (ValueError, TypeError):
+                pass
+
+            # ====== FORM TIME ======
+            form_time = csv.get('form time', '').strip()
+            if form_time:
+                try:
+                    form_time_val = float(form_time)
+                    if form_time_val > 0:
+                        components['Has Last Start Time'] = 1.0
+                except (ValueError, TypeError):
+                    pass
+
+            # ====== HORSE RECORD (CAREER) ======
+            horse_record = csv.get('horse record', '').strip()
+            if horse_record:
+                try:
+                    # Format: "starts:wins-seconds-thirds" e.g. "20:5-3-2"
+                    parts = horse_record.replace('-', ':').split(':')
+                    if len(parts) >= 4:
+                        starts = int(parts[0])
+                        wins = int(parts[1])
+                        if starts > 0:
+                            career_sr = wins / starts * 100
+                            if career_sr >= 40:
+                                components['Career Record: Elite (40%+ SR)'] = 1.0
+                            elif career_sr >= 25:
+                                components['Career Record: Strong (25-40% SR)'] = 1.0
+                            elif career_sr >= 15:
+                                components['Career Record: Moderate (15-25% SR)'] = 1.0
+                            elif career_sr >= 5:
+                                components['Career Record: Low (5-15% SR)'] = 1.0
+                            else:
+                                components['Career Record: Poor (<5% SR)'] = 1.0
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+            # ====== HORSE RECORD DISTANCE ======
+            record_dist = csv.get('horse record distance', '').strip()
+            if record_dist:
+                try:
+                    parts = record_dist.replace('-', ':').split(':')
+                    if len(parts) >= 2:
+                        starts = int(parts[0])
+                        wins = int(parts[1])
+                        if starts > 0:
+                            sr = wins / starts * 100
+                            components[f"Distance Record SR: {int(sr//10)*10}-{int(sr//10)*10+9}%"] = 1.0
+                        elif starts == 0:
+                            components['Distance Record: No Runs'] = 1.0
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+            # ====== HORSE RECORD TRACK ======
+            record_track = csv.get('horse record track', '').strip()
+            if record_track:
+                try:
+                    parts = record_track.replace('-', ':').split(':')
+                    if len(parts) >= 2:
+                        starts = int(parts[0])
+                        wins = int(parts[1])
+                        if starts > 0:
+                            sr = wins / starts * 100
+                            if sr >= 33:
+                                components['Track Record: Strong (33%+)'] = 1.0
+                            elif sr >= 15:
+                                components['Track Record: Moderate (15-33%)'] = 1.0
+                            elif sr > 0:
+                                components['Track Record: Low (<15%)'] = 1.0
+                            else:
+                                components['Track Record: No Wins'] = 1.0
+                        else:
+                            components['Track Record: No Runs'] = 1.0
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+            # ====== HORSE RECORD TRACK+DISTANCE ======
+            record_td = csv.get('horse record track distance', '').strip()
+            if record_td:
+                try:
+                    parts = record_td.replace('-', ':').split(':')
+                    if len(parts) >= 2:
+                        starts = int(parts[0])
+                        wins = int(parts[1])
+                        if starts > 0:
+                            sr = wins / starts * 100
+                            if sr >= 33:
+                                components['Track+Dist Record: Strong (33%+)'] = 1.0
+                            elif sr >= 15:
+                                components['Track+Dist Record: Moderate (15-33%)'] = 1.0
+                            elif sr > 0:
+                                components['Track+Dist Record: Low (<15%)'] = 1.0
+                            else:
+                                components['Track+Dist Record: No Wins'] = 1.0
+                        else:
+                            components['Track+Dist Record: No Runs'] = 1.0
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+            # ====== GOING RECORDS ======
+            for going, label in [
+                ('horse record firm',    'Firm'),
+                ('horse record good',    'Good'),
+                ('horse record soft',    'Soft'),
+                ('horse record heavy',   'Heavy'),
+                ('horse record synthetic','Synthetic'),
+            ]:
+                rec = csv.get(going, '').strip()
+                if rec:
+                    try:
+                        parts = rec.replace('-', ':').split(':')
+                        if len(parts) >= 2:
+                            starts = int(parts[0])
+                            wins = int(parts[1])
+                            if starts > 0:
+                                sr = wins / starts * 100
+                                if sr >= 33:
+                                    components[f"{label} Record: Strong (33%+)"] = 1.0
+                                elif sr >= 15:
+                                    components[f"{label} Record: Moderate (15-33%)"] = 1.0
+                                elif sr > 0:
+                                    components[f"{label} Record: Low (<15%)"] = 1.0
+                                else:
+                                    components[f"{label} Record: No Wins"] = 1.0
+                            else:
+                                components[f"{label} Record: No Runs"] = 1.0
+                    except (ValueError, TypeError, IndexError):
+                        pass
+
+            # ====== HORSE RECORD JUMPS ======
+            record_jumps = csv.get('horse record jumps', '').strip()
+            if record_jumps:
+                try:
+                    parts = record_jumps.replace('-', ':').split(':')
+                    starts = int(parts[0])
+                    if starts > 0:
+                        components['Has Jumps Experience'] = 1.0
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+            # ====== HORSE RECORD FIRST UP ======
+            record_fu = csv.get('horse record first up', '').strip()
+            if record_fu:
+                try:
+                    parts = record_fu.replace('-', ':').split(':')
+                    if len(parts) >= 2:
+                        starts = int(parts[0])
+                        wins = int(parts[1])
+                        if starts > 0:
+                            sr = wins / starts * 100
+                            if sr >= 33:
+                                components['First Up Record: Strong (33%+)'] = 1.0
+                            elif sr >= 15:
+                                components['First Up Record: Moderate (15-33%)'] = 1.0
+                            elif sr > 0:
+                                components['First Up Record: Low (<15%)'] = 1.0
+                            else:
+                                components['First Up Record: No Wins'] = 1.0
+                        else:
+                            components['First Up Record: No Runs'] = 1.0
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+            # ====== HORSE RECORD SECOND UP ======
+            record_su = csv.get('horse record second up', '').strip()
+            if record_su:
+                try:
+                    parts = record_su.replace('-', ':').split(':')
+                    if len(parts) >= 2:
+                        starts = int(parts[0])
+                        wins = int(parts[1])
+                        if starts > 0:
+                            sr = wins / starts * 100
+                            if sr >= 33:
+                                components['Second Up Record: Strong (33%+)'] = 1.0
+                            elif sr >= 15:
+                                components['Second Up Record: Moderate (15-33%)'] = 1.0
+                            elif sr > 0:
+                                components['Second Up Record: Low (<15%)'] = 1.0
+                            else:
+                                components['Second Up Record: No Wins'] = 1.0
+                        else:
+                            components['Second Up Record: No Runs'] = 1.0
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+            # ====== HORSE LAST 10 FORM STRING ======
+            last10 = csv.get('horse last10', '').strip()
+            if last10:
+                wins_in_10 = last10.count('1')
+                places_in_10 = last10.count('2') + last10.count('3')
+                if wins_in_10 >= 4:
+                    components['Last 10: 4+ Wins'] = 1.0
+                elif wins_in_10 >= 2:
+                    components['Last 10: 2-3 Wins'] = 1.0
+                elif wins_in_10 == 1:
+                    components['Last 10: 1 Win'] = 1.0
+                else:
+                    components['Last 10: No Recent Wins'] = 1.0
+                if places_in_10 >= 5:
+                    components['Last 10: 5+ Places'] = 1.0
+                elif places_in_10 >= 3:
+                    components['Last 10: 3-4 Places'] = 1.0
+
+            # ====== SECTIONAL ======
+            sectional = csv.get('sectional', '').strip()
+            if sectional:
+                try:
+                    sec_val = float(sectional)
+                    if sec_val > 0:
+                        components['Has Sectional Data'] = 1.0
+                except (ValueError, TypeError):
+                    pass
+
+            # ====== IDs (existence checks only — no ROI signal expected) ======
+            for id_field, label in [
+                ('meeting id',    'Has Meeting ID'),
+                ('race id',       'Has Race ID'),
+                ('horse id',      'Has Horse ID'),
+                ('horse trainer id', 'Has Trainer ID'),
+                ('horse jockey id',  'Has Jockey ID'),
+                ('form trainer id',  'Has Form Trainer ID'),
+                ('form jockey id',   'Has Form Jockey ID'),
+            ]:
+                if csv.get(id_field, ''):
+                    components[label] = 1.0
+
+            # ====== START TIME ======
+            start_time = csv.get('start time', '').strip()
+            if start_time:
+                try:
+                    hour = int(start_time.split(':')[0])
+                    if hour < 12:
+                        components['Race Time: Morning'] = 1.0
+                    elif hour < 14:
+                        components['Race Time: Early Afternoon'] = 1.0
+                    elif hour < 16:
+                        components['Race Time: Mid Afternoon'] = 1.0
+                    else:
+                        components['Race Time: Late Afternoon'] = 1.0
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+            # ====== RACE NAME ======
+            race_name = csv.get('race name', '').strip()
+            if race_name:
+                components[f"Race Name: {race_name}"] = 1.0
+
+            # ====== MEETING DATE ======
+            meeting_date_raw = csv.get('meeting date', '').strip()
+            if meeting_date_raw:
+                try:
+                    from datetime import datetime as _dt2
+                    for fmt in ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y'):
+                        try:
+                            md = _dt2.strptime(meeting_date_raw, fmt)
+                            components[f"Meeting Day: {md.strftime('%A')}"] = 1.0
+                            break
+                        except ValueError:
+                            continue
+                except Exception:
+                    pass
         for component_name, score_value in components.items():
             if component_name not in component_stats:
                 component_stats[component_name] = {
