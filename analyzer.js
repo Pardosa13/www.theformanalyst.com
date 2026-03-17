@@ -4415,6 +4415,8 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             notes += `+12.0 : Hidden Edge — 3yo Filly + competitive effort last start (+115.9% ROI, 110 races)\n`;
         }
         // 6. Leader Sprint + Last Start Favoured ($2-$4) — 98 races +54% → +10
+        const isLeaderSprint      = (horse['runningposition'] || '').toUpperCase() === 'LEADER' && 
+                                    (parseInt(horse['distance']) || 0) <= 1200;
         const isLastStartFavoured = (() => {
             const fp = parseFloat(horse['form price']) || 0;
             return fp > 2.0 && fp <= 4.0;
