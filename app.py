@@ -1601,31 +1601,6 @@ def aggregate_component_stats(all_results_data, stake=10.0):
             except (ValueError, TypeError):
                 pass
 
-            # ====== HORSE SIRE ======
-            sire = csv.get('horse sire', '').strip()
-            if sire:
-                components[f"Sire: {sire}"] = 1.0
-
-            # ====== HORSE DAM ======
-            dam = csv.get('horse dam', '').strip()
-            if dam:
-                components[f"Dam: {dam}"] = 1.0
-
-            # ====== HORSE NUMBER ======
-            try:
-                horse_num = int(str(csv.get('horse number', '') or '').strip())
-                if horse_num >= 1:
-                    if horse_num <= 4:
-                        components['Horse Number: 1-4'] = 1.0
-                    elif horse_num <= 8:
-                        components['Horse Number: 5-8'] = 1.0
-                    elif horse_num <= 12:
-                        components['Horse Number: 9-12'] = 1.0
-                    else:
-                        components['Horse Number: 13+'] = 1.0
-            except (ValueError, TypeError):
-                pass
-
             # ====== JOCKEYS CAN CLAIM ======
             can_claim = csv.get('jockeys can claim', '').strip()
             if can_claim:
@@ -1636,47 +1611,10 @@ def aggregate_component_stats(all_results_data, stake=10.0):
             if weight_restrictions:
                 components[f"Weight Restrictions: {weight_restrictions}"] = 1.0
 
-            # ====== FORM BARRIER ======
-            try:
-                form_barrier = int(str(csv.get('form barrier', '') or '').strip())
-                today_barrier = horse.barrier or 0
-                if form_barrier >= 1 and today_barrier >= 1:
-                    barrier_change = today_barrier - form_barrier
-                    if barrier_change <= -4:
-                        components['Barrier Change: Much Better (4+)'] = 1.0
-                    elif barrier_change <= -2:
-                        components['Barrier Change: Better (2-3)'] = 1.0
-                    elif barrier_change <= 1:
-                        components['Barrier Change: Similar'] = 1.0
-                    elif barrier_change <= 3:
-                        components['Barrier Change: Worse (2-3)'] = 1.0
-                    else:
-                        components['Barrier Change: Much Worse (4+)'] = 1.0
-            except (ValueError, TypeError):
-                pass
-
             # ====== FORM CLASS ======
             form_class = csv.get('form class', '').strip()
             if form_class:
                 components[f"Last Start Class: {form_class}"] = 1.0
-
-            # ====== FORM JOCKEY (SAME AS TODAY?) ======
-            form_jockey = csv.get('form jockey', '').strip()
-            today_jockey = csv.get('horse jockey', '').strip()
-            if form_jockey and today_jockey:
-                if form_jockey.lower() == today_jockey.lower():
-                    components['Same Jockey As Last Start'] = 1.0
-                else:
-                    components['Different Jockey From Last Start'] = 1.0
-
-            # ====== FORM TRAINER (SAME AS TODAY?) ======
-            form_trainer = csv.get('form trainer', '').strip()
-            today_trainer = csv.get('horse trainer', '').strip()
-            if form_trainer and today_trainer:
-                if form_trainer.lower() == today_trainer.lower():
-                    components['Same Trainer As Last Start'] = 1.0
-                else:
-                    components['Different Trainer From Last Start'] = 1.0
 
             # ====== FORM MARGIN ======
             try:
