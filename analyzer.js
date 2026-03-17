@@ -4423,7 +4423,26 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             score += 12;
             notes += `+12.0 : Hidden Edge — 3yo Filly + competitive effort last start (+115.9% ROI, 110 races)\n`;
         }
+        // 6. Leader Sprint + Last Start Favoured ($2-$4) — 98 races +54% → +10
+        const isLastStartFavoured = (() => {
+            const fp = parseFloat(horse['form price']) || 0;
+            return fp > 2.0 && fp <= 4.0;
+        })();
+        if (isLeaderSprint && isLastStartFavoured) {
+            score += 10;
+            notes += `+10.0 : Hidden Edge — Sprint leader + last start favoured ($2-$4) (+54% ROI, 98 races)\n`;
+        }
 
+        // 7. Condition Podium Rate Strong + Last Start Fav (≤$2) — 83 races +47.8% → +10
+        const isConditionPodiumStrong = /\+\s*9\.0\s*:\s*Strong podium rate.*on (good|soft|heavy|firm|synthetic)/i.test(allNotes);
+        const isLastStartFav          = (() => {
+            const fp = parseFloat(horse['form price']) || 0;
+            return fp > 0 && fp <= 2.0;
+        })();
+        if (isConditionPodiumStrong && isLastStartFav) {
+            score += 10;
+            notes += `+10.0 : Hidden Edge — Strong condition podium rate + last start favourite (≤$2) (+47.8% ROI, 83 races)\n`;
+        }
         const matchingME = marketExpectationScores.find(m =>
             parseInt(m.race) === parseInt(raceNumber) &&
             m.name.toLowerCase().trim() === horseName.toLowerCase().trim()
