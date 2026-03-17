@@ -176,16 +176,19 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     notes += rpNote;
 
     // ==========================================
-    // SPRINT LEADER RUN DOWN BONUS (+32.1% ROI edge)
-    // Fires when horse is mapped to lead in a sprint AND had a narrow loss last start
+    // SPRINT LEADER RUN DOWN BONUS (+33.4% ROI edge)
+    // Fires when horse is mapped to lead in a sprint AND had a competitive last start
     // ==========================================
     const isSprintLeader = runningPosition === 'LEADER' && raceDistance <= 1200;
     const lastStartMargin = parseFloat(horseRow['form margin']) || 99;
     const lastStartPosition = parseInt(horseRow['form position'], 10) || 99;
-    const isNarrowLoss = (lastStartPosition === 2 || lastStartPosition === 3) && lastStartMargin <= 2.0;
+    const isNarrowLoss = (
+        ((lastStartPosition === 2 || lastStartPosition === 3) && lastStartMargin <= 2.0) ||
+        (lastStartPosition >= 4 && lastStartMargin <= 3.0)
+    );
     if (isSprintLeader && isNarrowLoss) {
         score += 15;
-        notes += `+15.0 : Sprint Leader Run Down Bonus — mapped to lead in sprint, narrow loss last start (+32.1% ROI pattern)\n`;
+        notes += `+15.0 : Sprint Leader Run Down Bonus — mapped to lead in sprint, narrow loss last start (+33.4% ROI, 154 races)\n`;
     }
     
     // Check horse weight and score
