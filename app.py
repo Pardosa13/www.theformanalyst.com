@@ -1611,11 +1611,6 @@ def aggregate_component_stats(all_results_data, stake=10.0):
             if weight_restrictions:
                 components[f"Weight Restrictions: {weight_restrictions}"] = 1.0
 
-            # ====== FORM CLASS ======
-            form_class = csv.get('form class', '').strip()
-            if form_class:
-                components[f"Last Start Class: {form_class}"] = 1.0
-
             # ====== FORM MARGIN ======
             try:
                 form_margin = float(str(csv.get('form margin', '') or '').strip())
@@ -1668,11 +1663,6 @@ def aggregate_component_stats(all_results_data, stake=10.0):
                             continue
             except Exception:
                 pass
-
-            # ====== FORM NAME (LAST RACE NAME) ======
-            form_name = csv.get('form name', '').strip()
-            if form_name:
-                components[f"Last Race Name: {form_name}"] = 1.0
 
             # ====== FORM OTHER RUNNERS ======
             try:
