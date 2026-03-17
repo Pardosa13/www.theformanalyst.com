@@ -5795,6 +5795,11 @@ def api_combination_analysis():
     for key in race_keys_ordered:
         all_horse_rows.extend(races_map[key])
 
+    # ── Notes cache — parse once per horse ────────────────────────────────────
+    notes_cache = {}
+    for row in all_horse_rows:
+        notes_cache[row.horse_id] = parse_notes_components(row.notes or '')
+
     # ── 2. Helper functions ────────────────────────────────────────────────────
     def _accum(bucket, won, sp):
         bucket['races']  += 1
@@ -6060,11 +6065,9 @@ def api_combination_analysis():
             _accum(weight_change_buckets[wcb], won, sp)
 
         # Components from notes
-        if row.notes:
-            components = parse_notes_components(row.notes)
-            for cname, val in components.items():
-                if val:
-                    _accum(component_buckets[cname], won, sp)
+        for cname, val in notes_cache[row.horse_id].items():
+            if val:
+                _accum(component_buckets[cname], won, sp)
 
     # ── 4. Derive positive-ROI sets (min appearances to trust signal) ──────────
     def _positive_keys(bucket_dict, min_races=10):
@@ -6227,11 +6230,9 @@ def api_combination_analysis():
             factors.add(f"WeightChange: {wcb}")
 
         # Components
-        if row.notes:
-            components = parse_notes_components(row.notes)
-            for cname, val in components.items():
-                if val and cname in pos_components:
-                    factors.add(f"Component: {cname}")
+        for cname, val in notes_cache[row.horse_id].items():
+            if val and cname in pos_components:
+                factors.add(f"Component: {cname}")
 
         if len(factors) >= 2:
             tagged_horses.append({
@@ -6272,11 +6273,6 @@ def api_combination_analysis():
             combo_stats[quad]['races']  += 1
             combo_stats[quad]['wins']   += (1 if won else 0)
             combo_stats[quad]['profit'] += profit
-
-        for quint in itertools.combinations(factors, 5):
-            combo_stats[quint]['races']  += 1
-            combo_stats[quint]['wins']   += (1 if won else 0)
-            combo_stats[quint]['profit'] += profit
 
     # ── 7. Filter: positive ROI, tiered minimum appearances, sort by ROI ───────
     results_list = []
@@ -6408,11 +6404,9 @@ def api_combination_analysis():
             factors.add(f"WeightChange: {wcb}")
 
         # Components — tag all regardless of ROI
-        if row.notes:
-            components = parse_notes_components(row.notes)
-            for cname, val in components.items():
-                if val:
-                    factors.add(f"Component: {cname}")
+        for cname, val in notes_cache[row.horse_id].items():
+            if val:
+                factors.add(f"Component: {cname}")
 
         # Cap to 15 factors to avoid explosion
         if len(factors) > 15:
@@ -6518,7 +6512,7 @@ def api_combination_analysis():
         won    = row.finish_position == 1
         sp     = row.sp or 0
         profit = (sp * stake - stake) if won else -stake
-        comps  = parse_notes_components(row.notes or '')
+        comps  = notes_cache[row.horse_id]
 
         is_leader      = any(p in comps for p in leader_patterns.values())
         is_narrow_loss = any(p in comps for p in narrow_loss_patterns)
