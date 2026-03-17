@@ -1938,10 +1938,7 @@ def aggregate_component_stats(all_results_data, stake=10.0):
                 except (ValueError, TypeError, IndexError):
                     pass
 
-            # ====== RACE NAME ======
-            race_name = csv.get('race name', '').strip()
-            if race_name:
-                components[f"Race Name: {race_name}"] = 1.0
+            
 
             # ====== MEETING DATE ======
             meeting_date_raw = csv.get('meeting date', '').strip()
