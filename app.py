@@ -1544,21 +1544,30 @@ def aggregate_component_stats(all_results_data, stake=10.0):
 
             # ====== FORM MARGIN ======
             try:
+                form_pos_check = str(csv.get('form position', '') or '').strip()
                 form_margin = float(str(csv.get('form margin', '') or '').strip())
-                if form_margin == 0:
-                    components['Last Start Margin: Won'] = 1.0
-                elif form_margin <= 0.5:
-                    components['Last Start Margin: ≤0.5L'] = 1.0
-                elif form_margin <= 1.0:
-                    components['Last Start Margin: 0.5-1L'] = 1.0
-                elif form_margin <= 2.0:
-                    components['Last Start Margin: 1-2L'] = 1.0
-                elif form_margin <= 4.0:
-                    components['Last Start Margin: 2-4L'] = 1.0
-                elif form_margin <= 8.0:
-                    components['Last Start Margin: 4-8L'] = 1.0
+                if form_pos_check == '1':
+                    if form_margin <= 0.5:
+                        components['Last Start Margin: Won Short Head'] = 1.0
+                    elif form_margin <= 2.0:
+                        components['Last Start Margin: Won ≤2L'] = 1.0
+                    elif form_margin <= 5.0:
+                        components['Last Start Margin: Won 2-5L'] = 1.0
+                    else:
+                        components['Last Start Margin: Won 5L+'] = 1.0
                 else:
-                    components['Last Start Margin: 8L+'] = 1.0
+                    if form_margin <= 0.5:
+                        components['Last Start Margin: Beaten ≤0.5L'] = 1.0
+                    elif form_margin <= 1.0:
+                        components['Last Start Margin: Beaten 0.5-1L'] = 1.0
+                    elif form_margin <= 2.0:
+                        components['Last Start Margin: Beaten 1-2L'] = 1.0
+                    elif form_margin <= 4.0:
+                        components['Last Start Margin: Beaten 2-4L'] = 1.0
+                    elif form_margin <= 8.0:
+                        components['Last Start Margin: Beaten 4-8L'] = 1.0
+                    else:
+                        components['Last Start Margin: Beaten 8L+'] = 1.0
             except (ValueError, TypeError):
                 pass
 
@@ -1671,14 +1680,20 @@ def aggregate_component_stats(all_results_data, stake=10.0):
                     if len(parts) >= 2:
                         starts = int(parts[0])
                         wins = int(parts[1])
-                        if starts > 0:
-                            sr = wins / starts * 100
-                            components[f"Distance Record SR: {int(sr//10)*10}-{int(sr//10)*10+9}%"] = 1.0
-                        elif starts == 0:
+                        if starts == 0:
                             components['Distance Record: No Runs'] = 1.0
+                        else:
+                            sr = wins / starts * 100
+                            if sr >= 33:
+                                components['Distance Record: Strong (33%+)'] = 1.0
+                            elif sr >= 15:
+                                components['Distance Record: Moderate (15-33%)'] = 1.0
+                            elif sr > 0:
+                                components['Distance Record: Low (<15%)'] = 1.0
+                            else:
+                                components['Distance Record: No Wins'] = 1.0
                 except (ValueError, TypeError, IndexError):
                     pass
-
             # ====== HORSE RECORD TRACK ======
             record_track = csv.get('horse record track', '').strip()
             if record_track:
