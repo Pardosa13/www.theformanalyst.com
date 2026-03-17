@@ -4370,81 +4370,72 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
 
         // ==========================================
         // HIDDEN EDGE COMBINATION BONUSES
-        // Exact note string matching from analyzer.js output
-        // Matched against allNotes which combines all note sources
         // ==========================================
 
         const allNotes = notes + (matchingWeight ? matchingWeight.weightNote : '') + (matchingHorse ? matchingHorse.sectionalNote : '');
 
-        // API Sectional detections — selective (rank 1-3 only)
+        // API Sectional detections
         const isLast600Elite      = /Last 600m \(Rank \d+[^)]*\)\s*-\s*ELITE/i.test(allNotes);
         const isLast400Elite      = /Last 400m \(Rank \d+[^)]*\)\s*-\s*ELITE/i.test(allNotes);
 
-        // Last start detections — specific note strings
+        // Last start detections
         const isCompetitiveEffort = /\+\s*0\.0\s*:\s*Competitive effort \(\d+th\) by [\d.]+L/i.test(allNotes);
-        const isNarrowWin         = /\+\s*5\.0\s*:\s*Narrow last.?start win by [\d.]+L/i.test(allNotes);
-
-        // Condition win rate — specific band (26-35%)
-        const isConditionWinGood  = /\+\s*8\.0\s*:\s*Good win rate \(\d+%\) on (good|soft|heavy|firm|synthetic)/i.test(allNotes);
-
-        // Weight vs field — exact score bands
-        const isMarginallyBelow   = /\+\s*3\.0\s*:\s*Weight [\d.]+kg is [\d.]+kg below race avg/i.test(allNotes);
-        const isSlightlyBelow     = /\+\s*6\.0\s*:\s*Weight [\d.]+kg is [\d.]+kg below race avg/i.test(allNotes);
-
-        // Best recent sectional — POSITIVE score only, split by strength
-        const hasBestRecentStrong = /\+\s*([5-9][\d.]*|[1-9]\d[\d.]*)\s*:\s*best of last \d+/i.test(allNotes);
 
         // Form price — raw CSV field ($2.01-$5.00)
         const isFormPriceShort    = (() => {
             const fp = parseFloat(horse['form price']) || 0;
             return fp > 2.0 && fp <= 5.0;
         })();
+
+        // Best recent sectional — POSITIVE score only
+        const hasBestRecentStrong = /\+\s*([5-9][\d.]*|[1-9]\d[\d.]*)\s*:\s*best of last \d+/i.test(allNotes);
+
         // 1. Form Price Short ($2-$5) + Competitive Effort — 179 races +102.3% → +10
         if (isFormPriceShort && isCompetitiveEffort) {
             score += 10;
             notes += `+10.0 : Hidden Edge — Short price ($2-$5) + competitive effort last start (+102.3% ROI pattern)\n`;
         }
-        // 2. API Sectional Last 600m Elite + Weight Marginally Below — 167 races +66.7% → +10
-        if (isLast600Elite && isMarginallyBelow) {
-            score += 10;
-            notes += `+10.0 : Hidden Edge — Elite last 600m sectional + marginally below weight (+66.7% ROI pattern)\n`;
-        }
 
-        // 3. API Sectional Last 400m Elite + Competitive Effort — 96 races +112.5% → +10
+        // 2. API Sectional Last 400m Elite + Competitive Effort — 96 races +112.5% → +10
         if (isLast400Elite && isCompetitiveEffort) {
             score += 10;
             notes += `+10.0 : Hidden Edge — Elite last 400m sectional + competitive effort last start (+112.5% ROI pattern)\n`;
         }
 
-        // 4. API Sectional Last 400m Elite + Weight Marginally Below — 82 races +125.5% → +10
-        if (isLast400Elite && isMarginallyBelow) {
-            score += 10;
-            notes += `+10.0 : Hidden Edge — Elite last 400m sectional + marginally below weight (+125.5% ROI pattern)\n`;
-        }
-
-        // 5. API Sectional Last 600m Elite + Competitive Effort — 102 races +108.2% → +10
+        // 3. API Sectional Last 600m Elite + Competitive Effort — 102 races +108.2% → +10
         if (isLast600Elite && isCompetitiveEffort) {
             score += 10;
             notes += `+10.0 : Hidden Edge — Elite last 600m sectional + competitive effort last start (+108.2% ROI pattern)\n`;
         }
-        // 6. Condition Win Rate Good + Narrow Win Last Start — 152 races +62.1% → +10
-        if (isConditionWinGood && isNarrowWin) {
-            score += 10;
-            notes += `+10.0 : Hidden Edge — Good condition win rate + narrow win last start (+62.1% ROI pattern)\n`;
-        }
-        // 7. Form Price Short ($2-$5) + Weight Slightly Below — 238 races +59.3% → +15
-        if (isFormPriceShort && isSlightlyBelow) {
+
+        // 4. Sprint Leader Run Down — 154 races +33.4% → +15
+        const isLeaderSprint = /Running Position.*LEADER in Sprint/i.test(allNotes);
+        const isNarrowLoss   = /Narrow loss.*very competitive|Close loss.*[23]rd/i.test(allNotes);
+        const isSprintRace   = (() => {
+            const dist = parseInt(horse['distance']) || 0;
+            return dist <= 1200;
+        })();
+        if (isLeaderSprint && isNarrowLoss && isSprintRace) {
             score += 15;
-            notes += `+15.0 : Hidden Edge — Short price ($2-$5) + slightly below weight (+59.3% ROI pattern)\n`;
+            notes += `+15.0 : Sprint Leader Run Down Bonus — front runner caught late at sprint distance (+33.4% ROI, 154 races)\n`;
         }
+
+        // 5. 3yo Filly + Competitive Effort — 110 races +115.9% → +12
+        const is3yoFilly = horse['horse age'] === '3' && horse['horse sex'] === 'Filly';
+        if (is3yoFilly && isCompetitiveEffort) {
+            score += 12;
+            notes += `+12.0 : Hidden Edge — 3yo Filly + competitive effort last start (+115.9% ROI, 110 races)\n`;
+        }
+
         const matchingME = marketExpectationScores.find(m =>
-    parseInt(m.race) === parseInt(raceNumber) &&
-    m.name.toLowerCase().trim() === horseName.toLowerCase().trim()
-);
-if (matchingME) {
-    score += matchingME.meScore;
-    notes += matchingME.meNote;
-}
+            parseInt(m.race) === parseInt(raceNumber) &&
+            m.name.toLowerCase().trim() === horseName.toLowerCase().trim()
+        );
+        if (matchingME) {
+            score += matchingME.meScore;
+            notes += matchingME.meNote;
+        }
+
         analysisResults.push({ horse, score, notes, pfaiScore: parseFloat(horse['pfaiscore']) || 0 });
     });
     
