@@ -4676,32 +4676,40 @@ def api_component_analysis():
 
     # ══════════════════════════════════════════════════════════════════
     # C — COMPONENT STACKING
+    # Count ALL components that fired (named, non-underscore)
+    # Buckets: 10,11,12,13,14,15,16,17,18,19,20+
     # ══════════════════════════════════════════════════════════════════
     stacking_buckets = {
-        '1-4': {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '5':   {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '6':   {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '7':   {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '8':   {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '9':   {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '10+': {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '<10':  {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '10':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '11':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '12':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '13':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '14':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '15':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '16':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '17':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '18':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '19':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '20+':  {'horses': 0, 'wins': 0, 'profit': 0.0},
     }
 
     for race_id, horses in races.items():
         for h in horses:
-            pos_count = sum(
-                1 for k, v in h['components'].items()
-                if not k.startswith('_') and isinstance(v, (int, float)) and v > 0
+            # Count every component that fired regardless of point value
+            comp_count = sum(
+                1 for k in h['components']
+                if not k.startswith('_')
             )
             won    = h['finish_pos'] == 1
             profit = (h['sp'] * stake - stake) if won else -stake
 
-            if pos_count <= 4:
-                bucket = '1-4'
-            elif pos_count <= 9:
-                bucket = str(pos_count)
+            if comp_count < 10:
+                bucket = '<10'
+            elif comp_count <= 19:
+                bucket = str(comp_count)
             else:
-                bucket = '10+'
+                bucket = '20+'
 
             stacking_buckets[bucket]['horses'] += 1
             if won:
@@ -4709,7 +4717,9 @@ def api_component_analysis():
             stacking_buckets[bucket]['profit'] += profit
 
     stacking_results = {}
-    for bucket, data in stacking_buckets.items():
+    bucket_order = ['<10', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20+']
+    for bucket in bucket_order:
+        data = stacking_buckets[bucket]
         n = data['horses']
         w = data['wins']
         stacking_results[bucket] = {
