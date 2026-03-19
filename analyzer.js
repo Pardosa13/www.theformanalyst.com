@@ -489,13 +489,6 @@ if (!isNaN(horseAge)) {
     notes += '+25.0 : 5yo horse (164% ROI, 40% SR - elite age)\n';
     }
     
-    // === MAJOR EDGE: 8YO MARES ===
-    // 118% ROI, 7.7% SR - Specialist pattern
-    if (horseAge === 8 && horseSex === 'Mare') {
-        score += 20;
-        notes += '+20.0 : 8yo Mare (118% ROI - specialist)\n';
-    }
-    
     // === STANDARD AGE BONUSES (REDUCED) ===
     // 3yo: Only -4.6% ROI - reduced from +5 to +3
     if (horseAge === 3) {
