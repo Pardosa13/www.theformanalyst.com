@@ -4458,15 +4458,17 @@ def get_meeting_sectionals(meeting_id):
 def api_component_analysis():
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
-    
-    from flask import jsonify
-    
-    track_filter = request.args.get('track', '')
+
+    from collections import defaultdict
+
+    track_filter    = request.args.get('track', '')
     min_score_filter = request.args.get('min_score', type=float)
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-    
-    race_id_query = db.session.query(Race.id).join(
+    date_from       = request.args.get('date_from', '')
+    date_to         = request.args.get('date_to', '')
+    limit_param     = request.args.get('limit', 'all')
+
+    # ── Build race id list ──────────────────────────────────────────────
+    race_id_query = db.session.query(Race.id, Meeting.uploaded_at).join(
         Meeting, Race.meeting_id == Meeting.id
     ).join(
         Horse, Horse.race_id == Race.id
@@ -4475,83 +4477,285 @@ def api_component_analysis():
     ).filter(
         Result.finish_position > 0
     )
-    
+
     if track_filter:
         race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
         race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
-    
-    limit_param = request.args.get('limit', 'all')
-    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
-    
+
+    all_race_ids = race_id_query.distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
+
     if limit_param == 'all':
         recent_race_ids = [r[0] for r in all_race_ids]
     else:
-        limit = int(limit_param) if limit_param.isdigit() else 200
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
         recent_race_ids = [r[0] for r in all_race_ids[:limit]]
-    
-    base_query = db.session.query(
-        Horse, Prediction, Result, Race, Meeting
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
-        Result, Horse.id == Result.horse_id
-    ).join(
-        Race, Horse.race_id == Race.id
-    ).join(
-        Meeting, Race.meeting_id == Meeting.id
+
+    # ── Fetch all horses with predictions + results ─────────────────────
+    rows = db.session.query(
+        Race.id,
+        Horse.horse_name,
+        Prediction.score,
+        Prediction.notes,
+        Result.finish_position,
+        Result.sp
+    ).join(Horse,      Horse.race_id       == Race.id
+    ).join(Prediction, Prediction.horse_id == Horse.id
+    ).join(Result,     Result.horse_id     == Horse.id
     ).filter(
         Result.finish_position > 0,
         Race.id.in_(recent_race_ids)
-    )
-    
-    all_results = base_query.all()
-    
-    all_results_data = []
-    for horse, pred, result, race, meeting in all_results:
-        all_results_data.append({
-            'horse': horse,
-            'prediction': pred,
-            'result': result,
-            'race': race,
-            'meeting': meeting
+    ).all()
+
+    # ── Group into races ────────────────────────────────────────────────
+    races = defaultdict(list)
+    for race_id, horse_name, score, notes, finish_pos, sp in rows:
+        races[race_id].append({
+            'horse_name': horse_name,
+            'score':      score or 0,
+            'notes':      notes or '',
+            'finish_pos': finish_pos,
+            'sp':         sp or 0,
+            'components': parse_notes_components(notes or '')
         })
-    
-    component_stats = aggregate_component_stats(all_results_data, stake=10.0)
-    
-    sorted_components = sorted(
-        component_stats.items(),
-        key=lambda x: x[1]['roi'],
-        reverse=True
-    )
-    
-    components_list = []
-    for name, stats in sorted_components:
-        if stats['appearances'] >= 2:
-            components_list.append({
-                'name': name,
-                'appearances': stats['appearances'],
-                'wins': stats['wins'],
-                'strike_rate': stats['strike_rate'],
-                'places': stats['places'],
-                'place_rate': stats['place_rate'],
-                'roi': stats['roi']
+
+    stake = 10.0
+
+    # ══════════════════════════════════════════════════════════════════
+    # A — EXISTING COMPONENT STATS (ROI-sorted, all horses)
+    # ══════════════════════════════════════════════════════════════════
+    all_results_data = []
+    for race_id, horses in races.items():
+        for h in horses:
+            all_results_data.append({
+                'horse':      type('obj', (object,), {'id': None})(),
+                'prediction': type('obj', (object,), {'notes': h['notes'], 'score': h['score']})(),
+                'result':     type('obj', (object,), {'finish_position': h['finish_pos'], 'sp': h['sp']})(),
+                'race':       type('obj', (object,), {'id': race_id})(),
+                'meeting':    type('obj', (object,), {})()
             })
-    
-    result = jsonify({'components': components_list})
-    del all_results
-    del all_results_data
-    del component_stats
-    del components_list
-    import gc
-    gc.collect()
+
+    component_stats = aggregate_component_stats(all_results_data, stake=10.0)
+    sorted_components = sorted(component_stats.items(), key=lambda x: x[1]['roi'], reverse=True)
+    components_list = [
+        {
+            'name':         name,
+            'appearances':  stats['appearances'],
+            'wins':         stats['wins'],
+            'strike_rate':  stats['strike_rate'],
+            'places':       stats['places'],
+            'place_rate':   stats['place_rate'],
+            'roi':          stats['roi']
+        }
+        for name, stats in sorted_components
+        if stats['appearances'] >= 2 and not name.startswith('_')
+    ]
+
+    # ══════════════════════════════════════════════════════════════════
+    # A (ENHANCED) — RACE-RELATIVE COMPONENT LIFT
+    # For each component: win rate WITH it vs win rate WITHOUT it
+    # in the same race
+    # ══════════════════════════════════════════════════════════════════
+    comp_with    = defaultdict(lambda: {'races': 0, 'wins': 0})
+    comp_without = defaultdict(lambda: {'races': 0, 'wins': 0})
+
+    for race_id, horses in races.items():
+        if len(horses) < 2:
+            continue
+        all_comps_in_race = set()
+        for h in horses:
+            all_comps_in_race.update(
+                k for k in h['components'].keys() if not k.startswith('_')
+            )
+        for comp in all_comps_in_race:
+            for h in horses:
+                has_comp = comp in h['components']
+                won      = h['finish_pos'] == 1
+                if has_comp:
+                    comp_with[comp]['races'] += 1
+                    if won:
+                        comp_with[comp]['wins'] += 1
+                else:
+                    comp_without[comp]['races'] += 1
+                    if won:
+                        comp_without[comp]['wins'] += 1
+
+    race_relative = []
+    for comp in comp_with:
+        with_r = comp_with[comp]['races']
+        with_w = comp_with[comp]['wins']
+        wo_r   = comp_without[comp]['races']
+        wo_w   = comp_without[comp]['wins']
+        if with_r < 10 or wo_r < 10:
+            continue
+        with_sr = round(with_w / with_r * 100, 1)
+        wo_sr   = round(wo_w   / wo_r   * 100, 1)
+        lift    = round(with_sr - wo_sr, 1)
+        race_relative.append({
+            'name':        comp,
+            'with_races':  with_r,
+            'with_wins':   with_w,
+            'with_sr':     with_sr,
+            'without_sr':  wo_sr,
+            'lift':        lift,
+        })
+
+    race_relative.sort(key=lambda x: x['lift'], reverse=True)
+
+    # ══════════════════════════════════════════════════════════════════
+    # B — WINNER GAP ANALYSIS
+    # When top pick loses, what components did the actual winner have
+    # that the top pick didn't?
+    # ══════════════════════════════════════════════════════════════════
+    gap_comp_counts  = defaultdict(int)
+    gap_total_races  = 0
+    top_pick_losses  = 0
+
+    for race_id, horses in races.items():
+        if len(horses) < 2:
+            continue
+        top_pick = max(horses, key=lambda x: x['score'])
+        winner   = next((h for h in horses if h['finish_pos'] == 1), None)
+        if not winner:
+            continue
+        gap_total_races += 1
+        if top_pick['horse_name'] == winner['horse_name']:
+            continue
+        # Top pick lost — find what winner had that top pick didn't
+        top_comps    = set(k for k in top_pick['components'] if not k.startswith('_'))
+        winner_comps = set(k for k in winner['components']   if not k.startswith('_'))
+        missing      = winner_comps - top_comps
+        top_pick_losses += 1
+        for comp in missing:
+            gap_comp_counts[comp] += 1
+
+    winner_gap = []
+    for comp, count in sorted(gap_comp_counts.items(), key=lambda x: x[1], reverse=True):
+        if count >= 5:
+            winner_gap.append({
+                'component':    comp,
+                'count':        count,
+                'pct_of_losses': round(count / top_pick_losses * 100, 1) if top_pick_losses else 0,
+            })
+
+    # ══════════════════════════════════════════════════════════════════
+    # C — COMPONENT STACKING
+    # Group horses by positive component count (5,6,7,8,9,10+)
+    # Win rate + ROI per tier
+    # ══════════════════════════════════════════════════════════════════
+    stacking_buckets = {
+        '1-4':  {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '5':    {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '6':    {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '7':    {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '8':    {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '9':    {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '10+':  {'horses': 0, 'wins': 0, 'profit': 0.0},
+    }
+
+    for race_id, horses in races.items():
+        for h in horses:
+            pos_count = sum(
+                1 for k, v in h['components'].items()
+                if not k.startswith('_') and isinstance(v, (int, float)) and v > 0
+            )
+            won    = h['finish_pos'] == 1
+            profit = (h['sp'] * stake - stake) if won else -stake
+
+            if pos_count <= 4:
+                bucket = '1-4'
+            elif pos_count <= 9:
+                bucket = str(pos_count)
+            else:
+                bucket = '10+'
+
+            stacking_buckets[bucket]['horses'] += 1
+            if won:
+                stacking_buckets[bucket]['wins'] += 1
+            stacking_buckets[bucket]['profit'] += profit
+
+    stacking_results = {}
+    for bucket, data in stacking_buckets.items():
+        h = data['horses']
+        w = data['wins']
+        stacking_results[bucket] = {
+            'horses':      h,
+            'wins':        w,
+            'strike_rate': round(w / h * 100, 1) if h else 0,
+            'roi':         round(data['profit'] / (h * stake) * 100, 1) if h else 0,
+            'profit':      round(data['profit'], 2),
+        }
+
+    # ══════════════════════════════════════════════════════════════════
+    # D — OVER/UNDER SCORING
+    # Compare assigned points vs actual ROI contribution
+    # ══════════════════════════════════════════════════════════════════
+    comp_points_roi = defaultdict(lambda: {
+        'total_points': 0.0,
+        'appearances':  0,
+        'wins':         0,
+        'profit':       0.0
+    })
+
+    for race_id, horses in races.items():
+        for h in horses:
+            won    = h['finish_pos'] == 1
+            profit = (h['sp'] * stake - stake) if won else -stake
+            for comp, pts in h['components'].items():
+                if comp.startswith('_'):
+                    continue
+                if not isinstance(pts, (int, float)):
+                    continue
+                comp_points_roi[comp]['total_points'] += pts
+                comp_points_roi[comp]['appearances']  += 1
+                if won:
+                    comp_points_roi[comp]['wins']  += 1
+                    comp_points_roi[comp]['profit'] += profit
+                else:
+                    comp_points_roi[comp]['profit'] += -stake
+
+    scoring_audit = []
+    for comp, data in comp_points_roi.items():
+        n   = data['appearances']
+        if n < 10:
+            continue
+        avg_pts = round(data['total_points'] / n, 1)
+        roi     = round(data['profit'] / (n * stake) * 100, 1)
+        sr      = round(data['wins'] / n * 100, 1)
+        # Divergence: positive = over-scored (pts high, ROI low)
+        #             negative = under-scored (pts low, ROI high)
+        divergence = round(avg_pts - (roi / 10), 1)
+        scoring_audit.append({
+            'name':        comp,
+            'appearances': n,
+            'avg_pts':     avg_pts,
+            'strike_rate': sr,
+            'roi':         roi,
+            'divergence':  divergence,
+        })
+
+    # Sort by divergence descending (most over-scored first)
+    scoring_audit.sort(key=lambda x: x['divergence'], reverse=True)
+
+    result = jsonify({
+        'components':    components_list,
+        'race_relative': race_relative,
+        'winner_gap':    winner_gap,
+        'winner_gap_meta': {
+            'total_races':   gap_total_races,
+            'top_pick_losses': top_pick_losses,
+            'top_pick_wins': gap_total_races - top_pick_losses,
+            'top_pick_sr':   round((gap_total_races - top_pick_losses) / gap_total_races * 100, 1) if gap_total_races else 0,
+        },
+        'stacking':      stacking_results,
+        'scoring_audit': scoring_audit,
+    })
+
     db.session.expunge_all()
     db.session.remove()
-
     return result
-
 
 @app.route("/api/data/external-factors")
 @login_required
