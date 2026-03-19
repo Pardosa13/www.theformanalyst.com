@@ -5644,6 +5644,201 @@ def api_monthly_performance():
 
     return jsonify({'monthly': result_list})
 
+@app.route("/api/data/pfai-analysis")
+@login_required
+def api_pfai_analysis():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    import re
+    from collections import defaultdict
+
+    PFAI_RE = re.compile(
+        r'Analyzer Score \(normalized\): ([\d.]+).*?'
+        r'PFAI Score: ([\d.]+).*?'
+        r'Final Blended Score: ([\d.]+)',
+        re.DOTALL
+    )
+
+    # Pull only PFAI era records — filter at SQL level first
+    rows = db.session.query(
+        Meeting.id,
+        Race.id,
+        Race.race_number,
+        Horse.horse_name,
+        Prediction.score,
+        Prediction.notes,
+        Result.finish_position,
+        Result.sp
+    ).join(Race,       Race.meeting_id     == Meeting.id
+    ).join(Horse,      Horse.race_id       == Race.id
+    ).join(Prediction, Prediction.horse_id == Horse.id
+    ).join(Result,     Result.horse_id     == Horse.id
+    ).filter(
+        Result.finish_position > 0,
+        Prediction.notes.like('%=== PFAI BLEND ===%')
+    ).order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
+
+    # Group by race, parse blend scores from notes
+    races = defaultdict(list)
+    race_keys_ordered = []
+
+    for meeting_id, race_id, race_num, horse_name, score, notes, finish_pos, sp in rows:
+        key = (meeting_id, race_id)
+        if key not in races:
+            race_keys_ordered.append(key)
+
+        match = PFAI_RE.search(notes or '')
+        if not match:
+            # Mark race as incomplete — will be excluded
+            races[key].append(None)
+            continue
+
+        analyzer_norm = float(match.group(1))
+        pfai_score    = float(match.group(2))
+        blended_final = float(match.group(3))
+
+        races[key].append({
+            'horse_name':    horse_name,
+            'analyzer_norm': analyzer_norm,
+            'pfai_score':    pfai_score,
+            'blended_final': blended_final,
+            'finish_pos':    finish_pos,
+            'sp':            sp or 0
+        })
+
+    # Exclude any race where even one horse is missing the blend block
+    clean_race_keys = [
+        k for k in race_keys_ordered
+        if all(h is not None for h in races[k]) and len(races[k]) >= 2
+    ]
+
+    # ── WEIGHT SIMULATIONS ──────────────────────────────────────────────
+    weightings = [
+        ('100/0  (Pure Analyzer)', 1.0,  0.0),
+        ('80/20',                  0.8,  0.2),
+        ('70/30  (Current)',       0.7,  0.3),
+        ('60/40',                  0.6,  0.4),
+        ('50/50',                  0.5,  0.5),
+        ('0/100  (Pure PFAI)',     0.0,  1.0),
+    ]
+
+    stake = 10.0
+    weight_results = {}
+
+    for label, w_analyzer, w_pfai in weightings:
+        races_count = 0
+        wins        = 0
+        profit      = 0.0
+        winner_sps  = []
+
+        for key in clean_race_keys:
+            horses = races[key]
+
+            # Simulate score for this weighting
+            for h in horses:
+                h['sim_score'] = (h['analyzer_norm'] * w_analyzer) + (h['pfai_score'] * w_pfai)
+
+            top = max(horses, key=lambda x: x['sim_score'])
+            races_count += 1
+
+            if top['finish_pos'] == 1:
+                wins += 1
+                profit += (top['sp'] * stake - stake)
+                if top['sp'] > 0:
+                    winner_sps.append(top['sp'])
+            else:
+                profit -= stake
+
+        weight_results[label] = {
+            'races':        races_count,
+            'wins':         wins,
+            'strike_rate':  round(wins / races_count * 100, 1) if races_count else 0,
+            'roi':          round(profit / (races_count * stake) * 100, 1) if races_count else 0,
+            'profit':       round(profit, 2),
+            'avg_winner_sp': round(sum(winner_sps) / len(winner_sps), 2) if winner_sps else 0,
+        }
+
+    # ── DISAGREEMENT ANALYSIS ───────────────────────────────────────────
+    # Races where pure analyzer and pure PFAI ranked #1 differently
+    analyzer_right = 0
+    pfai_right     = 0
+    both_wrong     = 0
+    disagreements  = 0
+
+    for key in clean_race_keys:
+        horses = races[key]
+
+        analyzer_top = max(horses, key=lambda x: x['analyzer_norm'])
+        pfai_top     = max(horses, key=lambda x: x['pfai_score'])
+
+        # Only care about disagreements
+        if analyzer_top['horse_name'] == pfai_top['horse_name']:
+            continue
+
+        disagreements += 1
+
+        analyzer_won = analyzer_top['finish_pos'] == 1
+        pfai_won     = pfai_top['finish_pos'] == 1
+
+        if analyzer_won:
+            analyzer_right += 1
+        elif pfai_won:
+            pfai_right += 1
+        else:
+            both_wrong += 1
+
+    disagreement_results = {
+        'total_disagreements': disagreements,
+        'analyzer_right':      analyzer_right,
+        'pfai_right':          pfai_right,
+        'both_wrong':          both_wrong,
+        'analyzer_right_pct':  round(analyzer_right / disagreements * 100, 1) if disagreements else 0,
+        'pfai_right_pct':      round(pfai_right     / disagreements * 100, 1) if disagreements else 0,
+    }
+
+    # ── PFAI SCORE BAND ANALYSIS ────────────────────────────────────────
+    # Does high PFAI confidence on the top blended pick produce better results?
+    pfai_bands = {
+        'Low (0-40)':   {'races': 0, 'wins': 0, 'profit': 0.0},
+        'Mid (40-70)':  {'races': 0, 'wins': 0, 'profit': 0.0},
+        'High (70-100)':{'races': 0, 'wins': 0, 'profit': 0.0},
+    }
+
+    for key in clean_race_keys:
+        horses = races[key]
+        # Use current blended score to identify top pick (as per live system)
+        top = max(horses, key=lambda x: x['blended_final'])
+        pfai = top['pfai_score']
+
+        band = ('High (70-100)' if pfai >= 70 else 'Mid (40-70)' if pfai >= 40 else 'Low (0-40)')
+        pfai_bands[band]['races'] += 1
+
+        if top['finish_pos'] == 1:
+            pfai_bands[band]['wins'] += 1
+            pfai_bands[band]['profit'] += (top['sp'] * stake - stake)
+        else:
+            pfai_bands[band]['profit'] -= stake
+
+    for band in pfai_bands.values():
+        r = band['races']
+        band['strike_rate'] = round(band['wins'] / r * 100, 1) if r else 0
+        band['roi']         = round(band['profit'] / (r * stake) * 100, 1) if r else 0
+        band['profit']      = round(band['profit'], 2)
+
+    # ── OVERVIEW ────────────────────────────────────────────────────────
+    total_horses = sum(len(races[k]) for k in clean_race_keys)
+
+    return jsonify({
+        'overview': {
+            'total_horses': total_horses,
+            'total_races':  len(clean_race_keys),
+        },
+        'weight_simulation': weight_results,
+        'disagreements':     disagreement_results,
+        'pfai_bands':        pfai_bands,
+    })
+
 @app.route("/api/data/combination-analysis")
 @login_required
 def api_combination_analysis():
