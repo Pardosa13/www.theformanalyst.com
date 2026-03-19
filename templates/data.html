@@ -696,8 +696,8 @@ document.addEventListener('DOMContentLoaded', function() {
     pfaiAnalysis.addEventListener('show.bs.collapse', function() { 
         if (!loadedSections.has('pfai-analysis')) { loadPfaiAnalysis(); } 
     }); 
-}
-
+    }
+});
 function loadScoreAnalysis() {
     const container = document.getElementById('scoreAnalysis');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading score analysis...</p></div>';
