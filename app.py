@@ -4761,7 +4761,7 @@ def api_component_analysis():
             stacking_buckets[bucket]['horses'] += 1
             if won:
                 stacking_buckets[bucket]['wins'] += 1
-            stacking_buckets[bucket]['profit'] += profitt
+            stacking_buckets[bucket]['profit'] += profit
 
     bucket_order = ['<0','0-4','5-9','10-14','15-19','20-24','25-29','30+']
     stacking_results = {}
