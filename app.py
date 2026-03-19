@@ -4466,6 +4466,50 @@ def _parse_analyzer_score(notes):
         return float(m.group(1))
     return None
 
+SCORING_PREFIXES = (
+    'Jockey', 'Trainer', 'Track Win Rate', 'Track Podium',
+    'Track+Distance Win', 'Track+Distance Podium', 'Track+Distance Score',
+    'Track+Distance -',
+    'Distance Win', 'Distance Podium', 'Distance Change', 'Distance -',
+    'Distance Score', 'Condition Win', 'Condition Podium', 'Condition -',
+    'Class Drop', 'Class Rise', 'Last Start', 'Days Since Run -',
+    'Form Price', 'First Up', 'Second Up', 'Weight vs Field',
+    'Weight Change', 'Career Win Rate', 'Age/Sex', 'Colt', 'Sire',
+    'Specialist', 'Sectional History', 'Sectional Consistency',
+    'API Sectional', 'Running Position', 'Hidden Edge', 'PFAI Score',
+    'Market Expectation', 'Pace Angle', 'Ran Places', 'Track Score',
+    'Track Condition Score',
+)
+
+NEGATIVE_COMPONENTS = {
+    'Jockey - Poor Value',
+    'Trainer - Poor Value',
+    'Track - Poor Performance',
+    'Distance - Poor Performance',
+    'Condition - Poor Performance',
+    'Last Start - Beaten Clearly (3-6L)',
+    'Last Start - Well Beaten (6-10L)',
+    'Last Start - Demolished (10L+)',
+    'Last Start - Beaten Badly Placed',
+    'Career Win Rate - Poor <10%',
+    'Age/Sex - 5yo Mare Penalty',
+    'Age/Sex - 6-7yo Mare Penalty',
+    'Age/Sex - 7-8yo Penalty',
+    'Age/Sex - 9yo Penalty',
+    'Age/Sex - 10yo Penalty',
+    'Age/Sex - 11yo Penalty',
+    'Age/Sex - 12yo Penalty',
+    'Age/Sex - 13+yo Penalty',
+    'Market Expectation - Worst in Field',
+    'Market Expectation - Chronic Underperformer',
+    'Market Expectation - Significant Underperformer',
+    'Market Expectation - Mild Underperformer',
+    'Market Expectation - Below Average',
+    'Sire - Negative ROI',
+}
+
+def is_scoring_component(name):
+    return any(name.startswith(p) for p in SCORING_PREFIXES)
 
 @app.route("/api/data/component-analysis")
 @login_required
@@ -4678,46 +4722,48 @@ def api_component_analysis():
     # C — COMPONENT STACKING
     # ══════════════════════════════════════════════════════════════════
     stacking_buckets = {
-        '<20':   {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '20-22': {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '23-25': {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '26-28': {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '29-31': {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '32-34': {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '35-37': {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '38-40': {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '41-43': {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '44-46': {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '47-49': {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '50+':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '<0':    {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '0-4':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '5-9':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '10-14': {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '15-19': {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '20-24': {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '25-29': {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '30+':   {'horses': 0, 'wins': 0, 'profit': 0.0},
     }
 
     def get_stacking_bucket(n):
-        if n < 20:   return '<20'
-        elif n <= 22: return '20-22'
-        elif n <= 25: return '23-25'
-        elif n <= 28: return '26-28'
-        elif n <= 31: return '29-31'
-        elif n <= 34: return '32-34'
-        elif n <= 37: return '35-37'
-        elif n <= 40: return '38-40'
-        elif n <= 43: return '41-43'
-        elif n <= 46: return '44-46'
-        elif n <= 49: return '47-49'
-        else:         return '50+'
+        if n < 0:     return '<0'
+        elif n <= 4:  return '0-4'
+        elif n <= 9:  return '5-9'
+        elif n <= 14: return '10-14'
+        elif n <= 19: return '15-19'
+        elif n <= 24: return '20-24'
+        elif n <= 29: return '25-29'
+        else:         return '30+'
 
     for race_id, horses in races.items():
         for h in horses:
-            comp_count = sum(1 for k in h['components'] if not k.startswith('_'))
+            pos_count = sum(
+                1 for k in h['components']
+                if is_scoring_component(k)
+                and k not in NEGATIVE_COMPONENTS
+            )
+            neg_count = sum(
+                1 for k in h['components']
+                if is_scoring_component(k)
+                and k in NEGATIVE_COMPONENTS
+            )
+            net_count = pos_count - neg_count
             won    = h['finish_pos'] == 1
             profit = (h['sp'] * stake - stake) if won else -stake
-            bucket = get_stacking_bucket(comp_count)
+            bucket = get_stacking_bucket(net_count)
             stacking_buckets[bucket]['horses'] += 1
             if won:
                 stacking_buckets[bucket]['wins'] += 1
-            stacking_buckets[bucket]['profit'] += profit
+            stacking_buckets[bucket]['profit'] += profitt
 
-    bucket_order = ['<20','20-22','23-25','26-28','29-31','32-34','35-37','38-40','41-43','44-46','47-49','50+']
+    bucket_order = ['<0','0-4','5-9','10-14','15-19','20-24','25-29','30+']
     stacking_results = {}
     for bucket in bucket_order:
         data = stacking_buckets[bucket]
