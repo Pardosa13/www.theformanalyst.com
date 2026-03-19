@@ -2598,12 +2598,12 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
             addScore = 5;
             note += `+ 5.0 : Narrow loss (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L - very competitive\n`;
         } else if (margin <= 2.0) {
-            addScore = 3;
-            note += `+ 3.0 : Close loss (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
+            addScore = 5;
+            note += `+ 5.0 : Close loss (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
         } else if (margin <= 3.5) {
-            addScore = 0;
+            addScore = 2;
+            note += `+ 2.0 : Placed (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L\n`;
         } else {
-            // Apply class drop context for place getters beaten badly
             if (classChange < -10) {
                 addScore = 5;
                 note += `+ 5.0 : Beaten (${position}${position === 2 ? 'nd' : 'rd'}) by ${margin.toFixed(1)}L BUT dropping in class significantly\n`;
