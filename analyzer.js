@@ -1448,23 +1448,23 @@ function checkJockeys(JockeyName) {
         'D Pires',                // -68.9% ROI, 8.1% SR, 37 rides
     ];
     
-    // Apply scoring
-    if (eliteValueJockeys.includes(JockeyName)) {
-        addScore += 25;
-        note += '+25.0: Elite value jockey (50%+ ROI proven)\n';
-    }
-    else if (strongValueJockeys.includes(JockeyName)) {
-        addScore += 20;
-        note += '+20.0: Strong value jockey (20-50% ROI)\n';
-    }
-    else if (profitableJockeys.includes(JockeyName)) {
-        addScore += 10;
-        note += '+10.0: Profitable jockey (0-20% ROI)\n';
-    }
-    else if (badJockeys.includes(JockeyName)) {
-        addScore -= 10;
-        note += '-10.0: Poor value jockey (destroys ROI)\n';
-    }
+    // JOCKEY SCORING — TEMPORARILY DISABLED 2026-03-20
+    // if (eliteValueJockeys.includes(JockeyName)) {
+    //     addScore += 25;
+    //     note += '+25.0: Elite value jockey (50%+ ROI proven)\n';
+    // }
+    // else if (strongValueJockeys.includes(JockeyName)) {
+    //     addScore += 20;
+    //     note += '+20.0: Strong value jockey (20-50% ROI)\n';
+    // }
+    // else if (profitableJockeys.includes(JockeyName)) {
+    //     addScore += 10;
+    //     note += '+10.0: Profitable jockey (0-20% ROI)\n';
+    // }
+    // else if (badJockeys.includes(JockeyName)) {
+    //     addScore -= 10;
+    //     note += '-10.0: Poor value jockey (destroys ROI)\n';
+    // }
     // All others get 0 points (market efficient)
 
     return [addScore, note];
@@ -1925,23 +1925,23 @@ function checkTrainers(trainerName) {
         'Rob Potter',                       // -10.5% ROI, 18.4% SR, 38 runners
     ];
     
-    // Apply scoring
-    if (eliteValueTrainers.includes(trainerName)) {
-        addScore += 20;
-        note += '+20.0: Elite value trainer (50%+ ROI proven)\n';
-    }
-    else if (strongValueTrainers.includes(trainerName)) {
-        addScore += 15;
-        note += '+15.0: Strong value trainer (20-50% ROI)\n';
-    }
-    else if (profitableTrainers.includes(trainerName)) {
-        addScore += 10;
-        note += '+10.0: Profitable trainer (5-20% ROI)\n';
-    }
-    else if (badTrainers.includes(trainerName)) {
-        addScore -= 10;
-        note += '-10.0: Poor value trainer (destroys ROI)\n';
-    }
+    // TRAINER SCORING — TEMPORARILY DISABLED 2026-03-20
+    // if (eliteValueTrainers.includes(trainerName)) {
+    //     addScore += 20;
+    //     note += '+20.0: Elite value trainer (50%+ ROI proven)\n';
+    // }
+    // else if (strongValueTrainers.includes(trainerName)) {
+    //     addScore += 15;
+    //     note += '+15.0: Strong value trainer (20-50% ROI)\n';
+    // }
+    // else if (profitableTrainers.includes(trainerName)) {
+    //     addScore += 10;
+    //     note += '+10.0: Profitable trainer (5-20% ROI)\n';
+    // }
+    // else if (badTrainers.includes(trainerName)) {
+    //     addScore -= 10;
+    //     note += '-10.0: Poor value trainer (destroys ROI)\n';
+    // }
     // All others get 0 points (market efficient)
     
     return [addScore, note];
