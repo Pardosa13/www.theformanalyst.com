@@ -1853,13 +1853,16 @@ function renderPfaiAnalysis(data) {
 
     // ── Weight simulation table — sorted by ROI ──
     const weightOrder = [
-        '100/0  (Pure Analyzer)',
-        '80/20',
-        '70/30  (Current)',
-        '60/40',
-        '50/50',
-        '0/100  (Pure PFAI)',
-    ];
+    '100/0  (Pure Analyzer)',
+    '95/5', '90/10', '85/15',
+    '80/20', '75/25',
+    '70/30  (Current)',
+    '65/35', '60/40', '55/45',
+    '50/50', '45/55', '40/60', '35/65',
+    '30/70', '25/75', '20/80', '15/85',
+    '10/90', '5/95',
+    '0/100  (Pure PFAI)',
+];
 
     // Find best ROI for highlighting
     const bestRoi = Math.max(...weightOrder.map(w => ws[w]?.roi || -999));
