@@ -205,20 +205,19 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     // Declare horseSex early — needed for jockey/trainer combo and age/sex scoring
     const horseSex = String(horseRow['horse sex'] || '').trim();
 
-    // Check if horse jockey is someone we like or not
-    [a, b] = checkJockeys(horseRow['horse jockey']);
-    score += a;
-    notes += b;
+    // JOCKEY SCORING — TEMPORARILY DISABLED 2026-03-20
+    // [a, b] = checkJockeys(horseRow['horse jockey']);
+    // score += a;
+    // notes += b;
+    // JOCKEY+TRAINER COMBO — TEMPORARILY DISABLED 2026-03-20
+    // [a, b] = checkJockeyTrainerCombo(horseRow['horse jockey'], horseRow['horse trainer'], horseSex);
+    // score += a;
+    // notes += b;
 
-    // Check jockey + trainer combo bonuses
-    [a, b] = checkJockeyTrainerCombo(horseRow['horse jockey'], horseRow['horse trainer'], horseSex);
-    score += a;
-    notes += b;
-
-    // Check if horse trainer is someone we like or not
-    [a, b] = checkTrainers(horseRow['horse trainer']);
-    score += a;
-    notes += b;
+    // TRAINER SCORING — TEMPORARILY DISABLED 2026-03-20
+    // [a, b] = checkTrainers(horseRow['horse trainer']);
+    // score += a;
+    // notes += b;
 
     // Check if horse has won at this track (ENHANCED WEIGHTED SYSTEM)
     [a, b] = checkTrackForm(horseRow['horse record track']);
@@ -593,6 +592,22 @@ if (!isNaN(horseAge)) {
     }
     score += damScore;
     notes += damNote;
+// ==========================================
+// DAM SCORING — TEMPORARILY DISABLED 2026-03-20
+// ==========================================
+/*
+const damData = {
+    ... entire dam data object ...
+};
+const damEntry = damData[dam];
+let damScore = 0;
+let damNote = '';
+if (damEntry) {
+    ...
+}
+score += damScore;
+notes += damNote;
+*/
     
     // ==========================================
 // SIRE BONUSES/PENALTIES - UPDATED 2025-01-30
@@ -994,6 +1009,19 @@ if (data) {
         notes += `${sireScore > 0 ? '+' : ''}${sireScore}.0: Sire ${sire} (${roi.toFixed(1)}% ROI, ${runners} runners)\n`;
     }
 }
+// ==========================================
+// SIRE SCORING — TEMPORARILY DISABLED 2026-03-20
+// Re-enable to restore sire bonuses/penalties
+// ==========================================
+/*
+const sireData = {
+    ... entire sire data object ...
+};
+const data = sireData[sire];
+if (data) {
+    ... scoring logic ...
+}
+*/
     // NEW: CAREER WIN RATE SCORING
 const careerRecord = horseRow['horse record'];
 if (careerRecord && typeof careerRecord === 'string') {
