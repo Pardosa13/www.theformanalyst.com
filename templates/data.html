@@ -580,14 +580,7 @@
           <div class="card-body text-center"><h5>Profit/Loss</h5><h2>${{ best_bets_stats.profit|round(2) }}</h2><small>ROI: {{ best_bets_stats.roi|round(1) }}%</small></div>
         </div>
       </div>
-      <div class="section-card">
-  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#pfaiAnalysis" aria-expanded="false">
-    <h5>🤖 PFAI Blend Analysis</h5><i class="bi bi-chevron-down"></i>
-  </div>
-  <div id="pfaiAnalysis" class="collapse">
-    <div class="card-body text-center"><p class="text-muted">Click to expand and load PFAI blend analysis...</p></div>
-  </div>
-</div>
+      
       <div class="card">
         <div class="card-header"><h5>💰 Financial Summary</h5></div>
         <div class="card-body">
@@ -640,7 +633,21 @@
     </div>
   </div>
 </div>
+{% endif %}
+    </div>
+  </div>
+</div>
 
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#pfaiAnalysis" aria-expanded="false">
+    <h5>🤖 PFAI Blend Analysis</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="pfaiAnalysis" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load PFAI blend analysis...</p></div>
+  </div>
+</div>
+
+{% if total_races == 0 %}
 {% if total_races == 0 %}
 <div class="analytics-empty">
   <h5>No results data yet!</h5>
