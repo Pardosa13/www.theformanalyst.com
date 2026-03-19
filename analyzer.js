@@ -555,65 +555,40 @@ if (!isNaN(horseAge)) {
     }
 }
     
-   // ==========================================
-    // DAM BONUSES/PENALTIES - UPDATED 2026-03-10
-    // Based on expanded dataset analysis
-    // ==========================================
-    const dam = String(horseRow['horse dam'] || '').trim();
-    const damData = {
-        // POSITIVE ROI DAMS (10+ runners, 80%+ ROI)
-        'Dixie Chick':      { runners: 12, roi: 266.7, strikeRate: 25.0 },
-        'Funtantes':        { runners: 11, roi: 109.1, strikeRate: 36.4 },
-        'Full Of Beans':    { runners: 11, roi: 90.9,  strikeRate: 27.3 },
-        'Fire Opal':        { runners: 10, roi: 80.0,  strikeRate: 20.0 },
-
-        // NEGATIVE ROI DAMS (10+ runners, -62%+ ROI)
-        'Novel Idea':       { runners: 15, roi: -72.0, strikeRate: 13.3 },
-        'Ballet Blanc':     { runners: 10, roi: -66.0, strikeRate: 10.0 },
-        'Diva Express':     { runners: 11, roi: -68.2, strikeRate:  9.1 },
-        'Scarlet\'s Secret':{ runners: 11, roi: -68.2, strikeRate:  9.1 },
-        'Banish':           { runners: 10, roi: -62.0, strikeRate: 10.0 },
-        'Dream Genie':      { runners: 10, roi: -62.0, strikeRate: 10.0 },
-    };
-
-    // Calculate dam score
-    const damEntry = damData[dam];
-    let damScore = 0;
-    let damNote = '';
-    if (damEntry) {
-        const { runners, roi, strikeRate } = damEntry;
-        if (roi >= 80) {
-            damScore = 5;
-            damNote = `+ 5.0 : Dam ${dam} bonus (${roi.toFixed(1)}% ROI, ${strikeRate}% SR, ${runners} runners)\n`;
-        } else if (roi <= -62) {
-            damScore = -5;
-            damNote = `- 5.0 : Dam ${dam} penalty (${roi.toFixed(1)}% ROI, ${strikeRate}% SR, ${runners} runners)\n`;
-        }
-    }
-    score += damScore;
-    notes += damNote;
-// ==========================================
-// DAM SCORING — TEMPORARILY DISABLED 2026-03-20
-// ==========================================
-/*
-const damData = {
-    ... entire dam data object ...
-};
-const damEntry = damData[dam];
-let damScore = 0;
-let damNote = '';
-if (damEntry) {
-    ...
-}
-score += damScore;
-notes += damNote;
-*/
+   // DAM SCORING — TEMPORARILY DISABLED 2026-03-20
+    // const dam = String(horseRow['horse dam'] || '').trim();
+    // const damData = {
+    //     'Dixie Chick':      { runners: 12, roi: 266.7, strikeRate: 25.0 },
+    //     'Funtantes':        { runners: 11, roi: 109.1, strikeRate: 36.4 },
+    //     'Full Of Beans':    { runners: 11, roi: 90.9,  strikeRate: 27.3 },
+    //     'Fire Opal':        { runners: 10, roi: 80.0,  strikeRate: 20.0 },
+    //     'Novel Idea':       { runners: 15, roi: -72.0, strikeRate: 13.3 },
+    //     'Ballet Blanc':     { runners: 10, roi: -66.0, strikeRate: 10.0 },
+    //     'Diva Express':     { runners: 11, roi: -68.2, strikeRate:  9.1 },
+    //     'Scarlet\'s Secret':{ runners: 11, roi: -68.2, strikeRate:  9.1 },
+    //     'Banish':           { runners: 10, roi: -62.0, strikeRate: 10.0 },
+    //     'Dream Genie':      { runners: 10, roi: -62.0, strikeRate: 10.0 },
+    // };
+    // const damEntry = damData[dam];
+    // let damScore = 0;
+    // let damNote = '';
+    // if (damEntry) {
+    //     const { runners, roi, strikeRate } = damEntry;
+    //     if (roi >= 80) {
+    //         damScore = 5;
+    //         damNote = `+ 5.0 : Dam ${dam} bonus (${roi.toFixed(1)}% ROI, ${strikeRate}% SR, ${runners} runners)\n`;
+    //     } else if (roi <= -62) {
+    //         damScore = -5;
+    //         damNote = `- 5.0 : Dam ${dam} penalty (${roi.toFixed(1)}% ROI, ${strikeRate}% SR, ${runners} runners)\n`;
+    //     }
+    // }
+    // score += damScore;
+    // notes += damNote;
     
     // ==========================================
-// SIRE BONUSES/PENALTIES - UPDATED 2025-01-30
-// Based on 1203 race analysis
-// ==========================================
-const sire = String(horseRow['horse sire'] || '').trim();
+    // SIRE SCORING — TEMPORARILY DISABLED 2026-03-20
+    // ==========================================
+    const sire = String(horseRow['horse sire'] || '').trim();
 
 const sireData = {
     // ELITE PERFORMERS (100%+ ROI)
@@ -967,61 +942,33 @@ const sireData = {
     'Wolf Cry': { runners: 21, roi: -100.0, strikeRate: 0.0 },
     'Zebedee': { runners: 21, roi: -100.0, strikeRate: 0.0 },
     };
-// Calculate sire score - UPDATED THRESHOLDS
-const data = sireData[sire];
-if (data) {
-    const { runners, roi, strikeRate } = data;
-    let sireScore = 0;
-    
-    // Base ROI scoring - UPDATED 2025-01-30
-    if (roi >= 100) sireScore = 15;        // Elite tier (Wootton Bassett, Rommel)
-    else if (roi >= 50) sireScore = 12;    // Super elite
-    else if (roi >= 30) sireScore = 10;    // Elite
-    else if (roi >= 20) sireScore = 8;     // Strong
-    else if (roi >= 10) sireScore = 6;     // Good
-    else if (roi >= 5) sireScore = 3;      // Moderate
-    else if (roi >= -5) sireScore = 0;     // Neutral
-    else if (roi >= -20) sireScore = -2;   // Slight negative
-    else if (roi >= -40) sireScore = -5;   // Bad
-    else if (roi >= -60) sireScore = -10;  // Severe
-    else sireScore = -15;                  // Disaster
-    
-    // Strike rate penalty for chronic underperformers
-    if (strikeRate < 5 && runners >= 40) {
-        sireScore -= 3;
-    }
-    
-    // Sample size weighting
-    if (runners >= 80) {
-        // Full weight
-    } else if (runners >= 50) {
-        sireScore *= 0.9;
-    } else if (runners >= 30) {
-        sireScore *= 0.75;
-    } else {
-        sireScore *= 0.5;
-    }
-    
-    sireScore = Math.round(sireScore);
-    
-    if (sireScore !== 0) {
-        score += sireScore;
-        notes += `${sireScore > 0 ? '+' : ''}${sireScore}.0: Sire ${sire} (${roi.toFixed(1)}% ROI, ${runners} runners)\n`;
-    }
-}
-// ==========================================
 // SIRE SCORING — TEMPORARILY DISABLED 2026-03-20
-// Re-enable to restore sire bonuses/penalties
-// ==========================================
-/*
-const sireData = {
-    ... entire sire data object ...
-};
-const data = sireData[sire];
-if (data) {
-    ... scoring logic ...
-}
-*/
+    // const data = sireData[sire];
+    // if (data) {
+    //     const { runners, roi, strikeRate } = data;
+    //     let sireScore = 0;
+    //     if (roi >= 100) sireScore = 15;
+    //     else if (roi >= 50) sireScore = 12;
+    //     else if (roi >= 30) sireScore = 10;
+    //     else if (roi >= 20) sireScore = 8;
+    //     else if (roi >= 10) sireScore = 6;
+    //     else if (roi >= 5) sireScore = 3;
+    //     else if (roi >= -5) sireScore = 0;
+    //     else if (roi >= -20) sireScore = -2;
+    //     else if (roi >= -40) sireScore = -5;
+    //     else if (roi >= -60) sireScore = -10;
+    //     else sireScore = -15;
+    //     if (strikeRate < 5 && runners >= 40) sireScore -= 3;
+    //     if (runners >= 80) {}
+    //     else if (runners >= 50) sireScore *= 0.9;
+    //     else if (runners >= 30) sireScore *= 0.75;
+    //     else sireScore *= 0.5;
+    //     sireScore = Math.round(sireScore);
+    //     if (sireScore !== 0) {
+    //         score += sireScore;
+    //         notes += `${sireScore > 0 ? '+' : ''}${sireScore}.0: Sire ${sire} (${roi.toFixed(1)}% ROI, ${runners} runners)\n`;
+    //     }
+    // }
     // NEW: CAREER WIN RATE SCORING
 const careerRecord = horseRow['horse record'];
 if (careerRecord && typeof careerRecord === 'string') {
@@ -1050,7 +997,7 @@ if (!isNaN(lastMargin) && !isNaN(lastPosition) && lastPosition > 1 && lastMargin
     score += 0;  // INCREASED from 5
     notes += '+0.0: Close loss last start (0.5-2.5L) - not competitive\n';
 }
-    // === COLT BONUS SYSTEM (MUTUALLY EXCLUSIVE) ===
+  // === COLT BONUS SYSTEM (MUTUALLY EXCLUSIVE) ===
 if (horseSex === 'Colt') {
     const sectionalMatch = String(horseRow['sectional'] || '').match(/(\d+\.?\d*)sec/);
     const rawSectional = sectionalMatch ? parseFloat(sectionalMatch[1]) : null;
@@ -1070,7 +1017,6 @@ if (horseSex === 'Colt') {
         score += 20;
         notes += '+20.0 : COLT base bonus (14.3% SR, +66.1% ROI, 84 races)\n';
     }
-
     // Set Weight bonus (applies in addition to above)
     const weightType = String(horseRow['weight type'] || horseRow['horse weight type'] || '').trim().toLowerCase();
     if (weightType.includes('set weight')) {
@@ -1078,15 +1024,11 @@ if (horseSex === 'Colt') {
         notes += '+ 5.0 : Colt in Set Weight race (+106.7% ROI, 50 runners)\n';
     }
 }
-// ==========================================
-// SNITZEL × COLT COMBO
-// Sex: Colt + Sire: Snitzel = +215% ROI, 17 races, 29.4% SR
-// Snitzel alone is neutral (0 score) but Colt+Snitzel is a confirmed edge
-// ==========================================
-if (horseSex === 'Colt' && sire === 'Snitzel') {
-    score += 5;
-    notes += '+ 5.0 : Snitzel × Colt combo (+215% ROI, 17 races, 29.4% SR)\n';
-}
+// SNITZEL × COLT COMBO — TEMPORARILY DISABLED 2026-03-20 (sire scoring disabled)
+// if (horseSex === 'Colt' && sire === 'Snitzel') {
+//     score += 5;
+//     notes += '+ 5.0 : Snitzel × Colt combo (+215% ROI, 17 races, 29.4% SR)\n';
+// }
     return [score, notes]; // Return the score and notes
 }
 
