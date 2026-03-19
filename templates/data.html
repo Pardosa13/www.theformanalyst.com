@@ -636,7 +636,7 @@
 
 <div class="section-card">
   <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#pfaiAnalysis" aria-expanded="false">
-    <h5>🤖 PFAI Blend Analysis</h5><i class="bi bi-chevron-down"></i>
+    <h5>🤖 PFAI And Analyzer Blend Analysis</h5><i class="bi bi-chevron-down"></i>
   </div>
   <div id="pfaiAnalysis" class="collapse">
     <div class="card-body text-center"><p class="text-muted">Click to expand and load PFAI blend analysis...</p></div>
@@ -1965,12 +1965,44 @@ function renderPfaiAnalysis(data) {
 
         <!-- Disagreement Analysis -->
         <div class="card mb-4">
-            <div class="card-header"><h6 class="mb-0">🔀 Disagreement Analysis — When signals conflict, who was right?</h6></div>
+            <div class="card-header"><h6 class="mb-0">🔀 Signal Agreement Analysis</h6></div>
             <div class="card-body">
                 <p class="text-muted" style="font-size:12px;margin-bottom:16px">
-                    Races where pure Analyzer and pure PFAI ranked #1 differently — 
-                    <strong style="color:var(--text-primary)">${dg.total_disagreements.toLocaleString()}</strong> disagreement races out of ${ov.total_races.toLocaleString()} total.
+                    Out of ${ov.total_races.toLocaleString()} races — 
+                    <strong style="color:#34d399">${dg.agree_races.toLocaleString()} agreement races</strong> where both signals picked the same horse, 
+                    and <strong style="color:#fbbf24">${dg.total_disagreements.toLocaleString()} disagreement races</strong> where they differed.
                 </p>
+
+                <!-- Agreement row -->
+                <div class="row mb-3">
+                    <div class="col-md-12">
+                        <div class="card" style="border-color:rgba(52,211,153,0.4)!important;background:rgba(52,211,153,0.05)!important">
+                            <div class="card-body">
+                                <h6 style="color:#34d399;font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">✅ When Both Signals Agree</h6>
+                                <div class="row text-center">
+                                    <div class="col-md-3">
+                                        <div style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace;color:var(--text-primary)">${dg.agree_races}</div>
+                                        <div style="font-size:11px;color:var(--text-muted)">Races</div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace;color:var(--text-primary)">${dg.agree_wins}</div>
+                                        <div style="font-size:11px;color:var(--text-muted)">Wins</div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace;color:${dg.agree_strike >= 25 ? '#34d399' : 'var(--text-primary)'}">${dg.agree_strike}%</div>
+                                        <div style="font-size:11px;color:var(--text-muted)">Strike Rate</div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace;color:${dg.agree_roi >= 0 ? '#34d399' : '#f87171'}">${dg.agree_roi >= 0 ? '+' : ''}${dg.agree_roi}%</div>
+                                        <div style="font-size:11px;color:var(--text-muted)">ROI (Avg SP $${dg.agree_avg_sp})</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Disagreement row -->
                 <div class="row mb-3">
                     <div class="col-md-4">
                         <div class="card text-center">
@@ -1995,18 +2027,19 @@ function renderPfaiAnalysis(data) {
                             <div class="card-body">
                                 <h6 style="color:#9090a8;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Both Wrong</h6>
                                 <div style="font-size:1.8rem;font-weight:800;font-family:'DM Mono',monospace;color:#f87171">${dg.both_wrong}</div>
-                                <div style="font-size:13px;color:var(--text-muted)">${dg.total_disagreements > 0 ? ((dg.both_wrong / dg.total_disagreements) * 100).toFixed(1) : 0}% of disagreements</div>
+                                <div style="font-size:13px;color:var(--text-muted)">${dg.both_wrong_pct}% of disagreements</div>
                             </div>
                         </div>
                     </div>
                 </div>
+
                 <div class="alert alert-info" style="font-size:13px">
                     <strong>💡 Verdict: </strong>
                     <span style="color:${verdictColor}">${verdictText}</span>
+                    ${dg.agree_races > 0 ? `When both signals agree (${dg.agree_races} races), strike rate is <strong>${dg.agree_strike}%</strong> — ${dg.agree_strike > 25 ? 'above average, confirming agreement races are your highest confidence bets.' : 'worth monitoring as sample grows.'}` : ''}
                 </div>
             </div>
         </div>
-
         <!-- PFAI Band Analysis -->
         <div class="card mb-4">
             <div class="card-header"><h6 class="mb-0">📊 PFAI Score Band Analysis — Does high PFAI confidence actually perform better?</h6></div>
