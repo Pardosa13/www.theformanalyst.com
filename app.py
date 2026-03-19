@@ -5774,42 +5774,65 @@ def api_pfai_analysis():
             'avg_winner_sp': round(sum(winner_sps) / len(winner_sps), 2) if winner_sps else 0,
         }
 
-    # ── DISAGREEMENT ANALYSIS ───────────────────────────────────────────
-    # Races where pure analyzer and pure PFAI ranked #1 differently
+    # ── AGREEMENT + DISAGREEMENT ANALYSIS ─────────────────────────────
     analyzer_right = 0
     pfai_right     = 0
     both_wrong     = 0
     disagreements  = 0
+    
+    agree_races  = 0
+    agree_wins   = 0
+    agree_profit = 0.0
+    agree_sps    = []
 
     for key in clean_race_keys:
         horses = races[key]
 
         analyzer_top = max(horses, key=lambda x: x['analyzer_norm'])
         pfai_top     = max(horses, key=lambda x: x['pfai_score'])
+        blended_top  = max(horses, key=lambda x: x['blended_final'])
 
-        # Only care about disagreements
         if analyzer_top['horse_name'] == pfai_top['horse_name']:
-            continue
-
-        disagreements += 1
-
-        analyzer_won = analyzer_top['finish_pos'] == 1
-        pfai_won     = pfai_top['finish_pos'] == 1
-
-        if analyzer_won:
-            analyzer_right += 1
-        elif pfai_won:
-            pfai_right += 1
+            # Signals agree
+            agree_races += 1
+            if blended_top['finish_pos'] == 1:
+                agree_wins += 1
+                agree_profit += (blended_top['sp'] * stake - stake)
+                if blended_top['sp'] > 0:
+                    agree_sps.append(blended_top['sp'])
+            else:
+                agree_profit -= stake
         else:
-            both_wrong += 1
+            # Signals disagree
+            disagreements += 1
+            analyzer_won = analyzer_top['finish_pos'] == 1
+            pfai_won     = pfai_top['finish_pos'] == 1
+
+            if analyzer_won:
+                analyzer_right += 1
+            elif pfai_won:
+                pfai_right += 1
+            else:
+                both_wrong += 1
+
+    agree_strike  = round(agree_wins / agree_races * 100, 1) if agree_races else 0
+    agree_roi     = round(agree_profit / (agree_races * stake) * 100, 1) if agree_races else 0
+    agree_avg_sp  = round(sum(agree_sps) / len(agree_sps), 2) if agree_sps else 0
 
     disagreement_results = {
-        'total_disagreements': disagreements,
-        'analyzer_right':      analyzer_right,
-        'pfai_right':          pfai_right,
-        'both_wrong':          both_wrong,
-        'analyzer_right_pct':  round(analyzer_right / disagreements * 100, 1) if disagreements else 0,
-        'pfai_right_pct':      round(pfai_right     / disagreements * 100, 1) if disagreements else 0,
+        'total_disagreements':  disagreements,
+        'analyzer_right':       analyzer_right,
+        'pfai_right':           pfai_right,
+        'both_wrong':           both_wrong,
+        'analyzer_right_pct':   round(analyzer_right / disagreements * 100, 1) if disagreements else 0,
+        'pfai_right_pct':       round(pfai_right     / disagreements * 100, 1) if disagreements else 0,
+        'both_wrong_pct':       round(both_wrong     / disagreements * 100, 1) if disagreements else 0,
+        'agree_races':          agree_races,
+        'agree_wins':           agree_wins,
+        'agree_strike':         agree_strike,
+        'agree_roi':            round(agree_roi, 1),
+        'agree_profit':         round(agree_profit, 2),
+        'agree_avg_sp':         agree_avg_sp,
     }
 
     # ── PFAI SCORE BAND ANALYSIS ────────────────────────────────────────
