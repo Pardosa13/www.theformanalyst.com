@@ -2786,25 +2786,24 @@ function compareClasses(newClass, formClass, newPrizemoneyString, formPrizemoney
 
     // Interpret the score difference
     if (scoreDiff > 0) {
-        // Stepping UP in class (harder race)
-        const basePenalty = -scoreDiff; // Negative points for stepping up
+        // Stepping UP in class (harder race) — cap penalty at 20pts
+        const basePenalty = -Math.min(scoreDiff, 20);
 
-        // Check if weight advantage enables the class rise
         if (scoreDiff > 10 && weightAdvantage > 0) {
-            const adjustment = adjustClassRiseForWeight(scoreDiff, weightAdvantage);
+            const adjustment = adjustClassRiseForWeight(Math.min(scoreDiff, 20), weightAdvantage);
             addScore = adjustment.adjustedPenalty;
-            note += addScore.toFixed(1) + ': Stepping UP ' + scoreDiff.toFixed(1) + ' class points; "' + formClass + '" (' + lastScore.toFixed(1) + ') to "' + newClass + '" (' + todayScore.toFixed(1) + ')\n';
+            note += addScore.toFixed(1) + ': Stepping UP ' + scoreDiff.toFixed(1) + ' class points (capped at 20); "' + formClass + '" (' + lastScore.toFixed(1) + ') to "' + newClass + '" (' + todayScore.toFixed(1) + ')\n';
             if (adjustment.note) {
                 note += '  ℹ️  ' + adjustment.note + '\n';
             }
         } else {
             addScore = basePenalty;
-            note += basePenalty.toFixed(1) + ': Stepping UP ' + scoreDiff.toFixed(1) + ' class points; "' + formClass + '" (' + lastScore.toFixed(1) + ') to "' + newClass + '" (' + todayScore.toFixed(1) + ')\n';
+            note += basePenalty.toFixed(1) + ': Stepping UP ' + scoreDiff.toFixed(1) + ' class points (capped at 20); "' + formClass + '" (' + lastScore.toFixed(1) + ') to "' + newClass + '" (' + todayScore.toFixed(1) + ')\n';
         }
     } else if (scoreDiff < 0) {
-        // Stepping DOWN in class (easier race)
-        addScore = Math.abs(scoreDiff);
-        note += '+ ' + addScore.toFixed(1) + ': Stepping DOWN ' + Math.abs(scoreDiff).toFixed(1) + ' class points; "' + formClass + '" (' + lastScore.toFixed(1) + ') to "' + newClass + '" (' + todayScore.toFixed(1) + ')\n';
+        // Stepping DOWN in class — cap bonus at 20pts
+        addScore = Math.min(Math.abs(scoreDiff), 20);
+        note += '+ ' + addScore.toFixed(1) + ': Stepping DOWN ' + Math.abs(scoreDiff).toFixed(1) + ' class points (capped at 20); "' + formClass + '" (' + lastScore.toFixed(1) + ') to "' + newClass + '" (' + todayScore.toFixed(1) + ')\n';
     } else {
         // Same class level
         note += '0.0: Same class level; "' + formClass + '" to "' + newClass + '" (both ' + todayScore.toFixed(1) + ')\n';
