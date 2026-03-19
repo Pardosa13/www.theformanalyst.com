@@ -324,8 +324,8 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             score -= 8;
             notes += '- 8.0 : French-bred (-67.7% ROI, 77 runners)\n';
         } else if (horseCountry === 'GB') {
-            score -= 5;
-            notes += '- 5.0 : GB-bred (-45.7% ROI, 187 runners)\n';
+            score += 5;
+            notes += '+ 5.0 : GB-bred (+59.2% ROI, 26 runners - monitor sample)\n';
         } else if (horseCountry === 'JPN') {
             score -= 10;
             notes += '- 10.0 : Japan-bred (-100% ROI, 17 runners)\n';
@@ -333,8 +333,8 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             score -= 10;
             notes += '- 10.0 : German-bred (-100% ROI, 7 runners)\n';
         } else if (horseCountry === 'NZ') {
-            score -= 3;
-            notes += '- 3.0 : NZ-bred (-23.7% ROI, 1925 runners)\n';
+            score -= 8;
+            notes += '- 8.0 : NZ-bred (-31.1% ROI, 267 runners)\n';
         } else if (horseCountry === 'IRE') {
             score -= 2;
             notes += '- 2.0 : Irish-bred (-11.0% ROI, 350 runners)\n';
@@ -1120,15 +1120,15 @@ function checkLast10runs(last10) {
             count++;
             
             if (char === '1') {
-                addScore += 10 * weight;
+                addScore += 6 * weight;
                 note2 = ' 1st' + note2;
             }
             if (char === '2') {
-                addScore += 5 * weight;
+                addScore += 3 * weight;
                 note2 = ' 2nd' + note2;
             }
             if (char === '3') {
-                addScore += 2 * weight;
+                addScore += 1 * weight;
                 note2 = ' 3rd' + note2;
             }
         }
@@ -1434,8 +1434,8 @@ function checkJockeys(JockeyName) {
         note += '+10.0: Profitable jockey (0-20% ROI)\n';
     }
     else if (badJockeys.includes(JockeyName)) {
-        addScore -= 15;
-        note += '-15.0: Poor value jockey (destroys ROI)\n';
+        addScore -= 10;
+        note += '-10.0: Poor value jockey (destroys ROI)\n';
     }
     // All others get 0 points (market efficient)
 
@@ -1911,8 +1911,8 @@ function checkTrainers(trainerName) {
         note += '+10.0: Profitable trainer (5-20% ROI)\n';
     }
     else if (badTrainers.includes(trainerName)) {
-        addScore -= 15;
-        note += '-15.0: Poor value trainer (destroys ROI)\n';
+        addScore -= 10;
+        note += '-10.0: Poor value trainer (destroys ROI)\n';
     }
     // All others get 0 points (market efficient)
     
@@ -2507,10 +2507,9 @@ function checkDaysSinceLastRun(meetingDate, formMeetingDate) {
     const daysSinceLastRun = Math.floor((todayDate - lastRunDate) / millisecondsPerDay);
 
     // Apply penalties/bonuses based on days since last run
-    if (daysSinceLastRun >= 365) {
-        // Over a year - small penalty (still negative ROI at -71.9% on 153 races)
-        addScore = -10;
-        note += `-10.0 : Very long absence - ${daysSinceLastRun} days since last run (1+ year, -71.9% ROI)\n`;
+   if (daysSinceLastRun >= 365) {
+        addScore = -20;
+        note += `-20.0 : Very long absence - ${daysSinceLastRun} days since last run (1+ year, -73.7% ROI)\n`;
     } else if (daysSinceLastRun >= 250) {
         // 250+ days - POSITIVE ROI confirmed (+34.5% ROI, 194 races - statistically solid)
         addScore = 5;
@@ -3501,10 +3500,10 @@ function checkFirstUpSecondUp(horseRow) {
         note += `+15.0 : Second-up specialist (UNDEFEATED: ${secondUpRecord})\n`;
     }
 
-    // Mild penalty for unclear markers
+    // Unclear spell status — neutral (data shows 21.7% of winners have this)
     if (!isFirstUp && !isSecondUp && last10.length > 0 && /x/i.test(last10)) {
-        addScore -= 1;
-        note += `- 1.0 : Unclear spell/return status (markers present but pattern not first/second-up)\n`;
+        addScore += 0;
+        note += `+ 0.0 : Unclear spell/return status\n`;
     }
 
     return [addScore, note];
