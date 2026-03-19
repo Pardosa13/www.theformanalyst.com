@@ -867,7 +867,7 @@ function renderComponentAnalysis(data) {
 
     // ── C — Component stacking ────────────────────────────────────────
     if (data.stacking) {
-        const bucketOrder = ['<10', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20+'];
+        const bucketOrder = ['<20','20-22','23-25','26-28','29-31','32-34','35-37','38-40','41-43','44-46','47-49','50+'];
         html += '<h5 style="margin:24px 0 8px">📦 Component Stacking</h5>';
         html += '<p class="text-muted mb-3" style="font-size:12px">Does having more positive components actually produce more winners? Grouped by count of positive-scoring components on a horse.</p>';
         html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
