@@ -4453,6 +4453,20 @@ def get_meeting_sectionals(meeting_id):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
     
+_PFAI_ANALYZER_RE = re.compile(
+    r'Analyzer Score \(normalized\): ([\d.]+)',
+    re.DOTALL
+)
+
+def _parse_analyzer_score(notes):
+    if not notes:
+        return None
+    m = _PFAI_ANALYZER_RE.search(notes)
+    if m:
+        return float(m.group(1))
+    return None
+
+
 @app.route("/api/data/component-analysis")
 @login_required
 def api_component_analysis():
@@ -4461,14 +4475,15 @@ def api_component_analysis():
 
     from collections import defaultdict
 
-    track_filter    = request.args.get('track', '')
-    min_score_filter = request.args.get('min_score', type=float)
-    date_from       = request.args.get('date_from', '')
-    date_to         = request.args.get('date_to', '')
-    limit_param     = request.args.get('limit', 'all')
+    track_filter     = request.args.get('track', '')
+    date_from        = request.args.get('date_from', '')
+    date_to          = request.args.get('date_to', '')
+    limit_param      = request.args.get('limit', 'all')
 
     # ── Build race id list ──────────────────────────────────────────────
-    race_id_query = db.session.query(Race.id, Meeting.uploaded_at).join(
+    race_id_query = db.session.query(
+        Race.id, Meeting.uploaded_at
+    ).join(
         Meeting, Race.meeting_id == Meeting.id
     ).join(
         Horse, Horse.race_id == Race.id
@@ -4485,7 +4500,9 @@ def api_component_analysis():
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
 
-    all_race_ids = race_id_query.distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
+    all_race_ids = race_id_query.distinct().order_by(
+        Meeting.uploaded_at.desc(), Race.id.desc()
+    ).all()
 
     if limit_param == 'all':
         recent_race_ids = [r[0] for r in all_race_ids]
@@ -4493,7 +4510,13 @@ def api_component_analysis():
         limit = int(limit_param) if str(limit_param).isdigit() else 200
         recent_race_ids = [r[0] for r in all_race_ids[:limit]]
 
-    # ── Fetch all horses with predictions + results ─────────────────────
+    if not recent_race_ids:
+        return jsonify({
+            'components': [], 'race_relative': [], 'winner_gap': [],
+            'winner_gap_meta': {}, 'stacking': {}, 'scoring_audit': []
+        })
+
+    # ── Fetch all horses ────────────────────────────────────────────────
     rows = db.session.query(
         Race.id,
         Horse.horse_name,
@@ -4509,12 +4532,13 @@ def api_component_analysis():
         Race.id.in_(recent_race_ids)
     ).all()
 
-    # ── Group into races ────────────────────────────────────────────────
+    # ── Group into races — use analyzer score for ranking ───────────────
     races = defaultdict(list)
     for race_id, horse_name, score, notes, finish_pos, sp in rows:
+        analyzer_score = _parse_analyzer_score(notes)
         races[race_id].append({
             'horse_name': horse_name,
-            'score':      score or 0,
+            'score':      analyzer_score if analyzer_score is not None else (score or 0),
             'notes':      notes or '',
             'finish_pos': finish_pos,
             'sp':         sp or 0,
@@ -4524,39 +4548,51 @@ def api_component_analysis():
     stake = 10.0
 
     # ══════════════════════════════════════════════════════════════════
-    # A — EXISTING COMPONENT STATS (ROI-sorted, all horses)
+    # A — COMPONENT ROI STATS (all horses, ROI sorted)
     # ══════════════════════════════════════════════════════════════════
-    all_results_data = []
+    comp_stats = defaultdict(lambda: {
+        'appearances': 0, 'wins': 0, 'places': 0, 'profit': 0.0
+    })
+
     for race_id, horses in races.items():
         for h in horses:
-            all_results_data.append({
-                'horse':      type('obj', (object,), {'id': None})(),
-                'prediction': type('obj', (object,), {'notes': h['notes'], 'score': h['score']})(),
-                'result':     type('obj', (object,), {'finish_position': h['finish_pos'], 'sp': h['sp']})(),
-                'race':       type('obj', (object,), {'id': race_id})(),
-                'meeting':    type('obj', (object,), {})()
-            })
+            won   = h['finish_pos'] == 1
+            placed = h['finish_pos'] in (1, 2, 3)
+            profit = (h['sp'] * stake - stake) if won else -stake
+            for comp in h['components']:
+                if comp.startswith('_'):
+                    continue
+                comp_stats[comp]['appearances'] += 1
+                if won:
+                    comp_stats[comp]['wins'] += 1
+                    comp_stats[comp]['profit'] += profit
+                else:
+                    comp_stats[comp]['profit'] -= stake
+                if placed:
+                    comp_stats[comp]['places'] += 1
 
-    component_stats = aggregate_component_stats(all_results_data, stake=10.0)
-    sorted_components = sorted(component_stats.items(), key=lambda x: x[1]['roi'], reverse=True)
-    components_list = [
-        {
-            'name':         name,
-            'appearances':  stats['appearances'],
-            'wins':         stats['wins'],
-            'strike_rate':  stats['strike_rate'],
-            'places':       stats['places'],
-            'place_rate':   stats['place_rate'],
-            'roi':          stats['roi']
-        }
-        for name, stats in sorted_components
-        if stats['appearances'] >= 2 and not name.startswith('_')
-    ]
+    components_list = []
+    for name, stats in sorted(comp_stats.items(), key=lambda x: x[1]['profit'] / max(x[1]['appearances'], 1), reverse=True):
+        n = stats['appearances']
+        if n < 2:
+            continue
+        w = stats['wins']
+        p = stats['places']
+        roi = round(stats['profit'] / (n * stake) * 100, 1)
+        components_list.append({
+            'name':        name,
+            'appearances': n,
+            'wins':        w,
+            'strike_rate': round(w / n * 100, 1),
+            'places':      p,
+            'place_rate':  round(p / n * 100, 1),
+            'roi':         roi,
+        })
+
+    components_list.sort(key=lambda x: x['roi'], reverse=True)
 
     # ══════════════════════════════════════════════════════════════════
     # A (ENHANCED) — RACE-RELATIVE COMPONENT LIFT
-    # For each component: win rate WITH it vs win rate WITHOUT it
-    # in the same race
     # ══════════════════════════════════════════════════════════════════
     comp_with    = defaultdict(lambda: {'races': 0, 'wins': 0})
     comp_without = defaultdict(lambda: {'races': 0, 'wins': 0})
@@ -4567,7 +4603,7 @@ def api_component_analysis():
         all_comps_in_race = set()
         for h in horses:
             all_comps_in_race.update(
-                k for k in h['components'].keys() if not k.startswith('_')
+                k for k in h['components'] if not k.startswith('_')
             )
         for comp in all_comps_in_race:
             for h in horses:
@@ -4606,12 +4642,10 @@ def api_component_analysis():
 
     # ══════════════════════════════════════════════════════════════════
     # B — WINNER GAP ANALYSIS
-    # When top pick loses, what components did the actual winner have
-    # that the top pick didn't?
     # ══════════════════════════════════════════════════════════════════
-    gap_comp_counts  = defaultdict(int)
-    gap_total_races  = 0
-    top_pick_losses  = 0
+    gap_comp_counts = defaultdict(int)
+    gap_total_races = 0
+    top_pick_losses = 0
 
     for race_id, horses in races.items():
         if len(horses) < 2:
@@ -4623,7 +4657,6 @@ def api_component_analysis():
         gap_total_races += 1
         if top_pick['horse_name'] == winner['horse_name']:
             continue
-        # Top pick lost — find what winner had that top pick didn't
         top_comps    = set(k for k in top_pick['components'] if not k.startswith('_'))
         winner_comps = set(k for k in winner['components']   if not k.startswith('_'))
         missing      = winner_comps - top_comps
@@ -4631,28 +4664,27 @@ def api_component_analysis():
         for comp in missing:
             gap_comp_counts[comp] += 1
 
-    winner_gap = []
-    for comp, count in sorted(gap_comp_counts.items(), key=lambda x: x[1], reverse=True):
-        if count >= 5:
-            winner_gap.append({
-                'component':    comp,
-                'count':        count,
-                'pct_of_losses': round(count / top_pick_losses * 100, 1) if top_pick_losses else 0,
-            })
+    winner_gap = [
+        {
+            'component':     comp,
+            'count':         count,
+            'pct_of_losses': round(count / top_pick_losses * 100, 1) if top_pick_losses else 0,
+        }
+        for comp, count in sorted(gap_comp_counts.items(), key=lambda x: x[1], reverse=True)
+        if count >= 5
+    ]
 
     # ══════════════════════════════════════════════════════════════════
     # C — COMPONENT STACKING
-    # Group horses by positive component count (5,6,7,8,9,10+)
-    # Win rate + ROI per tier
     # ══════════════════════════════════════════════════════════════════
     stacking_buckets = {
-        '1-4':  {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '5':    {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '6':    {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '7':    {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '8':    {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '9':    {'horses': 0, 'wins': 0, 'profit': 0.0},
-        '10+':  {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '1-4': {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '5':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '6':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '7':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '8':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '9':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '10+': {'horses': 0, 'wins': 0, 'profit': 0.0},
     }
 
     for race_id, horses in races.items():
@@ -4678,19 +4710,18 @@ def api_component_analysis():
 
     stacking_results = {}
     for bucket, data in stacking_buckets.items():
-        h = data['horses']
+        n = data['horses']
         w = data['wins']
         stacking_results[bucket] = {
-            'horses':      h,
+            'horses':      n,
             'wins':        w,
-            'strike_rate': round(w / h * 100, 1) if h else 0,
-            'roi':         round(data['profit'] / (h * stake) * 100, 1) if h else 0,
+            'strike_rate': round(w / n * 100, 1) if n else 0,
+            'roi':         round(data['profit'] / (n * stake) * 100, 1) if n else 0,
             'profit':      round(data['profit'], 2),
         }
 
     # ══════════════════════════════════════════════════════════════════
-    # D — OVER/UNDER SCORING
-    # Compare assigned points vs actual ROI contribution
+    # D — SCORING AUDIT (over/under scored)
     # ══════════════════════════════════════════════════════════════════
     comp_points_roi = defaultdict(lambda: {
         'total_points': 0.0,
@@ -4711,21 +4742,19 @@ def api_component_analysis():
                 comp_points_roi[comp]['total_points'] += pts
                 comp_points_roi[comp]['appearances']  += 1
                 if won:
-                    comp_points_roi[comp]['wins']  += 1
+                    comp_points_roi[comp]['wins']   += 1
                     comp_points_roi[comp]['profit'] += profit
                 else:
-                    comp_points_roi[comp]['profit'] += -stake
+                    comp_points_roi[comp]['profit'] -= stake
 
     scoring_audit = []
     for comp, data in comp_points_roi.items():
-        n   = data['appearances']
+        n = data['appearances']
         if n < 10:
             continue
-        avg_pts = round(data['total_points'] / n, 1)
-        roi     = round(data['profit'] / (n * stake) * 100, 1)
-        sr      = round(data['wins'] / n * 100, 1)
-        # Divergence: positive = over-scored (pts high, ROI low)
-        #             negative = under-scored (pts low, ROI high)
+        avg_pts    = round(data['total_points'] / n, 1)
+        roi        = round(data['profit'] / (n * stake) * 100, 1)
+        sr         = round(data['wins'] / n * 100, 1)
         divergence = round(avg_pts - (roi / 10), 1)
         scoring_audit.append({
             'name':        comp,
@@ -4736,26 +4765,25 @@ def api_component_analysis():
             'divergence':  divergence,
         })
 
-    # Sort by divergence descending (most over-scored first)
     scoring_audit.sort(key=lambda x: x['divergence'], reverse=True)
 
-    result = jsonify({
-        'components':    components_list,
-        'race_relative': race_relative,
-        'winner_gap':    winner_gap,
-        'winner_gap_meta': {
-            'total_races':   gap_total_races,
-            'top_pick_losses': top_pick_losses,
-            'top_pick_wins': gap_total_races - top_pick_losses,
-            'top_pick_sr':   round((gap_total_races - top_pick_losses) / gap_total_races * 100, 1) if gap_total_races else 0,
-        },
-        'stacking':      stacking_results,
-        'scoring_audit': scoring_audit,
-    })
-
-    db.session.expunge_all()
-    db.session.remove()
-    return result
+    try:
+        return jsonify({
+            'components':      components_list,
+            'race_relative':   race_relative,
+            'winner_gap':      winner_gap,
+            'winner_gap_meta': {
+                'total_races':     gap_total_races,
+                'top_pick_losses': top_pick_losses,
+                'top_pick_wins':   gap_total_races - top_pick_losses,
+                'top_pick_sr':     round((gap_total_races - top_pick_losses) / gap_total_races * 100, 1) if gap_total_races else 0,
+            },
+            'stacking':        stacking_results,
+            'scoring_audit':   scoring_audit,
+        })
+    finally:
+        db.session.expunge_all()
+        db.session.remove()
 
 @app.route("/api/data/external-factors")
 @login_required
