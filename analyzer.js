@@ -4270,7 +4270,6 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
         // ==========================================
         // HIDDEN EDGE COMBINATION BONUSES
         // ==========================================
-
         const allNotes = notes + (matchingWeight ? matchingWeight.weightNote : '') + (matchingHorse ? matchingHorse.sectionalNote : '');
 
         // API Sectional detections
@@ -4280,32 +4279,23 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
         // Last start detections
         const isCompetitiveEffort = /\+\s*0\.0\s*:\s*Competitive effort \(\d+th\) by [\d.]+L/i.test(allNotes);
 
-        // Form price — raw CSV field ($2.01-$5.00)
+        // Form price — raw CSV field
         const isFormPriceShort    = (() => {
             const fp = parseFloat(horse['form price']) || 0;
             return fp > 2.0 && fp <= 5.0;
         })();
 
-        // 1. Form Price Short ($2-$5) + Competitive Effort — 179 races +102.3% → +10
-        if (isFormPriceShort && isCompetitiveEffort) {
-            score += 10;
-            notes += `+10.0 : Hidden Edge — Short price ($2-$5) + competitive effort last start (+102.3% ROI pattern)\n`;
-        }
+        // 1. Form Price Short ($2-$5) + Competitive Effort — DEACTIVATED (-25.1% ROI, 108 races)
+        // if (isFormPriceShort && isCompetitiveEffort) { score += 10; }
 
-        // 2. API Sectional Last 400m Elite + Competitive Effort — 96 races +112.5% → +10
-        if (isLast400Elite && isCompetitiveEffort) {
-            score += 10;
-            notes += `+10.0 : Hidden Edge — Elite last 400m sectional + competitive effort last start (+112.5% ROI pattern)\n`;
-        }
+        // 2. API Sectional Last 400m Elite + Competitive Effort — DEACTIVATED (-29.0% ROI, 97 races)
+        // if (isLast400Elite && isCompetitiveEffort) { score += 10; }
 
-        // 3. API Sectional Last 600m Elite + Competitive Effort — 102 races +108.2% → +10
-        if (isLast600Elite && isCompetitiveEffort) {
-            score += 10;
-            notes += `+10.0 : Hidden Edge — Elite last 600m sectional + competitive effort last start (+108.2% ROI pattern)\n`;
-        }
+        // 3. API Sectional Last 600m Elite + Competitive Effort — DEACTIVATED (-33.7% ROI, 90 races)
+        // if (isLast600Elite && isCompetitiveEffort) { score += 10; }
 
-        // 6. Leader Sprint + Last Start Favoured ($2-$4) — 98 races +54% → +10
-        const isLeaderSprint      = (horse['runningposition'] || '').toUpperCase() === 'LEADER' && 
+        // 4. Sprint Leader + Last Start Favoured ($2-$4) — ACTIVE (+56.5% ROI, 30% SR, 20 races)
+        const isLeaderSprint      = (horse['runningposition'] || '').toUpperCase() === 'LEADER' &&
                                     (parseInt(horse['distance']) || 0) <= 1200;
         const isLastStartFavoured = (() => {
             const fp = parseFloat(horse['form price']) || 0;
@@ -4313,10 +4303,10 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
         })();
         if (isLeaderSprint && isLastStartFavoured) {
             score += 20;
-            notes += `+20.0 : Hidden Edge — Sprint leader + last start favoured ($2-$4) (+54% ROI, 98 races)\n`;
+            notes += `+20.0 : Hidden Edge — Sprint leader + last start favoured ($2-$4) (+56.5% ROI, 30% SR, 20 races)\n`;
         }
 
-        // 7. Condition Podium Rate Strong + Last Start Fav (≤$2) — 83 races +47.8% → +10
+        // 5. Condition Podium Rate Strong + Last Start Fav (≤$2) — MONITORING (3 races, insufficient sample)
         const isConditionPodiumStrong = /\+\s*9\.0\s*:\s*Strong podium rate.*on (good|soft|heavy|firm|synthetic)/i.test(allNotes);
         const isLastStartFav          = (() => {
             const fp = parseFloat(horse['form price']) || 0;
@@ -4324,8 +4314,9 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
         })();
         if (isConditionPodiumStrong && isLastStartFav) {
             score += 10;
-            notes += `+10.0 : Hidden Edge — Strong condition podium rate + last start favourite (≤$2) (+47.8% ROI, 83 races)\n`;
+            notes += `+10.0 : Hidden Edge — Strong condition podium rate + last start favourite (≤$2) (+47.8% ROI, 3 races - monitoring)\n`;
         }
+
         const matchingME = marketExpectationScores.find(m =>
             parseInt(m.race) === parseInt(raceNumber) &&
             m.name.toLowerCase().trim() === horseName.toLowerCase().trim()
