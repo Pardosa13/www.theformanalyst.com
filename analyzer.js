@@ -4304,12 +4304,6 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             notes += `+10.0 : Hidden Edge — Elite last 600m sectional + competitive effort last start (+108.2% ROI pattern)\n`;
         }
 
-        // 5. 3yo Filly + Competitive Effort — 110 races +115.9% → +12
-        const is3yoFilly = horse['horse age'] === '3' && horse['horse sex'] === 'Filly';
-        if (is3yoFilly && isCompetitiveEffort) {
-            score += 12;
-            notes += `+12.0 : Hidden Edge — 3yo Filly + competitive effort last start (+115.9% ROI, 110 races)\n`;
-        }
         // 6. Leader Sprint + Last Start Favoured ($2-$4) — 98 races +54% → +10
         const isLeaderSprint      = (horse['runningposition'] || '').toUpperCase() === 'LEADER' && 
                                     (parseInt(horse['distance']) || 0) <= 1200;
