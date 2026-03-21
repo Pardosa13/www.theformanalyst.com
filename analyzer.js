@@ -323,8 +323,8 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             score -= 8;
             notes += '- 8.0 : French-bred (-67.7% ROI, 77 runners)\n';
         } else if (horseCountry === 'GB') {
-            score += 5;
-            notes += '+ 5.0 : GB-bred (+59.2% ROI, 26 runners - monitor sample)\n';
+            score += 10;
+            notes += '+ 10.0 : GB-bred (+59.2% ROI, 26 runners - monitor sample)\n';
         } else if (horseCountry === 'JPN') {
             score -= 10;
             notes += '- 10.0 : Japan-bred (-100% ROI, 17 runners)\n';
@@ -335,11 +335,11 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             score -= 8;
             notes += '- 8.0 : NZ-bred (-31.1% ROI, 267 runners)\n';
         } else if (horseCountry === 'IRE') {
-            score -= 2;
-            notes += '- 2.0 : Irish-bred (-11.0% ROI, 350 runners)\n';
+            score -= 0;
+            notes += '- 0.0 : Irish-bred (-11.0% ROI, 350 runners)\n';
         } else if (horseCountry === 'USA') {
-            score += 5;
-            notes += '+ 5.0 : USA-bred (+100% ROI, 9 runners - small sample)\n';
+            score += 0;
+            notes += '+ 0.0 : USA-bred (+100% ROI, 9 runners - small sample)\n';
         }
     }
 
@@ -481,11 +481,11 @@ const horseAge = parseInt(horseRow['horse age']);
 
 if (!isNaN(horseAge)) {
     
-    // === MAJOR EDGE: 5YO HORSES (ENTIRE MALES ONLY) ===
+    // === 5YO HORSES (ENTIRE MALES ONLY) ===
     // 164% ROI, 40% SR - HUGE DISCOVERY (geldings destroy value at -61.5% ROI)
     if (horseAge === 5 && horseSex === 'Horse') {
-    score += 25;
-    notes += '+25.0 : 5yo horse (164% ROI, 40% SR - elite age)\n';
+    score += 5;
+    notes += '+5.0 : 5yo horse (164% ROI, 40% SR - elite age)\n';
     }
     
     // === STANDARD AGE BONUSES (REDUCED) ===
@@ -518,8 +518,8 @@ if (!isNaN(horseAge)) {
     // === OLD AGE PENALTY (INCREASED) ===
     // 7+: -40.2% ROI confirmed - increased from -20 to -25
     if (horseAge >= 7 && horseAge < 9) {
-        score -= 25;
-        notes += '-25.0 : Old age (7-8yo, 4.5% SR, -40.2% ROI)\n';
+        score -= 20;
+        notes += '-20.0 : Old age (7-8yo, 4.5% SR, -40.2% ROI)\n';
     }
     
     // === EXTREME AGE PENALTIES - ZERO WINNERS ===
@@ -1014,8 +1014,8 @@ if (horseSex === 'Colt') {
     }
     // Priority 3: Base Colt bonus
     else {
-        score += 20;
-        notes += '+20.0 : COLT base bonus (14.3% SR, +66.1% ROI, 84 races)\n';
+        score += 10;
+        notes += '+10.0 : COLT base bonus (14.3% SR, +66.1% ROI, 84 races)\n';
     }
     // Set Weight bonus (applies in addition to above)
     const weightType = String(horseRow['weight type'] || horseRow['horse weight type'] || '').trim().toLowerCase();
@@ -4025,7 +4025,7 @@ function calculateRunningPositionScore(runningPosition, raceDistance) {
         if (pos === 'LEADER')      { score = -8; note = '- 8.0 : LEADER in Staying race (2400m+) - likely to tire\n'; }
         else if (pos === 'ONPACE') { score = 3;  note = '+ 3.0 : ONPACE in Staying race\n'; }
         else if (pos === 'MIDFIELD')   { score = 5;  note = '+ 5.0 : MIDFIELD in Staying race\n'; }
-        else if (pos === 'BACKMARKER') { score = 2;  note = '+ 2.0 : BACKMARKER in Staying race\n'; }
+        else if (pos === 'BACKMARKER') { score = 20;  note = '+ 20.0 : BACKMARKER in Staying race\n'; }
     }
     
     return [score, note];
@@ -4312,8 +4312,8 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
             return fp > 2.0 && fp <= 4.0;
         })();
         if (isLeaderSprint && isLastStartFavoured) {
-            score += 10;
-            notes += `+10.0 : Hidden Edge — Sprint leader + last start favoured ($2-$4) (+54% ROI, 98 races)\n`;
+            score += 20;
+            notes += `+20.0 : Hidden Edge — Sprint leader + last start favoured ($2-$4) (+54% ROI, 98 races)\n`;
         }
 
         // 7. Condition Podium Rate Strong + Last Start Fav (≤$2) — 83 races +47.8% → +10
