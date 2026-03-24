@@ -4822,7 +4822,293 @@ def api_component_analysis():
         })
 
     scoring_audit.sort(key=lambda x: x['divergence'], reverse=True)
-
+    # ══════════════════════════════════════════════════════════════════
+    # E — RAW FACTOR MINING (csv_data fields not scored by analyzer)
+    # ══════════════════════════════════════════════════════════════════
+    # Needs csv_data + meeting name, so requires a second lightweight query
+    import re as _re
+ 
+    raw_rows = db.session.query(
+        Race.id,
+        Horse.csv_data,
+        Horse.is_scratched,
+        Race.track_condition,
+        Meeting.meeting_name,
+        Result.finish_position,
+        Result.sp
+    ).join(Horse,   Horse.race_id    == Race.id
+    ).join(Meeting, Race.meeting_id  == Meeting.id
+    ).join(Result,  Result.horse_id  == Horse.id
+    ).filter(
+        Result.finish_position > 0,
+        Horse.is_scratched == False,
+        Race.id.in_(recent_race_ids)
+    ).all()
+ 
+    raw_buckets = defaultdict(lambda: {"wins": 0, "total": 0, "profit": 0.0, "category": ""})
+ 
+    def _racc(key, category, won, sp):
+        raw_buckets[key]["wins"]    += 1 if won else 0
+        raw_buckets[key]["total"]   += 1
+        raw_buckets[key]["profit"]  += (sp * stake - stake) if won else -stake
+        raw_buckets[key]["category"] = category
+ 
+    total_raw = len(raw_rows)
+    raw_wins  = sum(1 for r in raw_rows if r.finish_position == 1)
+    raw_avg_wr = raw_wins / total_raw * 100 if total_raw else 0
+ 
+    for race_id, csv, is_scratched, track_cond, meeting_name, finish_pos, sp in raw_rows:
+        csv  = csv or {}
+        won  = finish_pos == 1
+        sp   = sp or 0
+ 
+        # Age + Sex
+        age = csv.get("horse age")
+        sex = csv.get("horse sex", "").strip()
+        if age and sex:
+            _racc(f"AgeSex:{age}yo {sex}", "Age / Sex", won, sp)
+        if age:
+            _racc(f"Age:{age}yo", "Age", won, sp)
+ 
+        # Country
+        country = csv.get("country", "").strip().upper()
+        if country:
+            label = ("AUS" if country in ("AUS","AUSTRALIA") else
+                     "NZ"  if country in ("NZ","NEW ZEALAND") else
+                     "IRE" if country in ("IRE","IRELAND")    else
+                     "GB"  if country in ("GB","GBR","UK")    else
+                     "Other")
+            _racc(f"Country:{label}", "Country of Origin", won, sp)
+ 
+        # Barrier
+        try:
+            b = int(str(csv.get("horse barrier","0") or 0).strip())
+            if 1 <= b <= 20:
+                bg = ("1" if b==1 else "2-3" if b<=3 else "4-6" if b<=6 else "7-9" if b<=9 else "10+")
+                _racc(f"BarrierGroup:{bg}", "Barrier Group", won, sp)
+        except (ValueError, TypeError):
+            pass
+ 
+        # Weight type
+        wt = csv.get("weight type", "").strip()
+        if wt:
+            _racc(f"WeightType:{wt}", "Weight Type", won, sp)
+ 
+        # Sex restrictions
+        sr = csv.get("sex restrictions", "").strip()
+        if sr:
+            _racc(f"SexRestrict:{sr}", "Sex Restrictions", won, sp)
+ 
+        # Apprentice claim
+        try:
+            claim = float(str(csv.get("horse claim","0") or 0).strip())
+            if claim > 0:
+                cb = ("1kg" if claim<=1 else "1.5kg" if claim<=1.5 else "2kg" if claim<=2 else "3kg+")
+                _racc(f"Claim:{cb}", "Claim Allowance", won, sp)
+                _racc("Claim:HasClaim", "Claim: Any", won, sp)
+            else:
+                _racc("Claim:NoClaim", "Claim: No Claim", won, sp)
+        except (ValueError, TypeError):
+            pass
+ 
+        # Last start finish position
+        fp_raw = csv.get("form position", "")
+        try:
+            fp = int(str(fp_raw).strip())
+            label = ("1st" if fp==1 else "2nd" if fp==2 else "3rd" if fp==3 else
+                     "4th-6th" if fp<=6 else "7th-10th" if fp<=10 else "11th+")
+            _racc(f"LastPos:{label}", "Last Start Position", won, sp)
+        except (ValueError, TypeError):
+            _racc("LastPos:NoForm", "Last Start Position", won, sp)
+ 
+        # Last start SP
+        try:
+            fpp = float(str(csv.get("form price","0") or 0).strip())
+            if fpp > 0:
+                pb = ("≤$2" if fpp<=2 else "$2-$4" if fpp<=4 else "$4-$8" if fpp<=8 else
+                      "$8-$15" if fpp<=15 else "$15-$30" if fpp<=30 else "$30+")
+                _racc(f"LastSP:{pb}", "Last Start SP", won, sp)
+        except (ValueError, TypeError):
+            pass
+ 
+        # Last start margin
+        try:
+            fm  = float(str(csv.get("form margin","0") or 0).strip())
+            won_last = str(fp_raw).strip() == "1"
+            if won_last:
+                ml = ("Won <0.5L" if fm<0.5 else "Won 0.5-2L" if fm<=2 else
+                      "Won 2-5L" if fm<=5 else "Won 5L+")
+            else:
+                ml = ("Lost <1L" if fm<1 else "Lost 1-2L" if fm<=2 else
+                      "Lost 2-4L" if fm<=4 else "Lost 4-8L" if fm<=8 else "Lost 8L+")
+            _racc(f"LastMargin:{ml}", "Last Start Margin", won, sp)
+        except (ValueError, TypeError):
+            pass
+ 
+        # Last start going
+        ftc = csv.get("form track condition", "").strip()
+        if ftc:
+            going_base = ftc.split()[0].capitalize()
+            _racc(f"LastGoing:{ftc}",          "Last Start Going (Full)",  won, sp)
+            _racc(f"LastGoingBase:{going_base}","Last Start Going (Type)", won, sp)
+ 
+        # Last start class type
+        fc = csv.get("form class", "").strip().upper()
+        if fc:
+            cls_type = ("Maiden"    if "MAIDEN" in fc else
+                        "Benchmark" if "BENCH"  in fc or "BM" in fc else
+                        "Restricted" if "REST"  in fc else
+                        "Class"     if "CLASS"  in fc else
+                        "Open"      if "OPEN"   in fc else
+                        "Group/Listed" if ("GROUP" in fc or "GR" in fc or "LIST" in fc) else "Other")
+            _racc(f"LastClassType:{cls_type}", "Last Start Class Type", won, sp)
+ 
+        # Distance change vs last start
+        try:
+            today_d = int(str(csv.get("distance","0") or 0).replace("m","").strip())
+            form_d  = int(str(csv.get("form distance","0") or 0).replace("m","").strip())
+            if today_d > 0 and form_d > 0:
+                delta = today_d - form_d
+                dl = ("Same ±200m"   if abs(delta)<=200 else
+                      "Up 200-400m"  if 200<delta<=400  else
+                      "Up 400m+"     if delta>400        else
+                      "Down 200-400m" if -400<=delta<-200 else "Down 400m+")
+                _racc(f"DistChange:{dl}", "Distance Change", won, sp)
+        except (ValueError, TypeError):
+            pass
+ 
+        # Weight change vs last start
+        try:
+            hw  = float(str(csv.get("horse weight","0") or 0).strip())
+            fmw = float(str(csv.get("form weight","0")  or 0).strip())
+            if 49<=hw<=65 and 49<=fmw<=65:
+                diff = fmw - hw
+                wl = ("Same ±0.5kg"    if abs(diff)<0.5  else
+                      "Lighter ≤1.5kg" if 0.5<=diff<=1.5 else
+                      "Lighter >1.5kg" if diff>1.5        else
+                      "Heavier ≤1.5kg" if diff>=-1.5     else "Heavier >1.5kg")
+                _racc(f"WeightChange:{wl}", "Weight Change vs Last", won, sp)
+        except (ValueError, TypeError):
+            pass
+ 
+        # Career win-rate bucket
+        rec = csv.get("horse record","").strip()
+        try:
+            parts  = rec.replace("-",":").split(":")
+            starts = int(parts[0]); wins_c = int(parts[1])
+            if starts >= 3:
+                cr = wins_c/starts*100
+                cl = ("0 wins ever" if wins_c==0 else "<10% SR" if cr<10 else
+                      "10-20% SR" if cr<20 else "20-33% SR" if cr<33 else
+                      "33-50% SR" if cr<50 else "50%+ SR")
+                _racc(f"CareerSR:{cl}", "Career Strike Rate", won, sp)
+        except (ValueError, TypeError, IndexError):
+            pass
+ 
+        # Race prizemoney tier
+        prize_raw = csv.get("race prizemoney","") or csv.get("prizemoney","")
+        pm_match  = _re.search(r"\$([\d,]+)", str(prize_raw))
+        try:
+            if pm_match:
+                pv = int(pm_match.group(1).replace(",",""))
+                pl = ("<$30k" if pv<30_000 else "$30k-$60k" if pv<60_000 else
+                      "$60k-$100k" if pv<100_000 else "$100k-$200k" if pv<200_000 else "$200k+")
+                _racc(f"Prizemoney:{pl}", "Race Prizemoney", won, sp)
+        except (ValueError, TypeError):
+            pass
+ 
+        # Last start field size
+        fsize_raw = csv.get("form other runners","")
+        try:
+            m2 = _re.match(r"^(\d+)", str(fsize_raw).strip())
+            if m2:
+                total_runners = int(m2.group(1)) + 1
+                fl = ("Small ≤7" if total_runners<=7 else "Mid 8-11" if total_runners<=11 else
+                      "Large 12-15" if total_runners<=15 else "Big 16+")
+                _racc(f"LastFieldSize:{fl}", "Last Start Field Size", won, sp)
+        except (ValueError, TypeError):
+            pass
+ 
+        # Last start sectional (600m)
+        sect_raw = csv.get("sectional","").strip()
+        sect_match = _re.match(r"([\d.]+)sec", sect_raw)
+        try:
+            if sect_match:
+                sv = float(sect_match.group(1))
+                if sv > 1:
+                    sl = ("<33.5s" if sv<33.5 else "33.5-34.5s" if sv<34.5 else
+                          "34.5-35.5s" if sv<35.5 else "35.5-36.5s" if sv<36.5 else ">36.5s")
+                    _racc(f"LastSect600m:{sl}", "Last 600m Sectional", won, sp)
+        except (ValueError, TypeError):
+            pass
+ 
+        # horse last10 form string
+        last10 = csv.get("horse last10","").strip()
+        if last10:
+            digits = [c for c in last10 if c.isdigit()]
+            if digits:
+                wins_10 = digits.count("1")
+                recent5 = digits[-5:]
+                w5 = recent5.count("1")
+                _racc(f"Last10Wins:{'4+' if wins_10>=4 else '2-3' if wins_10>=2 else '1' if wins_10==1 else '0'}",
+                      "Last 10 Win Count", won, sp)
+                _racc(f"Last5Wins:{'2+' if w5>=2 else '1' if w5==1 else '0'}",
+                      "Last 5 Win Count", won, sp)
+ 
+        # Same track as last start
+        form_track    = csv.get("form track","").strip()
+        meeting_track = meeting_name.split("_")[1] if "_" in meeting_name else meeting_name
+        if form_track and meeting_track:
+            same = form_track.lower() == meeting_track.lower()
+            _racc(f"SameTrack:{'Yes' if same else 'No'}", "Same Track as Last Start", won, sp)
+ 
+        # Unregistered jockey flag
+        jock_id = csv.get("horse jockey id","").strip()
+        _racc(f"JockeyReg:{'Unregistered' if not jock_id else 'Registered'}",
+              "Jockey Registration", won, sp)
+ 
+        # Age restrictions
+        age_restr = csv.get("age restrictions","").strip()
+        _racc(f"AgeRestriction:{age_restr if age_restr else 'Open Age'}", "Age Restrictions", won, sp)
+ 
+        # Today's track condition type
+        cond_base = (track_cond or "Unknown").split()[0].capitalize()
+        _racc(f"ConditionType:{cond_base}", "Condition Type", won, sp)
+ 
+        # Jockeys can claim
+        jcc = csv.get("jockeys can claim","").strip()
+        if jcc:
+            _racc(f"JockeysCanClaim:{jcc}", "Jockeys Can Claim", won, sp)
+ 
+    # Build raw_factors list — min 30 appearances, sorted by ROI
+    min_raw_n = 30
+    raw_factors = []
+    for key, stats in raw_buckets.items():
+        n = stats["total"]
+        if n < min_raw_n:
+            continue
+        w   = stats["wins"]
+        wr  = w / n * 100
+        roi = stats["profit"] / (n * stake) * 100
+        lift = wr - raw_avg_wr
+        raw_factors.append({
+            "key":      key,
+            "category": stats["category"],
+            "label":    key.split(":",1)[1] if ":" in key else key,
+            "total":    n,
+            "wins":     w,
+            "win_rate": round(wr, 1),
+            "roi":      round(roi, 1),
+            "lift":     round(lift, 1),
+            "profit":   round(stats["profit"], 2),
+        })
+ 
+    raw_factors.sort(key=lambda x: x["roi"], reverse=True)
+    raw_meta = {
+        "total_horses":     total_raw,
+        "overall_win_rate": round(raw_avg_wr, 1),
+        "min_n":            min_raw_n,
+    }
     try:
         return jsonify({
             'components':      components_list,
@@ -4836,6 +5122,8 @@ def api_component_analysis():
             },
             'stacking':        stacking_results,
             'scoring_audit':   scoring_audit,
+            'raw_factors':     raw_factors,   # NEW
+            'raw_meta':        raw_meta,      # NEW
         })
     finally:
         db.session.expunge_all()
