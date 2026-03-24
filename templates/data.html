@@ -931,8 +931,6 @@ function renderComponentAnalysis(data) {
         html += '</ul></div>';
     }
 
-    html += '</div>';
-    container.innerHTML = html;
 if (data.raw_factors && data.raw_factors.length > 0) {
     const factors = data.raw_factors;
     const meta    = data.raw_meta || {};
@@ -1154,7 +1152,11 @@ if (data.raw_factors && data.raw_factors.length > 0) {
                 }
             });
         }
-    }, 0);
+}, 0);
+}
+
+    html += '</div>';
+    container.innerHTML = html;
 }
 
 function renderExternalFactors(data) {
