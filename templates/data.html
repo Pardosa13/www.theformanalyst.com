@@ -933,6 +933,228 @@ function renderComponentAnalysis(data) {
 
     html += '</div>';
     container.innerHTML = html;
+if (data.raw_factors && data.raw_factors.length > 0) {
+    const factors = data.raw_factors;
+    const meta    = data.raw_meta || {};
+    const pos     = factors.filter(f => f.roi > 0).length;
+    const cats    = ['All', ...new Set(factors.map(f => f.category))].sort();
+ 
+    html += `
+    <h5 style="margin:32px 0 8px">🔍 Raw Factor Mining</h5>
+    <p class="text-muted mb-3" style="font-size:12px">
+        Mines raw CSV fields your analyzer doesn't currently score —
+        finding edges in untouched data.
+        <strong style="color:var(--text-primary)">${(meta.total_horses||0).toLocaleString()}</strong> horses ·
+        avg win rate <strong style="color:var(--text-primary)">${(meta.overall_win_rate||0).toFixed(1)}%</strong> ·
+        <strong style="color:#34d399">${pos}</strong> positive-ROI factors found (min ${meta.min_n||30} appearances).
+        Different from Component Analysis above which only sees what the analyzer writes into notes.
+    </p>
+ 
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
+        <div style="display:flex;flex-wrap:wrap;gap:.4rem" id="rfmCats">
+            ${cats.map(c => `<button onclick="rfmSetCat('${c}',this)"
+                style="background:${c==='All'?'var(--accent,#667eea)':'var(--bg-elevated,#1e293b)'};
+                       color:${c==='All'?'#fff':'var(--text-muted,#94a3b8)'};
+                       border:1px solid ${c==='All'?'var(--accent,#667eea)':'var(--border-subtle)'};
+                       border-radius:20px;padding:3px 12px;font-size:11px;cursor:pointer;white-space:nowrap">
+                ${c}
+            </button>`).join('')}
+        </div>
+        <button id="rfmAIBtn"
+            style="background:#a78bfa;color:#fff;border:none;border-radius:6px;
+                   padding:.4rem 1rem;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap">
+            ✦ Ask Claude
+        </button>
+    </div>
+ 
+    <div style="display:flex;gap:.5rem;margin-bottom:.75rem;align-items:center">
+        ${['roi','lift','wins','total'].map((s,i) =>
+            `<button onclick="rfmSetSort('${s}',this)"
+                style="background:${s==='roi'?'var(--bg-hover)':'var(--bg-elevated)'};
+                       color:${s==='roi'?'var(--text-primary)':'var(--text-muted)'};
+                       border:1px solid var(--border-subtle);border-radius:6px;
+                       padding:3px 10px;font-size:12px;cursor:pointer">
+                ${['ROI','Lift','Wins','Sample'][i]}
+            </button>`
+        ).join('')}
+        <select id="rfmShow" onchange="rfmSetShow(this.value)"
+            style="margin-left:auto;background:var(--bg-elevated);color:var(--text-primary);
+                   border:1px solid var(--border-subtle);border-radius:6px;padding:3px 8px;font-size:12px">
+            <option value="all">All factors</option>
+            <option value="pos">Positive ROI only</option>
+            <option value="neg">Negative ROI only</option>
+        </select>
+    </div>
+ 
+    <div class="table-responsive">
+        <table class="table table-sm table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>Category</th>
+                    <th>Factor</th>
+                    <th class="text-center">N</th>
+                    <th class="text-center">Win%</th>
+                    <th>Lift vs avg</th>
+                    <th class="text-center">ROI</th>
+                    <th class="text-center">P&amp;L</th>
+                </tr>
+            </thead>
+            <tbody id="rfmTableBody"></tbody>
+        </table>
+    </div>
+ 
+    <div id="rfmAIPanel" style="display:none;margin-top:1.25rem;
+         background:var(--bg-elevated);border:1px solid var(--border-subtle);
+         border-radius:10px;padding:1.25rem">
+        <h6 style="margin:0 0 .75rem;font-weight:700">
+            <span style="background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;
+                         border-radius:4px;padding:2px 8px;font-size:11px;font-weight:800;margin-right:6px">AI</span>
+            Claude's Edge Recommendations
+        </h6>
+        <div id="rfmAIContent"
+             style="font-size:13px;line-height:1.65;color:var(--text-muted);
+                    white-space:pre-wrap;max-height:500px;overflow-y:auto"></div>
+    </div>
+ 
+    <div class="mt-3 mb-2 p-3 bg-light rounded">
+        <h6>📖 How to read this:</h6>
+        <ul class="mb-0 small">
+            <li><strong>Lift</strong> — win rate for this bucket minus the overall average. +5pp means horses in this bucket win 5 percentage points more often than average.</li>
+            <li><strong>ROI</strong> — return betting $10 flat on every horse in this bucket.</li>
+            <li>Focus on factors with <strong>50+ appearances</strong> and positive lift — those are the most reliable new edges to test in analyzer.js.</li>
+            <li>Negative ROI factors are candidates for new <strong>penalty rules</strong>.</li>
+        </ul>
+    </div>`;
+ 
+    // ── Wire up interactivity after HTML is in the page ──────────────
+    // We use setTimeout(0) to yield to the DOM render before attaching events.
+    setTimeout(function() {
+        // Internal state — scoped to this invocation
+        let _rfmSort = 'roi';
+        let _rfmCat  = 'All';
+        let _rfmShow = 'all';
+ 
+        function rfmFiltered() {
+            return [...factors]
+                .filter(f =>
+                    (_rfmCat === 'All' || f.category === _rfmCat) &&
+                    (_rfmShow === 'pos' ? f.roi > 0 :
+                     _rfmShow === 'neg' ? f.roi < 0 : true)
+                )
+                .sort((a, b) => b[_rfmSort] - a[_rfmSort]);
+        }
+ 
+        function rfmBuildRows() {
+            const rows    = rfmFiltered();
+            const maxLift = Math.max(...rows.map(f => Math.abs(f.lift)), 1);
+            const body    = document.getElementById('rfmTableBody');
+            if (!body) return;
+ 
+            if (!rows.length) {
+                body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-muted)">No factors match current filter</td></tr>`;
+                return;
+            }
+ 
+            body.innerHTML = rows.map(f => {
+                const roiCol  = f.roi >= 30 ? '#34d399' : f.roi >= 0 ? '#fbbf24' : '#f87171';
+                const liftCol = f.lift >= 0 ? '#34d399' : '#f87171';
+                const barW    = Math.round(Math.abs(f.lift) / maxLift * 80);
+                const pnlCol  = f.profit >= 0 ? '#34d399' : '#f87171';
+                return `<tr>
+                    <td><span style="background:var(--bg-hover);color:var(--text-muted);border-radius:4px;
+                                     padding:2px 7px;font-size:11px;font-weight:600;white-space:nowrap">
+                        ${f.category}
+                    </span></td>
+                    <td><strong>${f.label}</strong></td>
+                    <td class="text-center" style="color:var(--text-muted)">${f.total.toLocaleString()}</td>
+                    <td class="text-center">${f.win_rate.toFixed(1)}%</td>
+                    <td>
+                        <div style="display:flex;align-items:center;gap:6px">
+                            <div style="height:6px;border-radius:3px;width:${barW}px;min-width:4px;background:${liftCol}"></div>
+                            <span style="font-size:12px;font-weight:700;color:${liftCol};white-space:nowrap">
+                                ${f.lift >= 0 ? '+' : ''}${f.lift.toFixed(1)}pp
+                            </span>
+                        </div>
+                    </td>
+                    <td class="text-center" style="font-weight:700;color:${roiCol}">
+                        ${f.roi >= 0 ? '+' : ''}${f.roi.toFixed(1)}%
+                    </td>
+                    <td class="text-center" style="font-weight:600;color:${pnlCol}">
+                        ${f.profit >= 0 ? '+' : ''}$${f.profit.toFixed(0)}
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+ 
+        // Initial render
+        rfmBuildRows();
+ 
+        // Category buttons
+        window.rfmSetCat = function(cat, btn) {
+            _rfmCat = cat;
+            document.querySelectorAll('#rfmCats button').forEach(b => {
+                const active    = b.textContent.trim() === cat;
+                b.style.background  = active ? 'var(--accent,#667eea)' : 'var(--bg-elevated)';
+                b.style.color       = active ? '#fff' : 'var(--text-muted)';
+                b.style.borderColor = active ? 'var(--accent,#667eea)' : 'var(--border-subtle)';
+            });
+            rfmBuildRows();
+        };
+ 
+        // Sort buttons
+        window.rfmSetSort = function(s, btn) {
+            _rfmSort = s;
+            document.querySelectorAll('[onclick^="rfmSetSort"]').forEach(b => {
+                b.style.background = (b === btn) ? 'var(--bg-hover)' : 'var(--bg-elevated)';
+                b.style.color      = (b === btn) ? 'var(--text-primary)' : 'var(--text-muted)';
+            });
+            rfmBuildRows();
+        };
+ 
+        // Show filter
+        window.rfmSetShow = function(v) { _rfmShow = v; rfmBuildRows(); };
+ 
+        // AI button
+        const aiBtn = document.getElementById('rfmAIBtn');
+        if (aiBtn) {
+            aiBtn.addEventListener('click', async function() {
+                this.disabled    = true;
+                this.textContent = '⏳ Asking Claude…';
+                const panel   = document.getElementById('rfmAIPanel');
+                const content = document.getElementById('rfmAIContent');
+                panel.style.display = '';
+                content.innerHTML = `<div style="display:flex;align-items:center;gap:.75rem;color:var(--text-muted)">
+                    <div style="width:16px;height:16px;border-radius:50%;border:2px solid var(--border-subtle);
+                                border-top-color:#a78bfa;animation:spin .8s linear infinite"></div>
+                    Analysing your data…
+                </div>`;
+ 
+                const toSend = [
+                    ...factors.filter(f => f.roi > 0).slice(0, 25),
+                    ...factors.filter(f => f.roi < 0).slice(0, 10),
+                ];
+ 
+                try {
+                    const res = await fetch('/api/analytics/edge-discovery/ai-analysis', {
+                        method:  'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body:    JSON.stringify({ factors: toSend, metadata: meta }),
+                    });
+                    const d = await res.json();
+                    content.innerHTML = (d.analysis || 'No response')
+                        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                        .replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--text-primary)">$1</strong>')
+                        .replace(/^#{1,3}\s+(.+)$/gm, '<div style="font-weight:700;color:var(--text-primary);margin:1rem 0 .3rem">$1</div>')
+                        .replace(/^[•\-]\s+(.+)$/gm, '<div style="margin:.25rem 0 .25rem 1rem">• $1</div>');
+                } catch(e) {
+                    content.innerHTML = `<span style="color:#f87171">Failed: ${e.message}</span>`;
+                } finally {
+                    this.disabled    = false;
+                    this.textContent = '✦ Ask Claude';
+                }
+            });
+        }
+    }, 0);
 }
 
 function renderExternalFactors(data) {
