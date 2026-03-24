@@ -4547,11 +4547,8 @@ def api_component_analysis():
         Meeting.uploaded_at.desc(), Race.id.desc()
     ).all()
 
-    if limit_param == 'all':
-        recent_race_ids = [r[0] for r in all_race_ids]
-    else:
-        limit = int(limit_param) if str(limit_param).isdigit() else 200
-        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
+    recent_race_ids = [r[0] for r in all_race_ids]
+# Always use ALL races — ignore limit_param for analytics
 
     if not recent_race_ids:
         return jsonify({
