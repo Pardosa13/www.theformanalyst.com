@@ -5076,7 +5076,98 @@ def api_component_analysis():
         jcc = csv.get("jockeys can claim","").strip()
         if jcc:
             _racc(f"JockeysCanClaim:{jcc}", "Jockeys Can Claim", won, sp)
- 
+
+        # ── PFAI SCORE ──
+        pfai_raw = csv.get("pfaiScore", "").strip()
+        try:
+            pfai_val = float(pfai_raw)
+            if pfai_val > 0:
+                pfai_bucket = (
+                    "85-100" if pfai_val >= 85 else
+                    "75-84"  if pfai_val >= 75 else
+                    "60-74"  if pfai_val >= 60 else
+                    "40-59"  if pfai_val >= 40 else
+                    "<40"
+                )
+                _racc(f"PFAI:{pfai_bucket}", "PFAI Score", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # ── RUNNING POSITION (speed map) ──
+        rp = csv.get("runningPosition", "").strip().upper()
+        if rp in ("LEADER", "ONPACE", "MIDFIELD", "BACKMARKER"):
+            _racc(f"RunPos:{rp}", "Running Position", won, sp)
+
+        # ── LAST 600m SECTIONAL RANK (field-relative) ──
+        try:
+            rank600 = int(str(csv.get("last600TimeRank", "") or "").strip())
+            if rank600 > 0:
+                r600_bucket = (
+                    "Rank 1"   if rank600 == 1 else
+                    "Rank 2-3" if rank600 <= 3 else
+                    "Rank 4-6" if rank600 <= 6 else
+                    "Rank 7+"
+                )
+                _racc(f"Rank600m:{r600_bucket}", "Last 600m Rank", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # ── LAST 400m SECTIONAL RANK ──
+        try:
+            rank400 = int(str(csv.get("last400TimeRank", "") or "").strip())
+            if rank400 > 0:
+                r400_bucket = (
+                    "Rank 1"   if rank400 == 1 else
+                    "Rank 2-3" if rank400 <= 3 else
+                    "Rank 4-6" if rank400 <= 6 else
+                    "Rank 7+"
+                )
+                _racc(f"Rank400m:{r400_bucket}", "Last 400m Rank", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # ── LAST 200m SECTIONAL RANK ──
+        try:
+            rank200 = int(str(csv.get("last200TimeRank", "") or "").strip())
+            if rank200 > 0:
+                r200_bucket = (
+                    "Rank 1"   if rank200 == 1 else
+                    "Rank 2-3" if rank200 <= 3 else
+                    "Rank 4-6" if rank200 <= 6 else
+                    "Rank 7+"
+                )
+                _racc(f"Rank200m:{r200_bucket}", "Last 200m Rank", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # ── LAST 600m RAW TIME ──
+        try:
+            time600 = float(str(csv.get("last600TimePrice", "") or "").strip())
+            if time600 > 1:
+                t600_bucket = (
+                    "<33.5s"     if time600 < 33.5 else
+                    "33.5-34.5s" if time600 < 34.5 else
+                    "34.5-35.5s" if time600 < 35.5 else
+                    ">35.5s"
+                )
+                _racc(f"Time600m:{t600_bucket}", "Last 600m Time", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # ── RUNNING POSITION × DISTANCE ──
+        try:
+            dist_int = int(str(csv.get("distance", "0") or "0").replace("m", "").strip())
+            dist_type = (
+                "Sprint"  if dist_int <= 1200 else
+                "Mile"    if dist_int <= 1700 else
+                "Middle"  if dist_int <= 2200 else
+                "Staying"
+            )
+            if rp in ("LEADER", "ONPACE", "MIDFIELD", "BACKMARKER"):
+                _racc(f"RunPosDist:{rp}_{dist_type}", "Running Position × Distance", won, sp)
+        except (ValueError, TypeError):
+            pass
+
     # Build raw_factors list — min 30 appearances, sorted by ROI
     min_raw_n = 30
     raw_factors = []
