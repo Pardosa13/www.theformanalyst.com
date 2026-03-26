@@ -1836,6 +1836,111 @@ function setTrackBias(newBias) {
 document.addEventListener('DOMContentLoaded', function() {
     highlightBiasButton(currentBias);
 });
+// ══════════════════════════════════════════
+//  LADBROKES LIVE ODDS
+//  Polls /api/odds/ladbrokes/<uuid> every 45s
+//  Injects into td:nth-child(4) — below PPE odds
+// ══════════════════════════════════════════
+(function() {
+    var ladbrokesRaceMap = {};   // { "1": "uuid", "2": "uuid", ... }
+    var ladbrokesIntervals = {}; // { "1": intervalId, ... }
+    var POLL_MS = 45000;
 
+    function lbNorm(name) {
+        return (name || '')
+            .toLowerCase().trim()
+            .replace(/\([^)]*\)/g, '')
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ').trim();
+    }
+
+    function injectLbOdds(raceNumber, oddsData) {
+        var raceCard = document.getElementById('race-' + raceNumber);
+        if (!raceCard) return;
+
+        var status = oddsData.status || '';
+        var odds   = oddsData.odds  || {};
+
+        raceCard.querySelectorAll('tbody tr').forEach(function(row) {
+            var nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
+            if (!nameSpan) return;
+            var normName = lbNorm(nameSpan.textContent);
+            if (!normName) return;
+
+            var oddsCell = row.cells[3]; // td:nth-child(4) zero-indexed
+            if (!oddsCell) return;
+
+            var existing = oddsCell.querySelector('.lb-odds-span');
+            var horseOdds = odds[normName];
+
+            if (!horseOdds || !horseOdds.win) {
+                // No data — remove stale span if present
+                if (existing) existing.remove();
+                return;
+            }
+
+            var winPrice = '$' + parseFloat(horseOdds.win).toFixed(2);
+            var label = horseOdds.favourite ? '⭐ LB ' : (horseOdds.mover ? '📈 LB ' : 'LB ');
+            var html = label + winPrice;
+
+            if (existing) {
+                existing.textContent = html;
+            } else {
+                var span = document.createElement('span');
+                span.className = 'lb-odds-span';
+                span.style.cssText = [
+                    'display:block',
+                    'font-family:"DM Mono",monospace',
+                    'font-size:11px',
+                    'font-weight:700',
+                    'color:#fbbf24',
+                    'margin-top:3px',
+                    'letter-spacing:0.03em',
+                ].join(';');
+                span.textContent = html;
+                oddsCell.appendChild(span);
+            }
+        });
+
+        // Stop polling once race is settled
+        if (['Closed','Final','Abandoned','Interim'].indexOf(status) !== -1) {
+            if (ladbrokesIntervals[raceNumber]) {
+                clearInterval(ladbrokesIntervals[raceNumber]);
+                delete ladbrokesIntervals[raceNumber];
+            }
+        }
+    }
+
+    function pollRace(raceNumber, uuid) {
+        fetch('/api/odds/ladbrokes/' + uuid)
+            .then(function(r) { return r.json(); })
+            .then(function(data) { injectLbOdds(raceNumber, data); })
+            .catch(function() {}); // fail silently
+    }
+
+    function startPolling() {
+        Object.keys(ladbrokesRaceMap).forEach(function(raceNum) {
+            var uuid = ladbrokesRaceMap[raceNum];
+            // Immediate first fetch
+            pollRace(raceNum, uuid);
+            // Then every 45s
+            ladbrokesIntervals[raceNum] = setInterval(function() {
+                pollRace(raceNum, uuid);
+            }, POLL_MS);
+        });
+    }
+
+    // Kick off on page load
+    fetch('/api/meeting/' + meetingId + '/ladbrokes-map')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            ladbrokesRaceMap = data;
+            if (Object.keys(ladbrokesRaceMap).length > 0) {
+                startPolling();
+            }
+        })
+        .catch(function() {}); // fail silently — no LB odds for this meeting
+
+})();
 </script>
 {% endblock %}
