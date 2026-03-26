@@ -16,7 +16,7 @@ import uuid
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage
 from puntingform_service import PuntingFormService
-from utils.ladbrokes import match_race_uuid, fetch_race_odds
+from ladbrokes import match_race_uuid, fetch_race_odds
 
 import logging
 import sys
