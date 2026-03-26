@@ -16,6 +16,7 @@ import uuid
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage
 from puntingform_service import PuntingFormService
+from utils.ladbrokes import match_race_uuid, fetch_race_odds
 
 import logging
 import sys
@@ -2563,7 +2564,53 @@ def api_get_strikerate(meeting_id):
     except Exception as e:
         logger.error(f"Strikerate fetch failed: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
+@app.route("/api/meeting/<int:meeting_id>/ladbrokes-map")
+@login_required
+def get_ladbrokes_race_map(meeting_id):
+    """Return a mapping of race_number → Ladbrokes event UUID for all races in a meeting."""
+    try:
+        meeting = Meeting.query.get_or_404(meeting_id)
 
+        # Resolve track name — prefer puntingform_id, fall back to meeting_name suffix
+        track_name = meeting.puntingform_id
+        if not track_name and '_' in (meeting.meeting_name or ''):
+            track_name = meeting.meeting_name.split('_')[1]
+        if not track_name:
+            return jsonify({})
+
+        # Resolve date string
+        if meeting.date:
+            date_str = meeting.date.strftime('%Y-%m-%d')
+        elif meeting.meeting_name and len(meeting.meeting_name) >= 6:
+            dp = meeting.meeting_name.split('_')[0]
+            date_str = f"20{dp[:2]}-{dp[2:4]}-{dp[4:6]}"
+        else:
+            return jsonify({})
+
+        races = Race.query.filter_by(meeting_id=meeting_id).order_by(Race.race_number).all()
+        race_map = {}
+        for race in races:
+            uuid = match_race_uuid(track_name, date_str, race.race_number)
+            if uuid:
+                race_map[str(race.race_number)] = uuid
+
+        return jsonify(race_map)
+
+    except Exception as e:
+        logger.warning(f"Ladbrokes race map failed for meeting {meeting_id}: {e}")
+        return jsonify({})
+
+@app.route("/api/odds/ladbrokes/<race_uuid>")
+@login_required
+def get_ladbrokes_odds(race_uuid):
+    """Proxy Ladbrokes live odds for a specific race UUID."""
+    try:
+        result = fetch_race_odds(race_uuid)
+        return jsonify(result)
+    except Exception as e:
+        logger.warning(f"Ladbrokes odds route failed for {race_uuid}: {e}")
+        return jsonify({"status": "error", "odds": {}})
+        
 @app.route("/api/meetings/<meeting_id>/scratchings")
 @login_required
 def api_get_scratchings(meeting_id):
