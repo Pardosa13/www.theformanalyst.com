@@ -8380,7 +8380,7 @@ def best_bets():
     hours_back = request.args.get('hours', default=80, type=int)
     min_score = request.args.get('min_score', type=float)
     min_gap = request.args.get('min_gap', type=float)
-    mode = request.args.get('mode', default='all')  # NEW: 'all', 'top_pick', 'non_top_pick'
+    mode = request.args.get('mode', default='top_pick')
 
     # Get all active components
     active_components = Component.query.filter_by(is_active=True).all()
