@@ -4252,8 +4252,8 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
         const rawSectional = sectionalMatch ? parseFloat(sectionalMatch[1]) : null;
         
         if (classChange < -30 && rawSectional && rawSectional >= 37) {
-            score += 30;
-            notes += '+30.0 : Major class drop + slow sectional combo (100% SR, +85% ROI - elite to easier)\n';
+            score += 0;
+            notes += '+0.0 : Major class drop + slow sectional combo (100% SR, +85% ROI - elite to easier)\n';
         }
         
         // WEIGHT SCORING
