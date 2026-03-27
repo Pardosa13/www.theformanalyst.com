@@ -1156,6 +1156,176 @@ if (data.raw_factors && data.raw_factors.length > 0) {
 }
 
     html += '</div>';
+  // ── F1: Top Pick — Parsed Notes Components ────────────────────────
+    if (data.tp_notes && data.tp_notes.length > 0) {
+        html += '<h5 style="margin:32px 0 8px">🎯 Top Pick — Notes Component ROI</h5>';
+        html += '<p class="text-muted mb-3" style="font-size:12px">Same as Component ROI above — but only counts horses your model selected as #1. Shows which components are profitable specifically when they appear on your top pick.</p>';
+        html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr>';
+        html += '<th>Component</th><th class="text-center">As Top Pick</th><th class="text-center">Wins</th><th class="text-center">Strike %</th>';
+        html += '<th class="text-center">Places</th><th class="text-center">Place %</th><th class="text-center">ROI %</th><th class="text-center">Value?</th>';
+        html += '</tr></thead><tbody>';
+        for (const comp of data.tp_notes) {
+            let strikeClass = '';
+            if (comp.strike_rate >= 30) strikeClass = 'text-success fw-bold';
+            else if (comp.strike_rate >= 20) strikeClass = 'text-success';
+            else if (comp.strike_rate < 10) strikeClass = 'text-danger';
+            let valueBadge = '';
+            if (comp.roi >= 25 && comp.appearances >= 5) valueBadge = '<span class="badge bg-success">✓ Strong</span>';
+            else if (comp.roi >= 18 && comp.appearances >= 3) valueBadge = '<span class="badge bg-info">Promising</span>';
+            else if (comp.roi < 10 && comp.appearances >= 5) valueBadge = '<span class="badge bg-danger">Weak</span>';
+            else if (comp.appearances < 5) valueBadge = '<span class="badge bg-primary">Low Data</span>';
+            else valueBadge = '<span class="badge bg-warning text-dark">Neutral</span>';
+            html += `<tr>
+                <td><strong>${comp.name}</strong></td>
+                <td class="text-center">${comp.appearances}</td>
+                <td class="text-center">${comp.wins}</td>
+                <td class="text-center ${strikeClass}">${comp.strike_rate.toFixed(1)}%</td>
+                <td class="text-center">${comp.places}</td>
+                <td class="text-center${comp.place_rate >= 50 ? ' text-success' : ''}">${comp.place_rate.toFixed(1)}%</td>
+                <td class="text-center ${comp.roi >= 0 ? 'text-success' : 'text-danger'}">${comp.roi.toFixed(1)}%</td>
+                <td class="text-center">${valueBadge}</td>
+            </tr>`;
+        }
+        html += '</tbody></table></div>';
+        html += '<div class="mt-3 mb-4 p-3 bg-light rounded"><h6>📖 How to read this:</h6><ul class="mb-0 small">';
+        html += '<li>This only counts races where that component appeared on <strong>your #1 ranked horse</strong> — not all horses.</li>';
+        html += '<li>Compare with the All Horses table above. If a component\'s ROI is much higher here, it\'s most valuable as a <strong>top pick signal</strong>.</li>';
+        html += '<li>If ROI is lower here than above, the component may help non-top-picks more — potentially a <strong>gap in your scoring</strong>.</li>';
+        html += '</ul></div>';
+    }
+
+    // ── F2: Top Pick — Raw CSV Bucketed Factors ───────────────────────
+    if (data.tp_raw && data.tp_raw.length > 0) {
+        const tpCats = ['All', ...new Set(data.tp_raw.map(f => f.category))].sort();
+
+        html += `
+        <h5 style="margin:32px 0 8px">🎯 Top Pick — Raw Factor ROI</h5>
+        <p class="text-muted mb-3" style="font-size:12px">
+            Same as Raw Factor Mining above — but restricted to horses your model ranked #1.
+            Reveals which raw CSV factors are genuinely profitable <em>when your top pick has them</em>.
+        </p>
+        <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.75rem" id="tpRawCats">
+            ${tpCats.map(c => `<button onclick="tpRawSetCat('${c}',this)"
+                style="background:${c==='All'?'var(--accent,#667eea)':'var(--bg-elevated,#1e293b)'};
+                       color:${c==='All'?'#fff':'var(--text-muted,#94a3b8)'};
+                       border:1px solid ${c==='All'?'var(--accent,#667eea)':'var(--border-subtle)'};
+                       border-radius:20px;padding:3px 12px;font-size:11px;cursor:pointer;white-space:nowrap">
+                ${c}
+            </button>`).join('')}
+        </div>
+        <div style="display:flex;gap:.5rem;margin-bottom:.75rem">
+            ${['roi','wins','appearances'].map((s,i) =>
+                `<button onclick="tpRawSetSort('${s}',this)"
+                    style="background:${s==='roi'?'var(--bg-hover)':'var(--bg-elevated)'};
+                           color:${s==='roi'?'var(--text-primary)':'var(--text-muted)'};
+                           border:1px solid var(--border-subtle);border-radius:6px;
+                           padding:3px 10px;font-size:12px;cursor:pointer">
+                    ${['ROI','Wins','Sample'][i]}
+                </button>`
+            ).join('')}
+            <select id="tpRawShow" onchange="tpRawSetShow(this.value)"
+                style="margin-left:auto;background:var(--bg-elevated);color:var(--text-primary);
+                       border:1px solid var(--border-subtle);border-radius:6px;padding:3px 8px;font-size:12px">
+                <option value="all">All factors</option>
+                <option value="pos">Positive ROI only</option>
+                <option value="neg">Negative ROI only</option>
+            </select>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Category</th><th>Factor</th>
+                        <th class="text-center">As Top Pick</th>
+                        <th class="text-center">Wins</th>
+                        <th class="text-center">Strike %</th>
+                        <th class="text-center">ROI %</th>
+                        <th class="text-center">P&L</th>
+                    </tr>
+                </thead>
+                <tbody id="tpRawTableBody"></tbody>
+            </table>
+        </div>
+        <div class="mt-3 mb-4 p-3 bg-light rounded">
+            <h6>📖 How to read this:</h6>
+            <ul class="mb-0 small">
+                <li>Compare directly with the Raw Factor Mining table above. If a factor is profitable here but not above (or vice versa), that divergence is meaningful.</li>
+                <li>Positive ROI here = backing your top pick when it has this factor is profitable.</li>
+                <li>Negative ROI here = this factor on your top pick is a <strong>red flag</strong> — consider it a filter to avoid.</li>
+            </ul>
+        </div>`;
+
+        setTimeout(function() {
+            const tpFactors = data.tp_raw;
+            let _tpCat  = 'All';
+            let _tpSort = 'roi';
+            let _tpShow = 'all';
+
+            function tpFiltered() {
+                return [...tpFactors]
+                    .filter(f =>
+                        (_tpCat === 'All' || f.category === _tpCat) &&
+                        (_tpShow === 'pos' ? f.roi > 0 :
+                         _tpShow === 'neg' ? f.roi < 0 : true)
+                    )
+                    .sort((a, b) => b[_tpSort] - a[_tpSort]);
+            }
+
+            function tpBuildRows() {
+                const rows = tpFiltered();
+                const body = document.getElementById('tpRawTableBody');
+                if (!body) return;
+                if (!rows.length) {
+                    body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-muted)">No factors match current filter</td></tr>`;
+                    return;
+                }
+                body.innerHTML = rows.map(f => {
+                    const roiCol = f.roi >= 30 ? '#34d399' : f.roi >= 0 ? '#fbbf24' : '#f87171';
+                    const pnlCol = f.profit >= 0 ? '#34d399' : '#f87171';
+                    return `<tr>
+                        <td><span style="background:var(--bg-hover);color:var(--text-muted);border-radius:4px;
+                                         padding:2px 7px;font-size:11px;font-weight:600;white-space:nowrap">
+                            ${f.category}
+                        </span></td>
+                        <td><strong>${f.label}</strong></td>
+                        <td class="text-center" style="color:var(--text-muted)">${f.appearances}</td>
+                        <td class="text-center">${f.wins}</td>
+                        <td class="text-center ${f.strike_rate >= 20 ? 'text-success' : ''}">${f.strike_rate.toFixed(1)}%</td>
+                        <td class="text-center" style="font-weight:700;color:${roiCol}">
+                            ${f.roi >= 0 ? '+' : ''}${f.roi.toFixed(1)}%
+                        </td>
+                        <td class="text-center" style="font-weight:600;color:${pnlCol}">
+                            ${f.profit >= 0 ? '+' : ''}$${f.profit.toFixed(0)}
+                        </td>
+                    </tr>`;
+                }).join('');
+            }
+
+            tpBuildRows();
+
+            window.tpRawSetCat = function(cat, btn) {
+                _tpCat = cat;
+                document.querySelectorAll('#tpRawCats button').forEach(b => {
+                    const active = b.textContent.trim() === cat;
+                    b.style.background  = active ? 'var(--accent,#667eea)' : 'var(--bg-elevated)';
+                    b.style.color       = active ? '#fff' : 'var(--text-muted)';
+                    b.style.borderColor = active ? 'var(--accent,#667eea)' : 'var(--border-subtle)';
+                });
+                tpBuildRows();
+            };
+
+            window.tpRawSetSort = function(s, btn) {
+                _tpSort = s;
+                document.querySelectorAll('[onclick^="tpRawSetSort"]').forEach(b => {
+                    b.style.background = (b === btn) ? 'var(--bg-hover)' : 'var(--bg-elevated)';
+                    b.style.color      = (b === btn) ? 'var(--text-primary)' : 'var(--text-muted)';
+                });
+                tpBuildRows();
+            };
+
+            window.tpRawSetShow = function(v) { _tpShow = v; tpBuildRows(); };
+        }, 0);
+    }
     container.innerHTML = html;
 }
 
