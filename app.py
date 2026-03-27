@@ -266,16 +266,34 @@ with app.app_context():
         from models import Component
 
         profitable_components = [
-            {'component_name': 'Age/Sex - 5yo Horse (Entire)',                 'appearances': 21,   'wins': 6,   'strike_rate': 28.6, 'roi_percentage': 224.8, 'is_active': True},
-            {'component_name': 'Days Since Run - Fresh Return (150-199 days)', 'appearances': 16,   'wins': 3,   'strike_rate': 18.8, 'roi_percentage': 193.1, 'is_active': True},
-            {'component_name': 'Colt - Base Bonus',                            'appearances': 841,  'wins': 120, 'strike_rate': 14.3, 'roi_percentage': 66.1,  'is_active': True},
-            {'component_name': 'Country: USA-bred',                            'appearances': 11,   'wins': 1,   'strike_rate': 9.1,  'roi_percentage': 63.6,  'is_active': True},
-            {'component_name': 'Market Expectation - Worst in Field',          'appearances': 8,    'wins': 2,   'strike_rate': 25.0, 'roi_percentage': 62.5,  'is_active': True},
-            {'component_name': 'Colt - 3yo Colt',                             'appearances': 2043, 'wins': 370, 'strike_rate': 18.1, 'roi_percentage': 49.2,  'is_active': True},
-            {'component_name': 'Running Position - Leader Staying',            'appearances': 14,   'wins': 2,   'strike_rate': 14.3, 'roi_percentage': 42.9,  'is_active': True},
-            {'component_name': 'Days Since Run - Too Fresh (250+ days)',       'appearances': 198,  'wins': 28,  'strike_rate': 14.1, 'roi_percentage': 31.8,  'is_active': True},
-            {'component_name': 'Age/Sex - 3yo',                               'appearances': 286,  'wins': 55,  'strike_rate': 19.2, 'roi_percentage': 27.7,  'is_active': True},
-        ]
+    # ── Original list ────────────────────────────────────────────────────────
+    {'component_name': 'Age/Sex - 5yo Horse (Entire)',                          'appearances': 21,   'wins': 6,   'strike_rate': 28.6, 'roi_percentage': 224.8, 'is_active': True},
+    {'component_name': 'Colt - Base Bonus',                                     'appearances': 841,  'wins': 120, 'strike_rate': 14.3, 'roi_percentage': 66.1,  'is_active': True},
+    {'component_name': 'Colt - 3yo Colt',                                       'appearances': 2043, 'wins': 370, 'strike_rate': 18.1, 'roi_percentage': 49.2,  'is_active': True},
+    {'component_name': 'Running Position - Leader Staying',                     'appearances': 14,   'wins': 2,   'strike_rate': 14.3, 'roi_percentage': 42.9,  'is_active': True},
+    {'component_name': 'Days Since Run - Too Fresh (250+ days)',                'appearances': 198,  'wins': 28,  'strike_rate': 14.1, 'roi_percentage': 31.8,  'is_active': True},
+    {'component_name': 'Age/Sex - 3yo',                                         'appearances': 286,  'wins': 55,  'strike_rate': 19.2, 'roi_percentage': 27.7,  'is_active': True},
+    {'component_name': 'Pace Angle - Sprint Leader Run Down',                   'appearances': 123,  'wins': 32,  'strike_rate': 26.0, 'roi_percentage': 32.1,  'is_active': True},
+    {'component_name': 'Hidden Edge - Elite 400m + Marginally Below Weight',    'appearances': 82,   'wins': 14,  'strike_rate': 17.1, 'roi_percentage': 125.5, 'is_active': True},
+    {'component_name': 'Hidden Edge - Elite 400m + Competitive Effort',         'appearances': 96,   'wins': 24,  'strike_rate': 25.0, 'roi_percentage': 112.5, 'is_active': True},
+    {'component_name': 'Hidden Edge - Elite 600m + Competitive Effort',         'appearances': 102,  'wins': 23,  'strike_rate': 22.5, 'roi_percentage': 108.2, 'is_active': True},
+    {'component_name': 'Hidden Edge - Short Price + Competitive Effort',        'appearances': 179,  'wins': 37,  'strike_rate': 20.7, 'roi_percentage': 102.3, 'is_active': True},
+    {'component_name': 'Hidden Edge - Elite 600m + Marginally Below Weight',    'appearances': 167,  'wins': 28,  'strike_rate': 16.8, 'roi_percentage': 66.7,  'is_active': True},
+    {'component_name': 'Hidden Edge - Good Condition WR + Narrow Win',          'appearances': 152,  'wins': 35,  'strike_rate': 23.0, 'roi_percentage': 62.1,  'is_active': True},
+    {'component_name': 'Hidden Edge - Short Price + Slightly Below Weight',     'appearances': 238,  'wins': 45,  'strike_rate': 18.9, 'roi_percentage': 59.3,  'is_active': True},
+    {'component_name': 'Hidden Edge - Short Price + Best Recent Sectional',     'appearances': 286,  'wins': 56,  'strike_rate': 19.6, 'roi_percentage': 49.9,  'is_active': True},
+    {'component_name': 'Undefeated on Condition',                               'appearances': 31,   'wins': 7,   'strike_rate': 22.6, 'roi_percentage': 34.0,  'is_active': True},
+    {'component_name': 'Hidden Edge - Sprint Leader + Last Start Favoured',     'appearances': 0,    'wins': 0,   'strike_rate': 0.0,  'roi_percentage': 0.0,   'is_active': True},
+    {'component_name': 'Hidden Edge - Condition Podium + Last Start Favourite', 'appearances': 0,    'wins': 0,   'strike_rate': 0.0,  'roi_percentage': 0.0,   'is_active': True},
+    # ── New — Top Pick Notes ROI ─────────────────────────────────────────────
+    {'component_name': 'Running Position - Backmarker Staying',                 'appearances': 6,    'wins': 1,   'strike_rate': 16.7, 'roi_percentage': 333.3, 'is_active': True},
+    {'component_name': 'Last Start - Photo Win (<0.5L)',                        'appearances': 212,  'wins': 48,  'strike_rate': 22.6, 'roi_percentage': 48.0,  'is_active': True},
+    {'component_name': 'Specialist - Undefeated Distance',                      'appearances': 220,  'wins': 54,  'strike_rate': 24.5, 'roi_percentage': 43.3,  'is_active': True},
+    {'component_name': 'Distance Change - Drop Back Moderate (200-400m)',       'appearances': 45,   'wins': 11,  'strike_rate': 24.4, 'roi_percentage': 37.9,  'is_active': True},
+    {'component_name': 'Running Position - Backmarker Middle',                  'appearances': 37,   'wins': 6,   'strike_rate': 16.2, 'roi_percentage': 31.6,  'is_active': True},
+    {'component_name': 'Specialist - Undefeated Track+Distance',                'appearances': 146,  'wins': 43,  'strike_rate': 29.5, 'roi_percentage': 31.4,  'is_active': True},
+    {'component_name': 'First Up - Specialist Undefeated',                      'appearances': 62,   'wins': 21,  'strike_rate': 33.9, 'roi_percentage': 27.7,  'is_active': True},
+]
 
         added = 0
         for comp_data in profitable_components:
