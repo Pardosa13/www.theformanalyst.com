@@ -991,6 +991,11 @@ def parse_notes_components(notes):
         (r'\+\s*20\.0\s*:\s*Strong value jockey', 'Jockey - Strong Value (20-50% ROI)'),
         (r'\+\s*10\.0\s*:\s*Profitable jockey', 'Jockey - Profitable (0-20% ROI)'),
         (r'-\s*15\.0\s*:\s*Poor value jockey', 'Jockey - Poor Value'),
+        # Live L100 strike rate patterns
+        (r'\+\s*12\.0\s*:\s*Jockey hot form', 'Jockey - Hot Form (L100 25%+ SR)'),
+        (r'\+\s*6\.0\s*:\s*Jockey solid form', 'Jockey - Solid Form (L100 18-25% SR)'),
+        (r'[-−]\s*6\.0\s*:\s*Jockey poor form', 'Jockey - Poor Form (L100 6-11% SR)'),
+        (r'[-−]\s*12\.0\s*:\s*Jockey cold', 'Jockey - Cold (L100 <6% SR)'),
 
         # ====== TRAINERS ======
         (r'\+\s*20\.0\s*:\s*Elite value trainer', 'Trainer - Elite (50%+ ROI)'),
