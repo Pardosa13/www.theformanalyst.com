@@ -97,3 +97,26 @@ class PuntingFormService:
         url = f"https://www.puntingform.com.au/api/ScratchingsService/GetAllScratchings?apikey={self.api_key}"
         response = self._make_request(url)
         return response.json()
+
+    def get_strike_rates(self, meeting_date, entity_type='jockey'):
+    import csv, io
+    date_obj = datetime.strptime(meeting_date, '%Y-%m-%d')
+    date_str = date_obj.strftime('%d-%b-%Y')
+    endpoint = 'GetJockeyStrikeRateData' if entity_type == 'jockey' else 'GetTrainerStrikeRateData'
+    url = f"{self.base_url}/{endpoint}/{date_str}?ApiKey={self.api_key}"
+    try:
+        response = self._make_request(url)
+        reader = csv.DictReader(io.StringIO(response.text))
+        name_field = 'JockeyName' if entity_type == 'jockey' else 'TrainerName'
+        results = {}
+        for row in reader:
+            name = row.get(name_field, '').strip().strip('"')
+            if name:
+                results[name] = {
+                    'L100Wins': int(row.get('L100Wins', 0) or 0),
+                    'L100Runs': int(row.get('L100Runs', 0) or 0),
+                }
+        return results
+    except Exception as e:
+        logger.warning(f"Strike rate fetch failed for {entity_type}s on {meeting_date}: {str(e)}")
+        return {}
