@@ -1090,7 +1090,7 @@ def parse_notes_components(notes):
         (r'\+\s*10\.0\s*:\s*Dominant last.?start win', 'Last Start - Dominant Win (5L+)'),
         (r'\+\s*7\.0\s*:\s*Comfortable last.?start win', 'Last Start - Comfortable Win (2-5L)'),
         (r'\+\s*5\.0\s*:\s*Narrow last.?start win', 'Last Start - Narrow Win (0.5-2L)'),
-        (r'\+\s*3\.0\s*:\s*Photo finish last.?start win', 'Last Start - Photo Win (<0.5L)'),
+        (r'\+\s*15\.0\s*:\s*Last Start - Photo Win', 'Last Start - Photo Win (<0.5L)'),
 
         # ====== LAST START - PLACED ======
         (r'\+\s*5\.0\s*:\s*Narrow loss.*very competitive', 'Last Start - Narrow Loss (≤1L)'),
@@ -1187,8 +1187,8 @@ def parse_notes_components(notes):
         (r':\s*([\w][\w -]*?bred)\s*\(([-+\d.]+)%\s*ROI', '_country_dynamic'),
 
         # ====== SPECIALIST / PERFECT RECORD ======
-        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED.*track\+distance.*specialist', 'Specialist - Undefeated Track+Distance'),
-        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED.*track.*specialist', 'Specialist - Undefeated Track'),
+        (r'\+\s*15\.0\s*:\s*Specialist - Undefeated Track\+Distance', 'Specialist - Undefeated Track+Distance'),
+        (r'\+\s*15\.0\s*:\s*Specialist - Undefeated Distance', 'Specialist - Undefeated Distance'),
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED.*distance.*specialist', 'Specialist - Undefeated Distance'),
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED.*condition.*specialist', 'Specialist - Undefeated Condition'),
         (r'\+\s*([\d.]+)\s*:\s*100% PODIUM.*track\+distance', 'Specialist - Perfect Podium Track+Distance'),
