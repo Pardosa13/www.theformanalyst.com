@@ -2750,6 +2750,8 @@ def api_import_meeting(meeting_id):
             strike_rate_data['jockeys']  = pf_service.get_strike_rates(date_str, 'jockey')
             strike_rate_data['trainers'] = pf_service.get_strike_rates(date_str, 'trainer')
             logger.info(f"✅ Strike rates: {len(strike_rate_data['jockeys'])} jockeys, {len(strike_rate_data['trainers'])} trainers")
+            logger.info(f"Sample jockey keys: {list(strike_rate_data['jockeys'].keys())[:5]}")
+            logger.info(f"Sample trainer keys: {list(strike_rate_data['trainers'].keys())[:5]}")
         except Exception as e:
             logger.warning(f"Strike rate pre-fetch failed (non-fatal): {str(e)}")
         # ==========================================
