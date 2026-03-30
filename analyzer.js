@@ -999,28 +999,20 @@ function checkLast10runs(last10) {
 // JOCKEY AND TRAINER FUNCTIONS - UPDATED 2025-01-06
 // =============================================================================
 
-function normalizeJockeyName(jockeyName) {
-    if (!jockeyName || typeof jockeyName !== 'string') return jockeyName || '';
-    const jr = jockeyName.trim().replace(/\s+/g, ' '); // collapse whitespace
-
-    for (const [key, value] of Object.entries(jockeyMapping)) {
-        if (jr.startsWith(key)) {
-            return jr.replace(key, value);
-        }
-    }
-    return jr;
-}
-
 function checkJockeys(JockeyName) {
     var addScore = 0;
     var note = '';
 
-    JockeyName = normalizeJockeyName(JockeyName);
-
     if (!JockeyName || !strikeRateData || !strikeRateData.jockeys) return [0, ''];
 
-    const data = strikeRateData.jockeys[JockeyName.trim()];
-    if (!data || !data.L100Runs || data.L100Runs < 10) return [0, ''];
+    const data = strikeRateData.jockeys[JockeyName.trim()]
+              || strikeRateData.jockeys[abbreviateName(JockeyName.trim())];
+
+    if (!data) {
+        return [0, `Jockey Not Found in strike rate data: ${JockeyName}\n`];
+    }
+
+    if (data.L100Runs < 10) return [0, ''];
 
     const winPct = (data.L100Wins / data.L100Runs) * 100;
     const runs   = data.L100Runs;
@@ -1034,64 +1026,20 @@ function checkJockeys(JockeyName) {
     return [addScore, note];
 }
 
-function checkJockeyTrainerCombo(jockeyName, trainerName, horseSex) {
-    // ==========================================
-    // JOCKEY + TRAINER COMBO SCORING - ADDED 2026-03-09
-    // Based on combination analysis across 23,743 horses
-    // ==========================================
-    var addScore = 0;
-    var note = '';
-
-    jockeyName = normalizeJockeyName(jockeyName);
-    trainerName = normalizeTrainerName(trainerName);
-
-    const combos = [
-        { jockey: 'Ethan Brown',      trainer: 'C Maher',                        bonus: 15, label: 'Ethan Brown × C Maher (+691.6% ROI, 28 races, 32.1% SR)' },
-        { jockey: 'Codi Jordan',      trainer: 'G J Stevenson',                  bonus: 10, label: 'Codi Jordan × G J Stevenson (+111.8% ROI, 20 races, 40% SR)' },
-        { jockey: 'Robert Whearty',   trainer: 'C Maher',                        bonus: 10, label: 'Robert Whearty × C Maher (+108% ROI, 20 races, 35% SR)' },
-        { jockey: 'Luke Cartwright',  trainer: 'C Maher',                        bonus: 8,  label: 'Luke Cartwright × C Maher (+231.7% ROI, 12 races, 16.7% SR)' },
-        { jockey: 'Dylan Gibbons',    trainer: 'John O\'Shea & Tom Charlton',    bonus: 7,  label: 'Dylan Gibbons × O\'Shea (+71.5% ROI, 34 races, 17.6% SR)' },
-        { jockey: 'B Melham',         trainer: 'C W McDonald',                   bonus: 7,  label: 'B Melham × C W McDonald (+79% ROI, 15 races, 40% SR)' },
-    ];
-
-    for (const combo of combos) {
-        if (jockeyName === combo.jockey && trainerName === combo.trainer) {
-            addScore += combo.bonus;
-            note += `+${combo.bonus}.0: Combo bonus - ${combo.label}\n`;
-            break;
-        }
-    }
-    
-    // Jockey × Sex combos
-    if (jockeyName === 'Tommy Berry' && horseSex === 'Colt') {
-        addScore += 8;
-        note += '+8.0: Combo bonus - Tommy Berry × Colt (+205% ROI, 16 races, 25% SR)\n';
-    }
-    
-    return [addScore, note];
-}
-
-function normalizeTrainerName(trainerName) {
-    if (!trainerName || typeof trainerName !== 'string') return trainerName || '';
-    const tr = trainerName.trim();
-    for (const [key, value] of Object.entries(trainerMapping)) {
-        if (tr.startsWith(key)) {
-            return tr.replace(key, value);
-        }
-    }
-    return tr; // Return the original if no mapping is found
-}
-
 function checkTrainers(trainerName) {
     var addScore = 0;
     var note = '';
 
-    trainerName = normalizeTrainerName(trainerName);
-
     if (!trainerName || !strikeRateData || !strikeRateData.trainers) return [0, ''];
 
-    const data = strikeRateData.trainers[trainerName.trim()];
-    if (!data || !data.L100Runs || data.L100Runs < 10) return [0, ''];
+    const data = strikeRateData.trainers[trainerName.trim()]
+              || strikeRateData.trainers[abbreviateName(trainerName.trim())];
+
+    if (!data) {
+        return [0, `Trainer Not Found in strike rate data: ${trainerName}\n`];
+    }
+
+    if (data.L100Runs < 10) return [0, ''];
 
     const winPct = (data.L100Wins / data.L100Runs) * 100;
     const runs   = data.L100Runs;
@@ -1099,8 +1047,8 @@ function checkTrainers(trainerName) {
     if      (winPct >= 22) { addScore =  10; note = `+10.0 : Trainer hot form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
     else if (winPct >= 16) { addScore =   5; note = `+5.0 : Trainer solid form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
     else if (winPct >= 10) { addScore =   0; }
-    else if (winPct >=  5) { addScore =  -5; note = `−5.0 : Trainer poor form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
-    else                   { addScore = -10; note = `−10.0 : Trainer cold — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
+    else if (winPct >=  5) { addScore =  -5; note = `-5.0 : Trainer poor form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
+    else                   { addScore = -10; note = `-10.0 : Trainer cold — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
 
     return [addScore, note];
 }
