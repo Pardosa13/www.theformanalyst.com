@@ -130,5 +130,7 @@ class PuntingFormService:
                     }
             return results
         except Exception as e:
-            print(f"Strike rate fetch failed for {entity_type}s on {meeting_date}: {str(e)}")
+            print(f"Strike rate fetch failed for {entity_type}s on {meeting_date}: {str(e)}", flush=True)
+            import traceback
+            traceback.print_exc()
             return {}
