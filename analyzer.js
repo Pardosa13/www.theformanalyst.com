@@ -3310,7 +3310,7 @@ function calculatePerfectRecordBonus(horse, trackCondition) {
             else if (record.runs <= 6) confidenceMultiplier = 0.8;
             else confidenceMultiplier = 1.0;
 
-            const bonus = baseBonus * confidenceMultiplier;
+            const bonus = (record.type === 'track+distance' || record.type === 'distance') ? 15 : baseBonus * confidenceMultiplier;
             totalBonus += bonus;
 
             const recordType = record.isPerfectWin ? 'UNDEFEATED' : '100% PODIUM';
