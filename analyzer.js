@@ -2530,8 +2530,8 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
             addScore = 5;
             note += `+ 5.0 : Narrow last start win by ${margin.toFixed(1)}L\n`;
         } else {
-            addScore = 3;
-            note += `+ 3.0 : Photo finish last start win by ${margin.toFixed(1)}L\n`;
+            addScore = 15;
+            note += `+15.0 : Last Start Photo Win (<0.5L)\n`;
         }
     }
     // PLACE GETTERS (position = 2 or 3)
@@ -3314,7 +3314,13 @@ function calculatePerfectRecordBonus(horse, trackCondition) {
             totalBonus += bonus;
 
             const recordType = record.isPerfectWin ? 'UNDEFEATED' : '100% PODIUM';
-            notes.push(`+${bonus.toFixed(1)} : ${recordType} at ${record.type} (${record.runs}/${record.runs}) - specialist bonus`);
+            if (record.type === 'track+distance') {
+    notes.push(`+15.0 : Specialist - Undefeated Track+Distance`);
+} else if (record.type === 'distance') {
+    notes.push(`+15.0 : Specialist - Undefeated Distance`);
+} else {
+    notes.push(`+15.0 : ${recordType} at ${record.type} (${record.runs}/${record.runs}) - specialist bonus`);
+}
         });
 
         if (perfectRecords.length > 1) {
