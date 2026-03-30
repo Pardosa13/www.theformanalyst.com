@@ -2531,7 +2531,7 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
             note += `+ 5.0 : Narrow last start win by ${margin.toFixed(1)}L\n`;
         } else {
             addScore = 15;
-            note += `+15.0 : Last Start Photo Win (<0.5L)\n`;
+            note += `+15.0 : Last Start - Photo Win (<0.5L)\n`;
         }
     }
     // PLACE GETTERS (position = 2 or 3)
