@@ -1034,7 +1034,7 @@ function checkJockeys(JockeyName) {
 
     if      (winPct >= 25) { addScore =  12; note = `+12.0 : Jockey hot form — ${winPct.toFixed(1)}% L100 SR (${runs} rides)\n`; }
     else if (winPct >= 18) { addScore =   6; note = `+6.0 : Jockey solid form — ${winPct.toFixed(1)}% L100 SR (${runs} rides)\n`; }
-    else if (winPct >= 11) { addScore =   0; }
+    else if (winPct >= 11) { addScore = 0; note = `+0.0 : Jockey average form — ${winPct.toFixed(1)}% L100 SR (${runs} rides)\n`; }
     else if (winPct >=  6) { addScore =  -6; note = `-6.0 : Jockey poor form — ${winPct.toFixed(1)}% L100 SR (${runs} rides)\n`; }
     else                   { addScore = -12; note = `-12.0 : Jockey cold — ${winPct.toFixed(1)}% L100 SR (${runs} rides)\n`; }
 
@@ -1061,7 +1061,7 @@ function checkTrainers(trainerName) {
 
     if      (winPct >= 22) { addScore =  10; note = `+10.0 : Trainer hot form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
     else if (winPct >= 16) { addScore =   5; note = `+5.0 : Trainer solid form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
-    else if (winPct >= 10) { addScore =   0; }
+    else if (winPct >= 10) { addScore = 0; note = `+0.0 : Trainer average form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
     else if (winPct >=  5) { addScore =  -5; note = `-5.0 : Trainer poor form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
     else                   { addScore = -10; note = `-10.0 : Trainer cold — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
 
