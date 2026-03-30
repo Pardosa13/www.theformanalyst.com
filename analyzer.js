@@ -21,15 +21,21 @@ function abbreviateName(fullName) {
 }
 function normalizeName(name) {
     if (!name) return '';
+
     let cleaned = name
         .toLowerCase()
-        .replace(/['']/g, "'")
+        .replace(/['''\u2018\u2019]/g, "'")
         .replace(/\(.*?\)/g, '')
         .replace(/\./g, '')
-        .replace(/,/g, '')
-        .replace(/\s+/g, ' ')
+        .replace(/\s*&\s*/g, ' & ')
         .trim();
-    return cleaned;
+
+    if (cleaned.includes(',')) {
+        const [last, first] = cleaned.split(',').map(s => s.trim());
+        cleaned = `${first} ${last}`;
+    }
+
+    return cleaned.replace(/\s+/g, ' ');
 }
 function convertCSV(data) {
     // Normalize line endings (convert CRLF and CR to LF)
@@ -3524,10 +3530,12 @@ process.stdin.on('end', () => {
         jockeyLookup = {};
         for (const [key, value] of Object.entries(strikeRateData.jockeys)) {
             jockeyLookup[normalizeName(key)] = value;
+            jockeyLookup[normalizeName(abbreviateName(key))] = value;
         }
         trainerLookup = {};
         for (const [key, value] of Object.entries(strikeRateData.trainers)) {
             trainerLookup[normalizeName(key)] = value;
+            trainerLookup[normalizeName(abbreviateName(key))] = value;
         }
 
         const results = analyzeCSV(input.csv_data, input.track_condition, input.is_advanced);
