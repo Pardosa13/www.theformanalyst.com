@@ -3319,7 +3319,7 @@ function calculatePerfectRecordBonus(horse, trackCondition) {
 } else if (record.type === 'distance') {
     notes.push(`+15.0 : Specialist - Undefeated Distance`);
 } else {
-    notes.push(`+15.0 : ${recordType} at ${record.type} (${record.runs}/${record.runs}) - specialist bonus`);
+    notes.push(`+${bonus.toFixed(1)} : ${recordType} at ${record.type} (${record.runs}/${record.runs}) - specialist bonus`);
 }
         });
 
