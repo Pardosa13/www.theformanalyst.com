@@ -2753,7 +2753,7 @@ def api_import_meeting(meeting_id):
             logger.info(f"Sample jockey keys: {list(strike_rate_data['jockeys'].keys())[:5]}")
             logger.info(f"Sample trainer keys: {list(strike_rate_data['trainers'].keys())[:5]}")
         except Exception as e:
-            logger.warning(f"Strike rate pre-fetch failed (non-fatal): {str(e)}")
+            logger.warning(f"Strike rate pre-fetch failed (non-fatal): {str(e)}", exc_info=True)
         # ==========================================
 
         # ==========================================
