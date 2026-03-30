@@ -94,11 +94,6 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     score += a;
     notes += b;
 
-    // JOCKEY+TRAINER COMBO — DISABLED (static lists, not applicable to live data)
-    // [a, b] = checkJockeyTrainerCombo(horseRow['horse jockey'], horseRow['horse trainer'], horseSex);
-    // score += a;
-    // notes += b;
-
     // TRAINER SCORING — Live L100 strike rate from PuntingForm
     [a, b] = checkTrainers(horseRow['horse trainer']);
     score += a;
