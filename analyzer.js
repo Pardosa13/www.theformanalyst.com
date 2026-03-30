@@ -1,141 +1,22 @@
-// Mapping of equivalent jockey names
-const jockeyMapping = {
-    // Abbreviation → full name as used in tier lists
-    "J B Mc Donald": "James McDonald",     // neutral (-9.8% ROI)
-    "A Bullock": "Aaron Bullock",           // neutral (-32.8% ROI) - below Tier 4 threshold
-    "W Pike": "William Pike",               // neutral (-4.4% ROI)
-    "J Parr": "J Parr",                     // Tier 4 - maps to tier list key
-    "J R Collett": "J R Collett",           // Tier 4 - maps to tier list key
-    "M Zahra": "Mark Zahra",                // neutral (-77.5% ROI, only 10 rides - below threshold)
-    "B Shinn": "Blake Shinn",               // neutral
-    "C Williams": "Craig Williams",         // Tier 4
-    "E Brown": "Ethan Brown",               // Tier 1
-    "D Lane": "Damian Lane",                // Tier 4
-    "B Melham": "B Melham",                 // Tier 3 - tier list uses "B Melham"
-    "T Berry": "Tommy Berry",               // neutral (-9.9% ROI)
-    "H Coffey": "H Coffey",                 // neutral - tier list uses "H Coffey" directly
-    "B Avdulla": "Brenton Avdulla",         // neutral
-    "J Ford": "J Ford",                     // Tier 4 - tier list uses "J Ford"
-    "R King": "Rachel King",                // neutral (-43.8% ROI, below threshold)
-    "H Bowman": "Hugh Bowman",              // neutral
-    "K Mc Evoy": "K Mc Evoy",               // Tier 4 - tier list uses "K Mc Evoy"
-    "A Livesey": "Alana Livesey",           // Tier 1
-    "T Clark": "Tim Clark",                 // Tier 2
-    "L Cartwright": "Luke Cartwright",      // Tier 1
-    "T Schiller": "Tyler Schiller",         // Tier 3
-    "A Warren": "Alysha Warren",            // neutral (-7.1% ROI)
-    "C Tootell": "Caitlin Tootell",         // Tier 2
-    "B Thompson": "Ben Thompson",           // neutral (-21.5% ROI)
-    "Z Lloyd": "Zac Lloyd",                 // neutral (-19.4% ROI)
-    "J McNeil": "Jye McNeil",               // Tier 4
-    "R Maloney": "Ryan Maloney",            // Tier 4
-    "J Childs": "Jordan Childs",            // Tier 4
-    "H Nottle": "Holly Nottle",             // neutral (-41.6% ROI, below threshold)
-    "D Gibbons": "Dylan Gibbons",           // Tier 3
-    "J Radley": "Jackson Radley",           // Tier 4
-    "L Neindorf": "Lachlan Neindorf",       // Tier 4
-    "J Allen": "John Allen",                // Tier 4
-    "L Bates": "Logan Bates",               // Tier 4
-    "C Sutherland": "Corey Sutherland",     // Tier 4
-    "L Campbell": "Luke Campbell",          // Tier 1 - NEW
-    "G Semmens": "Gabrielle Semmens",       // Tier 1 - NEW
-    "A Graham": "Amy Graham",               // Tier 1 - NEW
-    "Y Lewis": "Yvette Lewis",              // Tier 1 - NEW
-    "T McCarroll": "Tilly McCarroll",       // Tier 1 - NEW
-    "P Graham": "P Graham",                 // Tier 1 - maps directly
-    "W Price": "Will Price",               // Tier 1 - NEW
-    "J Watkins": "J Watkins",              // Tier 1 - maps directly
-    "W Egan": "W Egan",                    // Tier 2 - maps directly
-    "Ms K Yuill": "Ms K Yuill",            // Tier 2 - maps directly
-    "Ms W Costin": "Ms W Costin",          // Tier 2 - maps directly
-    "C Collis": "Cody Collis",             // Tier 2 - NEW
-    "T Voorham": "Teagan Voorham",         // Tier 2 - NEW
-    "J Stanley": "Jett Stanley",           // Tier 2 - NEW
-    "L Fiore": "Lucy Fiore",               // Tier 3 - NEW
-    "Ms G Cartwright": "Ms G Cartwright",  // Tier 3 - maps directly
-    "T Berry": "Tommy Berry",              // Tier 3 - updated (was neutral)
-    "C Bellamy": "Courtney Bellamy",       // Tier 3 - NEW
-    "C Frater": "Carly Frater",            // Tier 3 - NEW
-    "J W Stanley": "Justin W Stanley",     // Tier 3 - NEW
-    "N Palmer": "Nick Palmer",             // Tier 3 - NEW
-    // Spelling normalization
-    "T Nugent": "Theodore Nugent",          // neutral
-    "Teodore Nugent": "Theodore Nugent",    // neutral
-    "B Allen": "Ben Allen",                 // neutral (-33.0% ROI)
-    "R Houston": "Ryan Houston",            // Tier 4
-    "K Wilson-Taylor": "Kyle Wilson-Taylor", // Tier 4
-    "E Pozman": "Emily Pozman",             // neutral (-47.7% ROI)
-    "A Roper": "Anna Roper",                // Tier 4
-    "T Stockdale": "Thomas Stockdale",      // Tier 4
-    "C Parnham": "Chris Parnham",           // Tier 4
-    "R Bayliss": "Regan Bayliss",           // Tier 4
-    "A Morgan": "Ashley Morgan",            // Tier 4
-    "S Grima": "Siena Grima",               // neutral (-37.5% ROI)
-    "C Graham": "Cejay Graham",             // Tier 4
-    "T Sherry": "Tom Sherry",               // Tier 4
-    "C Hefel": "Carleen Hefel",             // Tier 4
-    "K Crowther": "Kayla Crowther",         // Tier 4
-    "D Thornton": "Damien Thornton",        // Tier 4
-    "B Mertens": "Beau Mertens",            // Tier 4
-    "H Watson": "Holly Watson",             // Tier 4
-    "W Stanley": "William Stanley",         // Tier 4
-    "R Jones": "Reece Jones",               // Tier 4
-    // New additions
-    "J Williams": "Jai Williams",           // Tier 1 - NEW
-    "L Ramoly": "Laqdar Ramoly",            // Tier 3 - NEW
-    "N Rawiller": "N Rawiller",             // Tier 4 - tier list uses abbreviation
-};
-// Mapping of equivalent trainer names
-const trainerMapping = {
-    // These map to tier list keys exactly
-    'C Maher': 'C Maher',                               // Tier 1 - tier list uses 'C Maher'
-    'C J Waller': 'C J Waller',                         // neutral - tier list uses 'C J Waller'
-    'Ben Will & Jd Hayes': 'Ben Will & Jd Hayes',       // Tier 4 - tier list uses this exact string
-    'G Waterhouse & A Bott': 'G Waterhouse & A Bott',   // neutral - tier list uses abbreviation
-    'Gai Waterhouse & Adrian Bott': 'G Waterhouse & A Bott', // alternate full name → abbreviation
-    'G M Begg': 'G M Begg',                             // Tier 4 - tier list uses abbreviation
-    'P Stokes': 'P Stokes',                             // neutral - tier list uses 'P Stokes'
-    'M M Laurie': 'M M Laurie',                         // Tier 4 - tier list uses abbreviation
-    'K Lees': 'K A Lees',                               // Tier 4 - tier list uses 'K A Lees'
-    'K A Lees': 'K A Lees',                             // Tier 4
-    'J Cummings': 'J Cummings',                         // neutral
-    'J Pride': 'Joseph Pride',                          // Tier 4 - tier list uses full name
-    'J O\'Shea': 'John O\'Shea & Tom Charlton',         // Tier 3 - maps to partnership name
-    'P Moody': 'P G Moody & Katherine Coleman',         // Tier 3 - maps to partnership name
-    'R D Griffiths': 'R D Griffiths',                   // neutral
-    'T Busuttin & N Young': 'T Busuttin & N Young',     // Tier 3
-    'S W Kendrick': 'S W Kendrick',                     // neutral
-    'T & C McEvoy': 'T & C McEvoy',                     // Tier 4
-    'A & S Freedman': 'A & S Freedman',                 // Tier 3
-    'R L Heathcote': 'R L Heathcote',                   // neutral
-    'D T O\'Brien': 'D T O\'Brien',                     // Tier 4
-    'Annabel & Rob Archibald': 'Annabel & Rob Archibald', // Tier 4
-    'Matthew Smith': 'Matthew Smith',                   // Tier 4
-    'Gavin Bedggood': 'Gavin Bedggood',                 // Tier 4
-    'Chris & Corey Munce': 'Chris & Corey Munce',       // Tier 4
-    'P G Moody & Katherine Coleman': 'P G Moody & Katherine Coleman', // Tier 3
-    'T J Gollan': 'T J Gollan',                         // Tier 4
-    'Ben Brisbourne': 'Ben Brisbourne',                 // Tier 4
-    'G Ryan & S Alexiou': 'G Ryan & S Alexiou',         // Tier 4
-    'Peter Snowden': 'Peter Snowden',                   // Tier 4
-    'P Snowden': 'Peter Snowden',                       // Tier 4
-    'M Price & M Kent Jnr': 'M Price & M Kent Jnr',     // Tier 4
-    'Bjorn Baker': 'Bjorn Baker',                       // Tier 4
-    'B Baker': 'Bjorn Baker',                           // Tier 4
-    'Patrick & Michelle Payne': 'Patrick & Michelle Payne', // Tier 4
-    'N D Parnham': 'N D Parnham',                       // Tier 4
-    // New additions
-    'M W & J Hawkes': 'M W & J Hawkes',                 // Tier 2 - NEW
-    'Brett & Georgie Cavanough': 'Brett & Georgie Cavanough', // Tier 2 - NEW
-    'Declan Maher': 'Declan Maher',                     // Tier 2 - NEW
-    'Richard Litt': 'Richard Litt',                     // Tier 3 - NEW
-    'Richard & Will Freedman': 'Richard & Will Freedman', // Tier 3 - NEW
-    'L & T Corstens & W Larkin': 'L & T Corstens & W Larkin', // Tier 4 - NEW
-    'Annabel & Rob Archibald': 'Annabel & Rob Archibald', // Tier 4 - NEW (big sample)
-    'Mitchell Beer & George Carpenter': 'Mitchell Beer & George Carpenter', // Tier 4 - NEW
-};
-
 let strikeRateData = { jockeys: {}, trainers: {} };
+
+function abbreviateName(fullName) {
+    if (!fullName || typeof fullName !== 'string') return fullName;
+    const trimmed = fullName.trim();
+    if (trimmed.includes('&')) {
+        const sides = trimmed.split('&').map(s => s.trim());
+        return sides.map(side => {
+            const p = side.trim().split(/\s+/);
+            if (p.length < 2) return side;
+            const initials = p.slice(0, p.length - 1).map(n => n[0].toUpperCase()).join(' ');
+            return `${initials} ${p[p.length - 1]}`;
+        }).join(' & ');
+    }
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2) return trimmed;
+    const initials = parts.slice(0, parts.length - 1).map(n => n[0].toUpperCase()).join(' ');
+    return `${initials} ${parts[parts.length - 1]}`;
+}
 
 function convertCSV(data) {
     // Normalize line endings (convert CRLF and CR to LF)
