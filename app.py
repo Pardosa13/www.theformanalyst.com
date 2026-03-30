@@ -1001,8 +1001,12 @@ def parse_notes_components(notes):
         (r'\+\s*20\.0\s*:\s*Elite value trainer', 'Trainer - Elite (50%+ ROI)'),
         (r'\+\s*15\.0\s*:\s*Strong value trainer', 'Trainer - Strong Value (20-50% ROI)'),
         (r'\+\s*10\.0\s*:\s*Profitable trainer', 'Trainer - Profitable (0-20% ROI)'),
-        # FIX: also catches "destroys ROI" phrasing
         (r'-\s*15\.0\s*:\s*Poor value trainer|Poor value trainer.*destroys ROI', 'Trainer - Poor Value'),
+        # Live L100 strike rate patterns
+        (r'\+\s*10\.0\s*:\s*Trainer hot form', 'Trainer - Hot Form (L100 22%+ SR)'),
+        (r'\+\s*5\.0\s*:\s*Trainer solid form', 'Trainer - Solid Form (L100 16-22% SR)'),
+        (r'[-−]\s*5\.0\s*:\s*Trainer poor form', 'Trainer - Poor Form (L100 5-10% SR)'),
+        (r'[-−]\s*10\.0\s*:\s*Trainer cold', 'Trainer - Cold (L100 <5% SR)'),
 
         # ====== TRACK RECORD - WIN RATES ======
         (r'\+\s*6\.0\s*:\s*Exceptional win rate.*at this track\b', 'Track Win Rate - Exceptional (51%+)'),
