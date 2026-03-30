@@ -320,15 +320,12 @@ with app.app_context():
         db.session.commit()
 
 # ----- Analyzer Integration -----
-def run_analyzer(csv_data, track_condition, is_advanced=False):
-    """
-    Run the JavaScript analyzer with the CSV data
-    Returns list of analysis results
-    """
+def run_analyzer(csv_data, track_condition, is_advanced=False, strike_rate_data=None):
     input_data = {
         'csv_data': csv_data,
         'track_condition': track_condition,
-        'is_advanced': is_advanced
+        'is_advanced': is_advanced,
+        'strike_rate_data': strike_rate_data or {'jockeys': {}, 'trainers': {}}
     }
 
     analyzer_path = os.path.join(os.path.dirname(__file__), 'analyzer.js')
@@ -607,7 +604,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                               is_advanced=False, puntingform_id=None,
                               speed_maps_data=None, ratings_data=None, 
                               sectionals_data=None, rail_position=0,
-                              scratched_set=None, **kwargs):
+                              scratched_set=None, strike_rate_data=None, **kwargs):
     kwargs['rail_position'] = rail_position
 
     # ===== INJECT API SECTIONAL DATA INTO CSV =====
@@ -729,7 +726,8 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
     logger.info("✅ Rebuilt CSV with API data injection")
 
     # Run the analyzer
-    analysis_results = run_analyzer(csv_data, track_condition, is_advanced)
+    analysis_results = run_analyzer(csv_data, track_condition, is_advanced,
+                                    strike_rate_data=strike_rate_data)
     
     if not analysis_results:
         raise Exception("No results returned from analyzer")
@@ -2728,12 +2726,24 @@ def api_import_meeting(meeting_id):
         except Exception as e:
             logger.warning(f"Could not fetch sectionals: {str(e)}")
         
-                      # ==========================================
+        # ==========================================
         # FETCH CSV DATA
         # ==========================================
         csv_data = pf_service.get_fields_csv(track_name, date_str)
         if not csv_data:
             return jsonify({'success': False, 'error': 'No data available for this meeting'}), 400
+
+        # ==========================================
+        # PRE-FETCH STRIKE RATES
+        # ==========================================
+        strike_rate_data = {'jockeys': {}, 'trainers': {}}
+        try:
+            strike_rate_data['jockeys']  = pf_service.get_strike_rates(date_str, 'jockey')
+            strike_rate_data['trainers'] = pf_service.get_strike_rates(date_str, 'trainer')
+            logger.info(f"✅ Strike rates: {len(strike_rate_data['jockeys'])} jockeys, {len(strike_rate_data['trainers'])} trainers")
+        except Exception as e:
+            logger.warning(f"Strike rate pre-fetch failed (non-fatal): {str(e)}")
+        # ==========================================
 
         # ==========================================
         # FETCH SCRATCHINGS BEFORE ANALYSIS
@@ -2818,7 +2828,8 @@ def api_import_meeting(meeting_id):
             ratings_data=sectionals_data,
             sectionals_data=sectionals_data,
             rail_position=rail_position,
-            scratched_set=scratched_set
+            scratched_set=scratched_set,
+            strike_rate_data=strike_rate_data
         )
 
         meeting.date = date_obj.date()
