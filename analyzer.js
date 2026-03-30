@@ -1001,9 +1001,10 @@ function checkJockeys(JockeyName) {
     if (!JockeyName || !strikeRateData || !strikeRateData.jockeys) return [0, ''];
 
     const lastName = JockeyName.trim().split(/\s+/).pop();
+    const lastNameMatch = Object.entries(strikeRateData.jockeys).find(([k]) => k.split(/\s+/).pop() === lastName);
     const data = strikeRateData.jockeys[JockeyName.trim()]
               || strikeRateData.jockeys[abbreviateName(JockeyName.trim())]
-              || Object.entries(strikeRateData.jockeys).find(([k]) => k.split(/\s+/).pop() === lastName)?.[1];
+              || (lastNameMatch ? lastNameMatch[1] : null);
 
     if (!data) {
         return [0, `Jockey Not Found in strike rate data: ${JockeyName}\n`];
@@ -1030,9 +1031,10 @@ function checkTrainers(trainerName) {
     if (!trainerName || !strikeRateData || !strikeRateData.trainers) return [0, ''];
 
     const lastName = trainerName.trim().split(/\s+/).pop();
+    const lastNameMatch = Object.entries(strikeRateData.trainers).find(([k]) => k.split(/\s+/).pop() === lastName);
     const data = strikeRateData.trainers[trainerName.trim()]
               || strikeRateData.trainers[abbreviateName(trainerName.trim())]
-              || Object.entries(strikeRateData.trainers).find(([k]) => k.split(/\s+/).pop() === lastName)?.[1];
+              || (lastNameMatch ? lastNameMatch[1] : null);
 
     if (!data) {
         return [0, `Trainer Not Found in strike rate data: ${trainerName}\n`];
