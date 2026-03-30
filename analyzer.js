@@ -134,6 +134,9 @@ const trainerMapping = {
     'Annabel & Rob Archibald': 'Annabel & Rob Archibald', // Tier 4 - NEW (big sample)
     'Mitchell Beer & George Carpenter': 'Mitchell Beer & George Carpenter', // Tier 4 - NEW
 };
+
+let strikeRateData = { jockeys: {}, trainers: {} };
+
 function convertCSV(data) {
     // Normalize line endings (convert CRLF and CR to LF)
     data = data.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -3502,7 +3505,7 @@ function getUniqueHorsesOnly(data) {
 }
 
 // Main analysis function
-function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false, strikeRateData = { jockeys: {}, trainers: {} }) {
+function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
     let data = parseCSV(csvData);
     if (!data || data.length === 0) return [];
     data = data.filter(row => {
@@ -3677,8 +3680,8 @@ process.stdin.on('end', () => {
     try {
         // Try parsing as JSON first (new format)
         const input = JSON.parse(inputData);
-        const strikeRateData = input.strike_rate_data || { jockeys: {}, trainers: {} };
-        const results = analyzeCSV(input.csv_data, input.track_condition, input.is_advanced, strikeRateData);
+        strikeRateData = input.strike_rate_data || { jockeys: {}, trainers: {} };
+        const results = analyzeCSV(input.csv_data, input.track_condition, input.is_advanced);
         console.log(JSON.stringify(results));
     } catch (jsonError) {
         // Fallback to old format: CSV + track condition on last line
