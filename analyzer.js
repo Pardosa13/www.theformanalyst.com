@@ -1,4 +1,6 @@
 let strikeRateData = { jockeys: {}, trainers: {} };
+let jockeyLookup = {};
+let trainerLookup = {};
 
 function abbreviateName(fullName) {
     if (!fullName || typeof fullName !== 'string') return fullName;
@@ -17,7 +19,18 @@ function abbreviateName(fullName) {
     const initials = parts.slice(0, parts.length - 1).map(n => n[0].toUpperCase()).join(' ');
     return `${initials} ${parts[parts.length - 1]}`;
 }
-
+function normalizeName(name) {
+    if (!name) return '';
+    let cleaned = name
+        .toLowerCase()
+        .replace(/['']/g, "'")
+        .replace(/\(.*?\)/g, '')
+        .replace(/\./g, '')
+        .replace(/,/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return cleaned;
+}
 function convertCSV(data) {
     // Normalize line endings (convert CRLF and CR to LF)
     data = data.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -998,19 +1011,17 @@ function checkJockeys(JockeyName) {
     var addScore = 0;
     var note = '';
 
-    if (!JockeyName || !strikeRateData || !strikeRateData.jockeys) return [0, ''];
+    if (!JockeyName) return [0, ''];
 
-    const lastName = JockeyName.trim().split(/\s+/).pop();
-    const lastNameMatch = Object.entries(strikeRateData.jockeys).find(([k]) => k.split(/\s+/).pop() === lastName);
-    const data = strikeRateData.jockeys[JockeyName.trim()]
-              || strikeRateData.jockeys[abbreviateName(JockeyName.trim())]
-              || (lastNameMatch ? lastNameMatch[1] : null);
+    const data = jockeyLookup[normalizeName(JockeyName)];
 
     if (!data) {
         return [0, `Jockey Not Found in strike rate data: ${JockeyName}\n`];
     }
 
-    if (data.L100Runs < 10) return [0, ''];
+    if (data.L100Runs < 10) {
+        return [0, `Jockey insufficient data: ${JockeyName} (${data.L100Runs} rides)\n`];
+    }
 
     const winPct = (data.L100Wins / data.L100Runs) * 100;
     const runs   = data.L100Runs;
@@ -1023,24 +1034,21 @@ function checkJockeys(JockeyName) {
 
     return [addScore, note];
 }
-
 function checkTrainers(trainerName) {
     var addScore = 0;
     var note = '';
 
-    if (!trainerName || !strikeRateData || !strikeRateData.trainers) return [0, ''];
+    if (!trainerName) return [0, ''];
 
-    const lastName = trainerName.trim().split(/\s+/).pop();
-    const lastNameMatch = Object.entries(strikeRateData.trainers).find(([k]) => k.split(/\s+/).pop() === lastName);
-    const data = strikeRateData.trainers[trainerName.trim()]
-              || strikeRateData.trainers[abbreviateName(trainerName.trim())]
-              || (lastNameMatch ? lastNameMatch[1] : null);
+    const data = trainerLookup[normalizeName(trainerName)];
 
     if (!data) {
         return [0, `Trainer Not Found in strike rate data: ${trainerName}\n`];
     }
 
-    if (data.L100Runs < 10) return [0, ''];
+    if (data.L100Runs < 10) {
+        return [0, `Trainer insufficient data: ${trainerName} (${data.L100Runs} rides)\n`];
+    }
 
     const winPct = (data.L100Wins / data.L100Runs) * 100;
     const runs   = data.L100Runs;
@@ -3511,6 +3519,17 @@ process.stdin.on('end', () => {
         // Try parsing as JSON first (new format)
         const input = JSON.parse(inputData);
         strikeRateData = input.strike_rate_data || { jockeys: {}, trainers: {} };
+
+        // Build normalized lookup maps
+        jockeyLookup = {};
+        for (const [key, value] of Object.entries(strikeRateData.jockeys)) {
+            jockeyLookup[normalizeName(key)] = value;
+        }
+        trainerLookup = {};
+        for (const [key, value] of Object.entries(strikeRateData.trainers)) {
+            trainerLookup[normalizeName(key)] = value;
+        }
+
         const results = analyzeCSV(input.csv_data, input.track_condition, input.is_advanced);
         console.log(JSON.stringify(results));
     } catch (jsonError) {
