@@ -2514,7 +2514,7 @@ function calculatePerfectRecordBonus(horse, trackCondition) {
 
     return {
         bonus: totalBonus,
-        note: notes.length ? notes.join('; ') + '\n' : '',
+        note: notes.length ? notes.join('\n') + '\n' : '',
         recordCount: perfectRecords.length
     };
 }
