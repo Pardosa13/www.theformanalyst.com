@@ -303,7 +303,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             }
 
             // Perfect record
-            if (runs > 0 && (wins === runs || podiums === runs)) {
+            if (runs > 0 && wins === runs) {
                 specialistContext.hasPerfectRecord = true;
             }
         }
@@ -321,7 +321,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             if (runs >= 5 && podiumRate >= 0.50) {
                 specialistContext.hasStrongTrackRecord = true;
             }
-            if (runs > 0 && (wins === runs || podiums === runs)) {
+            if (runs > 0 && wins === runs) {
                 specialistContext.hasPerfectRecord = true;
             }
         }
@@ -339,7 +339,7 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
             if (runs >= 5 && podiumRate >= 0.50) {
                 specialistContext.hasStrongDistanceRecord = true;
             }
-            if (runs > 0 && (wins === runs || podiums === runs)) {
+            if (runs > 0 && wins === runs) {
                 specialistContext.hasPerfectRecord = true;
             }
         }
@@ -2468,14 +2468,14 @@ function calculatePerfectRecordBonus(horse, trackCondition) {
         if (numbers.length !== 4) return;
         const [runs, wins, seconds, thirds] = numbers;
         const podiums = wins + seconds + thirds;
-        if (runs > 0 && (wins === runs || podiums === runs)) {
-            perfectRecords.push({
-                type: label,
-                runs,
-                isPerfectWin: wins === runs,
-                isPerfectPodium: podiums === runs
-            });
-        }
+        if (runs > 0 && wins === runs) {
+    perfectRecords.push({
+        type: label,
+        runs,
+        isPerfectWin: true,
+        isPerfectPodium: false
+    });
+}
     };
 
     evalRecord(horse['horse record track'], 'track');
