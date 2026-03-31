@@ -1087,7 +1087,7 @@ def parse_notes_components(notes):
         (r'[~+\-]\s*[\d.]+\s*:\s*Step(?:ping)? up.*\(400m\+\)', 'Distance Change - Step Up Large (400m+)'),
         (r'[~+\-]\s*[\d.]+\s*:\s*Step(?:ping)? up.*\(200-400m\)', 'Distance Change - Step Up Moderate (200-400m)'),
         (r'[~+\-]\s*[\d.]+\s*:\s*Drop(?:ping)? back.*\(400m\+\)', 'Distance Change - Drop Back Large (400m+)'),
-        (r'[~+\-]\s*[\d.]+\s*:\s*Drop(?:ping)? back.*\(200-400m\)', 'Distance Change - Drop Back Moderate (200-400m)'),
+        (r'\+\s*8\.0\s*:\s*Drop back in distance \(200-400m\)', 'Distance Change - Drop Back Moderate (200-400m)'),
 
         # ====== CLASS CHANGE ======
         (r'\+\s*([\d.]+):\s*Stepping DOWN', '_class_drop_dynamic'),
