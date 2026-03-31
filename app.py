@@ -1196,7 +1196,6 @@ def parse_notes_components(notes):
         # ====== SPECIALIST / PERFECT RECORD ======
         (r'\+\s*15\.0\s*:\s*Specialist - Undefeated Track\+Distance', 'Specialist - Undefeated Track+Distance'),
         (r'\+\s*15\.0\s*:\s*Specialist - Undefeated Distance(?!.*Track)', 'Specialist - Undefeated Distance'),
-        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED.*distance.*specialist', 'Specialist - Undefeated Distance'),
         (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED.*condition.*specialist', 'Specialist - Undefeated Condition'),
         (r'\+\s*([\d.]+)\s*:\s*100% PODIUM.*track\+distance', 'Specialist - Perfect Podium Track+Distance'),
         (r'\+\s*([\d.]+)\s*:\s*100% PODIUM.*track\b', 'Specialist - Perfect Podium Track'),
