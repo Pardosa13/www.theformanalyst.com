@@ -371,6 +371,11 @@ notes += b;
 score += a;
 notes += b;
 
+// PERFECT RECORD SPECIALIST BONUS
+const perfectRecordResult = calculatePerfectRecordBonus(horseRow, trackCondition);
+score += perfectRecordResult.bonus;
+notes += perfectRecordResult.note;
+
 // ==========================================
 // AGE/SEX SCORING - UPDATED 2025-01-30
 // Based on 1203 race analysis
