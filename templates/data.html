@@ -750,7 +750,7 @@ function loadPriceAnalysis() {
 function loadSoleLeader() {
     const container = document.getElementById('soleLeaderAnalysis');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading sole leader analysis...</p></div>';
-    fetch('/api/data/sole-leader-analysis')
+    fetch(`/api/data/sole-leader-analysis?${filterParams}`)
         .then(r => r.json())
         .then(data => { renderSoleLeader(data); loadedSections.add('sole-leader'); })
         .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data.</div>'; console.error(err); });
