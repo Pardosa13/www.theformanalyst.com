@@ -6463,7 +6463,7 @@ def api_sole_leader_analysis():
             dist_breakdown[dl]['wins']   += 1 if won else 0
             dist_breakdown[dl]['profit'] += profit
 
-            # Field size (#2)
+            # Field size
             field_size = len(horses)
             if field_size <= 7:    fs_label = 'Small (≤7)'
             elif field_size <= 11: fs_label = 'Medium (8-11)'
@@ -6473,7 +6473,7 @@ def api_sole_leader_analysis():
             field_size_breakdown[fs_label]['wins']   += 1 if won else 0
             field_size_breakdown[fs_label]['profit'] += profit
 
-            # SP bracket (#4)
+            # SP bracket
             if sp <= 0:     sp_label = 'No SP'
             elif sp < 2.0:  sp_label = 'Odds-on (<$2)'
             elif sp < 3.0:  sp_label = '$2-$2.99'
@@ -6485,8 +6485,8 @@ def api_sole_leader_analysis():
             sp_breakdown[sp_label]['wins']   += 1 if won else 0
             sp_breakdown[sp_label]['profit'] += profit
 
-            # Pick is leader (#5)
-            top_norm      = normalize_runner_name(top['horse'].horse_name)
+            # Pick is leader
+            top_norm       = normalize_runner_name(top['horse'].horse_name)
             pick_is_leader = top_norm in leaders
             pk = 'yes' if pick_is_leader else 'no'
             pick_is_leader_breakdown[pk]['races']  += 1
@@ -6505,7 +6505,6 @@ def api_sole_leader_analysis():
                     'sp':                 sp,
                 })
 
-    # Finalise bucket stats
     for bucket in results.values():
         n = bucket['races']
         bucket['strike_rate'] = round(bucket['wins'] / n * 100, 1) if n else 0
@@ -6562,11 +6561,11 @@ def api_sole_leader_analysis():
     db.session.remove()
 
     return jsonify({
-        'buckets':                  results,
-        'distance_breakdown':       dist_list,
-        'field_size_breakdown':     fs_list,
-        'sp_breakdown':             sp_list,
-        'pick_is_leader_breakdown': pick_list,
+        'buckets':                    results,
+        'distance_breakdown':         dist_list,
+        'field_size_breakdown':       fs_list,
+        'sp_breakdown':               sp_list,
+        'pick_is_leader_breakdown':   pick_list,
         'total_races_with_speedmaps': len(recent_race_ids),
     })
 @app.route("/api/data/field-size")
