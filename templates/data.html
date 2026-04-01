@@ -764,15 +764,15 @@ function renderSoleLeader(data) {
         return;
     }
 
-    const b = data.buckets;
+    const b         = data.buckets;
     const sole      = b.sole_leader      || {};
     const contested = b.contested_leader || {};
     const none      = b.no_leader        || {};
 
     function metricCard(label, desc, stats, highlight) {
         if (!stats || stats.races === 0) return '';
-        const roiCol   = stats.roi >= 0 ? '#34d399' : '#f87171';
-        const border   = highlight ? 'border:2px solid #fbbf24' : 'border:1px solid var(--border-subtle)';
+        const roiCol = stats.roi >= 0 ? '#34d399' : '#f87171';
+        const border = highlight ? 'border:2px solid #fbbf24' : 'border:1px solid var(--border-subtle)';
         return `
         <div class="col-md-4 mb-3">
             <div class="card h-100" style="${border}">
@@ -788,18 +788,21 @@ function renderSoleLeader(data) {
         </div>`;
     }
 
-    let distHtml = '';
-    if (data.distance_breakdown && data.distance_breakdown.length > 0) {
-        distHtml = `
-        <h6 style="margin:20px 0 10px;color:var(--text-primary)">Sole Leader — By Distance</h6>
-        <div class="table-responsive">
-            <table class="table table-sm table-hover">
-                <thead class="table-dark">
-                    <tr><th>Distance</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">ROI %</th><th class="text-center">P&L</th></tr>
-                </thead><tbody>`;
-        for (const row of data.distance_breakdown) {
-            distHtml += `<tr>
-                <td><strong>${row.label}</strong></td>
+    function buildTable(title, rows, colHeader) {
+        if (!rows || rows.length === 0) return '';
+        let t = `<h6 style="margin:20px 0 10px;color:var(--text-primary)">${title}</h6>
+        <div class="table-responsive"><table class="table table-sm table-hover">
+        <thead class="table-dark"><tr>
+            <th>${colHeader}</th>
+            <th class="text-center">Races</th>
+            <th class="text-center">Wins</th>
+            <th class="text-center">Strike %</th>
+            <th class="text-center">ROI %</th>
+            <th class="text-center">P&L</th>
+        </tr></thead><tbody>`;
+        for (const row of rows) {
+            t += `<tr>
+                <td><strong>${row.label}</strong>${row.desc ? `<br><span style="font-size:11px;color:var(--text-muted)">${row.desc}</span>` : ''}</td>
                 <td class="text-center">${row.races}</td>
                 <td class="text-center">${row.wins}</td>
                 <td class="text-center ${row.strike_rate >= 25 ? 'text-success fw-bold' : ''}">${row.strike_rate}%</td>
@@ -807,7 +810,8 @@ function renderSoleLeader(data) {
                 <td class="text-center ${row.profit >= 0 ? 'text-success' : 'text-danger'}">$${row.profit.toFixed(2)}</td>
             </tr>`;
         }
-        distHtml += '</tbody></table></div>';
+        t += '</tbody></table></div>';
+        return t;
     }
 
     let examplesHtml = '';
@@ -845,12 +849,16 @@ function renderSoleLeader(data) {
             ${metricCard('🔴 Contested Leader', '2+ horses wanting the front', contested, false)}
             ${metricCard('⚫ No Clear Leader', 'No horse with settle rank 1', none, false)}
         </div>
-        ${distHtml}
+        ${buildTable('Sole Leader — By Distance', data.distance_breakdown, 'Distance')}
+        ${buildTable('Sole Leader — By Field Size', data.field_size_breakdown, 'Field Size')}
+        ${buildTable('Sole Leader — By SP Bracket (Top Pick)', data.sp_breakdown, 'SP Bracket')}
+        ${buildTable('Sole Leader — Does Your Pick = The Leader?', data.pick_is_leader_breakdown, 'Scenario')}
         ${examplesHtml}
         <div class="alert alert-info mt-3">
             <strong>💡 How to use this:</strong>
-            If sole leader races show materially better ROI than contested, that's a strong signal to add a "cushy lead" bonus in analyzer.js for horses mapped as sole leaders.
-            The distance breakdown tells you which trip length benefits most from front-running — typically staying races where tempo control compounds.
+            The distance breakdown shows where front-running pays off. Field size reveals whether small fields amplify the advantage.
+            SP bracket shows which price ranges are profitable to back. The pick vs leader breakdown tells you whether to bonus
+            the leader horse itself or just use sole leader as a race filter for your existing top pick.
         </div>
     </div>`;
 
