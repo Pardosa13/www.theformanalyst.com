@@ -643,6 +643,15 @@
   </div>
 </div>
 
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#soleLeaderAnalysis" aria-expanded="false">
+    <h5>🏇 Sole Leader Analysis</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="soleLeaderAnalysis" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load sole leader analysis...</p></div>
+  </div>
+</div>
+
 {% if total_races == 0 %}
 <div class="analytics-empty">
   <h5>No results data yet!</h5>
@@ -696,7 +705,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const pfaiAnalysis = document.getElementById('pfaiAnalysis');
     if (pfaiAnalysis) { 
     pfaiAnalysis.addEventListener('show.bs.collapse', function() { 
-        if (!loadedSections.has('pfai-analysis')) { loadPfaiAnalysis(); } 
+    if (!loadedSections.has('pfai-analysis')) { loadPfaiAnalysis(); }
+    const soleLeaderAnalysis = document.getElementById('soleLeaderAnalysis');
+    if (soleLeaderAnalysis) {
+    soleLeaderAnalysis.addEventListener('show.bs.collapse', function() {
+    if (!loadedSections.has('sole-leader')) { loadSoleLeader(); }
     }); 
     }
 });
@@ -732,7 +745,115 @@ function loadPriceAnalysis() {
         .then(data => { renderPriceAnalysis(data); loadedSections.add('price-analysis'); })
         .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>'; console.error('Error:', error); });
 }
+function loadSoleLeader() {
+    const container = document.getElementById('soleLeaderAnalysis');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading sole leader analysis...</p></div>';
+    fetch('/api/data/sole-leader-analysis')
+        .then(r => r.json())
+        .then(data => { renderSoleLeader(data); loadedSections.add('sole-leader'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data.</div>'; console.error(err); });
+}
 
+function renderSoleLeader(data) {
+    const container = document.getElementById('soleLeaderAnalysis');
+
+    if (!data.buckets) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No speed map data available yet.</p></div>';
+        return;
+    }
+
+    const b = data.buckets;
+    const sole      = b.sole_leader      || {};
+    const contested = b.contested_leader || {};
+    const none      = b.no_leader        || {};
+
+    function metricCard(label, desc, stats, highlight) {
+        if (!stats || stats.races === 0) return '';
+        const roiCol   = stats.roi >= 0 ? '#34d399' : '#f87171';
+        const border   = highlight ? 'border:2px solid #fbbf24' : 'border:1px solid var(--border-subtle)';
+        return `
+        <div class="col-md-4 mb-3">
+            <div class="card h-100" style="${border}">
+                <div class="card-body text-center">
+                    <h6 style="color:${highlight ? '#fbbf24' : 'var(--text-primary)'}">${label}</h6>
+                    <p style="font-size:11px;color:var(--text-muted);margin-bottom:10px">${desc}</p>
+                    <div style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace;color:var(--text-primary)">${stats.wins}/${stats.races}</div>
+                    <div style="font-size:13px;margin:4px 0">Strike: <strong style="color:${stats.strike_rate >= 25 ? '#34d399' : 'var(--text-primary)'}">${stats.strike_rate}%</strong></div>
+                    <div style="font-size:13px">ROI: <strong style="color:${roiCol}">${stats.roi >= 0 ? '+' : ''}${stats.roi}%</strong></div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px">P&L: $${stats.profit.toFixed(2)}</div>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    let distHtml = '';
+    if (data.distance_breakdown && data.distance_breakdown.length > 0) {
+        distHtml = `
+        <h6 style="margin:20px 0 10px;color:var(--text-primary)">Sole Leader — By Distance</h6>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr><th>Distance</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">ROI %</th><th class="text-center">P&L</th></tr>
+                </thead><tbody>`;
+        for (const row of data.distance_breakdown) {
+            distHtml += `<tr>
+                <td><strong>${row.label}</strong></td>
+                <td class="text-center">${row.races}</td>
+                <td class="text-center">${row.wins}</td>
+                <td class="text-center ${row.strike_rate >= 25 ? 'text-success fw-bold' : ''}">${row.strike_rate}%</td>
+                <td class="text-center ${row.roi >= 0 ? 'text-success' : 'text-danger'}">${row.roi >= 0 ? '+' : ''}${row.roi}%</td>
+                <td class="text-center ${row.profit >= 0 ? 'text-success' : 'text-danger'}">$${row.profit.toFixed(2)}</td>
+            </tr>`;
+        }
+        distHtml += '</tbody></table></div>';
+    }
+
+    let examplesHtml = '';
+    const examples = (b.sole_leader || {}).examples || [];
+    if (examples.length > 0) {
+        examplesHtml = `
+        <h6 style="margin:20px 0 10px;color:var(--text-primary)">Recent Sole Leader Examples</h6>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr><th>Meeting</th><th class="text-center">Race</th><th>Top Pick</th><th>Leader</th><th class="text-center">Pick = Leader?</th><th class="text-center">Won?</th><th class="text-center">SP</th></tr>
+                </thead><tbody>`;
+        for (const ex of examples) {
+            examplesHtml += `<tr>
+                <td style="font-size:11px;color:var(--text-muted)">${ex.meeting}</td>
+                <td class="text-center">R${ex.race}</td>
+                <td><strong>${ex.top_pick}</strong></td>
+                <td>${ex.leader}</td>
+                <td class="text-center">${ex.top_pick_is_leader ? '✅ Yes' : '❌ No'}</td>
+                <td class="text-center">${ex.won ? '✅ WON' : '❌'}</td>
+                <td class="text-center">$${ex.sp ? ex.sp.toFixed(2) : '-'}</td>
+            </tr>`;
+        }
+        examplesHtml += '</tbody></table></div>';
+    }
+
+    const html = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px;margin-bottom:16px">
+            Analyses races by tempo type based on speed map settle ranks.
+            <strong style="color:var(--text-primary)">${data.total_races_with_speedmaps}</strong> races with speed map data found.
+            Performance shown is for your #1 ranked horse in each race.
+        </p>
+        <div class="row">
+            ${metricCard('🟡 Sole Leader', 'Only one horse mapped to lead — cushy front run', sole, true)}
+            ${metricCard('🔴 Contested Leader', '2+ horses wanting the front', contested, false)}
+            ${metricCard('⚫ No Clear Leader', 'No horse with settle rank 1', none, false)}
+        </div>
+        ${distHtml}
+        ${examplesHtml}
+        <div class="alert alert-info mt-3">
+            <strong>💡 How to use this:</strong>
+            If sole leader races show materially better ROI than contested, that's a strong signal to add a "cushy lead" bonus in analyzer.js for horses mapped as sole leaders.
+            The distance breakdown tells you which trip length benefits most from front-running — typically staying races where tempo control compounds.
+        </div>
+    </div>`;
+
+    container.innerHTML = html;
+}
 function renderScoreAnalysis(data) {
     const container = document.getElementById('scoreAnalysis');
     let html = '<div class="card-body"><div class="row">';
