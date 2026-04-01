@@ -701,16 +701,17 @@ document.addEventListener('DOMContentLoaded', function() {
     const monthlyPerformance = document.getElementById('monthlyPerformance');
     if (monthlyPerformance) { monthlyPerformance.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('monthly-performance')) { loadMonthlyPerformance(); } }); }
     const combinationAnalysis = document.getElementById('combinationAnalysis');
-    if (combinationAnalysis) { combinationAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('combination-analysis')) { loadCombinationAnalysis(); } }); }
-    const pfaiAnalysis = document.getElementById('pfaiAnalysis');
+    if (combinationAnalysis) { combinationAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('combination-analysis')) { const pfaiAnalysis = document.getElementById('pfaiAnalysis');
     if (pfaiAnalysis) { 
-    pfaiAnalysis.addEventListener('show.bs.collapse', function() { 
-    if (!loadedSections.has('pfai-analysis')) { loadPfaiAnalysis(); }
+        pfaiAnalysis.addEventListener('show.bs.collapse', function() { 
+            if (!loadedSections.has('pfai-analysis')) { loadPfaiAnalysis(); }
+        }); 
+    }
     const soleLeaderAnalysis = document.getElementById('soleLeaderAnalysis');
     if (soleLeaderAnalysis) {
-    soleLeaderAnalysis.addEventListener('show.bs.collapse', function() {
-    if (!loadedSections.has('sole-leader')) { loadSoleLeader(); }
-    }); 
+        soleLeaderAnalysis.addEventListener('show.bs.collapse', function() {
+            if (!loadedSections.has('sole-leader')) { loadSoleLeader(); }
+        }); 
     }
 });
 function loadScoreAnalysis() {
