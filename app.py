@@ -6333,10 +6333,66 @@ def api_sole_leader_analysis():
 
     stake = 10.0
 
-    # Pull races with speed maps and results in one efficient query
-    races_with_data = db.session.query(Race).filter(
+    track_filter = request.args.get('track', '')
+    date_from    = request.args.get('date_from', '')
+    date_to      = request.args.get('date_to', '')
+    limit_param  = request.args.get('limit', '200')
+
+    race_id_query = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(
+        Horse, Horse.race_id == Race.id
+    ).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(
+        Result.finish_position > 0,
         Race.speed_maps_json.isnot(None)
-    ).limit(500).all()  # Cap at 500 to prevent timeout
+    )
+
+    if track_filter:
+        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+
+    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(
+        Meeting.uploaded_at.desc(), Race.id.desc()
+    ).all()
+
+    if limit_param == 'all':
+        recent_race_ids = [r[0] for r in all_race_ids]
+    else:
+        limit = int(limit_param) if limit_param.isdigit() else 200
+        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
+
+    all_results = db.session.query(
+        Horse, Prediction, Result, Race, Meeting
+    ).join(
+        Prediction, Horse.id == Prediction.horse_id
+    ).join(
+        Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
+    ).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Result.finish_position > 0,
+        Race.id.in_(recent_race_ids)
+    ).all()
+
+    races_data = {}
+    for horse, pred, result, race, meeting in all_results:
+        race_key = (meeting.id, race.race_number)
+        if race_key not in races_data:
+            races_data[race_key] = []
+        races_data[race_key].append({
+            'horse': horse,
+            'prediction': pred,
+            'result': result,
+            'race': race,
+            'meeting': meeting
+        })
 
     results = {
         'sole_leader':      {'races': 0, 'wins': 0, 'profit': 0.0, 'examples': []},
@@ -6345,16 +6401,18 @@ def api_sole_leader_analysis():
     }
     dist_breakdown = defaultdict(lambda: {'races': 0, 'wins': 0, 'profit': 0.0})
 
-    for race in races_with_data:
+    for race_key, horses in races_data.items():
+        if not horses:
+            continue
+
+        race = horses[0]['race']
+
         try:
             smap = race.speed_maps_json
             if isinstance(smap, str):
                 smap = _json.loads(smap)
             items = smap.get('payLoad', [{}])[0].get('items', [])
         except Exception:
-            continue
-
-        if not items:
             continue
 
         leaders = []
@@ -6373,28 +6431,18 @@ def api_sole_leader_analysis():
         else:
             bucket = 'contested_leader'
 
-        # Get top scoring non-scratched horse with a result
-        active_horses = [
-            h for h in race.horses
-            if not h.is_scratched
-            and h.prediction
-            and h.result
-            and h.result.finish_position > 0
-        ]
-        if not active_horses:
-            continue
+        horses_sorted = sorted(horses, key=lambda x: x['prediction'].score, reverse=True)
+        top = horses_sorted[0]
 
-        top_horse = max(active_horses, key=lambda h: h.prediction.score)
-        won = top_horse.result.finish_position == 1
-        sp = top_horse.result.sp or 0
+        won    = top['result'].finish_position == 1
+        sp     = top['result'].sp or 0
         profit = (sp * stake - stake) if won else -stake
 
         results[bucket]['races'] += 1
-        results[bucket]['wins'] += 1 if won else 0
+        results[bucket]['wins']  += 1 if won else 0
         results[bucket]['profit'] += profit
 
         if bucket == 'sole_leader':
-            # Distance breakdown
             try:
                 dist = int(str(race.distance or '0').replace('m', '').strip())
                 if dist <= 1200:   dl = 'Sprint (≤1200m)'
@@ -6403,51 +6451,51 @@ def api_sole_leader_analysis():
                 else:              dl = 'Staying (2400m+)'
             except (ValueError, TypeError):
                 dl = 'Unknown'
-            dist_breakdown[dl]['races'] += 1
-            dist_breakdown[dl]['wins'] += 1 if won else 0
+            dist_breakdown[dl]['races']  += 1
+            dist_breakdown[dl]['wins']   += 1 if won else 0
             dist_breakdown[dl]['profit'] += profit
 
-            # Examples
             if len(results['sole_leader']['examples']) < 10:
-                meeting = race.meeting
-                top_norm = normalize_runner_name(top_horse.horse_name)
+                top_norm = normalize_runner_name(top['horse'].horse_name)
                 results['sole_leader']['examples'].append({
-                    'meeting': meeting.meeting_name if meeting else '',
-                    'race': race.race_number,
-                    'top_pick': top_horse.horse_name,
+                    'meeting':            top['meeting'].meeting_name,
+                    'race':               race.race_number,
+                    'top_pick':           top['horse'].horse_name,
                     'top_pick_is_leader': top_norm in leaders,
-                    'leader': leaders[0] if leaders else '',
-                    'won': won,
-                    'sp': sp,
+                    'leader':             leaders[0] if leaders else '',
+                    'won':                won,
+                    'sp':                 sp,
                 })
 
-    # Calculate rates
     for bucket in results.values():
         n = bucket['races']
         bucket['strike_rate'] = round(bucket['wins'] / n * 100, 1) if n else 0
-        bucket['roi'] = round(bucket['profit'] / (n * stake) * 100, 1) if n else 0
-        bucket['profit'] = round(bucket['profit'], 2)
+        bucket['roi']         = round(bucket['profit'] / (n * stake) * 100, 1) if n else 0
+        bucket['profit']      = round(bucket['profit'], 2)
 
     dist_list = []
     for label, stats in dist_breakdown.items():
         n = stats['races']
         dist_list.append({
-            'label': label,
-            'races': n,
-            'wins': stats['wins'],
-            'strike_rate': round(stats['wins'] / n * 100, 1) if n else 0,
-            'roi': round(stats['profit'] / (n * stake) * 100, 1) if n else 0,
-            'profit': round(stats['profit'], 2),
+            'label':        label,
+            'races':        n,
+            'wins':         stats['wins'],
+            'strike_rate':  round(stats['wins'] / n * 100, 1) if n else 0,
+            'roi':          round(stats['profit'] / (n * stake) * 100, 1) if n else 0,
+            'profit':       round(stats['profit'], 2),
         })
     dist_list.sort(key=lambda x: x['roi'], reverse=True)
 
+    del all_results, races_data
+    import gc
+    gc.collect()
     db.session.expunge_all()
     db.session.remove()
 
     return jsonify({
-        'buckets': results,
-        'distance_breakdown': dist_list,
-        'total_races_with_speedmaps': len(races_with_data),
+        'buckets':                   results,
+        'distance_breakdown':        dist_list,
+        'total_races_with_speedmaps': len(recent_race_ids),
     })
 @app.route("/api/data/field-size")
 @login_required
