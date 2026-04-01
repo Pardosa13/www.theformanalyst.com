@@ -6387,11 +6387,11 @@ def api_sole_leader_analysis():
         if race_key not in races_data:
             races_data[race_key] = []
         races_data[race_key].append({
-            'horse': horse,
+            'horse':      horse,
             'prediction': pred,
-            'result': result,
-            'race': race,
-            'meeting': meeting
+            'result':     result,
+            'race':       race,
+            'meeting':    meeting
         })
 
     results = {
@@ -6399,7 +6399,13 @@ def api_sole_leader_analysis():
         'contested_leader': {'races': 0, 'wins': 0, 'profit': 0.0},
         'no_leader':        {'races': 0, 'wins': 0, 'profit': 0.0},
     }
-    dist_breakdown = defaultdict(lambda: {'races': 0, 'wins': 0, 'profit': 0.0})
+    dist_breakdown       = defaultdict(lambda: {'races': 0, 'wins': 0, 'profit': 0.0})
+    field_size_breakdown = defaultdict(lambda: {'races': 0, 'wins': 0, 'profit': 0.0})
+    sp_breakdown         = defaultdict(lambda: {'races': 0, 'wins': 0, 'profit': 0.0})
+    pick_is_leader_breakdown = {
+        'yes': {'races': 0, 'wins': 0, 'profit': 0.0},
+        'no':  {'races': 0, 'wins': 0, 'profit': 0.0},
+    }
 
     for race_key, horses in races_data.items():
         if not horses:
@@ -6438,11 +6444,13 @@ def api_sole_leader_analysis():
         sp     = top['result'].sp or 0
         profit = (sp * stake - stake) if won else -stake
 
-        results[bucket]['races'] += 1
-        results[bucket]['wins']  += 1 if won else 0
+        results[bucket]['races']  += 1
+        results[bucket]['wins']   += 1 if won else 0
         results[bucket]['profit'] += profit
 
         if bucket == 'sole_leader':
+
+            # Distance
             try:
                 dist = int(str(race.distance or '0').replace('m', '').strip())
                 if dist <= 1200:   dl = 'Sprint (≤1200m)'
@@ -6455,36 +6463,97 @@ def api_sole_leader_analysis():
             dist_breakdown[dl]['wins']   += 1 if won else 0
             dist_breakdown[dl]['profit'] += profit
 
+            # Field size (#2)
+            field_size = len(horses)
+            if field_size <= 7:    fs_label = 'Small (≤7)'
+            elif field_size <= 11: fs_label = 'Medium (8-11)'
+            elif field_size <= 15: fs_label = 'Large (12-15)'
+            else:                  fs_label = 'Very Large (16+)'
+            field_size_breakdown[fs_label]['races']  += 1
+            field_size_breakdown[fs_label]['wins']   += 1 if won else 0
+            field_size_breakdown[fs_label]['profit'] += profit
+
+            # SP bracket (#4)
+            if sp <= 0:     sp_label = 'No SP'
+            elif sp < 2.0:  sp_label = 'Odds-on (<$2)'
+            elif sp < 3.0:  sp_label = '$2-$2.99'
+            elif sp < 5.0:  sp_label = '$3-$4.99'
+            elif sp < 8.0:  sp_label = '$5-$7.99'
+            elif sp < 15.0: sp_label = '$8-$14.99'
+            else:           sp_label = '$15+'
+            sp_breakdown[sp_label]['races']  += 1
+            sp_breakdown[sp_label]['wins']   += 1 if won else 0
+            sp_breakdown[sp_label]['profit'] += profit
+
+            # Pick is leader (#5)
+            top_norm      = normalize_runner_name(top['horse'].horse_name)
+            pick_is_leader = top_norm in leaders
+            pk = 'yes' if pick_is_leader else 'no'
+            pick_is_leader_breakdown[pk]['races']  += 1
+            pick_is_leader_breakdown[pk]['wins']   += 1 if won else 0
+            pick_is_leader_breakdown[pk]['profit'] += profit
+
+            # Examples
             if len(results['sole_leader']['examples']) < 10:
-                top_norm = normalize_runner_name(top['horse'].horse_name)
                 results['sole_leader']['examples'].append({
                     'meeting':            top['meeting'].meeting_name,
                     'race':               race.race_number,
                     'top_pick':           top['horse'].horse_name,
-                    'top_pick_is_leader': top_norm in leaders,
+                    'top_pick_is_leader': pick_is_leader,
                     'leader':             leaders[0] if leaders else '',
                     'won':                won,
                     'sp':                 sp,
                 })
 
+    # Finalise bucket stats
     for bucket in results.values():
         n = bucket['races']
         bucket['strike_rate'] = round(bucket['wins'] / n * 100, 1) if n else 0
         bucket['roi']         = round(bucket['profit'] / (n * stake) * 100, 1) if n else 0
         bucket['profit']      = round(bucket['profit'], 2)
 
-    dist_list = []
-    for label, stats in dist_breakdown.items():
-        n = stats['races']
-        dist_list.append({
-            'label':        label,
-            'races':        n,
-            'wins':         stats['wins'],
-            'strike_rate':  round(stats['wins'] / n * 100, 1) if n else 0,
-            'roi':          round(stats['profit'] / (n * stake) * 100, 1) if n else 0,
-            'profit':       round(stats['profit'], 2),
-        })
+    def build_list(breakdown, order):
+        out = []
+        for label in order:
+            stats = breakdown.get(label)
+            if not stats or stats['races'] == 0:
+                continue
+            n = stats['races']
+            out.append({
+                'label':       label,
+                'races':       n,
+                'wins':        stats['wins'],
+                'strike_rate': round(stats['wins'] / n * 100, 1),
+                'roi':         round(stats['profit'] / (n * stake) * 100, 1),
+                'profit':      round(stats['profit'], 2),
+            })
+        return out
+
+    dist_list = build_list(dist_breakdown, ['Staying (2400m+)', 'Mile (1300-1700m)', 'Sprint (≤1200m)', 'Middle (1800-2200m)', 'Unknown'])
     dist_list.sort(key=lambda x: x['roi'], reverse=True)
+
+    fs_list = build_list(field_size_breakdown, ['Small (≤7)', 'Medium (8-11)', 'Large (12-15)', 'Very Large (16+)'])
+
+    sp_list = build_list(sp_breakdown, ['Odds-on (<$2)', '$2-$2.99', '$3-$4.99', '$5-$7.99', '$8-$14.99', '$15+', 'No SP'])
+
+    pick_list = []
+    for label, key, desc in [
+        ('✅ Pick IS Leader',     'yes', 'Your top pick is the sole leader'),
+        ('❌ Pick is NOT Leader', 'no',  'Sole leader is a different horse'),
+    ]:
+        stats = pick_is_leader_breakdown[key]
+        n = stats['races']
+        if n == 0:
+            continue
+        pick_list.append({
+            'label':       label,
+            'desc':        desc,
+            'races':       n,
+            'wins':        stats['wins'],
+            'strike_rate': round(stats['wins'] / n * 100, 1),
+            'roi':         round(stats['profit'] / (n * stake) * 100, 1),
+            'profit':      round(stats['profit'], 2),
+        })
 
     del all_results, races_data
     import gc
@@ -6493,8 +6562,11 @@ def api_sole_leader_analysis():
     db.session.remove()
 
     return jsonify({
-        'buckets':                   results,
-        'distance_breakdown':        dist_list,
+        'buckets':                  results,
+        'distance_breakdown':       dist_list,
+        'field_size_breakdown':     fs_list,
+        'sp_breakdown':             sp_list,
+        'pick_is_leader_breakdown': pick_list,
         'total_races_with_speedmaps': len(recent_race_ids),
     })
 @app.route("/api/data/field-size")
