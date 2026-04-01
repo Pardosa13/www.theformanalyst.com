@@ -6322,6 +6322,144 @@ def api_pnl_over_time():
         'total_races': len(data_points)
     })
 
+@app.route("/api/data/sole-leader-analysis")
+@login_required
+def api_sole_leader_analysis():
+    """
+    Backtest: horses that were the sole LEADER in their race (settle rank 1, 
+    and no other horse had settle rank 1).
+    """
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    from collections import defaultdict
+    import json as _json
+
+    stake = 10.0
+
+    # Pull all races that have speed map data and results
+    races = db.session.query(Race, Meeting).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).filter(
+        Race.speed_maps_json.isnot(None)
+    ).all()
+
+    results = {
+        'sole_leader':     {'races': 0, 'wins': 0, 'profit': 0.0, 'examples': []},
+        'contested_leader':{'races': 0, 'wins': 0, 'profit': 0.0},
+        'no_leader':       {'races': 0, 'wins': 0, 'profit': 0.0},
+    }
+
+    # Distance breakdown for sole leader
+    dist_breakdown = defaultdict(lambda: {'races': 0, 'wins': 0, 'profit': 0.0})
+
+    for race, meeting in races:
+        # Parse speed map
+        try:
+            smap = race.speed_maps_json
+            if isinstance(smap, str):
+                smap = _json.loads(smap)
+            items = smap.get('payLoad', [{}])[0].get('items', [])
+        except Exception:
+            continue
+
+        if not items:
+            continue
+
+        # Find all leaders (settle == 1)
+        leaders = []
+        for item in items:
+            try:
+                settle = int(str(item.get('settle', 99)).split('/')[0].strip())
+            except (ValueError, TypeError):
+                continue
+            if settle == 1:
+                leaders.append(normalize_runner_name(item.get('runnerName', '')))
+
+        # Classify race tempo
+        if len(leaders) == 0:
+            bucket = 'no_leader'
+        elif len(leaders) == 1:
+            bucket = 'sole_leader'
+        else:
+            bucket = 'contested_leader'
+
+        # Find the top pick (highest score) in this race
+        active_horses = [h for h in race.horses if not h.is_scratched and h.prediction]
+        if not active_horses:
+            continue
+
+        top_horse = max(active_horses, key=lambda h: h.prediction.score)
+
+        if not top_horse.result or top_horse.result.finish_position == 0:
+            continue
+
+        won = top_horse.result.finish_position == 1
+        sp = top_horse.result.sp or 0
+        profit = (sp * stake - stake) if won else -stake
+
+        results[bucket]['races'] += 1
+        results[bucket]['wins'] += 1 if won else 0
+        results[bucket]['profit'] += profit
+
+        # For sole leader races — also check if the top pick IS the leader
+        if bucket == 'sole_leader' and len(results['sole_leader']['examples']) < 10:
+            top_norm = normalize_runner_name(top_horse.horse_name)
+            top_is_leader = top_norm in leaders
+            results['sole_leader']['examples'].append({
+                'meeting': meeting.meeting_name,
+                'race': race.race_number,
+                'top_pick': top_horse.horse_name,
+                'top_pick_is_leader': top_is_leader,
+                'leader': leaders[0] if leaders else '',
+                'won': won,
+                'sp': sp,
+            })
+
+        # Distance breakdown (sole leader only)
+        if bucket == 'sole_leader':
+            try:
+                dist = int(str(race.distance or '0').replace('m', '').strip())
+                if dist <= 1200:
+                    dl = 'Sprint (≤1200m)'
+                elif dist <= 1700:
+                    dl = 'Mile (1300-1700m)'
+                elif dist <= 2200:
+                    dl = 'Middle (1800-2200m)'
+                else:
+                    dl = 'Staying (2400m+)'
+            except (ValueError, TypeError):
+                dl = 'Unknown'
+            dist_breakdown[dl]['races'] += 1
+            dist_breakdown[dl]['wins'] += 1 if won else 0
+            dist_breakdown[dl]['profit'] += profit
+
+    # Calculate rates
+    for bucket in results.values():
+        n = bucket['races']
+        bucket['strike_rate'] = round(bucket['wins'] / n * 100, 1) if n else 0
+        bucket['roi'] = round(bucket['profit'] / (n * stake) * 100, 1) if n else 0
+        bucket['profit'] = round(bucket['profit'], 2)
+
+    dist_list = []
+    for label, stats in dist_breakdown.items():
+        n = stats['races']
+        dist_list.append({
+            'label': label,
+            'races': n,
+            'wins': stats['wins'],
+            'strike_rate': round(stats['wins'] / n * 100, 1) if n else 0,
+            'roi': round(stats['profit'] / (n * stake) * 100, 1) if n else 0,
+            'profit': round(stats['profit'], 2),
+        })
+    dist_list.sort(key=lambda x: x['roi'], reverse=True)
+
+    return jsonify({
+        'buckets': results,
+        'distance_breakdown': dist_list,
+        'total_races_with_speedmaps': len(races),
+    })
+
 @app.route("/api/data/field-size")
 @login_required
 def api_field_size():
