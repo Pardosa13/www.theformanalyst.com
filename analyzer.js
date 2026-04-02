@@ -2753,7 +2753,7 @@ function calculateApiSectionalScore(runner, raceDistance) {
     // Improving trend bonus
     if (last200Rank < 900 && last400Rank < 900 && last600Rank < 900) {
         if (last200Rank < last400Rank && last400Rank < last600Rank) {
-            const trendBonus = 5;
+            const trendBonus = 10;
             score += trendBonus;
             notes += `+${trendBonus.toFixed(1)}: IMPROVING TREND (Ranks: ${last600Rank} → ${last400Rank} → ${last200Rank})\n`;
         }
