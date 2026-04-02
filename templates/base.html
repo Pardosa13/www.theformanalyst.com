@@ -675,6 +675,11 @@ body.modal-open .main-container {
                             </a>
                         </li>
                         <li class="nav-item">
+    <a class="nav-link {{ 'active' if request.endpoint == 'backtest' }}" href="{{ url_for('backtest') }}">
+        <i class="bi bi-cpu"></i> Backtest
+    </a>
+</li>
+                        <li class="nav-item">
                             <a class="nav-link {{ 'active' if request.endpoint == 'best_bets' }}" href="{{ url_for('best_bets') }}">
                                 <i class="bi bi-fire"></i> Best Bets
                             </a>
