@@ -913,13 +913,13 @@ if (horseSex === 'Colt') {
     }
     // Priority 2: 3yo Colt (age advantage)
     else if (horseAge === 3) {
-        score += 20;
-        notes += '+20.0 : 3yo COLT (18.2% SR, +50% ROI, 203 races - strong confirmed edge)\n';
+        score += 25;
+        notes += '+25.0 : 3yo COLT (18.2% SR, +50% ROI, 203 races - strong confirmed edge)\n';
     }
     // Priority 3: Base Colt bonus
     else {
-        score += 10;
-        notes += '+10.0 : COLT base bonus (14.3% SR, +66.1% ROI, 84 races)\n';
+        score += 15;
+        notes += '+15.0 : COLT base bonus (14.3% SR, +66.1% ROI, 84 races)\n';
     }
     // Set Weight bonus (applies in addition to above)
     const weightType = String(horseRow['weight type'] || horseRow['horse weight type'] || '').trim().toLowerCase();
@@ -1037,8 +1037,8 @@ function checkJockeys(JockeyName) {
     const winPct = (data.L100Wins / data.L100Runs) * 100;
     const runs   = data.L100Runs;
 
-    if      (winPct >= 25) { addScore =  12; note = `+12.0 : Jockey hot form — ${winPct.toFixed(1)}% L100 SR (${runs} rides)\n`; }
-    else if (winPct >= 18) { addScore =   6; note = `+6.0 : Jockey solid form — ${winPct.toFixed(1)}% L100 SR (${runs} rides)\n`; }
+    if      (winPct >= 25) { addScore =  20; note = `+20.0 : Jockey hot form — ${winPct.toFixed(1)}% L100 SR (${runs} rides)\n`; }
+    else if (winPct >= 18) { addScore =   15; note = `+15.0 : Jockey solid form — ${winPct.toFixed(1)}% L100 SR (${runs} rides)\n`; }
     else if (winPct >= 11) { addScore = 0; note = `+0.0 : Jockey average form — ${winPct.toFixed(1)}% L100 SR (${runs} rides)\n`; }
     else if (winPct >=  6) { addScore =  -6; note = `-6.0 : Jockey poor form — ${winPct.toFixed(1)}% L100 SR (${runs} rides)\n`; }
     else                   { addScore = -12; note = `-12.0 : Jockey cold — ${winPct.toFixed(1)}% L100 SR (${runs} rides)\n`; }
@@ -3197,7 +3197,7 @@ function calculateRunningPositionScore(runningPosition, raceDistance) {
     const isStaying = raceDistance > 2200;
     
     if (isSprint) {
-        if (pos === 'LEADER')      { score = 12; note = '+12.0 : LEADER in Sprint (≤1200m)\n'; }
+        if (pos === 'LEADER')      { score = 15; note = '+15.0 : LEADER in Sprint (≤1200m)\n'; }
         else if (pos === 'ONPACE') { score = 8;  note = '+ 8.0 : ONPACE in Sprint\n'; }
         else if (pos === 'MIDFIELD')   { score = 0;  note = '  0.0 : MIDFIELD in Sprint\n'; }
         else if (pos === 'BACKMARKER') { score = -8; note = '- 8.0 : BACKMARKER in Sprint\n'; }
