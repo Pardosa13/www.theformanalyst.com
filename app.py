@@ -1244,7 +1244,7 @@ def parse_notes_components(notes):
         (r'[+\-]?\s*5\.0\s*:\s*ONPACE in Middle distance', 'Running Position - OnPace Middle'),
         (r'[+\-]?\s*3\.0\s*:\s*MIDFIELD in Middle distance', 'Running Position - Midfield Middle'),
         (r'[+\-]?\s*0\.0\s*:\s*BACKMARKER in Middle distance', 'Running Position - Backmarker Middle'),
-        (r'[+\-]?\s*8\.0\s*:\s*LEADER in Staying', 'Running Position - Leader Staying'),
+        (r'[+\-]?\s*7\.0\s*:\s*LEADER in Staying', 'Running Position - Leader Staying'),
         (r'[+\-]?\s*3\.0\s*:\s*ONPACE in Staying', 'Running Position - OnPace Staying'),
         (r'[+\-]?\s*5\.0\s*:\s*MIDFIELD in Staying', 'Running Position - Midfield Staying'),
         (r'[+\-]?\s*2\.0\s*:\s*BACKMARKER in Staying', 'Running Position - Backmarker Staying'),
