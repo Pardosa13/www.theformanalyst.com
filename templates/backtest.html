@@ -1,0 +1,898 @@
+{% extends "base.html" %}
+
+{% block title %}Backtest — The Form Analyst{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* ── Page header ── */
+    .bt-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+    }
+
+    .bt-title {
+        font-size: 1.6rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0 0 4px;
+    }
+
+    .bt-subtitle {
+        color: var(--text-muted);
+        font-size: 13px;
+        margin: 0;
+        font-family: 'DM Mono', monospace;
+    }
+
+    /* ── Run status bar ── */
+    .run-bar {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-subtle);
+        border-radius: 10px;
+        padding: 12px 18px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 1.5rem;
+        font-size: 13px;
+    }
+
+    .run-bar .run-stat {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-secondary);
+    }
+
+    .run-bar .run-stat strong {
+        color: var(--text-primary);
+        font-family: 'DM Mono', monospace;
+    }
+
+    .run-bar .divider {
+        width: 1px;
+        height: 20px;
+        background: var(--border-subtle);
+    }
+
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+    }
+
+    .status-pill.complete  { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+    .status-pill.running   { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+    .status-pill.failed    { background: rgba(239,68,68,0.15);  color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+    .status-pill.pending   { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+
+    .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+    }
+
+    .status-pill.running .status-dot {
+        animation: pulse 1.5s ease infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.5; transform: scale(1.4); }
+    }
+
+    /* ── ROI hero cards ── */
+    .roi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .roi-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: 12px;
+        padding: 1.25rem;
+        text-align: center;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .roi-card:hover {
+        border-color: var(--border-mid);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+
+    .roi-card .roi-label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+    }
+
+    .roi-card .roi-value {
+        font-family: 'DM Mono', monospace;
+        font-size: 1.8rem;
+        font-weight: 500;
+        line-height: 1;
+        margin-bottom: 4px;
+    }
+
+    .roi-card .roi-sub {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    .roi-value.positive { color: #34d399; }
+    .roi-value.negative { color: #f87171; }
+    .roi-value.neutral  { color: var(--accent); }
+
+    /* ── Tab nav ── */
+    .bt-tabs {
+        display: flex;
+        gap: 4px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-subtle);
+        border-radius: 10px;
+        padding: 4px;
+        margin-bottom: 1.5rem;
+        width: fit-content;
+    }
+
+    .bt-tab {
+        padding: 8px 20px;
+        border-radius: 7px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        cursor: pointer;
+        border: none;
+        background: transparent;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        white-space: nowrap;
+    }
+
+    .bt-tab:hover { color: var(--text-primary); }
+
+    .bt-tab.active {
+        background: linear-gradient(135deg, rgba(102,126,234,0.18), rgba(118,75,162,0.12));
+        border: 1px solid var(--border-accent);
+        color: var(--text-primary);
+    }
+
+    .bt-tab .tab-count {
+        background: var(--bg-hover);
+        color: var(--text-muted);
+        font-family: 'DM Mono', monospace;
+        font-size: 10px;
+        padding: 2px 7px;
+        border-radius: 10px;
+    }
+
+    .bt-tab.active .tab-count {
+        background: rgba(102,126,234,0.2);
+        color: var(--accent);
+    }
+
+    .bt-panel { display: none; }
+    .bt-panel.active { display: block; }
+
+    /* ── Section headers ── */
+    .section-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .section-head h3 {
+        font-size: 1rem;
+        font-weight: 700;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .section-head h3 .bi {
+        color: var(--accent);
+    }
+
+    .section-desc {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 1rem;
+        padding: 10px 14px;
+        background: rgba(102,126,234,0.06);
+        border: 1px solid var(--border-accent);
+        border-radius: 8px;
+    }
+
+    /* ── Feature importance bars ── */
+    .feature-row {
+        display: grid;
+        grid-template-columns: 28px 1fr 120px 180px;
+        gap: 12px;
+        align-items: center;
+        padding: 10px 14px;
+        border-radius: 8px;
+        transition: background 0.15s;
+        border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .feature-row:hover { background: var(--bg-hover); }
+    .feature-row:last-child { border-bottom: none; }
+
+    .feature-rank {
+        font-family: 'DM Mono', monospace;
+        font-size: 11px;
+        color: var(--text-muted);
+        text-align: right;
+    }
+
+    .feature-name-block {}
+
+    .feature-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 2px;
+    }
+
+    .feature-rec {
+        font-size: 11px;
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .feature-bar-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .feature-bar-bg {
+        flex: 1;
+        height: 6px;
+        background: var(--bg-hover);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+
+    .feature-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .feature-pct {
+        font-family: 'DM Mono', monospace;
+        font-size: 11px;
+        color: var(--text-secondary);
+        min-width: 40px;
+        text-align: right;
+    }
+
+    .feature-weight {
+        font-size: 11px;
+        color: var(--text-muted);
+        font-family: 'DM Mono', monospace;
+        text-align: right;
+    }
+
+    /* Importance label badges */
+    .imp-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+    }
+
+    .imp-VERY.HIGH, .imp-VERY-HIGH { background: rgba(16,185,129,0.15); color: #34d399; }
+    .imp-HIGH   { background: rgba(102,126,234,0.15); color: var(--accent); }
+    .imp-MEDIUM { background: rgba(245,158,11,0.12); color: #fbbf24; }
+    .imp-LOW    { background: rgba(239,68,68,0.1);   color: #f87171; }
+    .imp-VERY-LOW { background: var(--bg-hover); color: var(--text-muted); }
+
+    /* ── Component table ── */
+    .comp-verdict {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 10px;
+        border-radius: 5px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+    }
+
+    .verdict-BOOST   { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
+    .verdict-REDUCE  { background: rgba(239,68,68,0.12);  color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
+    .verdict-MONITOR { background: rgba(245,158,11,0.12); color: #fbbf24; border: 1px solid rgba(245,158,11,0.2); }
+    .verdict-OK      { background: rgba(255,255,255,0.05); color: var(--text-muted); border: 1px solid var(--border-subtle); }
+
+    .roi-cell-pos { color: #34d399; font-family: 'DM Mono', monospace; font-weight: 600; }
+    .roi-cell-neg { color: #f87171; font-family: 'DM Mono', monospace; font-weight: 600; }
+    .roi-cell-neu { color: var(--text-muted); font-family: 'DM Mono', monospace; }
+
+    .mono { font-family: 'DM Mono', monospace; font-size: 12px; }
+
+    /* ── Filter bar ── */
+    .filter-bar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .filter-chip {
+        padding: 5px 14px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        border: 1px solid var(--border-mid);
+        background: transparent;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .filter-chip:hover { border-color: var(--accent); color: var(--text-primary); }
+    .filter-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    .filter-chip.boost-chip.active   { background: #065f46; border-color: #10b981; color: #34d399; }
+    .filter-chip.reduce-chip.active  { background: #7f1d1d; border-color: #ef4444; color: #f87171; }
+    .filter-chip.monitor-chip.active { background: #78350f; border-color: #f59e0b; color: #fbbf24; }
+
+    /* ── Search input ── */
+    .search-wrap {
+        position: relative;
+        flex: 1;
+        min-width: 200px;
+        max-width: 320px;
+    }
+
+    .search-wrap i {
+        position: absolute;
+        left: 11px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-muted);
+        font-size: 14px;
+        pointer-events: none;
+    }
+
+    .search-wrap input {
+        padding-left: 34px !important;
+        width: 100%;
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--text-muted);
+    }
+
+    .empty-state .empty-icon {
+        font-size: 3rem;
+        margin-bottom: 16px;
+        opacity: 0.4;
+    }
+
+    .empty-state h4 {
+        color: var(--text-secondary);
+        font-size: 1.1rem;
+        margin-bottom: 8px;
+    }
+
+    .empty-state p {
+        font-size: 13px;
+        max-width: 400px;
+        margin: 0 auto;
+    }
+
+    /* ── Run history ── */
+    .run-history-item {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 12px 16px;
+        border-radius: 8px;
+        border-bottom: 1px solid var(--border-subtle);
+        transition: background 0.15s;
+        flex-wrap: wrap;
+    }
+
+    .run-history-item:hover { background: var(--bg-hover); }
+    .run-history-item:last-child { border-bottom: none; }
+
+    .run-history-item .run-id {
+        font-family: 'DM Mono', monospace;
+        font-size: 12px;
+        color: var(--text-muted);
+        min-width: 40px;
+    }
+
+    .run-history-item .run-date {
+        font-size: 13px;
+        color: var(--text-secondary);
+        flex: 1;
+    }
+
+    .run-history-item .run-metrics {
+        display: flex;
+        gap: 16px;
+        font-family: 'DM Mono', monospace;
+        font-size: 12px;
+    }
+
+    /* ── Table scroll wrapper ── */
+    .table-scroll {
+        overflow-x: auto;
+        border-radius: 10px;
+        border: 1px solid var(--border-subtle);
+    }
+
+    .table-scroll .table {
+        margin-bottom: 0;
+    }
+
+    /* ── Suggestion callout ── */
+    .suggestion-box {
+        background: rgba(102,126,234,0.06);
+        border: 1px solid var(--border-accent);
+        border-radius: 10px;
+        padding: 14px 18px;
+        margin-bottom: 1rem;
+    }
+
+    .suggestion-box h5 {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--accent);
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+    }
+
+    .suggestion-box p {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin: 0;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .feature-row {
+            grid-template-columns: 24px 1fr;
+            gap: 8px;
+        }
+        .feature-bar-wrap, .feature-weight { display: none; }
+        .roi-card .roi-value { font-size: 1.4rem; }
+        .bt-tabs { width: 100%; overflow-x: auto; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Page header ── -->
+<div class="bt-header">
+    <div>
+        <h1 class="bt-title">
+            <i class="bi bi-cpu" style="color: var(--accent);"></i>
+            Backtest Engine
+        </h1>
+        <p class="bt-subtitle">Random Forest + Component ROI Analysis · Runs nightly at 2am</p>
+    </div>
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('backtest_run_now') }}" class="btn btn-primary"
+       onclick="return confirm('Trigger a manual backtest run now? This may take several minutes.')">
+        <i class="bi bi-play-circle"></i> Run Now
+    </a>
+    {% endif %}
+</div>
+
+{% if not latest_run %}
+<!-- ── No data yet ── -->
+<div class="empty-state">
+    <div class="empty-icon"><i class="bi bi-cpu"></i></div>
+    <h4>No backtest runs yet</h4>
+    <p>The backtest job runs automatically every night at 2am. You can also trigger a manual run using the button above.</p>
+    {% if current_user.is_admin %}
+    <div style="margin-top: 1.5rem;">
+        <a href="{{ url_for('backtest_run_now') }}" class="btn btn-primary">
+            <i class="bi bi-play-circle"></i> Run First Backtest
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+{% else %}
+
+<!-- ── Run status bar ── -->
+<div class="run-bar">
+    <span class="status-pill {{ latest_run.status }}">
+        <span class="status-dot"></span>
+        {{ latest_run.status | title }}
+    </span>
+    <div class="divider"></div>
+    <div class="run-stat">
+        <i class="bi bi-calendar3"></i>
+        <span>Last run: <strong>{{ latest_run.completed_at.strftime('%d %b %Y %H:%M') if latest_run.completed_at else 'In progress...' }}</strong></span>
+    </div>
+    {% if latest_run.total_races %}
+    <div class="divider"></div>
+    <div class="run-stat">
+        <i class="bi bi-flag"></i>
+        <span>Races: <strong>{{ latest_run.total_races }}</strong></span>
+    </div>
+    <div class="divider"></div>
+    <div class="run-stat">
+        <i class="bi bi-database"></i>
+        <span>Horses: <strong>{{ latest_run.total_horses }}</strong></span>
+    </div>
+    {% endif %}
+    {% if run_count > 1 %}
+    <div class="divider"></div>
+    <div class="run-stat">
+        <i class="bi bi-arrow-repeat"></i>
+        <span>Total runs: <strong>{{ run_count }}</strong></span>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ── ROI hero stats ── -->
+{% if latest_run.baseline_roi is not none %}
+<div class="roi-grid">
+    <div class="roi-card">
+        <div class="roi-label">Baseline ROI</div>
+        <div class="roi-value {{ 'positive' if latest_run.baseline_roi > 0 else 'negative' }}">
+            {{ '%+.1f' % latest_run.baseline_roi }}%
+        </div>
+        <div class="roi-sub">Current analyzer</div>
+    </div>
+    <div class="roi-card">
+        <div class="roi-label">Strike Rate</div>
+        <div class="roi-value neutral">{{ '%.1f' % latest_run.baseline_strike_rate }}%</div>
+        <div class="roi-sub">Top pick wins</div>
+    </div>
+    <div class="roi-card">
+        <div class="roi-label">Components</div>
+        <div class="roi-value neutral">{{ component_results | length }}</div>
+        <div class="roi-sub">Analysed</div>
+    </div>
+    <div class="roi-card">
+        <div class="roi-label">To Boost</div>
+        <div class="roi-value positive">{{ component_results | selectattr('verdict', 'equalto', 'BOOST') | list | length }}</div>
+        <div class="roi-sub">Components</div>
+    </div>
+    <div class="roi-card">
+        <div class="roi-label">To Reduce</div>
+        <div class="roi-value negative">{{ component_results | selectattr('verdict', 'equalto', 'REDUCE') | list | length }}</div>
+        <div class="roi-sub">Components</div>
+    </div>
+    <div class="roi-card">
+        <div class="roi-label">Features</div>
+        <div class="roi-value neutral">{{ feature_results | length }}</div>
+        <div class="roi-sub">RF analysed</div>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── Tabs ── -->
+<div class="bt-tabs">
+    <button class="bt-tab active" onclick="switchTab('components', this)">
+        <i class="bi bi-sliders"></i> Component ROI
+        <span class="tab-count">{{ component_results | length }}</span>
+    </button>
+    <button class="bt-tab" onclick="switchTab('features', this)">
+        <i class="bi bi-diagram-3"></i> Feature Importance
+        <span class="tab-count">{{ feature_results | length }}</span>
+    </button>
+    <button class="bt-tab" onclick="switchTab('history', this)">
+        <i class="bi bi-clock-history"></i> Run History
+        <span class="tab-count">{{ run_count }}</span>
+    </button>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     PANEL A: COMPONENT ROI
+═══════════════════════════════════════════════ -->
+<div id="panel-components" class="bt-panel active">
+
+    <div class="section-desc">
+        <i class="bi bi-info-circle" style="color: var(--accent);"></i>
+        These are the scoring components from <code>analyzer.js</code> ranked by their ROI impact when they fire on your top pick.
+        <strong>BOOST</strong> = increase the point value. <strong>REDUCE</strong> = decrease or remove. Changes are suggestions only — you decide what to implement.
+    </div>
+
+    <div class="filter-bar">
+        <button class="filter-chip active" data-filter="all" onclick="filterComponents('all', this)">All</button>
+        <button class="filter-chip boost-chip" data-filter="BOOST" onclick="filterComponents('BOOST', this)">
+            <i class="bi bi-arrow-up-circle"></i> Boost
+        </button>
+        <button class="filter-chip reduce-chip" data-filter="REDUCE" onclick="filterComponents('REDUCE', this)">
+            <i class="bi bi-arrow-down-circle"></i> Reduce
+        </button>
+        <button class="filter-chip monitor-chip" data-filter="MONITOR" onclick="filterComponents('MONITOR', this)">
+            <i class="bi bi-eye"></i> Monitor
+        </button>
+        <button class="filter-chip" data-filter="OK" onclick="filterComponents('OK', this)">
+            <i class="bi bi-check-circle"></i> OK
+        </button>
+        <div class="search-wrap ms-auto">
+            <i class="bi bi-search"></i>
+            <input type="text" class="form-control form-control-sm"
+                   id="comp-search" placeholder="Search components..."
+                   oninput="searchComponents(this.value)">
+        </div>
+    </div>
+
+    {% if component_results %}
+    <div class="table-scroll">
+        <table class="table table-hover" id="comp-table">
+            <thead>
+                <tr>
+                    <th>Component</th>
+                    <th>Verdict</th>
+                    <th>ROI</th>
+                    <th>SR%</th>
+                    <th>Appearances</th>
+                    <th>Avg SP</th>
+                    <th>Current Pts</th>
+                    <th>Suggested Pts</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for comp in component_results %}
+                <tr class="comp-row" data-verdict="{{ comp.verdict }}"
+                    data-name="{{ comp.component_name | lower }}">
+                    <td>
+                        <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); max-width: 300px;">
+                            {{ comp.component_name }}
+                        </div>
+                    </td>
+                    <td>
+                        <span class="comp-verdict verdict-{{ comp.verdict }}">
+                            {% if comp.verdict == 'BOOST' %}<i class="bi bi-arrow-up-short"></i>
+                            {% elif comp.verdict == 'REDUCE' %}<i class="bi bi-arrow-down-short"></i>
+                            {% elif comp.verdict == 'MONITOR' %}<i class="bi bi-eye"></i>
+                            {% else %}<i class="bi bi-check2"></i>{% endif %}
+                            {{ comp.verdict }}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="{{ 'roi-cell-pos' if comp.roi > 0 else 'roi-cell-neg' if comp.roi < 0 else 'roi-cell-neu' }}">
+                            {{ '%+.1f' % comp.roi }}%
+                        </span>
+                    </td>
+                    <td class="mono">{{ '%.1f' % comp.strike_rate }}%</td>
+                    <td class="mono">{{ comp.appearances }}</td>
+                    <td class="mono">${{ '%.2f' % comp.avg_sp }}</td>
+                    <td class="mono">{{ '%+.1f' % comp.current_value }}</td>
+                    <td>
+                        {% if comp.suggested_value != comp.current_value %}
+                        <span class="mono {{ 'roi-cell-pos' if comp.suggested_value > comp.current_value else 'roi-cell-neg' }}">
+                            {{ '%+.1f' % comp.suggested_value }}
+                        </span>
+                        {% else %}
+                        <span class="mono roi-cell-neu">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon"><i class="bi bi-sliders"></i></div>
+        <h4>No component data yet</h4>
+        <p>Component analysis requires predictions with notes in the database.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ══════════════════════════════════════════════
+     PANEL B: FEATURE IMPORTANCE
+═══════════════════════════════════════════════ -->
+<div id="panel-features" class="bt-panel">
+
+    <div class="section-desc">
+        <i class="bi bi-info-circle" style="color: var(--accent);"></i>
+        Random Forest analysis of which raw horse features actually predict winners (weighted 60% ROI regression, 40% win classification).
+        A high importance score on a feature that is <em>not directly scored</em> in analyzer.js is a potential edge to exploit.
+    </div>
+
+    {% if feature_results %}
+
+    {% set top_feature = feature_results[0] %}
+    {% set max_importance = top_feature.importance_score %}
+
+    <!-- Top finding callout -->
+    <div class="suggestion-box">
+        <h5><i class="bi bi-lightbulb"></i> Top Finding</h5>
+        <p>
+            <strong style="color: var(--text-primary);">{{ feature_results[0].feature_name }}</strong>
+            is your most predictive feature ({{ '%.1f' % (feature_results[0].importance_score * 100) }}% importance).
+            {% if feature_results | length > 1 %}
+            The top 3 features account for
+            {{ '%.0f' % ((feature_results[:3] | sum(attribute='importance_score')) * 100) }}%
+            of total predictive power.
+            {% endif %}
+        </p>
+    </div>
+
+    <div style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden;">
+        <!-- Header row -->
+        <div class="feature-row" style="background: var(--bg-elevated); border-bottom: 1px solid var(--border-mid);">
+            <div style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);">#</div>
+            <div style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);">Feature</div>
+            <div style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); text-align: right;">Importance</div>
+            <div style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); text-align: right;">Current Weight</div>
+        </div>
+
+        {% for feat in feature_results %}
+        <div class="feature-row">
+            <div class="feature-rank">{{ feat.importance_rank }}</div>
+            <div class="feature-name-block">
+                <div class="feature-name">{{ feat.feature_name | replace('_', ' ') | title }}</div>
+                <div class="feature-rec" title="{{ feat.recommendation }}">
+                    {% set rec = feat.recommendation %}
+                    {% if '[VERY HIGH]' in rec or '[HIGH]' in rec %}
+                        <span class="imp-badge imp-HIGH">High Impact</span>
+                    {% elif '[MEDIUM]' in rec %}
+                        <span class="imp-badge imp-MEDIUM">Medium</span>
+                    {% elif '[LOW]' in rec or '[VERY LOW]' in rec %}
+                        <span class="imp-badge imp-LOW">Low Impact</span>
+                    {% endif %}
+                    {{ rec | replace('[VERY HIGH] ', '') | replace('[HIGH] ', '') | replace('[MEDIUM] ', '') | replace('[LOW] ', '') | replace('[VERY LOW] ', '') | truncate(80) }}
+                </div>
+            </div>
+            <div class="feature-bar-wrap">
+                <div class="feature-bar-bg">
+                    <div class="feature-bar-fill"
+                         style="width: {{ (feat.importance_score / max_importance * 100) | round(1) }}%"></div>
+                </div>
+                <span class="feature-pct">{{ '%.2f' % (feat.importance_score * 100) }}%</span>
+            </div>
+            <div class="feature-weight" title="{{ feat.current_analyzer_weight }}">
+                {{ feat.current_analyzer_weight | truncate(40) }}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon"><i class="bi bi-diagram-3"></i></div>
+        <h4>No feature data yet</h4>
+        <p>Feature importance analysis requires sufficient historical data with results.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ══════════════════════════════════════════════
+     PANEL C: RUN HISTORY
+═══════════════════════════════════════════════ -->
+<div id="panel-history" class="bt-panel">
+    {% if all_runs %}
+    <div style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden;">
+        {% for run in all_runs %}
+        <div class="run-history-item">
+            <div class="run-id">#{{ run.id }}</div>
+            <div class="run-date">
+                {{ run.started_at.strftime('%d %b %Y, %H:%M') if run.started_at else '—' }}
+            </div>
+            <span class="status-pill {{ run.status }}" style="font-size: 10px; padding: 3px 9px;">
+                <span class="status-dot"></span>{{ run.status | title }}
+            </span>
+            {% if run.total_races %}
+            <div class="run-metrics">
+                <span style="color: var(--text-muted);">{{ run.total_races }} races</span>
+                {% if run.baseline_roi is not none %}
+                <span class="{{ 'roi-cell-pos' if run.baseline_roi > 0 else 'roi-cell-neg' }}">
+                    ROI {{ '%+.1f' % run.baseline_roi }}%
+                </span>
+                <span style="color: var(--text-muted);">SR {{ '%.1f' % run.baseline_strike_rate }}%</span>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% if run.notes and run.status == 'failed' %}
+            <div style="font-size: 11px; color: #f87171; flex: 1;">{{ run.notes | truncate(100) }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon"><i class="bi bi-clock-history"></i></div>
+        <h4>No run history</h4>
+        <p>Run history will appear here after the first backtest completes.</p>
+    </div>
+    {% endif %}
+</div>
+
+{% endif %} {# end if latest_run #}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── Tab switching ──
+function switchTab(name, btn) {
+    document.querySelectorAll('.bt-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.bt-tab').forEach(b => b.classList.remove('active'));
+    document.getElementById('panel-' + name).classList.add('active');
+    btn.classList.add('active');
+}
+
+// ── Component filtering ──
+function filterComponents(verdict, btn) {
+    document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+
+    const rows = document.querySelectorAll('.comp-row');
+    const search = document.getElementById('comp-search')?.value.toLowerCase() || '';
+
+    rows.forEach(row => {
+        const matchVerdict = verdict === 'all' || row.dataset.verdict === verdict;
+        const matchSearch  = !search || row.dataset.name.includes(search);
+        row.style.display  = (matchVerdict && matchSearch) ? '' : 'none';
+    });
+}
+
+// ── Component search ──
+function searchComponents(val) {
+    const activeFilter = document.querySelector('.filter-chip.active')?.dataset.filter || 'all';
+    const search = val.toLowerCase();
+    document.querySelectorAll('.comp-row').forEach(row => {
+        const matchVerdict = activeFilter === 'all' || row.dataset.verdict === activeFilter;
+        const matchSearch  = !search || row.dataset.name.includes(search);
+        row.style.display  = (matchVerdict && matchSearch) ? '' : 'none';
+    });
+}
+
+// ── Animate feature bars on tab switch ──
+document.querySelector('[onclick*="features"]')?.addEventListener('click', function() {
+    setTimeout(() => {
+        document.querySelectorAll('.feature-bar-fill').forEach(bar => {
+            const w = bar.style.width;
+            bar.style.width = '0%';
+            requestAnimationFrame(() => {
+                setTimeout(() => { bar.style.width = w; }, 50);
+            });
+        });
+    }, 50);
+});
+</script>
+{% endblock %}
