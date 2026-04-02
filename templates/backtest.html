@@ -458,10 +458,48 @@
         overflow-x: auto;
         border-radius: 10px;
         border: 1px solid var(--border-subtle);
+        background: var(--bg-surface);
     }
 
     .table-scroll .table {
         margin-bottom: 0;
+        background: var(--bg-surface) !important;
+    }
+
+    /* Force dark background on ALL table elements */
+    .table-scroll table,
+    .table-scroll thead,
+    .table-scroll tbody,
+    .table-scroll tr,
+    .table-scroll th,
+    .table-scroll td {
+        background-color: transparent !important;
+        color: var(--text-primary) !important;
+        border-color: var(--border-subtle) !important;
+    }
+
+    .table-scroll thead tr {
+        background: var(--bg-elevated) !important;
+    }
+
+    .table-scroll thead th {
+        background: var(--bg-elevated) !important;
+        color: var(--text-muted) !important;
+    }
+
+    .table-scroll tbody tr:hover td {
+        background: var(--bg-hover) !important;
+    }
+
+    /* Fix component name column */
+    .comp-name-cell {
+        min-width: 220px;
+        max-width: 320px;
+        white-space: normal;
+        word-break: break-word;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary) !important;
     }
 
     /* ── Suggestion callout ── */
@@ -659,10 +697,10 @@
 
     {% if component_results %}
     <div class="table-scroll">
-        <table class="table table-hover" id="comp-table">
+        <table class="table" id="comp-table" style="background: var(--bg-surface) !important;">
             <thead>
-                <tr>
-                    <th>Component</th>
+                <tr style="background: var(--bg-elevated) !important;">
+                    <th style="min-width: 220px;">Component</th>
                     <th>Verdict</th>
                     <th>ROI</th>
                     <th>SR%</th>
@@ -674,13 +712,11 @@
             </thead>
             <tbody>
                 {% for comp in component_results %}
+                {% if comp.appearances >= 10 %}
                 <tr class="comp-row" data-verdict="{{ comp.verdict }}"
-                    data-name="{{ comp.component_name | lower }}">
-                    <td>
-                        <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); max-width: 300px;">
-                            {{ comp.component_name }}
-                        </div>
-                    </td>
+                    data-name="{{ comp.component_name | lower }}"
+                    style="background: transparent !important; border-color: var(--border-subtle) !important;">
+                    <td class="comp-name-cell">{{ comp.component_name }}</td>
                     <td>
                         <span class="comp-verdict verdict-{{ comp.verdict }}">
                             {% if comp.verdict == 'BOOST' %}<i class="bi bi-arrow-up-short"></i>
@@ -697,7 +733,7 @@
                     </td>
                     <td class="mono">{{ '%.1f' % comp.strike_rate }}%</td>
                     <td class="mono">{{ comp.appearances }}</td>
-                    <td class="mono">${{ '%.2f' % comp.avg_sp }}</td>
+                    <td class="mono">{% if comp.avg_sp and comp.avg_sp == comp.avg_sp %}${{ '%.2f' % comp.avg_sp }}{% else %}—{% endif %}</td>
                     <td class="mono">{{ '%+.1f' % comp.current_value }}</td>
                     <td>
                         {% if comp.suggested_value != comp.current_value %}
@@ -709,6 +745,7 @@
                         {% endif %}
                     </td>
                 </tr>
+                {% endif %}
                 {% endfor %}
             </tbody>
         </table>
