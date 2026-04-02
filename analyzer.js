@@ -898,8 +898,8 @@ if (careerRecord && typeof careerRecord === 'string') {
 const lastMargin = parseFloat(horseRow['form margin']);
 const lastPosition = parseInt(horseRow['form position']);
 if (!isNaN(lastMargin) && !isNaN(lastPosition) && lastPosition > 1 && lastMargin > 0 && lastMargin <= 2.5) {
-    score += 0;  // INCREASED from 5
-    notes += '+0.0: Close loss last start (0.5-2.5L) - not competitive\n';
+    score += 10;  // INCREASED from 5
+    notes += '+10.0: Close loss last start (0.5-2.5L) - competitive\n';
 }
   // === COLT BONUS SYSTEM (MUTUALLY EXCLUSIVE) ===
 if (horseSex === 'Colt') {
