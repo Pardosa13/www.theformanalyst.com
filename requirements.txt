@@ -11,3 +11,7 @@ tweepy
 gevent==24.11.1
 anthropic
 Flask-Limiter
+scikit-learn==1.4.2
+pandas==2.2.2
+numpy==1.26.4
+optuna==3.6.1
