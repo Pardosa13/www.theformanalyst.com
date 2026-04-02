@@ -3212,7 +3212,7 @@ function calculateRunningPositionScore(runningPosition, raceDistance) {
         else if (pos === 'MIDFIELD')   { score = 3;  note = '+ 3.0 : MIDFIELD in Middle distance\n'; }
         else if (pos === 'BACKMARKER') { score = 0;  note = '  0.0 : BACKMARKER in Middle distance\n'; }
     } else if (isStaying) {
-        if (pos === 'LEADER')      { score = -8; note = '- 8.0 : LEADER in Staying race (2400m+) - likely to tire\n'; }
+        if (pos === 'LEADER')      { score = 7;  note = '+ 7.0 : LEADER in Staying race (2400m+) — Sole Leader Staying bonus (+84.9% ROI, 38 races)\n'; }
         else if (pos === 'ONPACE') { score = 3;  note = '+ 3.0 : ONPACE in Staying race\n'; }
         else if (pos === 'MIDFIELD')   { score = 5;  note = '+ 5.0 : MIDFIELD in Staying race\n'; }
         else if (pos === 'BACKMARKER') { score = 20;  note = '+ 20.0 : BACKMARKER in Staying race\n'; }
