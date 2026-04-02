@@ -8635,8 +8635,11 @@ def export_ml_data():
 @login_required
 def backtest():
     """Backtest dashboard - shows latest RF + component analysis results."""
+    if not current_user.is_admin:
+        flash('Admin access required.', 'danger')
+        return redirect(url_for('dashboard'))
+    
     from sqlalchemy import text
-
     # Get latest completed run
     latest_run = db.session.execute(text("""
         SELECT * FROM backtest_runs
