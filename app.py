@@ -8626,6 +8626,79 @@ def export_ml_data():
 
     return output
 
+# ─────────────────────────────────────────────────────────────
+# BACKTEST DASHBOARD ROUTES
+# Add these routes to app.py alongside your other routes
+# ─────────────────────────────────────────────────────────────
+
+@app.route('/backtest')
+@login_required
+def backtest():
+    """Backtest dashboard - shows latest RF + component analysis results."""
+    from sqlalchemy import text
+
+    # Get latest completed run
+    latest_run = db.session.execute(text("""
+        SELECT * FROM backtest_runs
+        ORDER BY id DESC LIMIT 1
+    """)).fetchone()
+
+    run_count = db.session.execute(text(
+        "SELECT COUNT(*) FROM backtest_runs"
+    )).scalar() or 0
+
+    all_runs = db.session.execute(text("""
+        SELECT * FROM backtest_runs ORDER BY id DESC LIMIT 20
+    """)).fetchall()
+
+    feature_results = []
+    component_results = []
+
+    if latest_run and latest_run.status == 'complete':
+        feature_results = db.session.execute(text("""
+            SELECT * FROM backtest_feature_importance
+            WHERE run_id = :run_id
+            ORDER BY importance_rank ASC
+        """), {'run_id': latest_run.id}).fetchall()
+
+        component_results = db.session.execute(text("""
+            SELECT * FROM backtest_component_analysis
+            WHERE run_id = :run_id
+            ORDER BY ABS(roi) DESC
+        """), {'run_id': latest_run.id}).fetchall()
+
+    return render_template(
+        'backtest.html',
+        latest_run=latest_run,
+        run_count=run_count,
+        all_runs=all_runs,
+        feature_results=feature_results,
+        component_results=component_results
+    )
+
+@app.route('/backtest/run-now')
+@login_required
+def backtest_run_now():
+    """Trigger a manual backtest run (admin only)."""
+    import subprocess
+    import threading
+
+    if not current_user.is_admin:
+        flash('Admin access required.', 'danger')
+        return redirect(url_for('backtest'))
+
+    def run_backtest():
+        try:
+            subprocess.run(['python', 'backtest.py'], timeout=3600, check=True)
+        except Exception as e:
+            app.logger.error(f"Manual backtest failed: {e}")
+
+    thread = threading.Thread(target=run_backtest, daemon=True)
+    thread.start()
+
+    flash('Backtest started in the background. Results will appear here when complete (may take several minutes).', 'info')
+    return redirect(url_for('backtest'))
+
 @app.route("/best-bets")
 @login_required
 def best_bets():
