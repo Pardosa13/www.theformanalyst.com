@@ -409,8 +409,8 @@ if (!isNaN(horseAge)) {
     
     // 5yo Mares: -51.3% ROI - MAJOR VALUE DESTROYER
     if (horseAge === 5 && horseSex === 'Mare') {
-        score -= 15;
-        notes += '-15.0 : 5yo Mare (-51.3% ROI)\n';
+        score -= 0;
+        notes += '-0.0 : 5yo Mare (-51.3% ROI)\n';
     }
     
     // 6-7yo Mares: -33% to -69% ROI
