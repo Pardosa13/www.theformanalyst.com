@@ -913,13 +913,13 @@ if (horseSex === 'Colt') {
     }
     // Priority 2: 3yo Colt (age advantage)
     else if (horseAge === 3) {
-        score += 25;
-        notes += '+25.0 : 3yo COLT (18.2% SR, +50% ROI, 203 races - strong confirmed edge)\n';
+        score += 30;
+        notes += '+30.0 : 3yo COLT (18.2% SR, +50% ROI, 203 races - strong confirmed edge)\n';
     }
     // Priority 3: Base Colt bonus
     else {
-        score += 15;
-        notes += '+15.0 : COLT base bonus (14.3% SR, +66.1% ROI, 84 races)\n';
+        score += 20;
+        notes += '+20.0 : COLT base bonus (14.3% SR, +66.1% ROI, 84 races)\n';
     }
     // Set Weight bonus (applies in addition to above)
     const weightType = String(horseRow['weight type'] || horseRow['horse weight type'] || '').trim().toLowerCase();
