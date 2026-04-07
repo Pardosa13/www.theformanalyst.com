@@ -1149,8 +1149,8 @@ function checkTrackConditionForm(racingForm, trackCondition) {
 
     let winScore = 0;
     if (winRate >= 0.51) {
-        winScore = 12;
-        note += '+ 12.0 : Exceptional win rate (' + (winRate * 100).toFixed(0) + '%) on ' + trackCondition + '\n';
+        winScore = 15;
+        note += '+ 15.0 : Exceptional win rate (' + (winRate * 100).toFixed(0) + '%) on ' + trackCondition + '\n';
     } else if (winRate >= 0.36) {
         winScore = 10;
         note += '+ 10.0 : Strong win rate (' + (winRate * 100).toFixed(0) + '%) on ' + trackCondition + '\n';
@@ -1171,7 +1171,7 @@ function checkTrackConditionForm(racingForm, trackCondition) {
     let podiumScore = 0;
     if (podiumRate >= 0.85) {
         podiumScore = 12;
-        note += '+ 12.0 : Elite podium rate (' + (podiumRate * 100).toFixed(0) + '%) on ' + trackCondition + '\n';
+        note += '+ 15.0 : Elite podium rate (' + (podiumRate * 100).toFixed(0) + '%) on ' + trackCondition + '\n';
     } else if (podiumRate >= 0.70) {
         podiumScore = 10;
         note += '+ 10.0 : Excellent podium rate (' + (podiumRate * 100).toFixed(0) + '%) on ' + trackCondition + '\n';
