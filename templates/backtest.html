@@ -302,7 +302,8 @@
         text-align: right;
     }
 
-    /* Importance label badges */
+    /* ── Importance label badges ── */
+    /* FIX: was .imp-VERY.HIGH (broken selector) — corrected to .imp-VERY-HIGH */
     .imp-badge {
         display: inline-block;
         padding: 2px 8px;
@@ -313,11 +314,11 @@
         text-transform: uppercase;
     }
 
-    .imp-VERY.HIGH, .imp-VERY-HIGH { background: rgba(16,185,129,0.15); color: #34d399; }
-    .imp-HIGH   { background: rgba(102,126,234,0.15); color: var(--accent); }
-    .imp-MEDIUM { background: rgba(245,158,11,0.12); color: #fbbf24; }
-    .imp-LOW    { background: rgba(239,68,68,0.1);   color: #f87171; }
-    .imp-VERY-LOW { background: var(--bg-hover); color: var(--text-muted); }
+    .imp-VERY-HIGH { background: rgba(16,185,129,0.15); color: #34d399; }
+    .imp-HIGH      { background: rgba(102,126,234,0.15); color: var(--accent); }
+    .imp-MEDIUM    { background: rgba(245,158,11,0.12);  color: #fbbf24; }
+    .imp-LOW       { background: rgba(239,68,68,0.1);    color: #f87171; }
+    .imp-VERY-LOW  { background: var(--bg-hover);        color: var(--text-muted); }
 
     /* ── Component table ── */
     .comp-verdict {
@@ -697,6 +698,7 @@
 
     {% if component_results %}
     <div class="table-scroll">
+        {# FIX 1: threshold lowered from >= 10 to >= 5 to match backtest.py minimum sample #}
         <table class="table" id="comp-table" style="background: var(--bg-surface) !important;">
             <thead>
                 <tr style="background: var(--bg-elevated) !important;">
@@ -712,7 +714,7 @@
             </thead>
             <tbody>
                 {% for comp in component_results %}
-                {% if comp.appearances >= 10 %}
+                {% if comp.appearances >= 5 %}
                 <tr class="comp-row" data-verdict="{{ comp.verdict }}"
                     data-name="{{ comp.component_name | lower }}"
                     style="background: transparent !important; border-color: var(--border-subtle) !important;">
@@ -733,7 +735,8 @@
                     </td>
                     <td class="mono">{{ '%.1f' % comp.strike_rate }}%</td>
                     <td class="mono">{{ comp.appearances }}</td>
-                    <td class="mono">{% if comp.avg_sp and comp.avg_sp == comp.avg_sp %}${{ '%.2f' % comp.avg_sp }}{% else %}—{% endif %}</td>
+                    {# FIX 2: replaced broken Jinja NaN check (x == x) with simple truthiness check #}
+                    <td class="mono">{% if comp.avg_sp %}${{ '%.2f' % comp.avg_sp }}{% else %}—{% endif %}</td>
                     <td class="mono">{{ '%+.1f' % comp.current_value }}</td>
                     <td>
                         {% if comp.suggested_value != comp.current_value %}
@@ -804,12 +807,18 @@
             <div class="feature-name-block">
                 <div class="feature-name">{{ feat.feature_name | replace('_', ' ') | title }}</div>
                 <div class="feature-rec" title="{{ feat.recommendation }}">
+                    {# FIX 3 (indirect): badge logic now uses correct CSS class names that match
+                       the fixed .imp-VERY-HIGH / .imp-HIGH selectors above #}
                     {% set rec = feat.recommendation %}
-                    {% if '[VERY HIGH]' in rec or '[HIGH]' in rec %}
+                    {% if '[VERY HIGH]' in rec %}
+                        <span class="imp-badge imp-VERY-HIGH">Very High Impact</span>
+                    {% elif '[HIGH]' in rec %}
                         <span class="imp-badge imp-HIGH">High Impact</span>
                     {% elif '[MEDIUM]' in rec %}
                         <span class="imp-badge imp-MEDIUM">Medium</span>
-                    {% elif '[LOW]' in rec or '[VERY LOW]' in rec %}
+                    {% elif '[VERY LOW]' in rec %}
+                        <span class="imp-badge imp-VERY-LOW">Very Low</span>
+                    {% elif '[LOW]' in rec %}
                         <span class="imp-badge imp-LOW">Low Impact</span>
                     {% endif %}
                     {{ rec | replace('[VERY HIGH] ', '') | replace('[HIGH] ', '') | replace('[MEDIUM] ', '') | replace('[LOW] ', '') | replace('[VERY LOW] ', '') | truncate(80) }}
