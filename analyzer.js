@@ -882,8 +882,8 @@ if (careerRecord && typeof careerRecord === 'string') {
         if (careerStarts >= 5) {
             const careerWinPct = (careerWins / careerStarts) * 100;
             if (careerWinPct >= 40) {
-                score += 10;
-                notes += '+10.0 : Elite career win rate (40%+, 18.5% SR lift confirmed)\n';
+                score += 15;
+                notes += '+15.0 : Elite career win rate (40%+, 18.5% SR lift confirmed)\n';
             } else if (careerWinPct >= 30) {
                 score += 0;
                 notes += '+ 0.0 : Strong career win rate (30-40%)\n';
