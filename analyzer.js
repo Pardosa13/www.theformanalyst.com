@@ -1545,11 +1545,11 @@ function checkTrackDistanceForm(racingForm) {
 
     let winScore = 0;
     if (winRate >= 0.51) {
-        winScore = 8;
-        note += '+ 8.0 : Exceptional win rate (' + (winRate * 100).toFixed(0) + '%) at this track+distance\n';
+        winScore = 20;
+        note += '+ 20.0 : Exceptional win rate (' + (winRate * 100).toFixed(0) + '%) at this track+distance\n';
     } else if (winRate >= 0.36) {
-        winScore = 7;
-        note += '+ 7.0 : Strong win rate (' + (winRate * 100).toFixed(0) + '%) at this track+distance\n';
+        winScore = 15;
+        note += '+ 15.0 : Strong win rate (' + (winRate * 100).toFixed(0) + '%) at this track+distance\n';
     } else if (winRate >= 0.26) {
         winScore = 5;
         note += '+ 5.0 : Good win rate (' + (winRate * 100).toFixed(0) + '%) at this track+distance\n';
