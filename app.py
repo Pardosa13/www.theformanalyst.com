@@ -8690,7 +8690,8 @@ def backtest():
         all_runs=all_runs,
         feature_results=feature_results,
         component_results=component_results,
-        momentum_results=momentum_results
+        momentum_results_all=momentum_results_all,
+        momentum_results_tp=momentum_results_tp
     )
 
 @app.route('/backtest/run-now')
