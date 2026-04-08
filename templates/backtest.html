@@ -904,9 +904,9 @@
 
     <div class="section-desc">
         <i class="bi bi-info-circle" style="color: var(--accent);"></i>
-        For every horse with 3+ scored races, a linear slope is fitted to their last 5 <code>analyzer_score</code> values.
-        <strong>Rising</strong> = slope &gt; 1.5 pts/run. <strong>Falling</strong> = slope &lt; −1.5 pts/run. <strong>Flat</strong> = everything in between.
-        A meaningful ROI gap between Rising and Falling horses indicates momentum is a real signal worth exploiting.
+        Linear slope fitted to each horse's last 5 <code>analyzer_score</code> values across all horses (not just top picks).
+        <strong>Overlay %</strong> = how often SP &gt; your predicted odds in that bucket — the key value signal.
+        A Rising bucket with high overlay % means the market is underpricing horses on an upward trajectory.
     </div>
 
     {% if momentum_results %}
@@ -920,6 +920,8 @@
                     <th>Strike Rate</th>
                     <th>ROI</th>
                     <th>Avg SP</th>
+                    <th>Avg Predicted</th>
+                    <th>Overlay %</th>
                     <th>Avg Slope</th>
                 </tr>
             </thead>
@@ -927,12 +929,22 @@
                 {% for row in momentum_results %}
                 <tr style="background: transparent !important;">
                     <td>
-                        {% if row.trajectory == 'Rising' %}
-                            <span class="comp-verdict verdict-BOOST"><i class="bi bi-graph-up-arrow"></i> Rising</span>
-                        {% elif row.trajectory == 'Falling' %}
-                            <span class="comp-verdict verdict-REDUCE"><i class="bi bi-graph-down-arrow"></i> Falling</span>
-                        {% else %}
+                        {% if row.trajectory == 'Strong Rise' %}
+                            <span class="comp-verdict verdict-BOOST"><i class="bi bi-graph-up-arrow"></i> Strong Rise</span>
+                        {% elif row.trajectory == 'Moderate Rise' %}
+                            <span class="comp-verdict verdict-BOOST" style="opacity:0.75;"><i class="bi bi-arrow-up"></i> Moderate Rise</span>
+                        {% elif row.trajectory == 'Mild Rise' %}
+                            <span class="comp-verdict verdict-OK"><i class="bi bi-arrow-up-short"></i> Mild Rise</span>
+                        {% elif row.trajectory == 'Flat' %}
                             <span class="comp-verdict verdict-OK"><i class="bi bi-dash"></i> Flat</span>
+                        {% elif row.trajectory == 'Mild Fall' %}
+                            <span class="comp-verdict verdict-MONITOR"><i class="bi bi-arrow-down-short"></i> Mild Fall</span>
+                        {% elif row.trajectory == 'Moderate Fall' %}
+                            <span class="comp-verdict verdict-REDUCE" style="opacity:0.75;"><i class="bi bi-arrow-down"></i> Moderate Fall</span>
+                        {% elif row.trajectory == 'Strong Fall' %}
+                            <span class="comp-verdict verdict-REDUCE"><i class="bi bi-graph-down-arrow"></i> Strong Fall</span>
+                        {% else %}
+                            <span class="comp-verdict verdict-OK">{{ row.trajectory }}</span>
                         {% endif %}
                     </td>
                     <td class="mono">{{ row.appearances }}</td>
@@ -944,6 +956,22 @@
                         </span>
                     </td>
                     <td class="mono">${{ '%.2f' % row.avg_sp }}</td>
+                    <td class="mono">
+                        {% if row.avg_predicted_sp %}
+                            ${{ '%.2f' % row.avg_predicted_sp }}
+                        {% else %}
+                            <span style="color: var(--text-muted);">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if row.overlay_pct is not none %}
+                            <span class="{{ 'roi-cell-pos' if row.overlay_pct >= 55 else 'roi-cell-neg' if row.overlay_pct < 45 else 'roi-cell-neu' }}">
+                                {{ '%.1f' % row.overlay_pct }}%
+                            </span>
+                        {% else %}
+                            <span style="color: var(--text-muted);">—</span>
+                        {% endif %}
+                    </td>
                     <td class="mono">{{ '%+.2f' % row.avg_slope }}</td>
                 </tr>
                 {% endfor %}
@@ -960,7 +988,6 @@
 </div>
 
 {% endif %} {# end if latest_run #}
-
 {% endblock %}
 
 {% block extra_js %}
