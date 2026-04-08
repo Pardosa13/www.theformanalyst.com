@@ -644,6 +644,11 @@
         <div class="roi-value neutral">{{ feature_results | length }}</div>
         <div class="roi-sub">RF analysed</div>
     </div>
+    <div class="roi-card">
+        <div class="roi-label">Momentum</div>
+        <div class="roi-value neutral">{{ momentum_results | length }}</div>
+        <div class="roi-sub">Trajectories</div>
+    </div>
 </div>
 {% endif %}
 
@@ -660,6 +665,10 @@
     <button class="bt-tab" onclick="switchTab('history', this)">
         <i class="bi bi-clock-history"></i> Run History
         <span class="tab-count">{{ run_count }}</span>
+    </button>
+    <button class="bt-tab" onclick="switchTab('momentum', this)">
+        <i class="bi bi-graph-up-arrow"></i> Score Momentum
+        <span class="tab-count">3</span>
     </button>
 </div>
 
@@ -884,6 +893,68 @@
         <div class="empty-icon"><i class="bi bi-clock-history"></i></div>
         <h4>No run history</h4>
         <p>Run history will appear here after the first backtest completes.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ══════════════════════════════════════════════
+     PANEL D: SCORE MOMENTUM
+═══════════════════════════════════════════════ -->
+<div id="panel-momentum" class="bt-panel">
+
+    <div class="section-desc">
+        <i class="bi bi-info-circle" style="color: var(--accent);"></i>
+        For every horse with 3+ scored races, a linear slope is fitted to their last 5 <code>analyzer_score</code> values.
+        <strong>Rising</strong> = slope &gt; 1.5 pts/run. <strong>Falling</strong> = slope &lt; −1.5 pts/run. <strong>Flat</strong> = everything in between.
+        A meaningful ROI gap between Rising and Falling horses indicates momentum is a real signal worth exploiting.
+    </div>
+
+    {% if momentum_results %}
+    <div class="table-scroll">
+        <table class="table" style="background: var(--bg-surface) !important;">
+            <thead>
+                <tr style="background: var(--bg-elevated) !important;">
+                    <th>Trajectory</th>
+                    <th>Appearances</th>
+                    <th>Wins</th>
+                    <th>Strike Rate</th>
+                    <th>ROI</th>
+                    <th>Avg SP</th>
+                    <th>Avg Slope</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in momentum_results %}
+                <tr style="background: transparent !important;">
+                    <td>
+                        {% if row.trajectory == 'Rising' %}
+                            <span class="comp-verdict verdict-BOOST"><i class="bi bi-graph-up-arrow"></i> Rising</span>
+                        {% elif row.trajectory == 'Falling' %}
+                            <span class="comp-verdict verdict-REDUCE"><i class="bi bi-graph-down-arrow"></i> Falling</span>
+                        {% else %}
+                            <span class="comp-verdict verdict-OK"><i class="bi bi-dash"></i> Flat</span>
+                        {% endif %}
+                    </td>
+                    <td class="mono">{{ row.appearances }}</td>
+                    <td class="mono">{{ row.wins }}</td>
+                    <td class="mono">{{ '%.1f' % row.strike_rate }}%</td>
+                    <td>
+                        <span class="{{ 'roi-cell-pos' if row.roi > 0 else 'roi-cell-neg' if row.roi < 0 else 'roi-cell-neu' }}">
+                            {{ '%+.1f' % row.roi }}%
+                        </span>
+                    </td>
+                    <td class="mono">${{ '%.2f' % row.avg_sp }}</td>
+                    <td class="mono">{{ '%+.2f' % row.avg_slope }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon"><i class="bi bi-graph-up-arrow"></i></div>
+        <h4>No momentum data yet</h4>
+        <p>Momentum analysis requires horses with 3+ scored races in the database.</p>
     </div>
     {% endif %}
 </div>
