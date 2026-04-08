@@ -8671,9 +8671,15 @@ def backtest():
             ORDER BY ABS(roi) DESC
         """), {'run_id': latest_run.id}).fetchall()
 
-        momentum_results = db.session.execute(text("""
+        momentum_results_all = db.session.execute(text("""
             SELECT * FROM backtest_momentum_analysis
-            WHERE run_id = :run_id
+            WHERE run_id = :run_id AND scope = 'all_horses'
+            ORDER BY roi DESC
+        """), {'run_id': latest_run.id}).fetchall()
+
+        momentum_results_tp = db.session.execute(text("""
+            SELECT * FROM backtest_momentum_analysis
+            WHERE run_id = :run_id AND scope = 'top_pick'
             ORDER BY roi DESC
         """), {'run_id': latest_run.id}).fetchall()
 
