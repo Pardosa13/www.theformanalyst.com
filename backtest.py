@@ -1083,13 +1083,11 @@ def run_component_analysis(df):
 # ─────────────────────────────────────────────
 def run_momentum_analysis(df):
     """
-    Track C: For every horse with 3+ scored races, compute the linear slope
-    of analyzer_score across their last 5 runs (oldest→newest).
-    Buckets: Strong Fall / Moderate Fall / Mild Fall / Flat /
-             Mild Rise / Moderate Rise / Strong Rise
-    Also tracks avg_predicted_sp and overlay_pct (SP > predicted odds)
-    to identify where market mis-prices trajectory.
-    Uses ALL horses to maximise sample size.
+    Track C: Runs two parallel momentum analyses:
+      - scope='all_horses': every horse with 3+ scored races
+      - scope='top_pick': only the highest scored horse per race
+    For each, computes linear slope over last 5 analyzer_scores,
+    buckets into 7 trajectory bands, and tracks overlay %.
     """
     log.info("Running score momentum analysis (Track C)...")
 
@@ -1103,6 +1101,11 @@ def run_momentum_analysis(df):
     df_scored['meeting_date'] = pd.to_datetime(df_scored['meeting_date'], errors='coerce')
     df_scored = df_scored.dropna(subset=['meeting_date'])
     df_scored = df_scored.sort_values(['horse_name', 'meeting_date'])
+
+    # ── Identify top pick per race ──────────────────────────────────
+    top_pick_ids = set(
+        df_scored.groupby('race_id')['analyzer_score'].idxmax().values
+    )
 
     BUCKETS = [
         ('Strong Fall',    None,  -5.0),
@@ -1124,28 +1127,33 @@ def run_momentum_analysis(df):
                 return name
         return 'Flat'
 
-    bucket_data = {
-        name: {
-            'appearances': 0,
-            'wins': 0,
-            'roi_contributions': [],
-            'sps': [],
-            'slopes': [],
-            'predicted_sps': [],
-            'overlays': 0,
+    def empty_bucket_data():
+        return {
+            name: {
+                'appearances': 0,
+                'wins': 0,
+                'roi_contributions': [],
+                'sps': [],
+                'slopes': [],
+                'predicted_sps': [],
+                'overlays': 0,
+            }
+            for name, _, _ in BUCKETS
         }
-        for name, _, _ in BUCKETS
-    }
+
+    all_horses_data = empty_bucket_data()
+    top_pick_data   = empty_bucket_data()
 
     for horse_name, group in df_scored.groupby('horse_name'):
         group = group.sort_values('meeting_date')
         if len(group) < 3:
             continue
 
-        scores        = group['analyzer_score'].tolist()
-        positions     = group['finish_position'].tolist()
-        sps           = group['sp'].tolist()
+        scores         = group['analyzer_score'].tolist()
+        positions      = group['finish_position'].tolist()
+        sps            = group['sp'].tolist()
         predicted_odds = group['predicted_odds'].tolist() if 'predicted_odds' in group.columns else [None] * len(scores)
+        idx_list       = group.index.tolist()
 
         for i in range(2, len(scores)):
             window_start  = max(0, i - 4)
@@ -1162,12 +1170,11 @@ def run_momentum_analysis(df):
             if sp_val is None or sp_val <= 1.0:
                 continue
 
-            x     = list(range(len(window_scores)))
-            slope = float(np.polyfit(x, window_scores, 1)[0])
-            won   = int(positions[i]) == 1
+            x      = list(range(len(window_scores)))
+            slope  = float(np.polyfit(x, window_scores, 1)[0])
+            won    = int(positions[i]) == 1
             bucket = get_bucket(slope)
 
-            # Parse predicted odds for overlay calculation
             pred_sp = None
             try:
                 raw_pred = predicted_odds[i]
@@ -1176,49 +1183,63 @@ def run_momentum_analysis(df):
             except Exception:
                 pred_sp = None
 
-            bucket_data[bucket]['appearances'] += 1
-            if won:
-                bucket_data[bucket]['wins'] += 1
-            bucket_data[bucket]['roi_contributions'].append(sp_val if won else -1.0)
-            bucket_data[bucket]['sps'].append(sp_val)
-            bucket_data[bucket]['slopes'].append(slope)
+            is_top_pick = idx_list[i] in top_pick_ids
 
-            if pred_sp and pred_sp > 0:
-                bucket_data[bucket]['predicted_sps'].append(pred_sp)
-                if sp_val > pred_sp:
-                    bucket_data[bucket]['overlays'] += 1
+            def _add(data):
+                data[bucket]['appearances'] += 1
+                if won:
+                    data[bucket]['wins'] += 1
+                data[bucket]['roi_contributions'].append(sp_val if won else -1.0)
+                data[bucket]['sps'].append(sp_val)
+                data[bucket]['slopes'].append(slope)
+                if pred_sp and pred_sp > 0:
+                    data[bucket]['predicted_sps'].append(pred_sp)
+                    if sp_val > pred_sp:
+                        data[bucket]['overlays'] += 1
 
-    results = []
-    for name, _, _ in BUCKETS:
-        data = bucket_data[name]
-        n = data['appearances']
-        if n < 10:
-            continue
+            _add(all_horses_data)
+            if is_top_pick:
+                _add(top_pick_data)
 
-        wins        = data['wins']
-        strike_rate = wins / n * 100
-        roi         = sum(data['roi_contributions']) / n * 100
-        avg_sp      = float(np.mean(data['sps']))
-        avg_slope   = float(np.mean(data['slopes']))
+    def build_results(bucket_data, scope):
+        results = []
+        for name, _, _ in BUCKETS:
+            data = bucket_data[name]
+            n = data['appearances']
+            if n < 10:
+                continue
 
-        pred_sps = data['predicted_sps']
-        avg_predicted_sp = round(float(np.mean(pred_sps)), 2) if pred_sps else None
-        overlay_pct = round(data['overlays'] / len(pred_sps) * 100, 1) if pred_sps else None
+            wins        = data['wins']
+            strike_rate = wins / n * 100
+            roi         = sum(data['roi_contributions']) / n * 100
+            avg_sp      = float(np.mean(data['sps']))
+            avg_slope   = float(np.mean(data['slopes']))
 
-        results.append({
-            'trajectory':      name,
-            'appearances':     n,
-            'wins':            wins,
-            'strike_rate':     round(strike_rate, 1),
-            'roi':             round(roi, 1),
-            'avg_sp':          round(avg_sp, 2),
-            'avg_slope':       round(avg_slope, 2),
-            'avg_predicted_sp': avg_predicted_sp,
-            'overlay_pct':     overlay_pct,
-        })
+            pred_sps = data['predicted_sps']
+            avg_predicted_sp = round(float(np.mean(pred_sps)), 2) if pred_sps else None
+            overlay_pct      = round(data['overlays'] / len(pred_sps) * 100, 1) if pred_sps else None
 
-    log.info(f"Momentum analysis: {[r['trajectory'] + ' n=' + str(r['appearances']) for r in results]}")
-    return results
+            results.append({
+                'trajectory':        name,
+                'scope':             scope,
+                'appearances':       n,
+                'wins':              wins,
+                'strike_rate':       round(strike_rate, 1),
+                'roi':               round(roi, 1),
+                'avg_sp':            round(avg_sp, 2),
+                'avg_slope':         round(avg_slope, 2),
+                'avg_predicted_sp':  avg_predicted_sp,
+                'overlay_pct':       overlay_pct,
+            })
+        return results
+
+    all_results      = build_results(all_horses_data, 'all_horses')
+    top_pick_results = build_results(top_pick_data,   'top_pick')
+    combined         = all_results + top_pick_results
+
+    log.info(f"Momentum all_horses: {[r['trajectory'] + ' n=' + str(r['appearances']) for r in all_results]}")
+    log.info(f"Momentum top_pick:   {[r['trajectory'] + ' n=' + str(r['appearances']) for r in top_pick_results]}")
+    return combined
 
 
 # ─────────────────────────────────────────────
