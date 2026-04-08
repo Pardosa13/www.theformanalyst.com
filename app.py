@@ -8656,6 +8656,7 @@ def backtest():
 
     feature_results = []
     component_results = []
+    momentum_results = []
 
     if latest_run and latest_run.status == 'complete':
         feature_results = db.session.execute(text("""
@@ -8670,13 +8671,20 @@ def backtest():
             ORDER BY ABS(roi) DESC
         """), {'run_id': latest_run.id}).fetchall()
 
+        momentum_results = db.session.execute(text("""
+            SELECT * FROM backtest_momentum_analysis
+            WHERE run_id = :run_id
+            ORDER BY roi DESC
+        """), {'run_id': latest_run.id}).fetchall()
+
     return render_template(
         'backtest.html',
         latest_run=latest_run,
         run_count=run_count,
         all_runs=all_runs,
         feature_results=feature_results,
-        component_results=component_results
+        component_results=component_results,
+        momentum_results=momentum_results
     )
 
 @app.route('/backtest/run-now')
