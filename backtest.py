@@ -1307,7 +1307,7 @@ def generate_feature_recommendations(importance_sorted):
 # STEP 6: WRITE RESULTS TO DB
 # ─────────────────────────────────────────────
 def write_results(run_id, feature_recommendations, component_results,
-                  baseline_roi, baseline_sr, total_races, total_horses):
+                  momentum_results, baseline_roi, baseline_sr, total_races, total_horses):
     """Write all backtest findings to the database."""
     log.info("Writing results to database...")
 
@@ -1336,6 +1336,13 @@ def write_results(run_id, feature_recommendations, component_results,
                 VALUES (:run_id, :component_name, :appearances, :wins, :strike_rate,
                         :roi, :avg_sp, :current_value, :suggested_value, :roi_delta, :verdict)
             """), {'run_id': run_id, **comp})
+
+        for mom in momentum_results:
+            conn.execute(text("""
+                INSERT INTO backtest_momentum_analysis
+                (run_id, trajectory, appearances, wins, strike_rate, roi, avg_sp, avg_slope)
+                VALUES (:run_id, :trajectory, :appearances, :wins, :strike_rate, :roi, :avg_sp, :avg_slope)
+            """), {'run_id': run_id, **mom})
 
         conn.execute(text("""
             UPDATE backtest_runs
@@ -1407,18 +1414,20 @@ def main():
             total_races  = df['race_id'].nunique()
             total_wins   = 0
 
+        momentum_results = run_momentum_analysis(df)
+
         total_horses = len(df)
 
         write_results(
             run_id,
             feature_recommendations,
             component_results,
+            momentum_results,
             baseline_roi,
             baseline_sr,
             total_races,
             total_horses
         )
-
         log.info("=" * 60)
         log.info("BACKTEST JOB COMPLETE")
         log.info(f"Run ID:             {run_id}")
