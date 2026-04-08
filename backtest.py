@@ -124,13 +124,15 @@ def ensure_tables():
             CREATE TABLE IF NOT EXISTS backtest_momentum_analysis (
                 id SERIAL PRIMARY KEY,
                 run_id INTEGER REFERENCES backtest_runs(id),
-                trajectory VARCHAR(10),
+                trajectory VARCHAR(20),
                 appearances INTEGER,
                 wins INTEGER,
                 strike_rate FLOAT,
                 roi FLOAT,
                 avg_sp FLOAT,
                 avg_slope FLOAT,
+                avg_predicted_sp FLOAT,
+                overlay_pct FLOAT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """))
@@ -1083,8 +1085,11 @@ def run_momentum_analysis(df):
     """
     Track C: For every horse with 3+ scored races, compute the linear slope
     of analyzer_score across their last 5 runs (oldest→newest).
-    Bucket into Rising / Flat / Falling and compare win rate + ROI vs baseline.
-    Uses ALL horses (not just top picks) to maximise sample size.
+    Buckets: Strong Fall / Moderate Fall / Mild Fall / Flat /
+             Mild Rise / Moderate Rise / Strong Rise
+    Also tracks avg_predicted_sp and overlay_pct (SP > predicted odds)
+    to identify where market mis-prices trajectory.
+    Uses ALL horses to maximise sample size.
     """
     log.info("Running score momentum analysis (Track C)...")
 
@@ -1099,12 +1104,37 @@ def run_momentum_analysis(df):
     df_scored = df_scored.dropna(subset=['meeting_date'])
     df_scored = df_scored.sort_values(['horse_name', 'meeting_date'])
 
-    SLOPE_THRESHOLD = 1.5  # points per run
+    BUCKETS = [
+        ('Strong Fall',    None,  -5.0),
+        ('Moderate Fall',  -5.0,  -2.5),
+        ('Mild Fall',      -2.5,  -1.5),
+        ('Flat',           -1.5,   1.5),
+        ('Mild Rise',       1.5,   2.5),
+        ('Moderate Rise',   2.5,   5.0),
+        ('Strong Rise',     5.0,  None),
+    ]
+
+    def get_bucket(slope):
+        for name, low, high in BUCKETS:
+            if low is None and slope < high:
+                return name
+            if high is None and slope >= low:
+                return name
+            if low is not None and high is not None and low <= slope < high:
+                return name
+        return 'Flat'
 
     bucket_data = {
-        'Rising':  {'appearances': 0, 'wins': 0, 'roi_contributions': [], 'sps': [], 'slopes': []},
-        'Flat':    {'appearances': 0, 'wins': 0, 'roi_contributions': [], 'sps': [], 'slopes': []},
-        'Falling': {'appearances': 0, 'wins': 0, 'roi_contributions': [], 'sps': [], 'slopes': []},
+        name: {
+            'appearances': 0,
+            'wins': 0,
+            'roi_contributions': [],
+            'sps': [],
+            'slopes': [],
+            'predicted_sps': [],
+            'overlays': 0,
+        }
+        for name, _, _ in BUCKETS
     }
 
     for horse_name, group in df_scored.groupby('horse_name'):
@@ -1112,9 +1142,10 @@ def run_momentum_analysis(df):
         if len(group) < 3:
             continue
 
-        scores    = group['analyzer_score'].tolist()
-        positions = group['finish_position'].tolist()
-        sps       = group['sp'].tolist()
+        scores        = group['analyzer_score'].tolist()
+        positions     = group['finish_position'].tolist()
+        sps           = group['sp'].tolist()
+        predicted_odds = group['predicted_odds'].tolist() if 'predicted_odds' in group.columns else [None] * len(scores)
 
         for i in range(2, len(scores)):
             window_start  = max(0, i - 4)
@@ -1134,13 +1165,16 @@ def run_momentum_analysis(df):
             x     = list(range(len(window_scores)))
             slope = float(np.polyfit(x, window_scores, 1)[0])
             won   = int(positions[i]) == 1
+            bucket = get_bucket(slope)
 
-            if slope > SLOPE_THRESHOLD:
-                bucket = 'Rising'
-            elif slope < -SLOPE_THRESHOLD:
-                bucket = 'Falling'
-            else:
-                bucket = 'Flat'
+            # Parse predicted odds for overlay calculation
+            pred_sp = None
+            try:
+                raw_pred = predicted_odds[i]
+                if raw_pred:
+                    pred_sp = float(str(raw_pred).replace('$', '').strip())
+            except Exception:
+                pred_sp = None
 
             bucket_data[bucket]['appearances'] += 1
             if won:
@@ -1149,8 +1183,14 @@ def run_momentum_analysis(df):
             bucket_data[bucket]['sps'].append(sp_val)
             bucket_data[bucket]['slopes'].append(slope)
 
+            if pred_sp and pred_sp > 0:
+                bucket_data[bucket]['predicted_sps'].append(pred_sp)
+                if sp_val > pred_sp:
+                    bucket_data[bucket]['overlays'] += 1
+
     results = []
-    for trajectory, data in bucket_data.items():
+    for name, _, _ in BUCKETS:
+        data = bucket_data[name]
         n = data['appearances']
         if n < 10:
             continue
@@ -1161,14 +1201,20 @@ def run_momentum_analysis(df):
         avg_sp      = float(np.mean(data['sps']))
         avg_slope   = float(np.mean(data['slopes']))
 
+        pred_sps = data['predicted_sps']
+        avg_predicted_sp = round(float(np.mean(pred_sps)), 2) if pred_sps else None
+        overlay_pct = round(data['overlays'] / len(pred_sps) * 100, 1) if pred_sps else None
+
         results.append({
-            'trajectory': trajectory,
-            'appearances': n,
-            'wins':        wins,
-            'strike_rate': round(strike_rate, 1),
-            'roi':         round(roi, 1),
-            'avg_sp':      round(avg_sp, 2),
-            'avg_slope':   round(avg_slope, 2),
+            'trajectory':      name,
+            'appearances':     n,
+            'wins':            wins,
+            'strike_rate':     round(strike_rate, 1),
+            'roi':             round(roi, 1),
+            'avg_sp':          round(avg_sp, 2),
+            'avg_slope':       round(avg_slope, 2),
+            'avg_predicted_sp': avg_predicted_sp,
+            'overlay_pct':     overlay_pct,
         })
 
     log.info(f"Momentum analysis: {[r['trajectory'] + ' n=' + str(r['appearances']) for r in results]}")
