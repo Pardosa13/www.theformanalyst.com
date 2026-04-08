@@ -904,13 +904,14 @@
 
     <div class="section-desc">
         <i class="bi bi-info-circle" style="color: var(--accent);"></i>
-        Linear slope fitted to each horse's last 5 <code>analyzer_score</code> values across all horses (not just top picks).
-        <strong>Overlay %</strong> = how often SP &gt; your predicted odds in that bucket — the key value signal.
-        A Rising bucket with high overlay % means the market is underpricing horses on an upward trajectory.
+        Linear slope fitted to each horse's last 5 <code>analyzer_score</code> values.
+        <strong>All Horses</strong> = full population. <strong>Top Pick</strong> = only the highest scored horse per race.
+        Overlay % = how often SP &gt; your predicted odds — high overlay on a Rising bucket = market underpricing momentum.
     </div>
 
-    {% if momentum_results %}
-    <div class="table-scroll">
+    {% macro momentum_table(rows) %}
+    {% if rows %}
+    <div class="table-scroll" style="margin-bottom: 1.5rem;">
         <table class="table" style="background: var(--bg-surface) !important;">
             <thead>
                 <tr style="background: var(--bg-elevated) !important;">
@@ -926,7 +927,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for row in momentum_results %}
+                {% for row in rows %}
                 <tr style="background: transparent !important;">
                     <td>
                         {% if row.trajectory == 'Strong Rise' %}
@@ -979,14 +980,25 @@
         </table>
     </div>
     {% else %}
-    <div class="empty-state">
-        <div class="empty-icon"><i class="bi bi-graph-up-arrow"></i></div>
-        <h4>No momentum data yet</h4>
-        <p>Momentum analysis requires horses with 3+ scored races in the database.</p>
+    <div class="empty-state" style="padding: 30px;">
+        <p style="color: var(--text-muted); font-size: 13px;">No data yet.</p>
     </div>
     {% endif %}
+    {% endmacro %}
+
+    <div class="section-head" style="margin-top: 1rem;">
+        <h3><i class="bi bi-people"></i> All Horses</h3>
+    </div>
+    {{ momentum_table(momentum_results_all) }}
+
+    <div class="section-head" style="margin-top: 0.5rem;">
+        <h3><i class="bi bi-trophy"></i> Top Pick Only</h3>
+    </div>
+    {{ momentum_table(momentum_results_tp) }}
+
 </div>
 
+{% endif %} {# end if latest_run #}
 {% endif %} {# end if latest_run #}
 {% endblock %}
 
