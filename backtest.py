@@ -120,6 +120,21 @@ def ensure_tables():
             )
         """))
 
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS backtest_momentum_analysis (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER REFERENCES backtest_runs(id),
+                trajectory VARCHAR(10),
+                appearances INTEGER,
+                wins INTEGER,
+                strike_rate FLOAT,
+                roi FLOAT,
+                avg_sp FLOAT,
+                avg_slope FLOAT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+
         conn.commit()
     log.info("Backtest tables verified.")
 
@@ -1061,11 +1076,107 @@ def run_component_analysis(df):
 
     return results, baseline_roi, baseline_sr, total_staked, len(winners)
 
+# ─────────────────────────────────────────────
+# TRACK C — SCORE MOMENTUM ANALYSIS
+# ─────────────────────────────────────────────
+def run_momentum_analysis(df):
+    """
+    Track C: For every horse with 3+ scored races, compute the linear slope
+    of analyzer_score across their last 5 runs (oldest→newest).
+    Bucket into Rising / Flat / Falling and compare win rate + ROI vs baseline.
+    Uses ALL horses (not just top picks) to maximise sample size.
+    """
+    log.info("Running score momentum analysis (Track C)...")
+
+    df_scored = df.dropna(subset=['analyzer_score']).copy()
+    df_scored = df_scored[df_scored['analyzer_score'] > 0]
+
+    if df_scored.empty:
+        log.warning("No scored horses found. Skipping Track C.")
+        return []
+
+    df_scored['meeting_date'] = pd.to_datetime(df_scored['meeting_date'], errors='coerce')
+    df_scored = df_scored.dropna(subset=['meeting_date'])
+    df_scored = df_scored.sort_values(['horse_name', 'meeting_date'])
+
+    SLOPE_THRESHOLD = 1.5  # points per run
+
+    bucket_data = {
+        'Rising':  {'appearances': 0, 'wins': 0, 'roi_contributions': [], 'sps': [], 'slopes': []},
+        'Flat':    {'appearances': 0, 'wins': 0, 'roi_contributions': [], 'sps': [], 'slopes': []},
+        'Falling': {'appearances': 0, 'wins': 0, 'roi_contributions': [], 'sps': [], 'slopes': []},
+    }
+
+    for horse_name, group in df_scored.groupby('horse_name'):
+        group = group.sort_values('meeting_date')
+        if len(group) < 3:
+            continue
+
+        scores    = group['analyzer_score'].tolist()
+        positions = group['finish_position'].tolist()
+        sps       = group['sp'].tolist()
+
+        for i in range(2, len(scores)):
+            window_start  = max(0, i - 4)
+            window_scores = scores[window_start:i + 1]
+
+            if len(window_scores) < 3:
+                continue
+
+            try:
+                sp_val = float(sps[i]) if sps[i] else None
+            except Exception:
+                sp_val = None
+
+            if sp_val is None or sp_val <= 1.0:
+                continue
+
+            x     = list(range(len(window_scores)))
+            slope = float(np.polyfit(x, window_scores, 1)[0])
+            won   = int(positions[i]) == 1
+
+            if slope > SLOPE_THRESHOLD:
+                bucket = 'Rising'
+            elif slope < -SLOPE_THRESHOLD:
+                bucket = 'Falling'
+            else:
+                bucket = 'Flat'
+
+            bucket_data[bucket]['appearances'] += 1
+            if won:
+                bucket_data[bucket]['wins'] += 1
+            bucket_data[bucket]['roi_contributions'].append(sp_val if won else -1.0)
+            bucket_data[bucket]['sps'].append(sp_val)
+            bucket_data[bucket]['slopes'].append(slope)
+
+    results = []
+    for trajectory, data in bucket_data.items():
+        n = data['appearances']
+        if n < 10:
+            continue
+
+        wins        = data['wins']
+        strike_rate = wins / n * 100
+        roi         = sum(data['roi_contributions']) / n * 100
+        avg_sp      = float(np.mean(data['sps']))
+        avg_slope   = float(np.mean(data['slopes']))
+
+        results.append({
+            'trajectory': trajectory,
+            'appearances': n,
+            'wins':        wins,
+            'strike_rate': round(strike_rate, 1),
+            'roi':         round(roi, 1),
+            'avg_sp':      round(avg_sp, 2),
+            'avg_slope':   round(avg_slope, 2),
+        })
+
+    log.info(f"Momentum analysis: {[r['trajectory'] + ' n=' + str(r['appearances']) for r in results]}")
+    return results
+
 
 # ─────────────────────────────────────────────
 # ANALYZER WEIGHTS — updated to match current analyzer.js
-# Used for the RF feature importance dashboard display only.
-# ─────────────────────────────────────────────
 ANALYZER_WEIGHTS = {
     # Core form
     'last_margin':              'Up to ±25 pts (dominant win → +10, demolished → -25)',
