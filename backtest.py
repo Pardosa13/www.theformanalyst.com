@@ -125,6 +125,7 @@ def ensure_tables():
                 id SERIAL PRIMARY KEY,
                 run_id INTEGER REFERENCES backtest_runs(id),
                 trajectory VARCHAR(20),
+                scope VARCHAR(20) DEFAULT 'all_horses',
                 appearances INTEGER,
                 wins INTEGER,
                 strike_rate FLOAT,
@@ -1407,9 +1408,9 @@ def write_results(run_id, feature_recommendations, component_results,
         for mom in momentum_results:
             conn.execute(text("""
                 INSERT INTO backtest_momentum_analysis
-                (run_id, trajectory, appearances, wins, strike_rate, roi, avg_sp, avg_slope,
+                (run_id, trajectory, scope, appearances, wins, strike_rate, roi, avg_sp, avg_slope,
                  avg_predicted_sp, overlay_pct)
-                VALUES (:run_id, :trajectory, :appearances, :wins, :strike_rate, :roi, :avg_sp, :avg_slope,
+                VALUES (:run_id, :trajectory, :scope, :appearances, :wins, :strike_rate, :roi, :avg_sp, :avg_slope,
                         :avg_predicted_sp, :overlay_pct)
             """), {'run_id': run_id, **mom})
 
