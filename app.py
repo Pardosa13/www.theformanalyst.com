@@ -5712,113 +5712,308 @@ def api_component_analysis():
 def api_external_factors():
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
-    
-    from flask import jsonify
-    
+
+    from collections import defaultdict
+
     track_filter = request.args.get('track', '')
-    min_score_filter = request.args.get('min_score', type=float)
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-    
-    race_id_query = db.session.query(Race.id).join(
+    date_from    = request.args.get('date_from', '')
+    date_to      = request.args.get('date_to', '')
+    limit_param  = request.args.get('limit', '200')
+    stake        = 10.0
+
+    # ── Lean race ID query ────────────────────────────────────────────
+    race_id_q = db.session.query(Race.id).join(
         Meeting, Race.meeting_id == Meeting.id
-    ).join(
-        Horse, Horse.race_id == Race.id
-    ).join(
-        Result, Result.horse_id == Horse.id
-    ).filter(
-        Result.finish_position > 0
-    )
-    
+    ).join(Horse, Horse.race_id == Race.id
+    ).join(Result, Result.horse_id == Horse.id
+    ).filter(Result.finish_position > 0)
+
     if track_filter:
-        race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+        race_id_q = race_id_q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
+        race_id_q = race_id_q.filter(Meeting.uploaded_at >= date_from)
     if date_to:
-        race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
-    
-    limit_param = request.args.get('limit', 'all')
-    all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
-    
+        race_id_q = race_id_q.filter(Meeting.uploaded_at <= date_to)
+
+    all_ids = race_id_q.add_columns(Meeting.uploaded_at).distinct().order_by(
+        Meeting.uploaded_at.desc(), Race.id.desc()
+    ).all()
+
     if limit_param == 'all':
-        recent_race_ids = [r[0] for r in all_race_ids]
+        race_ids = [r[0] for r in all_ids]
     else:
-        limit = int(limit_param) if limit_param.isdigit() else 200
-        recent_race_ids = [r[0] for r in all_race_ids[:limit]]
-    
-    base_query = db.session.query(
-        Horse, Prediction, Result, Race, Meeting
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
-        Result, Horse.id == Result.horse_id
-    ).join(
-        Race, Horse.race_id == Race.id
-    ).join(
-        Meeting, Race.meeting_id == Meeting.id
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        race_ids = [r[0] for r in all_ids[:limit]]
+
+    if not race_ids:
+        return jsonify({
+            'jockeys_reliable': {}, 'jockeys_limited': {},
+            'trainers_reliable': {}, 'trainers_limited': {},
+            'sires_reliable': {}, 'dams_reliable': {},
+            'barriers': {}, 'distances': {}, 'tracks': {},
+            'track_conditions': {}, 'class_performance': {},
+            'class_drops': {}
+        })
+
+    # ── Single lean query — columns only, no full ORM objects ────────
+    rows = db.session.query(
+        Meeting.meeting_name,
+        Race.id,
+        Race.race_number,
+        Race.distance,
+        Race.race_class,
+        Race.track_condition,
+        Horse.id,
+        Horse.jockey,
+        Horse.trainer,
+        Horse.csv_data,
+        Prediction.score,
+        Prediction.notes,
+        Result.finish_position,
+        Result.sp
+    ).join(Race,       Race.meeting_id      == Meeting.id
+    ).join(Horse,      Horse.race_id        == Race.id
+    ).join(Prediction, Prediction.horse_id  == Horse.id
+    ).join(Result,     Result.horse_id      == Horse.id
     ).filter(
         Result.finish_position > 0,
-        Race.id.in_(recent_race_ids)
-    )
-    
-    all_results = base_query.all()
-    
-    all_results_data = []
-    races_data = {}
-    for horse, pred, result, race, meeting in all_results:
-        all_results_data.append({
-            'horse': horse,
-            'prediction': pred,
-            'result': result,
-            'race': race,
-            'meeting': meeting
-        })
-        
-        race_key = (meeting.id, race.race_number)
-        if race_key not in races_data:
-            races_data[race_key] = []
-        races_data[race_key].append({
-            'horse': horse,
-            'prediction': pred,
-            'result': result,
-            'race': race,
-            'meeting': meeting
-        })
-    
-    external_factors = analyze_external_factors(all_results_data, races_data, stake=10.0)
-    class_performance = analyze_race_classes(races_data, stake=10.0)
-    
-    class_performance_filtered = {k: v for k, v in class_performance.items() if v['runs'] >= 2}
+        Race.id.in_(race_ids)
+    ).all()
 
-    class_drops = analyze_class_drops(stake=10.0)
-    
-    result = jsonify({
-        'jockeys_reliable': external_factors['jockeys_reliable'],
-        'jockeys_limited': external_factors['jockeys_limited'],
-        'trainers_reliable': external_factors['trainers_reliable'],
-        'trainers_limited': external_factors['trainers_limited'],
-        'sires_reliable': external_factors['sires_reliable'],
-        'dams_reliable': external_factors['dams_reliable'],
-        'barriers': external_factors['barriers'],
-        'distances': external_factors['distances'],
-        'tracks': external_factors['tracks'],
-        'track_conditions': external_factors['track_conditions'],
-        'class_performance': class_performance_filtered,
-        'class_drops': class_drops
-    })
-    
-    del all_results
-    del all_results_data
-    del races_data
-    del external_factors
-    del class_performance
-    del class_drops
-    import gc
-    gc.collect()
+    # ── Group into races for top-pick analysis ────────────────────────
+    races_map = defaultdict(list)
+    for row in rows:
+        key = (row[0], row[2])  # meeting_name, race_number
+        races_map[key].append(row)
+
+    # ── Accumulators ──────────────────────────────────────────────────
+    jockeys   = defaultdict(lambda: {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0})
+    trainers  = defaultdict(lambda: {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0})
+    sires     = defaultdict(lambda: {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0})
+    dams      = defaultdict(lambda: {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0})
+
+    barriers = {
+        '1-3': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        '4-6': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        '7-9': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        '10+': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    }
+    distances = {
+        'Sprint (≤1200m)':   {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'Short (1300-1500m)':{'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'Mile (1550-1700m)': {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'Middle (1800-2200m)':{'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+        'Staying (2400m+)':  {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
+    }
+    tracks           = defaultdict(lambda: {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0})
+    track_conditions = defaultdict(lambda: {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0})
+    class_perf       = defaultdict(lambda: {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0})
+
+    # Class drops — all horses
+    class_drop_buckets = {b: {'runs': 0, 'wins': 0, 'places': 0, 'profit': 0.0} for b in [
+        '100+','90-99','80-89','70-79','60-69','50-59','40-49','30-39',
+        '20-29','10-19','0-9','Same Class','Rise 0-9','Rise 10-19','Rise 20-29','Rise 30+'
+    ]}
+
+    import re as _re
+
+    # ── Single pass over all rows ─────────────────────────────────────
+    for row in rows:
+        meeting_name, race_id, race_num, distance, race_class, track_cond, \
+        horse_id, jockey, trainer, csv_data, score, notes, finish_pos, sp = row
+
+        won    = finish_pos == 1
+        placed = finish_pos in (1, 2, 3)
+        sp     = sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        csv    = csv_data or {}
+
+        # Jockey — all horses
+        j = (jockey or '').strip()
+        if j:
+            jockeys[j]['runs']   += 1
+            jockeys[j]['wins']   += 1 if won else 0
+            jockeys[j]['places'] += 1 if placed else 0
+            jockeys[j]['profit'] += profit
+
+        # Trainer — all horses
+        t = (trainer or '').strip()
+        if t:
+            trainers[t]['runs']   += 1
+            trainers[t]['wins']   += 1 if won else 0
+            trainers[t]['places'] += 1 if placed else 0
+            trainers[t]['profit'] += profit
+
+        # Sire — all horses
+        sire = csv.get('horse sire', '').strip()
+        if sire:
+            sires[sire]['runs']   += 1
+            sires[sire]['wins']   += 1 if won else 0
+            sires[sire]['places'] += 1 if placed else 0
+            sires[sire]['profit'] += profit
+
+        # Dam — all horses
+        dam = csv.get('horse dam', '').strip()
+        if dam:
+            dams[dam]['runs']   += 1
+            dams[dam]['wins']   += 1 if won else 0
+            dams[dam]['places'] += 1 if placed else 0
+            dams[dam]['profit'] += profit
+
+        # Class drops — all horses
+        notes_str = notes or ''
+        cd_bucket = None
+        if 'Stepping DOWN' in notes_str or 'Stepping UP' in notes_str:
+            m = _re.search(r'Stepping (DOWN|UP) ([\d.]+) class points', notes_str)
+            if m:
+                direction = m.group(1)
+                pts = float(m.group(2))
+                if direction == 'DOWN':
+                    if pts >= 100: cd_bucket = '100+'
+                    elif pts >= 90: cd_bucket = '90-99'
+                    elif pts >= 80: cd_bucket = '80-89'
+                    elif pts >= 70: cd_bucket = '70-79'
+                    elif pts >= 60: cd_bucket = '60-69'
+                    elif pts >= 50: cd_bucket = '50-59'
+                    elif pts >= 40: cd_bucket = '40-49'
+                    elif pts >= 30: cd_bucket = '30-39'
+                    elif pts >= 20: cd_bucket = '20-29'
+                    elif pts >= 10: cd_bucket = '10-19'
+                    else: cd_bucket = '0-9'
+                else:
+                    if pts >= 30: cd_bucket = 'Rise 30+'
+                    elif pts >= 20: cd_bucket = 'Rise 20-29'
+                    elif pts >= 10: cd_bucket = 'Rise 10-19'
+                    else: cd_bucket = 'Rise 0-9'
+        else:
+            cd_bucket = 'Same Class'
+
+        if cd_bucket:
+            class_drop_buckets[cd_bucket]['runs']   += 1
+            class_drop_buckets[cd_bucket]['wins']   += 1 if won else 0
+            class_drop_buckets[cd_bucket]['places'] += 1 if placed else 0
+            class_drop_buckets[cd_bucket]['profit'] += profit
+
+    # ── Top-pick only pass for barriers/distances/tracks/conditions/class ──
+    for key, horse_list in races_map.items():
+        if not horse_list:
+            continue
+
+        meeting_name = key[0]
+        top = max(horse_list, key=lambda x: x[10] or 0)  # x[10] = score
+
+        meeting_name, race_id, race_num, distance, race_class, track_cond, \
+        horse_id, jockey, trainer, csv_data, score, notes, finish_pos, sp = top
+
+        won    = finish_pos == 1
+        placed = finish_pos in (1, 2, 3)
+        sp     = sp or 0
+        profit = (sp * stake - stake) if won else -stake
+        csv    = csv_data or {}
+
+        # Barrier
+        try:
+            b = int(str(csv.get('horse barrier', 0) or 0).strip())
+            if b >= 1:
+                bucket = '1-3' if b <= 3 else '4-6' if b <= 6 else '7-9' if b <= 9 else '10+'
+                barriers[bucket]['runs']   += 1
+                barriers[bucket]['wins']   += 1 if won else 0
+                barriers[bucket]['places'] += 1 if placed else 0
+                barriers[bucket]['profit'] += profit
+        except (ValueError, TypeError):
+            pass
+
+        # Distance
+        try:
+            dist = int(str(csv.get('distance', 0) or 0).replace('m', '').strip())
+            if dist > 0:
+                if dist <= 1200:   db_ = 'Sprint (≤1200m)'
+                elif dist <= 1500: db_ = 'Short (1300-1500m)'
+                elif dist <= 1700: db_ = 'Mile (1550-1700m)'
+                elif dist <= 2200: db_ = 'Middle (1800-2200m)'
+                else:              db_ = 'Staying (2400m+)'
+                distances[db_]['runs']   += 1
+                distances[db_]['wins']   += 1 if won else 0
+                distances[db_]['places'] += 1 if placed else 0
+                distances[db_]['profit'] += profit
+        except (ValueError, TypeError):
+            pass
+
+        # Track condition
+        cond = (track_cond or 'Unknown').strip()
+        track_conditions[cond]['runs']   += 1
+        track_conditions[cond]['wins']   += 1 if won else 0
+        track_conditions[cond]['places'] += 1 if placed else 0
+        track_conditions[cond]['profit'] += profit
+
+        # Track name
+        track = meeting_name.split('_')[1] if '_' in meeting_name else meeting_name
+        if track:
+            tracks[track]['runs']   += 1
+            tracks[track]['wins']   += 1 if won else 0
+            tracks[track]['places'] += 1 if placed else 0
+            tracks[track]['profit'] += profit
+
+        # Race class
+        rc = (race_class or 'Unknown').strip()
+        class_perf[rc]['runs']   += 1
+        class_perf[rc]['wins']   += 1 if won else 0
+        class_perf[rc]['places'] += 1 if placed else 0
+        class_perf[rc]['profit'] += profit
+
+    # ── Calculate rates ───────────────────────────────────────────────
+    def calc(d):
+        for v in d.values():
+            n = v['runs']
+            v['strike_rate'] = round(v['wins'] / n * 100, 1) if n else 0
+            v['place_rate']  = round(v['places'] / n * 100, 1) if n else 0
+            v['roi']         = round(v['profit'] / (n * stake) * 100, 1) if n else 0
+        return d
+
+    calc(jockeys); calc(trainers); calc(sires); calc(dams)
+    calc(barriers); calc(distances); calc(tracks)
+    calc(track_conditions); calc(class_perf)
+
+    for v in class_drop_buckets.values():
+        n = v['runs']
+        v['strike_rate'] = round(v['wins'] / n * 100, 1) if n else 0
+        v['place_rate']  = round(v['places'] / n * 100, 1) if n else 0
+        v['roi']         = round(v['profit'] / (n * stake) * 100, 1) if n else 0
+
+    # ── Filter to 100+ runs only, sort by ROI ─────────────────────────
+    def filter_sort(d, min_runs=100):
+        return dict(sorted(
+            {k: v for k, v in d.items() if v['runs'] >= min_runs}.items(),
+            key=lambda x: x[1]['roi'], reverse=True
+        ))
+
+    # Tracks need 2+ races not 100+
+    tracks_filtered = dict(sorted(
+        {k: v for k, v in tracks.items() if v['runs'] >= 2}.items(),
+        key=lambda x: x[1]['strike_rate'], reverse=True
+    ))
+
+    class_perf_filtered = {k: v for k, v in class_perf.items() if v['runs'] >= 2}
+    class_drops_filtered = {k: v for k, v in class_drop_buckets.items() if v['runs'] > 0}
+
     db.session.expunge_all()
     db.session.remove()
+    import gc; gc.collect()
 
-    return result
+    return jsonify({
+        'jockeys_reliable':  filter_sort(jockeys),
+        'jockeys_limited':   {},
+        'trainers_reliable': filter_sort(trainers),
+        'trainers_limited':  {},
+        'sires_reliable':    filter_sort(sires),
+        'dams_reliable':     filter_sort(dams),
+        'barriers':          barriers,
+        'distances':         distances,
+        'tracks':            tracks_filtered,
+        'track_conditions':  dict(sorted(track_conditions.items(), key=lambda x: x[1]['roi'], reverse=True)),
+        'class_performance': class_perf_filtered,
+        'class_drops':       class_drops_filtered,
+    })
 @app.route("/api/data/probability-calibration")
 @login_required
 def api_probability_calibration():
