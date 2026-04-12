@@ -418,6 +418,8 @@
           <option value="100" {% if filters.limit == 100 %}selected{% endif %}>100 Races (Balanced)</option>
           <option value="200" {% if filters.limit == 200 or not filters.limit %}selected{% endif %}>200 Races (More Data)</option>
           <option value="500" {% if filters.limit == 500 %}selected{% endif %}>500 Races (Slow)</option>
+          <option value="1000" {% if filters.limit == 1000 %}selected{% endif %}>1000 Races (Very Slow)</option>
+          
           {% if current_user.is_admin %}
           <option value="all" {% if filters.limit == 'all' %}selected{% endif %}>All Races (Admin)</option>
           {% endif %}
