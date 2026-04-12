@@ -8626,6 +8626,222 @@ def export_ml_data():
 
     return output
 
+@app.route("/api/data/betting-filters")
+@login_required
+def api_betting_filters():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    from collections import defaultdict
+    import re as _re
+
+    track_filter = request.args.get('track', '')
+    date_from    = request.args.get('date_from', '')
+    date_to      = request.args.get('date_to', '')
+    limit_param  = request.args.get('limit', '200')
+    stake        = 10.0
+
+    # ── Race ID subquery ──────────────────────────────────────────────
+    race_id_q = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(Horse, Horse.race_id == Race.id
+    ).join(Result, Result.horse_id == Horse.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        race_id_q = race_id_q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_q = race_id_q.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_q = race_id_q.filter(Meeting.uploaded_at <= date_to)
+
+    all_ids = race_id_q.add_columns(Meeting.uploaded_at).distinct().order_by(
+        Meeting.uploaded_at.desc(), Race.id.desc()
+    ).all()
+
+    if limit_param == 'all':
+        race_ids = [r[0] for r in all_ids]
+    else:
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        race_ids = [r[0] for r in all_ids[:limit]]
+
+    if not race_ids:
+        return jsonify({'day_of_week': {}, 'win_prob_filter': [], 'confidence_filter': [], 'confidence_tiers': {}})
+
+    # ── Main data pull ────────────────────────────────────────────────
+    rows = db.session.query(
+        Meeting.date,
+        Meeting.uploaded_at,
+        Meeting.id,
+        Race.race_number,
+        Prediction.score,
+        Prediction.win_probability,
+        Prediction.predicted_odds,
+        Result.finish_position,
+        Result.sp
+    ).join(Race,       Race.meeting_id      == Meeting.id
+    ).join(Horse,      Horse.race_id        == Race.id
+    ).join(Prediction, Prediction.horse_id  == Horse.id
+    ).join(Result,     Result.horse_id      == Horse.id
+    ).filter(
+        Result.finish_position > 0,
+        Race.id.in_(race_ids)
+    ).all()
+
+    # ── Group by race ─────────────────────────────────────────────────
+    from collections import defaultdict
+    races_map = defaultdict(list)
+    for row in rows:
+        key = (row[2], row[3])  # meeting_id, race_number
+        races_map[key].append(row)
+
+    # ── A: Day of week ────────────────────────────────────────────────
+    DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+    day_stats = {d: {'races': 0, 'wins': 0, 'profit': 0.0} for d in DAYS}
+
+    for key, horses in races_map.items():
+        top = max(horses, key=lambda x: x[4])  # x[4] = score
+        row = top
+        # Determine date
+        date_val = row[0]  # Meeting.date
+        if not date_val:
+            ts = row[1]    # Meeting.uploaded_at
+            date_val = ts.date() if ts else None
+        if not date_val:
+            continue
+        day_name = DAYS[date_val.weekday()]
+        won    = row[7] == 1
+        sp     = row[8] or 0
+        profit = (sp * stake - stake) if won else -stake
+        day_stats[day_name]['races']  += 1
+        day_stats[day_name]['wins']   += 1 if won else 0
+        day_stats[day_name]['profit'] += profit
+
+    day_result = {}
+    for day, s in day_stats.items():
+        n = s['races']
+        if n == 0:
+            continue
+        day_result[day] = {
+            'races':       n,
+            'wins':        s['wins'],
+            'strike_rate': round(s['wins'] / n * 100, 1),
+            'roi':         round(s['profit'] / (n * stake) * 100, 1),
+            'profit':      round(s['profit'], 2),
+        }
+
+    # ── B: Win probability as betting filter ──────────────────────────
+    thresholds_wp = [0, 10, 15, 20, 25, 30, 35, 40, 50]
+    wp_accum = {t: {'count': 0, 'wins': 0, 'profit': 0.0} for t in thresholds_wp}
+
+    for key, horses in races_map.items():
+        top = max(horses, key=lambda x: x[4])
+        wp_raw = top[5]  # win_probability
+        sp     = top[8] or 0
+        won    = top[7] == 1
+        profit = (sp * stake - stake) if won else -stake
+        try:
+            wp = float(str(wp_raw).replace('%','').strip())
+        except (ValueError, TypeError):
+            continue
+        for t in thresholds_wp:
+            if wp >= t:
+                wp_accum[t]['count']  += 1
+                wp_accum[t]['wins']   += 1 if won else 0
+                wp_accum[t]['profit'] += profit
+
+    wp_result = []
+    for t in thresholds_wp:
+        v = wp_accum[t]
+        n = v['count']
+        if n == 0:
+            continue
+        wp_result.append({
+            'threshold':   t,
+            'count':       n,
+            'wins':        v['wins'],
+            'strike_rate': round(v['wins'] / n * 100, 1),
+            'roi':         round(v['profit'] / (n * stake) * 100, 1),
+            'profit':      round(v['profit'], 2),
+        })
+
+    # ── C: Race confidence (score gap) as betting filter ─────────────
+    gap_thresholds = [0, 5, 10, 15, 20, 25, 30, 40, 50]
+    gap_accum = {t: {'count': 0, 'wins': 0, 'profit': 0.0} for t in gap_thresholds}
+
+    # Also tier breakdown
+    tier_defs = [
+        ('Dominant (50+ gap)',   50, 9999),
+        ('Clear (30-49 gap)',    30,   49),
+        ('Comfortable (20-29)', 20,   29),
+        ('Moderate (15-19)',    15,   19),
+        ('Marginal (10-14)',    10,   14),
+        ('Slim (5-9)',           5,    9),
+        ('Tight (<5)',           0,    4),
+    ]
+    tier_stats = {label: {'count': 0, 'wins': 0, 'profit': 0.0} for label, _, _ in tier_defs}
+
+    for key, horses in races_map.items():
+        sorted_horses = sorted(horses, key=lambda x: x[4], reverse=True)
+        top    = sorted_horses[0]
+        second = sorted_horses[1] if len(sorted_horses) > 1 else None
+        gap    = top[4] - (second[4] if second else 0)
+        sp     = top[8] or 0
+        won    = top[7] == 1
+        profit = (sp * stake - stake) if won else -stake
+
+        for t in gap_thresholds:
+            if gap >= t:
+                gap_accum[t]['count']  += 1
+                gap_accum[t]['wins']   += 1 if won else 0
+                gap_accum[t]['profit'] += profit
+
+        for label, lo, hi in tier_defs:
+            if lo <= gap <= hi:
+                tier_stats[label]['count']  += 1
+                tier_stats[label]['wins']   += 1 if won else 0
+                tier_stats[label]['profit'] += profit
+                break
+
+    gap_result = []
+    for t in gap_thresholds:
+        v = gap_accum[t]
+        n = v['count']
+        if n == 0:
+            continue
+        gap_result.append({
+            'threshold':   t,
+            'count':       n,
+            'wins':        v['wins'],
+            'strike_rate': round(v['wins'] / n * 100, 1),
+            'roi':         round(v['profit'] / (n * stake) * 100, 1),
+            'profit':      round(v['profit'], 2),
+        })
+
+    tier_result = {}
+    for label, _, _ in tier_defs:
+        s = tier_stats[label]
+        n = s['count']
+        if n == 0:
+            continue
+        tier_result[label] = {
+            'count':       n,
+            'wins':        s['wins'],
+            'strike_rate': round(s['wins'] / n * 100, 1),
+            'roi':         round(s['profit'] / (n * stake) * 100, 1),
+            'profit':      round(s['profit'], 2),
+        }
+
+    db.session.expunge_all()
+    db.session.remove()
+
+    return jsonify({
+        'day_of_week':       day_result,
+        'win_prob_filter':   wp_result,
+        'confidence_filter': gap_result,
+        'confidence_tiers':  tier_result,
+    })
+
 # ─────────────────────────────────────────────────────────────
 # BACKTEST DASHBOARD ROUTES
 # Add these routes to app.py alongside your other routes
