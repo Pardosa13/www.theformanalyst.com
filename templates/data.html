@@ -651,7 +651,32 @@
     <div class="card-body text-center"><p class="text-muted">Click to expand and load sole leader analysis...</p></div>
   </div>
 </div>
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#dayOfWeek" aria-expanded="false">
+    <h5>📅 Day of Week Performance</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="dayOfWeek" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load day of week analysis...</p></div>
+  </div>
+</div>
 
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#winProbFilter" aria-expanded="false">
+    <h5>🎯 Win Probability as Betting Filter</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="winProbFilter" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load win probability analysis...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#raceConfidence" aria-expanded="false">
+    <h5>💪 Race Confidence (Score Gap) as Betting Filter</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="raceConfidence" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load race confidence analysis...</p></div>
+  </div>
+</div>
 {% if total_races == 0 %}
 <div class="analytics-empty">
   <h5>No results data yet!</h5>
@@ -702,6 +727,12 @@ document.addEventListener('DOMContentLoaded', function() {
     if (monthlyPerformance) { monthlyPerformance.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('monthly-performance')) { loadMonthlyPerformance(); } }); }
     const combinationAnalysis = document.getElementById('combinationAnalysis');
     if (combinationAnalysis) { combinationAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('combination-analysis')) { loadCombinationAnalysis(); } }); }
+    const dayOfWeek = document.getElementById('dayOfWeek');
+    if (dayOfWeek) { dayOfWeek.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('day-of-week')) { loadDayOfWeek(); } }); }
+    const winProbFilter = document.getElementById('winProbFilter');
+    if (winProbFilter) { winProbFilter.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('win-prob-filter')) { loadWinProbFilter(); } }); }
+    const raceConfidence = document.getElementById('raceConfidence');
+    if (raceConfidence) { raceConfidence.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('race-confidence')) { loadRaceConfidence(); } }); }
     const pfaiAnalysis = document.getElementById('pfaiAnalysis');
     if (pfaiAnalysis) { 
         pfaiAnalysis.addEventListener('show.bs.collapse', function() { 
@@ -2780,6 +2811,351 @@ function renderPfaiAnalysis(data) {
             }
         });
     }
+}
+function loadDayOfWeek() {
+    const container = document.getElementById('dayOfWeek');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading day of week data...</p></div>';
+    fetch(`/api/data/betting-filters?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderDayOfWeek(data); loadedSections.add('day-of-week'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data.</div>'; });
+}
+
+function loadWinProbFilter() {
+    const container = document.getElementById('winProbFilter');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading win probability data...</p></div>';
+    fetch(`/api/data/betting-filters?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderWinProbFilter(data); loadedSections.add('win-prob-filter'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data.</div>'; });
+}
+
+function loadRaceConfidence() {
+    const container = document.getElementById('raceConfidence');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading race confidence data...</p></div>';
+    fetch(`/api/data/betting-filters?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderRaceConfidence(data); loadedSections.add('race-confidence'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data.</div>'; });
+}
+
+function renderDayOfWeek(data) {
+    const container = document.getElementById('dayOfWeek');
+    const dow = data.day_of_week || {};
+    const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const available = DAYS.filter(d => dow[d]);
+
+    if (available.length === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No data with date information yet.</p></div>';
+        return;
+    }
+
+    const bestDay = available.reduce((a, b) => (dow[a]?.roi || -999) > (dow[b]?.roi || -999) ? a : b);
+    const worstDay = available.reduce((a, b) => (dow[a]?.roi || 999) < (dow[b]?.roi || 999) ? a : b);
+
+    let html = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px;margin-bottom:16px">Performance of your #1 ranked horse by day of week. Identifies whether certain race days suit your model better.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">`;
+
+    for (const day of DAYS) {
+        const s = dow[day];
+        if (!s) continue;
+        const roiCol  = s.roi >= 10 ? '#34d399' : s.roi >= 0 ? '#fbbf24' : '#f87171';
+        const isBest  = day === bestDay;
+        const border  = isBest ? 'border:2px solid #34d399' : 'border:1px solid var(--border-subtle)';
+        html += `<div style="flex:1;min-width:120px;${border};border-radius:10px;padding:14px;text-align:center">
+            <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">${day.slice(0,3)}</div>
+            <div style="font-size:1.4rem;font-weight:800;font-family:'DM Mono',monospace;color:${roiCol}">${s.roi >= 0 ? '+' : ''}${s.roi}%</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${s.wins}/${s.races} · ${s.strike_rate}%</div>
+            ${isBest ? '<div style="font-size:10px;color:#34d399;margin-top:4px;font-weight:700">BEST DAY</div>' : ''}
+        </div>`;
+    }
+
+    html += `</div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr><th>Day</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">ROI %</th><th class="text-center">P&L</th></tr>
+                </thead><tbody>`;
+
+    for (const day of DAYS) {
+        const s = dow[day];
+        if (!s) continue;
+        html += `<tr>
+            <td><strong>${day}</strong></td>
+            <td class="text-center">${s.races}</td>
+            <td class="text-center">${s.wins}</td>
+            <td class="text-center ${s.strike_rate >= 20 ? 'text-success' : s.strike_rate < 10 ? 'text-danger' : ''}">${s.strike_rate}%</td>
+            <td class="text-center ${s.roi >= 0 ? 'text-success' : 'text-danger'}">${s.roi >= 0 ? '+' : ''}${s.roi}%</td>
+            <td class="text-center ${s.profit >= 0 ? 'text-success' : 'text-danger'}">$${s.profit.toFixed(2)}</td>
+        </tr>`;
+    }
+
+    html += `</tbody></table></div>
+        <canvas id="dowChart" height="120" class="mt-3"></canvas>
+        <div class="alert alert-info mt-3">
+            <strong>💡 How to use this:</strong>
+            If Saturday produces a consistently higher ROI than mid-week days, it likely means better quality racing and more accurate market prices to compare against.
+            A bad day (negative ROI) doesn't mean stop betting — it may just need a higher score threshold applied as a filter.
+        </div>
+    </div>`;
+
+    container.innerHTML = html;
+
+    const chartDays = DAYS.filter(d => dow[d]);
+    new Chart(document.getElementById('dowChart'), {
+        type: 'bar',
+        data: {
+            labels: chartDays,
+            datasets: [{
+                label: 'ROI %',
+                data: chartDays.map(d => dow[d].roi),
+                backgroundColor: chartDays.map(d => dow[d].roi >= 0 ? 'rgba(52,211,153,0.65)' : 'rgba(248,113,113,0.65)'),
+                borderColor:     chartDays.map(d => dow[d].roi >= 0 ? 'rgba(52,211,153,1)'    : 'rgba(248,113,113,1)'),
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: { ticks: { color: '#9090a8', font: { size: 11 }, callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                x: { ticks: { color: '#9090a8', font: { size: 11 } }, grid: { display: false } }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+}
+
+function renderWinProbFilter(data) {
+    const container = document.getElementById('winProbFilter');
+    const rows = data.win_prob_filter || [];
+
+    if (rows.length === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No win probability data available. Ensure meetings have been analysed with probability calculations.</p></div>';
+        return;
+    }
+
+    const bestRow = rows.reduce((a, b) => a.roi > b.roi ? a : b);
+
+    let html = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px;margin-bottom:16px">
+            Tests whether only betting races where your model's win probability for the top pick exceeds a threshold improves ROI.
+            The <strong style="color:var(--text-primary)">≥0% row</strong> is your baseline (all races).
+        </p>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Min Win Probability</th>
+                        <th class="text-center">Qualifying Races</th>
+                        <th class="text-center">Wins</th>
+                        <th class="text-center">Strike %</th>
+                        <th class="text-center">ROI %</th>
+                        <th class="text-center">P&L</th>
+                        <th class="text-center">Signal?</th>
+                    </tr>
+                </thead><tbody>`;
+
+    const baseline = rows[0]?.roi || 0;
+    for (const row of rows) {
+        const isBest    = row.threshold === bestRow.threshold && rows.length > 1;
+        const improved  = row.roi > baseline && row.threshold > 0;
+        let badge = '';
+        if (isBest && row.threshold > 0) badge = '<span class="badge bg-success">Best ROI</span>';
+        else if (improved) badge = '<span class="badge bg-info">Improved</span>';
+        else if (row.threshold === 0) badge = '<span class="badge bg-primary">Baseline</span>';
+        else badge = '<span class="badge bg-warning">No edge</span>';
+
+        html += `<tr style="${isBest ? 'background:rgba(52,211,153,0.06)' : ''}">
+            <td><strong>≥${row.threshold}%</strong></td>
+            <td class="text-center">${row.count}</td>
+            <td class="text-center">${row.wins}</td>
+            <td class="text-center ${row.strike_rate >= 20 ? 'text-success' : ''}">${row.strike_rate}%</td>
+            <td class="text-center ${row.roi >= 0 ? 'text-success' : 'text-danger'}">${row.roi >= 0 ? '+' : ''}${row.roi}%</td>
+            <td class="text-center ${row.profit >= 0 ? 'text-success' : 'text-danger'}">$${row.profit.toFixed(2)}</td>
+            <td class="text-center">${badge}</td>
+        </tr>`;
+    }
+
+    html += `</tbody></table></div>
+        <canvas id="wpChart" height="120" class="mt-3"></canvas>
+        <div class="alert alert-info mt-3">
+            <strong>💡 How to interpret this:</strong>
+            If ROI climbs as the threshold increases, the win probability is <em>predictive</em> — your model's confidence is meaningful and filtering by it adds real value.
+            If ROI stays flat or falls, the win probability numbers may need recalibration (see Probability Calibration section above).
+            The sweet spot is the threshold where ROI is highest <em>while still having enough qualifying races to be statistically meaningful</em>.
+        </div>
+    </div>`;
+
+    container.innerHTML = html;
+
+    new Chart(document.getElementById('wpChart'), {
+        type: 'line',
+        data: {
+            labels: rows.map(r => '≥' + r.threshold + '%'),
+            datasets: [
+                {
+                    label: 'ROI %',
+                    data: rows.map(r => r.roi),
+                    borderColor: 'rgba(102,126,234,1)',
+                    backgroundColor: 'rgba(102,126,234,0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    yAxisID: 'y',
+                },
+                {
+                    label: 'Strike %',
+                    data: rows.map(r => r.strike_rate),
+                    borderColor: 'rgba(16,185,129,1)',
+                    backgroundColor: 'transparent',
+                    tension: 0.3,
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    borderDash: [4, 4],
+                    yAxisID: 'y2',
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                y:  { ticks: { color: '#9090a8', font: { size: 11 }, callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                y2: { position: 'right', ticks: { color: 'rgba(16,185,129,0.8)', font: { size: 11 }, callback: v => v + '%' }, grid: { display: false } },
+                x:  { ticks: { color: '#9090a8', font: { size: 11 } }, grid: { display: false } }
+            },
+            plugins: { legend: { labels: { color: '#9090a8', font: { size: 11 } } } }
+        }
+    });
+}
+
+function renderRaceConfidence(data) {
+    const container = document.getElementById('raceConfidence');
+    const gapRows   = data.confidence_filter || [];
+    const tiers     = data.confidence_tiers  || {};
+
+    if (gapRows.length === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No confidence data yet.</p></div>';
+        return;
+    }
+
+    const baseline = gapRows[0]?.roi || 0;
+    const bestRow  = gapRows.reduce((a, b) => a.roi > b.roi ? a : b);
+
+    const tierOrder = ['Dominant (50+ gap)','Clear (30-49 gap)','Comfortable (20-29)','Moderate (15-19)','Marginal (10-14)','Slim (5-9)','Tight (<5)'];
+
+    let html = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px;margin-bottom:16px">
+            Tests whether only betting races where your top pick has a clear lead over the #2 horse (by score points) improves ROI.
+            <strong style="color:var(--text-primary)">Score gap</strong> = difference in points between rank 1 and rank 2.
+        </p>
+
+        <h6 style="margin-bottom:10px">Confidence Tier Breakdown</h6>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">`;
+
+    for (const label of tierOrder) {
+        const s = tiers[label];
+        if (!s) continue;
+        const roiCol = s.roi >= 10 ? '#34d399' : s.roi >= 0 ? '#fbbf24' : '#f87171';
+        html += `<div style="flex:1;min-width:130px;border:1px solid var(--border-subtle);border-radius:10px;padding:12px;text-align:center">
+            <div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:4px">${label}</div>
+            <div style="font-size:1.3rem;font-weight:800;font-family:'DM Mono',monospace;color:${roiCol}">${s.roi >= 0 ? '+' : ''}${s.roi}%</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${s.wins}/${s.count} · ${s.strike_rate}%</div>
+        </div>`;
+    }
+
+    html += `</div>
+        <h6 style="margin-bottom:10px">Threshold Tuning — Bet only when gap ≥ X points</h6>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Min Score Gap</th>
+                        <th class="text-center">Qualifying Races</th>
+                        <th class="text-center">Wins</th>
+                        <th class="text-center">Strike %</th>
+                        <th class="text-center">ROI %</th>
+                        <th class="text-center">P&L</th>
+                        <th class="text-center">Signal?</th>
+                    </tr>
+                </thead><tbody>`;
+
+    for (const row of gapRows) {
+        const isBest   = row.threshold === bestRow.threshold && gapRows.length > 1;
+        const improved = row.roi > baseline && row.threshold > 0;
+        let badge = '';
+        if (isBest && row.threshold > 0) badge = '<span class="badge bg-success">Best ROI</span>';
+        else if (improved) badge = '<span class="badge bg-info">Improved</span>';
+        else if (row.threshold === 0) badge = '<span class="badge bg-primary">Baseline</span>';
+        else badge = '<span class="badge bg-warning">No extra edge</span>';
+
+        html += `<tr style="${isBest ? 'background:rgba(52,211,153,0.06)' : ''}">
+            <td><strong>≥${row.threshold} pts</strong></td>
+            <td class="text-center">${row.count}</td>
+            <td class="text-center">${row.wins}</td>
+            <td class="text-center ${row.strike_rate >= 20 ? 'text-success' : ''}">${row.strike_rate}%</td>
+            <td class="text-center ${row.roi >= 0 ? 'text-success' : 'text-danger'}">${row.roi >= 0 ? '+' : ''}${row.roi}%</td>
+            <td class="text-center ${row.profit >= 0 ? 'text-success' : 'text-danger'}">$${row.profit.toFixed(2)}</td>
+            <td class="text-center">${badge}</td>
+        </tr>`;
+    }
+
+    html += `</tbody></table></div>
+        <canvas id="confChart" height="120" class="mt-3"></canvas>
+        <div class="alert alert-info mt-3">
+            <strong>💡 How to interpret this:</strong>
+            A rising ROI curve as the gap threshold increases means your model <em>knows when it knows</em> — high-confidence races genuinely perform better.
+            If the curve is flat, score gap isn't a useful betting filter on its own.
+            Combine with the win probability filter: races where <em>both</em> metrics are high are your best candidates.
+        </div>
+    </div>`;
+
+    container.innerHTML = html;
+
+    new Chart(document.getElementById('confChart'), {
+        type: 'line',
+        data: {
+            labels: gapRows.map(r => '≥' + r.threshold + ' pts'),
+            datasets: [
+                {
+                    label: 'ROI %',
+                    data: gapRows.map(r => r.roi),
+                    borderColor: 'rgba(245,158,11,1)',
+                    backgroundColor: 'rgba(245,158,11,0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    yAxisID: 'y',
+                },
+                {
+                    label: 'Strike %',
+                    data: gapRows.map(r => r.strike_rate),
+                    borderColor: 'rgba(102,126,234,1)',
+                    backgroundColor: 'transparent',
+                    tension: 0.3,
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    borderDash: [4, 4],
+                    yAxisID: 'y2',
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                y:  { ticks: { color: '#9090a8', font: { size: 11 }, callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                y2: { position: 'right', ticks: { color: 'rgba(102,126,234,0.8)', font: { size: 11 }, callback: v => v + '%' }, grid: { display: false } },
+                x:  { ticks: { color: '#9090a8', font: { size: 11 } }, grid: { display: false } }
+            },
+            plugins: { legend: { labels: { color: '#9090a8', font: { size: 11 } } } }
+        }
+    });
 }
 </script>
 
