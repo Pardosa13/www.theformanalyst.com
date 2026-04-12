@@ -8731,7 +8731,7 @@ def api_betting_filters():
         }
 
     # ── B: Win probability as betting filter ──────────────────────────
-    thresholds_wp = [0, 10, 15, 20, 25, 30, 35, 40, 50]
+    thresholds_wp = [0, 10, 15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90]
     wp_accum = {t: {'count': 0, 'wins': 0, 'profit': 0.0} for t in thresholds_wp}
 
     for key, horses in races_map.items():
