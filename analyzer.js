@@ -1064,8 +1064,8 @@ function checkTrainers(trainerName) {
     const winPct = (data.L100Wins / data.L100Runs) * 100;
     const runs   = data.L100Runs;
 
-    if      (winPct >= 22) { addScore =  10; note = `+15.0 : Trainer hot form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
-    else if (winPct >= 16) { addScore =   5; note = `+10.0 : Trainer solid form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
+    if      (winPct >= 22) { addScore =  20; note = `+20.0 : Trainer hot form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
+    else if (winPct >= 16) { addScore =   15; note = `+15.0 : Trainer solid form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
     else if (winPct >= 10) { addScore = 0; note = `+0.0 : Trainer average form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
     else if (winPct >=  5) { addScore =  -5; note = `-5.0 : Trainer poor form — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
     else                   { addScore = -10; note = `-10.0 : Trainer cold — ${winPct.toFixed(1)}% L100 SR (${runs} starters)\n`; }
