@@ -967,8 +967,8 @@ function checkLastDistance(horseRow) {
             addScore -= 5;
             note += '- 5.0 : Big drop back in distance (400m+) - confirmed -34% ROI\n';
         } else if (distanceChange < -200) {
-    addScore += 8;
-    note += '+ 8.0 : Drop back in distance (200-400m) (+37.9% ROI edge)\n';
+    addScore += 20;
+    note += '+ 20.0 : Drop back in distance (200-400m) (+37.9% ROI edge)\n';
 }
     // Else: similar distance (-200 to +200), no bonus/penalty
     
