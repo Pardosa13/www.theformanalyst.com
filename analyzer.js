@@ -1705,11 +1705,11 @@ function checkMargin(formPosition, formMargin, classChange = 0, recentForm = nul
     // WINNERS (position = 1)
     if (position === 1) {
         if (margin >= 5.0) {
-            addScore = 10;
-            note += `+10.0 : Dominant last start win by ${margin.toFixed(1)}L\n`;
+            addScore = 20;
+            note += `+20.0 : Dominant last start win by ${margin.toFixed(1)}L\n`;
         } else if (margin >= 2.0) {
-            addScore = 7;
-            note += `+ 7.0 : Comfortable last start win by ${margin.toFixed(1)}L\n`;
+            addScore = 15;
+            note += `+ 15.0 : Comfortable last start win by ${margin.toFixed(1)}L\n`;
         } else if (margin >= 0.5) {
             addScore = 5;
             note += `+ 5.0 : Narrow last start win by ${margin.toFixed(1)}L\n`;
