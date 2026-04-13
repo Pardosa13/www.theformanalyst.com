@@ -219,20 +219,20 @@ function calculateScore(horseRow, trackCondition, troubleshooting = false, avera
     const horseCountry = String(horseRow['country'] || '').trim().toUpperCase();
     if (horseCountry && horseCountry !== 'AUS') {
         if (horseCountry === 'FR') {
-            score -= 8;
-            notes += '- 8.0 : French-bred (-67.7% ROI, 77 runners)\n';
+            score += 15;
+            notes += '+ 15.0 : French-bred (-67.7% ROI, 77 runners)\n';
         } else if (horseCountry === 'GB') {
             score += 10;
             notes += '+ 10.0 : GB-bred (+59.2% ROI, 26 runners - monitor sample)\n';
         } else if (horseCountry === 'JPN') {
-            score -= 10;
-            notes += '- 10.0 : Japan-bred (-100% ROI, 17 runners)\n';
+            score += 15;
+            notes += '+ 15.0 : Japan-bred (-100% ROI, 17 runners)\n';
         } else if (horseCountry === 'GER') {
             score -= 10;
             notes += '- 10.0 : German-bred (-100% ROI, 7 runners)\n';
         } else if (horseCountry === 'NZ') {
-            score -= 8;
-            notes += '- 8.0 : NZ-bred (-31.1% ROI, 267 runners)\n';
+            score -= 0;
+            notes += '- 0.0 : NZ-bred (-31.1% ROI, 267 runners)\n';
         } else if (horseCountry === 'IRE') {
             score -= 0;
             notes += '- 0.0 : Irish-bred (-11.0% ROI, 350 runners)\n';
