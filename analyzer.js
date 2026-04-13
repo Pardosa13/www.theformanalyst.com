@@ -2558,12 +2558,12 @@ function checkFirstUpSecondUp(horseRow) {
             const runs = nums[0], wins = nums[1], seconds = nums[2], thirds = nums[3];
             const podiumRate = (wins + seconds + thirds) / runs;
             if (wins > 0) {
-                addScore += 0;
-                note += `+ 0.0 : First-up winner(s) in ${wins} of ${runs} runs\n`;
+                addScore += 15;
+                note += `+ 15.0 : First-up winner(s) in ${wins} of ${runs} runs\n`;
             }
             if (podiumRate >= 0.5) {
-                addScore += 0;
-                note += `+ 0.0 : Strong first-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
+                addScore += 15;
+                note += `+ 15.0 : Strong first-up podium rate (${(podiumRate*100).toFixed(0)}%)\n`;
             }
         }
     }
