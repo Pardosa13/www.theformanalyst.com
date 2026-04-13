@@ -387,9 +387,9 @@ if (!isNaN(horseAge)) {
     
     // === 5YO HORSES (ENTIRE MALES ONLY) ===
     // 164% ROI, 40% SR - HUGE DISCOVERY (geldings destroy value at -61.5% ROI)
-    if (horseAge === 5 && horseSex === 'Horse') {
-    score += 5;
-    notes += '+5.0 : 5yo horse (164% ROI, 40% SR - elite age)\n';
+    if (horseAge === 15 && horseSex === 'Horse') {
+    score += 15;
+    notes += '+15.0 : 5yo horse (164% ROI, 40% SR - elite age)\n';
     }
     
     // === STANDARD AGE BONUSES (REDUCED) ===
