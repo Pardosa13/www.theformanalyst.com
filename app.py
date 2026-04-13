@@ -987,24 +987,16 @@ def parse_notes_components(notes):
         (r'([+-]?\s*[\d.]+)\s*:\s*Ran places:', '_ran_places_dynamic'),
 
         # ====== JOCKEYS ======
-        (r'\+\s*25\.0\s*:\s*Elite value jockey', 'Jockey - Elite (50%+ ROI)'),
-        (r'\+\s*20\.0\s*:\s*Strong value jockey', 'Jockey - Strong Value (20-50% ROI)'),
-        (r'\+\s*10\.0\s*:\s*Profitable jockey', 'Jockey - Profitable (0-20% ROI)'),
-        (r'-\s*15\.0\s*:\s*Poor value jockey', 'Jockey - Poor Value'),
         # Live L100 strike rate patterns
-        (r'\+\s*12\.0\s*:\s*Jockey hot form', 'Jockey - Hot Form (L100 25%+ SR)'),
-        (r'\+\s*6\.0\s*:\s*Jockey solid form', 'Jockey - Solid Form (L100 18-25% SR)'),
+        (r'\+\s*20\.0\s*:\s*Jockey hot form', 'Jockey - Hot Form (L100 25%+ SR)'),
+        (r'\+\s*15\.0\s*:\s*Jockey solid form', 'Jockey - Solid Form (L100 18-25% SR)'),
         (r'[-−]\s*6\.0\s*:\s*Jockey poor form', 'Jockey - Poor Form (L100 6-11% SR)'),
         (r'[-−]\s*12\.0\s*:\s*Jockey cold', 'Jockey - Cold (L100 <6% SR)'),
 
         # ====== TRAINERS ======
-        (r'\+\s*20\.0\s*:\s*Elite value trainer', 'Trainer - Elite (50%+ ROI)'),
-        (r'\+\s*15\.0\s*:\s*Strong value trainer', 'Trainer - Strong Value (20-50% ROI)'),
-        (r'\+\s*10\.0\s*:\s*Profitable trainer', 'Trainer - Profitable (0-20% ROI)'),
-        (r'-\s*15\.0\s*:\s*Poor value trainer|Poor value trainer.*destroys ROI', 'Trainer - Poor Value'),
         # Live L100 strike rate patterns
-        (r'\+\s*10\.0\s*:\s*Trainer hot form', 'Trainer - Hot Form (L100 22%+ SR)'),
-        (r'\+\s*5\.0\s*:\s*Trainer solid form', 'Trainer - Solid Form (L100 16-22% SR)'),
+        (r'\+\s*20\.0\s*:\s*Trainer hot form', 'Trainer - Hot Form (L100 22%+ SR)'),
+        (r'\+\s*15\.0\s*:\s*Trainer solid form', 'Trainer - Solid Form (L100 16-22% SR)'),
         (r'[-−]\s*5\.0\s*:\s*Trainer poor form', 'Trainer - Poor Form (L100 5-10% SR)'),
         (r'[-−]\s*10\.0\s*:\s*Trainer cold', 'Trainer - Cold (L100 <5% SR)'),
 
@@ -1094,8 +1086,8 @@ def parse_notes_components(notes):
         (r'(-[\d.]+):\s*Stepping UP', '_class_rise_dynamic'),
 
         # ====== LAST START - WINNERS ======
-        (r'\+\s*10\.0\s*:\s*Dominant last.?start win', 'Last Start - Dominant Win (5L+)'),
-        (r'\+\s*7\.0\s*:\s*Comfortable last.?start win', 'Last Start - Comfortable Win (2-5L)'),
+        (r'\+\s*20\.0\s*:\s*Dominant last.?start win', 'Last Start - Dominant Win (5L+)'),
+        (r'\+\s*15\.0\s*:\s*Comfortable last.?start win', 'Last Start - Comfortable Win (2-5L)'),
         (r'\+\s*5\.0\s*:\s*Narrow last.?start win', 'Last Start - Narrow Win (0.5-2L)'),
         (r'\+\s*15\.0\s*:\s*Last Start - Photo Win', 'Last Start - Photo Win (<0.5L)'),
 
@@ -1113,6 +1105,7 @@ def parse_notes_components(notes):
         (r'\+\s*0\.0\s*:\s*Beaten clearly.*BUT dropping in class', 'Last Start - Beaten Clearly + Dropping'),
         (r'-\s*7\.0\s*:\s*Well beaten', 'Last Start - Well Beaten (6-10L)'),
         (r'-\s*25\.0\s*:\s*Demolished', 'Last Start - Demolished (10L+)'),
+        (r'\+\s*15\.0\s*:\s*Close loss last start', 'Last Start - Close Loss (0.5-2.5L)'),
 
         # ====== DAYS SINCE RUN ======
         # FIX: new format is "Fresh return - X days since last run (150-199 days, +ROI%)"
@@ -1161,7 +1154,7 @@ def parse_notes_components(notes):
         (r'-\s*15\.0\s*:\s*Poor career win rate', 'Career Win Rate - Poor <10%'),
 
         # ====== AGE/SEX - BONUSES ======
-        (r'\+\s*25\.0\s*:\s*5yo horse', 'Age/Sex - 5yo Horse (Entire)'),
+        (r'\+\s*5\.0\s*:\s*5yo horse', 'Age/Sex - 5yo Horse (Entire)'),
         (r'\+\s*20\.0\s*:\s*8yo Mare', 'Age/Sex - 8yo Mare'),
         (r'\+\s*3\.0\s*:\s*Prime age \(3yo\)', 'Age/Sex - 3yo'),
         (r'\+\s*0\.0\s*:\s*\(4yo\)', 'Age/Sex - 4yo'),
@@ -1179,10 +1172,8 @@ def parse_notes_components(notes):
         (r'-\s*60\.0\s*:\s*13\+yo', 'Age/Sex - 13+yo Penalty'),
 
         # ====== COLT BONUSES ======
-        # FIX: new format is "3yo COLT (" not "3yo COLT combo"
-        (r'\+\s*20\.0\s*:\s*3yo COLT', 'Colt - 3yo Colt'),
-        # FIX: "COLT (" pattern — make sure this comes AFTER 3yo COLT so it doesn't double-match
-        (r'\+\s*20\.0\s*:\s*COLT\s*\((?!.*3yo)', 'Colt - Base Bonus'),
+        (r'\+\s*30\.0\s*:\s*3yo COLT', 'Colt - 3yo Colt'),
+        (r'\+\s*20\.0\s*:\s*COLT base bonus', 'Colt - Base Bonus'),
         (r'\+\s*15\.0\s*:\s*Fast sectional \+ COLT combo', 'Colt - Fast Sectional + Colt'),
 
         # ====== SIRE SCORING ======
@@ -1232,11 +1223,11 @@ def parse_notes_components(notes):
         (r'\+\s*15\.0\s*:\s*Sprint Leader Run Down Bonus', 'Pace Angle - Sprint Leader Run Down'),
 
         # ====== RUNNING POSITION (SPEEDMAP) ======
-        (r'[+\-]?\s*12\.0\s*:\s*LEADER in Sprint', 'Running Position - Leader Sprint'),
+        (r'[+\-]?\s*15\.0\s*:\s*LEADER in Sprint', 'Running Position - Leader Sprint'),
         (r'[+\-]?\s*8\.0\s*:\s*ONPACE in Sprint', 'Running Position - OnPace Sprint'),
         (r'[+\-]?\s*0\.0\s*:\s*MIDFIELD in Sprint', 'Running Position - Midfield Sprint'),
         (r'[+\-]?\s*8\.0\s*:\s*BACKMARKER in Sprint', 'Running Position - Backmarker Sprint'),
-        (r'[+\-]?\s*6\.0\s*:\s*LEADER in Mile', 'Running Position - Leader Mile'),
+        (r'[+\-]?\s*15\.0\s*:\s*LEADER in Mile', 'Running Position - Leader Mile'),
         (r'[+\-]?\s*8\.0\s*:\s*ONPACE in Mile', 'Running Position - OnPace Mile'),
         (r'[+\-]?\s*2\.0\s*:\s*MIDFIELD in Mile', 'Running Position - Midfield Mile'),
         (r'[+\-]?\s*5\.0\s*:\s*BACKMARKER in Mile', 'Running Position - Backmarker Mile'),
@@ -1244,10 +1235,10 @@ def parse_notes_components(notes):
         (r'[+\-]?\s*5\.0\s*:\s*ONPACE in Middle distance', 'Running Position - OnPace Middle'),
         (r'[+\-]?\s*3\.0\s*:\s*MIDFIELD in Middle distance', 'Running Position - Midfield Middle'),
         (r'[+\-]?\s*0\.0\s*:\s*BACKMARKER in Middle distance', 'Running Position - Backmarker Middle'),
-        (r'[+\-]?\s*7\.0\s*:\s*LEADER in Staying', 'Running Position - Leader Staying'),
-        (r'[+\-]?\s*3\.0\s*:\s*ONPACE in Staying', 'Running Position - OnPace Staying'),
-        (r'[+\-]?\s*5\.0\s*:\s*MIDFIELD in Staying', 'Running Position - Midfield Staying'),
-        (r'[+\-]?\s*2\.0\s*:\s*BACKMARKER in Staying', 'Running Position - Backmarker Staying'),
+        (r'[+\-]?\s*20\.0\s*:\s*LEADER in Staying', 'Running Position - Leader Staying'),
+        (r'[+\-]?\s*0\.0\s*:\s*ONPACE in Staying', 'Running Position - OnPace Staying'),
+        (r'[+\-]?\s*0\.0\s*:\s*MIDFIELD in Staying', 'Running Position - Midfield Staying'),
+        (r'[+\-]?\s*20\.0\s*:\s*BACKMARKER in Staying', 'Running Position - Backmarker Staying'),
         
         # ====== HIDDEN EDGE COMBINATION BONUSES ======
         (r'\+\s*[\d.]+\s*:\s*Hidden Edge.*Sprint leader.*last start favoured', 'Hidden Edge - Sprint Leader + Last Start Favoured'),
