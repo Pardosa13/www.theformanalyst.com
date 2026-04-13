@@ -3202,7 +3202,7 @@ function calculateRunningPositionScore(runningPosition, raceDistance) {
         else if (pos === 'MIDFIELD')   { score = 0;  note = '  0.0 : MIDFIELD in Sprint\n'; }
         else if (pos === 'BACKMARKER') { score = -8; note = '- 8.0 : BACKMARKER in Sprint\n'; }
     } else if (isMile) {
-        if (pos === 'LEADER')      { score = 6;  note = '+ 6.0 : LEADER in Mile (1300-1700m)\n'; }
+        if (pos === 'LEADER')      { score = 15;  note = '+ 15.0 : LEADER in Mile (1300-1700m)\n'; }
         else if (pos === 'ONPACE') { score = 8;  note = '+ 8.0 : ONPACE in Mile - sweet spot\n'; }
         else if (pos === 'MIDFIELD')   { score = 2;  note = '+ 2.0 : MIDFIELD in Mile\n'; }
         else if (pos === 'BACKMARKER') { score = -5; note = '- 5.0 : BACKMARKER in Mile\n'; }
