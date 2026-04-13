@@ -1154,7 +1154,7 @@ def parse_notes_components(notes):
         (r'-\s*15\.0\s*:\s*Poor career win rate', 'Career Win Rate - Poor <10%'),
 
         # ====== AGE/SEX - BONUSES ======
-        (r'\+\s*5\.0\s*:\s*5yo horse', 'Age/Sex - 5yo Horse (Entire)'),
+        (r'\+\s*15\.0\s*:\s*5yo horse', 'Age/Sex - 5yo Horse (Entire)'),
         (r'\+\s*20\.0\s*:\s*8yo Mare', 'Age/Sex - 8yo Mare'),
         (r'\+\s*3\.0\s*:\s*Prime age \(3yo\)', 'Age/Sex - 3yo'),
         (r'\+\s*0\.0\s*:\s*\(4yo\)', 'Age/Sex - 4yo'),
