@@ -1551,8 +1551,8 @@ function checkTrackDistanceForm(racingForm) {
         winScore = 15;
         note += '+ 15.0 : Strong win rate (' + (winRate * 100).toFixed(0) + '%) at this track+distance\n';
     } else if (winRate >= 0.26) {
-        winScore = 5;
-        note += '+ 5.0 : Good win rate (' + (winRate * 100).toFixed(0) + '%) at this track+distance\n';
+        winScore = 15;
+        note += '+ 15.0 : Good win rate (' + (winRate * 100).toFixed(0) + '%) at this track+distance\n';
     } else if (winRate >= 0.16) {
         winScore = 3;
         note += '+ 3.0 : Moderate win rate (' + (winRate * 100).toFixed(0) + '%) at this track+distance\n';
