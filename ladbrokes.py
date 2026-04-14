@@ -169,7 +169,14 @@ def fetch_race_odds(race_uuid: str) -> dict:
         data = resp.json()
 
         race_data = data.get("data", {})
-        status = race_data.get("race", {}).get("status", "Unknown")
+        race_obj  = race_data.get("race", {})
+        status    = race_obj.get("status", "Unknown")
+
+        # Silk sprite URL — ensure https prefix
+        silk_url = race_obj.get("silk_url", "")
+        if silk_url and not silk_url.startswith("http"):
+            silk_url = "https://" + silk_url
+
         runners = race_data.get("runners", [])
 
         odds = {}
@@ -181,18 +188,19 @@ def fetch_race_odds(race_uuid: str) -> dict:
                 continue
             runner_odds = runner.get("odds", {})
             odds[name_norm] = {
-                "win":       runner_odds.get("fixed_win"),
-                "place":     runner_odds.get("fixed_place"),
-                "favourite": runner.get("favourite", False),
-                "mover":     runner.get("mover", False),
-                "flucs":     runner.get("flucs", []),
+                "win":           runner_odds.get("fixed_win"),
+                "place":         runner_odds.get("fixed_place"),
+                "favourite":     runner.get("favourite", False),
+                "mover":         runner.get("mover", False),
+                "flucs":         runner.get("flucs", []),
+                "runner_number": runner.get("runner_number", 0),
             }
 
-        result = {"status": status, "odds": odds}
+        result = {"status": status, "odds": odds, "silk_url": silk_url}
         _odds_cache[race_uuid] = (now, result)
         logger.debug(f"Ladbrokes: fetched odds for {race_uuid} — status={status}, runners={len(odds)}")
         return result
 
     except Exception as e:
         logger.warning(f"Ladbrokes odds fetch failed for {race_uuid}: {e}")
-        return {"status": "error", "odds": {}}
+        return {"status": "error", "odds": {}, "silk_url": ""}
