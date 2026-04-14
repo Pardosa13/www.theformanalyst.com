@@ -1961,19 +1961,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 parts.push('<span style="background:#b45309;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:3px;">🔥 MOVE</span>');
             }
 
-            // LB price
-            parts.push('<span style="color:#fbbf24;font-weight:700;">LB ' + winPrice + '</span>');
-
-            // Fluc arrow + opening price
+            // LB price — show as: opening ▲/▼ current
             if (fluc) {
+                var openPrice = '$' + parseFloat(horseOdds.flucs[0]).toFixed(2);
                 parts.push(
-                    '<span style="color:' + fluc.color + ';margin-left:4px;font-size:12px;" title="' + fluc.title + '">' +
-                    fluc.arrow +
-                    ' <span style="font-size:10px;opacity:0.8;">$' + parseFloat(horseOdds.flucs[0]).toFixed(2) + '</span>' +
-                    '</span>'
+                    '<span style="color:#fbbf24;font-weight:700;">' +
+                    'LB ' + openPrice +
+                    '</span>' +
+                    '<span style="color:' + fluc.color + ';margin-left:3px;margin-right:3px;">' + fluc.arrow + '</span>' +
+                    '<span style="color:#fbbf24;font-weight:700;">' + winPrice + '</span>'
                 );
+            } else {
+                parts.push('<span style="color:#fbbf24;font-weight:700;">LB ' + winPrice + '</span>');
             }
-
             var html = parts.join('');
 
             if (existing) {
