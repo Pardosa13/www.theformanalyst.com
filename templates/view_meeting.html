@@ -1839,12 +1839,15 @@ document.addEventListener('DOMContentLoaded', function() {
 // ══════════════════════════════════════════
 //  LADBROKES LIVE ODDS
 //  Polls /api/odds/ladbrokes/<uuid> every 45s
-//  Injects into td:nth-child(4) — below PPE odds
+//  Injects:
+//    - Silk sprite into name cell (td:nth-child(2))
+//    - LB price + fluc arrow + fav/mover badge into odds cell (td:nth-child(4))
 // ══════════════════════════════════════════
 (function() {
-    var ladbrokesRaceMap = {};   // { "1": "uuid", "2": "uuid", ... }
-    var ladbrokesIntervals = {}; // { "1": intervalId, ... }
-    var POLL_MS = 45000;
+    var ladbrokesRaceMap   = {};
+    var ladbrokesIntervals = {};
+    var POLL_MS  = 45000;
+    var SILK_PX  = 32; // display size per silk tile
 
     function lbNorm(name) {
         return (name || '')
@@ -1854,50 +1857,130 @@ document.addEventListener('DOMContentLoaded', function() {
             .replace(/\s+/g, ' ').trim();
     }
 
+    // ── Silk sprite clipping ─────────────────────────────────────────
+    // The sprite is ordered left-to-right by runner_number (1-based).
+    // Runner 1 offset = 0px, runner 2 = -32px, etc.
+    function buildSilkStyle(silkUrl, runnerNumber) {
+        var offset = -((runnerNumber - 1) * SILK_PX);
+        return [
+            'display:inline-block',
+            'width:'  + SILK_PX + 'px',
+            'height:' + SILK_PX + 'px',
+            'background-image:url(' + silkUrl + ')',
+            'background-repeat:no-repeat',
+            'background-position:' + offset + 'px 0px',
+            'background-size:auto ' + SILK_PX + 'px',
+            'border-radius:3px',
+            'vertical-align:middle',
+            'flex-shrink:0',
+        ].join(';');
+    }
+
+    // ── Fluc indicator ───────────────────────────────────────────────
+    function flucIndicator(flucs) {
+        if (!flucs || flucs.length < 2) return null;
+        var open    = flucs[0];
+        var current = flucs[flucs.length - 1];
+        var diff    = current - open;
+        if (Math.abs(diff) < 0.05) return null;
+        return diff < 0
+            ? { arrow: '▼', color: '#34d399', title: 'Firming: was $' + open.toFixed(2) }
+            : { arrow: '▲', color: '#f87171', title: 'Drifting: was $' + open.toFixed(2) };
+    }
+
+    // ── Main inject ──────────────────────────────────────────────────
     function injectLbOdds(raceNumber, oddsData) {
         var raceCard = document.getElementById('race-' + raceNumber);
         if (!raceCard) return;
 
-        var status = oddsData.status || '';
-        var odds   = oddsData.odds  || {};
+        var status  = oddsData.status   || '';
+        var odds    = oddsData.odds     || {};
+        var silkUrl = oddsData.silk_url || '';
 
         raceCard.querySelectorAll('tbody tr').forEach(function(row) {
-            var nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
+            var nameCell = row.cells[1]; // td:nth-child(2)
+            var oddsCell = row.cells[3]; // td:nth-child(4)
+            if (!nameCell || !oddsCell) return;
+
+            var nameSpan = nameCell.querySelector('div > span:first-child');
             if (!nameSpan) return;
             var normName = lbNorm(nameSpan.textContent);
             if (!normName) return;
 
-            var oddsCell = row.cells[3]; // td:nth-child(4) zero-indexed
-            if (!oddsCell) return;
-
-            var existing = oddsCell.querySelector('.lb-odds-span');
             var horseOdds = odds[normName];
 
+            // ── 1. SILK ───────────────────────────────────────────────
+            var existingSilk = nameCell.querySelector('.lb-silk');
+            if (silkUrl && horseOdds && horseOdds.runner_number) {
+                if (!existingSilk) {
+                    var silkEl = document.createElement('span');
+                    silkEl.className = 'lb-silk';
+                    silkEl.style.cssText = buildSilkStyle(silkUrl, horseOdds.runner_number);
+                    silkEl.title = 'Silk — runner ' + horseOdds.runner_number;
+                    // Insert before the horse name inside the flex div
+                    var nameDiv = nameSpan.parentNode;
+                    nameDiv.style.display = 'flex';
+                    nameDiv.style.alignItems = 'center';
+                    nameDiv.style.gap = '8px';
+                    nameDiv.insertBefore(silkEl, nameSpan);
+                } else {
+                    existingSilk.style.cssText = buildSilkStyle(silkUrl, horseOdds.runner_number);
+                }
+            } else if (!silkUrl && existingSilk) {
+                existingSilk.remove();
+            }
+
+            // ── 2. LB ODDS + FLUC + FAV/MOVER ────────────────────────
+            var existing = oddsCell.querySelector('.lb-odds-span');
+
             if (!horseOdds || !horseOdds.win) {
-                // No data — remove stale span if present
                 if (existing) existing.remove();
                 return;
             }
 
             var winPrice = '$' + parseFloat(horseOdds.win).toFixed(2);
-            var label = horseOdds.favourite ? '⭐ LB ' : (horseOdds.mover ? '📈 LB ' : 'LB ');
-            var html = label + winPrice;
+            var fluc     = flucIndicator(horseOdds.flucs);
+            var parts    = [];
+
+            // Badge
+            if (horseOdds.favourite) {
+                parts.push('<span style="background:#7c3aed;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:3px;">⭐ FAV</span>');
+            } else if (horseOdds.mover) {
+                parts.push('<span style="background:#b45309;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:3px;">🔥 MOVE</span>');
+            }
+
+            // LB price
+            parts.push('<span style="color:#fbbf24;font-weight:700;">LB ' + winPrice + '</span>');
+
+            // Fluc arrow + opening price
+            if (fluc) {
+                parts.push(
+                    '<span style="color:' + fluc.color + ';margin-left:4px;font-size:12px;" title="' + fluc.title + '">' +
+                    fluc.arrow +
+                    ' <span style="font-size:10px;opacity:0.8;">$' + parseFloat(horseOdds.flucs[0]).toFixed(2) + '</span>' +
+                    '</span>'
+                );
+            }
+
+            var html = parts.join('');
 
             if (existing) {
-                existing.textContent = html;
+                existing.innerHTML = html;
             } else {
                 var span = document.createElement('span');
                 span.className = 'lb-odds-span';
                 span.style.cssText = [
-                    'display:block',
+                    'display:flex',
+                    'align-items:center',
+                    'flex-wrap:wrap',
+                    'gap:2px',
                     'font-family:"DM Mono",monospace',
                     'font-size:11px',
                     'font-weight:700',
-                    'color:#fbbf24',
-                    'margin-top:3px',
-                    'letter-spacing:0.03em',
+                    'margin-top:4px',
+                    'letter-spacing:0.02em',
                 ].join(';');
-                span.textContent = html;
+                span.innerHTML = html;
                 oddsCell.appendChild(span);
             }
         });
@@ -1915,31 +1998,26 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch('/api/odds/ladbrokes/' + uuid)
             .then(function(r) { return r.json(); })
             .then(function(data) { injectLbOdds(raceNumber, data); })
-            .catch(function() {}); // fail silently
+            .catch(function() {});
     }
 
     function startPolling() {
         Object.keys(ladbrokesRaceMap).forEach(function(raceNum) {
             var uuid = ladbrokesRaceMap[raceNum];
-            // Immediate first fetch
             pollRace(raceNum, uuid);
-            // Then every 45s
             ladbrokesIntervals[raceNum] = setInterval(function() {
                 pollRace(raceNum, uuid);
             }, POLL_MS);
         });
     }
 
-    // Kick off on page load
     fetch('/api/meeting/' + meetingId + '/ladbrokes-map')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             ladbrokesRaceMap = data;
-            if (Object.keys(ladbrokesRaceMap).length > 0) {
-                startPolling();
-            }
+            if (Object.keys(ladbrokesRaceMap).length > 0) startPolling();
         })
-        .catch(function() {}); // fail silently — no LB odds for this meeting
+        .catch(function() {});
 
 })();
 </script>
