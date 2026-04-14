@@ -299,15 +299,23 @@
   text-align: center;
 }
 
-/* Win % — near-white mono */
+/* Ladbrokes Price column */
 .vm-race-card tbody td:nth-child(5) {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 13px !important;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* Win % — near-white mono */
+.vm-race-card tbody td:nth-child(6) {
   font-family: 'DM Mono', monospace !important;
   color: var(--text-primary) !important;
   text-align: center;
 }
 
 /* Notes cell — details/summary */
-.vm-race-card tbody td:nth-child(6) { font-size: 11px; }
+.vm-race-card tbody td:nth-child(7) { font-size: 11px; }
 
 .vm-race-card details summary {
   cursor: pointer;
@@ -1067,6 +1075,9 @@ function updateScratchings(meetingId) {
           </td>
           <td style="padding:12px; text-align:center; font-weight:600; border-bottom:1px solid #e2e8f0; color:#28a745;">
             {{ horse.odds }}
+          </td>
+          <td class="lb-price-cell" style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0;">
+            <!-- Populated by Ladbrokes polling JS -->
           </td>
           <td style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0;">
             {{ horse.win_probability }}
@@ -1899,8 +1910,8 @@ document.addEventListener('DOMContentLoaded', function() {
         var silkUrl = oddsData.silk_url || '';
 
         raceCard.querySelectorAll('tbody tr').forEach(function(row) {
-            var nameCell = row.cells[1]; // td:nth-child(2)
-            var oddsCell = row.cells[3]; // td:nth-child(4)
+            var nameCell = row.cells[1]; // td:nth-child(2) — horse name + silk
+            var oddsCell = row.cells[4]; // td:nth-child(5) — dedicated Ladbrokes Price column
             if (!nameCell || !oddsCell) return;
 
             var nameSpan = nameCell.querySelector('div > span:first-child');
@@ -1978,7 +1989,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     'font-family:"DM Mono",monospace',
                     'font-size:11px',
                     'font-weight:700',
-                    'margin-top:4px',
                     'letter-spacing:0.02em',
                 ].join(';');
                 span.innerHTML = html;
