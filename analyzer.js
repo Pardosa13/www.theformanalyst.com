@@ -906,18 +906,18 @@ if (horseSex === 'Colt') {
     const sectionalMatch = String(horseRow['sectional'] || '').match(/(\d+\.?\d*)sec/);
     const rawSectional = sectionalMatch ? parseFloat(sectionalMatch[1]) : null;
     
-    // Priority 1: Fast sectional Colt (most valuable)
+    // Fast sectional Colt bonus
     if (rawSectional && rawSectional < 34) {
         score += 15;
         notes += '+15.0 : Fast sectional + COLT combo (13% SR, +8.4% ROI - sectional edge)\n';
     }
-    // Priority 2: 3yo Colt (age advantage)
-    else if (horseAge === 3) {
+    // 3yo Colt bonus (independent)
+    if (horseAge === 3) {
         score += 30;
         notes += '+30.0 : 3yo COLT (18.2% SR, +50% ROI, 203 races - strong confirmed edge)\n';
     }
-    // Priority 3: Base Colt bonus
-    else {
+    // Base Colt bonus (only if neither above applies)
+    if (!(rawSectional && rawSectional < 34) && horseAge !== 3) {
         score += 20;
         notes += '+20.0 : COLT base bonus (14.3% SR, +66.1% ROI, 84 races)\n';
     }
