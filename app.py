@@ -9211,7 +9211,8 @@ def best_bets():
                 )
 
                 # Include if matched components OR ≥80% win probability
-                if matched_components or wp >= 80:
+                jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
+                if matched_components or wp >= 80 or jockey_sole:
                     matched_components.sort(key=lambda x: x['roi'], reverse=True)
                     best_bets.append({
                         'meeting_id': meeting.id,
@@ -9231,7 +9232,7 @@ def best_bets():
                         'components': matched_components,
                         'component_count': len(matched_components),
                         'jockey': horse.jockey,
-                        'jockey_sole_ride': jockey_ride_counts.get(horse.jockey or '', 0) == 1,
+                        'jockey_sole_ride': jockey_sole,
                         'trainer': horse.trainer,
                         'barrier': horse.barrier,
                         'weight': horse.weight,
