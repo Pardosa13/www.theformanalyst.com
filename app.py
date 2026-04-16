@@ -9143,6 +9143,15 @@ def best_bets():
     total_horses_scanned = 0
 
     for meeting in recent_meetings:
+
+        # Build jockey ride count across all races in this meeting
+        jockey_ride_counts = {}
+        for r in meeting.races:
+            for h in r.horses:
+                j = h.jockey or ''
+                if j:
+                    jockey_ride_counts[j] = jockey_ride_counts.get(j, 0) + 1
+
         for race in meeting.races:
             horses_in_race = []
             for horse in race.horses:
@@ -9222,6 +9231,7 @@ def best_bets():
                         'components': matched_components,
                         'component_count': len(matched_components),
                         'jockey': horse.jockey,
+                        'jockey_sole_ride': jockey_ride_counts.get(horse.jockey or '', 0) == 1,
                         'trainer': horse.trainer,
                         'barrier': horse.barrier,
                         'weight': horse.weight,
