@@ -726,7 +726,16 @@
                 <td>{{ bet.win_probability }}</td>
                 <td>{{ bet.barrier }}</td>
                 <td>{{ bet.weight }}kg</td>
-                <td>{{ bet.jockey }}</td>
+                <td>
+                  {{ bet.jockey }}
+                  {% if bet.jockey_sole_ride %}
+                  <div style="margin-top:3px;">
+                    <span style="background:rgba(124,58,237,0.15);border:1px solid rgba(124,58,237,0.4);color:#c4b5fd;font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;font-family:'DM Mono',monospace;">
+                      ✈️ SOLE RIDE
+                    </span>
+                  </div>
+                  {% endif %}
+                </td>
                 <td>{{ bet.trainer }}</td>
                 <td>
                   <span class="badge bg-primary">{{ bet.component_count }} matched</span>
