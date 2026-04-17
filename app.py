@@ -17,6 +17,7 @@ import uuid
 from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage
 from puntingform_service import PuntingFormService
 from ladbrokes import match_race_uuid, fetch_race_odds
+from afl_routes import register_afl_routes, afl_nightly_sync
 
 import logging
 import sys
@@ -123,6 +124,8 @@ pf_service = PuntingFormService()
 login_manager = LoginManager()
 login_manager.login_view = "login"
 login_manager.init_app(app)
+
+register_afl_routes(app, db)
 
 @login_manager.user_loader
 def load_user(user_id):
