@@ -684,6 +684,11 @@ body.modal-open .main-container {
                                 <i class="bi bi-fire"></i> Best Bets
                             </a>
                         </li>
+                    <li class="nav-item">
+                            <a class="nav-link {{ 'active' if request.endpoint == 'afl_hub' }}" href="{{ url_for('afl_hub') }}">
+                                <i class="bi bi-dribbble"></i> AFL
+                            </a>
+                        </li>
                         {% if current_user.is_admin %}
                         <li class="nav-item">
                             <a class="nav-link {{ 'active' if request.endpoint == 'admin_panel' }}" href="{{ url_for('admin_panel') }}">
