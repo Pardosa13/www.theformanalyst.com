@@ -4,628 +4,112 @@
 
 {% block extra_css %}
 <style>
-  /* ══════════════════════════════════════════
-     AFL HUB — slots into existing design system
-     All tokens from base.html, no overrides
-  ══════════════════════════════════════════ */
-
-  /* ── Page header ── */
   .afl-header {
-    margin-bottom: 28px;
-    padding-bottom: 20px;
+    margin-bottom: 24px; padding-bottom: 18px;
     border-bottom: 1px solid var(--border-subtle);
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 14px;
+    display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 14px;
   }
-  .afl-header-left h2 {
-    font-size: 1.6rem;
-    font-weight: 800;
-    margin: 0 0 4px;
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .afl-header-left h2 .afl-badge {
-    font-size: 11px;
-    font-weight: 700;
-    padding: 3px 10px;
-    border-radius: 20px;
-    background: linear-gradient(135deg, rgba(102,126,234,0.2), rgba(118,75,162,0.2));
-    border: 1px solid var(--border-accent);
-    color: var(--accent);
-    letter-spacing: 0.05em;
-    vertical-align: middle;
-  }
-  .afl-header-left p {
-    margin: 0;
-    font-size: 13px;
-    color: var(--text-muted);
-  }
-  .afl-header-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .round-pill {
-    font-family: 'DM Mono', monospace;
-    font-size: 12px;
-    padding: 6px 14px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-mid);
-    border-radius: 20px;
-    color: var(--text-secondary);
-  }
-
-  /* ── Tab nav ── */
-  .afl-tabs {
-    display: flex;
-    gap: 4px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: 12px;
-    padding: 5px;
-    margin-bottom: 24px;
-    overflow-x: auto;
-  }
-  .afl-tab {
-    flex: 1;
-    min-width: 120px;
-    padding: 9px 16px;
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    text-align: center;
-    cursor: pointer;
-    border: none;
-    background: transparent;
-    color: var(--text-secondary);
-    transition: all 0.15s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    white-space: nowrap;
-  }
-  .afl-tab:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .afl-tab.active {
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    color: white;
-    box-shadow: 0 2px 10px var(--accent-glow);
-  }
-
-  /* ── Tab panels ── */
+  .afl-header-left h2 { font-size: 1.5rem; font-weight: 800; margin: 0 0 4px; color: var(--text-primary); display: flex; align-items: center; gap: 10px; }
+  .afl-badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; background: linear-gradient(135deg, rgba(102,126,234,0.2), rgba(118,75,162,0.2)); border: 1px solid var(--border-accent); color: var(--accent); letter-spacing: 0.05em; }
+  .afl-header-left p { margin: 0; font-size: 13px; color: var(--text-muted); }
+  .afl-header-right { display: flex; align-items: center; gap: 10px; }
+  .round-pill { font-family: 'DM Mono', monospace; font-size: 12px; padding: 6px 14px; background: var(--bg-elevated); border: 1px solid var(--border-mid); border-radius: 20px; color: var(--text-secondary); }
+  .afl-tabs { display: flex; gap: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 5px; margin-bottom: 24px; overflow-x: auto; }
+  .afl-tab { flex: 1; min-width: 110px; padding: 9px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; text-align: center; cursor: pointer; border: none; background: transparent; color: var(--text-secondary); transition: all 0.15s; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+  .afl-tab:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .afl-tab.active { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; box-shadow: 0 2px 10px var(--accent-glow); }
   .tab-panel { display: none; }
   .tab-panel.active { display: block; animation: fadeInUp 0.3s ease both; }
-
-  /* ── Stat row (same pattern as best_bets) ── */
-  .stat-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 14px;
-    margin-bottom: 24px;
-  }
-  .stat-tile {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: 12px;
-    padding: 18px 20px;
-    position: relative;
-    overflow: hidden;
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
-  .stat-tile:hover {
-    border-color: var(--border-mid);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-  }
-  .stat-tile::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-  }
-  .stat-tile.s-primary::before  { background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
-  .stat-tile.s-info::before     { background: linear-gradient(90deg, #3b82f6, #06b6d4); }
-  .stat-tile.s-success::before  { background: linear-gradient(90deg, #10b981, #34d399); }
-  .stat-tile.s-warning::before  { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
-  .stat-tile h5 {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-muted);
-    margin: 0 0 10px;
-  }
-  .stat-tile h2 {
-    font-size: 2rem;
-    font-weight: 800;
-    margin: 0;
-    font-family: 'DM Mono', monospace;
-    color: var(--text-primary);
-  }
-  .stat-tile .stat-sub {
-    font-size: 11px;
-    color: var(--text-muted);
-    margin-top: 4px;
-  }
-
-  /* ── Section cards ── */
-  .afl-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: 14px;
-    margin-bottom: 20px;
-    overflow: hidden;
-  }
-  .afl-card-header {
-    background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border-subtle);
-    padding: 14px 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-  .afl-card-header h4 {
-    font-size: 14px;
-    font-weight: 700;
-    margin: 0;
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+  .stat-tile { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 18px 20px; position: relative; overflow: hidden; }
+  .stat-tile::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
+  .stat-tile.s-primary::before { background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+  .stat-tile.s-info::before    { background: linear-gradient(90deg, #3b82f6, #06b6d4); }
+  .stat-tile.s-success::before { background: linear-gradient(90deg, #10b981, #34d399); }
+  .stat-tile.s-warning::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+  .stat-tile h5 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin: 0 0 10px; }
+  .stat-tile h2 { font-size: 2rem; font-weight: 800; margin: 0; font-family: 'DM Mono', monospace; color: var(--text-primary); }
+  .stat-tile .stat-sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .afl-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 14px; margin-bottom: 20px; overflow: hidden; }
+  .afl-card-header { background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+  .afl-card-header h4 { font-size: 14px; font-weight: 700; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
   .afl-card-body { padding: 20px; }
-
-  /* ── Player search bar ── */
-  .player-search-bar {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-  }
+  .player-search-bar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
   .player-search-bar .form-control { flex: 1; min-width: 200px; }
   .player-search-bar .form-select  { width: 180px; }
-
-  /* ── Player stat card ── */
-  .player-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: 14px;
-    overflow: hidden;
-    margin-bottom: 16px;
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
-  .player-card:hover {
-    border-color: var(--border-accent);
-    box-shadow: 0 4px 24px rgba(102,126,234,0.1);
-  }
-  .player-card-top {
-    background: linear-gradient(135deg, rgba(102,126,234,0.08), rgba(118,75,162,0.05));
-    border-bottom: 1px solid var(--border-subtle);
-    padding: 16px 20px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-  .player-avatar {
-    width: 48px;
-    height: 48px;
-    border-radius: 12px;
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    font-weight: 800;
-    color: white;
-    flex-shrink: 0;
-    font-family: 'DM Mono', monospace;
-  }
-  .player-info h4 {
-    font-size: 15px;
-    font-weight: 700;
-    margin: 0 0 3px;
-    color: var(--text-primary);
-  }
-  .player-meta {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .player-meta-pill {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 5px;
-    background: var(--bg-hover);
-    border: 1px solid var(--border-mid);
-    color: var(--text-secondary);
-    font-family: 'DM Mono', monospace;
-  }
-  .player-card-stats {
-    padding: 16px 20px;
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    gap: 12px;
-  }
-  .pstat {
-    text-align: center;
-  }
-  .pstat-val {
-    font-family: 'DM Mono', monospace;
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    display: block;
-  }
-  .pstat-lbl {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-muted);
-    margin-top: 2px;
-  }
-  .pstat-trend {
-    font-size: 11px;
-    font-family: 'DM Mono', monospace;
-    margin-top: 3px;
-  }
-  .trend-up   { color: var(--success); }
-  .trend-down { color: var(--danger); }
-  .trend-flat { color: var(--text-muted); }
-
-  /* Last 5 games mini chart */
-  .last5 {
-    padding: 0 20px 16px;
-    border-top: 1px solid var(--border-subtle);
-    padding-top: 14px;
-  }
-  .last5-label {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--text-muted);
-    margin-bottom: 10px;
-  }
-  .last5-bars {
-    display: flex;
-    gap: 8px;
-    align-items: flex-end;
-    height: 60px;
-  }
-  .last5-bar-wrap {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    height: 100%;
-    justify-content: flex-end;
-  }
-  .last5-bar {
-    width: 100%;
-    border-radius: 4px 4px 0 0;
-    background: linear-gradient(180deg, var(--accent), var(--accent-2));
-    min-height: 4px;
-    transition: height 0.3s ease;
-    position: relative;
-  }
-  .last5-bar:hover::after {
-    content: attr(data-val);
-    position: absolute;
-    bottom: calc(100% + 4px);
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-mid);
-    border-radius: 5px;
-    padding: 2px 6px;
-    font-size: 11px;
-    font-family: 'DM Mono', monospace;
-    color: var(--text-primary);
-    white-space: nowrap;
-    z-index: 10;
-  }
-  .last5-val {
-    font-size: 11px;
-    font-family: 'DM Mono', monospace;
-    color: var(--text-secondary);
-  }
-  .last5-opp {
-    font-size: 10px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-    text-align: center;
-  }
-
-  /* vs opponent section */
-  .vs-opponent-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    background: rgba(245,158,11,0.1);
-    border: 1px solid rgba(245,158,11,0.3);
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 700;
-    color: #fbbf24;
-    font-family: 'DM Mono', monospace;
-    margin-bottom: 8px;
-  }
-  .vs-stat-row {
-    display: flex;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin-top: 8px;
-  }
-  .vs-stat {
-    text-align: center;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    padding: 10px 16px;
-    flex: 1;
-    min-width: 80px;
-  }
-  .vs-stat-val {
-    font-family: 'DM Mono', monospace;
-    font-size: 1.3rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    display: block;
-  }
-  .vs-stat-lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-
-  /* ── Fixtures table ── */
-  .fixture-row {
-    display: flex;
-    align-items: center;
-    padding: 14px 0;
-    border-bottom: 1px solid var(--border-subtle);
-    gap: 16px;
-    flex-wrap: wrap;
-  }
+  .player-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 14px; overflow: hidden; margin-bottom: 16px; transition: border-color 0.2s, box-shadow 0.2s; }
+  .player-card:hover { border-color: var(--border-accent); box-shadow: 0 4px 24px rgba(102,126,234,0.1); }
+  .player-card-top { background: linear-gradient(135deg, rgba(102,126,234,0.08), rgba(118,75,162,0.05)); border-bottom: 1px solid var(--border-subtle); padding: 16px 20px; display: flex; align-items: center; gap: 16px; }
+  .player-avatar { width: 48px; height: 48px; border-radius: 12px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800; color: white; flex-shrink: 0; font-family: 'DM Mono', monospace; }
+  .player-info h4 { font-size: 15px; font-weight: 700; margin: 0 0 4px; color: var(--text-primary); }
+  .player-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+  .player-meta-pill { font-size: 11px; padding: 2px 8px; border-radius: 5px; background: var(--bg-hover); border: 1px solid var(--border-mid); color: var(--text-secondary); font-family: 'DM Mono', monospace; }
+  .player-card-stats { padding: 16px 20px; display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  .pstat { text-align: center; }
+  .pstat-val { font-family: 'DM Mono', monospace; font-size: 1.4rem; font-weight: 700; color: var(--text-primary); display: block; }
+  .pstat-lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-top: 2px; }
+  .pstat-trend { font-size: 11px; font-family: 'DM Mono', monospace; margin-top: 3px; }
+  .trend-up { color: var(--success); } .trend-down { color: var(--danger); } .trend-flat { color: var(--text-muted); }
+  .last5 { padding: 14px 20px 16px; border-top: 1px solid var(--border-subtle); }
+  .last5-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 10px; }
+  .last5-bars { display: flex; gap: 8px; align-items: flex-end; height: 70px; }
+  .last5-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; justify-content: flex-end; }
+  .last5-bar { width: 100%; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, var(--accent), var(--accent-2)); min-height: 4px; position: relative; cursor: default; }
+  .last5-bar:hover::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); background: var(--bg-elevated); border: 1px solid var(--border-mid); border-radius: 6px; padding: 4px 8px; font-size: 11px; font-family: 'DM Mono', monospace; color: var(--text-primary); white-space: nowrap; z-index: 20; }
+  .last5-val { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--text-secondary); }
+  .last5-opp { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; text-align: center; }
+  .line-input-row { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border-subtle); background: rgba(102,126,234,0.03); flex-wrap: wrap; }
+  .line-input-row label { font-size: 12px; color: var(--text-muted); white-space: nowrap; margin: 0; }
+  .line-input { width: 80px; padding: 6px 10px; font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 700; background: var(--bg-elevated); border: 1px solid var(--border-mid); border-radius: 8px; color: var(--text-primary); text-align: center; }
+  .line-input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-glow); }
+  .edge-display { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 8px; min-width: 140px; text-align: center; }
+  .edge-positive-bg { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); color: #34d399; }
+  .edge-negative-bg { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); color: #f87171; }
+  .edge-neutral-bg  { background: var(--bg-elevated); border: 1px solid var(--border-mid); color: var(--text-muted); }
+  .hit-rate-display { font-size: 12px; color: var(--text-muted); font-family: 'DM Mono', monospace; }
+  .player-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+  .player-empty i { font-size: 2rem; margin-bottom: 12px; display: block; }
+  .player-loading { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+  .player-loading .spinner { margin: 0 auto 16px; }
+  .fixture-row { display: flex; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--border-subtle); gap: 14px; flex-wrap: wrap; }
   .fixture-row:last-child { border-bottom: none; }
-  .fixture-time {
-    font-family: 'DM Mono', monospace;
-    font-size: 11px;
-    color: var(--text-muted);
-    min-width: 80px;
-  }
-  .fixture-teams {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 200px;
-  }
-  .team-name {
-    font-weight: 700;
-    font-size: 14px;
-    color: var(--text-primary);
-    flex: 1;
-    text-align: right;
-  }
+  .fixture-time { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--text-muted); min-width: 90px; line-height: 1.6; }
+  .fixture-teams { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 200px; }
+  .team-name { font-weight: 700; font-size: 14px; color: var(--text-primary); flex: 1; text-align: right; }
   .team-name.away { text-align: left; }
-  .vs-divider {
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--text-muted);
-    background: var(--bg-hover);
-    border: 1px solid var(--border-mid);
-    border-radius: 5px;
-    padding: 3px 8px;
-    font-family: 'DM Mono', monospace;
-    flex-shrink: 0;
-  }
-  .fixture-venue {
-    font-size: 12px;
-    color: var(--text-muted);
-    min-width: 120px;
-  }
-  .fixture-odds {
-    display: flex;
-    gap: 6px;
-  }
-  .odds-pill {
-    font-family: 'DM Mono', monospace;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 4px 10px;
-    border-radius: 6px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-mid);
-    color: var(--text-primary);
-    min-width: 52px;
-    text-align: center;
-  }
-  .odds-pill.fav {
-    background: rgba(102,126,234,0.12);
-    border-color: var(--border-accent);
-    color: var(--accent);
-  }
-
-  /* ── Value finder table ── */
-  .value-table { width: 100%; border-collapse: collapse; }
-  .value-table thead tr {
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  }
-  .value-table thead th {
-    padding: 10px 14px;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: rgba(255,255,255,0.9);
-    white-space: nowrap;
-  }
-  .value-table tbody tr {
-    border-bottom: 1px solid var(--border-subtle);
-    transition: background 0.15s;
-  }
-  .value-table tbody tr:hover { background: var(--bg-hover); }
-  .value-table tbody tr:last-child { border-bottom: none; }
-  .value-table tbody td {
-    padding: 12px 14px;
-    font-size: 13px;
-    color: var(--text-primary);
-    vertical-align: middle;
-  }
-  .edge-positive {
-    color: var(--success);
-    font-family: 'DM Mono', monospace;
-    font-weight: 700;
-  }
-  .edge-negative {
-    color: var(--danger);
-    font-family: 'DM Mono', monospace;
-  }
-  .edge-bar-wrap {
-    width: 80px;
-    height: 6px;
-    background: var(--bg-hover);
-    border-radius: 3px;
-    overflow: hidden;
-    display: inline-block;
-    vertical-align: middle;
-    margin-left: 8px;
-  }
-  .edge-bar {
-    height: 100%;
-    border-radius: 3px;
-    background: linear-gradient(90deg, var(--success), #34d399);
-  }
-
-  /* ── Ladder table ── */
+  .vs-divider { font-size: 11px; font-weight: 700; color: var(--text-muted); background: var(--bg-hover); border: 1px solid var(--border-mid); border-radius: 5px; padding: 3px 8px; font-family: 'DM Mono', monospace; flex-shrink: 0; }
+  .fixture-venue { font-size: 12px; color: var(--text-muted); min-width: 120px; }
+  .tip-badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 6px; font-family: 'DM Mono', monospace; background: rgba(102,126,234,0.12); border: 1px solid var(--border-accent); color: var(--accent); }
   .ladder-table { width: 100%; border-collapse: collapse; }
-  .ladder-table thead th {
-    background: var(--bg-elevated);
-    padding: 10px 14px;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--text-muted);
-    border-bottom: 1px solid var(--border-mid);
-    white-space: nowrap;
-  }
-  .ladder-table tbody tr {
-    border-bottom: 1px solid var(--border-subtle);
-    transition: background 0.15s;
-  }
+  .ladder-table thead th { background: var(--bg-elevated); padding: 10px 14px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); border-bottom: 1px solid var(--border-mid); white-space: nowrap; }
+  .ladder-table tbody tr { border-bottom: 1px solid var(--border-subtle); transition: background 0.15s; }
   .ladder-table tbody tr:hover { background: var(--bg-hover); }
-  .ladder-table tbody td {
-    padding: 11px 14px;
-    font-size: 13px;
-    color: var(--text-primary);
-    vertical-align: middle;
-  }
-  .pos-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    border-radius: 7px;
-    font-family: 'DM Mono', monospace;
-    font-size: 12px;
-    font-weight: 700;
-    background: var(--bg-hover);
-    border: 1px solid var(--border-mid);
-    color: var(--text-secondary);
-  }
+  .ladder-table tbody td { padding: 11px 14px; font-size: 13px; color: var(--text-primary); vertical-align: middle; }
+  .pos-badge { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 7px; font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 700; background: var(--bg-hover); border: 1px solid var(--border-mid); color: var(--text-secondary); }
   .pos-badge.finals { background: rgba(102,126,234,0.15); border-color: var(--border-accent); color: var(--accent); }
   .pos-badge.top2   { background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; color: white; }
-  .form-dots { display: flex; gap: 3px; }
-  .form-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-  }
-  .form-dot.w { background: var(--success); }
-  .form-dot.l { background: var(--danger); }
-  .form-dot.d { background: var(--text-muted); }
-  .pct-bar-wrap {
-    width: 60px; height: 4px;
-    background: var(--bg-hover);
-    border-radius: 2px; overflow: hidden;
-    display: inline-block; vertical-align: middle;
-    margin-left: 6px;
-  }
+  .pct-bar-wrap { width: 60px; height: 4px; background: var(--bg-hover); border-radius: 2px; overflow: hidden; display: inline-block; vertical-align: middle; margin-left: 6px; }
   .pct-bar { height: 100%; border-radius: 2px; background: var(--accent); }
-
-  /* ── Data source status ── */
-  .data-sources {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 20px;
-  }
-  .ds-pill {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 600;
-    border: 1px solid;
-  }
-  .ds-pill.connected {
-    background: rgba(16,185,129,0.08);
-    border-color: rgba(16,185,129,0.25);
-    color: #34d399;
-  }
-  .ds-pill.pending {
-    background: rgba(245,158,11,0.08);
-    border-color: rgba(245,158,11,0.25);
-    color: #fbbf24;
-  }
-  .ds-pill.offline {
-    background: rgba(239,68,68,0.08);
-    border-color: rgba(239,68,68,0.25);
-    color: #f87171;
-  }
-  .ds-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    flex-shrink: 0;
-  }
+  .margin-bar-row { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+  .margin-label { width: 150px; font-size: 13px; font-weight: 600; color: var(--text-primary); flex-shrink: 0; }
+  .margin-bar-outer { flex: 1; height: 28px; background: var(--bg-elevated); border-radius: 6px; overflow: hidden; position: relative; }
+  .margin-bar-inner { height: 100%; border-radius: 6px; opacity: 0.85; }
+  .margin-bar-pct { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 700; color: var(--text-primary); }
+  .margin-meta { width: 120px; font-size: 12px; color: var(--text-muted); font-family: 'DM Mono', monospace; flex-shrink: 0; }
+  .data-sources { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  .ds-pill { display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; border: 1px solid; }
+  .ds-pill.connected { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.25); color: #34d399; }
+  .ds-pill.pending   { background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.25); color: #fbbf24; }
+  .ds-pill.offline   { background: rgba(239,68,68,0.08);  border-color: rgba(239,68,68,0.25);  color: #f87171; }
+  .ds-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
   .connected .ds-dot { background: var(--success); box-shadow: 0 0 6px rgba(16,185,129,0.5); }
   .pending .ds-dot   { background: var(--warning); }
   .offline .ds-dot   { background: var(--danger); }
-
-  /* ── Coming soon overlay ── */
-  .coming-soon-overlay {
-    background: rgba(16,185,129,0.06);
-    border: 1px dashed rgba(16,185,129,0.25);
-    border-radius: 12px;
-    padding: 32px 24px;
-    text-align: center;
-    color: var(--text-secondary);
-  }
-  .coming-soon-overlay h4 { color: var(--text-primary); font-size: 1.1rem; margin-bottom: 8px; }
-  .coming-soon-overlay p { font-size: 13px; margin: 0; }
-
-  /* ── Responsive ── */
   @media (max-width: 768px) {
     .stat-row { grid-template-columns: 1fr 1fr; }
     .player-card-stats { grid-template-columns: repeat(3, 1fr); }
     .afl-tabs { gap: 2px; padding: 4px; }
     .afl-tab { font-size: 11px; padding: 8px 10px; min-width: 90px; }
-    .fixture-teams { min-width: 160px; }
-    .afl-header { flex-direction: column; }
   }
   @media (max-width: 480px) {
     .stat-row { grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -636,97 +120,76 @@
 
 {% block content %}
 
-<!-- ═══ PAGE HEADER ═══ -->
 <div class="afl-header">
   <div class="afl-header-left">
-    <h2>
-      🏈 AFL Hub
-      <span class="afl-badge">2026 SEASON</span>
-    </h2>
-    <p>Player form, disposal analysis, fixture odds & value finder</p>
+    <h2>🏈 AFL Hub <span class="afl-badge">{{ year }} SEASON</span></h2>
+    <p>Player disposal analysis · fixture tips · ladder</p>
   </div>
   <div class="afl-header-right">
-    <span class="round-pill">Round {{ current_round|default('5') }}</span>
-    <button class="btn btn-secondary btn-sm" onclick="refreshData()">
+    <span class="round-pill">Round {{ current_round }}</span>
+    <button class="btn btn-secondary btn-sm" onclick="refreshAll()">
       <i class="bi bi-arrow-clockwise"></i> Refresh
     </button>
   </div>
 </div>
 
-<!-- ═══ DATA SOURCE STATUS ═══ -->
 <div class="data-sources">
-  <div class="ds-pill connected">
-    <span class="ds-dot"></span>
-    AFL Tables (Historical)
+  <div class="ds-pill {{ 'connected' if data_sources.fryzigg else 'offline' }}">
+    <span class="ds-dot"></span> Fryzigg (Player Stats)
   </div>
-  <div class="ds-pill connected">
-    <span class="ds-dot"></span>
-    Fryzigg API (Player Stats)
+  <div class="ds-pill {{ 'connected' if data_sources.squiggle else 'pending' }}">
+    <span class="ds-dot"></span> Squiggle (Fixtures/Ladder)
   </div>
-  <div class="ds-pill pending">
-    <span class="ds-dot"></span>
-    Squiggle API (Fixtures)
-  </div>
-  <div class="ds-pill offline">
-    <span class="ds-dot"></span>
-    The Odds API (Prop Lines) — Configure
+  <div class="ds-pill {{ 'connected' if data_sources.odds_api else 'offline' }}">
+    <span class="ds-dot"></span> Odds API{% if not data_sources.odds_api %} — Configure{% endif %}
   </div>
 </div>
 
-<!-- ═══ STAT TILES ═══ -->
 <div class="stat-row">
   <div class="stat-tile s-primary">
     <h5>Players Tracked</h5>
-    <h2>{{ total_players|default('5,700') }}</h2>
-    <div class="stat-sub">All VFL/AFL history</div>
+    <h2>{{ total_players }}</h2>
+    <div class="stat-sub">Fryzigg 2019–present</div>
   </div>
   <div class="stat-tile s-info">
     <h5>Games in DB</h5>
-    <h2>{{ total_games|default('15K+') }}</h2>
-    <div class="stat-sub">Since 1897</div>
+    <h2>{{ total_games }}</h2>
+    <div class="stat-sub">Squiggle 2012–present</div>
   </div>
   <div class="stat-tile s-success">
-    <h5>Value Bets Today</h5>
-    <h2>{{ value_bets_today|default('7') }}</h2>
-    <div class="stat-sub">Props vs model</div>
+    <h5>Value Props</h5>
+    <h2>{{ value_bets_today }}</h2>
+    <div class="stat-sub">Last 24 hours</div>
   </div>
   <div class="stat-tile s-warning">
     <h5>Next Bounce</h5>
-    <h2>{{ next_game_time|default('1:20') }}</h2>
-    <div class="stat-sub">{{ next_game_teams|default('Mel vs Fre') }}</div>
+    <h2 style="font-size:1.3rem;">{{ next_game_time }}</h2>
+    <div class="stat-sub">{{ next_game_teams }}</div>
   </div>
 </div>
 
-<!-- ═══ TAB NAV ═══ -->
 <div class="afl-tabs">
   <button class="afl-tab active" onclick="switchTab('players', this)">
     <i class="bi bi-person-lines-fill"></i> Player Form
   </button>
   <button class="afl-tab" onclick="switchTab('fixtures', this)">
-    <i class="bi bi-calendar3"></i> Fixtures & Odds
-  </button>
-  <button class="afl-tab" onclick="switchTab('value', this)">
-    <i class="bi bi-lightning-charge-fill"></i> Value Finder
+    <i class="bi bi-calendar3"></i> Fixtures
   </button>
   <button class="afl-tab" onclick="switchTab('ladder', this)">
     <i class="bi bi-list-ol"></i> Ladder
   </button>
   <button class="afl-tab" onclick="switchTab('margins', this)">
-    <i class="bi bi-bar-chart-fill"></i> Margin Analysis
+    <i class="bi bi-bar-chart-fill"></i> Margins
   </button>
 </div>
 
 
-<!-- ══════════════════════════════════════
-     TAB 1: PLAYER FORM
-══════════════════════════════════════ -->
+<!-- TAB 1: PLAYER FORM -->
 <div id="tab-players" class="tab-panel active">
-
-  <!-- Search bar -->
   <div class="player-search-bar">
     <input type="text" class="form-control" id="playerSearch"
-           placeholder="Search player name... e.g. Bontempelli" oninput="filterPlayers()">
-    <select class="form-select" id="teamFilter" onchange="filterPlayers()">
+           placeholder="Search player... e.g. Bontempelli, Oliver, Daicos">
+    <select class="form-select" id="teamFilter">
       <option value="">All Teams</option>
       <option>Adelaide</option><option>Brisbane Lions</option><option>Carlton</option>
       <option>Collingwood</option><option>Essendon</option><option>Fremantle</option>
@@ -735,7 +198,7 @@
       <option>Port Adelaide</option><option>Richmond</option><option>St Kilda</option>
       <option>Sydney</option><option>West Coast</option><option>Western Bulldogs</option>
     </select>
-    <select class="form-select" style="width:160px;" id="statFilter">
+    <select class="form-select" style="width:150px;" id="statFilter">
       <option value="disposals">Disposals</option>
       <option value="marks">Marks</option>
       <option value="kicks">Kicks</option>
@@ -747,449 +210,139 @@
     </button>
   </div>
 
-  <!-- Player cards — populated via JS / Flask route -->
   <div id="playerResults">
-
-    <!-- DEMO CARD 1: Bontempelli -->
-    <div class="player-card" data-team="Western Bulldogs" data-name="Marcus Bontempelli">
-      <div class="player-card-top">
-        <div class="player-avatar">MB</div>
-        <div class="player-info">
-          <h4>Marcus Bontempelli <span style="font-size:12px;color:var(--text-muted);font-weight:400;">#4</span></h4>
-          <div class="player-meta">
-            <span class="player-meta-pill">Western Bulldogs</span>
-            <span class="player-meta-pill">MID</span>
-            <span class="player-meta-pill">193cm · 91kg</span>
-            <span class="player-meta-pill">Season avg: 28.4 disp</span>
-          </div>
-        </div>
-        <div style="margin-left:auto; text-align:right;">
-          <div class="vs-opponent-badge">
-            <i class="bi bi-lightning-fill"></i> vs St Kilda
-          </div>
-          <div style="font-size:11px; color:var(--text-muted);">Avg 31.2 disp vs StK (8 games)</div>
-        </div>
-      </div>
-
-      <!-- Season averages -->
-      <div class="player-card-stats">
-        <div class="pstat">
-          <span class="pstat-val">28.4</span>
-          <span class="pstat-lbl">Disp</span>
-          <div class="pstat-trend trend-up">▲ +2.1</div>
-        </div>
-        <div class="pstat">
-          <span class="pstat-val">5.8</span>
-          <span class="pstat-lbl">Marks</span>
-          <div class="pstat-trend trend-flat">→ 0.0</div>
-        </div>
-        <div class="pstat">
-          <span class="pstat-val">16.2</span>
-          <span class="pstat-lbl">Kicks</span>
-          <div class="pstat-trend trend-up">▲ +1.4</div>
-        </div>
-        <div class="pstat">
-          <span class="pstat-val">12.1</span>
-          <span class="pstat-lbl">HBalls</span>
-          <div class="pstat-trend trend-down">▼ -0.8</div>
-        </div>
-        <div class="pstat">
-          <span class="pstat-val">4.2</span>
-          <span class="pstat-lbl">Tackles</span>
-          <div class="pstat-trend trend-up">▲ +0.3</div>
-        </div>
-        <div class="pstat">
-          <span class="pstat-val">78%</span>
-          <span class="pstat-lbl">Eff%</span>
-          <div class="pstat-trend trend-up">▲ +3%</div>
-        </div>
-      </div>
-
-      <!-- Last 5 games bar chart -->
-      <div class="last5">
-        <div class="last5-label">Last 5 Games — Disposals</div>
-        <div class="last5-bars" id="bars-bont">
-          <!-- Rendered by JS below -->
-        </div>
-      </div>
-
-      <!-- vs this opponent -->
-      <div style="padding: 0 20px 16px;">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:10px;">
-          vs St Kilda — Career (8 games)
-        </div>
-        <div class="vs-stat-row">
-          <div class="vs-stat">
-            <span class="vs-stat-val">31.2</span>
-            <div class="vs-stat-lbl">Avg Disp</div>
-          </div>
-          <div class="vs-stat">
-            <span class="vs-stat-val">6.1</span>
-            <div class="vs-stat-lbl">Avg Marks</div>
-          </div>
-          <div class="vs-stat">
-            <span class="vs-stat-val">18.0</span>
-            <div class="vs-stat-lbl">Avg Kicks</div>
-          </div>
-          <div class="vs-stat">
-            <span class="vs-stat-val">87%</span>
-            <div class="vs-stat-lbl">Hit 25+</div>
-          </div>
-          <div class="vs-stat">
-            <span class="vs-stat-val">75%</span>
-            <div class="vs-stat-lbl">Hit 30+</div>
-          </div>
-        </div>
-      </div>
+    <div class="player-empty">
+      <i class="bi bi-person-lines-fill" style="color:var(--accent);opacity:0.4;"></i>
+      <div style="font-size:14px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Search for a player above</div>
+      <div style="font-size:13px;">Type a name or select a team. Set a book line to see edge vs model.</div>
     </div>
-
-    <!-- DEMO CARD 2: Nick Daicos -->
-    <div class="player-card" data-team="Collingwood" data-name="Nick Daicos">
-      <div class="player-card-top">
-        <div class="player-avatar" style="background: linear-gradient(135deg, #1a1a2e, #444);">ND</div>
-        <div class="player-info">
-          <h4>Nick Daicos <span style="font-size:12px;color:var(--text-muted);font-weight:400;">#35</span></h4>
-          <div class="player-meta">
-            <span class="player-meta-pill">Collingwood</span>
-            <span class="player-meta-pill">MID</span>
-            <span class="player-meta-pill">183cm · 76kg</span>
-            <span class="player-meta-pill">Season avg: 32.1 disp</span>
-          </div>
-        </div>
-        <div style="margin-left:auto; text-align:right;">
-          <div class="vs-opponent-badge">
-            <i class="bi bi-lightning-fill"></i> vs Hawthorn
-          </div>
-          <div style="font-size:11px; color:var(--text-muted);">Avg 29.8 disp vs Haw (5 games)</div>
-        </div>
-      </div>
-      <div class="player-card-stats">
-        <div class="pstat">
-          <span class="pstat-val">32.1</span>
-          <span class="pstat-lbl">Disp</span>
-          <div class="pstat-trend trend-up">▲ +1.8</div>
-        </div>
-        <div class="pstat">
-          <span class="pstat-val">7.2</span>
-          <span class="pstat-lbl">Marks</span>
-          <div class="pstat-trend trend-up">▲ +0.6</div>
-        </div>
-        <div class="pstat">
-          <span class="pstat-val">19.4</span>
-          <span class="pstat-lbl">Kicks</span>
-          <div class="pstat-trend trend-up">▲ +2.1</div>
-        </div>
-        <div class="pstat">
-          <span class="pstat-val">12.7</span>
-          <span class="pstat-lbl">HBalls</span>
-          <div class="pstat-trend trend-flat">→ 0.0</div>
-        </div>
-        <div class="pstat">
-          <span class="pstat-val">3.8</span>
-          <span class="pstat-lbl">Tackles</span>
-          <div class="pstat-trend trend-down">▼ -0.4</div>
-        </div>
-        <div class="pstat">
-          <span class="pstat-val">82%</span>
-          <span class="pstat-lbl">Eff%</span>
-          <div class="pstat-trend trend-up">▲ +1%</div>
-        </div>
-      </div>
-      <div class="last5">
-        <div class="last5-label">Last 5 Games — Disposals</div>
-        <div class="last5-bars" id="bars-daicos"></div>
-      </div>
-    </div>
-
-  </div><!-- /playerResults -->
+  </div>
 </div>
 
 
-<!-- ══════════════════════════════════════
-     TAB 2: FIXTURES & ODDS
-══════════════════════════════════════ -->
+<!-- TAB 2: FIXTURES -->
 <div id="tab-fixtures" class="tab-panel">
-
   <div class="afl-card">
     <div class="afl-card-header">
-      <h4><i class="bi bi-calendar3"></i> Round {{ current_round|default('5') }} Fixtures</h4>
-      <span style="font-size:12px;color:var(--text-muted);">Odds: Sportsbet · Updated 10 min ago</span>
+      <h4><i class="bi bi-calendar3"></i> Round {{ current_round }} Fixtures</h4>
+      <span style="font-size:12px;color:var(--text-muted);">Tips = Squiggle Aggregate model</span>
     </div>
-    <div class="afl-card-body" style="padding:0 20px;">
-
-      <!-- fixture rows -->
-      {% set fixtures = [
-        {'time':'Sat 1:20pm','home':'Melbourne','away':'Fremantle','venue':'MCG','home_odds':'1.55','away_odds':'2.45','fav':'home'},
-        {'time':'Sat 3:45pm','home':'Adelaide','away':'GWS Giants','venue':'Adelaide Oval','home_odds':'1.70','away_odds':'2.15','fav':'home'},
-        {'time':'Sat 7:35pm','home':'Richmond','away':'Gold Coast','venue':'MCG','home_odds':'2.30','away_odds':'1.65','fav':'away'},
-        {'time':'Sun 3:20pm','home':'Sydney','away':'Port Adelaide','venue':'SCG','home_odds':'1.85','away_odds':'1.95','fav':'away'},
-        {'time':'Sun 7:20pm','home':'W Bulldogs','away':'St Kilda','venue':'Marvel Stadium','home_odds':'1.40','away_odds':'2.90','fav':'home'},
-        {'time':'Mon 3:20pm','home':'Geelong','away':'Hawthorn','venue':'GMHBA','home_odds':'1.60','away_odds':'2.30','fav':'home'},
-      ] %}
-
-      {% for f in fixtures %}
-      <div class="fixture-row">
-        <div class="fixture-time">{{ f.time }}</div>
-        <div class="fixture-teams">
-          <div class="team-name">{{ f.home }}</div>
-          <div class="vs-divider">VS</div>
-          <div class="team-name away">{{ f.away }}</div>
+    <div class="afl-card-body" style="padding: 0 20px;">
+      {% if fixtures %}
+        {% for f in fixtures %}
+        <div class="fixture-row">
+          <div class="fixture-time">
+            {% if f.date %}{{ f.date.strftime('%a %-d %b') }}<br><span style="font-size:10px;">{{ f.localtime or '' }}</span>
+            {% else %}TBC{% endif %}
+          </div>
+          <div class="fixture-teams">
+            <div class="team-name">{{ f.hteam }}</div>
+            <div class="vs-divider">VS</div>
+            <div class="team-name away">{{ f.ateam }}</div>
+          </div>
+          <div class="fixture-venue"><i class="bi bi-geo-alt" style="font-size:11px;"></i> {{ f.venue or '—' }}</div>
+          {% if f.squiggle_tip %}
+          <span class="tip-badge"><i class="bi bi-lightning-fill"></i> {{ f.squiggle_tip }}{% if f.squiggle_confidence %} · {{ f.squiggle_confidence|round(0)|int }}%{% endif %}</span>
+          {% endif %}
+          <button class="btn btn-sm btn-secondary" onclick="loadTeamPlayers('{{ f.hteam }}')">
+            <i class="bi bi-person-lines-fill"></i> {{ f.hteam }} players
+          </button>
+          <button class="btn btn-sm btn-secondary" onclick="loadTeamPlayers('{{ f.ateam }}')">
+            <i class="bi bi-person-lines-fill"></i> {{ f.ateam }} players
+          </button>
         </div>
-        <div class="fixture-venue">
-          <i class="bi bi-geo-alt" style="font-size:11px;"></i>
-          {{ f.venue }}
+        {% endfor %}
+      {% else %}
+        <div style="padding:30px;text-align:center;color:var(--text-muted);">
+          <i class="bi bi-calendar-x" style="font-size:1.5rem;display:block;margin-bottom:10px;"></i>
+          No upcoming fixtures. Click Refresh to fetch from Squiggle.
         </div>
-        <div class="fixture-odds">
-          <span class="odds-pill {% if f.fav == 'home' %}fav{% endif %}">{{ f.home_odds }}</span>
-          <span class="odds-pill {% if f.fav == 'away' %}fav{% endif %}">{{ f.away_odds }}</span>
-        </div>
-        <a href="#" class="btn btn-sm btn-secondary" onclick="loadMatchProps('{{ f.home }}', '{{ f.away }}')">
-          Props <i class="bi bi-arrow-right"></i>
-        </a>
-      </div>
-      {% endfor %}
-
+      {% endif %}
     </div>
   </div>
-
 </div>
 
 
-<!-- ══════════════════════════════════════
-     TAB 3: VALUE FINDER
-══════════════════════════════════════ -->
-<div id="tab-value" class="tab-panel">
-
-  <div class="afl-card" style="margin-bottom:16px;">
-    <div class="afl-card-header">
-      <h4><i class="bi bi-info-circle"></i> How Value Finder Works</h4>
-    </div>
-    <div class="afl-card-body" style="padding:14px 20px;">
-      <p style="font-size:13px;margin:0;">
-        Your model's predicted disposal average vs what the bookmaker has priced as the line.
-        <span style="color:var(--success);font-weight:600;">Green edge</span> = model says player will beat the line.
-        Requires The Odds API connection for live prop lines.
-      </p>
-    </div>
-  </div>
-
-  <div class="afl-card">
-    <div class="afl-card-header">
-      <h4><i class="bi bi-lightning-charge-fill"></i> Disposal Value Bets — Round {{ current_round|default('5') }}</h4>
-      <div style="display:flex;gap:8px;">
-        <select class="form-select form-select-sm" style="width:130px;">
-          <option>Disposals</option>
-          <option>Marks</option>
-          <option>Tackles</option>
-          <option>Goals</option>
-        </select>
-        <button class="btn btn-sm btn-primary">
-          <i class="bi bi-funnel"></i> Filter
-        </button>
-      </div>
-    </div>
-    <div class="afl-card-body" style="padding:0;">
-      <div class="table-responsive">
-        <table class="value-table">
-          <thead>
-            <tr>
-              <th>Player</th>
-              <th>Team</th>
-              <th>Opponent</th>
-              <th>Book Line</th>
-              <th>Model Pred</th>
-              <th>Edge</th>
-              <th>Hist Hit%</th>
-              <th>vs Opp Avg</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% set value_bets = [
-              {'player':'M. Bontempelli','team':'W. Bulldogs','opp':'St Kilda','line':'27.5','pred':'31.2','edge':'+3.7','hist':'75%','vs_avg':'31.2','positive':true},
-              {'player':'N. Daicos','team':'Collingwood','opp':'Hawthorn','line':'30.5','pred':'29.8','edge':'-0.7','hist':'55%','vs_avg':'29.8','positive':false},
-              {'player':'C. Oliver','team':'Melbourne','opp':'Fremantle','line':'24.5','pred':'27.8','edge':'+3.3','hist':'68%','vs_avg':'26.4','positive':true},
-              {'player':'Z. Merrett','team':'Essendon','opp':'Carlton','line':'22.5','pred':'25.1','edge':'+2.6','hist':'71%','vs_avg':'24.8','positive':true},
-              {'player':'T. Kelly','team':'GWS','opp':'Adelaide','line':'26.5','pred':'24.2','edge':'-2.3','hist':'42%','vs_avg':'23.9','positive':false},
-              {'player':'P. Cripps','team':'Carlton','opp':'Essendon','line':'25.5','pred':'28.8','edge':'+3.3','hist':'72%','vs_avg':'27.1','positive':true},
-            ] %}
-            {% for b in value_bets %}
-            <tr>
-              <td style="font-weight:700;">{{ b.player }}</td>
-              <td style="color:var(--text-secondary);">{{ b.team }}</td>
-              <td style="color:var(--text-muted);font-size:12px;">{{ b.opp }}</td>
-              <td>
-                <span style="font-family:'DM Mono',monospace;font-weight:700;">{{ b.line }}</span>
-              </td>
-              <td>
-                <span style="font-family:'DM Mono',monospace;font-weight:700;color:var(--accent);">{{ b.pred }}</span>
-              </td>
-              <td>
-                <span class="{% if b.positive %}edge-positive{% else %}edge-negative{% endif %}">
-                  {{ b.edge }}
-                </span>
-                {% if b.positive %}
-                <span class="edge-bar-wrap">
-                  <span class="edge-bar" style="width:{{ [(b.edge[1:]|float / 6 * 100)|int, 100]|min }}%"></span>
-                </span>
-                {% endif %}
-              </td>
-              <td>
-                <span style="font-family:'DM Mono',monospace;
-                  color:{% if b.hist|replace('%','')|int >= 65 %}var(--success){% elif b.hist|replace('%','')|int >= 50 %}var(--warning){% else %}var(--danger){% endif %}">
-                  {{ b.hist }}
-                </span>
-              </td>
-              <td style="font-family:'DM Mono',monospace;color:var(--text-secondary);">{{ b.vs_avg }}</td>
-              <td>
-                {% if b.positive %}
-                <span class="badge bg-success" style="font-size:11px;">✓ Value</span>
-                {% else %}
-                <span class="badge bg-secondary" style="font-size:11px;">Skip</span>
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-</div>
-
-
-<!-- ══════════════════════════════════════
-     TAB 4: LADDER
-══════════════════════════════════════ -->
+<!-- TAB 3: LADDER -->
 <div id="tab-ladder" class="tab-panel">
-
   <div class="afl-card">
     <div class="afl-card-header">
-      <h4><i class="bi bi-list-ol"></i> 2026 AFL Ladder — Round {{ current_round|default('5') }}</h4>
+      <h4><i class="bi bi-list-ol"></i> {{ year }} AFL Ladder — Round {{ current_round }}</h4>
       <span style="font-size:12px;color:var(--text-muted);">Source: Squiggle API</span>
     </div>
     <div class="afl-card-body" style="padding:0;">
       <table class="ladder-table">
         <thead>
           <tr>
-            <th>#</th>
-            <th>Team</th>
+            <th>#</th><th>Team</th>
             <th>W</th><th>L</th><th>D</th>
-            <th>PF</th><th>PA</th>
-            <th>%</th>
-            <th>Pts</th>
-            <th>Form</th>
+            <th>PF</th><th>PA</th><th>%</th><th>Pts</th>
           </tr>
         </thead>
         <tbody>
-          {% set ladder = [
-            {'pos':1,'team':'Brisbane Lions','w':4,'l':1,'d':0,'pf':512,'pa':401,'pct':127.7,'pts':16,'form':'WWWLW'},
-            {'pos':2,'team':'Geelong','w':4,'l':1,'d':0,'pf':498,'pa':421,'pct':118.3,'pts':16,'form':'WLWWW'},
-            {'pos':3,'team':'Carlton','w':3,'l':2,'d':0,'pf':467,'pa':438,'pct':106.6,'pts':12,'form':'WWLWL'},
-            {'pos':4,'team':'Sydney','w':3,'l':2,'d':0,'pf':455,'pa':440,'pct':103.4,'pts':12,'form':'WLWLW'},
-            {'pos':5,'team':'Melbourne','w':3,'l':2,'d':0,'pf':449,'pa':441,'pct':101.8,'pts':12,'form':'LWWWL'},
-            {'pos':6,'team':'Collingwood','w':3,'l':2,'d':0,'pf':442,'pa':448,'pct':98.7,'pts':12,'form':'WWLLW'},
-            {'pos':7,'team':'Port Adelaide','w':3,'l':2,'d':0,'pf':431,'pa':447,'pct':96.4,'pts':12,'form':'LLLWW'},
-            {'pos':8,'team':'W. Bulldogs','w':2,'l':3,'d':0,'pf':421,'pa':459,'pct':91.7,'pts':8,'form':'WLLWL'},
-            {'pos':9,'team':'Hawthorn','w':2,'l':3,'d':0,'pf':418,'pa':462,'pct':90.5,'pts':8,'form':'LWLWL'},
-            {'pos':10,'team':'Fremantle','w':2,'l':3,'d':0,'pf':401,'pa':471,'pct':85.1,'pts':8,'form':'LLWLW'},
-          ] %}
-          {% for team in ladder %}
-          <tr>
-            <td>
-              <span class="pos-badge {% if team.pos <= 2 %}top2{% elif team.pos <= 8 %}finals{% endif %}">
-                {{ team.pos }}
-              </span>
-            </td>
-            <td style="font-weight:600;">{{ team.team }}</td>
-            <td style="color:var(--success);font-family:'DM Mono',monospace;">{{ team.w }}</td>
-            <td style="color:var(--danger);font-family:'DM Mono',monospace;">{{ team.l }}</td>
-            <td style="color:var(--text-muted);font-family:'DM Mono',monospace;">{{ team.d }}</td>
-            <td style="font-family:'DM Mono',monospace;color:var(--text-secondary);">{{ team.pf }}</td>
-            <td style="font-family:'DM Mono',monospace;color:var(--text-secondary);">{{ team.pa }}</td>
-            <td>
-              <span style="font-family:'DM Mono',monospace;">{{ team.pct }}%</span>
-              <span class="pct-bar-wrap">
-                <span class="pct-bar" style="width:{{ [(team.pct - 70) / 70 * 100 | int, 100]|min }}%"></span>
-              </span>
-            </td>
-            <td style="font-family:'DM Mono',monospace;font-weight:700;color:var(--accent);">{{ team.pts }}</td>
-            <td>
-              <div class="form-dots">
-                {% for c in team.form %}
-                <span class="form-dot {% if c == 'W' %}w{% elif c == 'L' %}l{% else %}d{% endif %}"></span>
-                {% endfor %}
-              </div>
-            </td>
-          </tr>
-          {% endfor %}
+          {% if standings %}
+            {% for s in standings %}
+            <tr>
+              <td><span class="pos-badge {% if s.rank <= 2 %}top2{% elif s.rank <= 8 %}finals{% endif %}">{{ s.rank }}</span></td>
+              <td style="font-weight:600;">{{ s.team }}</td>
+              <td style="color:var(--success);font-family:'DM Mono',monospace;">{{ s.wins }}</td>
+              <td style="color:var(--danger);font-family:'DM Mono',monospace;">{{ s.losses }}</td>
+              <td style="color:var(--text-muted);font-family:'DM Mono',monospace;">{{ s.draws }}</td>
+              <td style="font-family:'DM Mono',monospace;color:var(--text-secondary);">{{ s.for_score }}</td>
+              <td style="font-family:'DM Mono',monospace;color:var(--text-secondary);">{{ s.against_score }}</td>
+              <td>
+                <span style="font-family:'DM Mono',monospace;">{{ s.percentage }}%</span>
+                <span class="pct-bar-wrap"><span class="pct-bar" style="width:{{ [[((s.percentage or 0) - 70) / 80 * 100, 0]|max, 100]|min }}%"></span></span>
+              </td>
+              <td style="font-family:'DM Mono',monospace;font-weight:700;color:var(--accent);">{{ s.pts }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted);">No ladder data. Click Refresh.</td></tr>
+          {% endif %}
         </tbody>
       </table>
     </div>
   </div>
-
 </div>
 
 
-<!-- ══════════════════════════════════════
-     TAB 5: MARGIN ANALYSIS
-══════════════════════════════════════ -->
+<!-- TAB 4: MARGINS -->
 <div id="tab-margins" class="tab-panel">
-
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-bar-chart-fill"></i> 30+ Point Margin Frequency by Favourite Strength</h4>
-      <span style="font-size:12px;color:var(--text-muted);">Based on 2,100 games · 2014–2023</span>
+      <span style="font-size:12px;color:var(--text-muted);">2,100 games · 2014–2023</span>
     </div>
     <div class="afl-card-body">
-      <p style="font-size:13px;margin-bottom:20px;color:var(--text-secondary);">
-        How often does the favourite win by 30+ points, broken down by market strength.
-        The key finding: blowout rates are high but bookmakers price them accordingly.
-      </p>
+      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;">How often the favourite wins by 30+ points, broken down by market strength.</p>
 
       {% set margin_data = [
-        {'label':'≤$1.20 Heavy Fav','rate':74,'avg_margin':45,'games':234,'color':'var(--success)'},
+        {'label':'≤$1.20 Heavy Fav','rate':74,'avg_margin':45,'games':234,'color':'#10b981'},
         {'label':'$1.21–$1.40','rate':63,'avg_margin':41,'games':635,'color':'#34d399'},
-        {'label':'$1.41–$1.60','rate':52,'avg_margin':35,'games':407,'color':'var(--warning)'},
+        {'label':'$1.41–$1.60','rate':52,'avg_margin':35,'games':407,'color':'#f59e0b'},
         {'label':'$1.61–$1.80','rate':46,'avg_margin':33,'games':433,'color':'#fb923c'},
-        {'label':'$1.81+ Coinflip','rate':39,'avg_margin':30,'games':391,'color':'var(--danger)'},
+        {'label':'$1.81+ Coinflip','rate':39,'avg_margin':30,'games':391,'color':'#ef4444'},
       ] %}
-
-      <div style="display:flex;flex-direction:column;gap:14px;">
-        {% for row in margin_data %}
-        <div style="display:flex;align-items:center;gap:16px;">
-          <div style="width:160px;font-size:13px;font-weight:600;color:var(--text-primary);flex-shrink:0;">
-            {{ row.label }}
-          </div>
-          <div style="flex:1;height:28px;background:var(--bg-elevated);border-radius:6px;overflow:hidden;position:relative;">
-            <div style="height:100%;width:{{ row.rate }}%;background:{{ row.color }};border-radius:6px;opacity:0.8;transition:width 0.6s ease;"></div>
-            <div style="position:absolute;top:50%;right:12px;transform:translateY(-50%);font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:var(--text-primary);">
-              {{ row.rate }}%
-            </div>
-          </div>
-          <div style="width:100px;font-size:12px;color:var(--text-muted);font-family:'DM Mono',monospace;flex-shrink:0;">
-            avg {{ row.avg_margin }}pt · n={{ row.games }}
-          </div>
+      {% for row in margin_data %}
+      <div class="margin-bar-row">
+        <div class="margin-label">{{ row.label }}</div>
+        <div class="margin-bar-outer">
+          <div class="margin-bar-inner" style="width:{{ row.rate }}%;background:{{ row.color }};"></div>
+          <div class="margin-bar-pct">{{ row.rate }}%</div>
         </div>
-        {% endfor %}
+        <div class="margin-meta">avg {{ row.avg_margin }}pt · n={{ row.games }}</div>
       </div>
+      {% endfor %}
 
       <div style="margin-top:24px;padding:16px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:10px;">
-        <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:6px;">
-          ⚠️ Key Finding: "Back Both" Strategy
-        </div>
+        <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:6px;">⚠️ Key Finding: "Back Both" Strategy</div>
         <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;">
-          Backing both teams to win by 30+ costs double overround and produces
-          <strong style="color:var(--danger);">-36% to -55% EV</strong> across all game types.
-          The blowout rates are real, but the odds already price them in.
-          The edge (if it exists) is in <strong style="color:var(--success);">single-sided bets on heavy favourites
-          when the line is mispriced</strong> — compare model prediction vs book line in the Value Finder tab.
+          Backing both teams to win by 30+ costs double overround and produces <strong style="color:var(--danger);">-36% to -55% EV</strong> across all game types. The blowout rates are real but the odds already price them in.
         </div>
       </div>
     </div>
   </div>
-
 </div>
 
 {% endblock %}
@@ -1197,11 +350,6 @@
 
 {% block extra_js %}
 <script>
-/* ══════════════════════════════════════
-   AFL HUB JS
-══════════════════════════════════════ */
-
-// Tab switching
 function switchTab(name, btn) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.afl-tab').forEach(b => b.classList.remove('active'));
@@ -1209,73 +357,119 @@ function switchTab(name, btn) {
   btn.classList.add('active');
 }
 
-// Render mini bar chart
-function renderBars(containerId, data) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  const max = Math.max(...data.map(d => d.val));
-  container.innerHTML = data.map(d => `
-    <div class="last5-bar-wrap">
-      <div class="last5-val">${d.val}</div>
-      <div class="last5-bar"
-           data-val="${d.val} disp vs ${d.opp}"
-           style="height:${Math.round((d.val / (max * 1.15)) * 48)}px; opacity:${d.val >= d.line ? '1' : '0.45'}">
-      </div>
-      <div class="last5-opp" title="${d.opp}">${d.opp}</div>
-    </div>
-  `).join('');
+function searchPlayer() {
+  const name = document.getElementById('playerSearch').value.trim();
+  const team = document.getElementById('teamFilter').value.trim();
+  const stat = document.getElementById('statFilter').value;
+  if (!name && !team) {
+    document.getElementById('playerResults').innerHTML = `<div class="player-empty"><i class="bi bi-search" style="color:var(--accent);opacity:0.4;"></i><div style="font-size:14px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Enter a name or select a team</div></div>`;
+    return;
+  }
+  document.getElementById('playerResults').innerHTML = `<div class="player-loading"><div class="spinner"></div><div style="font-size:13px;margin-top:10px;">Fetching player stats...</div></div>`;
+  fetch(`/api/afl/player-stats?name=${encodeURIComponent(name)}&team=${encodeURIComponent(team)}&stat=${stat}&season={{ year }}&limit=10`)
+    .then(r => r.json())
+    .then(data => {
+      if (!data.players || data.players.length === 0) {
+        document.getElementById('playerResults').innerHTML = `<div class="player-empty"><i class="bi bi-person-x" style="color:var(--danger);opacity:0.5;"></i><div style="font-size:14px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">No players found</div><div style="font-size:13px;">Stats available from 2019 onwards via Fryzigg.</div></div>`;
+        return;
+      }
+      renderPlayerCards(data.players, stat);
+    })
+    .catch(() => {
+      document.getElementById('playerResults').innerHTML = `<div class="player-empty"><i class="bi bi-exclamation-triangle" style="color:var(--danger);opacity:0.5;"></i><div style="font-size:14px;font-weight:600;color:var(--text-secondary);">Failed to fetch stats</div></div>`;
+    });
 }
 
-// Demo data — replace with Flask route data
-renderBars('bars-bont', [
-  {val:24, opp:'GWS',    line:27.5},
-  {val:31, opp:'Syd',    line:27.5},
-  {val:28, opp:'Carl',   line:27.5},
-  {val:35, opp:'Rich',   line:27.5},
-  {val:29, opp:'StK',    line:27.5},
-]);
+document.getElementById('playerSearch').addEventListener('keydown', e => { if (e.key === 'Enter') searchPlayer(); });
 
-renderBars('bars-daicos', [
-  {val:29, opp:'Bris',   line:30.5},
-  {val:38, opp:'Mel',    line:30.5},
-  {val:25, opp:'GWS',    line:30.5},
-  {val:33, opp:'Adel',   line:30.5},
-  {val:31, opp:'Haw',    line:30.5},
-]);
-
-// Player search / filter
-function filterPlayers() {
-  const search = document.getElementById('playerSearch').value.toLowerCase();
-  const team   = document.getElementById('teamFilter').value.toLowerCase();
-  document.querySelectorAll('.player-card').forEach(card => {
-    const name = (card.dataset.name || '').toLowerCase();
-    const t    = (card.dataset.team || '').toLowerCase();
-    const show = (!search || name.includes(search)) && (!team || t.includes(team));
-    card.style.display = show ? '' : 'none';
+function renderPlayerCards(players, stat) {
+  const container = document.getElementById('playerResults');
+  container.innerHTML = '';
+  players.forEach(p => {
+    const avgs = p.averages || {};
+    const last5 = p.last_5 || [];
+    const trend = p.trend || {};
+    const initials = ((p.first_name || '')[0] || '') + ((p.last_name || '')[0] || '');
+    const seasonAvg = avgs[stat] || 0;
+    const statVals = last5.map(g => g[stat] || 0);
+    const maxVal = Math.max(...statVals, 1);
+    const barsHtml = last5.map(g => {
+      const val = g[stat] || 0;
+      const h = Math.max(Math.round((val / (maxVal * 1.15)) * 52), 4);
+      return `<div class="last5-bar-wrap"><div class="last5-val">${val}</div><div class="last5-bar" data-tip="${val} ${stat} vs ${g.opponent || '?'} (${g.result || '?'})" style="height:${h}px;"></div><div class="last5-opp" title="${g.opponent || ''}">${(g.opponent || '').substring(0,4)}</div></div>`;
+    }).join('');
+    const trendDir = trend.direction || 'flat';
+    const trendDiff = Math.abs(trend.diff || 0);
+    const trendHtml = trendDir === 'up' ? `<span class="pstat-trend trend-up">▲ +${trendDiff}</span>` : trendDir === 'down' ? `<span class="pstat-trend trend-down">▼ -${trendDiff}</span>` : `<span class="pstat-trend trend-flat">→ 0.0</span>`;
+    container.insertAdjacentHTML('beforeend', `
+      <div class="player-card" id="card-${p.player_id}">
+        <div class="player-card-top">
+          <div class="player-avatar">${initials}</div>
+          <div class="player-info">
+            <h4>${p.name} <span style="font-size:12px;color:var(--text-muted);font-weight:400;">#${p.guernsey || '—'}</span></h4>
+            <div class="player-meta">
+              <span class="player-meta-pill">${p.team || '—'}</span>
+              ${p.height_cm ? `<span class="player-meta-pill">${p.height_cm}cm · ${p.weight_kg}kg</span>` : ''}
+              <span class="player-meta-pill">Season avg: ${seasonAvg} ${stat}</span>
+              <span class="player-meta-pill">${p.games_played} games</span>
+            </div>
+          </div>
+        </div>
+        <div class="player-card-stats">
+          <div class="pstat"><span class="pstat-val">${avgs.disposals||0}</span><span class="pstat-lbl">Disp</span>${stat==='disposals'?trendHtml:''}</div>
+          <div class="pstat"><span class="pstat-val">${avgs.marks||0}</span><span class="pstat-lbl">Marks</span>${stat==='marks'?trendHtml:''}</div>
+          <div class="pstat"><span class="pstat-val">${avgs.kicks||0}</span><span class="pstat-lbl">Kicks</span></div>
+          <div class="pstat"><span class="pstat-val">${avgs.handballs||0}</span><span class="pstat-lbl">HBalls</span></div>
+          <div class="pstat"><span class="pstat-val">${avgs.tackles||0}</span><span class="pstat-lbl">Tackles</span>${stat==='tackles'?trendHtml:''}</div>
+          <div class="pstat"><span class="pstat-val">${avgs.goals||0}</span><span class="pstat-lbl">Goals</span>${stat==='goals'?trendHtml:''}</div>
+        </div>
+        <div class="last5">
+          <div class="last5-label">Last 5 Games — ${stat.charAt(0).toUpperCase()+stat.slice(1)}</div>
+          <div class="last5-bars">${barsHtml||'<span style="color:var(--text-muted);font-size:12px;padding:20px;">No recent games</span>'}</div>
+        </div>
+        <div class="line-input-row">
+          <label>Set book line:</label>
+          <input type="number" class="line-input" id="line-${p.player_id}" placeholder="e.g. 27.5" step="0.5"
+                 oninput="calcEdge(${p.player_id}, ${seasonAvg}, ${JSON.stringify(statVals)})">
+          <div id="edge-${p.player_id}" class="edge-display edge-neutral-bg">Enter line →</div>
+          <div id="hitrate-${p.player_id}" class="hit-rate-display"></div>
+        </div>
+      </div>`);
   });
 }
 
-function searchPlayer() {
-  filterPlayers();
-  // TODO: AJAX to /api/afl/player-stats?name=...&team=...
-  // fetch(`/api/afl/player-stats?name=${encodeURIComponent(document.getElementById('playerSearch').value)}`)
-  //   .then(r => r.json()).then(renderPlayerCards);
+function calcEdge(playerId, seasonAvg, last5Vals) {
+  const line = parseFloat(document.getElementById(`line-${playerId}`).value);
+  const edgeEl = document.getElementById(`edge-${playerId}`);
+  const hitEl  = document.getElementById(`hitrate-${playerId}`);
+  if (isNaN(line) || line <= 0) {
+    edgeEl.className = 'edge-display edge-neutral-bg'; edgeEl.textContent = 'Enter line →'; hitEl.textContent = ''; return;
+  }
+  const last5Avg = last5Vals.length ? last5Vals.reduce((a,b)=>a+b,0)/last5Vals.length : seasonAvg;
+  const pred = Math.round((seasonAvg*0.70 + last5Avg*0.30)*10)/10;
+  const edge = Math.round((pred - line)*10)/10;
+  edgeEl.textContent = `${edge>0?'+':''}${edge} (pred: ${pred})`;
+  edgeEl.className = `edge-display ${edge>=2?'edge-positive-bg':edge<=-2?'edge-negative-bg':'edge-neutral-bg'}`;
+  if (last5Vals.length > 0) {
+    const hits = last5Vals.filter(v=>v>=line).length;
+    hitEl.textContent = `L5 hit rate: ${hits}/${last5Vals.length} (${Math.round(hits/last5Vals.length*100)}%)`;
+  }
 }
 
-function loadMatchProps(home, away) {
-  // TODO: AJAX to /api/afl/match-props?home=...&away=...
-  alert(`Prop lines for ${home} vs ${away} — connect The Odds API to enable live data`);
+function loadTeamPlayers(team) {
+  document.querySelector('[onclick="switchTab(\'players\', this)"]').click();
+  document.getElementById('teamFilter').value = team;
+  document.getElementById('playerSearch').value = '';
+  searchPlayer();
 }
 
-function refreshData() {
-  const btn = document.querySelector('[onclick="refreshData()"]');
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Refreshing...';
+function refreshAll() {
+  const btn = document.querySelector('[onclick="refreshAll()"]');
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
   btn.disabled = true;
-  // TODO: fetch('/api/afl/refresh').then(() => location.reload())
-  setTimeout(() => {
-    btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Refresh';
-    btn.disabled = false;
-  }, 1500);
+  fetch('/api/afl/refresh', {method:'POST'})
+    .then(()=>location.reload())
+    .catch(()=>{ btn.innerHTML='<i class="bi bi-arrow-clockwise"></i> Refresh'; btn.disabled=false; });
 }
 </script>
 {% endblock %}
