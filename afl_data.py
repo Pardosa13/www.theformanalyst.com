@@ -301,12 +301,20 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
                 return name
         return None
 
-    season_col = first_existing("season", "year")
-    if season_col is None:
-        logger.error("Fryzigg: no season/year column found. Sample cols: %s", list(df.columns)[:30])
-        return []
+        season_col = first_existing("season", "year")
 
-    season_df = df[df[season_col].astype(str) == str(season)].copy()
+    if season_col is not None:
+        season_df = df[df[season_col].astype(str) == str(season)].copy()
+    else:
+        logger.info("Fryzigg: no season/year column found, deriving season from match_date")
+        match_date_col = first_existing("match_date", "date")
+        if match_date_col is None:
+            logger.error("Fryzigg: no season/year column and no match_date/date column found. Sample cols: %s", list(df.columns)[:30])
+            return []
+
+        temp_dates = pd.to_datetime(df[match_date_col], errors="coerce")
+        season_df = df[temp_dates.dt.year == season].copy()
+
     if season_df.empty:
         logger.warning("Fryzigg: no rows for season %s", season)
         return []
