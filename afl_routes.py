@@ -471,18 +471,25 @@ def register_afl_routes(app, db):
     @app.route("/api/afl/seed")
     @login_required
     def afl_seed():
-        import requests
+        import requests, json as _json
         results = {}
         try:
             r = requests.get(
                 "https://api.squiggle.com.au/",
-                params={"q": "games", "year": 2026},
+                params={"q": "games", "year": CURRENT_YEAR},
                 headers={"User-Agent": "TheFormAnalyst/1.0 (theformanalyst.com; personal research project)"},
                 timeout=15
             )
-            data = r.json()
-            games = data.get("games", [])
             results['status'] = r.status_code
+            if not r.text or not r.text.strip():
+                results['error'] = f"Squiggle returned empty response (HTTP {r.status_code})"
+                return jsonify(results)
+            try:
+                data = r.json()
+            except _json.JSONDecodeError:
+                results['error'] = f"Squiggle returned non-JSON (HTTP {r.status_code}): {r.text[:200]}"
+                return jsonify(results)
+            games = data.get("games", [])
             results['game_count'] = len(games)
             if games:
                 results['first_game'] = games[0]
