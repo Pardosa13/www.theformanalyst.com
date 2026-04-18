@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS afl_games (
     round           INTEGER,
     roundname       TEXT,
     date            TIMESTAMP,
-    localtime       TEXT,
+    "localtime"     TEXT,
     venue           TEXT,
     hteam           TEXT,
     ateam           TEXT,
@@ -217,7 +217,7 @@ def upsert_games(db, games: list[dict]) -> int:
     count = 0
     sql = db.text("""
         INSERT INTO afl_games
-            (id, year, round, roundname, date, localtime, venue,
+            (id, year, round, roundname, date, "localtime", venue,
              hteam, ateam, hteamid, ateamid,
              hscore, ascore, hgoals, hbehinds, agoals, abehinds,
              margin, winner, winnerteamid, is_final, complete, updated_at)
