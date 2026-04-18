@@ -66,6 +66,7 @@ SQUIGGLE_TEAM_IDS = {
 
 def _get(url: str, params: dict = None, retries: int = 3) -> Optional[dict]:
     """GET with retry + rate-limit respect."""
+    import json as _json
     for attempt in range(retries):
         try:
             r = requests.get(url, params=params, headers=HEADERS, timeout=15)
@@ -74,7 +75,13 @@ def _get(url: str, params: dict = None, retries: int = 3) -> Optional[dict]:
                 time.sleep(10)
                 continue
             r.raise_for_status()
+            if not r.text or not r.text.strip():
+                logger.warning(f"Empty response from {url} (params={params})")
+                return None
             return r.json()
+        except _json.JSONDecodeError as e:
+            logger.error(f"JSON decode error from {url}: {e} — body was: {r.text[:200]!r}")
+            return None
         except requests.RequestException as e:
             logger.error(f"Request failed ({attempt+1}/{retries}): {e}")
             if attempt < retries - 1:
