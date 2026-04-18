@@ -181,45 +181,231 @@ def fetch_squiggle_upcoming_games(year: int = None) -> list[dict]:
 
     return data.get("games", [])
 
+# ─────────────────────────────────────────────
+# FRYZIGG DATA  (via fryziggafl.rds, same source fitzRoy uses)
+# ─────────────────────────────────────────────
 
-# ─────────────────────────────────────────────
-# FRYZIGG API
-# ─────────────────────────────────────────────
+_FRYZIGG_CACHE = {
+    "df": None,
+    "loaded": False,
+}
+
+
+def _download_fryzigg_rds() -> pd.DataFrame:
+    """Download and cache the Fryzigg .rds file as a pandas DataFrame."""
+    global _FRYZIGG_CACHE
+
+    if _FRYZIGG_CACHE["loaded"] and _FRYZIGG_CACHE["df"] is not None:
+        logger.info("Fryzigg: using cached DataFrame (%s rows)", len(_FRYZIGG_CACHE["df"]))
+        return _FRYZIGG_CACHE["df"]
+
+    logger.info("Fryzigg: downloading %s ...", FRYZIGG_RDS_URL)
+    response = requests.get(FRYZIGG_RDS_URL, timeout=120)
+    response.raise_for_status()
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".rds") as tmp:
+        tmp.write(response.content)
+        tmp_path = tmp.name
+
+    try:
+        result = pyreadr.read_r(tmp_path)
+        if not result:
+            raise ValueError("No objects found in Fryzigg RDS")
+
+        df = next(iter(result.values()))
+        if df is None or df.empty:
+            raise ValueError("Fryzigg RDS loaded but DataFrame is empty")
+
+        df.columns = [str(c).strip().lower() for c in df.columns]
+
+        _FRYZIGG_CACHE["df"] = df
+        _FRYZIGG_CACHE["loaded"] = True
+
+        logger.info("Fryzigg: loaded %s rows, %s columns", len(df), len(df.columns))
+        return df
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def _coerce_int(value, default=0):
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+    try:
+        return int(float(value))
+    except Exception:
+        return default
+
+
+def _coerce_str(value, default=""):
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+    return str(value).strip()
+
+
+def _coerce_bool(value, default=False):
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
+
+
+def _coerce_date(value):
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    try:
+        return pd.to_datetime(value).date()
+    except Exception:
+        return None
+
 
 def fetch_fryzigg_player_stats(season: int) -> list[dict]:
     """
-    Fetch advanced player stats from Fryzigg.
-    Tries known URL patterns and logs which one succeeds so we can
-    lock it in once confirmed.
+    Load Fryzigg player stats for one season from the .rds file.
+    Returns rows shaped for upsert_player_stats().
     """
-    # Candidate URL patterns, most likely first
-    candidates = [
-        f"{FRYZIGG_BASE}/seasons/{season}",
-        f"{FRYZIGG_BASE}/stats/{season}",
-        f"{FRYZIGG_BASE}/stats?season={season}",
-        f"{FRYZIGG_BASE}/player_stats/{season}",
-    ]
+    try:
+        df = _download_fryzigg_rds()
+    except Exception as e:
+        logger.error("Fryzigg: failed loading RDS: %s", e)
+        return []
 
-    for url in candidates:
-        logger.info("Fryzigg: trying %s", url)
-        data = _get(url)
+    cols = set(df.columns)
 
-        if data is None:
-            continue
+    def first_existing(*names):
+        for name in names:
+            if name in cols:
+                return name
+        return None
 
-        # Normalise response shape
-        rows = None
-        if isinstance(data, list):
-            rows = data
-        elif isinstance(data, dict):
-            rows = data.get("stats") or data.get("data") or data.get("results")
+    season_col = first_existing("season", "year")
+    if season_col is None:
+        logger.error("Fryzigg: no season/year column found. Sample cols: %s", list(df.columns)[:30])
+        return []
 
-        if rows:
-            logger.info("Fryzigg: ✓ success via %s (%d rows)", url, len(rows))
-            return rows
+    season_df = df[df[season_col].astype(str) == str(season)].copy()
+    if season_df.empty:
+        logger.warning("Fryzigg: no rows for season %s", season)
+        return []
 
-    logger.warning("Fryzigg: all candidate URLs failed for season %s", season)
-    return []
+    logger.info("Fryzigg: %s rows for season %s", len(season_df), season)
+
+    c_match_id = first_existing("match_id", "game_id", "id")
+    c_match_date = first_existing("match_date", "date")
+    c_match_round = first_existing("match_round", "round")
+    c_home_team = first_existing("match_home_team", "home_team")
+    c_away_team = first_existing("match_away_team", "away_team")
+    c_home_score = first_existing("match_home_team_score", "home_score")
+    c_away_score = first_existing("match_away_team_score", "away_score")
+    c_match_margin = first_existing("match_margin", "margin")
+    c_match_winner = first_existing("match_winner", "winner")
+    c_weather_temp = first_existing("match_weather_temp_c", "weather_temp_c")
+    c_weather_type = first_existing("match_weather_type", "weather_type")
+    c_attendance = first_existing("match_attendance", "attendance")
+    c_venue = first_existing("venue_name", "venue")
+
+    c_player_id = first_existing("player_id")
+    c_first = first_existing("player_first_name", "first_name")
+    c_last = first_existing("player_last_name", "last_name")
+    c_team = first_existing("player_team", "team")
+    c_guernsey = first_existing("guernsey_number", "guernsey")
+    c_height = first_existing("player_height_cm", "height_cm")
+    c_weight = first_existing("player_weight_kg", "weight_kg")
+    c_retired = first_existing("player_is_retired", "is_retired")
+
+    def build_row(row) -> dict:
+        def g(col):
+            return row[col] if col in row.index else None
+
+        return {
+            "match_id": _coerce_int(g(c_match_id)),
+            "match_date": _coerce_date(g(c_match_date)),
+            "match_round": _coerce_str(g(c_match_round)),
+            "match_home_team": _coerce_str(g(c_home_team)),
+            "match_away_team": _coerce_str(g(c_away_team)),
+            "match_home_team_score": _coerce_int(g(c_home_score)),
+            "match_away_team_score": _coerce_int(g(c_away_score)),
+            "match_margin": _coerce_int(g(c_match_margin)),
+            "match_winner": _coerce_str(g(c_match_winner)),
+            "match_weather_temp_c": _coerce_int(g(c_weather_temp)),
+            "match_weather_type": _coerce_str(g(c_weather_type)),
+            "match_attendance": _coerce_int(g(c_attendance)),
+            "venue_name": _coerce_str(g(c_venue)),
+            "season": season,
+
+            "player_id": _coerce_int(g(c_player_id)),
+            "player_first_name": _coerce_str(g(c_first)),
+            "player_last_name": _coerce_str(g(c_last)),
+            "player_team": _coerce_str(g(c_team)),
+            "guernsey_number": _coerce_int(g(c_guernsey)),
+            "player_height_cm": _coerce_int(g(c_height)),
+            "player_weight_kg": _coerce_int(g(c_weight)),
+            "player_is_retired": _coerce_bool(g(c_retired), False),
+
+            "kicks": _coerce_int(g(first_existing("kicks"))),
+            "marks": _coerce_int(g(first_existing("marks"))),
+            "handballs": _coerce_int(g(first_existing("handballs"))),
+            "disposals": _coerce_int(g(first_existing("disposals"))),
+            "effective_disposals": _coerce_int(g(first_existing("effective_disposals"))),
+            "disposal_efficiency_percentage": _coerce_int(g(first_existing("disposal_efficiency_percentage"))),
+            "goals": _coerce_int(g(first_existing("goals"))),
+            "behinds": _coerce_int(g(first_existing("behinds"))),
+            "hitouts": _coerce_int(g(first_existing("hitouts"))),
+            "tackles": _coerce_int(g(first_existing("tackles"))),
+            "rebounds": _coerce_int(g(first_existing("rebounds"))),
+            "inside_fifties": _coerce_int(g(first_existing("inside_fifties"))),
+            "clearances": _coerce_int(g(first_existing("clearances"))),
+            "clangers": _coerce_int(g(first_existing("clangers"))),
+            "free_kicks_for": _coerce_int(g(first_existing("free_kicks_for"))),
+            "free_kicks_against": _coerce_int(g(first_existing("free_kicks_against"))),
+            "brownlow_votes": _coerce_int(g(first_existing("brownlow_votes"))),
+            "contested_possessions": _coerce_int(g(first_existing("contested_possessions"))),
+            "uncontested_possessions": _coerce_int(g(first_existing("uncontested_possessions"))),
+            "contested_marks": _coerce_int(g(first_existing("contested_marks"))),
+            "marks_inside_fifty": _coerce_int(g(first_existing("marks_inside_fifty"))),
+            "one_percenters": _coerce_int(g(first_existing("one_percenters"))),
+            "bounces": _coerce_int(g(first_existing("bounces"))),
+            "goal_assists": _coerce_int(g(first_existing("goal_assists"))),
+            "time_on_ground_percentage": _coerce_int(g(first_existing("time_on_ground_percentage"))),
+            "afl_fantasy_score": _coerce_int(g(first_existing("afl_fantasy_score"))),
+            "supercoach_score": _coerce_int(g(first_existing("supercoach_score"))),
+            "centre_clearances": _coerce_int(g(first_existing("centre_clearances"))),
+            "stoppage_clearances": _coerce_int(g(first_existing("stoppage_clearances"))),
+            "score_involvements": _coerce_int(g(first_existing("score_involvements"))),
+            "metres_gained": _coerce_int(g(first_existing("metres_gained"))),
+            "turnovers": _coerce_int(g(first_existing("turnovers"))),
+            "intercepts": _coerce_int(g(first_existing("intercepts"))),
+            "tackles_inside_fifty": _coerce_int(g(first_existing("tackles_inside_fifty"))),
+        }
+
+    rows = [build_row(row) for _, row in season_df.iterrows()]
+    rows = [r for r in rows if r["player_id"] and r["match_id"]]
+
+    logger.info("Fryzigg: prepared %s rows for season %s", len(rows), season)
+    return rows
 
 
 def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dict]:
