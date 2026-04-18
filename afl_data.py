@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # ─────────────────────────────────────────────
 
-FRYZIGG_BASE = "https://api.fryzigg.com"
+FRYZIGG_BASE = "https://www.fryziggafl.net/api"
 SQUIGGLE_BASE = "https://api.squiggle.com.au"
 AFLTABLES_BASE = "https://afltables.com/afl"
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
@@ -185,26 +185,36 @@ def fetch_squiggle_upcoming_games(year: int = None) -> list[dict]:
 def fetch_fryzigg_player_stats(season: int) -> list[dict]:
     """
     Fetch advanced player stats from Fryzigg.
-
-    Returns either:
-    - data["stats"]
-    - data["data"]
-    - raw list
+    Tries known URL patterns and logs which one succeeds so we can
+    lock it in once confirmed.
     """
-    url = f"{FRYZIGG_BASE}/stats/{season}"
-    data = _get(url)
+    # Candidate URL patterns, most likely first
+    candidates = [
+        f"{FRYZIGG_BASE}/seasons/{season}",
+        f"{FRYZIGG_BASE}/stats/{season}",
+        f"{FRYZIGG_BASE}/stats?season={season}",
+        f"{FRYZIGG_BASE}/player_stats/{season}",
+    ]
 
-    if not data:
-        logger.warning("Fryzigg returned no data for %s", season)
-        return []
+    for url in candidates:
+        logger.info("Fryzigg: trying %s", url)
+        data = _get(url)
 
-    if isinstance(data, dict):
-        return data.get("stats", data.get("data", []))
+        if data is None:
+            continue
 
-    if isinstance(data, list):
-        return data
+        # Normalise response shape
+        rows = None
+        if isinstance(data, list):
+            rows = data
+        elif isinstance(data, dict):
+            rows = data.get("stats") or data.get("data") or data.get("results")
 
-    logger.warning("Unexpected Fryzigg response type for %s: %s", season, type(data).__name__)
+        if rows:
+            logger.info("Fryzigg: ✓ success via %s (%d rows)", url, len(rows))
+            return rows
+
+    logger.warning("Fryzigg: all candidate URLs failed for season %s", season)
     return []
 
 
