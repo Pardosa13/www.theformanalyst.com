@@ -174,56 +174,18 @@ def fetch_squiggle_upcoming_games(year: int = None) -> list[dict]:
 # FRYZIGG API  (advanced player stats)
 # ─────────────────────────────────────────────
 # fitzRoy calls: fetch_player_stats_fryzigg(season)
-# The underlying endpoint is stats.fryzigg.com
 
 def fetch_fryzigg_player_stats(season: int) -> list[dict]:
     """
     Fetch advanced player stats from Fryzigg API.
     Returns 81-column dataset per fitzRoy documentation.
-
-    Key fields returned:
-      match_id, match_date, match_round,
-      match_home_team, match_away_team,
-      match_home_team_score, match_away_team_score,
-      match_margin, match_winner,
-      match_weather_temp_c, match_weather_type,
-      player_id, player_first_name, player_last_name,
-      player_team, guernsey_number,
-      player_height_cm, player_weight_kg,
-      kicks, marks, handballs, disposals,
-      effective_disposals, disposal_efficiency_percentage,
-      goals, behinds, hitouts, tackles,
-      rebounds, inside_fifties, clearances,
-      clangers, free_kicks_for, free_kicks_against,
-      brownlow_votes, contested_possessions,
-      uncontested_possessions, contested_marks,
-      marks_inside_fifty, one_percenters, bounces,
-      goal_assists, time_on_ground_percentage,
-      afl_fantasy_score, supercoach_score,
-      centre_clearances, stoppage_clearances,
-      score_involvements, metres_gained,
-      turnovers, intercepts, tackles_inside_fifty,
-      venue_name, match_attendance
     """
-    def fetch_fryzigg_player_stats(season: int) -> list[dict]:
     url = f"{FRYZIGG_BASE}/stats/{season}"
     data = _get(url)
 
     if not data:
         logger.warning(f"Fryzigg returned no data for {season}")
         return []
-
-    if isinstance(data, dict):
-        return data.get("stats", data.get("data", []))
-
-    return data if isinstance(data, list) else []
-
-# Fryzigg returns {"stats": [...]} 
-if isinstance(data, dict):
-    return data.get("stats", data.get("data", []))
-
-return data if isinstance(data, list) else []
-
 
 def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dict]:
     """Fetch multiple seasons. Respects rate limiting."""
