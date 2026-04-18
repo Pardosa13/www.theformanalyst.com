@@ -1107,7 +1107,7 @@
       </div>
     `;
 
-    const url = `/api/afl/player-stats?name=${encodeURIComponent(name)}&team=${encodeURIComponent(team)}&stat=${encodeURIComponent(stat)}&season={{ year }}&limit=10`;
+    const url = `/api/afl/player-stats?name=${encodeURIComponent(name)}&team=${encodeURIComponent(team)}&stat=${encodeURIComponent(stat)}&season={{ player_stats_season }}&limit=10`;
 
     fetch(url)
       .then(async response => {
