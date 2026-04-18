@@ -68,6 +68,14 @@ def register_afl_routes(app, db):
         # Data source status
         sources = _check_data_sources(db)
 
+        fixtures = _db_get_fixtures(db, year=year) or fetch_squiggle_upcoming_games(year) or []
+        standings = _db_get_standings(db, year=year)
+        if not standings:
+            raw_standings = fetch_squiggle_standings(year, current_round)
+            if raw_standings:
+                upsert_standings(db, raw_standings, year, current_round)
+                standings = _db_get_standings(db, year=year)
+
         return render_template(
             "afl.html",
             current_round=current_round,
@@ -78,6 +86,8 @@ def register_afl_routes(app, db):
             next_game_time=next_game.get("time", "—") if next_game else "—",
             next_game_teams=next_game.get("teams", "—") if next_game else "—",
             data_sources=sources,
+            fixtures=fixtures,
+            standings=standings,
         )
 
 
