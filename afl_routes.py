@@ -610,12 +610,8 @@ def _db_get_fixtures(db, year: int, round_number: int = None) -> list[dict]:
         params["round"] = round_number
 
     sql = db.text(f"""
-        SELECT g.*,
-               t.tip        AS squiggle_tip,
-               t.confidence AS squiggle_confidence,
-               t.margin     AS squiggle_margin
+        SELECT g.*
         FROM afl_games g
-        LEFT JOIN afl_tips t ON t.gameid = g.id
         WHERE g.year = :year AND g.complete < 100
               {round_filter}
         ORDER BY g.date ASC
