@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # ─────────────────────────────────────────────
 
-FRYZIGG_BASE   = "https://api.fryzigg.com/afl"
+FRYZIGG_BASE   = "https://api.fryzigg.com"
 SQUIGGLE_BASE  = "https://api.squiggle.com.au"
 AFLTABLES_BASE = "https://afltables.com/afl"
 ODDS_API_BASE  = "https://api.the-odds-api.com/v4"
@@ -205,7 +205,9 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
       turnovers, intercepts, tackles_inside_fifty,
       venue_name, match_attendance
     """
-    url = f"{FRYZIGG_BASE}/stats/{season}"
+    url = f"{FRYZIGG_BASE}/afl/stats"
+    data = _get(url, params={"season": season})
+    if not data:
     data = _get(url)
     if not data:
         logger.warning(f"Fryzigg returned no data for {season}")
