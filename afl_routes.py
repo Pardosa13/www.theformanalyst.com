@@ -471,14 +471,23 @@ def register_afl_routes(app, db):
     @app.route("/api/afl/seed")
     @login_required
     def afl_seed():
+        import requests
         results = {}
         try:
-            games = fetch_squiggle_games(CURRENT_YEAR)
-            results['games'] = upsert_games(db, games)
-            rnd = fetch_squiggle_current_round(CURRENT_YEAR)
-            standings = fetch_squiggle_standings(CURRENT_YEAR, rnd)
-            results['standings'] = upsert_standings(db, standings, CURRENT_YEAR, rnd)
-            results['round'] = rnd
+            r = requests.get(
+                "https://api.squiggle.com.au/",
+                params={"q": "games", "year": 2026},
+                headers={"User-Agent": "TheFormAnalyst/1.0 (theformanalyst.com; personal research project)"},
+                timeout=15
+            )
+            data = r.json()
+            games = data.get("games", [])
+            results['status'] = r.status_code
+            results['game_count'] = len(games)
+            if games:
+                results['first_game'] = games[0]
+                count = upsert_games(db, games)
+                results['inserted'] = count
         except Exception as e:
             results['error'] = str(e)
         return jsonify(results)
