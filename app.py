@@ -311,7 +311,7 @@ with app.app_context():
         db.session.rollback()
         print(f"Profitable component migration error: {e}")
     try:
-        from AFL_db import init_afl_tables
+        from afl_db import init_afl_tables
         init_afl_tables(db)
         print("✓ AFL tables initialised")
     except Exception as e:
