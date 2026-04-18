@@ -467,7 +467,21 @@ def register_afl_routes(app, db):
         except Exception as e:
             log_sync(db, "odds_api", status="error", error=str(e))
             return jsonify({"status": "error", "message": str(e)}), 500
-
+            
+    @app.route("/api/afl/seed")
+    @login_required
+    def afl_seed():
+        results = {}
+        try:
+            games = fetch_squiggle_games(CURRENT_YEAR)
+            results['games'] = upsert_games(db, games)
+            rnd = fetch_squiggle_current_round(CURRENT_YEAR)
+            standings = fetch_squiggle_standings(CURRENT_YEAR, rnd)
+            results['standings'] = upsert_standings(db, standings, CURRENT_YEAR, rnd)
+            results['round'] = rnd
+        except Exception as e:
+            results['error'] = str(e)
+        return jsonify(results)
 
     @app.route("/api/afl/refresh", methods=["POST"])
     @login_required
