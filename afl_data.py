@@ -32,7 +32,10 @@ ODDS_API_BASE  = "https://api.the-odds-api.com/v4"
 
 # Squiggle requires a descriptive User-Agent — see api.squiggle.com.au/#section_bots
 HEADERS = {
-    "User-Agent": "TheFormAnalyst/1.0 (theformanalyst.com; personal research project)"
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-AU,en;q=0.9",
+    "Referer": "https://squiggle.com.au/",
 }
 
 CURRENT_YEAR = datetime.now().year
