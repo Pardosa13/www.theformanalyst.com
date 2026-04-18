@@ -310,6 +310,12 @@ with app.app_context():
     except Exception as e:
         db.session.rollback()
         print(f"Profitable component migration error: {e}")
+    try:
+        from AFL_db import init_afl_tables
+        init_afl_tables(db)
+        print("✓ AFL tables initialised")
+    except Exception as e:
+        print(f"AFL table init: {e}")
     # Create default admin if doesn't exist
     admin = User.query.filter_by(username='admin').first()
     if not admin:
