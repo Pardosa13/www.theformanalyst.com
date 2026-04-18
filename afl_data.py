@@ -4,7 +4,7 @@ afl_data.py
 Data layer for The Form Analyst AFL section.
 
 Sources:
-  1. Fryzigg API  — advanced player stats (2019-present)
+  1. Fryzigg API  — advanced player stats (via fryziggafl.rds)
   2. Squiggle API — fixtures, results, ladder, tips
   3. AFL Tables   — historical results/player stats
   4. The Odds API — live player prop lines (optional)
@@ -68,13 +68,12 @@ SQUIGGLE_TEAM_IDS = {
     "Western Bulldogs": 18,
 }
 
-
 # ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
 
 def _get(url: str, params: Optional[dict] = None, retries: int = 3) -> Optional[Any]:
-    """HTTP GET with retries and basic rate-limit handling."""
+    """HTTP GET with retries and rate-limit handling."""
     import json as _json
 
     for attempt in range(retries):
@@ -105,6 +104,57 @@ def _get(url: str, params: Optional[dict] = None, retries: int = 3) -> Optional[
 
     return None
 
+
+def _coerce_int(value, default=0):
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+    try:
+        return int(float(value))
+    except Exception:
+        return default
+
+
+def _coerce_str(value, default=""):
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+    return str(value).strip()
+
+
+def _coerce_bool(value, default=False):
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
+
+
+def _coerce_date(value):
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    try:
+        return pd.to_datetime(value).date()
+    except Exception:
+        return None
 
 # ─────────────────────────────────────────────
 # SQUIGGLE API
@@ -182,7 +232,7 @@ def fetch_squiggle_upcoming_games(year: int = None) -> list[dict]:
     return data.get("games", [])
 
 # ─────────────────────────────────────────────
-# FRYZIGG DATA  (via fryziggafl.rds, same source fitzRoy uses)
+# FRYZIGG DATA  (via fryziggafl.rds)
 # ─────────────────────────────────────────────
 
 _FRYZIGG_CACHE = {
@@ -230,58 +280,6 @@ def _download_fryzigg_rds() -> pd.DataFrame:
             pass
 
 
-def _coerce_int(value, default=0):
-    if value is None:
-        return default
-    try:
-        if pd.isna(value):
-            return default
-    except Exception:
-        pass
-    try:
-        return int(float(value))
-    except Exception:
-        return default
-
-
-def _coerce_str(value, default=""):
-    if value is None:
-        return default
-    try:
-        if pd.isna(value):
-            return default
-    except Exception:
-        pass
-    return str(value).strip()
-
-
-def _coerce_bool(value, default=False):
-    if value is None:
-        return default
-    try:
-        if pd.isna(value):
-            return default
-    except Exception:
-        pass
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
-
-
-def _coerce_date(value):
-    if value is None:
-        return None
-    try:
-        if pd.isna(value):
-            return None
-    except Exception:
-        pass
-    try:
-        return pd.to_datetime(value).date()
-    except Exception:
-        return None
-
-
 def fetch_fryzigg_player_stats(season: int) -> list[dict]:
     """
     Load Fryzigg player stats for one season from the .rds file.
@@ -303,7 +301,7 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
 
     season_col = first_existing("season", "year")
 
-        if season_col is not None:
+    if season_col is not None:
         season_df = df[df[season_col].astype(str) == str(season)].copy()
     else:
         logger.info("Fryzigg: no season/year column found, deriving season from match_date")
@@ -332,13 +330,6 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
 
     if season_df.empty:
         logger.warning("Fryzigg: still no rows after fallback for season %s", season)
-        return []
-
-        temp_dates = pd.to_datetime(df[match_date_col], errors="coerce")
-        season_df = df[temp_dates.dt.year == season].copy()
-
-    if season_df.empty:
-        logger.warning("Fryzigg: no rows for season %s", season)
         return []
 
     logger.info("Fryzigg: %s rows for season %s", len(season_df), season)
@@ -450,7 +441,6 @@ def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dic
 
     return all_stats
 
-
 # ─────────────────────────────────────────────
 # AFL TABLES
 # ─────────────────────────────────────────────
@@ -497,7 +487,6 @@ def fetch_afltables_results(year: int) -> list[dict]:
                 continue
 
     return results
-
 
 # ─────────────────────────────────────────────
 # THE ODDS API
@@ -565,7 +554,6 @@ def fetch_afl_player_props(api_key: str, market: str = "player_disposals") -> li
 
     return props
 
-
 # ─────────────────────────────────────────────
 # CONVENIENCE AGGREGATORS
 # ─────────────────────────────────────────────
@@ -612,10 +600,8 @@ def get_player_season_averages(player_stats: list[dict]) -> dict:
 def get_player_vs_opponent(player_stats: list[dict], opponent_team: str) -> dict:
     """Filter a player's game log to games against one opponent."""
     opp_games = [
-        g
-        for g in player_stats
-        if g.get("match_home_team") == opponent_team
-        or g.get("match_away_team") == opponent_team
+        g for g in player_stats
+        if g.get("match_home_team") == opponent_team or g.get("match_away_team") == opponent_team
     ]
 
     if not opp_games:
