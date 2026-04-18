@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # ─────────────────────────────────────────────
 
-FRYZIGG_BASE = "https://www.fryziggafl.net/api"
+FRYZIGG_RDS_URL = "http://www.fryziggafl.net/static/fryziggafl.rds"
 SQUIGGLE_BASE = "https://api.squiggle.com.au"
 AFLTABLES_BASE = "https://afltables.com/afl"
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
