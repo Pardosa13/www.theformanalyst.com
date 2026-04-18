@@ -104,7 +104,9 @@ def register_afl_routes(app, db):
         """
         name   = request.args.get("name", "").strip()
         team   = request.args.get("team", "").strip()
-        season = request.args.get("season", CURRENT_YEAR, type=int)
+        season = request.args.get("season", None, type=int)
+        if not season:
+        season = _db_latest_player_stats_season(db) or (CURRENT_YEAR - 1)
         stat   = request.args.get("stat", "disposals")
         limit  = request.args.get("limit", 20, type=int)
 
