@@ -79,16 +79,32 @@ def sync_afl_all(season: int = None):
         try: log_sync(db, "squiggle_standings", season=season, status="error", error=str(e))
         except: pass
 
-    # ── 3. Fryzigg player stats ───────────────────────────────────
-    try:
-        stats = fetch_fryzigg_player_stats(season)
-        count = upsert_player_stats(db, stats, season)
-        log_sync(db, "fryzigg", season=season, rows=count)
-        logger.info(f"  ✓ Player stats: {count} rows synced")
-    except Exception as e:
-        logger.error(f"  ✗ Player stats sync failed: {e}")
-        try: log_sync(db, "fryzigg", season=season, status="error", error=str(e))
-        except: pass
+    # ── 3. Fryzigg player stats (last 5 seasons) ──────────────────
+    fryzigg_total = 0
+    current_year = season
+    seasons_to_sync = list(range(current_year - 4, current_year + 1))
+    # e.g. if season=2026, syncs [2022, 2023, 2024, 2025, 2026]
+
+    for yr in seasons_to_sync:
+        try:
+            stats = fetch_fryzigg_player_stats(yr)
+            if stats:
+                count = upsert_player_stats(db, stats, yr)
+                fryzigg_total += count
+                log_sync(db, "fryzigg", season=yr, rows=count)
+                logger.info(f"  ✓ Fryzigg {yr}: {count} rows synced")
+            else:
+                logger.info(f"  - Fryzigg {yr}: no data returned (may not be published yet)")
+                log_sync(db, "fryzigg", season=yr, rows=0, status="empty")
+            # Be polite to the API between seasons
+            import time
+            time.sleep(1)
+        except Exception as e:
+            logger.error(f"  ✗ Fryzigg {yr} failed: {e}")
+            try: log_sync(db, "fryzigg", season=yr, status="error", error=str(e))
+            except: pass
+
+    logger.info(f"  ✓ Fryzigg total: {fryzigg_total} rows across {len(seasons_to_sync)} seasons")
 
     # ── 4. Prop lines (skip if no key) ────────────────────────────
     api_key = os.environ.get("ODDS_API_KEY", "")
