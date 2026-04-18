@@ -928,13 +928,13 @@
           </span>
           {% endif %}
 
-          <button class="btn btn-sm btn-secondary" type="button" onclick="loadTeamPlayers('{{ (f.hteam or '')|replace(\"'\", \"\\\\'\") }}')">
-            <i class="bi bi-person-lines-fill"></i> {{ f.hteam or 'Home' }} players
-          </button>
+          <button class="btn btn-sm btn-secondary" type="button" onclick='loadTeamPlayers({{ (f.hteam or "")|tojson }})'>
+  <i class="bi bi-person-lines-fill"></i> {{ f.hteam or 'Home' }} players
+</button>
 
-          <button class="btn btn-sm btn-secondary" type="button" onclick="loadTeamPlayers('{{ (f.ateam or '')|replace(\"'\", \"\\\\'\") }}')">
-            <i class="bi bi-person-lines-fill"></i> {{ f.ateam or 'Away' }} players
-          </button>
+<button class="btn btn-sm btn-secondary" type="button" onclick='loadTeamPlayers({{ (f.ateam or "")|tojson }})'>
+  <i class="bi bi-person-lines-fill"></i> {{ f.ateam or 'Away' }} players
+</button>
         </div>
         {% endfor %}
       {% else %}
