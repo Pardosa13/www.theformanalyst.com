@@ -311,14 +311,8 @@ with app.app_context():
         db.session.rollback()
         print(f"Profitable component migration error: {e}")
     try:
-        with db.engine.connect() as conn:
-            conn.execute(db.text("CREATE TABLE IF NOT EXISTS afl_games (id INTEGER PRIMARY KEY, year INTEGER NOT NULL, round INTEGER, roundname TEXT, hteam TEXT, ateam TEXT, hscore INTEGER, ascore INTEGER, margin INTEGER, winner TEXT, venue TEXT, date TIMESTAMP, complete INTEGER DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW())"))
-            conn.execute(db.text("CREATE TABLE IF NOT EXISTS afl_tips (id SERIAL PRIMARY KEY, gameid INTEGER, year INTEGER, round INTEGER, hteam TEXT, ateam TEXT, tip TEXT, confidence FLOAT, updated_at TIMESTAMP DEFAULT NOW())"))
-            conn.execute(db.text("CREATE TABLE IF NOT EXISTS afl_standings (id SERIAL PRIMARY KEY, year INTEGER, round INTEGER, rank INTEGER, team TEXT, teamid INTEGER, pts INTEGER, played INTEGER, wins INTEGER, losses INTEGER, draws INTEGER, percentage FLOAT, last_updated TIMESTAMP DEFAULT NOW())"))
-            conn.execute(db.text("CREATE TABLE IF NOT EXISTS afl_player_stats (id SERIAL PRIMARY KEY, season INTEGER, match_id INTEGER, player_id INTEGER, player_name TEXT, team TEXT, updated_at TIMESTAMP DEFAULT NOW())"))
-            conn.execute(db.text("CREATE TABLE IF NOT EXISTS afl_player_props (id SERIAL PRIMARY KEY, player_name TEXT, market TEXT, line FLOAT, odds FLOAT, updated_at TIMESTAMP DEFAULT NOW())"))
-            conn.execute(db.text("CREATE TABLE IF NOT EXISTS afl_sync_log (id SERIAL PRIMARY KEY, sync_type TEXT, status TEXT, updated_at TIMESTAMP DEFAULT NOW())"))
-            conn.commit()
+        from afl_db import init_afl_tables
+        init_afl_tables(db)
         print("✓ AFL tables initialised")
     except Exception as e:
         print(f"AFL table init: {e}")
