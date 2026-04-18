@@ -75,7 +75,9 @@ def register_afl_routes(app, db):
             if raw_standings:
                 upsert_standings(db, raw_standings, year, current_round)
                 standings = _db_get_standings(db, year=year)
-
+                
+        player_stats_season = _db_latest_player_stats_season(db) or (year - 1)
+        
         return render_template(
             "afl.html",
             current_round=current_round,
