@@ -303,7 +303,7 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
 
     season_col = first_existing("season", "year")
 
-    if season_col is not None:
+        if season_col is not None:
         season_df = df[df[season_col].astype(str) == str(season)].copy()
     else:
         logger.info("Fryzigg: no season/year column found, deriving season from match_date")
@@ -314,6 +314,25 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
                 list(df.columns)[:30]
             )
             return []
+
+        temp_dates = pd.to_datetime(df[match_date_col], errors="coerce")
+        available_seasons = sorted([int(x) for x in temp_dates.dt.year.dropna().unique()])
+        logger.info("Fryzigg: available seasons in dataset: %s", available_seasons)
+
+        season_df = df[temp_dates.dt.year == season].copy()
+
+        if season_df.empty:
+            latest_season = int(temp_dates.dt.year.dropna().max())
+            logger.warning(
+                "Fryzigg: no rows for season %s, falling back to latest available season %s",
+                season,
+                latest_season,
+            )
+            season_df = df[temp_dates.dt.year == latest_season].copy()
+
+    if season_df.empty:
+        logger.warning("Fryzigg: still no rows after fallback for season %s", season)
+        return []
 
         temp_dates = pd.to_datetime(df[match_date_col], errors="coerce")
         season_df = df[temp_dates.dt.year == season].copy()
