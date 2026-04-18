@@ -615,7 +615,7 @@ def _db_get_fixtures(db, year: int, round_number: int = None) -> list[dict]:
                t.confidence AS squiggle_confidence,
                t.margin     AS squiggle_margin
         FROM afl_games g
-        LEFT JOIN afl_tips t ON t.gameid = g.id AND t.source_id = 8
+        LEFT JOIN afl_tips t ON t.gameid = g.id
         WHERE g.year = :year AND g.complete < 100
               {round_filter}
         ORDER BY g.date ASC
