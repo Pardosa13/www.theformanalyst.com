@@ -301,7 +301,7 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
                 return name
         return None
 
-        season_col = first_existing("season", "year")
+    season_col = first_existing("season", "year")
 
     if season_col is not None:
         season_df = df[df[season_col].astype(str) == str(season)].copy()
@@ -309,7 +309,10 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
         logger.info("Fryzigg: no season/year column found, deriving season from match_date")
         match_date_col = first_existing("match_date", "date")
         if match_date_col is None:
-            logger.error("Fryzigg: no season/year column and no match_date/date column found. Sample cols: %s", list(df.columns)[:30])
+            logger.error(
+                "Fryzigg: no season/year column and no match_date/date column found. Sample cols: %s",
+                list(df.columns)[:30]
+            )
             return []
 
         temp_dates = pd.to_datetime(df[match_date_col], errors="coerce")
@@ -346,7 +349,7 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
 
     def build_row(row) -> dict:
         def g(col):
-            return row[col] if col in row.index else None
+            return row[col] if col in row.index and col is not None else None
 
         return {
             "match_id": _coerce_int(g(c_match_id)),
