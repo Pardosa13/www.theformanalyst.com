@@ -206,13 +206,16 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
       venue_name, match_attendance
     """
     url = f"{FRYZIGG_BASE}/stats/{season}"
-        logger.warning(f"Fryzigg returned no data for {season}")
-        return []
 
-    # Fryzigg returns {"stats": [...]} 
-    if isinstance(data, dict):
-        return data.get("stats", data.get("data", []))
-    return data if isinstance(data, list) else []
+if not data:
+    logger.warning(f"Fryzigg returned no data for {season}")
+    return []
+
+# Fryzigg returns {"stats": [...]} 
+if isinstance(data, dict):
+    return data.get("stats", data.get("data", []))
+
+return data if isinstance(data, list) else []
 
 
 def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dict]:
