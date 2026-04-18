@@ -653,6 +653,14 @@ def _db_get_fixtures(db, year: int, round_number: int = None) -> list[dict]:
         rows = conn.execute(sql, params).mappings().fetchall()
     return [dict(r) for r in rows]
 
+def _db_latest_player_stats_season(db) -> int | None:
+    sql = db.text("SELECT MAX(season) FROM afl_player_stats")
+    try:
+        with db.engine.connect() as conn:
+            value = conn.execute(sql).scalar()
+        return int(value) if value else None
+    except Exception:
+        return None
 
 def _db_get_standings(db, year: int, round_number: int = None) -> list[dict]:
     """Get ladder from DB."""
