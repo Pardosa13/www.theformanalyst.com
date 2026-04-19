@@ -726,7 +726,7 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
             if stats_df.empty:
                 continue
 
-            details = match_details_map.get(match_id, {})
+            details = match_details_map.get(match_provider_id, {})
 
             for _, row in stats_df.iterrows():
                 all_rows.append(_build_afl_current_row(row, details, season, match_provider_id))
@@ -734,7 +734,7 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
             time.sleep(0.1)
 
         except Exception as exc:
-            logger.warning("AFL match stats fetch failed for match %s: %s", match_id, exc)
+            logger.warning("AFL match stats fetch failed for match %s: %s", match_provider_id, exc)
 
     all_rows = [r for r in all_rows if r.get("match_id") and r.get("player_id")]
 
