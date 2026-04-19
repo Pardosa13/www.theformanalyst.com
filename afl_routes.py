@@ -161,7 +161,7 @@ def register_afl_routes(app, db):
         if player_id:
             rows = _db_player_by_id(db, player_id=player_id, season=None, limit=200)
             # Fallback: AFL API uses different player_id to Fryzigg
-            if len(rows) <= 2 and rows:
+            if len(rows) <= 30 and rows:
                 first = rows[0]
                 fname = first.get("player_first_name", "")
                 lname = first.get("player_last_name", "")
