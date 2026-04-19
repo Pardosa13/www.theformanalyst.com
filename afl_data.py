@@ -748,13 +748,13 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
 def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
     """Map AFL current-season row into your DB shape."""
     row_dict = row.to_dict() if hasattr(row, "to_dict") else dict(row)
-
+ 
     def pick(*keys, default=None):
         for key in keys:
             if key in row_dict and row_dict.get(key) not in (None, "", []):
                 return row_dict.get(key)
         return default
-
+ 
     first_name = _coerce_str(
         pick(
             "player.givenName",
@@ -780,19 +780,19 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
             "displayName",
         )
     )
-
+ 
     if not first_name and full_name:
         parts = full_name.split()
         first_name = parts[0] if parts else ""
         last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
-
+ 
     home_team = _coerce_str(details.get("home.team.name"))
     away_team = _coerce_str(details.get("away.team.name"))
-
+ 
     player_team = _coerce_str(pick("team.name"))
     if not player_team:
         player_team = home_team if _coerce_str(row_dict.get("teamStatus")) == "home" else away_team
-
+ 
     home_score = _coerce_int(
         pick(
             "homeTeamScore",
@@ -807,7 +807,7 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
             "away.score",
         )
     )
-
+ 
     winner = ""
     margin = 0
     if home_score or away_score:
@@ -817,7 +817,7 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
         elif away_score > home_score:
             winner = away_team
             margin = away_score - home_score
-
+ 
     return {
         "match_id": _coerce_match_id(pick("providerId")),
         "match_date": _coerce_date(details.get("utcStartTime")),
@@ -833,7 +833,6 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
         "match_attendance": 0,
         "venue_name": _coerce_str(details.get("venue.name")),
         "season": season,
-
         "player_id": _coerce_int(
             pick(
                 "player.playerId",
@@ -859,7 +858,6 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
         "player_height_cm": _coerce_int(pick("heightCm", "height")),
         "player_weight_kg": _coerce_int(pick("weightKg", "weight")),
         "player_is_retired": False,
-
         "kicks": _coerce_int(pick("kicks")),
         "marks": _coerce_int(pick("marks")),
         "handballs": _coerce_int(pick("handballs")),
