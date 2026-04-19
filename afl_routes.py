@@ -242,9 +242,9 @@ def register_afl_routes(app, db):
         effective_season = _resolve_stats_season(db, requested_season)
 
         if player_id:
-            rows = _db_player_by_id(db, player_id=player_id, season=effective_season, limit=100)
+            rows = _db_player_by_id(db, player_id=player_id, season=None, limit=200)
         else:
-            rows = _db_player_search(db, name=name, season=effective_season, limit=100)
+            rows = _db_player_search(db, name=name, season=None, limit=200)
 
         if not rows:
             return jsonify({
