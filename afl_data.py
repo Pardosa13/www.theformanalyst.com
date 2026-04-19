@@ -1014,7 +1014,7 @@ def _fetch_fryzigg_player_stats_from_rds(season: int) -> list[dict]:
         "id",
     ))))
 ),
-            "player_first_name": _coerce_str(
+            "player_first_name": _coerce_str(g(c_first)),
             "player_last_name": _coerce_str(g(c_last)),
             "player_team": _coerce_str(g(c_team)),
             "guernsey_number": _coerce_int(g(c_guernsey)),
