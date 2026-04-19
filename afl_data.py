@@ -833,15 +833,15 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id:
         "match_attendance": 0,
         "venue_name": _coerce_str(details.get("venue.name")),
         "season": season,
-        "player_id": _coerce_str(
-            pick(
-                "player.playerId",
-                "player.player.playerId",
-                "player.player.player.playerId",
-                "playerId",
-                "id",
-            )
-       ),
+        "player_id": _coerce_int(
+    ''.join(filter(str.isdigit, str(pick(
+        "player.playerId",
+        "player.player.playerId",
+        "player.player.player.playerId",
+        "playerId",
+        "id",
+    )))) or "0"
+),
         "player_first_name": first_name,
         "player_last_name": last_name,
         "player_team": player_team,
