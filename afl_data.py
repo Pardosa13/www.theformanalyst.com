@@ -373,24 +373,36 @@ def _find_comp_id(comp: str = "AFLM") -> Optional[int]:
 
 def _find_season_id(season: int, comp: str = "AFLM") -> Optional[int]:
     """Find AFL compSeason id."""
+    import re
+
     comp_id = _find_comp_id(comp)
     if not comp_id:
         logger.error("Could not find comp id for %s", comp)
         return None
 
-    data = _afl_get(f"{AFL_META_BASE}/afl/v2/competitions/{comp_id}/compseasons", params={"pageSize": 100})
+    data = _afl_get(
+        f"{AFL_META_BASE}/afl/v2/competitions/{comp_id}/compseasons",
+        params={"pageSize": 100},
+    )
     if not data or "compSeasons" not in data:
         return None
 
+    candidates = []
     for comp_season in data.get("compSeasons") or []:
         name = _coerce_str(comp_season.get("name"))
         if "Legacy" in name:
             continue
-        if str(season) in name:
-            return comp_season.get("id")
 
-    logger.warning("Could not find AFL season id for %s", season)
-    return None
+        match = re.search(r"([0-9]{4})", name)
+        parsed_season = int(match.group(1)) if match else None
+        if parsed_season == season and comp_season.get("id") is not None:
+            candidates.append(int(comp_season["id"]))
+
+    if not candidates:
+        logger.warning("Could not find AFL season id for %s", season)
+        return None
+
+    return min(candidates)
 
 
 def _find_round_provider_ids(season: int, round_number: int = None, comp: str = "AFLM", future_rounds: bool = True) -> list[int]:
