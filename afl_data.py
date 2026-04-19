@@ -3,16 +3,16 @@ afl_data.py
 ===========
 Data layer for The Form Analyst AFL section.
 
-Sources:
-  1. Fryzigg API  — advanced player stats (via fryziggafl.rds)
-  2. Squiggle API — fixtures, results, ladder, tips
-  3. AFL Tables   — historical results/player stats
-  4. The Odds API — live player prop lines (optional)
-
-All data is cached in PostgreSQL. Fetchers are designed to be called
-from a nightly Railway cron job.
+Strategy:
+- Historical advanced stats: Fryzigg RDS (same source fitzRoy uses)
+- Current-season player stats: official AFL API fallback (same source family fitzRoy uses by default)
+- Fixtures / ladder / tips: Squiggle
+- Optional props: The Odds API
 """
 
+from __future__ import annotations
+
+import json
 import logging
 import os
 import tempfile
@@ -31,9 +31,13 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 FRYZIGG_RDS_URL = "http://www.fryziggafl.net/static/fryziggafl.rds"
+
 SQUIGGLE_BASE = "https://api.squiggle.com.au"
 AFLTABLES_BASE = "https://afltables.com/afl"
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
+
+AFL_API_BASE = "https://api.afl.com.au"
+AFL_META_BASE = "https://aflapi.afl.com.au"
 
 HEADERS = {
     "User-Agent": (
@@ -42,7 +46,7 @@ HEADERS = {
     ),
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-AU,en;q=0.9",
-    "Referer": "https://squiggle.com.au/",
+    "Referer": "https://www.afl.com.au/",
 }
 
 CURRENT_YEAR = datetime.now().year
@@ -68,17 +72,25 @@ SQUIGGLE_TEAM_IDS = {
     "Western Bulldogs": 18,
 }
 
+_FRYZIGG_CACHE = {
+    "df": None,
+    "loaded": False,
+}
+
+_AFL_TOKEN_CACHE = {
+    "token": None,
+    "loaded_at": None,
+}
+
 # ─────────────────────────────────────────────
-# HELPERS
+# GENERIC HELPERS
 # ─────────────────────────────────────────────
 
 def _get(url: str, params: Optional[dict] = None, retries: int = 3) -> Optional[Any]:
     """HTTP GET with retries and rate-limit handling."""
-    import json as _json
-
     for attempt in range(retries):
         try:
-            response = requests.get(url, params=params, headers=HEADERS, timeout=20)
+            response = requests.get(url, params=params, headers=HEADERS, timeout=30)
 
             if response.status_code == 429:
                 logger.warning("Rate limited from %s — sleeping 10s", url)
@@ -93,7 +105,7 @@ def _get(url: str, params: Optional[dict] = None, retries: int = 3) -> Optional[
 
             return response.json()
 
-        except _json.JSONDecodeError as exc:
+        except json.JSONDecodeError as exc:
             body = response.text[:300] if "response" in locals() else ""
             logger.error("JSON decode error from %s: %s — body=%r", url, exc, body)
             return None
@@ -115,6 +127,20 @@ def _coerce_int(value, default=0):
         pass
     try:
         return int(float(value))
+    except Exception:
+        return default
+
+
+def _coerce_float(value, default=0.0):
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+    try:
+        return float(value)
     except Exception:
         return default
 
@@ -155,6 +181,32 @@ def _coerce_date(value):
         return pd.to_datetime(value).date()
     except Exception:
         return None
+
+
+def _coerce_datetime(value):
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    try:
+        return pd.to_datetime(value)
+    except Exception:
+        return None
+
+
+def _season_start_end(season: int) -> tuple[pd.Timestamp, pd.Timestamp]:
+    return pd.Timestamp(f"{season}-01-01"), pd.Timestamp(f"{season}-12-31")
+
+
+def _first_existing(columns: set[str], *names: str) -> Optional[str]:
+    for name in names:
+        if name in columns:
+            return name
+    return None
+
 
 # ─────────────────────────────────────────────
 # SQUIGGLE API
@@ -231,18 +283,444 @@ def fetch_squiggle_upcoming_games(year: int = None) -> list[dict]:
 
     return data.get("games", [])
 
+
 # ─────────────────────────────────────────────
-# FRYZIGG DATA  (via fryziggafl.rds)
+# AFL OFFICIAL API (current-season path)
 # ─────────────────────────────────────────────
 
-_FRYZIGG_CACHE = {
-    "df": None,
-    "loaded": False,
-}
+def _afl_parse_response(response: requests.Response) -> Optional[dict]:
+    """Parse AFL API JSON safely."""
+    try:
+        response.raise_for_status()
+        if "application/json" not in response.headers.get("Content-Type", ""):
+            logger.error("AFL API did not return JSON: %s", response.headers.get("Content-Type"))
+            return None
+        return response.json()
+    except Exception as exc:
+        body = response.text[:300] if response is not None else ""
+        logger.error("AFL API parse failed: %s — body=%r", exc, body)
+        return None
 
+
+def _get_afl_cookie(force_refresh: bool = False) -> Optional[str]:
+    """
+    Get AFL token used in x-media-mis-token header.
+    Cached for a short period to avoid unnecessary token requests.
+    """
+    now = time.time()
+    cached = _AFL_TOKEN_CACHE.get("token")
+    loaded_at = _AFL_TOKEN_CACHE.get("loaded_at") or 0
+
+    if cached and not force_refresh and (now - loaded_at) < 900:
+        return cached
+
+    try:
+        response = requests.post(
+            f"{AFL_API_BASE}/cfs/afl/WMCTok",
+            headers=HEADERS,
+            timeout=30,
+        )
+        data = _afl_parse_response(response)
+        token = data.get("token") if isinstance(data, dict) else None
+        if not token:
+            logger.error("AFL token endpoint returned no token")
+            return None
+
+        _AFL_TOKEN_CACHE["token"] = token
+        _AFL_TOKEN_CACHE["loaded_at"] = now
+        return token
+    except Exception as exc:
+        logger.error("Failed to fetch AFL token: %s", exc)
+        return None
+
+
+def _afl_get(url: str, params: Optional[dict] = None, token: Optional[str] = None, retries: int = 2) -> Optional[dict]:
+    """GET helper for AFL APIs."""
+    for attempt in range(retries):
+        try:
+            headers = dict(HEADERS)
+            if token:
+                headers["x-media-mis-token"] = token
+
+            response = requests.get(url, params=params, headers=headers, timeout=40)
+
+            if response.status_code == 401 and token and attempt == 0:
+                token = _get_afl_cookie(force_refresh=True)
+                continue
+
+            return _afl_parse_response(response)
+        except requests.RequestException as exc:
+            logger.error("AFL GET failed (%s/%s) for %s: %s", attempt + 1, retries, url, exc)
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+
+    return None
+
+
+def _find_comp_id(comp: str = "AFLM") -> Optional[int]:
+    """Find AFL competition id."""
+    comp_code = "AFL" if comp == "AFLM" else comp
+    data = _afl_get(f"{AFL_META_BASE}/afl/v2/competitions", params={"pageSize": 50})
+    if not data or "competitions" not in data:
+        return None
+
+    comps = data.get("competitions") or []
+    matches = [c for c in comps if "Legacy" not in _coerce_str(c.get("name")) and c.get("code") == comp_code]
+    ids = [c.get("id") for c in matches if c.get("id") is not None]
+
+    return min(ids) if ids else None
+
+
+def _find_season_id(season: int, comp: str = "AFLM") -> Optional[int]:
+    """Find AFL compSeason id."""
+    comp_id = _find_comp_id(comp)
+    if not comp_id:
+        logger.error("Could not find comp id for %s", comp)
+        return None
+
+    data = _afl_get(f"{AFL_META_BASE}/afl/v2/competitions/{comp_id}/compseasons", params={"pageSize": 100})
+    if not data or "compSeasons" not in data:
+        return None
+
+    for comp_season in data.get("compSeasons") or []:
+        name = _coerce_str(comp_season.get("name"))
+        if "Legacy" in name:
+            continue
+        if str(season) in name:
+            return comp_season.get("id")
+
+    logger.warning("Could not find AFL season id for %s", season)
+    return None
+
+
+def _find_round_provider_ids(season: int, round_number: int = None, comp: str = "AFLM", future_rounds: bool = True) -> list[int]:
+    """Find AFL round providerIds."""
+    season_id = _find_season_id(season, comp)
+    if not season_id:
+        return []
+
+    data = _afl_get(f"{AFL_META_BASE}/afl/v2/compseasons/{season_id}/rounds", params={"pageSize": 30})
+    if not data or "rounds" not in data:
+        return []
+
+    rounds = data.get("rounds") or []
+
+    if not future_rounds:
+        today = pd.Timestamp.utcnow().tz_localize(None)
+        filtered = []
+        for r in rounds:
+            utc_start = _coerce_datetime(r.get("utcStartTime"))
+            if utc_start is not None and utc_start.tzinfo is not None:
+                utc_start = utc_start.tz_convert(None)
+            if utc_start is not None and utc_start < today:
+                filtered.append(r)
+        rounds = filtered
+
+    if round_number is None:
+        ids = [r.get("providerId") for r in rounds if r.get("providerId") is not None]
+    else:
+        ids = [
+            r.get("providerId")
+            for r in rounds
+            if r.get("providerId") is not None and r.get("roundNumber") == round_number
+        ]
+
+    return ids
+
+
+def _fetch_round_matches_afl(round_provider_id: int, token: Optional[str] = None) -> list[dict]:
+    """Fetch all match items for a round."""
+    token = token or _get_afl_cookie()
+    if not token:
+        return []
+
+    data = _afl_get(
+        f"{AFL_API_BASE}/cfs/afl/matchItems/round/{round_provider_id}",
+        token=token,
+    )
+    if not data:
+        return []
+
+    items = data.get("items") or []
+    return items if isinstance(items, list) else []
+
+
+def fetch_fixture_afl(season: int, round_number: int = None, comp: str = "AFLM") -> list[dict]:
+    """
+    Minimal AFL official fixture fetch.
+    Returns rows containing providerId so we can fetch current-season player stats.
+    """
+    round_provider_ids = _find_round_provider_ids(season, round_number, comp=comp, future_rounds=True)
+    if not round_provider_ids:
+        logger.warning("AFL fixture: no round provider ids for season=%s round=%s", season, round_number)
+        return []
+
+    token = _get_afl_cookie()
+    if not token:
+        return []
+
+    all_matches: list[dict] = []
+    for round_provider_id in round_provider_ids:
+        try:
+            matches = _fetch_round_matches_afl(round_provider_id, token=token)
+            all_matches.extend(matches)
+            time.sleep(0.15)
+        except Exception as exc:
+            logger.warning("AFL fixture round fetch failed for %s: %s", round_provider_id, exc)
+
+    # Deduplicate by providerId
+    deduped = {}
+    for match in all_matches:
+        provider_id = match.get("providerId")
+        if provider_id is not None:
+            deduped[provider_id] = match
+
+    result = list(deduped.values())
+    logger.info("AFL fixture: %s matches for season %s round=%s", len(result), season, round_number)
+    return result
+
+
+def _clean_names_playerstats_afl(df: pd.DataFrame) -> pd.DataFrame:
+    """Mirror fitzRoy AFL player stats name cleaning."""
+    if df is None or df.empty:
+        return df
+
+    cleaned = df.copy()
+    cleaned.columns = [str(c) for c in cleaned.columns]
+    cleaned.columns = [c.replace("playerStats.", "") for c in cleaned.columns]
+    cleaned.columns = [c.replace("stats.", "") for c in cleaned.columns]
+    cleaned.columns = [c.replace("playerName.", "") for c in cleaned.columns]
+    return cleaned
+
+
+def _fetch_match_stats_afl(match_provider_id: int, token: Optional[str] = None) -> pd.DataFrame:
+    """Fetch AFL official player stats for one match."""
+    token = token or _get_afl_cookie()
+    if not token:
+        return pd.DataFrame()
+
+    data = _afl_get(
+        f"{AFL_API_BASE}/cfs/afl/playerStats/match/{match_provider_id}",
+        token=token,
+    )
+    if not data:
+        return pd.DataFrame()
+
+    home_stats = data.get("homeTeamPlayerStats") or []
+    away_stats = data.get("awayTeamPlayerStats") or []
+
+    def _to_df(rows: list[dict], team_status: str) -> pd.DataFrame:
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.json_normalize(rows)
+        for bad_col in ("teamId", "playerStats.lastUpdated"):
+            if bad_col in df.columns:
+                df = df.drop(columns=[bad_col])
+
+        df = _clean_names_playerstats_afl(df)
+        df["teamStatus"] = team_status
+        df["providerId"] = match_provider_id
+        return df
+
+    home_df = _to_df(home_stats, "home")
+    away_df = _to_df(away_stats, "away")
+
+    if home_df.empty and away_df.empty:
+        return pd.DataFrame()
+
+    return pd.concat([home_df, away_df], ignore_index=True)
+
+
+def _normalise_afl_fixture_match(match: dict) -> dict:
+    """Normalise one AFL official match row into something we can merge against player stats."""
+    home_name = (
+        (((match.get("home") or {}).get("team") or {}).get("name"))
+        or (((match.get("home") or {}).get("team") or {}).get("club", {}) or {}).get("name")
+        or ""
+    )
+    away_name = (
+        (((match.get("away") or {}).get("team") or {}).get("name"))
+        or (((match.get("away") or {}).get("team") or {}).get("club", {}) or {}).get("name")
+        or ""
+    )
+
+    venue_name = ((match.get("venue") or {}).get("name")) or ""
+    round_obj = match.get("round") or {}
+    comp_season = match.get("compSeason") or {}
+
+    return {
+        "providerId": match.get("providerId"),
+        "utcStartTime": match.get("utcStartTime"),
+        "status": match.get("status"),
+        "compSeason.shortName": comp_season.get("shortName") or comp_season.get("name") or "",
+        "round.name": round_obj.get("name") or "",
+        "round.roundNumber": round_obj.get("roundNumber"),
+        "venue.name": venue_name,
+        "home.team.name": home_name,
+        "away.team.name": away_name,
+    }
+
+
+def fetch_afl_player_stats_current_season(season: int, round_number: int = None, comp: str = "AFLM") -> list[dict]:
+    """
+    Fetch current-season player stats using AFL official API,
+    following fitzRoy's AFL-source pattern.
+    """
+    matches = fetch_fixture_afl(season, round_number=round_number, comp=comp)
+    if not matches:
+        logger.warning("AFL current-season stats: no fixtures found for season %s", season)
+        return []
+
+    match_provider_ids = [m.get("providerId") for m in matches if m.get("providerId")]
+    if not match_provider_ids:
+        logger.warning("AFL current-season stats: no providerIds found for season %s", season)
+        return []
+
+    token = _get_afl_cookie()
+    if not token:
+        return []
+
+    match_details_map = {
+        m.get("providerId"): _normalise_afl_fixture_match(m)
+        for m in matches
+        if m.get("providerId")
+    }
+
+    all_rows: list[dict] = []
+
+    for match_id in match_provider_ids:
+        try:
+            stats_df = _fetch_match_stats_afl(match_id, token=token)
+            if stats_df.empty:
+                continue
+
+            details = match_details_map.get(match_id, {})
+
+            for _, row in stats_df.iterrows():
+                all_rows.append(_build_afl_current_row(row, details, season))
+            time.sleep(0.1)
+        except Exception as exc:
+            logger.warning("AFL match stats fetch failed for match %s: %s", match_id, exc)
+
+    # Keep only valid match/player IDs
+    all_rows = [r for r in all_rows if r.get("match_id") and r.get("player_id")]
+
+    logger.info("AFL current-season stats: prepared %s rows for season %s", len(all_rows), season)
+    return all_rows
+
+
+def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
+    """Map AFL current-season row into your DB shape."""
+    row_dict = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+
+    # AFL current stats use different field names than Fryzigg.
+    # We map what exists, leave unavailable advanced Fryzigg-only fields as 0.
+    first_name = _coerce_str(row_dict.get("firstName"))
+    last_name = _coerce_str(row_dict.get("surname"))
+    full_name = _coerce_str(row_dict.get("displayName"))
+    if not first_name and full_name:
+        parts = full_name.split()
+        first_name = parts[0] if parts else ""
+        last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
+
+    home_team = _coerce_str(details.get("home.team.name"))
+    away_team = _coerce_str(details.get("away.team.name"))
+
+    player_team = _coerce_str(row_dict.get("team.name"))
+    if not player_team:
+        player_team = home_team if _coerce_str(row_dict.get("teamStatus")) == "home" else away_team
+
+    # Scores may not always exist on incomplete matches
+    home_score = _coerce_int(
+        row_dict.get("homeTeamScore")
+        or row_dict.get("match.homeTeamScore")
+        or row_dict.get("home.score")
+    )
+    away_score = _coerce_int(
+        row_dict.get("awayTeamScore")
+        or row_dict.get("match.awayTeamScore")
+        or row_dict.get("away.score")
+    )
+
+    winner = ""
+    margin = 0
+    if home_score or away_score:
+        if home_score > away_score:
+            winner = home_team
+            margin = home_score - away_score
+        elif away_score > home_score:
+            winner = away_team
+            margin = away_score - home_score
+
+    return {
+        "match_id": _coerce_int(details.get("providerId")),
+        "match_date": _coerce_date(details.get("utcStartTime")),
+        "match_round": _coerce_str(details.get("round.roundNumber") or details.get("round.name")),
+        "match_home_team": home_team,
+        "match_away_team": away_team,
+        "match_home_team_score": home_score,
+        "match_away_team_score": away_score,
+        "match_margin": margin,
+        "match_winner": winner,
+        "match_weather_temp_c": 0,
+        "match_weather_type": "",
+        "match_attendance": 0,
+        "venue_name": _coerce_str(details.get("venue.name")),
+        "season": season,
+
+        "player_id": _coerce_int(row_dict.get("playerId") or row_dict.get("id")),
+        "player_first_name": first_name,
+        "player_last_name": last_name,
+        "player_team": player_team,
+        "guernsey_number": _coerce_int(row_dict.get("guernseyNumber") or row_dict.get("jumperNumber")),
+        "player_height_cm": _coerce_int(row_dict.get("heightCm") or row_dict.get("height")),
+        "player_weight_kg": _coerce_int(row_dict.get("weightKg") or row_dict.get("weight")),
+        "player_is_retired": False,
+
+        "kicks": _coerce_int(row_dict.get("kicks")),
+        "marks": _coerce_int(row_dict.get("marks")),
+        "handballs": _coerce_int(row_dict.get("handballs")),
+        "disposals": _coerce_int(row_dict.get("disposals")),
+        "effective_disposals": _coerce_int(row_dict.get("effectiveDisposals")),
+        "disposal_efficiency_percentage": _coerce_int(row_dict.get("disposalEfficiency")),
+        "goals": _coerce_int(row_dict.get("goals")),
+        "behinds": _coerce_int(row_dict.get("behinds")),
+        "hitouts": _coerce_int(row_dict.get("hitouts")),
+        "tackles": _coerce_int(row_dict.get("tackles")),
+        "rebounds": _coerce_int(row_dict.get("rebounds")),
+        "inside_fifties": _coerce_int(row_dict.get("inside50s") or row_dict.get("insideFifties")),
+        "clearances": _coerce_int(row_dict.get("clearances")),
+        "clangers": _coerce_int(row_dict.get("clangers")),
+        "free_kicks_for": _coerce_int(row_dict.get("freesFor") or row_dict.get("freeKicksFor")),
+        "free_kicks_against": _coerce_int(row_dict.get("freesAgainst") or row_dict.get("freeKicksAgainst")),
+        "brownlow_votes": 0,
+        "contested_possessions": _coerce_int(row_dict.get("contestedPossessions")),
+        "uncontested_possessions": _coerce_int(row_dict.get("uncontestedPossessions")),
+        "contested_marks": _coerce_int(row_dict.get("contestedMarks")),
+        "marks_inside_fifty": _coerce_int(row_dict.get("marksInside50")),
+        "one_percenters": _coerce_int(row_dict.get("onePercenters")),
+        "bounces": _coerce_int(row_dict.get("bounces")),
+        "goal_assists": _coerce_int(row_dict.get("goalAssists")),
+        "time_on_ground_percentage": _coerce_int(row_dict.get("timeOnGroundPct") or row_dict.get("timeOnGroundPercentage")),
+        "afl_fantasy_score": _coerce_int(row_dict.get("aflFantasyScore") or row_dict.get("fantasyScore")),
+        "supercoach_score": _coerce_int(row_dict.get("supercoachScore")),
+        "centre_clearances": _coerce_int(row_dict.get("centreClearances")),
+        "stoppage_clearances": _coerce_int(row_dict.get("stoppageClearances")),
+        "score_involvements": _coerce_int(row_dict.get("scoreInvolvements")),
+        "metres_gained": _coerce_int(row_dict.get("metresGained")),
+        "turnovers": _coerce_int(row_dict.get("turnovers")),
+        "intercepts": _coerce_int(row_dict.get("intercepts")),
+        "tackles_inside_fifty": _coerce_int(row_dict.get("tacklesInside50")),
+    }
+
+
+# ─────────────────────────────────────────────
+# FRYZIGG DATA (historical path)
+# ─────────────────────────────────────────────
 
 def _download_fryzigg_rds() -> pd.DataFrame:
-    """Download and cache the Fryzigg .rds file as a pandas DataFrame."""
+    """Download and cache Fryzigg RDS as DataFrame."""
     global _FRYZIGG_CACHE
 
     if _FRYZIGG_CACHE["loaded"] and _FRYZIGG_CACHE["df"] is not None:
@@ -267,7 +745,6 @@ def _download_fryzigg_rds() -> pd.DataFrame:
             raise ValueError("Fryzigg RDS loaded but DataFrame is empty")
 
         df.columns = [str(c).strip().lower() for c in df.columns]
-
         _FRYZIGG_CACHE["df"] = df
         _FRYZIGG_CACHE["loaded"] = True
 
@@ -280,82 +757,54 @@ def _download_fryzigg_rds() -> pd.DataFrame:
             pass
 
 
-def fetch_fryzigg_player_stats(season: int) -> list[dict]:
+def _fetch_fryzigg_player_stats_from_rds(season: int) -> list[dict]:
     """
     Load Fryzigg player stats for one season from the .rds file.
-    Returns rows shaped for upsert_player_stats().
+    Mirrors fitzRoy logic: filter by date range, not by assuming a season column.
     """
     try:
         df = _download_fryzigg_rds()
-    except Exception as e:
-        logger.error("Fryzigg: failed loading RDS: %s", e)
+    except Exception as exc:
+        logger.error("Fryzigg: failed loading RDS: %s", exc)
         return []
 
     cols = set(df.columns)
+    match_date_col = _first_existing(cols, "match_date", "date")
+    if match_date_col is None:
+        logger.error("Fryzigg: no match_date/date column found. Sample cols: %s", list(df.columns)[:30])
+        return []
 
-    def first_existing(*names):
-        for name in names:
-            if name in cols:
-                return name
-        return None
-
-    season_col = first_existing("season", "year")
-
-    if season_col is not None:
-        season_df = df[df[season_col].astype(str) == str(season)].copy()
-    else:
-        logger.info("Fryzigg: no season/year column found, deriving season from match_date")
-        match_date_col = first_existing("match_date", "date")
-        if match_date_col is None:
-            logger.error(
-                "Fryzigg: no season/year column and no match_date/date column found. Sample cols: %s",
-                list(df.columns)[:30]
-            )
-            return []
-
-        temp_dates = pd.to_datetime(df[match_date_col], errors="coerce")
-        available_seasons = sorted([int(x) for x in temp_dates.dt.year.dropna().unique()])
-        logger.info("Fryzigg: available seasons in dataset: %s", available_seasons)
-
-        season_df = df[temp_dates.dt.year == season].copy()
-
-        if season_df.empty:
-            latest_season = int(temp_dates.dt.year.dropna().max())
-            logger.warning(
-                "Fryzigg: no rows for season %s, falling back to latest available season %s",
-                season,
-                latest_season,
-            )
-            season_df = df[temp_dates.dt.year == latest_season].copy()
+    temp_dates = pd.to_datetime(df[match_date_col], errors="coerce")
+    start_date, end_date = _season_start_end(season)
+    season_df = df[(temp_dates >= start_date) & (temp_dates <= end_date)].copy()
 
     if season_df.empty:
-        logger.warning("Fryzigg: still no rows after fallback for season %s", season)
+        logger.warning("Fryzigg: no rows for season %s", season)
         return []
 
     logger.info("Fryzigg: %s rows for season %s", len(season_df), season)
 
-    c_match_id = first_existing("match_id", "game_id", "id")
-    c_match_date = first_existing("match_date", "date")
-    c_match_round = first_existing("match_round", "round")
-    c_home_team = first_existing("match_home_team", "home_team")
-    c_away_team = first_existing("match_away_team", "away_team")
-    c_home_score = first_existing("match_home_team_score", "home_score")
-    c_away_score = first_existing("match_away_team_score", "away_score")
-    c_match_margin = first_existing("match_margin", "margin")
-    c_match_winner = first_existing("match_winner", "winner")
-    c_weather_temp = first_existing("match_weather_temp_c", "weather_temp_c")
-    c_weather_type = first_existing("match_weather_type", "weather_type")
-    c_attendance = first_existing("match_attendance", "attendance")
-    c_venue = first_existing("venue_name", "venue")
+    c_match_id = _first_existing(cols, "match_id", "game_id", "id")
+    c_match_round = _first_existing(cols, "match_round", "round")
+    c_home_team = _first_existing(cols, "match_home_team", "home_team")
+    c_away_team = _first_existing(cols, "match_away_team", "away_team")
+    c_home_score = _first_existing(cols, "match_home_team_score", "home_score")
+    c_away_score = _first_existing(cols, "match_away_team_score", "away_score")
+    c_match_margin = _first_existing(cols, "match_margin", "margin")
+    c_match_winner = _first_existing(cols, "match_winner", "winner")
+    c_weather_temp = _first_existing(cols, "match_weather_temp_c", "weather_temp_c")
+    c_weather_type = _first_existing(cols, "match_weather_type", "weather_type")
+    c_attendance = _first_existing(cols, "match_attendance", "attendance")
+    c_venue = _first_existing(cols, "venue_name", "venue")
 
-    c_player_id = first_existing("player_id")
-    c_first = first_existing("player_first_name", "first_name")
-    c_last = first_existing("player_last_name", "last_name")
-    c_team = first_existing("player_team", "team")
-    c_guernsey = first_existing("guernsey_number", "guernsey")
-    c_height = first_existing("player_height_cm", "height_cm")
-    c_weight = first_existing("player_weight_kg", "weight_kg")
-    c_retired = first_existing("player_is_retired", "is_retired")
+    c_player_id = _first_existing(cols, "player_id")
+    c_first = _first_existing(cols, "player_first_name", "first_name")
+    c_last = _first_existing(cols, "player_last_name", "last_name")
+    c_team = _first_existing(cols, "player_team", "team")
+    c_guernsey = _first_existing(cols, "guernsey_number", "guernsey")
+    c_height = _first_existing(cols, "player_height_cm", "height_cm")
+    c_weight = _first_existing(cols, "player_weight_kg", "weight_kg")
+    c_retired = _first_existing(cols, "player_is_retired", "is_retired")
 
     def build_row(row) -> dict:
         def g(col):
@@ -363,7 +812,7 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
 
         return {
             "match_id": _coerce_int(g(c_match_id)),
-            "match_date": _coerce_date(g(c_match_date)),
+            "match_date": _coerce_date(g(match_date_col)),
             "match_round": _coerce_str(g(c_match_round)),
             "match_home_team": _coerce_str(g(c_home_team)),
             "match_away_team": _coerce_str(g(c_away_team)),
@@ -386,40 +835,40 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
             "player_weight_kg": _coerce_int(g(c_weight)),
             "player_is_retired": _coerce_bool(g(c_retired), False),
 
-            "kicks": _coerce_int(g(first_existing("kicks"))),
-            "marks": _coerce_int(g(first_existing("marks"))),
-            "handballs": _coerce_int(g(first_existing("handballs"))),
-            "disposals": _coerce_int(g(first_existing("disposals"))),
-            "effective_disposals": _coerce_int(g(first_existing("effective_disposals"))),
-            "disposal_efficiency_percentage": _coerce_int(g(first_existing("disposal_efficiency_percentage"))),
-            "goals": _coerce_int(g(first_existing("goals"))),
-            "behinds": _coerce_int(g(first_existing("behinds"))),
-            "hitouts": _coerce_int(g(first_existing("hitouts"))),
-            "tackles": _coerce_int(g(first_existing("tackles"))),
-            "rebounds": _coerce_int(g(first_existing("rebounds"))),
-            "inside_fifties": _coerce_int(g(first_existing("inside_fifties"))),
-            "clearances": _coerce_int(g(first_existing("clearances"))),
-            "clangers": _coerce_int(g(first_existing("clangers"))),
-            "free_kicks_for": _coerce_int(g(first_existing("free_kicks_for"))),
-            "free_kicks_against": _coerce_int(g(first_existing("free_kicks_against"))),
-            "brownlow_votes": _coerce_int(g(first_existing("brownlow_votes"))),
-            "contested_possessions": _coerce_int(g(first_existing("contested_possessions"))),
-            "uncontested_possessions": _coerce_int(g(first_existing("uncontested_possessions"))),
-            "contested_marks": _coerce_int(g(first_existing("contested_marks"))),
-            "marks_inside_fifty": _coerce_int(g(first_existing("marks_inside_fifty"))),
-            "one_percenters": _coerce_int(g(first_existing("one_percenters"))),
-            "bounces": _coerce_int(g(first_existing("bounces"))),
-            "goal_assists": _coerce_int(g(first_existing("goal_assists"))),
-            "time_on_ground_percentage": _coerce_int(g(first_existing("time_on_ground_percentage"))),
-            "afl_fantasy_score": _coerce_int(g(first_existing("afl_fantasy_score"))),
-            "supercoach_score": _coerce_int(g(first_existing("supercoach_score"))),
-            "centre_clearances": _coerce_int(g(first_existing("centre_clearances"))),
-            "stoppage_clearances": _coerce_int(g(first_existing("stoppage_clearances"))),
-            "score_involvements": _coerce_int(g(first_existing("score_involvements"))),
-            "metres_gained": _coerce_int(g(first_existing("metres_gained"))),
-            "turnovers": _coerce_int(g(first_existing("turnovers"))),
-            "intercepts": _coerce_int(g(first_existing("intercepts"))),
-            "tackles_inside_fifty": _coerce_int(g(first_existing("tackles_inside_fifty"))),
+            "kicks": _coerce_int(g(_first_existing(cols, "kicks"))),
+            "marks": _coerce_int(g(_first_existing(cols, "marks"))),
+            "handballs": _coerce_int(g(_first_existing(cols, "handballs"))),
+            "disposals": _coerce_int(g(_first_existing(cols, "disposals"))),
+            "effective_disposals": _coerce_int(g(_first_existing(cols, "effective_disposals"))),
+            "disposal_efficiency_percentage": _coerce_int(g(_first_existing(cols, "disposal_efficiency_percentage"))),
+            "goals": _coerce_int(g(_first_existing(cols, "goals"))),
+            "behinds": _coerce_int(g(_first_existing(cols, "behinds"))),
+            "hitouts": _coerce_int(g(_first_existing(cols, "hitouts"))),
+            "tackles": _coerce_int(g(_first_existing(cols, "tackles"))),
+            "rebounds": _coerce_int(g(_first_existing(cols, "rebounds"))),
+            "inside_fifties": _coerce_int(g(_first_existing(cols, "inside_fifties"))),
+            "clearances": _coerce_int(g(_first_existing(cols, "clearances"))),
+            "clangers": _coerce_int(g(_first_existing(cols, "clangers"))),
+            "free_kicks_for": _coerce_int(g(_first_existing(cols, "free_kicks_for"))),
+            "free_kicks_against": _coerce_int(g(_first_existing(cols, "free_kicks_against"))),
+            "brownlow_votes": _coerce_int(g(_first_existing(cols, "brownlow_votes"))),
+            "contested_possessions": _coerce_int(g(_first_existing(cols, "contested_possessions"))),
+            "uncontested_possessions": _coerce_int(g(_first_existing(cols, "uncontested_possessions"))),
+            "contested_marks": _coerce_int(g(_first_existing(cols, "contested_marks"))),
+            "marks_inside_fifty": _coerce_int(g(_first_existing(cols, "marks_inside_fifty"))),
+            "one_percenters": _coerce_int(g(_first_existing(cols, "one_percenters"))),
+            "bounces": _coerce_int(g(_first_existing(cols, "bounces"))),
+            "goal_assists": _coerce_int(g(_first_existing(cols, "goal_assists"))),
+            "time_on_ground_percentage": _coerce_int(g(_first_existing(cols, "time_on_ground_percentage"))),
+            "afl_fantasy_score": _coerce_int(g(_first_existing(cols, "afl_fantasy_score"))),
+            "supercoach_score": _coerce_int(g(_first_existing(cols, "supercoach_score"))),
+            "centre_clearances": _coerce_int(g(_first_existing(cols, "centre_clearances"))),
+            "stoppage_clearances": _coerce_int(g(_first_existing(cols, "stoppage_clearances"))),
+            "score_involvements": _coerce_int(g(_first_existing(cols, "score_involvements"))),
+            "metres_gained": _coerce_int(g(_first_existing(cols, "metres_gained"))),
+            "turnovers": _coerce_int(g(_first_existing(cols, "turnovers"))),
+            "intercepts": _coerce_int(g(_first_existing(cols, "intercepts"))),
+            "tackles_inside_fifty": _coerce_int(g(_first_existing(cols, "tackles_inside_fifty"))),
         }
 
     rows = [build_row(row) for _, row in season_df.iterrows()]
@@ -429,17 +878,38 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
     return rows
 
 
+def fetch_fryzigg_player_stats(season: int) -> list[dict]:
+    """
+    Unified player stats fetch.
+
+    Rules:
+    - For current season: try AFL official current-season stats first.
+    - If AFL official returns nothing, fall back to Fryzigg RDS.
+    - For past seasons: use Fryzigg RDS directly.
+    """
+    if season >= CURRENT_YEAR:
+        logger.info("Player stats: trying AFL official current-season source for %s", season)
+        current_rows = fetch_afl_player_stats_current_season(season)
+        if current_rows:
+            return current_rows
+
+        logger.warning("Player stats: AFL current-season source returned no rows for %s, falling back to Fryzigg", season)
+
+    return _fetch_fryzigg_player_stats_from_rds(season)
+
+
 def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dict]:
-    """Fetch multiple Fryzigg seasons."""
+    """Fetch multiple seasons."""
     all_stats: list[dict] = []
 
     for year in range(start_year, end_year + 1):
-        logger.info("Fetching Fryzigg stats for %s...", year)
+        logger.info("Fetching player stats for %s...", year)
         stats = fetch_fryzigg_player_stats(year)
         all_stats.extend(stats)
         time.sleep(1)
 
     return all_stats
+
 
 # ─────────────────────────────────────────────
 # AFL TABLES
@@ -487,6 +957,7 @@ def fetch_afltables_results(year: int) -> list[dict]:
                 continue
 
     return results
+
 
 # ─────────────────────────────────────────────
 # THE ODDS API
@@ -553,6 +1024,7 @@ def fetch_afl_player_props(api_key: str, market: str = "player_disposals") -> li
         time.sleep(0.5)
 
     return props
+
 
 # ─────────────────────────────────────────────
 # CONVENIENCE AGGREGATORS
