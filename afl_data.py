@@ -541,6 +541,43 @@ def _fetch_match_stats_afl(match_provider_id: int, token: Optional[str] = None) 
     if not data:
         return pd.DataFrame()
 
+    # DEBUG: log the top-level structure once so we can see what AFL is actually returning
+    try:
+        logger.info("AFL stats debug match %s top-level keys: %s", match_provider_id, list(data.keys())[:50])
+
+        for key in [
+            "homeTeamPlayerStats",
+            "awayTeamPlayerStats",
+            "playerStats",
+            "players",
+            "items",
+            "home",
+            "away",
+            "match",
+            "teamStats",
+        ]:
+            value = data.get(key)
+            if isinstance(value, list):
+                logger.info("AFL stats debug match %s key=%s list_len=%s", match_provider_id, key, len(value))
+                if value:
+                    first = value[0]
+                    if isinstance(first, dict):
+                        logger.info(
+                            "AFL stats debug match %s key=%s first_item_keys=%s",
+                            match_provider_id,
+                            key,
+                            list(first.keys())[:50],
+                        )
+            elif isinstance(value, dict):
+                logger.info(
+                    "AFL stats debug match %s key=%s dict_keys=%s",
+                    match_provider_id,
+                    key,
+                    list(value.keys())[:50],
+                )
+    except Exception as exc:
+        logger.warning("AFL stats debug logging failed for %s: %s", match_provider_id, exc)
+
     home_stats = data.get("homeTeamPlayerStats") or []
     away_stats = data.get("awayTeamPlayerStats") or []
 
@@ -562,9 +599,13 @@ def _fetch_match_stats_afl(match_provider_id: int, token: Optional[str] = None) 
     away_df = _to_df(away_stats, "away")
 
     if home_df.empty and away_df.empty:
+        logger.warning("AFL stats debug match %s produced no home/away player rows", match_provider_id)
         return pd.DataFrame()
 
-    return pd.concat([home_df, away_df], ignore_index=True)
+    combined = pd.concat([home_df, away_df], ignore_index=True)
+    logger.info("AFL stats debug match %s dataframe columns: %s", match_provider_id, list(combined.columns)[:100])
+    logger.info("AFL stats debug match %s dataframe rowcount: %s", match_provider_id, len(combined))
+    return combined
 
 
 def _normalise_afl_fixture_match(match: dict) -> dict:
