@@ -819,42 +819,42 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id:
             margin = away_score - home_score
  
     return {
-        "match_id": _coerce_match_id(match_id),
-        "match_date": _coerce_date(details.get("utcStartTime")),
-        "match_round": _coerce_str(details.get("round.roundNumber") or details.get("round.name")),
-        "match_home_team": home_team,
-        "match_away_team": away_team,
-        "match_home_team_score": home_score,
-        "match_away_team_score": away_score,
-        "match_margin": margin,
-        "match_winner": winner,
-        "match_weather_temp_c": 0,
-        "match_weather_type": "",
-        "match_attendance": 0,
-        "venue_name": _coerce_str(details.get("venue.name")),
-        "season": season,
-        "player_id": _coerce_int(
-    ''.join(filter(str.isdigit, str(pick(
-        "player.playerId",
-        "player.player.playerId",
-        "player.player.player.playerId",
-        "playerId",
-        "id",
-    )))) or "0"
-),
-        "player_first_name": first_name,
-        "player_last_name": last_name,
-        "player_team": player_team,
-        "guernsey_number": _coerce_int(
-            pick(
-                "player.playerJumperNumber",
-                "player.player.playerJumperNumber",
-                "player.player.player.playerJumperNumber",
-                "player.jumperNumber",
-                "guernseyNumber",
-                "jumperNumber",
-            )
-        ),
+    "match_id": _coerce_match_id(match_id),
+    "match_date": _coerce_date(details.get("utcStartTime")),
+    "match_round": _coerce_str(details.get("round.roundNumber") or details.get("round.name")),
+    "match_home_team": home_team,
+    "match_away_team": away_team,
+    "match_home_team_score": home_score,
+    "match_away_team_score": away_score,
+    "match_margin": margin,
+    "match_winner": winner,
+    "match_weather_temp_c": 0,
+    "match_weather_type": "",
+    "match_attendance": 0,
+    "venue_name": _coerce_str(details.get("venue.name")),
+    "season": season,
+    "player_id": _coerce_int(
+        ''.join(filter(str.isdigit, str(pick(
+            "player.playerId",
+            "player.player.playerId",
+            "player.player.player.playerId",
+            "playerId",
+            "id",
+        )))) or "0"
+    ),
+    "player_first_name": first_name,
+    "player_last_name": last_name,
+    "player_team": player_team,
+    "guernsey_number": _coerce_int(
+        pick(
+            "player.playerJumperNumber",
+            "player.player.playerJumperNumber",
+            "player.player.player.playerJumperNumber",
+            "player.jumperNumber",
+            "guernseyNumber",
+            "jumperNumber",
+        )
+    ),
         "player_height_cm": _coerce_int(pick("heightCm", "height")),
         "player_weight_kg": _coerce_int(pick("weightKg", "weight")),
         "player_is_retired": False,
