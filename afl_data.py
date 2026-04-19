@@ -600,14 +600,47 @@ def _normalise_afl_fixture_match(match: dict) -> dict:
 def fetch_afl_player_stats_current_season(season: int, round_number: int = None, comp: str = "AFLM") -> list[dict]:
     """
     Fetch current-season player stats using AFL official API,
-    following fitzRoy's AFL-source pattern.
+    but only for rounds/matches that should already have stats available.
     """
+    # If no round provided, only go up to the current round from Squiggle
+    if round_number is None:
+        try:
+            round_number = fetch_squiggle_current_round(season)
+        except Exception:
+            round_number = None
+
     matches = fetch_fixture_afl(season, round_number=round_number, comp=comp)
     if not matches:
-        logger.warning("AFL current-season stats: no fixtures found for season %s", season)
+        logger.warning("AFL current-season stats: no fixtures found for season %s round=%s", season, round_number)
         return []
 
-    match_provider_ids = [m.get("providerId") for m in matches if m.get("providerId")]
+    # Keep only matches that have already started / are not future scheduled matches
+    now_utc = pd.Timestamp.utcnow()
+
+    filtered_matches = []
+    for match in matches:
+        utc_start = _coerce_datetime(match.get("utcStartTime"))
+        status = _coerce_str(match.get("status")).lower()
+
+        include = False
+
+        # AFL statuses vary, so allow several non-future cases
+        if status in {"concluded", "complete", "finished", "closed", "final"}:
+            include = True
+        elif utc_start is not None and utc_start <= now_utc:
+            include = True
+
+        if include:
+            filtered_matches.append(match)
+
+    if not filtered_matches:
+        logger.warning(
+            "AFL current-season stats: no completed/started matches found for season %s round=%s",
+            season, round_number
+        )
+        return []
+
+    match_provider_ids = [m.get("providerId") for m in filtered_matches if m.get("providerId")]
     if not match_provider_ids:
         logger.warning("AFL current-season stats: no providerIds found for season %s", season)
         return []
@@ -618,7 +651,7 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
 
     match_details_map = {
         m.get("providerId"): _normalise_afl_fixture_match(m)
-        for m in matches
+        for m in filtered_matches
         if m.get("providerId")
     }
 
@@ -634,14 +667,18 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
 
             for _, row in stats_df.iterrows():
                 all_rows.append(_build_afl_current_row(row, details, season))
+
             time.sleep(0.1)
+
         except Exception as exc:
             logger.warning("AFL match stats fetch failed for match %s: %s", match_id, exc)
 
-    # Keep only valid match/player IDs
     all_rows = [r for r in all_rows if r.get("match_id") and r.get("player_id")]
 
-    logger.info("AFL current-season stats: prepared %s rows for season %s", len(all_rows), season)
+    logger.info(
+        "AFL current-season stats: prepared %s rows for season %s round=%s",
+        len(all_rows), season, round_number
+    )
     return all_rows
 
 
