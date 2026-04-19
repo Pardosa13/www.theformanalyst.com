@@ -334,8 +334,29 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
     """)
 
     def _i(row, key, default=0):
-        v = row.get(key)
-        return int(v) if v is not None else default
+    v = row.get(key)
+    if v is None:
+        return default
+    try:
+        return int(v)
+    except Exception:
+        return default
+
+def _match_id(row, key="match_id", default=0):
+    v = row.get(key)
+    if v is None:
+        return default
+
+    s = str(v).strip()
+    digits = "".join(ch for ch in s if ch.isdigit())
+
+    if not digits:
+        return default
+
+    try:
+        return int(digits)
+    except Exception:
+        return default
 
     with db.engine.begin() as conn:
         for row in stats:
