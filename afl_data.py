@@ -748,7 +748,11 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
 def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id: int) -> dict:
     """Map AFL current-season row into your DB shape."""
     row_dict = row.to_dict() if hasattr(row, "to_dict") else dict(row)
- 
+    # DEBUG: Print actual values
+    logger.info("DEBUG row_dict keys sample: %s", list(row_dict.keys())[:10])
+    logger.info("DEBUG player.player.player.playerId value: %s", row_dict.get('player.player.player.playerId'))
+    logger.info("DEBUG player.playerId value: %s", row_dict.get('player.playerId'))
+    logger.info("DEBUG playerId value: %s", row_dict.get('playerId'))
     def pick(*keys, default=None):
         for key in keys:
             if key in row_dict and row_dict.get(key) not in (None, "", []):
