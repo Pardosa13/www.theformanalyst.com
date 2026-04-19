@@ -448,14 +448,14 @@ def _find_round_ids(
     return [int(x) for x in ids if x is not None]
 
 
-def _fetch_round_matches_afl(round_provider_id: int, token: Optional[str] = None) -> list[dict]:
-    """Fetch all match items for a round."""
+def _fetch_round_matches_afl(round_id: int, token: Optional[str] = None) -> list[dict]:
+    """Fetch all match items for a round id."""
     token = token or _get_afl_cookie()
     if not token:
         return []
 
     data = _afl_get(
-        f"{AFL_API_BASE}/cfs/afl/matchItems/round/{round_provider_id}",
+        f"{AFL_API_BASE}/cfs/afl/matchItems/round/{round_id}",
         token=token,
     )
     if not data:
