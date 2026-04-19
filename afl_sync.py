@@ -21,8 +21,6 @@ logger = logging.getLogger(__name__)
 def sync_afl_all(season: int = None):
     """
     Nightly AFL sync. Called by Railway cron.
-    
-    season: the season to sync. Defaults to current year if not provided.
     """
     from datetime import datetime
     from sqlalchemy import create_engine, text
@@ -46,15 +44,13 @@ def sync_afl_all(season: int = None):
     if season is None:
         season = datetime.now().year
 
-        db_url = os.environ.get("DATABASE_URL")
+    db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         logger.error("DATABASE_URL not set — aborting")
         return
 
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
-
-    engine = create_engine(db_url)
 
     engine = create_engine(db_url)
     db = SimpleNamespace(engine=engine, text=text)
