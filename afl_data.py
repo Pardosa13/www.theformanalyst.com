@@ -129,7 +129,29 @@ def _coerce_int(value, default=0):
         return int(float(value))
     except Exception:
         return default
+def _coerce_match_id(value, default=0):
+    """
+    Convert AFL match ids like 'CD_M20260140601' into a stable integer.
+    """
+    if value is None:
+        return default
 
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+
+    s = str(value).strip()
+    digits = "".join(ch for ch in s if ch.isdigit())
+
+    if not digits:
+        return default
+
+    try:
+        return int(digits)
+    except Exception:
+        return default
 
 def _coerce_float(value, default=0.0):
     if value is None:
@@ -727,11 +749,21 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
     """Map AFL current-season row into your DB shape."""
     row_dict = row.to_dict() if hasattr(row, "to_dict") else dict(row)
 
-    # AFL current stats use different field names than Fryzigg.
-    # We map what exists, leave unavailable advanced Fryzigg-only fields as 0.
-    first_name = _coerce_str(row_dict.get("firstName"))
-    last_name = _coerce_str(row_dict.get("surname"))
-    full_name = _coerce_str(row_dict.get("displayName"))
+    first_name = _coerce_str(
+        row_dict.get("player.givenName")
+        or row_dict.get("player.player.givenName")
+        or row_dict.get("firstName")
+    )
+    last_name = _coerce_str(
+        row_dict.get("player.surname")
+        or row_dict.get("player.player.surname")
+        or row_dict.get("surname")
+    )
+
+    full_name = _coerce_str(
+        row_dict.get("displayName")
+        or f"{first_name} {last_name}".strip()
+    )
     if not first_name and full_name:
         parts = full_name.split()
         first_name = parts[0] if parts else ""
@@ -744,7 +776,6 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
     if not player_team:
         player_team = home_team if _coerce_str(row_dict.get("teamStatus")) == "home" else away_team
 
-    # Scores may not always exist on incomplete matches
     home_score = _coerce_int(
         row_dict.get("homeTeamScore")
         or row_dict.get("match.homeTeamScore")
@@ -766,8 +797,21 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
             winner = away_team
             margin = away_score - home_score
 
+    centre_clearances = _coerce_int(
+        row_dict.get("clearances.centreClearances")
+        or row_dict.get("centreClearances")
+    )
+    stoppage_clearances = _coerce_int(
+        row_dict.get("clearances.stoppageClearances")
+        or row_dict.get("stoppageClearances")
+    )
+    total_clearances = _coerce_int(
+        row_dict.get("clearances.totalClearances")
+        or row_dict.get("clearances")
+    )
+
     return {
-        "match_id": _coerce_int(details.get("providerId")),
+        "match_id": _coerce_match_id(details.get("providerId")),
         "match_date": _coerce_date(details.get("utcStartTime")),
         "match_round": _coerce_str(details.get("round.roundNumber") or details.get("round.name")),
         "match_home_team": home_team,
@@ -782,11 +826,22 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
         "venue_name": _coerce_str(details.get("venue.name")),
         "season": season,
 
-        "player_id": _coerce_int(row_dict.get("playerId") or row_dict.get("id")),
+        "player_id": _coerce_int(
+            row_dict.get("player.playerId")
+            or row_dict.get("player.player.playerId")
+            or row_dict.get("playerId")
+            or row_dict.get("id")
+        ),
         "player_first_name": first_name,
         "player_last_name": last_name,
         "player_team": player_team,
-        "guernsey_number": _coerce_int(row_dict.get("guernseyNumber") or row_dict.get("jumperNumber")),
+        "guernsey_number": _coerce_int(
+            row_dict.get("player.playerJumperNumber")
+            or row_dict.get("player.player.playerJumperNumber")
+            or row_dict.get("player.jumperNumber")
+            or row_dict.get("guernseyNumber")
+            or row_dict.get("jumperNumber")
+        ),
         "player_height_cm": _coerce_int(row_dict.get("heightCm") or row_dict.get("height")),
         "player_weight_kg": _coerce_int(row_dict.get("weightKg") or row_dict.get("weight")),
         "player_is_retired": False,
@@ -795,15 +850,18 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
         "marks": _coerce_int(row_dict.get("marks")),
         "handballs": _coerce_int(row_dict.get("handballs")),
         "disposals": _coerce_int(row_dict.get("disposals")),
-        "effective_disposals": _coerce_int(row_dict.get("effectiveDisposals")),
+        "effective_disposals": _coerce_int(
+            row_dict.get("extendedStats.effectiveDisposals")
+            or row_dict.get("effectiveDisposals")
+        ),
         "disposal_efficiency_percentage": _coerce_int(row_dict.get("disposalEfficiency")),
         "goals": _coerce_int(row_dict.get("goals")),
         "behinds": _coerce_int(row_dict.get("behinds")),
         "hitouts": _coerce_int(row_dict.get("hitouts")),
         "tackles": _coerce_int(row_dict.get("tackles")),
-        "rebounds": _coerce_int(row_dict.get("rebounds")),
+        "rebounds": _coerce_int(row_dict.get("rebound50s") or row_dict.get("rebounds")),
         "inside_fifties": _coerce_int(row_dict.get("inside50s") or row_dict.get("insideFifties")),
-        "clearances": _coerce_int(row_dict.get("clearances")),
+        "clearances": total_clearances,
         "clangers": _coerce_int(row_dict.get("clangers")),
         "free_kicks_for": _coerce_int(row_dict.get("freesFor") or row_dict.get("freeKicksFor")),
         "free_kicks_against": _coerce_int(row_dict.get("freesAgainst") or row_dict.get("freeKicksAgainst")),
@@ -815,11 +873,18 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
         "one_percenters": _coerce_int(row_dict.get("onePercenters")),
         "bounces": _coerce_int(row_dict.get("bounces")),
         "goal_assists": _coerce_int(row_dict.get("goalAssists")),
-        "time_on_ground_percentage": _coerce_int(row_dict.get("timeOnGroundPct") or row_dict.get("timeOnGroundPercentage")),
-        "afl_fantasy_score": _coerce_int(row_dict.get("aflFantasyScore") or row_dict.get("fantasyScore")),
+        "time_on_ground_percentage": _coerce_int(
+            row_dict.get("timeOnGroundPercentage")
+            or row_dict.get("timeOnGroundPct")
+        ),
+        "afl_fantasy_score": _coerce_int(
+            row_dict.get("dreamTeamPoints")
+            or row_dict.get("aflFantasyScore")
+            or row_dict.get("fantasyScore")
+        ),
         "supercoach_score": _coerce_int(row_dict.get("supercoachScore")),
-        "centre_clearances": _coerce_int(row_dict.get("centreClearances")),
-        "stoppage_clearances": _coerce_int(row_dict.get("stoppageClearances")),
+        "centre_clearances": centre_clearances,
+        "stoppage_clearances": stoppage_clearances,
         "score_involvements": _coerce_int(row_dict.get("scoreInvolvements")),
         "metres_gained": _coerce_int(row_dict.get("metresGained")),
         "turnovers": _coerce_int(row_dict.get("turnovers")),
