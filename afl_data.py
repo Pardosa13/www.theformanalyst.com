@@ -1005,9 +1005,16 @@ def _fetch_fryzigg_player_stats_from_rds(season: int) -> list[dict]:
             "match_attendance": _coerce_int(g(c_attendance)),
             "venue_name": _coerce_str(g(c_venue)),
             "season": season,
-
-            "player_id": _coerce_int(g(c_player_id)),
-            "player_first_name": _coerce_str(g(c_first)),
+"player_id": _coerce_int(
+    ''.join(filter(str.isdigit, str(pick(
+        "player.playerId",
+        "player.player.playerId",
+        "player.player.player.playerId",
+        "playerId",
+        "id",
+    ))))
+),
+            "player_first_name": _coerce_str(
             "player_last_name": _coerce_str(g(c_last)),
             "player_team": _coerce_str(g(c_team)),
             "guernsey_number": _coerce_int(g(c_guernsey)),
