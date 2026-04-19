@@ -902,12 +902,14 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id:
 
 def _download_fryzigg_rds() -> pd.DataFrame:
     """Download and cache Fryzigg RDS as DataFrame."""
+    import os
+    if not os.environ.get("AFL_CRON_MODE"):
+        raise RuntimeError("Fryzigg RDS blocked outside cron. Set AFL_CRON_MODE=1 to allow.")
+    
     global _FRYZIGG_CACHE
-
     if _FRYZIGG_CACHE["loaded"] and _FRYZIGG_CACHE["df"] is not None:
         logger.info("Fryzigg: using cached DataFrame (%s rows)", len(_FRYZIGG_CACHE["df"]))
         return _FRYZIGG_CACHE["df"]
-
     logger.info("Fryzigg: downloading %s ...", FRYZIGG_RDS_URL)
     response = requests.get(FRYZIGG_RDS_URL, timeout=120)
     response.raise_for_status()
