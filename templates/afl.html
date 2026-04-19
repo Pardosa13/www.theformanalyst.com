@@ -16,7 +16,7 @@
   }
 
   .afl-header-left h2 {
-    font-size: 1.5rem;
+    font-size: 1.6rem;
     font-weight: 800;
     margin: 0 0 4px;
     color: var(--text-primary);
@@ -72,8 +72,8 @@
 
   .afl-tab {
     flex: 1;
-    min-width: 110px;
-    padding: 9px 14px;
+    min-width: 120px;
+    padding: 10px 14px;
     border-radius: 8px;
     font-size: 12px;
     font-weight: 700;
@@ -107,7 +107,7 @@
 
   .tab-panel.active {
     display: block;
-    animation: fadeInUp 0.3s ease both;
+    animation: fadeInUp 0.25s ease both;
   }
 
   .stat-row {
@@ -194,19 +194,22 @@
     padding: 20px;
   }
 
-  .player-search-bar {
+  .player-search-bar,
+  .value-finder-bar {
     display: flex;
     gap: 10px;
     margin-bottom: 20px;
     flex-wrap: wrap;
   }
 
-  .player-search-bar .form-control {
+  .player-search-bar .form-control,
+  .value-finder-bar .form-control {
     flex: 1;
     min-width: 220px;
   }
 
-  .player-search-bar .form-select {
+  .player-search-bar .form-select,
+  .value-finder-bar .form-select {
     width: 180px;
   }
 
@@ -255,7 +258,8 @@
     color: var(--text-primary);
   }
 
-  .player-meta {
+  .player-meta,
+  .player-extra {
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
@@ -263,7 +267,7 @@
 
   .player-meta-pill {
     font-size: 11px;
-    padding: 2px 8px;
+    padding: 3px 8px;
     border-radius: 5px;
     background: var(--bg-hover);
     border: 1px solid var(--border-mid);
@@ -276,6 +280,10 @@
     display: grid;
     grid-template-columns: repeat(6, 1fr);
     gap: 12px;
+  }
+
+  .player-extra {
+    padding: 0 20px 14px;
   }
 
   .pstat {
@@ -537,12 +545,14 @@
     color: var(--accent);
   }
 
-  .ladder-table {
+  .ladder-table,
+  .value-table {
     width: 100%;
     border-collapse: collapse;
   }
 
-  .ladder-table thead th {
+  .ladder-table thead th,
+  .value-table thead th {
     background: var(--bg-elevated);
     padding: 10px 14px;
     font-size: 10px;
@@ -554,16 +564,19 @@
     white-space: nowrap;
   }
 
-  .ladder-table tbody tr {
+  .ladder-table tbody tr,
+  .value-table tbody tr {
     border-bottom: 1px solid var(--border-subtle);
     transition: background 0.15s;
   }
 
-  .ladder-table tbody tr:hover {
+  .ladder-table tbody tr:hover,
+  .value-table tbody tr:hover {
     background: var(--bg-hover);
   }
 
-  .ladder-table tbody td {
+  .ladder-table tbody td,
+  .value-table tbody td {
     padding: 11px 14px;
     font-size: 13px;
     color: var(--text-primary);
@@ -612,6 +625,36 @@
     height: 100%;
     border-radius: 2px;
     background: var(--accent);
+  }
+
+  .edge-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 64px;
+    padding: 4px 8px;
+    border-radius: 7px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .edge-chip.pos {
+    background: rgba(16,185,129,0.12);
+    border: 1px solid rgba(16,185,129,0.3);
+    color: #34d399;
+  }
+
+  .edge-chip.neg {
+    background: rgba(239,68,68,0.12);
+    border: 1px solid rgba(239,68,68,0.3);
+    color: #f87171;
+  }
+
+  .edge-chip.neu {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-mid);
+    color: var(--text-muted);
   }
 
   .margin-bar-row {
@@ -719,6 +762,10 @@
     background: var(--danger);
   }
 
+  .scroll-x {
+    overflow-x: auto;
+  }
+
   @media (max-width: 768px) {
     .stat-row {
       grid-template-columns: 1fr 1fr;
@@ -769,7 +816,7 @@
 <div class="afl-header">
   <div class="afl-header-left">
     <h2>🏈 AFL Hub <span class="afl-badge">{{ year }} SEASON</span></h2>
-    <p>Player form · fixtures · ladder · quick edge checks</p>
+    <p>Player form · fixtures · ladder · value finder</p>
   </div>
   <div class="afl-header-right">
     <span class="round-pill">Round {{ current_round or '—' }}</span>
@@ -781,10 +828,10 @@
 
 <div class="data-sources">
   <div class="ds-pill {{ 'connected' if data_sources and data_sources.fryzigg else 'offline' }}">
-    <span class="ds-dot"></span> Fryzigg (Player Stats)
+    <span class="ds-dot"></span> Fryzigg
   </div>
   <div class="ds-pill {{ 'connected' if data_sources and data_sources.squiggle else 'pending' }}">
-    <span class="ds-dot"></span> Squiggle (Fixtures/Ladder)
+    <span class="ds-dot"></span> Squiggle
   </div>
   <div class="ds-pill {{ 'connected' if data_sources and data_sources.odds_api else 'offline' }}">
     <span class="ds-dot"></span> Odds API{% if not (data_sources and data_sources.odds_api) %} — Configure{% endif %}
@@ -795,7 +842,7 @@
   <div class="stat-tile s-primary">
     <h5>Players Tracked</h5>
     <h2>{{ total_players or '0' }}</h2>
-    <div class="stat-sub">Fryzigg 2019–present</div>
+    <div class="stat-sub">Fryzigg player rows in DB</div>
   </div>
   <div class="stat-tile s-info">
     <h5>Games in DB</h5>
@@ -817,6 +864,9 @@
 <div class="afl-tabs">
   <button class="afl-tab active" type="button" data-tab="players" onclick="switchTab('players', this)">
     <i class="bi bi-person-lines-fill"></i> Player Form
+  </button>
+  <button class="afl-tab" type="button" data-tab="value" onclick="switchTab('value', this)">
+    <i class="bi bi-lightning-charge-fill"></i> Value Finder
   </button>
   <button class="afl-tab" type="button" data-tab="fixtures" onclick="switchTab('fixtures', this)">
     <i class="bi bi-calendar3"></i> Fixtures
@@ -876,10 +926,44 @@
         <div class="player-empty">
           <i class="bi bi-person-lines-fill" style="color:var(--accent);opacity:0.4;"></i>
           <div style="font-size:14px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">
-            Search for a player above
+            Search for a player or click a fixture team
           </div>
           <div style="font-size:13px;">
-            Type a name or select a team. Set a book line to compare your line against recent output.
+            You’ll get season averages, last 5, last 10, home/away splits and hit rates.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="tab-value" class="tab-panel">
+  <div class="afl-card">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-lightning-charge-fill"></i> Value Finder</h4>
+      <span style="font-size:12px;color:var(--text-muted);">Needs Odds API prop lines</span>
+    </div>
+    <div class="afl-card-body">
+      <div class="value-finder-bar">
+        <select class="form-select" id="valueMarket" style="width:200px;">
+          <option value="player_disposals">Player Disposals</option>
+          <option value="player_marks">Player Marks</option>
+          <option value="player_tackles">Player Tackles</option>
+        </select>
+        <input type="number" class="form-control" id="minEdge" value="2" step="0.5" style="max-width:160px;">
+        <button class="btn btn-primary" type="button" onclick="loadValueFinder()">
+          <i class="bi bi-search"></i> Find Value
+        </button>
+      </div>
+
+      <div id="valueResults">
+        <div class="player-empty">
+          <i class="bi bi-lightning-charge" style="color:var(--accent);opacity:0.4;"></i>
+          <div style="font-size:14px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">
+            Run value finder
+          </div>
+          <div style="font-size:13px;">
+            This will compare prop lines against your stored player stats.
           </div>
         </div>
       </div>
@@ -929,12 +1013,12 @@
           {% endif %}
 
           <button class="btn btn-sm btn-secondary" type="button" onclick='loadTeamPlayers({{ (f.hteam or "")|tojson }})'>
-  <i class="bi bi-person-lines-fill"></i> {{ f.hteam or 'Home' }} players
-</button>
+            <i class="bi bi-person-lines-fill"></i> {{ f.hteam or 'Home' }} players
+          </button>
 
-<button class="btn btn-sm btn-secondary" type="button" onclick='loadTeamPlayers({{ (f.ateam or "")|tojson }})'>
-  <i class="bi bi-person-lines-fill"></i> {{ f.ateam or 'Away' }} players
-</button>
+          <button class="btn btn-sm btn-secondary" type="button" onclick='loadTeamPlayers({{ (f.ateam or "")|tojson }})'>
+            <i class="bi bi-person-lines-fill"></i> {{ f.ateam or 'Away' }} players
+          </button>
         </div>
         {% endfor %}
       {% else %}
@@ -959,56 +1043,58 @@
       <span style="font-size:12px;color:var(--text-muted);">Source: Squiggle API / DB cache</span>
     </div>
     <div class="afl-card-body" style="padding:0;">
-      <table class="ladder-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Team</th>
-            <th>W</th>
-            <th>L</th>
-            <th>D</th>
-            <th>PF</th>
-            <th>PA</th>
-            <th>%</th>
-            <th>Pts</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% if standings %}
-            {% for s in standings %}
-            {% set pct = s.percentage or 0 %}
-            {% set pf = s.for_score if s.for_score is defined else (s['for'] if s['for'] is defined else '—') %}
-            {% set pa = s.against_score if s.against_score is defined else (s['against'] if s['against'] is defined else '—') %}
+      <div class="scroll-x">
+        <table class="ladder-table">
+          <thead>
             <tr>
-              <td>
-                <span class="pos-badge {% if s.rank <= 2 %}top2{% elif s.rank <= 8 %}finals{% endif %}">
-                  {{ s.rank or '—' }}
-                </span>
-              </td>
-              <td style="font-weight:600;">{{ s.team or s.name or '—' }}</td>
-              <td style="color:var(--success);font-family:'DM Mono',monospace;">{{ s.wins or 0 }}</td>
-              <td style="color:var(--danger);font-family:'DM Mono',monospace;">{{ s.losses or 0 }}</td>
-              <td style="color:var(--text-muted);font-family:'DM Mono',monospace;">{{ s.draws or 0 }}</td>
-              <td style="font-family:'DM Mono',monospace;color:var(--text-secondary);">{{ pf }}</td>
-              <td style="font-family:'DM Mono',monospace;color:var(--text-secondary);">{{ pa }}</td>
-              <td>
-                <span style="font-family:'DM Mono',monospace;">{{ pct }}%</span>
-                <span class="pct-bar-wrap">
-                  <span class="pct-bar" style="width:{{ [[((pct - 70) / 80 * 100), 0]|max, 100]|min }}%;"></span>
-                </span>
-              </td>
-              <td style="font-family:'DM Mono',monospace;font-weight:700;color:var(--accent);">{{ s.pts or 0 }}</td>
+              <th>#</th>
+              <th>Team</th>
+              <th>W</th>
+              <th>L</th>
+              <th>D</th>
+              <th>PF</th>
+              <th>PA</th>
+              <th>%</th>
+              <th>Pts</th>
             </tr>
-            {% endfor %}
-          {% else %}
-            <tr>
-              <td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted);">
-                No ladder data loaded. Click Refresh after syncing.
-              </td>
-            </tr>
-          {% endif %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% if standings %}
+              {% for s in standings %}
+              {% set pct = s.percentage or 0 %}
+              {% set pf = s.for_score if s.for_score is defined else (s['for'] if s['for'] is defined else '—') %}
+              {% set pa = s.against_score if s.against_score is defined else (s['against'] if s['against'] is defined else '—') %}
+              <tr>
+                <td>
+                  <span class="pos-badge {% if s.rank <= 2 %}top2{% elif s.rank <= 8 %}finals{% endif %}">
+                    {{ s.rank or '—' }}
+                  </span>
+                </td>
+                <td style="font-weight:600;">{{ s.team or s.name or '—' }}</td>
+                <td style="color:var(--success);font-family:'DM Mono',monospace;">{{ s.wins or 0 }}</td>
+                <td style="color:var(--danger);font-family:'DM Mono',monospace;">{{ s.losses or 0 }}</td>
+                <td style="color:var(--text-muted);font-family:'DM Mono',monospace;">{{ s.draws or 0 }}</td>
+                <td style="font-family:'DM Mono',monospace;color:var(--text-secondary);">{{ pf }}</td>
+                <td style="font-family:'DM Mono',monospace;color:var(--text-secondary);">{{ pa }}</td>
+                <td>
+                  <span style="font-family:'DM Mono',monospace;">{{ pct }}%</span>
+                  <span class="pct-bar-wrap">
+                    <span class="pct-bar" style="width:{{ [[((pct - 70) / 80 * 100), 0]|max, 100]|min }}%;"></span>
+                  </span>
+                </td>
+                <td style="font-family:'DM Mono',monospace;font-weight:700;color:var(--accent);">{{ s.pts or 0 }}</td>
+              </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted);">
+                  No ladder data loaded. Click Refresh after syncing.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -1062,7 +1148,6 @@
   function switchTab(name, btn) {
     document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
     document.querySelectorAll('.afl-tab').forEach(tab => tab.classList.remove('active'));
-
     const target = document.getElementById(`tab-${name}`);
     if (target) target.classList.add('active');
     if (btn) btn.classList.add('active');
@@ -1107,13 +1192,11 @@
       </div>
     `;
 
-    const url = `/api/afl/player-stats?name=${encodeURIComponent(name)}&team=${encodeURIComponent(team)}&stat=${encodeURIComponent(stat)}&season={{ player_stats_season }}&limit=10`;
+    const url = `/api/afl/player-stats?name=${encodeURIComponent(name)}&team=${encodeURIComponent(team)}&stat=${encodeURIComponent(stat)}&season={{ player_stats_season }}&limit=20`;
 
     fetch(url)
       .then(async response => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
       })
       .then(data => {
@@ -1125,7 +1208,7 @@
                 No players found
               </div>
               <div style="font-size:13px;">
-                Stats are available once Fryzigg data has been synced into your database.
+                Try team search or a broader surname.
               </div>
             </div>
           `;
@@ -1143,18 +1226,11 @@
               Failed to fetch stats
             </div>
             <div style="font-size:13px;">
-              Check that your AFL player data has been synced and the API route is returning JSON.
+              Check that player data exists and the API is returning JSON.
             </div>
           </div>
         `;
       });
-  }
-
-  const playerSearchInput = document.getElementById('playerSearch');
-  if (playerSearchInput) {
-    playerSearchInput.addEventListener('keydown', event => {
-      if (event.key === 'Enter') searchPlayer();
-    });
   }
 
   function renderPlayerCards(players, stat) {
@@ -1201,6 +1277,8 @@
         trendHtml = `<span class="pstat-trend trend-down">▼ -${trendDiff}</span>`;
       }
 
+      const hitRates = player.hit_rates || {};
+
       const cardHtml = `
         <div class="player-card" id="card-${escapeHtml(player.player_id || Math.random())}">
           <div class="player-card-top">
@@ -1217,6 +1295,10 @@
                 ${player.height_cm ? `<span class="player-meta-pill">${escapeHtml(player.height_cm)}cm · ${escapeHtml(player.weight_kg || '—')}kg</span>` : ''}
                 <span class="player-meta-pill">Season avg: ${seasonAvg} ${escapeHtml(stat)}</span>
                 <span class="player-meta-pill">${escapeHtml(player.games_played || 0)} games</span>
+                <span class="player-meta-pill">L5: ${safeNumber(player.last5_avg, 0)}</span>
+                <span class="player-meta-pill">L10: ${safeNumber(player.last10_avg, 0)}</span>
+                <span class="player-meta-pill">Home: ${safeNumber(player.home_avg, 0)}</span>
+                <span class="player-meta-pill">Away: ${safeNumber(player.away_avg, 0)}</span>
               </div>
             </div>
           </div>
@@ -1228,6 +1310,12 @@
             <div class="pstat"><span class="pstat-val">${safeNumber(avgs.handballs, 0)}</span><span class="pstat-lbl">HBalls</span></div>
             <div class="pstat"><span class="pstat-val">${safeNumber(avgs.tackles, 0)}</span><span class="pstat-lbl">Tackles</span>${stat === 'tackles' ? trendHtml : ''}</div>
             <div class="pstat"><span class="pstat-val">${safeNumber(avgs.goals, 0)}</span><span class="pstat-lbl">Goals</span>${stat === 'goals' ? trendHtml : ''}</div>
+          </div>
+
+          <div class="player-extra">
+            <span class="player-meta-pill">20+: ${safeNumber(hitRates["20_plus"], 0)}%</span>
+            <span class="player-meta-pill">25+: ${safeNumber(hitRates["25_plus"], 0)}%</span>
+            <span class="player-meta-pill">30+: ${safeNumber(hitRates["30_plus"], 0)}%</span>
           </div>
 
           <div class="last5">
@@ -1292,9 +1380,7 @@
 
   function loadTeamPlayers(team) {
     const playerTabButton = document.querySelector('.afl-tab[data-tab="players"]');
-    if (playerTabButton) {
-      switchTab('players', playerTabButton);
-    }
+    if (playerTabButton) switchTab('players', playerTabButton);
 
     const teamFilter = document.getElementById('teamFilter');
     const playerSearch = document.getElementById('playerSearch');
@@ -1303,6 +1389,98 @@
     if (playerSearch) playerSearch.value = '';
 
     searchPlayer();
+  }
+
+  function loadValueFinder() {
+    const resultsEl = document.getElementById('valueResults');
+    const market = document.getElementById('valueMarket').value;
+    const minEdge = document.getElementById('minEdge').value || 2;
+
+    resultsEl.innerHTML = `
+      <div class="player-loading">
+        <div class="spinner-border spinner-border-sm"></div>
+        <div style="font-size:13px;margin-top:10px;">Loading value finder...</div>
+      </div>
+    `;
+
+    fetch(`/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=${encodeURIComponent(minEdge)}`)
+      .then(async response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then(data => {
+        if (!data.bets || !Array.isArray(data.bets) || data.bets.length === 0) {
+          resultsEl.innerHTML = `
+            <div class="player-empty">
+              <i class="bi bi-lightning-charge" style="color:var(--accent);opacity:0.4;"></i>
+              <div style="font-size:14px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">
+                No value bets found
+              </div>
+              <div style="font-size:13px;">
+                Either there are no prop lines loaded yet, or nothing meets your minimum edge.
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        const rows = data.bets.map(bet => {
+          const edge = safeNumber(bet.edge, 0);
+          const cls = edge >= 2 ? 'pos' : edge <= -2 ? 'neg' : 'neu';
+          return `
+            <tr>
+              <td style="font-weight:700;">${escapeHtml(bet.player || '')}</td>
+              <td>${escapeHtml(bet.team || '')}</td>
+              <td>${escapeHtml(bet.opponent || '')}</td>
+              <td>${escapeHtml(bet.bookmaker || '')}</td>
+              <td>${escapeHtml(bet.market || '')}</td>
+              <td>${safeNumber(bet.book_line, 0)}</td>
+              <td>${safeNumber(bet.season_avg, 0)}</td>
+              <td>${safeNumber(bet.last5_avg, 0)}</td>
+              <td>${safeNumber(bet.hist_pct, 0)}%</td>
+              <td>${safeNumber(bet.model_prediction, 0)}</td>
+              <td><span class="edge-chip ${cls}">${edge > 0 ? '+' : ''}${edge}</span></td>
+            </tr>
+          `;
+        }).join('');
+
+        resultsEl.innerHTML = `
+          <div class="scroll-x">
+            <table class="value-table">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th>Team</th>
+                  <th>Opp</th>
+                  <th>Book</th>
+                  <th>Market</th>
+                  <th>Line</th>
+                  <th>Season</th>
+                  <th>L5</th>
+                  <th>Hit%</th>
+                  <th>Model</th>
+                  <th>Edge</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      })
+      .catch(error => {
+        console.error('Value finder failed:', error);
+        resultsEl.innerHTML = `
+          <div class="player-empty">
+            <i class="bi bi-exclamation-triangle" style="color:var(--danger);opacity:0.5;"></i>
+            <div style="font-size:14px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">
+              Value finder failed
+            </div>
+            <div style="font-size:13px;">
+              Check that Odds API lines exist and the route is working.
+            </div>
+          </div>
+        `;
+      });
   }
 
   function refreshAll() {
@@ -1314,9 +1492,7 @@
 
     fetch('/api/afl/refresh', { method: 'POST' })
       .then(response => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         window.location.reload();
       })
       .catch(error => {
@@ -1324,6 +1500,13 @@
         btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Refresh';
         btn.disabled = false;
       });
+  }
+
+  const playerSearchInput = document.getElementById('playerSearch');
+  if (playerSearchInput) {
+    playerSearchInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter') searchPlayer();
+    });
   }
 </script>
 {% endblock %}
