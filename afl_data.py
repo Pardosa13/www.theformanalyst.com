@@ -467,36 +467,52 @@ def _fetch_round_matches_afl(round_id: int, token: Optional[str] = None) -> list
 
 def fetch_fixture_afl(season: int, round_number: int = None, comp: str = "AFLM") -> list[dict]:
     """
-    Fetch AFL official fixture rows for a season/round.
-    Uses ROUND ID for /matchItems/round/{id}, matching fitzRoy behaviour.
+    Fetch AFL official fixture using the same endpoint pattern fitzRoy uses:
+    https://aflapi.afl.com.au/afl/v2/matches
+
+    Returns match rows that include providerId, which is then used to fetch
+    current-season player stats from the AFL API.
     """
-    round_ids = _find_round_ids(season, round_number, comp=comp, future_rounds=True)
-    if not round_ids:
-        logger.warning("AFL fixture: no round ids for season=%s round=%s", season, round_number)
+    comp_season_id = _find_season_id(season, comp)
+    if comp_season_id is None:
+        logger.warning("AFL fixture: no compSeasonId for season=%s comp=%s", season, comp)
         return []
 
-    token = _get_afl_cookie()
-    if not token:
+    comp_id = _find_comp_id(comp)
+    if comp_id is None:
+        logger.warning("AFL fixture: no competitionId for comp=%s", comp)
         return []
 
-    all_matches: list[dict] = []
-    for round_id in round_ids:
-        try:
-            matches = _fetch_round_matches_afl(round_id, token=token)
-            all_matches.extend(matches)
-            time.sleep(0.15)
-        except Exception as exc:
-            logger.warning("AFL fixture round fetch failed for round id %s: %s", round_id, exc)
+    params = {
+        "competitionId": comp_id,
+        "compSeasonId": comp_season_id,
+        "pageSize": 1000,
+    }
+    if round_number not in (None, "", 0):
+        params["roundNumber"] = round_number
 
-    deduped = {}
-    for match in all_matches:
-        provider_id = match.get("providerId")
-        if provider_id is not None:
-            deduped[provider_id] = match
+    data = _afl_get(f"{AFL_META_BASE}/afl/v2/matches", params=params, token=None)
+    if not data or "matches" not in data:
+        logger.warning("AFL fixture: no matches returned for season=%s round=%s", season, round_number)
+        return []
 
-    result = list(deduped.values())
-    logger.info("AFL fixture: %s matches for season %s round=%s", len(result), season, round_number)
-    return result
+    matches = data.get("matches") or []
+    if not isinstance(matches, list):
+        return []
+
+    # fitzRoy filters back down to the requested season as a safety check
+    filtered = []
+    for match in matches:
+        comp_season = match.get("compSeason") or {}
+        comp_season_name = _coerce_str(comp_season.get("name"))
+        if str(season) in comp_season_name:
+            filtered.append(match)
+
+    logger.info(
+        "AFL fixture: %s matches for season %s round=%s via afl/v2/matches",
+        len(filtered), season, round_number
+    )
+    return filtered
 
 
 def _clean_names_playerstats_afl(df: pd.DataFrame) -> pd.DataFrame:
