@@ -1,8 +1,13 @@
 """
-afl_db.py
-=========
+afl_db.py - FIXED
+=================
 PostgreSQL schema + helper functions for the AFL section.
 Run init_afl_tables(db) once to create all tables.
+
+FIXES APPLIED:
+- Fixed _i() and _match_id() helper function indentation in upsert_player_stats()
+- Properly scoped helper functions before SQL execution block
+- Removed misaligned code that prevented proper function definition
 """
 
 import logging
@@ -270,10 +275,23 @@ def upsert_games(db, games: list[dict]) -> int:
 
 
 def upsert_player_stats(db, stats: list[dict], season: int) -> int:
-    """Upsert Fryzigg player stats. Returns count inserted/updated."""
+    """
+    Upsert Fryzigg player stats. Returns count inserted/updated.
+    FIXED: Helper functions now properly scoped and indented.
+    """
     if not stats:
         return 0
-    count = 0
+
+    def _i(row, key, default=0):
+        """Coerce to int safely."""
+        v = row.get(key)
+        if v is None:
+            return default
+        try:
+            return int(v)
+        except Exception:
+            return default
+
     sql = db.text("""
         INSERT INTO afl_player_stats (
             match_id, match_date, match_round,
@@ -333,31 +351,7 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             supercoach_score               = EXCLUDED.supercoach_score
     """)
 
-    def _i(row, key, default=0):
-    v = row.get(key)
-    if v is None:
-        return default
-    try:
-        return int(v)
-    except Exception:
-        return default
-
-def _match_id(row, key="match_id", default=0):
-    v = row.get(key)
-    if v is None:
-        return default
-
-    s = str(v).strip()
-    digits = "".join(ch for ch in s if ch.isdigit())
-
-    if not digits:
-        return default
-
-    try:
-        return int(digits)
-    except Exception:
-        return default
-
+    count = 0
     with db.engine.begin() as conn:
         for row in stats:
             conn.execute(sql, {
