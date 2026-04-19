@@ -223,7 +223,7 @@ def register_afl_routes(app, db):
             "count": len(result),
         })
 
-    @app.route("/api/afl/player-detail")
+@app.route("/api/afl/player-detail")
 @login_required
 def api_afl_player_detail():
     """
