@@ -1008,7 +1008,7 @@
           {% if f.squiggle_tip %}
           <span class="tip-badge">
             <i class="bi bi-lightning-fill"></i>
-            {{ f.squiggle_tip }}{% if f.squiggle_confidence %} · {{ f.squiggle_confidence|round(0)|int }}%{% endif %}
+            {{ f.squiggle_tip }}{% if f.squiggle_confidence %} · {{ (f.squiggle_confidence|float)|round(0)|int }}%{% endif %}
           </span>
           {% endif %}
 
