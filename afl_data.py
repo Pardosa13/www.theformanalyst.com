@@ -817,7 +817,14 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id:
         elif away_score > home_score:
             winner = away_team
             margin = away_score - home_score
- 
+ player_id_raw = pick(
+    "player.playerId",
+    "player.player.playerId",
+    "player.player.player.playerId",
+    "playerId",
+    "id",
+)
+player_id_digits = ''.join(c for c in str(player_id_raw) if c.isdigit())
     return {
     "match_id": _coerce_match_id(match_id),
     "match_date": _coerce_date(details.get("utcStartTime")),
