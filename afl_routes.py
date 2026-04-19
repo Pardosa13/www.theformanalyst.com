@@ -786,11 +786,7 @@ def register_afl_routes(app, db):
         except Exception as e:
             results["ladder_error"] = str(e)
 
-        try:
-            stats = fetch_fryzigg_player_stats(stats_season)
-            results["player_stats"] = upsert_player_stats(db, stats, stats_season)
-        except Exception as e:
-            results["player_stats_error"] = str(e)
+        results["player_stats"] = "skipped — run via cron only"
 
         return jsonify({
             "status": "ok",
