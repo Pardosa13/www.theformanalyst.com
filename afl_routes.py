@@ -241,10 +241,20 @@ def register_afl_routes(app, db):
 
         effective_season = _resolve_stats_season(db, requested_season)
 
-        if player_id:
-            rows = _db_player_by_id(db, player_id=player_id, season=None, limit=200)
-        else:
-            rows = _db_player_search(db, name=name, season=None, limit=200)
+if player_id:
+    rows = _db_player_by_id(db, player_id=player_id, season=None, limit=200)
+    # If only 1 row, the player_id may be from AFL API (different to Fryzigg)
+    # Fall back to name search to get full history
+    if len(rows) <= 2 and rows:
+        first = rows[0]
+        fname = first.get("player_first_name", "")
+        lname = first.get("player_last_name", "")
+        if fname and lname:
+            name_rows = _db_player_search(db, name=f"{fname} {lname}", season=None, limit=200)
+            if len(name_rows) > len(rows):
+                rows = name_rows
+    else:
+        rows = _db_player_search(db, name=name, season=None, limit=200)
 
         if not rows:
             return jsonify({
