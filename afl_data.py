@@ -819,7 +819,7 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
             margin = away_score - home_score
 
     return {
-        "match_id": _coerce_str(details.get("providerId")),
+        "match_id": _coerce_match_id(g(c_match_id)),
         "match_date": _coerce_date(details.get("utcStartTime")),
         "match_round": _coerce_str(details.get("round.roundNumber") or details.get("round.name")),
         "match_home_team": home_team,
