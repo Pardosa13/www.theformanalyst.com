@@ -889,7 +889,10 @@ function selectPlayer(id){
 
   fetch(`/api/afl/player-detail?player_id=${id}`)
     .then(r=>r.json())
-    .then(data=>renderPropCard(data))
+    .then(data=>{
+      alert('games: ' + data.games_played + ' | log: ' + (data.game_log||[]).length);
+      renderPropCard(data);
+    })
     .catch(()=>{
       panel.innerHTML = '<div class="prop-empty" style="padding:40px;color:var(--danger);">Failed to load player data</div>';
     });
