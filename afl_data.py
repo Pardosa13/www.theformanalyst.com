@@ -749,21 +749,38 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
     """Map AFL current-season row into your DB shape."""
     row_dict = row.to_dict() if hasattr(row, "to_dict") else dict(row)
 
+    def pick(*keys, default=None):
+        for key in keys:
+            if key in row_dict and row_dict.get(key) not in (None, "", []):
+                return row_dict.get(key)
+        return default
+
     first_name = _coerce_str(
-        row_dict.get("player.givenName")
-        or row_dict.get("player.player.givenName")
-        or row_dict.get("firstName")
+        pick(
+            "player.givenName",
+            "player.player.givenName",
+            "player.player.player.givenName",
+            "givenName",
+            "firstName",
+        )
     )
     last_name = _coerce_str(
-        row_dict.get("player.surname")
-        or row_dict.get("player.player.surname")
-        or row_dict.get("surname")
+        pick(
+            "player.surname",
+            "player.player.surname",
+            "player.player.player.surname",
+            "surname",
+            "lastName",
+        )
+    )
+    full_name = _coerce_str(
+        pick(
+            "player.displayName",
+            "player.player.displayName",
+            "displayName",
+        )
     )
 
-    full_name = _coerce_str(
-        row_dict.get("displayName")
-        or f"{first_name} {last_name}".strip()
-    )
     if not first_name and full_name:
         parts = full_name.split()
         first_name = parts[0] if parts else ""
@@ -772,19 +789,23 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
     home_team = _coerce_str(details.get("home.team.name"))
     away_team = _coerce_str(details.get("away.team.name"))
 
-    player_team = _coerce_str(row_dict.get("team.name"))
+    player_team = _coerce_str(pick("team.name"))
     if not player_team:
         player_team = home_team if _coerce_str(row_dict.get("teamStatus")) == "home" else away_team
 
     home_score = _coerce_int(
-        row_dict.get("homeTeamScore")
-        or row_dict.get("match.homeTeamScore")
-        or row_dict.get("home.score")
+        pick(
+            "homeTeamScore",
+            "match.homeTeamScore",
+            "home.score",
+        )
     )
     away_score = _coerce_int(
-        row_dict.get("awayTeamScore")
-        or row_dict.get("match.awayTeamScore")
-        or row_dict.get("away.score")
+        pick(
+            "awayTeamScore",
+            "match.awayTeamScore",
+            "away.score",
+        )
     )
 
     winner = ""
@@ -797,21 +818,8 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
             winner = away_team
             margin = away_score - home_score
 
-    centre_clearances = _coerce_int(
-        row_dict.get("clearances.centreClearances")
-        or row_dict.get("centreClearances")
-    )
-    stoppage_clearances = _coerce_int(
-        row_dict.get("clearances.stoppageClearances")
-        or row_dict.get("stoppageClearances")
-    )
-    total_clearances = _coerce_int(
-        row_dict.get("clearances.totalClearances")
-        or row_dict.get("clearances")
-    )
-
     return {
-        "match_id": _coerce_match_id(details.get("providerId")),
+        "match_id": _coerce_str(details.get("providerId")),
         "match_date": _coerce_date(details.get("utcStartTime")),
         "match_round": _coerce_str(details.get("round.roundNumber") or details.get("round.name")),
         "match_home_team": home_team,
@@ -827,69 +835,65 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
         "season": season,
 
         "player_id": _coerce_int(
-            row_dict.get("player.playerId")
-            or row_dict.get("player.player.playerId")
-            or row_dict.get("playerId")
-            or row_dict.get("id")
+            pick(
+                "player.playerId",
+                "player.player.playerId",
+                "player.player.player.playerId",
+                "playerId",
+                "id",
+            )
         ),
         "player_first_name": first_name,
         "player_last_name": last_name,
         "player_team": player_team,
         "guernsey_number": _coerce_int(
-            row_dict.get("player.playerJumperNumber")
-            or row_dict.get("player.player.playerJumperNumber")
-            or row_dict.get("player.jumperNumber")
-            or row_dict.get("guernseyNumber")
-            or row_dict.get("jumperNumber")
+            pick(
+                "player.playerJumperNumber",
+                "player.player.playerJumperNumber",
+                "player.player.player.playerJumperNumber",
+                "player.jumperNumber",
+                "guernseyNumber",
+                "jumperNumber",
+            )
         ),
-        "player_height_cm": _coerce_int(row_dict.get("heightCm") or row_dict.get("height")),
-        "player_weight_kg": _coerce_int(row_dict.get("weightKg") or row_dict.get("weight")),
+        "player_height_cm": _coerce_int(pick("heightCm", "height")),
+        "player_weight_kg": _coerce_int(pick("weightKg", "weight")),
         "player_is_retired": False,
 
-        "kicks": _coerce_int(row_dict.get("kicks")),
-        "marks": _coerce_int(row_dict.get("marks")),
-        "handballs": _coerce_int(row_dict.get("handballs")),
-        "disposals": _coerce_int(row_dict.get("disposals")),
-        "effective_disposals": _coerce_int(
-            row_dict.get("extendedStats.effectiveDisposals")
-            or row_dict.get("effectiveDisposals")
-        ),
-        "disposal_efficiency_percentage": _coerce_int(row_dict.get("disposalEfficiency")),
-        "goals": _coerce_int(row_dict.get("goals")),
-        "behinds": _coerce_int(row_dict.get("behinds")),
-        "hitouts": _coerce_int(row_dict.get("hitouts")),
-        "tackles": _coerce_int(row_dict.get("tackles")),
-        "rebounds": _coerce_int(row_dict.get("rebound50s") or row_dict.get("rebounds")),
-        "inside_fifties": _coerce_int(row_dict.get("inside50s") or row_dict.get("insideFifties")),
-        "clearances": total_clearances,
-        "clangers": _coerce_int(row_dict.get("clangers")),
-        "free_kicks_for": _coerce_int(row_dict.get("freesFor") or row_dict.get("freeKicksFor")),
-        "free_kicks_against": _coerce_int(row_dict.get("freesAgainst") or row_dict.get("freeKicksAgainst")),
+        "kicks": _coerce_int(pick("kicks")),
+        "marks": _coerce_int(pick("marks")),
+        "handballs": _coerce_int(pick("handballs")),
+        "disposals": _coerce_int(pick("disposals")),
+        "effective_disposals": _coerce_int(pick("extendedStats.effectiveDisposals", "effectiveDisposals")),
+        "disposal_efficiency_percentage": _coerce_int(pick("disposalEfficiency")),
+        "goals": _coerce_int(pick("goals")),
+        "behinds": _coerce_int(pick("behinds")),
+        "hitouts": _coerce_int(pick("hitouts")),
+        "tackles": _coerce_int(pick("tackles")),
+        "rebounds": _coerce_int(pick("rebound50s", "rebounds")),
+        "inside_fifties": _coerce_int(pick("inside50s", "insideFifties")),
+        "clearances": _coerce_int(pick("clearances.totalClearances", "clearances")),
+        "clangers": _coerce_int(pick("clangers")),
+        "free_kicks_for": _coerce_int(pick("freesFor", "freeKicksFor")),
+        "free_kicks_against": _coerce_int(pick("freesAgainst", "freeKicksAgainst")),
         "brownlow_votes": 0,
-        "contested_possessions": _coerce_int(row_dict.get("contestedPossessions")),
-        "uncontested_possessions": _coerce_int(row_dict.get("uncontestedPossessions")),
-        "contested_marks": _coerce_int(row_dict.get("contestedMarks")),
-        "marks_inside_fifty": _coerce_int(row_dict.get("marksInside50")),
-        "one_percenters": _coerce_int(row_dict.get("onePercenters")),
-        "bounces": _coerce_int(row_dict.get("bounces")),
-        "goal_assists": _coerce_int(row_dict.get("goalAssists")),
-        "time_on_ground_percentage": _coerce_int(
-            row_dict.get("timeOnGroundPercentage")
-            or row_dict.get("timeOnGroundPct")
-        ),
-        "afl_fantasy_score": _coerce_int(
-            row_dict.get("dreamTeamPoints")
-            or row_dict.get("aflFantasyScore")
-            or row_dict.get("fantasyScore")
-        ),
-        "supercoach_score": _coerce_int(row_dict.get("supercoachScore")),
-        "centre_clearances": centre_clearances,
-        "stoppage_clearances": stoppage_clearances,
-        "score_involvements": _coerce_int(row_dict.get("scoreInvolvements")),
-        "metres_gained": _coerce_int(row_dict.get("metresGained")),
-        "turnovers": _coerce_int(row_dict.get("turnovers")),
-        "intercepts": _coerce_int(row_dict.get("intercepts")),
-        "tackles_inside_fifty": _coerce_int(row_dict.get("tacklesInside50")),
+        "contested_possessions": _coerce_int(pick("contestedPossessions")),
+        "uncontested_possessions": _coerce_int(pick("uncontestedPossessions")),
+        "contested_marks": _coerce_int(pick("contestedMarks")),
+        "marks_inside_fifty": _coerce_int(pick("marksInside50")),
+        "one_percenters": _coerce_int(pick("onePercenters")),
+        "bounces": _coerce_int(pick("bounces")),
+        "goal_assists": _coerce_int(pick("goalAssists")),
+        "time_on_ground_percentage": _coerce_int(pick("timeOnGroundPercentage", "timeOnGroundPct")),
+        "afl_fantasy_score": _coerce_int(pick("dreamTeamPoints", "aflFantasyScore", "fantasyScore")),
+        "supercoach_score": _coerce_int(pick("supercoachScore")),
+        "centre_clearances": _coerce_int(pick("clearances.centreClearances", "centreClearances")),
+        "stoppage_clearances": _coerce_int(pick("clearances.stoppageClearances", "stoppageClearances")),
+        "score_involvements": _coerce_int(pick("scoreInvolvements")),
+        "metres_gained": _coerce_int(pick("metresGained")),
+        "turnovers": _coerce_int(pick("turnovers")),
+        "intercepts": _coerce_int(pick("intercepts")),
+        "tackles_inside_fifty": _coerce_int(pick("tacklesInside50")),
     }
 
 
