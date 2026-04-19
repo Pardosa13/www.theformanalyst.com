@@ -961,7 +961,10 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
     """
     if season >= CURRENT_YEAR:
         logger.info("Player stats: trying AFL official current-season source for %s", season)
-        current_rows = fetch_afl_player_stats_current_season(season)
+        current_rows = fetch_afl_player_stats_current_season(
+    season,
+    round_number=fetch_squiggle_current_round(season)
+)
         if current_rows:
             return current_rows
 
