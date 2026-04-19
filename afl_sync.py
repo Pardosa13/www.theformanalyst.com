@@ -46,10 +46,15 @@ def sync_afl_all(season: int = None):
     if season is None:
         season = datetime.now().year
 
-    db_url = os.environ.get("DATABASE_URL")
+        db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         logger.error("DATABASE_URL not set — aborting")
         return
+
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+    engine = create_engine(db_url)
 
     engine = create_engine(db_url)
     db = SimpleNamespace(engine=engine, text=text)
