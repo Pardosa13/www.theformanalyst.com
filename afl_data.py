@@ -467,12 +467,12 @@ def _fetch_round_matches_afl(round_provider_id: int, token: Optional[str] = None
 
 def fetch_fixture_afl(season: int, round_number: int = None, comp: str = "AFLM") -> list[dict]:
     """
-    Minimal AFL official fixture fetch.
-    Returns rows containing providerId so we can fetch current-season player stats.
+    Fetch AFL official fixture rows for a season/round.
+    Uses ROUND ID for /matchItems/round/{id}, matching fitzRoy behaviour.
     """
-    round_provider_ids = _find_round_provider_ids(season, round_number, comp=comp, future_rounds=True)
-    if not round_provider_ids:
-        logger.warning("AFL fixture: no round provider ids for season=%s round=%s", season, round_number)
+    round_ids = _find_round_ids(season, round_number, comp=comp, future_rounds=True)
+    if not round_ids:
+        logger.warning("AFL fixture: no round ids for season=%s round=%s", season, round_number)
         return []
 
     token = _get_afl_cookie()
@@ -480,15 +480,14 @@ def fetch_fixture_afl(season: int, round_number: int = None, comp: str = "AFLM")
         return []
 
     all_matches: list[dict] = []
-    for round_provider_id in round_provider_ids:
+    for round_id in round_ids:
         try:
-            matches = _fetch_round_matches_afl(round_provider_id, token=token)
+            matches = _fetch_round_matches_afl(round_id, token=token)
             all_matches.extend(matches)
             time.sleep(0.15)
         except Exception as exc:
-            logger.warning("AFL fixture round fetch failed for %s: %s", round_provider_id, exc)
+            logger.warning("AFL fixture round fetch failed for round id %s: %s", round_id, exc)
 
-    # Deduplicate by providerId
     deduped = {}
     for match in all_matches:
         provider_id = match.get("providerId")
