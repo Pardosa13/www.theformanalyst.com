@@ -224,110 +224,108 @@ def register_afl_routes(app, db):
         })
 
     @app.route("/api/afl/player-detail")
-    @login_required
-    def api_afl_player_detail():
-        """
-        Detailed single-player endpoint.
-        Query params:
-          - player_id OR name
-          - season
-        """
-        player_id = request.args.get("player_id", type=int)
-        name = request.args.get("name", "").strip()
-        requested_season = request.args.get("season", type=int)
+@login_required
+def api_afl_player_detail():
+    """
+    Detailed single-player endpoint.
+    Query params:
+      - player_id OR name
+      - season
+    """
+    player_id = request.args.get("player_id", type=int)
+    name = request.args.get("name", "").strip()
+    requested_season = request.args.get("season", type=int)
 
-        if not player_id and not name:
-            return jsonify({"error": "Provide player_id or name"}), 400
+    if not player_id and not name:
+        return jsonify({"error": "Provide player_id or name"}), 400
 
-        effective_season = _resolve_stats_season(db, requested_season)
+    effective_season = _resolve_stats_season(db, requested_season)
 
-if player_id:
-    rows = _db_player_by_id(db, player_id=player_id, season=None, limit=200)
-    # If only 1 row, the player_id may be from AFL API (different to Fryzigg)
-    # Fall back to name search to get full history
-    if len(rows) <= 2 and rows:
-        first = rows[0]
-        fname = first.get("player_first_name", "")
-        lname = first.get("player_last_name", "")
-        if fname and lname:
-            name_rows = _db_player_search(db, name=f"{fname} {lname}", season=None, limit=200)
-            if len(name_rows) > len(rows):
-                rows = name_rows
+    if player_id:
+        rows = _db_player_by_id(db, player_id=player_id, season=None, limit=200)
+        if len(rows) <= 2 and rows:
+            first = rows[0]
+            fname = first.get("player_first_name", "")
+            lname = first.get("player_last_name", "")
+            if fname and lname:
+                name_rows = _db_player_search(db, name=f"{fname} {lname}", season=None, limit=200)
+                if len(name_rows) > len(rows):
+                    rows = name_rows
     else:
         rows = _db_player_search(db, name=name, season=None, limit=200)
 
-        if not rows:
-            return jsonify({
-                "error": "Player not found",
-                "requested_season": requested_season,
-                "season": effective_season,
-            }), 404
-
-        grouped = _group_players(rows)
-        player = next(iter(grouped.values()))
-        games = sorted(player["games"], key=_sort_date_key, reverse=True)
-
-        averages = get_player_season_averages(games)
-        last5 = get_player_last_n_games(games, 5)
-        last10 = get_player_last_n_games(games, 10)
-
-        opponents = defaultdict(list)
-        for g in games:
-            opp = _get_opponent(g, player["team"])
-            opponents[opp].append(g)
-
-        opponent_splits = []
-        for opp, opp_games in opponents.items():
-            opponent_splits.append({
-                "opponent": opp,
-                "games": len(opp_games),
-                "disposals_avg": _safe_avg(opp_games, "disposals"),
-                "marks_avg": _safe_avg(opp_games, "marks"),
-                "kicks_avg": _safe_avg(opp_games, "kicks"),
-                "tackles_avg": _safe_avg(opp_games, "tackles"),
-                "goals_avg": _safe_avg(opp_games, "goals"),
-            })
-
-        opponent_splits.sort(key=lambda x: x["games"], reverse=True)
-
+    if not rows:
         return jsonify({
-            "player_id": player["player_id"],
-            "name": player["name"],
-            "first_name": player["first_name"],
-            "last_name": player["last_name"],
-            "team": player["team"],
-            "guernsey": player["guernsey"],
-            "height_cm": player["height_cm"],
-            "weight_kg": player["weight_kg"],
-            "season": effective_season,
+            "error": "Player not found",
             "requested_season": requested_season,
-            "games_played": len(games),
-            "averages": averages,
-            "last5_avg": {
-                "disposals": _safe_avg(last5, "disposals"),
-                "marks": _safe_avg(last5, "marks"),
-                "kicks": _safe_avg(last5, "kicks"),
-                "tackles": _safe_avg(last5, "tackles"),
-                "goals": _safe_avg(last5, "goals"),
-            },
-            "last10_avg": {
-                "disposals": _safe_avg(last10, "disposals"),
-                "marks": _safe_avg(last10, "marks"),
-                "kicks": _safe_avg(last10, "kicks"),
-                "tackles": _safe_avg(last10, "tackles"),
-                "goals": _safe_avg(last10, "goals"),
-            },
-            "hit_rates": {
-                "disp_20_plus": _hit_rate(games, "disposals", 20),
-                "disp_25_plus": _hit_rate(games, "disposals", 25),
-                "disp_30_plus": _hit_rate(games, "disposals", 30),
-                "marks_5_plus": _hit_rate(games, "marks", 5),
-                "tackles_5_plus": _hit_rate(games, "tackles", 5),
-                "goals_1_plus": _hit_rate(games, "goals", 1),
-            },
-            "opponent_splits": opponent_splits,
-            "game_log": [_format_game_log_row(g, player["team"]) for g in games[:20]],
+            "season": effective_season,
+        }), 404
+
+    grouped = _group_players(rows)
+    player = next(iter(grouped.values()))
+    games = sorted(player["games"], key=_sort_date_key, reverse=True)
+
+    averages = get_player_season_averages(games)
+    last5 = get_player_last_n_games(games, 5)
+    last10 = get_player_last_n_games(games, 10)
+
+    opponents = defaultdict(list)
+    for g in games:
+        opp = _get_opponent(g, player["team"])
+        opponents[opp].append(g)
+
+    opponent_splits = []
+    for opp, opp_games in opponents.items():
+        opponent_splits.append({
+            "opponent": opp,
+            "games": len(opp_games),
+            "disposals_avg": _safe_avg(opp_games, "disposals"),
+            "marks_avg": _safe_avg(opp_games, "marks"),
+            "kicks_avg": _safe_avg(opp_games, "kicks"),
+            "tackles_avg": _safe_avg(opp_games, "tackles"),
+            "goals_avg": _safe_avg(opp_games, "goals"),
         })
+
+    opponent_splits.sort(key=lambda x: x["games"], reverse=True)
+
+    return jsonify({
+        "player_id": player["player_id"],
+        "name": player["name"],
+        "first_name": player["first_name"],
+        "last_name": player["last_name"],
+        "team": player["team"],
+        "guernsey": player["guernsey"],
+        "height_cm": player["height_cm"],
+        "weight_kg": player["weight_kg"],
+        "season": effective_season,
+        "requested_season": requested_season,
+        "games_played": len(games),
+        "averages": averages,
+        "last5_avg": {
+            "disposals": _safe_avg(last5, "disposals"),
+            "marks": _safe_avg(last5, "marks"),
+            "kicks": _safe_avg(last5, "kicks"),
+            "tackles": _safe_avg(last5, "tackles"),
+            "goals": _safe_avg(last5, "goals"),
+        },
+        "last10_avg": {
+            "disposals": _safe_avg(last10, "disposals"),
+            "marks": _safe_avg(last10, "marks"),
+            "kicks": _safe_avg(last10, "kicks"),
+            "tackles": _safe_avg(last10, "tackles"),
+            "goals": _safe_avg(last10, "goals"),
+        },
+        "hit_rates": {
+            "disp_20_plus": _hit_rate(games, "disposals", 20),
+            "disp_25_plus": _hit_rate(games, "disposals", 25),
+            "disp_30_plus": _hit_rate(games, "disposals", 30),
+            "marks_5_plus": _hit_rate(games, "marks", 5),
+            "tackles_5_plus": _hit_rate(games, "tackles", 5),
+            "goals_1_plus": _hit_rate(games, "goals", 1),
+        },
+        "opponent_splits": opponent_splits,
+        "game_log": [_format_game_log_row(g, player["team"]) for g in games[:20]],
+    })
 
     @app.route("/api/afl/player-game-log")
     @login_required
