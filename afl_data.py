@@ -720,9 +720,9 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
 
     all_rows: list[dict] = []
 
-    for match_id in match_provider_ids:
+    for match_provider_id in match_provider_ids:
         try:
-            stats_df = _fetch_match_stats_afl(match_id, token=token)
+            stats_df = _fetch_match_stats_afl(match_provider_id, token=token)
             if stats_df.empty:
                 continue
 
