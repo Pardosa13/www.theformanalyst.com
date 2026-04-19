@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS afl_standings (
 -- ── Fryzigg player stats (one row per player per game) ───────────────
 CREATE TABLE IF NOT EXISTS afl_player_stats (
     id                              SERIAL PRIMARY KEY,
-    match_id                        INTEGER,
+    match_id                        BIGINT,
     match_date                      DATE,
     match_round                     TEXT,
     match_home_team                 TEXT,
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS afl_player_stats (
     season                          INTEGER,
 
     -- Player identity
-    player_id                       INTEGER,
+    player_id                       BIGINT,
     player_first_name               TEXT,
     player_last_name                TEXT,
     player_team                     TEXT,
