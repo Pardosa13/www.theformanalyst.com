@@ -729,7 +729,7 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
             details = match_details_map.get(match_id, {})
 
             for _, row in stats_df.iterrows():
-                all_rows.append(_build_afl_current_row(row, details, season))
+                all_rows.append(_build_afl_current_row(row, details, season, match_provider_id))
 
             time.sleep(0.1)
 
@@ -745,7 +745,7 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
     return all_rows
 
 
-def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
+def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id: int) -> dict:
     """Map AFL current-season row into your DB shape."""
     row_dict = row.to_dict() if hasattr(row, "to_dict") else dict(row)
  
@@ -819,7 +819,7 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int) -> dict:
             margin = away_score - home_score
  
     return {
-        "match_id": _coerce_match_id(pick("providerId")),
+        "match_id": _coerce_match_id(match_id),
         "match_date": _coerce_date(details.get("utcStartTime")),
         "match_round": _coerce_str(details.get("round.roundNumber") or details.get("round.name")),
         "match_home_team": home_team,
