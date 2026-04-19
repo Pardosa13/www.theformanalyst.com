@@ -405,13 +405,21 @@ def _find_season_id(season: int, comp: str = "AFLM") -> Optional[int]:
     return min(candidates)
 
 
-def _find_round_provider_ids(season: int, round_number: int = None, comp: str = "AFLM", future_rounds: bool = True) -> list[int]:
-    """Find AFL round providerIds."""
+def _find_round_ids(
+    season: int,
+    round_number: int = None,
+    comp: str = "AFLM",
+    future_rounds: bool = True,
+) -> list[int]:
+    """Find AFL round ids (NOT providerIds)."""
     season_id = _find_season_id(season, comp)
     if not season_id:
         return []
 
-    data = _afl_get(f"{AFL_META_BASE}/afl/v2/compseasons/{season_id}/rounds", params={"pageSize": 30})
+    data = _afl_get(
+        f"{AFL_META_BASE}/afl/v2/compseasons/{season_id}/rounds",
+        params={"pageSize": 30},
+    )
     if not data or "rounds" not in data:
         return []
 
@@ -422,22 +430,22 @@ def _find_round_provider_ids(season: int, round_number: int = None, comp: str = 
         filtered = []
         for r in rounds:
             utc_start = _coerce_datetime(r.get("utcStartTime"))
-            if utc_start is not None and utc_start.tzinfo is not None:
+            if utc_start is not None and getattr(utc_start, "tzinfo", None) is not None:
                 utc_start = utc_start.tz_convert(None)
             if utc_start is not None and utc_start < today:
                 filtered.append(r)
         rounds = filtered
 
     if round_number is None:
-        ids = [r.get("providerId") for r in rounds if r.get("providerId") is not None]
+        ids = [r.get("id") for r in rounds if r.get("id") is not None]
     else:
         ids = [
-            r.get("providerId")
+            r.get("id")
             for r in rounds
-            if r.get("providerId") is not None and r.get("roundNumber") == round_number
+            if r.get("id") is not None and r.get("roundNumber") == round_number
         ]
 
-    return ids
+    return [int(x) for x in ids if x is not None]
 
 
 def _fetch_round_matches_afl(round_provider_id: int, token: Optional[str] = None) -> list[dict]:
