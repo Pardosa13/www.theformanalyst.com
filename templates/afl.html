@@ -887,7 +887,7 @@ function selectPlayer(id){
   const panel = document.getElementById('propChartPanel');
   panel.innerHTML = '<div class="prop-empty" style="padding:40px;"><span class="spinner-sm"></span></div>';
 
-  fetch(`/api/afl/player-detail?player_id=${id}&season=${_SEASON}`)
+  fetch(`/api/afl/player-detail?player_id=${id}`)
     .then(r=>r.json())
     .then(data=>renderPropCard(data))
     .catch(()=>{
