@@ -96,27 +96,30 @@ def run_setup(db, start_year: int = 2019, end_year: int = None):
         logger.info("         Past seasons use Fryzigg. Current season uses AFL official first, with Fryzigg fallback.")
 
         for year in range(start_year, end_year + 1):
-            try:
-                # FIX: retry current season properly
-stats = fetch_fryzigg_player_stats(year)
+    try:
+        # FIX: retry current season properly
+        stats = fetch_fryzigg_player_stats(year)
 
-# If current year fails, retry WITHOUT round restriction
-if year == CURRENT_YEAR and not stats:
-    logger.warning("Retrying %s without round filter...", year)
-    from afl_data import fetch_afl_player_stats_current_season
-    stats = fetch_afl_player_stats_current_season(year, round_number=None)
+        # If current year fails, retry WITHOUT round restriction
+        if year == CURRENT_YEAR and not stats:
+            logger.warning("Retrying %s without round filter...", year)
+            from afl_data import fetch_afl_player_stats_current_season
+            stats = fetch_afl_player_stats_current_season(year, round_number=None)
 
-count = upsert_player_stats(db, stats, year)
-                total_stats += count
-                logger.info("  %s: %s player-game rows", year, count)
-                log_sync(db, "player_stats", season=year, rows=count)
-                time.sleep(1)
-            except Exception as exc:
-                logger.error("  %s failed: %s", year, exc)
-                try:
-                    log_sync(db, "player_stats", season=year, status="error", error=str(exc))
-                except Exception:
-                    pass
+        count = upsert_player_stats(db, stats, year)
+        total_stats += count
+
+        logger.info("  %s: %s player-game rows", year, count)
+        log_sync(db, "player_stats", season=year, rows=count)
+
+        time.sleep(1)
+
+    except Exception as exc:
+        logger.error("  %s failed: %s", year, exc)
+        try:
+            log_sync(db, "player_stats", season=year, status="error", error=str(exc))
+        except Exception:
+            pass
 
         logger.info("  ✓ Total: %s player stats rows loaded", total_stats)
 
