@@ -636,51 +636,45 @@ def _normalise_afl_fixture_match(match: dict) -> dict:
     }
 
 
-def fetch_afl_player_stats_current_season(
-    season: int,
-    round_number: int = None,
-    comp: str = "AFLM",
-) -> list[dict]:
+def fetch_afl_player_stats_current_season(season: int, round_number: int = None, comp: str = "AFLM") -> list[dict]:
     """
-    Fetch current-season player stats using AFL official API.
+    Fetch current-season player stats using AFL official API
+    for ALL completed rounds in the current season.
     """
-    if round_number is None:
-        try:
-            round_number = fetch_squiggle_current_round(season)
-        except Exception:
-            round_number = None
+    try:
+        current_round = round_number or fetch_squiggle_current_round(season)
+    except Exception:
+        current_round = round_number or 1
 
-    matches = fetch_fixture_afl(season, round_number=round_number, comp=comp)
-    if not matches:
-        logger.warning("AFL current-season stats: no fixtures found for season %s round=%s", season, round_number)
+    # If current round is 7, completed rounds are 1..6
+    completed_rounds = list(range(1, max(current_round, 1)))
+    if not completed_rounds:
+        logger.warning("AFL current-season stats: no completed rounds yet for season %s", season)
         return []
 
-    now_utc = pd.Timestamp.utcnow()
-    filtered_matches = []
+    all_matches = []
+    for rnd in completed_rounds:
+        round_matches = fetch_fixture_afl(season, round_number=rnd, comp=comp)
+        if round_matches:
+            all_matches.extend(round_matches)
+        time.sleep(0.1)
 
-    for match in matches:
-        utc_start = _coerce_datetime(match.get("utcStartTime"))
-        status = _coerce_str(match.get("status")).lower()
-
-        include = False
-        if status in {"concluded", "complete", "finished", "closed", "final"}:
-            include = True
-        elif utc_start is not None and utc_start <= now_utc:
-            include = True
-
-        if include:
-            filtered_matches.append(match)
-
-    if not filtered_matches:
+    if not all_matches:
         logger.warning(
-            "AFL current-season stats: no completed/started matches found for season %s round=%s",
-            season,
-            round_number,
+            "AFL current-season stats: no fixtures found for completed rounds in season %s",
+            season
         )
         return []
 
-    match_provider_ids = [m.get("providerId") for m in filtered_matches if m.get("providerId")]
-    if not match_provider_ids:
+    # Deduplicate by providerId
+    deduped = {}
+    for match in all_matches:
+        provider_id = match.get("providerId")
+        if provider_id:
+            deduped[provider_id] = match
+
+    filtered_matches = list(deduped.values())
+    if not filtered_matches:
         logger.warning("AFL current-season stats: no providerIds found for season %s", season)
         return []
 
@@ -689,33 +683,32 @@ def fetch_afl_player_stats_current_season(
         return []
 
     match_details_map = {
-        match.get("providerId"): _normalise_afl_fixture_match(match)
-        for match in filtered_matches
-        if match.get("providerId")
+        m.get("providerId"): _normalise_afl_fixture_match(m)
+        for m in filtered_matches
+        if m.get("providerId")
     }
 
     all_rows: list[dict] = []
-    for match_provider_id in match_provider_ids:
+
+    for match_provider_id, details in match_details_map.items():
         try:
             stats_df = _fetch_match_stats_afl(match_provider_id, token=token)
             if stats_df.empty:
                 continue
 
-            details = match_details_map.get(match_provider_id, {})
             for _, row in stats_df.iterrows():
-                mapped_row = _build_afl_current_row(row, details, season, match_provider_id)
-                if mapped_row.get("match_id") and mapped_row.get("player_id"):
-                    all_rows.append(mapped_row)
+                all_rows.append(_build_afl_current_row(row, details, season, match_provider_id))
 
             time.sleep(0.1)
+
         except Exception as exc:
             logger.warning("AFL match stats fetch failed for match %s: %s", match_provider_id, exc)
 
+    all_rows = [r for r in all_rows if r.get("match_id") and r.get("player_id")]
+
     logger.info(
-        "AFL current-season stats: prepared %s rows for season %s round=%s",
-        len(all_rows),
-        season,
-        round_number,
+        "AFL current-season stats: prepared %s rows for season %s across rounds %s",
+        len(all_rows), season, completed_rounds
     )
     return all_rows
 
