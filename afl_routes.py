@@ -7,6 +7,7 @@ Key fixes in this rewrite:
 - Uses player_id as the primary identity everywhere possible.
 - Removes dangerous surname-only matching that caused Baker-style collisions.
 - Applies season filtering consistently to player detail and game-log routes.
+- Uses the last 3 seasons of player data for analysis views.
 - Never silently picks the "first" player when multiple players match.
 - Keeps existing route surface largely intact for safer integration.
 """
@@ -116,11 +117,13 @@ def register_afl_routes(app, db):
             return jsonify({"error": "Provide name or team parameter"}), 400
 
         effective_season = _resolve_stats_season(db, requested_season)
+        effective_seasons = _resolve_stats_seasons(db, requested_season)
+
         rows = _db_player_search(
             db,
             name=name,
             team=team,
-            season=effective_season,
+            seasons=effective_seasons,
             limit=max(limit * 30, 300),
         )
 
@@ -129,6 +132,7 @@ def register_afl_routes(app, db):
                 {
                     "players": [],
                     "season": effective_season,
+                    "seasons_used": effective_seasons,
                     "stat": stat,
                     "message": "No players found",
                 }
@@ -162,6 +166,7 @@ def register_afl_routes(app, db):
                     "height_cm": player["height_cm"],
                     "weight_kg": player["weight_kg"],
                     "season": effective_season,
+                    "seasons_used": effective_seasons,
                     "games_played": len(games),
                     "averages": avgs,
                     "last5_avg": _safe_avg(last5, stat),
@@ -194,6 +199,7 @@ def register_afl_routes(app, db):
             {
                 "players": result,
                 "season": effective_season,
+                "seasons_used": effective_seasons,
                 "stat": stat,
                 "count": len(result),
             }
@@ -211,18 +217,25 @@ def register_afl_routes(app, db):
             return jsonify({"error": "Provide player_id or name"}), 400
 
         effective_season = _resolve_stats_season(db, requested_season)
+        effective_seasons = _resolve_stats_seasons(db, requested_season)
 
         rows = _resolve_player_rows(
             db=db,
             player_id=player_id,
             name=name,
             team=team,
-            season=effective_season,
-            limit=200,
+            seasons=effective_seasons,
+            limit=300,
         )
 
         if not rows:
-            return jsonify({"error": "Player not found", "season": effective_season}), 404
+            return jsonify(
+                {
+                    "error": "Player not found",
+                    "season": effective_season,
+                    "seasons_used": effective_seasons,
+                }
+            ), 404
 
         grouped = _group_players(rows)
 
@@ -244,6 +257,7 @@ def register_afl_routes(app, db):
                 {
                     "error": "Multiple players matched",
                     "season": effective_season,
+                    "seasons_used": effective_seasons,
                     "matches": matches,
                 }
             ), 409
@@ -285,6 +299,7 @@ def register_afl_routes(app, db):
                 "height_cm": player["height_cm"],
                 "weight_kg": player["weight_kg"],
                 "season": effective_season,
+                "seasons_used": effective_seasons,
                 "games_played": len(games),
                 "averages": averages,
                 "last5_avg": {
@@ -327,18 +342,19 @@ def register_afl_routes(app, db):
             return jsonify({"error": "Provide player_id or name"}), 400
 
         effective_season = _resolve_stats_season(db, requested_season)
+        effective_seasons = _resolve_stats_seasons(db, requested_season)
 
         rows = _resolve_player_rows(
             db=db,
             player_id=player_id,
             name=name,
             team=team,
-            season=effective_season,
-            limit=max(limit, 100),
+            seasons=effective_seasons,
+            limit=max(limit, 150),
         )
 
         if not rows:
-            return jsonify({"games": [], "season": effective_season})
+            return jsonify({"games": [], "season": effective_season, "seasons_used": effective_seasons})
 
         grouped = _group_players(rows)
 
@@ -360,6 +376,7 @@ def register_afl_routes(app, db):
                 {
                     "error": "Multiple players matched",
                     "season": effective_season,
+                    "seasons_used": effective_seasons,
                     "matches": matches,
                 }
             ), 409
@@ -372,6 +389,7 @@ def register_afl_routes(app, db):
                 "name": player["name"],
                 "team": player["team"],
                 "season": effective_season,
+                "seasons_used": effective_seasons,
                 "games": [_format_game_log_row(g, player["team"]) for g in games],
                 "count": len(games),
             }
@@ -427,15 +445,24 @@ def register_afl_routes(app, db):
             return jsonify({"error": "team parameter required"}), 400
 
         effective_season = _resolve_stats_season(db, requested_season)
+        effective_seasons = _resolve_stats_seasons(db, requested_season)
+
         rows = _db_player_search(
             db,
             team=team,
-            season=effective_season,
-            limit=max(limit * 40, 400),
+            seasons=effective_seasons,
+            limit=max(limit * 60, 800),
         )
 
         if not rows:
-            return jsonify({"team": team, "season": effective_season, "players": []})
+            return jsonify(
+                {
+                    "team": team,
+                    "season": effective_season,
+                    "seasons_used": effective_seasons,
+                    "players": [],
+                }
+            )
 
         grouped = _group_players(rows)
         players = []
@@ -464,6 +491,7 @@ def register_afl_routes(app, db):
             {
                 "team": team,
                 "season": effective_season,
+                "seasons_used": effective_seasons,
                 "stat": stat,
                 "players": players[:limit],
                 "count": min(len(players), limit),
@@ -480,10 +508,25 @@ def register_afl_routes(app, db):
             return jsonify({"error": "team parameter required"}), 400
 
         effective_season = _resolve_stats_season(db, requested_season)
-        rows = _db_player_search(db, team=team, season=effective_season, limit=1200)
+        effective_seasons = _resolve_stats_seasons(db, requested_season)
+
+        rows = _db_player_search(
+            db,
+            team=team,
+            seasons=effective_seasons,
+            limit=2000,
+        )
 
         if not rows:
-            return jsonify({"team": team, "season": effective_season, "summary": {}, "leaders": {}})
+            return jsonify(
+                {
+                    "team": team,
+                    "season": effective_season,
+                    "seasons_used": effective_seasons,
+                    "summary": {},
+                    "leaders": {},
+                }
+            )
 
         grouped = _group_players(rows)
         summaries = []
@@ -512,6 +555,7 @@ def register_afl_routes(app, db):
             {
                 "team": team,
                 "season": effective_season,
+                "seasons_used": effective_seasons,
                 "player_count": len(summaries),
                 "leaders": {
                     "disposals": _leader("disposals"),
@@ -567,6 +611,7 @@ def register_afl_routes(app, db):
         requested_season = request.args.get("year", type=int)
 
         effective_season = _resolve_stats_season(db, requested_season)
+        effective_seasons = _resolve_stats_seasons(db, requested_season)
         props = _db_get_props(db, market=market)
 
         if not props:
@@ -575,6 +620,7 @@ def register_afl_routes(app, db):
                     "bets": [],
                     "message": "No prop lines loaded. Configure The Odds API key.",
                     "season": effective_season,
+                    "seasons_used": effective_seasons,
                 }
             )
 
@@ -601,8 +647,8 @@ def register_afl_routes(app, db):
             player_rows = _db_player_search(
                 db,
                 name=player_name,
-                season=effective_season,
-                limit=100,
+                seasons=effective_seasons,
+                limit=200,
             )
             if not player_rows:
                 continue
@@ -673,6 +719,7 @@ def register_afl_routes(app, db):
                 "market": market,
                 "min_edge": min_edge,
                 "season": effective_season,
+                "seasons_used": effective_seasons,
                 "bets": value_bets,
                 "count": len(value_bets),
             }
@@ -859,6 +906,12 @@ def _resolve_stats_season(db, requested_season: int | None) -> int:
     return requested_season or (CURRENT_YEAR - 1)
 
 
+def _resolve_stats_seasons(db, requested_season: int | None) -> list[int]:
+    effective_season = _resolve_stats_season(db, requested_season)
+    seasons = [effective_season, effective_season - 1, effective_season - 2]
+    return [s for s in seasons if s >= 2019]
+
+
 def _normalize_whitespace(value: str) -> str:
     return " ".join((value or "").strip().split())
 
@@ -868,6 +921,7 @@ def _db_player_search(
     name: str = "",
     team: str = "",
     season: int | None = None,
+    seasons: list[int] | None = None,
     limit: int = 50,
 ) -> list[dict]:
     conditions = []
@@ -886,7 +940,10 @@ def _db_player_search(
         conditions.append("LOWER(player_team) LIKE :team")
         params["team"] = f"%{team.lower()}%"
 
-    if season is not None:
+    if seasons:
+        conditions.append("season = ANY(:seasons)")
+        params["seasons"] = seasons
+    elif season is not None:
         conditions.append("season = :season")
         params["season"] = season
 
@@ -911,12 +968,16 @@ def _db_player_by_id(
     db,
     player_id: int,
     season: int | None = None,
+    seasons: list[int] | None = None,
     limit: int = 100,
 ) -> list[dict]:
     params = {"player_id": player_id, "limit": limit}
     season_filter = ""
 
-    if season is not None:
+    if seasons:
+        params["seasons"] = seasons
+        season_filter = "AND season = ANY(:seasons)"
+    elif season is not None:
         params["season"] = season
         season_filter = "AND season = :season"
 
@@ -943,15 +1004,29 @@ def _resolve_player_rows(
     name: str = "",
     team: str = "",
     season: int | None = None,
+    seasons: list[int] | None = None,
     limit: int = 200,
 ) -> list[dict]:
     if player_id:
-        exact_rows = _db_player_by_id(db, player_id=player_id, season=season, limit=limit)
+        exact_rows = _db_player_by_id(
+            db,
+            player_id=player_id,
+            season=season,
+            seasons=seasons,
+            limit=limit,
+        )
         if exact_rows:
             return exact_rows
 
     if name:
-        name_rows = _db_player_search(db, name=name, team=team, season=season, limit=limit)
+        name_rows = _db_player_search(
+            db,
+            name=name,
+            team=team,
+            season=season,
+            seasons=seasons,
+            limit=limit,
+        )
         if not name_rows:
             return []
 
@@ -1148,19 +1223,18 @@ def afl_nightly_sync(app_context, db):
     except Exception as exc:
         logger.error("  ✗ Ladder sync failed: %s", exc)
 
-    # FORCE include current season (fixes 2026 not saving)
     latest_stats_season = _db_latest_player_stats_season(db) or (CURRENT_YEAR - 1)
+    seasons_to_try = sorted(
+        {
+            CURRENT_YEAR,
+            latest_stats_season,
+            latest_stats_season - 1,
+            latest_stats_season - 2,
+            latest_stats_season - 3,
+        }
+    )
+    seasons_to_try = [s for s in seasons_to_try if s >= 2019]
 
-    seasons_to_try = list(set([
-        CURRENT_YEAR,                  # ← critical fix
-        latest_stats_season,
-        latest_stats_season - 1,
-        latest_stats_season - 2,
-        latest_stats_season - 3,
-    ]))
-
-seasons_to_try = [s for s in seasons_to_try if s >= 2019]
-seasons_to_try.sort()
     total_stats = 0
 
     for season in seasons_to_try:
@@ -1251,6 +1325,7 @@ def _group_players(rows: list[dict]) -> dict:
 
     return players
 
+
 def _format_game_log_row(game: dict, player_team: str) -> dict:
     winner = game.get("match_winner")
     result = "W" if winner == player_team else "L" if winner else "—"
@@ -1273,7 +1348,6 @@ def _format_game_log_row(game: dict, player_team: str) -> dict:
         "fantasy": game.get("afl_fantasy_score", 0),
         "supercoach": game.get("supercoach_score", 0),
     }
-
 
 
 def _merge_fixture_tips(db, fixtures: list[dict], year: int, round_number: int | None = None) -> list[dict]:
