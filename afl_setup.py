@@ -47,6 +47,7 @@ def run_setup(db, start_year: int = 2019, end_year: int = None):
     )
     from afl_data import (
         fetch_fryzigg_player_stats,
+        fetch_afl_player_stats_current_season,
         fetch_squiggle_games,
         fetch_squiggle_standings,
         fetch_squiggle_current_round,
@@ -87,7 +88,7 @@ def run_setup(db, start_year: int = 2019, end_year: int = None):
 
         logger.info("  ✓ Total: %s games loaded", total_games)
 
-                # ── Step 3: Load player stats (hybrid source path) ─────────────
+        # ── Step 3: Load player stats (hybrid source path) ─────────────
         logger.info(
             "Step 3/4: Loading player stats (%s-%s)...",
             start_year,
@@ -97,31 +98,24 @@ def run_setup(db, start_year: int = 2019, end_year: int = None):
 
         for year in range(start_year, end_year + 1):
             try:
-                # ── NORMAL FETCH ──
+                # First attempt: normal fetch path
                 stats = fetch_fryzigg_player_stats(year)
 
-                # 🔴 CRITICAL FIX FOR 2026
+                # Critical retry for current season if first attempt returned nothing
                 if year == CURRENT_YEAR and not stats:
                     logger.warning("Retrying %s without round filter...", year)
-                    from afl_data import fetch_afl_player_stats_current_season
-                    stats = fetch_afl_player_stats_current_season(
-                        year,
-                        round_number=None
-                    )
+                    stats = fetch_afl_player_stats_current_season(year, round_number=None)
 
-                # If still nothing → skip cleanly
                 if not stats:
                     logger.warning("  %s: no stats returned", year)
+                    log_sync(db, "player_stats", season=year, rows=0, status="empty")
                     continue
 
                 count = upsert_player_stats(db, stats, year)
                 total_stats += count
-
                 logger.info("  %s: %s player-game rows", year, count)
                 log_sync(db, "player_stats", season=year, rows=count)
-
                 time.sleep(1)
-
             except Exception as exc:
                 logger.error("  %s failed: %s", year, exc)
                 try:
