@@ -647,7 +647,7 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
         current_round = round_number or 1
 
     # If current round is 7, completed rounds are 1..6
-    completed_rounds = list(range(1, max(current_round, 1)))
+    completed_rounds = list(range(1, current_round + 1))
     if not completed_rounds:
         logger.warning("AFL current-season stats: no completed rounds yet for season %s", season)
         return []
