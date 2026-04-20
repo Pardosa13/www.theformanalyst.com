@@ -5,36 +5,59 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   fetch-stats:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install R and dependencies
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.3'
+
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y r-base r-base-dev libcurl4-openssl-dev libssl-dev libxml2-dev
-      
+          sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev
+
       - name: Install R packages
         run: |
-          sudo R --slave -e "
-          install.packages(c('httr', 'httr2', 'rvest', 'tidyr', 'janitor'), repos='http://cran.r-project.org')
-          remotes::install_github('jimmyday12/fitzRoy')
-          "
-      
-      - name: Fetch data
+          Rscript -e "install.packages(c('fitzRoy','readr','dplyr','httr','httr2','rvest','tidyr','janitor'), repos='https://cloud.r-project.org')"
+
+      - name: Create data directory
+        run: mkdir -p data
+
+      - name: Fetch 2026 AFL Tables player stats
         run: |
-          sudo R --slave -e "
+          Rscript -e "
           library(fitzRoy)
+          library(readr)
+
           data <- fetch_player_stats(season = 2026, source = 'afltables')
-          write.csv(data, 'data/afl_2026_stats.csv', row.names = FALSE)
+
+          if (is.null(data) || nrow(data) == 0) {
+            stop('No rows returned from fitzRoy::fetch_player_stats(season = 2026, source = \"afltables\")')
+          }
+
+          write_csv(data, 'data/afl_2026_stats.csv')
+          cat('Rows written:', nrow(data), '\n')
+          cat('Cols written:', ncol(data), '\n')
+          print(names(data))
           "
-      
-      - name: Commit and push
+
+      - name: Commit and push if changed
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add data/afl_2026_stats.csv
-          git commit -m "Update AFL 2026 stats" || true
+          git diff --cached --quiet && exit 0
+          git commit -m "Update AFL 2026 stats"
           git push
