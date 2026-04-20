@@ -433,13 +433,13 @@ def register_afl_routes(app, db):
 
         return jsonify({"opponent": opponent, "season_from": season_from, **result})
 
-@app.route("/api/afl/team-players")
-@login_required
-def api_afl_team_players():
-    team = request.args.get("team", "").strip()
-    stat = request.args.get("stat", "disposals").strip()
-    requested_season = request.args.get("season", type=int)
-    limit = request.args.get("limit", 30, type=int)
+    @app.route("/api/afl/team-players")
+    @login_required
+    def api_afl_team_players():
+        team = request.args.get("team", "").strip()
+        stat = request.args.get("stat", "disposals").strip()
+        requested_season = request.args.get("season", type=int)
+        limit = request.args.get("limit", 30, type=int)
 
     if not team:
         return jsonify({"error": "team parameter required"}), 400
