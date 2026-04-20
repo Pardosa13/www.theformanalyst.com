@@ -11,15 +11,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install R
+      - name: Install R and dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y r-base r-base-dev
+          sudo apt-get install -y r-base r-base-dev libcurl4-openssl-dev libssl-dev libxml2-dev
       
-      - name: Install fitzRoy and fetch data
+      - name: Install R packages
         run: |
           sudo R --slave -e "
-          install.packages('fitzRoy', repos='http://cran.r-project.org', dependencies=TRUE)
+          install.packages(c('httr', 'httr2', 'rvest', 'tidyr', 'janitor'), repos='http://cran.r-project.org')
+          remotes::install_github('jimmyday12/fitzRoy')
+          "
+      
+      - name: Fetch data
+        run: |
+          sudo R --slave -e "
           library(fitzRoy)
           data <- fetch_player_stats(season = 2026, source = 'afltables')
           write.csv(data, 'data/afl_2026_stats.csv', row.names = FALSE)
