@@ -4,11 +4,14 @@ afl_sync.py
 Railway cron entry point. Invoked by:
     python -c "from afl_sync import sync_afl_all; sync_afl_all(2026)"
 
-Uses the same raw-SQL upsert path as afl_setup.py (proven working).
-Does NOT use ORM models — that was the old broken import chain.
+Uses the same raw-SQL upsert path as afl_setup.py.
+Does not use ORM models.
 """
 
+from __future__ import annotations
+
 import os
+import time
 import logging
 
 logging.basicConfig(
@@ -16,6 +19,23 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _safe_log_sync(db, source: str, season: int = None, round_num: int = None,
+                   rows: int = 0, status: str = "ok", error: str = None):
+    try:
+        from afl_db import log_sync
+        log_sync(
+            db,
+            source=source,
+            season=season,
+            round_num=round_num,
+            rows=rows,
+            status=status,
+            error=error,
+        )
+    except Exception as exc:
+        logger.warning("Failed writing sync log for %s season=%s: %s", source, season, exc)
 
 
 def sync_afl_all(season: int = None):
@@ -38,7 +58,6 @@ def sync_afl_all(season: int = None):
         upsert_standings,
         upsert_player_stats,
         upsert_player_props,
-        log_sync,
     )
 
     if season is None:
@@ -52,84 +71,89 @@ def sync_afl_all(season: int = None):
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
 
+    # Ensure historical Fryzigg RDS path is allowed during cron.
+    previous_cron_mode = os.environ.get("AFL_CRON_MODE")
+    os.environ["AFL_CRON_MODE"] = "1"
+
     engine = create_engine(db_url)
     db = SimpleNamespace(engine=engine, text=text)
 
-    logger.info(f"=== AFL nightly sync for season {season} ===")
+    logger.info("=== AFL nightly sync for season %s ===", season)
 
-    # ── 1. Squiggle fixtures ──────────────────────────────────────
     try:
-        games = fetch_squiggle_games(season)
-        count = upsert_games(db, games)
-        log_sync(db, "squiggle_games", season=season, rows=count)
-        logger.info(f"  ✓ Fixtures: {count} games synced")
-    except Exception as e:
-        logger.error(f"  ✗ Fixtures sync failed: {e}")
-        try: log_sync(db, "squiggle_games", season=season, status="error", error=str(e))
-        except: pass
-
-    # ── 2. Squiggle ladder ────────────────────────────────────────
-    try:
-        rnd = fetch_squiggle_current_round(season)
-        standings = fetch_squiggle_standings(season, rnd)
-        count = upsert_standings(db, standings, season, rnd)
-        log_sync(db, "squiggle_standings", season=season, round_num=rnd, rows=count)
-        logger.info(f"  ✓ Ladder: {count} teams synced (round {rnd})")
-    except Exception as e:
-        logger.error(f"  ✗ Ladder sync failed: {e}")
-        try: log_sync(db, "squiggle_standings", season=season, status="error", error=str(e))
-        except: pass
-
-    # ── 3. Fryzigg player stats (last 5 seasons) ──────────────────
-    fryzigg_total = 0
-    current_year = season
-    seasons_to_sync = list(range(current_year - 4, current_year + 1))
-    # e.g. if season=2026, syncs [2022, 2023, 2024, 2025, 2026]
-
-    for yr in seasons_to_sync:
+        # ── 1. Squiggle fixtures ──────────────────────────────────
         try:
-            stats = fetch_fryzigg_player_stats(yr)
-            if stats:
-                count = upsert_player_stats(db, stats, yr)
-                fryzigg_total += count
-                log_sync(db, "fryzigg", season=yr, rows=count)
-                logger.info(f"  ✓ Fryzigg {yr}: {count} rows synced")
-            else:
-                logger.info(f"  - Fryzigg {yr}: no data returned (may not be published yet)")
-                log_sync(db, "fryzigg", season=yr, rows=0, status="empty")
-            # Be polite to the API between seasons
-            import time
-            time.sleep(1)
-        except Exception as e:
-            logger.error(f"  ✗ Fryzigg {yr} failed: {e}")
-            try: log_sync(db, "fryzigg", season=yr, status="error", error=str(e))
-            except: pass
+            games = fetch_squiggle_games(season)
+            count = upsert_games(db, games)
+            _safe_log_sync(db, "squiggle_games", season=season, rows=count)
+            logger.info("  ✓ Fixtures: %s games synced", count)
+        except Exception as exc:
+            logger.error("  ✗ Fixtures sync failed: %s", exc)
+            _safe_log_sync(db, "squiggle_games", season=season, status="error", error=str(exc))
 
-    logger.info(f"  ✓ Fryzigg total: {fryzigg_total} rows across {len(seasons_to_sync)} seasons")
+        # ── 2. Squiggle ladder ────────────────────────────────────
+        try:
+            current_round = fetch_squiggle_current_round(season)
+            standings = fetch_squiggle_standings(season, current_round)
+            count = upsert_standings(db, standings, season, current_round)
+            _safe_log_sync(db, "squiggle_standings", season=season, round_num=current_round, rows=count)
+            logger.info("  ✓ Ladder: %s teams synced (round %s)", count, current_round)
+        except Exception as exc:
+            logger.error("  ✗ Ladder sync failed: %s", exc)
+            _safe_log_sync(db, "squiggle_standings", season=season, status="error", error=str(exc))
 
-    # ── 4. Prop lines (skip if no key) ────────────────────────────
-    api_key = os.environ.get("ODDS_API_KEY", "")
-    if api_key:
-        total = 0
-        for market in ["player_disposals", "player_marks", "player_goals"]:
+        # ── 3. Player stats (last 5 seasons) ──────────────────────
+        # Current season may come from AFL official first, with Fryzigg fallback.
+        player_stats_total = 0
+        seasons_to_sync = list(range(season - 4, season + 1))
+
+        for yr in seasons_to_sync:
             try:
-                props = fetch_afl_player_props(api_key, market)
-                count = upsert_player_props(db, props)
-                total += count
-                log_sync(db, "odds_api", rows=count)
-                logger.info(f"  ✓ Props ({market}): {count} lines synced")
-            except Exception as e:
-                logger.error(f"  ✗ Props sync failed for {market}: {e}")
-                try: log_sync(db, "odds_api", status="error", error=str(e))
-                except: pass
-        logger.info(f"  ✓ Props total: {total} lines")
-    else:
-        logger.info("  - Props: skipped (ODDS_API_KEY not configured)")
+                stats = fetch_fryzigg_player_stats(yr)
+                if stats:
+                    count = upsert_player_stats(db, stats, yr)
+                    player_stats_total += count
+                    _safe_log_sync(db, "player_stats", season=yr, rows=count)
+                    logger.info("  ✓ Player stats %s: %s rows synced", yr, count)
+                else:
+                    logger.info("  - Player stats %s: no data returned", yr)
+                    _safe_log_sync(db, "player_stats", season=yr, rows=0, status="empty")
 
-    logger.info("=== AFL sync complete ===")
+                time.sleep(1)
+            except Exception as exc:
+                logger.error("  ✗ Player stats %s failed: %s", yr, exc)
+                _safe_log_sync(db, "player_stats", season=yr, status="error", error=str(exc))
+
+        logger.info("  ✓ Player stats total: %s rows across %s seasons", player_stats_total, len(seasons_to_sync))
+
+        # ── 4. Prop lines (skip if no key) ────────────────────────
+        api_key = os.environ.get("ODDS_API_KEY", "")
+        if api_key:
+            total_props = 0
+            for market in ["player_disposals", "player_marks", "player_goals"]:
+                try:
+                    props = fetch_afl_player_props(api_key, market)
+                    count = upsert_player_props(db, props)
+                    total_props += count
+                    _safe_log_sync(db, "odds_api", season=season, rows=count)
+                    logger.info("  ✓ Props (%s): %s lines synced", market, count)
+                except Exception as exc:
+                    logger.error("  ✗ Props sync failed for %s: %s", market, exc)
+                    _safe_log_sync(db, "odds_api", season=season, status="error", error=str(exc))
+
+            logger.info("  ✓ Props total: %s lines", total_props)
+        else:
+            logger.info("  - Props: skipped (ODDS_API_KEY not configured)")
+
+        logger.info("=== AFL sync complete ===")
+
+    finally:
+        if previous_cron_mode is None:
+            os.environ.pop("AFL_CRON_MODE", None)
+        else:
+            os.environ["AFL_CRON_MODE"] = previous_cron_mode
 
 
-# Allow direct invocation: python afl_sync.py
 if __name__ == "__main__":
     import sys
     season_arg = int(sys.argv[1]) if len(sys.argv) > 1 else None
