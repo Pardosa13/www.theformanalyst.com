@@ -1033,73 +1033,17 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
     3. Fryzigg (historical)
     """
 
-    # ── 1. AFL official API (PRIMARY for current year) ──
+    # ── 1. AFL Tables (PRIMARY for current year) ──
     if season >= CURRENT_YEAR:
-        logger.info("Player stats: trying AFL official current-season source for %s", season)
-
-        current_rows = fetch_afl_player_stats_current_season(
-            season,
-            round_number=fetch_squiggle_current_round(season),
-        )
-
-        if current_rows:
-            return current_rows
-
-        logger.warning("AFL API returned no rows for %s", season)
-
-        # ── 2. AFL TABLES FALLBACK (NEW FIX) ──
-        logger.info("Player stats: trying AFL Tables fallback for %s", season)
-
+        logger.info("Player stats: trying AFL Tables for %s", season)
+        
         afl_tables_games = fetch_afltables_results(season)
-
+        
         if afl_tables_games:
-            mapped_rows = []
-
-            for g in afl_tables_games:
-                try:
-                    home = _normalise_team_name(g.get("home_team"))
-                    away = _normalise_team_name(g.get("away_team"))
-
-                    # NOTE: AFL Tables has NO player stats → we create minimal rows
-                    # This at least allows fixtures + players page to NOT break
-                    mapped_rows.append({
-                        "match_id": _coerce_match_id(g.get("date") + home + away),
-                        "match_date": _coerce_date(g.get("date")),
-                        "match_round": g.get("round"),
-                        "match_home_team": home,
-                        "match_away_team": away,
-                        "match_home_team_score": _coerce_int(g.get("home_score")),
-                        "match_away_team_score": _coerce_int(g.get("away_score")),
-                        "match_margin": 0,
-                        "match_winner": "",
-                        "venue_name": g.get("venue"),
-                        "season": season,
-
-                        # CRITICAL: fake minimal player row so frontend doesn’t break
-                        "player_id": 999999,
-                        "player_first_name": "TEMP",
-                        "player_last_name": "DATA",
-                        "player_team": home,
-
-                        "disposals": 0,
-                        "kicks": 0,
-                        "marks": 0,
-                        "handballs": 0,
-                        "tackles": 0,
-                        "goals": 0,
-                    })
-                except Exception:
-                    continue
-
-            if mapped_rows:
-                logger.warning("Using AFL Tables fallback rows for %s", season)
-                return mapped_rows
-
-        # ── 3. Fryzigg fallback (will still be empty for 2026) ──
-        logger.warning(
-            "Player stats: AFL Tables also empty, falling back to Fryzigg for %s",
-            season,
-        )
+            logger.info("Player stats: found %s games from AFL Tables for %s", len(afl_tables_games), season)
+            return afl_tables_games
+        
+        logger.warning("AFL Tables returned no rows for %s", season)
 
     return _fetch_fryzigg_player_stats_from_rds(season)
 
