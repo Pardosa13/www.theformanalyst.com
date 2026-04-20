@@ -1024,29 +1024,6 @@ def _fetch_fryzigg_player_stats_from_rds(season: int) -> list[dict]:
     logger.info("Fryzigg: prepared %s rows for season %s", len(rows), season)
     return rows
 
-
-def fetch_fryzigg_player_stats(season: int) -> list[dict]:
-    """
-    Unified player stats fetch:
-    1. AFL official API (current season)
-    2. AFL Tables fallback (current season basic stats)
-    3. Fryzigg (historical)
-    """
-
-    # ── 1. AFL Tables (PRIMARY for current year) ──
-    if season >= CURRENT_YEAR:
-    logger.info("Player stats: trying fitzRoy R package for %s", season)
-    
-    fitzroy_rows = fetch_afltables_player_stats_rpy2(season)
-    
-    if fitzroy_rows:
-        logger.info("Player stats: got %s rows from fitzRoy for %s", len(fitzroy_rows), season)
-        return fitzroy_rows
-    
-    logger.warning("fitzRoy returned no rows for %s", season)
-
-return _fetch_fryzigg_player_stats_from_rds(season)
-
 def fetch_afltables_player_stats_rpy2(season: int) -> list[dict]:
     """
     Fetch player stats from fitzRoy R package via rpy2.
@@ -1117,6 +1094,27 @@ def fetch_afltables_player_stats_rpy2(season: int) -> list[dict]:
     except Exception as exc:
         logger.error("fitzRoy fetch failed for season %s: %s", season, exc)
         return []
+
+def fetch_fryzigg_player_stats(season: int) -> list[dict]:
+    """
+    Unified player stats fetch:
+    1. fitzRoy R package (current season)
+    2. Fryzigg (historical)
+    """
+
+    # ── 1. fitzRoy R package (PRIMARY for current year) ──
+    if season >= CURRENT_YEAR:
+        logger.info("Player stats: trying fitzRoy R package for %s", season)
+        
+        fitzroy_rows = fetch_afltables_player_stats_rpy2(season)
+        
+        if fitzroy_rows:
+            logger.info("Player stats: got %s rows from fitzRoy for %s", len(fitzroy_rows), season)
+            return fitzroy_rows
+        
+        logger.warning("fitzRoy returned no rows for %s", season)
+
+    return _fetch_fryzigg_player_stats_from_rds(season)
 
 def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dict]:
     all_stats: list[dict] = []
