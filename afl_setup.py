@@ -47,7 +47,7 @@ def run_setup(db, start_year: int = 2019, end_year: int = None):
     )
     from afl_data import (
         fetch_fryzigg_player_stats,
-        fetch_afl_player_stats_current_season,
+        fetch_2026_stats_from_csv,
         fetch_squiggle_games,
         fetch_squiggle_standings,
         fetch_squiggle_current_round,
