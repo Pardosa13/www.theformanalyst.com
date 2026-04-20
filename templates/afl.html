@@ -1,820 +1,107 @@
-{% extends "base.html" %}
-
-{% block title %}AFL Hub - The Form Analyst{% endblock %}
-
-{% block extra_css %}
-<style>
-  /* ── Base layout ─────────────────────────────────────────────── */
-  .afl-wrap { padding-bottom: 60px; }
-
-  .afl-header {
-    margin-bottom: 20px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--border-subtle);
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  .afl-header h2 {
-    font-size: 1.5rem;
-    font-weight: 800;
-    margin: 0 0 3px;
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .afl-badge {
-    font-size: 10px;
-    font-weight: 700;
-    padding: 2px 9px;
-    border-radius: 20px;
-    background: linear-gradient(135deg,rgba(102,126,234,.18),rgba(118,75,162,.18));
-    border: 1px solid var(--border-accent);
-    color: var(--accent);
-    letter-spacing: .05em;
-  }
-  .afl-header p { margin:0; font-size:12px; color:var(--text-muted); }
-  .afl-header-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .round-pill {
-    font-family:'DM Mono',monospace; font-size:11px;
-    padding:5px 12px; background:var(--bg-elevated);
-    border:1px solid var(--border-mid); border-radius:20px; color:var(--text-secondary);
-  }
-
-  /* ── Data source pills ───────────────────────────────────────── */
-  .data-sources { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px; }
-  .ds-pill {
-    display:flex; align-items:center; gap:5px;
-    padding:4px 10px; border-radius:7px;
-    font-size:11px; font-weight:600; border:1px solid;
-  }
-  .ds-pill.connected { background:rgba(16,185,129,.08); border-color:rgba(16,185,129,.25); color:#34d399; }
-  .ds-pill.pending   { background:rgba(245,158,11,.08);  border-color:rgba(245,158,11,.25);  color:#fbbf24; }
-  .ds-pill.offline   { background:rgba(239,68,68,.08);   border-color:rgba(239,68,68,.25);   color:#f87171; }
-  .ds-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
-  .connected .ds-dot { background:var(--success); box-shadow:0 0 5px rgba(16,185,129,.5); }
-  .pending .ds-dot   { background:var(--warning); }
-  .offline .ds-dot   { background:var(--danger); }
-
-  /* ── Stat tiles ──────────────────────────────────────────────── */
-  .stat-row {
-    display:grid; grid-template-columns:repeat(4,1fr);
-    gap:12px; margin-bottom:20px;
-  }
-  .stat-tile {
-    background:var(--bg-surface); border:1px solid var(--border-subtle);
-    border-radius:12px; padding:16px 18px; position:relative; overflow:hidden;
-  }
-  .stat-tile::before {
-    content:''; position:absolute; inset:0 0 auto 0; height:2px;
-  }
-  .stat-tile.s-primary::before { background:linear-gradient(90deg,var(--accent),var(--accent-2)); }
-  .stat-tile.s-info::before    { background:linear-gradient(90deg,#3b82f6,#06b6d4); }
-  .stat-tile.s-success::before { background:linear-gradient(90deg,#10b981,#34d399); }
-  .stat-tile.s-warning::before { background:linear-gradient(90deg,#f59e0b,#fbbf24); }
-  .stat-tile h5 {
-    font-size:10px; font-weight:700; text-transform:uppercase;
-    letter-spacing:.08em; color:var(--text-muted); margin:0 0 8px;
-  }
-  .stat-tile h2 {
-    font-size:1.9rem; font-weight:800; margin:0;
-    font-family:'DM Mono',monospace; color:var(--text-primary);
-  }
-  .stat-tile .stat-sub { font-size:10px; color:var(--text-muted); margin-top:3px; }
-
-  /* ── Main tabs ───────────────────────────────────────────────── */
-  .afl-tabs {
-    display:flex; gap:3px; background:var(--bg-surface);
-    border:1px solid var(--border-subtle); border-radius:12px;
-    padding:4px; margin-bottom:20px; overflow-x:auto;
-  }
-  .afl-tab {
-    flex:1; min-width:110px; padding:9px 12px; border-radius:8px;
-    font-size:11px; font-weight:700; text-align:center; cursor:pointer;
-    border:none; background:transparent; color:var(--text-secondary);
-    transition:all .15s; display:flex; align-items:center;
-    justify-content:center; gap:5px; white-space:nowrap;
-  }
-  .afl-tab:hover { background:var(--bg-hover); color:var(--text-primary); }
-  .afl-tab.active {
-    background:linear-gradient(135deg,var(--accent),var(--accent-2));
-    color:white; box-shadow:0 2px 8px var(--accent-glow);
-  }
-  .tab-panel { display:none; }
-  .tab-panel.active { display:block; animation:fadeInUp .2s ease both; }
-
-  /* ── Card shell ──────────────────────────────────────────────── */
-  .afl-card {
-    background:var(--bg-surface); border:1px solid var(--border-subtle);
-    border-radius:14px; margin-bottom:16px; overflow:hidden;
-  }
-  .afl-card-header {
-    background:var(--bg-elevated); border-bottom:1px solid var(--border-subtle);
-    padding:12px 18px; display:flex; align-items:center;
-    justify-content:space-between; flex-wrap:wrap; gap:8px;
-  }
-  .afl-card-header h4 {
-    font-size:13px; font-weight:700; margin:0;
-    color:var(--text-primary); display:flex; align-items:center; gap:7px;
-  }
-  .afl-card-body { padding:18px; }
-
-  /* ── Prop tool layout ────────────────────────────────────────── */
-  .prop-selector-bar {
-    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-    padding:14px 18px; background:var(--bg-elevated);
-    border-bottom:1px solid var(--border-subtle);
-  }
-  .round-nav-btn {
-    width:30px; height:30px; border-radius:8px; border:1px solid var(--border-mid);
-    background:var(--bg-surface); color:var(--text-primary); font-size:16px;
-    display:flex; align-items:center; justify-content:center; cursor:pointer;
-    transition:all .15s;
-  }
-  .round-nav-btn:hover { background:var(--bg-hover); border-color:var(--accent); }
-  #roundLabel {
-    font-family:'DM Mono',monospace; font-size:12px; font-weight:700;
-    color:var(--text-primary); min-width:72px; text-align:center;
-  }
-  .prop-split {
-    display:flex; gap:14px; align-items:flex-start;
-  }
-
-  /* ── Player list sidebar ─────────────────────────────────────── */
-  .prop-sidebar {
-    width:210px; flex-shrink:0;
-    background:var(--bg-surface); border:1px solid var(--border-subtle);
-    border-radius:12px; overflow:hidden;
-  }
-  .prop-sidebar-header {
-    padding:10px 14px; background:var(--bg-elevated);
-    border-bottom:1px solid var(--border-subtle);
-    font-size:10px; font-weight:700; text-transform:uppercase;
-    letter-spacing:.07em; color:var(--text-muted);
-    display:flex; align-items:center; justify-content:space-between;
-  }
-  .prop-player-row {
-    padding:9px 14px; border-bottom:1px solid var(--border-subtle);
-    cursor:pointer; display:flex; justify-content:space-between;
-    align-items:center; transition:background .12s;
-  }
-  .prop-player-row:hover { background:var(--bg-hover); }
-  .prop-player-row.selected { background:rgba(102,126,234,.12); }
-  .prop-player-row:last-child { border-bottom:none; }
-  .prow-name { font-size:12px; font-weight:600; color:var(--text-primary); }
-  .prow-team { font-size:10px; color:var(--text-muted); margin-top:1px; }
-  .prow-avg {
-    font-family:'DM Mono',monospace; font-size:13px;
-    font-weight:700; color:var(--accent);
-  }
-
-  /* ── Prop chart panel ────────────────────────────────────────── */
-  .prop-chart-panel { flex:1; min-width:0; }
-
-  /* Player header */
-  .player-hdr {
-    background:var(--bg-elevated); border:1px solid var(--border-subtle);
-    border-radius:12px; overflow:hidden; margin-bottom:12px;
-  }
-  .player-hdr-top {
-    padding:14px 18px;
-    display:flex; align-items:center; gap:14px;
-    border-bottom:1px solid var(--border-subtle);
-  }
-  .player-avatar {
-    width:48px; height:48px; border-radius:12px;
-    background:linear-gradient(135deg,var(--accent),var(--accent-2));
-    display:flex; align-items:center; justify-content:center;
-    font-size:15px; font-weight:800; color:white;
-    font-family:'DM Mono',monospace; flex-shrink:0;
-  }
-  .player-hdr-name { font-size:15px; font-weight:800; color:var(--text-primary); margin-bottom:4px; }
-  .player-hdr-meta { display:flex; gap:5px; flex-wrap:wrap; }
-  .meta-pill {
-    font-size:10px; padding:2px 7px; border-radius:5px;
-    background:var(--bg-hover); border:1px solid var(--border-mid);
-    color:var(--text-secondary); font-family:'DM Mono',monospace;
-  }
-
-  /* Stat row */
-  .player-stat-row {
-    display:grid; grid-template-columns:repeat(7,1fr);
-  }
-  .psr-cell {
-    text-align:center; padding:9px 4px;
-    border-right:1px solid var(--border-subtle);
-  }
-  .psr-cell:last-child { border-right:none; }
-  .psr-val {
-    font-family:'DM Mono',monospace; font-size:13px;
-    font-weight:700; color:var(--text-primary);
-  }
-  .psr-lbl {
-    font-size:9px; font-weight:700; text-transform:uppercase;
-    letter-spacing:.06em; color:var(--text-muted); margin-top:2px;
-  }
-
-  /* Chart controls */
-  .chart-controls {
-    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
-    padding:10px 14px; border-bottom:1px solid var(--border-subtle);
-    background:var(--bg-surface);
-  }
-  .stat-select-btn {
-    padding:5px 12px; border-radius:20px; border:none; cursor:pointer;
-    font-size:12px; font-weight:700;
-    background:linear-gradient(135deg,var(--accent),var(--accent-2));
-    color:white; font-family:inherit;
-  }
-  .hit-pill {
-    padding:4px 11px; border-radius:20px; font-size:11px; font-weight:700;
-    border:1px solid var(--border-mid); color:var(--text-secondary);
-    background:var(--bg-elevated); cursor:pointer;
-    font-family:'DM Mono',monospace; transition:all .12s;
-  }
-  .hit-pill.active {
-    background:linear-gradient(135deg,var(--accent),var(--accent-2));
-    color:white; border-color:transparent;
-  }
-  .line-label { font-size:11px; color:var(--text-muted); margin-left:auto; white-space:nowrap; }
-  .line-inp {
-    width:75px; padding:5px 8px; font-family:'DM Mono',monospace;
-    font-size:13px; font-weight:700; background:var(--bg-elevated);
-    border:1px solid var(--border-mid); border-radius:8px;
-    color:var(--text-primary); text-align:center;
-  }
-  .line-inp:focus { border-color:var(--accent); outline:none; box-shadow:0 0 0 2px var(--accent-glow); }
-
-  /* Bar chart */
-  .chart-body {
-    padding:16px 14px 0; position:relative;
-    background:var(--bg-surface);
-  }
-  #propBarsContainer {
-    display:flex; gap:5px; align-items:flex-end; height:150px;
-  }
-  #propXAxis {
-    display:flex; gap:5px; margin-top:5px; padding-bottom:12px;
-  }
-  .bar-wrap {
-    flex:1; display:flex; flex-direction:column;
-    align-items:center; justify-content:flex-end;
-    height:150px; position:relative;
-  }
-  .bar-val {
-    font-size:9px; font-weight:700; font-family:'DM Mono',monospace;
-    color:white; position:absolute; z-index:2;
-    text-align:center; width:100%; pointer-events:none;
-  }
-  .bar-rect {
-    width:100%; border-radius:3px 3px 0 0; position:relative;
-    transition:opacity .12s;
-  }
-  .bar-rect:hover { opacity:.85; }
-  .bar-rect.over  { background:rgba(22,163,74,.82); }
-  .bar-rect.under { background:rgba(220,38,38,.72); }
-  .x-label {
-    flex:1; text-align:center;
-    font-size:9px; color:var(--text-muted);
-    font-family:'DM Mono',monospace; line-height:1.4;
-  }
-  #propDashedLine {
-    position:absolute; left:14px; right:14px; height:0;
-    border-top:2px dashed rgba(100,116,139,.7); pointer-events:none; z-index:5;
-  }
-
-  /* ── Analysis tabs (below chart) ─────────────────────────────── */
-  .analysis-tabs {
-    display:flex; gap:0; border-top:1px solid var(--border-subtle);
-    background:var(--bg-elevated);
-  }
-  .atab {
-    flex:1; padding:8px 4px; font-size:11px; font-weight:700;
-    text-align:center; cursor:pointer; border:none;
-    background:transparent; color:var(--text-muted);
-    border-bottom:2px solid transparent; transition:all .12s;
-    white-space:nowrap;
-  }
-  .atab:hover { color:var(--text-primary); }
-  .atab.active { color:var(--accent); border-bottom-color:var(--accent); }
-  .analysis-panel { display:none; }
-  .analysis-panel.active { display:block; }
-  .analysis-body { padding:14px 16px; }
-
-  /* Analysis table */
-  .atbl {
-    width:100%; border-collapse:collapse; font-size:12px;
-  }
-  .atbl thead th {
-    padding:7px 10px; background:var(--bg-elevated);
-    font-size:9px; font-weight:700; text-transform:uppercase;
-    letter-spacing:.07em; color:var(--text-muted);
-    border-bottom:1px solid var(--border-mid); text-align:left;
-  }
-  .atbl tbody tr { border-bottom:1px solid var(--border-subtle); }
-  .atbl tbody tr:last-child { border-bottom:none; }
-  .atbl tbody td { padding:8px 10px; color:var(--text-primary); vertical-align:middle; }
-  .atbl .mono { font-family:'DM Mono',monospace; }
-  .win-dot  { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--success); }
-  .loss-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--danger); }
-
-  /* Split cards */
-  .split-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-  .split-card {
-    background:var(--bg-elevated); border:1px solid var(--border-subtle);
-    border-radius:10px; padding:12px 14px;
-  }
-  .split-card h6 {
-    font-size:10px; font-weight:700; text-transform:uppercase;
-    letter-spacing:.07em; color:var(--text-muted); margin:0 0 8px;
-  }
-  .split-stat {
-    display:flex; justify-content:space-between; align-items:center;
-    margin-bottom:5px; font-size:12px;
-  }
-  .split-stat-lbl { color:var(--text-secondary); }
-  .split-stat-val { font-family:'DM Mono',monospace; font-weight:700; color:var(--text-primary); }
-
-  /* Venue select */
-  .venue-filter {
-    display:flex; align-items:center; gap:8px;
-    margin-bottom:12px; flex-wrap:wrap;
-  }
-  .venue-filter label { font-size:11px; color:var(--text-muted); white-space:nowrap; }
-
-  /* Empty / loading states */
-  .prop-empty {
-    padding:40px 20px; text-align:center; color:var(--text-muted);
-  }
-  .prop-empty i { font-size:1.8rem; opacity:.3; display:block; margin-bottom:10px; }
-  .prop-empty p { font-size:13px; margin:0; }
-
-  /* ── Value finder ────────────────────────────────────────────── */
-  .value-finder-bar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
-  .value-table { width:100%; border-collapse:collapse; }
-  .value-table thead th {
-    background:var(--bg-elevated); padding:9px 12px;
-    font-size:9px; font-weight:700; text-transform:uppercase;
-    letter-spacing:.07em; color:var(--text-muted);
-    border-bottom:1px solid var(--border-mid); white-space:nowrap;
-  }
-  .value-table tbody tr { border-bottom:1px solid var(--border-subtle); transition:background .12s; }
-  .value-table tbody tr:hover { background:var(--bg-hover); }
-  .value-table tbody td { padding:9px 12px; font-size:12px; color:var(--text-primary); vertical-align:middle; }
-  .edge-chip {
-    display:inline-flex; align-items:center; justify-content:center;
-    min-width:60px; padding:3px 7px; border-radius:6px;
-    font-family:'DM Mono',monospace; font-size:11px; font-weight:700;
-  }
-  .edge-chip.pos { background:rgba(16,185,129,.12); border:1px solid rgba(16,185,129,.3); color:#34d399; }
-  .edge-chip.neg { background:rgba(239,68,68,.12);  border:1px solid rgba(239,68,68,.3);  color:#f87171; }
-  .edge-chip.neu { background:var(--bg-elevated); border:1px solid var(--border-mid); color:var(--text-muted); }
-
-  /* ── Fixtures ────────────────────────────────────────────────── */
-  .fixture-row {
-    display:flex; align-items:center; padding:12px 0;
-    border-bottom:1px solid var(--border-subtle); gap:12px; flex-wrap:wrap;
-  }
-  .fixture-row:last-child { border-bottom:none; }
-  .fixture-time { font-family:'DM Mono',monospace; font-size:10px; color:var(--text-muted); min-width:90px; line-height:1.6; }
-  .fixture-teams { flex:1; display:flex; align-items:center; gap:8px; min-width:200px; }
-  .team-name { font-weight:700; font-size:13px; color:var(--text-primary); flex:1; text-align:right; }
-  .team-name.away { text-align:left; }
-  .vs-divider {
-    font-size:10px; font-weight:700; color:var(--text-muted);
-    background:var(--bg-hover); border:1px solid var(--border-mid);
-    border-radius:4px; padding:2px 6px; font-family:'DM Mono',monospace; flex-shrink:0;
-  }
-  .fixture-venue { font-size:11px; color:var(--text-muted); min-width:110px; }
-  .tip-badge {
-    font-size:10px; font-weight:700; padding:2px 9px; border-radius:5px;
-    font-family:'DM Mono',monospace;
-    background:rgba(102,126,234,.12); border:1px solid var(--border-accent); color:var(--accent);
-  }
-
-  /* ── Ladder ──────────────────────────────────────────────────── */
-  .ladder-table { width:100%; border-collapse:collapse; }
-  .ladder-table thead th {
-    background:var(--bg-elevated); padding:9px 12px;
-    font-size:9px; font-weight:700; text-transform:uppercase;
-    letter-spacing:.07em; color:var(--text-muted);
-    border-bottom:1px solid var(--border-mid); white-space:nowrap;
-  }
-  .ladder-table tbody tr { border-bottom:1px solid var(--border-subtle); transition:background .12s; }
-  .ladder-table tbody tr:hover { background:var(--bg-hover); }
-  .ladder-table tbody td { padding:9px 12px; font-size:12px; color:var(--text-primary); vertical-align:middle; }
-  .pos-badge {
-    display:inline-flex; align-items:center; justify-content:center;
-    width:24px; height:24px; border-radius:6px;
-    font-family:'DM Mono',monospace; font-size:11px; font-weight:700;
-    background:var(--bg-hover); border:1px solid var(--border-mid); color:var(--text-secondary);
-  }
-  .pos-badge.finals { background:rgba(102,126,234,.15); border-color:var(--border-accent); color:var(--accent); }
-  .pos-badge.top2 { background:linear-gradient(135deg,var(--accent),var(--accent-2)); border-color:transparent; color:white; }
-  .pct-bar-wrap { width:50px; height:3px; background:var(--bg-hover); border-radius:2px; overflow:hidden; display:inline-block; vertical-align:middle; margin-left:5px; }
-  .pct-bar { height:100%; border-radius:2px; background:var(--accent); }
-
-  /* ── Margins ─────────────────────────────────────────────────── */
-  .margin-bar-row { display:flex; align-items:center; gap:14px; margin-bottom:12px; }
-  .margin-label { width:140px; font-size:12px; font-weight:600; color:var(--text-primary); flex-shrink:0; }
-  .margin-bar-outer { flex:1; height:26px; background:var(--bg-elevated); border-radius:5px; overflow:hidden; position:relative; }
-  .margin-bar-inner { height:100%; border-radius:5px; opacity:.85; }
-  .margin-bar-pct { position:absolute; top:50%; right:10px; transform:translateY(-50%); font-family:'DM Mono',monospace; font-size:11px; font-weight:700; color:var(--text-primary); }
-  .margin-meta { width:110px; font-size:11px; color:var(--text-muted); font-family:'DM Mono',monospace; flex-shrink:0; }
-
-  /* ── Utilities ───────────────────────────────────────────────── */
-  .scroll-x { overflow-x:auto; }
-  .afl-empty-state { text-align:center; padding:50px 20px; color:var(--text-muted); }
-  .afl-empty-state i { font-size:1.8rem; margin-bottom:10px; display:block; }
-  .spinner-sm { display:inline-block; width:14px; height:14px; border:2px solid rgba(255,255,255,.3); border-top-color:white; border-radius:50%; animation:spin .6s linear infinite; }
-  @keyframes spin { to { transform:rotate(360deg); } }
-
-  /* ── Responsive ──────────────────────────────────────────────── */
-  @media (max-width:900px) {
-    .prop-split { flex-direction:column; }
-    .prop-sidebar { width:100%; }
-    #propPlayerListInner { display:grid; grid-template-columns:repeat(2,1fr); }
-  }
-  @media (max-width:768px) {
-    .stat-row { grid-template-columns:1fr 1fr; }
-    .player-stat-row { grid-template-columns:repeat(4,1fr); }
-    .split-grid { grid-template-columns:1fr; }
-  }
-  @media (max-width:480px) {
-    .stat-row { grid-template-columns:1fr 1fr; gap:8px; }
-    .player-stat-row { grid-template-columns:repeat(3,1fr); }
-    .margin-bar-row { flex-direction:column; align-items:stretch; gap:6px; }
-    .margin-label,.margin-meta { width:auto; }
-  }
-</style>
-{% endblock %}
-
-{% block content %}
-<div class="afl-wrap">
-
-<!-- ── Header ──────────────────────────────────────────────────── -->
-<div class="afl-header">
-  <div>
-    <h2>🏉 AFL Hub <span class="afl-badge">{{ year }} SEASON</span></h2>
-    <p>Player props · fixtures · ladder · value finder</p>
-  </div>
-  <div class="afl-header-right">
-    <span class="round-pill">Round {{ current_round or '—' }}</span>
-    <button class="btn btn-secondary btn-sm" id="refreshBtn" onclick="refreshAll()">
-      <i class="bi bi-arrow-clockwise"></i> Refresh
-    </button>
-  </div>
-</div>
-
-<!-- ── Data sources ─────────────────────────────────────────────── -->
-<div class="data-sources">
-  <div class="ds-pill {{ 'connected' if data_sources and data_sources.fryzigg else 'offline' }}">
-    <span class="ds-dot"></span> Fryzigg
-  </div>
-  <div class="ds-pill {{ 'connected' if data_sources and data_sources.squiggle else 'pending' }}">
-    <span class="ds-dot"></span> Squiggle
-  </div>
-  <div class="ds-pill {{ 'connected' if data_sources and data_sources.odds_api else 'offline' }}">
-    <span class="ds-dot"></span> Odds API{% if not (data_sources and data_sources.odds_api) %} — Configure{% endif %}
-  </div>
-</div>
-
-<!-- ── Stat tiles ───────────────────────────────────────────────── -->
-<div class="stat-row">
-  <div class="stat-tile s-primary">
-    <h5>Players Tracked</h5>
-    <h2>{{ total_players or '0' }}</h2>
-    <div class="stat-sub">Fryzigg rows in DB</div>
-  </div>
-  <div class="stat-tile s-info">
-    <h5>Games in DB</h5>
-    <h2>{{ total_games or '0' }}</h2>
-    <div class="stat-sub">Squiggle historical</div>
-  </div>
-  <div class="stat-tile s-success">
-    <h5>Value Props</h5>
-    <h2>{{ value_bets_today or '0' }}</h2>
-    <div class="stat-sub">Last 24 hours</div>
-  </div>
-  <div class="stat-tile s-warning">
-    <h5>Next Bounce</h5>
-    <h2 style="font-size:1.2rem;">{{ next_game_time or '—' }}</h2>
-    <div class="stat-sub">{{ next_game_teams or 'No fixture loaded' }}</div>
-  </div>
-</div>
-
-<!-- ── Main tabs ────────────────────────────────────────────────── -->
-<div class="afl-tabs">
-  <button class="afl-tab active" data-tab="players" onclick="switchTab('players',this)">
-    <i class="bi bi-person-lines-fill"></i> Player Props
-  </button>
-  <button class="afl-tab" data-tab="value" onclick="switchTab('value',this)">
-    <i class="bi bi-lightning-charge-fill"></i> Value Finder
-  </button>
-  <button class="afl-tab" data-tab="fixtures" onclick="switchTab('fixtures',this)">
-    <i class="bi bi-calendar3"></i> Fixtures
-  </button>
-  <button class="afl-tab" data-tab="ladder" onclick="switchTab('ladder',this)">
-    <i class="bi bi-list-ol"></i> Ladder
-  </button>
-  <button class="afl-tab" data-tab="margins" onclick="switchTab('margins',this)">
-    <i class="bi bi-bar-chart-fill"></i> Margins
-  </button>
-</div>
-
-<!-- ════════════════════════════════════════════════════════════════
-     TAB: PLAYER PROPS
-     ════════════════════════════════════════════════════════════════ -->
-<div id="tab-players" class="tab-panel active">
-
-  <!-- Selector bar -->
-  <div class="afl-card" style="margin-bottom:14px;">
-    <div class="prop-selector-bar">
-      <!-- Round nav -->
-      <button class="round-nav-btn" onclick="changeRound(-1)">&#8249;</button>
-      <span id="roundLabel">Round {{ current_round or 1 }}</span>
-      <button class="round-nav-btn" onclick="changeRound(1)">&#8250;</button>
-
-      <!-- Match selector -->
-      <select class="form-select" id="matchSelector" style="max-width:300px;" onchange="onMatchSelect()">
-        <option value="">Select match...</option>
-        {% for f in fixtures %}
-        <option value="{{ f.hteam }}|{{ f.ateam }}|{{ f.venue or '' }}">
-          {{ f.hteam }} vs {{ f.ateam }}{% if f.venue %} · {{ f.venue }}{% endif %}
-        </option>
-        {% endfor %}
-      </select>
-
-      <!-- Team toggle (hidden until match selected) -->
-      <div id="teamTabsWrap" style="display:none;gap:6px;display:none;">
-        <button id="teamBtnHome" class="btn btn-sm btn-primary" onclick="selectTeam('home')"></button>
-        <button id="teamBtnAway" class="btn btn-sm btn-secondary" onclick="selectTeam('away')"></button>
-      </div>
-
-      <!-- Stat selector -->
-      <select class="form-select" id="propStatSelect" style="width:145px;margin-left:auto;" onchange="onStatChange()">
-        <option value="disposals">Disposals</option>
-        <option value="marks">Marks</option>
-        <option value="kicks">Kicks</option>
-        <option value="tackles">Tackles</option>
-        <option value="goals">Goals</option>
-        <option value="handballs">Handballs</option>
-      </select>
-    </div>
-  </div>
-
-  <!-- Split: sidebar + chart -->
-  <div class="prop-split">
-
-    <!-- Sidebar: player list -->
-    <div class="prop-sidebar">
-      <div class="prop-sidebar-header">
-        <span>Players</span>
-        <span id="playerCount" style="color:var(--text-secondary);font-weight:400;">—</span>
-      </div>
-      <div id="propPlayerListInner">
-        <div class="prop-empty">
-          <i class="bi bi-people"></i>
-          <p>Select a match</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Chart panel -->
-    <div class="prop-chart-panel" id="propChartPanel">
-      <div class="prop-empty" style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:12px;padding:60px 20px;">
-        <i class="bi bi-bar-chart-fill"></i>
-        <p>Select a player to see their prop chart</p>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ════════════════════════════════════════════════════════════════
-     TAB: VALUE FINDER
-     ════════════════════════════════════════════════════════════════ -->
-<div id="tab-value" class="tab-panel">
-  <div class="afl-card">
-    <div class="afl-card-header">
-      <h4><i class="bi bi-lightning-charge-fill"></i> Value Finder</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Needs Odds API prop lines</span>
-    </div>
-    <div class="afl-card-body">
-      <div class="value-finder-bar">
-        <select class="form-select" id="valueMarket" style="width:200px;">
-          <option value="player_disposals">Player Disposals</option>
-          <option value="player_marks">Player Marks</option>
-          <option value="player_tackles">Player Tackles</option>
-        </select>
-        <input type="number" class="form-control" id="minEdge" value="2" step="0.5" style="max-width:140px;" placeholder="Min edge">
-        <button class="btn btn-primary" onclick="loadValueFinder()">
-          <i class="bi bi-search"></i> Find Value
-        </button>
-      </div>
-      <div id="valueResults">
-        <div class="prop-empty">
-          <i class="bi bi-lightning-charge"></i>
-          <p>Run value finder to compare prop lines against player averages.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ════════════════════════════════════════════════════════════════
-     TAB: FIXTURES
-     ════════════════════════════════════════════════════════════════ -->
-<div id="tab-fixtures" class="tab-panel">
-  <div class="afl-card">
-    <div class="afl-card-header">
-      <h4><i class="bi bi-calendar3"></i> Round {{ current_round or '—' }} Fixtures</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Tips = Squiggle Aggregate model</span>
-    </div>
-    <div class="afl-card-body" style="padding:0 18px;">
-      {% if fixtures %}
-        {% for f in fixtures %}
-        <div class="fixture-row">
-          <div class="fixture-time">
-            {% if f.date %}
-              {% if f.date.strftime is defined %}{{ f.date.strftime('%a %-d %b') }}{% else %}{{ f.date|string }}{% endif %}<br>
-              <span style="font-size:9px;">{{ f.localtime or '' }}</span>
-            {% else %}TBC{% endif %}
-          </div>
-          <div class="fixture-teams">
-            <div class="team-name">{{ f.hteam or 'Home' }}</div>
-            <div class="vs-divider">VS</div>
-            <div class="team-name away">{{ f.ateam or 'Away' }}</div>
-          </div>
-          <div class="fixture-venue"><i class="bi bi-geo-alt" style="font-size:10px;"></i> {{ f.venue or '—' }}</div>
-          {% if f.squiggle_tip %}
-          <span class="tip-badge"><i class="bi bi-lightning-fill"></i> {{ f.squiggle_tip }}{% if f.squiggle_confidence %} · {{ (f.squiggle_confidence|float)|round(0)|int }}%{% endif %}</span>
-          {% endif %}
-          <button class="btn btn-sm btn-secondary" onclick='jumpToTeam({{ (f.hteam or "")|tojson }},{{ (f.ateam or "")|tojson }},{{ (f.venue or "")|tojson }},"home")'>
-            <i class="bi bi-person-lines-fill"></i> {{ f.hteam or 'Home' }}
-          </button>
-          <button class="btn btn-sm btn-secondary" onclick='jumpToTeam({{ (f.hteam or "")|tojson }},{{ (f.ateam or "")|tojson }},{{ (f.venue or "")|tojson }},"away")'>
-            <i class="bi bi-person-lines-fill"></i> {{ f.ateam or 'Away' }}
-          </button>
-        </div>
-        {% endfor %}
-      {% else %}
-        <div class="afl-empty-state">
-          <i class="bi bi-calendar-x" style="color:var(--accent);opacity:.35;"></i>
-          <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:5px;">No upcoming fixtures loaded</div>
-          <div style="font-size:12px;">Click Refresh after syncing Squiggle data.</div>
-        </div>
-      {% endif %}
-    </div>
-  </div>
-</div>
-
-<!-- ════════════════════════════════════════════════════════════════
-     TAB: LADDER
-     ════════════════════════════════════════════════════════════════ -->
-<div id="tab-ladder" class="tab-panel">
-  <div class="afl-card">
-    <div class="afl-card-header">
-      <h4><i class="bi bi-list-ol"></i> {{ year }} AFL Ladder — Round {{ current_round or '—' }}</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Squiggle API</span>
-    </div>
-    <div class="afl-card-body" style="padding:0;">
-      <div class="scroll-x">
-        <table class="ladder-table">
-          <thead>
-            <tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>D</th><th>PF</th><th>PA</th><th>%</th><th>Pts</th></tr>
-          </thead>
-          <tbody>
-            {% if standings %}
-              {% for s in standings %}
-              {% set pct = s.percentage or 0 %}
-              {% set pf = s.for_score if s.for_score is defined else (s['for'] if s['for'] is defined else '—') %}
-              {% set pa = s.against_score if s.against_score is defined else (s['against'] if s['against'] is defined else '—') %}
-              <tr>
-                <td><span class="pos-badge {% if s.rank<=2 %}top2{% elif s.rank<=8 %}finals{% endif %}">{{ s.rank or '—' }}</span></td>
-                <td style="font-weight:600;">{{ s.team or s.name or '—' }}</td>
-                <td style="color:var(--success);font-family:'DM Mono',monospace;">{{ s.wins or 0 }}</td>
-                <td style="color:var(--danger);font-family:'DM Mono',monospace;">{{ s.losses or 0 }}</td>
-                <td style="color:var(--text-muted);font-family:'DM Mono',monospace;">{{ s.draws or 0 }}</td>
-                <td style="font-family:'DM Mono',monospace;color:var(--text-secondary);">{{ pf }}</td>
-                <td style="font-family:'DM Mono',monospace;color:var(--text-secondary);">{{ pa }}</td>
-                <td>
-                  <span style="font-family:'DM Mono',monospace;">{{ pct }}%</span>
-                  <span class="pct-bar-wrap"><span class="pct-bar" style="width:{{ [[((pct-70)/80*100),0]|max,100]|min }}%;"></span></span>
-                </td>
-                <td style="font-family:'DM Mono',monospace;font-weight:700;color:var(--accent);">{{ s.pts or 0 }}</td>
-              </tr>
-              {% endfor %}
-            {% else %}
-              <tr><td colspan="9" style="text-align:center;padding:28px;color:var(--text-muted);">No ladder data. Click Refresh.</td></tr>
-            {% endif %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ════════════════════════════════════════════════════════════════
-     TAB: MARGINS
-     ════════════════════════════════════════════════════════════════ -->
-<div id="tab-margins" class="tab-panel">
-  <div class="afl-card">
-    <div class="afl-card-header">
-      <h4><i class="bi bi-bar-chart-fill"></i> 30+ Point Margin Frequency by Favourite Strength</h4>
-    </div>
-    <div class="afl-card-body">
-      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:18px;">How often the favourite wins by 30+ points, broken down by market strength.</p>
-      {% set margin_data = [
-        {'label':'≤$1.20 Heavy Fav','rate':74,'avg_margin':45,'games':234,'color':'#10b981'},
-        {'label':'$1.21–$1.40','rate':63,'avg_margin':41,'games':635,'color':'#34d399'},
-        {'label':'$1.41–$1.60','rate':52,'avg_margin':35,'games':407,'color':'#f59e0b'},
-        {'label':'$1.61–$1.80','rate':46,'avg_margin':33,'games':433,'color':'#fb923c'},
-        {'label':'$1.81+ Coinflip','rate':39,'avg_margin':30,'games':391,'color':'#ef4444'},
-      ] %}
-      {% for row in margin_data %}
-      <div class="margin-bar-row">
-        <div class="margin-label">{{ row.label }}</div>
-        <div class="margin-bar-outer">
-          <div class="margin-bar-inner" style="width:{{ row.rate }}%;background:{{ row.color }};"></div>
-          <div class="margin-bar-pct">{{ row.rate }}%</div>
-        </div>
-        <div class="margin-meta">avg {{ row.avg_margin }}pt · n={{ row.games }}</div>
-      </div>
-      {% endfor %}
-      <div style="margin-top:20px;padding:14px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:10px;">
-        <div style="font-size:12px;font-weight:700;color:#fbbf24;margin-bottom:5px;">⚠️ Key Finding</div>
-        <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">Backing both teams to win by 30+ usually compounds overround. Use margin angles selectively rather than blindly.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-</div><!-- /.afl-wrap -->
-{% endblock %}
-
 {% block extra_js %}
 <script>
 // ── Globals ─────────────────────────────────────────────────────
 const _SEASON = {{ player_stats_season }};
-let _round     = {{ current_round or 1 }};
-let _home      = '', _away = '', _venue = '';
-let _teamSide  = 'home';
+let _round = {{ current_round or 1 }};
+let _home = '';
+let _away = '';
+let _venue = '';
+let _teamSide = 'home';
 let _allPlayers = [];
-let _propStat  = 'disposals';
+let _propStat = 'disposals';
 let _selPlayerId = null;
-let _gameLog   = [];
-let _chartWin  = 'all';
+let _selPlayer = null;
+let _gameLog = [];
+let _chartWin = 'all';
 
 // ── Shared utils ─────────────────────────────────────────────────
-function safeNum(v, fb=0) { const n=Number(v); return Number.isFinite(n)?n:fb; }
-function esc(v) {
-  return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+function safeNum(v, fb = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fb;
 }
-function mono(v) { return `<span style="font-family:'DM Mono',monospace;">${esc(v)}</span>`; }
+
+function esc(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function norm(v) {
+  return String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function mono(v) {
+  return `<span style="font-family:'DM Mono',monospace;">${esc(v)}</span>`;
+}
+
+function capStat(stat) {
+  return stat.charAt(0).toUpperCase() + stat.slice(1);
+}
+
+function avgFromGames(games, stat) {
+  const vals = games.map(g => safeNum(g[stat], 0));
+  return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '—';
+}
+
+function maxFromGames(games, stat) {
+  const vals = games.map(g => safeNum(g[stat], 0));
+  return vals.length ? Math.max(...vals) : '—';
+}
+
+function buildPlayerMap() {
+  const map = new Map();
+  _allPlayers.forEach(p => map.set(p.player_id, p));
+  return map;
+}
 
 // ── Tab switching ────────────────────────────────────────────────
-function switchTab(name,btn){
-  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.afl-tab').forEach(t=>t.classList.remove('active'));
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.afl-tab').forEach(t => t.classList.remove('active'));
   document.getElementById(`tab-${name}`)?.classList.add('active');
   btn?.classList.add('active');
 }
 
 // ── Round navigation ─────────────────────────────────────────────
-function changeRound(dir){
-  _round = Math.max(1, _round+dir);
+function changeRound(dir) {
+  _round = Math.max(1, _round + dir);
   document.getElementById('roundLabel').textContent = `Round ${_round}`;
   resetPlayerState();
 
   fetch(`/api/afl/fixtures?year={{ year }}&round=${_round}`)
-    .then(r=>r.json())
-    .then(data=>{
+    .then(r => r.json())
+    .then(data => {
       const sel = document.getElementById('matchSelector');
       sel.innerHTML = '<option value="">Select match...</option>';
-      (data.games||[]).forEach(f=>{
+
+      (data.games || []).forEach(f => {
         const opt = document.createElement('option');
-        opt.value = `${f.hteam}|${f.ateam}|${f.venue||''}`;
-        opt.textContent = `${f.hteam} vs ${f.ateam}${f.venue?' · '+f.venue:''}`;
+        opt.value = `${f.hteam}|${f.ateam}|${f.venue || ''}`;
+        opt.textContent = `${f.hteam} vs ${f.ateam}${f.venue ? ' · ' + f.venue : ''}`;
         sel.appendChild(opt);
       });
-      document.getElementById('teamTabsWrap').style.display='none';
-    }).catch(()=>{});
+
+      document.getElementById('teamTabsWrap').style.display = 'none';
+    })
+    .catch(() => {});
 }
 
 // ── Match selector ───────────────────────────────────────────────
-function onMatchSelect(){
+function onMatchSelect() {
   const val = document.getElementById('matchSelector').value;
-  if(!val){ resetPlayerState(); document.getElementById('teamTabsWrap').style.display='none'; return; }
+  if (!val) {
+    resetPlayerState();
+    document.getElementById('teamTabsWrap').style.display = 'none';
+    return;
+  }
 
   const parts = val.split('|');
-  _home  = parts[0]||'';
-  _away  = parts[1]||'';
-  _venue = parts[2]||'';
+  _home = parts[0] || '';
+  _away = parts[1] || '';
+  _venue = parts[2] || '';
 
   const wrap = document.getElementById('teamTabsWrap');
   wrap.style.display = 'flex';
@@ -824,204 +111,237 @@ function onMatchSelect(){
   selectTeam('home');
 }
 
-function selectTeam(side){
+function selectTeam(side) {
   _teamSide = side;
-  document.getElementById('teamBtnHome').className = `btn btn-sm ${side==='home'?'btn-primary':'btn-secondary'}`;
-  document.getElementById('teamBtnAway').className = `btn btn-sm ${side==='away'?'btn-primary':'btn-secondary'}`;
-  loadPlayerList(side==='home'?_home:_away);
+  document.getElementById('teamBtnHome').className = `btn btn-sm ${side === 'home' ? 'btn-primary' : 'btn-secondary'}`;
+  document.getElementById('teamBtnAway').className = `btn btn-sm ${side === 'away' ? 'btn-primary' : 'btn-secondary'}`;
+  loadPlayerList(side === 'home' ? _home : _away);
 }
 
 // ── Player list ──────────────────────────────────────────────────
-function loadPlayerList(team){
+function loadPlayerList(team) {
   resetChart();
+
   const inner = document.getElementById('propPlayerListInner');
   inner.innerHTML = '<div class="prop-empty" style="padding:24px;"><span class="spinner-sm"></span></div>';
 
   const stat = document.getElementById('propStatSelect').value;
+
   fetch(`/api/afl/team-players?team=${encodeURIComponent(team)}&stat=${encodeURIComponent(stat)}&limit=35&season=${_SEASON}`)
-    .then(r=>r.json())
-    .then(data=>{
-      _allPlayers = data.players||[];
+    .then(r => r.json())
+    .then(data => {
+      _allPlayers = data.players || [];
       document.getElementById('playerCount').textContent = _allPlayers.length;
       renderPlayerList();
     })
-    .catch(()=>{
+    .catch(() => {
       inner.innerHTML = '<div class="prop-empty" style="padding:20px;color:var(--danger);font-size:12px;">Failed to load</div>';
     });
 }
 
-function renderPlayerList(){
+function renderPlayerList() {
   const inner = document.getElementById('propPlayerListInner');
-  const stat  = document.getElementById('propStatSelect').value;
+  const stat = document.getElementById('propStatSelect').value;
 
-  if(!_allPlayers.length){
+  if (!_allPlayers.length) {
     inner.innerHTML = '<div class="prop-empty" style="padding:24px;"><p>No players found</p></div>';
     return;
   }
 
-  inner.innerHTML = _allPlayers.map(p=>{
-    const avg = safeNum(p.averages?.[stat],0);
-    const sel = p.player_id===_selPlayerId ? 'selected':'';
-    return `<div class="prop-player-row ${sel}" id="prow-${p.player_id}" onclick="selectPlayer(${p.player_id})">
-      <div>
-        <div class="prow-name">${esc(p.name)}</div>
-        <div class="prow-team">${esc(p.team)}</div>
+  inner.innerHTML = _allPlayers.map(player => {
+    const avg = safeNum(player.averages?.[stat], 0);
+    const selected = player.player_id === _selPlayerId ? 'selected' : '';
+
+    return `
+      <div class="prop-player-row ${selected}" id="prow-${player.player_id}" onclick="selectPlayer(${player.player_id})">
+        <div>
+          <div class="prow-name">${esc(player.name)}</div>
+          <div class="prow-team">${esc(player.team)}</div>
+        </div>
+        <span class="prow-avg">${avg}</span>
       </div>
-      <span class="prow-avg">${avg}</span>
-    </div>`;
+    `;
   }).join('');
 }
 
-function onStatChange(){
+function onStatChange() {
   _propStat = document.getElementById('propStatSelect').value;
-  if(_allPlayers.length) renderPlayerList();
-  if(_selPlayerId) selectPlayer(_selPlayerId);
+  if (_allPlayers.length) renderPlayerList();
+  if (_selPlayerId) selectPlayer(_selPlayerId);
 }
 
-// ── Player selection & chart ──────────────────────────────────────
-function selectPlayer(id){
+// ── Player selection & chart ─────────────────────────────────────
+function selectPlayer(id) {
   _selPlayerId = id;
-  document.querySelectorAll('.prop-player-row').forEach(r=>r.classList.remove('selected'));
+  _selPlayer = _allPlayers.find(p => p.player_id === id) || null;
+
+  document.querySelectorAll('.prop-player-row').forEach(r => r.classList.remove('selected'));
   document.getElementById(`prow-${id}`)?.classList.add('selected');
 
   const panel = document.getElementById('propChartPanel');
   panel.innerHTML = '<div class="prop-empty" style="padding:40px;"><span class="spinner-sm"></span></div>';
 
-  fetch(`/api/afl/player-detail?player_id=${id}`)
-    .then(r=>r.json())
-    .then(data=>{
-      alert('games: ' + data.games_played + ' | log: ' + (data.game_log||[]).length);
+  let url = `/api/afl/player-detail?player_id=${id}&season=${_SEASON}`;
+  if (_selPlayer?.team) {
+    url += `&team=${encodeURIComponent(_selPlayer.team)}`;
+  }
+
+  fetch(url)
+    .then(async r => {
+      const data = await r.json();
+      return { ok: r.ok, status: r.status, data };
+    })
+    .then(({ ok, status, data }) => {
+      if (!ok) {
+        if (status === 409 && data.matches?.length) {
+          panel.innerHTML = `
+            <div class="prop-empty" style="padding:30px;">
+              <i class="bi bi-exclamation-triangle"></i>
+              <p>Multiple players matched.</p>
+              <div style="margin-top:12px;text-align:left;display:inline-block;">
+                ${data.matches.map(m => `
+                  <div style="margin:6px 0;">
+                    <button class="btn btn-sm btn-secondary" onclick="selectPlayer(${m.player_id})">
+                      ${esc(m.name)} · ${esc(m.team)}
+                    </button>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        throw new Error(data?.error || 'Failed to load player');
+      }
+
       renderPropCard(data);
     })
-    .catch(()=>{
+    .catch(() => {
       panel.innerHTML = '<div class="prop-empty" style="padding:40px;color:var(--danger);">Failed to load player data</div>';
     });
 }
 
-function renderPropCard(player){
-  const stat     = document.getElementById('propStatSelect').value;
-  const avgs     = player.averages||{};
-  _gameLog       = player.game_log||[];
-  _chartWin      = 'all';
+function renderPropCard(player) {
+  const stat = document.getElementById('propStatSelect').value;
+  const avgs = player.averages || {};
+  _gameLog = player.game_log || [];
+  _chartWin = 'all';
 
-  // Compute default line (round to nearest 0.5)
-  const seasonAvg = safeNum(avgs[stat],0);
-  const defLine   = Math.round(seasonAvg*2)/2;
+  const seasonAvg = safeNum(avgs[stat], 0);
+  const defLine = Math.round(seasonAvg * 2) / 2;
 
-  // Determine opponent (the other team in the fixture)
-  const opponent  = _teamSide==='home' ? _away : _home;
+  const opponent = _teamSide === 'home' ? _away : _home;
 
-  // All stat values for hit rate computation
-  const allVals  = _gameLog.map(g=>safeNum(g[stat],0));
-  const l5vals   = allVals.slice(0,5);
-  const l10vals  = allVals.slice(0,10);
+  const allVals = _gameLog.map(g => safeNum(g[stat], 0));
+  const l5vals = allVals.slice(0, 5);
+  const l10vals = allVals.slice(0, 10);
 
-  function hr(arr,line){ return arr.length ? Math.round(arr.filter(v=>v>=line).length/arr.length*100) : 0; }
+  function hr(arr, line) {
+    return arr.length ? Math.round(arr.filter(v => v >= line).length / arr.length * 100) : 0;
+  }
 
-  const hrAll = hr(allVals,defLine);
-  const hrL10 = hr(l10vals,defLine);
-  const hrL5  = hr(l5vals,defLine);
+  const hrAll = hr(allVals, defLine);
+  const hrL10 = hr(l10vals, defLine);
+  const hrL5 = hr(l5vals, defLine);
 
-  // Venue games (from game log matching _venue)
-  const venueGames = _venue ? _gameLog.filter(g=>(g.venue||'').toLowerCase().includes(_venue.toLowerCase().slice(0,8))) : [];
+  const venueGames = _venue
+    ? _gameLog.filter(g => norm(g.venue) === norm(_venue))
+    : [];
 
-  // vs Opponent games
-  const vsGames = opponent ? _gameLog.filter(g=>(g.opponent||'').toLowerCase().includes(opponent.toLowerCase().slice(0,6))) : [];
-
-  // Home / Away split
-  const homeGames = _gameLog.filter(g=>g.result!==undefined && (g.venue||'')!=='');// approximate; use home_avg/away_avg from player obj
+  const vsGames = opponent
+    ? _gameLog.filter(g => norm(g.opponent) === norm(opponent))
+    : [];
 
   const panel = document.getElementById('propChartPanel');
 
   panel.innerHTML = `
-  <div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:14px;overflow:hidden;">
+    <div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:14px;overflow:hidden;">
 
-    <!-- Player header -->
-    <div class="player-hdr-top">
-      <div class="player-avatar">${esc((player.first_name||'')[0]||'')}${esc((player.last_name||'')[0]||'')}</div>
-      <div style="flex:1;min-width:0;">
-        <div class="player-hdr-name">${esc(player.name||'')}</div>
-        <div class="player-hdr-meta">
-          <span class="meta-pill">${esc(player.team||'')}</span>
-          ${player.guernsey?`<span class="meta-pill">#${esc(player.guernsey)}</span>`:''}
-          <span class="meta-pill">${player.games_played||0} games</span>
-          ${opponent?`<span class="meta-pill" style="color:var(--accent);border-color:var(--border-accent);">vs ${esc(opponent)}</span>`:''}
-          ${_venue?`<span class="meta-pill" style="color:#fbbf24;border-color:rgba(245,158,11,.3);">@ ${esc(_venue)}</span>`:''}
+      <div class="player-hdr-top">
+        <div class="player-avatar">${esc((player.first_name || '')[0] || '')}${esc((player.last_name || '')[0] || '')}</div>
+        <div style="flex:1;min-width:0;">
+          <div class="player-hdr-name">${esc(player.name || '')}</div>
+          <div class="player-hdr-meta">
+            <span class="meta-pill">${esc(player.team || '')}</span>
+            ${player.guernsey ? `<span class="meta-pill">#${esc(player.guernsey)}</span>` : ''}
+            <span class="meta-pill">${player.games_played || 0} games</span>
+            ${opponent ? `<span class="meta-pill" style="color:var(--accent);border-color:var(--border-accent);">vs ${esc(opponent)}</span>` : ''}
+            ${_venue ? `<span class="meta-pill" style="color:#fbbf24;border-color:rgba(245,158,11,.3);">@ ${esc(_venue)}</span>` : ''}
+          </div>
+        </div>
+      </div>
+
+      <div class="player-stat-row">
+        ${[
+          ['DISP', avgs.disposals],
+          ['KCK', avgs.kicks],
+          ['HB', avgs.handballs],
+          ['MRK', avgs.marks],
+          ['TKL', avgs.tackles],
+          ['GL', avgs.goals],
+          ['FAN', avgs.afl_fantasy_score]
+        ].map(([lbl, val]) => `
+          <div class="psr-cell">
+            <div class="psr-val">${safeNum(val, 0)}</div>
+            <div class="psr-lbl">${lbl}</div>
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="chart-controls">
+        <select class="stat-select-btn" id="chartStatSel" onchange="onChartStatChange(this.value)">
+          <option value="disposals" ${stat === 'disposals' ? 'selected' : ''}>Disposals</option>
+          <option value="marks" ${stat === 'marks' ? 'selected' : ''}>Marks</option>
+          <option value="kicks" ${stat === 'kicks' ? 'selected' : ''}>Kicks</option>
+          <option value="tackles" ${stat === 'tackles' ? 'selected' : ''}>Tackles</option>
+          <option value="goals" ${stat === 'goals' ? 'selected' : ''}>Goals</option>
+          <option value="handballs" ${stat === 'handballs' ? 'selected' : ''}>Handballs</option>
+        </select>
+        <span class="hit-pill" id="hp-l5" onclick="setWin('l5')">L5 ${hrL5}%</span>
+        <span class="hit-pill" id="hp-l10" onclick="setWin('l10')">L10 ${hrL10}%</span>
+        <span class="hit-pill active" id="hp-all" onclick="setWin('all')">All ${hrAll}%</span>
+        <span class="line-label">Line:</span>
+        <input class="line-inp" type="number" id="propLineInp" value="${defLine}" step="0.5" oninput="redrawBars()">
+      </div>
+
+      <div class="chart-body" id="chartBody">
+        <div id="propBarsContainer"></div>
+        <div id="propXAxis"></div>
+        <div id="propDashedLine"></div>
+      </div>
+
+      <div class="analysis-tabs">
+        <button class="atab active" onclick="switchAtab('vs',this)">vs ${esc(opponent || 'Opp')} (${vsGames.length})</button>
+        <button class="atab" onclick="switchAtab('last5',this)">Last 5</button>
+        <button class="atab" onclick="switchAtab('split',this)">Home / Away</button>
+        <button class="atab" onclick="switchAtab('venue',this)">Venue${_venue ? ' (' + venueGames.length + ')' : ''}</button>
+      </div>
+
+      <div id="apanel-vs" class="analysis-panel active">
+        <div class="analysis-body">
+          ${renderVsOpponentPanel(vsGames, stat, opponent)}
+        </div>
+      </div>
+
+      <div id="apanel-last5" class="analysis-panel">
+        <div class="analysis-body">
+          ${renderLast5Panel(_gameLog.slice(0, 5), stat)}
+        </div>
+      </div>
+
+      <div id="apanel-split" class="analysis-panel">
+        <div class="analysis-body">
+          ${renderSplitPanel(player, stat)}
+        </div>
+      </div>
+
+      <div id="apanel-venue" class="analysis-panel">
+        <div class="analysis-body">
+          ${renderVenuePanel(venueGames, stat, _venue, _gameLog)}
         </div>
       </div>
     </div>
-
-    <!-- Stat row -->
-    <div class="player-stat-row">
-      ${[['DISP',avgs.disposals],['KCK',avgs.kicks],['HB',avgs.handballs],['MRK',avgs.marks],['TKL',avgs.tackles],['GL',avgs.goals],['FAN',avgs.afl_fantasy_score]]
-        .map(([lbl,val])=>`
-        <div class="psr-cell">
-          <div class="psr-val">${safeNum(val,0)}</div>
-          <div class="psr-lbl">${lbl}</div>
-        </div>`).join('')}
-    </div>
-
-    <!-- Chart controls -->
-    <div class="chart-controls">
-      <select class="stat-select-btn" id="chartStatSel" onchange="onChartStatChange(this.value)">
-        <option value="disposals" ${stat==='disposals'?'selected':''}>Disposals</option>
-        <option value="marks"     ${stat==='marks'    ?'selected':''}>Marks</option>
-        <option value="kicks"     ${stat==='kicks'    ?'selected':''}>Kicks</option>
-        <option value="tackles"   ${stat==='tackles'  ?'selected':''}>Tackles</option>
-        <option value="goals"     ${stat==='goals'    ?'selected':''}>Goals</option>
-        <option value="handballs" ${stat==='handballs'?'selected':''}>Handballs</option>
-      </select>
-      <span class="hit-pill" id="hp-l5"  onclick="setWin('l5')">L5 ${hrL5}%</span>
-      <span class="hit-pill" id="hp-l10" onclick="setWin('l10')">L10 ${hrL10}%</span>
-      <span class="hit-pill active" id="hp-all" onclick="setWin('all')">All ${hrAll}%</span>
-      <span class="line-label">Line:</span>
-      <input class="line-inp" type="number" id="propLineInp" value="${defLine}" step="0.5" oninput="redrawBars()">
-    </div>
-
-    <!-- Bar chart -->
-    <div class="chart-body" id="chartBody">
-      <div id="propBarsContainer"></div>
-      <div id="propXAxis"></div>
-      <div id="propDashedLine"></div>
-    </div>
-
-    <!-- Analysis tabs -->
-    <div class="analysis-tabs">
-      <button class="atab active" onclick="switchAtab('vs',this)">vs ${esc(opponent||'Opp')} (${vsGames.length})</button>
-      <button class="atab" onclick="switchAtab('last5',this)">Last 5</button>
-      <button class="atab" onclick="switchAtab('split',this)">Home / Away</button>
-      <button class="atab" onclick="switchAtab('venue',this)">Venue${_venue?' ('+venueGames.length+')':''}</button>
-    </div>
-
-    <!-- vs Opponent panel -->
-    <div id="apanel-vs" class="analysis-panel active">
-      <div class="analysis-body">
-        ${renderVsOpponentPanel(vsGames, stat, opponent)}
-      </div>
-    </div>
-
-    <!-- Last 5 panel -->
-    <div id="apanel-last5" class="analysis-panel">
-      <div class="analysis-body">
-        ${renderLast5Panel(_gameLog.slice(0,5), stat)}
-      </div>
-    </div>
-
-    <!-- Home / Away panel -->
-    <div id="apanel-split" class="analysis-panel">
-      <div class="analysis-body">
-        ${renderSplitPanel(player, stat)}
-      </div>
-    </div>
-
-    <!-- Venue panel -->
-    <div id="apanel-venue" class="analysis-panel">
-      <div class="analysis-body">
-        ${renderVenuePanel(venueGames, stat, _venue, _gameLog)}
-      </div>
-    </div>
-
-  </div>
   `;
 
   redrawBars();
@@ -1029,256 +349,255 @@ function renderPropCard(player){
 
 // ── Analysis panel renderers ─────────────────────────────────────
 
-function renderVsOpponentPanel(games, stat, opponent){
-  if(!games.length) return `<p style="font-size:12px;color:var(--text-muted);">No historical data vs ${esc(opponent||'this opponent')}.</p>`;
+function renderVsOpponentPanel(games, stat, opponent) {
+  if (!games.length) {
+    return `<p style="font-size:12px;color:var(--text-muted);">No historical data vs ${esc(opponent || 'this opponent')}.</p>`;
+  }
 
-  const vals = games.map(g=>safeNum(g[stat],0));
-  const avg  = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : '—';
-  const max  = Math.max(...vals);
-  const min  = Math.min(...vals);
-
-  return `
-  <div style="display:flex;gap:14px;margin-bottom:12px;flex-wrap:wrap;">
-    <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;padding:10px 16px;flex:1;min-width:90px;text-align:center;">
-      <div style="font-family:'DM Mono',monospace;font-size:1.4rem;font-weight:700;color:var(--accent);">${avg}</div>
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-top:2px;">Avg</div>
-    </div>
-    <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;padding:10px 16px;flex:1;min-width:90px;text-align:center;">
-      <div style="font-family:'DM Mono',monospace;font-size:1.4rem;font-weight:700;color:var(--text-primary);">${max}</div>
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-top:2px;">Best</div>
-    </div>
-    <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;padding:10px 16px;flex:1;min-width:90px;text-align:center;">
-      <div style="font-family:'DM Mono',monospace;font-size:1.4rem;font-weight:700;color:var(--text-primary);">${min}</div>
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-top:2px;">Low</div>
-    </div>
-    <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;padding:10px 16px;flex:1;min-width:90px;text-align:center;">
-      <div style="font-family:'DM Mono',monospace;font-size:1.4rem;font-weight:700;color:var(--text-primary);">${games.length}</div>
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-top:2px;">Games</div>
-    </div>
-  </div>
-  <div class="scroll-x">
-  <table class="atbl">
-    <thead><tr><th>Date</th><th>Rnd</th><th>Result</th><th>${esc(stat.charAt(0).toUpperCase()+stat.slice(1))}</th><th>Venue</th></tr></thead>
-    <tbody>
-    ${games.map(g=>`
-      <tr>
-        <td class="mono">${esc(g.date||'—')}</td>
-        <td class="mono">${esc(g.round||'—')}</td>
-        <td><span class="${g.result==='W'?'win-dot':'loss-dot'}"></span> ${esc(g.result||'—')}</td>
-        <td class="mono" style="font-weight:700;">${safeNum(g[stat],0)}</td>
-        <td style="font-size:11px;color:var(--text-muted);">${esc(g.venue||'—')}</td>
-      </tr>`).join('')}
-    </tbody>
-  </table>
-  </div>`;
-}
-
-function renderLast5Panel(games, stat){
-  if(!games.length) return '<p style="font-size:12px;color:var(--text-muted);">No recent game data.</p>';
-  return `
-  <div class="scroll-x">
-  <table class="atbl">
-    <thead><tr><th>Date</th><th>Rnd</th><th>Opponent</th><th>Result</th><th>${esc(stat.charAt(0).toUpperCase()+stat.slice(1))}</th><th>Disp</th><th>Marks</th><th>Kicks</th><th>Tackles</th></tr></thead>
-    <tbody>
-    ${games.map(g=>`
-      <tr>
-        <td class="mono">${esc(g.date||'—')}</td>
-        <td class="mono">${esc(g.round||'—')}</td>
-        <td style="font-weight:600;">${esc(g.opponent||'—')}</td>
-        <td><span class="${g.result==='W'?'win-dot':'loss-dot'}"></span> ${esc(g.result||'—')}</td>
-        <td class="mono" style="font-weight:700;color:var(--accent);">${safeNum(g[stat],0)}</td>
-        <td class="mono">${safeNum(g.disposals,0)}</td>
-        <td class="mono">${safeNum(g.marks,0)}</td>
-        <td class="mono">${safeNum(g.kicks,0)}</td>
-        <td class="mono">${safeNum(g.tackles,0)}</td>
-      </tr>`).join('')}
-    </tbody>
-  </table>
-  </div>`;
-}
-
-function renderSplitPanel(player, stat){
-  const la5 = safeNum(player.last5_avg?.[stat]||player.last5_avg, 0);
-  const la10 = safeNum(player.last10_avg?.[stat]||player.last10_avg, 0);
-
-  // Compute home/away from game log
-  const playerTeam = player.team||'';
-  const homeGames = _gameLog.filter(g=> {
-    // home if opponent is away team — use venue as proxy isn't reliable,
-    // so use result context. Best we can do without explicit home flag:
-    return g.opponent === _away || g.opponent === _home;
-  });
-  // Use averages from the route which already computed home_avg/away_avg
-  // Those are passed through player-stats API, not player-detail. Use what we have.
-  const homeAvg  = safeNum(player.last5_avg?.disposals||0, 0); // placeholder — use split from game log
-  const awayAvg  = safeNum(player.last10_avg?.disposals||0, 0);
-
-  // Compute proper home/away from game log using player.team vs match teams
-  const computed = computeHomAwaySplit(_gameLog, playerTeam, stat);
+  const vals = games.map(g => safeNum(g[stat], 0));
+  const avg = vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '—';
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
 
   return `
-  <div class="split-grid">
-    <div class="split-card">
-      <h6>🏠 Home</h6>
-      <div class="split-stat"><span class="split-stat-lbl">Avg ${esc(stat)}</span><span class="split-stat-val">${computed.homeAvg}</span></div>
-      <div class="split-stat"><span class="split-stat-lbl">Games</span><span class="split-stat-val">${computed.homeGames}</span></div>
-      <div class="split-stat"><span class="split-stat-lbl">Best</span><span class="split-stat-val">${computed.homeBest}</span></div>
+    <div style="display:flex;gap:14px;margin-bottom:12px;flex-wrap:wrap;">
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;padding:10px 16px;flex:1;min-width:90px;text-align:center;">
+        <div style="font-family:'DM Mono',monospace;font-size:1.4rem;font-weight:700;color:var(--accent);">${avg}</div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-top:2px;">Avg</div>
+      </div>
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;padding:10px 16px;flex:1;min-width:90px;text-align:center;">
+        <div style="font-family:'DM Mono',monospace;font-size:1.4rem;font-weight:700;color:var(--text-primary);">${max}</div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-top:2px;">Best</div>
+      </div>
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;padding:10px 16px;flex:1;min-width:90px;text-align:center;">
+        <div style="font-family:'DM Mono',monospace;font-size:1.4rem;font-weight:700;color:var(--text-primary);">${min}</div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-top:2px;">Low</div>
+      </div>
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;padding:10px 16px;flex:1;min-width:90px;text-align:center;">
+        <div style="font-family:'DM Mono',monospace;font-size:1.4rem;font-weight:700;color:var(--text-primary);">${games.length}</div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-top:2px;">Games</div>
+      </div>
     </div>
-    <div class="split-card">
-      <h6>✈️ Away</h6>
-      <div class="split-stat"><span class="split-stat-lbl">Avg ${esc(stat)}</span><span class="split-stat-val">${computed.awayAvg}</span></div>
-      <div class="split-stat"><span class="split-stat-lbl">Games</span><span class="split-stat-val">${computed.awayGames}</span></div>
-      <div class="split-stat"><span class="split-stat-lbl">Best</span><span class="split-stat-val">${computed.awayBest}</span></div>
+    <div class="scroll-x">
+      <table class="atbl">
+        <thead>
+          <tr><th>Date</th><th>Rnd</th><th>Result</th><th>${esc(capStat(stat))}</th><th>Venue</th></tr>
+        </thead>
+        <tbody>
+          ${games.map(g => `
+            <tr>
+              <td class="mono">${esc(g.date || '—')}</td>
+              <td class="mono">${esc(g.round || '—')}</td>
+              <td><span class="${g.result === 'W' ? 'win-dot' : 'loss-dot'}"></span> ${esc(g.result || '—')}</td>
+              <td class="mono" style="font-weight:700;">${safeNum(g[stat], 0)}</td>
+              <td style="font-size:11px;color:var(--text-muted);">${esc(g.venue || '—')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
     </div>
-  </div>
-  <div style="margin-top:10px;font-size:11px;color:var(--text-muted);">Season avg: <span style="font-family:'DM Mono',monospace;color:var(--text-primary);">${safeNum(player.averages?.[stat],0)}</span> · L5: <span style="font-family:'DM Mono',monospace;color:var(--text-primary);">${safeNum(la5,0)}</span> · L10: <span style="font-family:'DM Mono',monospace;color:var(--text-primary);">${safeNum(la10,0)}</span></div>
   `;
 }
 
-function computeHomAwaySplit(games, playerTeam, stat){
-  // In the game_log, if player's team matches match_home_team they're home
-  // game_log rows have: opponent, result, venue — but not explicit home flag
-  // Heuristic: if player's team is mentioned as home team in venue data isn't reliable
-  // Use: result 'W'/'L' and opponent to classify — we can't be 100% sure without the flag
-  // Best approach: compare player team against home/away from fixture context
-  // For now split by whether opponent is the away team in the current fixture (_away)
-  // That's not right generally. Use a simpler heuristic: alternate if unknown.
-  // Actually game_log doesn't carry home/away. We'll just show avg from the player object.
-  const homeGames = games.filter((_,i)=>i%2===0); // placeholder distribution
-  const awayGames = games.filter((_,i)=>i%2!==0);
+function renderLast5Panel(games, stat) {
+  if (!games.length) {
+    return '<p style="font-size:12px;color:var(--text-muted);">No recent game data.</p>';
+  }
 
-  function avg(arr){ const v=arr.map(g=>safeNum(g[stat],0)); return v.length?(v.reduce((a,b)=>a+b,0)/v.length).toFixed(1):'—'; }
-  function best(arr){ const v=arr.map(g=>safeNum(g[stat],0)); return v.length?Math.max(...v):'—'; }
+  return `
+    <div class="scroll-x">
+      <table class="atbl">
+        <thead>
+          <tr><th>Date</th><th>Rnd</th><th>Opponent</th><th>Result</th><th>${esc(capStat(stat))}</th><th>Disp</th><th>Marks</th><th>Kicks</th><th>Tackles</th></tr>
+        </thead>
+        <tbody>
+          ${games.map(g => `
+            <tr>
+              <td class="mono">${esc(g.date || '—')}</td>
+              <td class="mono">${esc(g.round || '—')}</td>
+              <td style="font-weight:600;">${esc(g.opponent || '—')}</td>
+              <td><span class="${g.result === 'W' ? 'win-dot' : 'loss-dot'}"></span> ${esc(g.result || '—')}</td>
+              <td class="mono" style="font-weight:700;color:var(--accent);">${safeNum(g[stat], 0)}</td>
+              <td class="mono">${safeNum(g.disposals, 0)}</td>
+              <td class="mono">${safeNum(g.marks, 0)}</td>
+              <td class="mono">${safeNum(g.kicks, 0)}</td>
+              <td class="mono">${safeNum(g.tackles, 0)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function computeHomeAwaySplit(games, playerTeam, stat) {
+  const homeGames = games.filter(g => norm(g.home_team) === norm(playerTeam));
+  const awayGames = games.filter(g => norm(g.away_team) === norm(playerTeam));
 
   return {
-    homeAvg:avg(homeGames), homeGames:homeGames.length, homeBest:best(homeGames),
-    awayAvg:avg(awayGames), awayGames:awayGames.length, awayBest:best(awayGames),
+    homeAvg: avgFromGames(homeGames, stat),
+    homeGames: homeGames.length,
+    homeBest: maxFromGames(homeGames, stat),
+    awayAvg: avgFromGames(awayGames, stat),
+    awayGames: awayGames.length,
+    awayBest: maxFromGames(awayGames, stat),
   };
 }
 
-function renderVenuePanel(venueGames, stat, venue, allGames){
-  // Build unique venue list from all game log for dropdown
-  const venues = [...new Set(allGames.map(g=>g.venue||'').filter(Boolean))].sort();
+function renderSplitPanel(player, stat) {
+  const split = computeHomeAwaySplit(_gameLog, player.team || '', stat);
+  const l5 = safeNum(player.last5_avg?.[stat], 0);
+  const l10 = safeNum(player.last10_avg?.[stat], 0);
+  const seasonAvg = safeNum(player.averages?.[stat], 0);
+
+  return `
+    <div class="split-grid">
+      <div class="split-card">
+        <h6>🏠 Home</h6>
+        <div class="split-stat"><span class="split-stat-lbl">Avg ${esc(stat)}</span><span class="split-stat-val">${split.homeAvg}</span></div>
+        <div class="split-stat"><span class="split-stat-lbl">Games</span><span class="split-stat-val">${split.homeGames}</span></div>
+        <div class="split-stat"><span class="split-stat-lbl">Best</span><span class="split-stat-val">${split.homeBest}</span></div>
+      </div>
+      <div class="split-card">
+        <h6>✈️ Away</h6>
+        <div class="split-stat"><span class="split-stat-lbl">Avg ${esc(stat)}</span><span class="split-stat-val">${split.awayAvg}</span></div>
+        <div class="split-stat"><span class="split-stat-lbl">Games</span><span class="split-stat-val">${split.awayGames}</span></div>
+        <div class="split-stat"><span class="split-stat-lbl">Best</span><span class="split-stat-val">${split.awayBest}</span></div>
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--text-muted);">
+      Season avg:
+      <span style="font-family:'DM Mono',monospace;color:var(--text-primary);">${seasonAvg}</span>
+      · L5:
+      <span style="font-family:'DM Mono',monospace;color:var(--text-primary);">${l5}</span>
+      · L10:
+      <span style="font-family:'DM Mono',monospace;color:var(--text-primary);">${l10}</span>
+    </div>
+  `;
+}
+
+function renderVenuePanel(venueGames, stat, venue, allGames) {
+  const venues = [...new Set(allGames.map(g => g.venue || '').filter(Boolean))].sort();
 
   const tableHtml = venueGames.length
     ? `<div class="scroll-x"><table class="atbl">
-        <thead><tr><th>Date</th><th>Rnd</th><th>Opponent</th><th>Result</th><th>${esc(stat.charAt(0).toUpperCase()+stat.slice(1))}</th></tr></thead>
-        <tbody>${venueGames.map(g=>`
+        <thead><tr><th>Date</th><th>Rnd</th><th>Opponent</th><th>Result</th><th>${esc(capStat(stat))}</th></tr></thead>
+        <tbody>${venueGames.map(g => `
           <tr>
-            <td class="mono">${esc(g.date||'—')}</td>
-            <td class="mono">${esc(g.round||'—')}</td>
-            <td style="font-weight:600;">${esc(g.opponent||'—')}</td>
-            <td><span class="${g.result==='W'?'win-dot':'loss-dot'}"></span> ${esc(g.result||'—')}</td>
-            <td class="mono" style="font-weight:700;color:var(--accent);">${safeNum(g[stat],0)}</td>
-          </tr>`).join('')}
-        </tbody></table></div>`
+            <td class="mono">${esc(g.date || '—')}</td>
+            <td class="mono">${esc(g.round || '—')}</td>
+            <td style="font-weight:600;">${esc(g.opponent || '—')}</td>
+            <td><span class="${g.result === 'W' ? 'win-dot' : 'loss-dot'}"></span> ${esc(g.result || '—')}</td>
+            <td class="mono" style="font-weight:700;color:var(--accent);">${safeNum(g[stat], 0)}</td>
+          </tr>
+        `).join('')}</tbody></table></div>`
     : `<p style="font-size:12px;color:var(--text-muted);">No games found at this venue in dataset.</p>`;
 
-  const venueVals = venueGames.map(g=>safeNum(g[stat],0));
-  const venueAvg  = venueVals.length ? (venueVals.reduce((a,b)=>a+b,0)/venueVals.length).toFixed(1) : '—';
+  const venueVals = venueGames.map(g => safeNum(g[stat], 0));
+  const venueAvg = venueVals.length ? (venueVals.reduce((a, b) => a + b, 0) / venueVals.length).toFixed(1) : '—';
 
   return `
-  <div class="venue-filter">
-    <label>Filter venue:</label>
-    <select class="form-select" style="max-width:260px;" onchange="filterByVenue(this.value)">
-      <option value="${esc(venue||'')}">${venue ? esc(venue)+' (match venue)' : 'All venues'}</option>
-      ${venues.filter(v=>v!==venue).map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('')}
-    </select>
-    ${venueGames.length?`<span style="font-size:12px;color:var(--text-muted);">Avg: <strong style="font-family:'DM Mono',monospace;color:var(--text-primary);">${venueAvg}</strong> over ${venueGames.length} games</span>`:''}
-  </div>
-  <div id="venueTableWrap">${tableHtml}</div>`;
+    <div class="venue-filter">
+      <label>Filter venue:</label>
+      <select class="form-select" style="max-width:260px;" onchange="filterByVenue(this.value)">
+        <option value="${esc(venue || '')}">${venue ? esc(venue) + ' (match venue)' : 'All venues'}</option>
+        ${venues.filter(v => norm(v) !== norm(venue)).map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('')}
+      </select>
+      ${venueGames.length ? `<span style="font-size:12px;color:var(--text-muted);">Avg: <strong style="font-family:'DM Mono',monospace;color:var(--text-primary);">${venueAvg}</strong> over ${venueGames.length} games</span>` : ''}
+    </div>
+    <div id="venueTableWrap">${tableHtml}</div>
+  `;
 }
 
-function filterByVenue(venueStr){
+function filterByVenue(venueStr) {
   const stat = document.getElementById('propStatSelect').value;
   const filtered = venueStr
-    ? _gameLog.filter(g=>(g.venue||'').toLowerCase().includes(venueStr.toLowerCase().slice(0,8)))
+    ? _gameLog.filter(g => norm(g.venue) === norm(venueStr))
     : _gameLog;
 
-  const venueVals = filtered.map(g=>safeNum(g[stat],0));
-  const venueAvg  = venueVals.length ? (venueVals.reduce((a,b)=>a+b,0)/venueVals.length).toFixed(1) : '—';
+  const venueVals = filtered.map(g => safeNum(g[stat], 0));
+  const venueAvg = venueVals.length ? (venueVals.reduce((a, b) => a + b, 0) / venueVals.length).toFixed(1) : '—';
 
   const wrap = document.getElementById('venueTableWrap');
-  if(!wrap) return;
+  if (!wrap) return;
 
   wrap.innerHTML = filtered.length
     ? `<div style="margin-bottom:8px;font-size:12px;color:var(--text-muted);">Avg: <strong style="font-family:'DM Mono',monospace;color:var(--text-primary);">${venueAvg}</strong> over ${filtered.length} games</div>
        <div class="scroll-x"><table class="atbl">
-        <thead><tr><th>Date</th><th>Rnd</th><th>Opponent</th><th>Result</th><th>${esc(stat.charAt(0).toUpperCase()+stat.slice(1))}</th><th>Venue</th></tr></thead>
-        <tbody>${filtered.map(g=>`
+        <thead><tr><th>Date</th><th>Rnd</th><th>Opponent</th><th>Result</th><th>${esc(capStat(stat))}</th><th>Venue</th></tr></thead>
+        <tbody>${filtered.map(g => `
           <tr>
-            <td class="mono">${esc(g.date||'—')}</td>
-            <td class="mono">${esc(g.round||'—')}</td>
-            <td style="font-weight:600;">${esc(g.opponent||'—')}</td>
-            <td><span class="${g.result==='W'?'win-dot':'loss-dot'}"></span> ${esc(g.result||'—')}</td>
-            <td class="mono" style="font-weight:700;color:var(--accent);">${safeNum(g[stat],0)}</td>
-            <td style="font-size:11px;color:var(--text-muted);">${esc(g.venue||'—')}</td>
-          </tr>`).join('')}
-        </tbody></table></div>`
+            <td class="mono">${esc(g.date || '—')}</td>
+            <td class="mono">${esc(g.round || '—')}</td>
+            <td style="font-weight:600;">${esc(g.opponent || '—')}</td>
+            <td><span class="${g.result === 'W' ? 'win-dot' : 'loss-dot'}"></span> ${esc(g.result || '—')}</td>
+            <td class="mono" style="font-weight:700;color:var(--accent);">${safeNum(g[stat], 0)}</td>
+            <td style="font-size:11px;color:var(--text-muted);">${esc(g.venue || '—')}</td>
+          </tr>
+        `).join('')}</tbody></table></div>`
     : `<p style="font-size:12px;color:var(--text-muted);">No games at this venue.</p>`;
 }
 
-// ── Analysis tab switching ────────────────────────────────────────
-function switchAtab(name,btn){
-  document.querySelectorAll('.analysis-panel').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.atab').forEach(t=>t.classList.remove('active'));
+// ── Analysis tab switching ───────────────────────────────────────
+function switchAtab(name, btn) {
+  document.querySelectorAll('.analysis-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.atab').forEach(t => t.classList.remove('active'));
   document.getElementById(`apanel-${name}`)?.classList.add('active');
   btn?.classList.add('active');
 }
 
 // ── Chart stat change from within card ───────────────────────────
-function onChartStatChange(val){
+function onChartStatChange(val) {
   document.getElementById('propStatSelect').value = val;
   onStatChange();
 }
 
-// ── Chart window (L5/L10/All) ─────────────────────────────────────
-function setWin(win){
+// ── Chart window (L5/L10/All) ────────────────────────────────────
+function setWin(win) {
   _chartWin = win;
-  ['l5','l10','all'].forEach(w=>{
-    document.getElementById(`hp-${w}`)?.classList.toggle('active',w===win);
+  ['l5', 'l10', 'all'].forEach(w => {
+    document.getElementById(`hp-${w}`)?.classList.toggle('active', w === win);
   });
   redrawBars();
 }
 
-// ── Bar chart renderer ────────────────────────────────────────────
-function redrawBars(){
+// ── Bar chart renderer ───────────────────────────────────────────
+function redrawBars() {
   const container = document.getElementById('propBarsContainer');
-  const xAxis     = document.getElementById('propXAxis');
-  const dashedEl  = document.getElementById('propDashedLine');
-  if(!container || !_gameLog.length) return;
+  const xAxis = document.getElementById('propXAxis');
+  const dashedEl = document.getElementById('propDashedLine');
+  if (!container || !_gameLog.length) return;
 
   const stat = document.getElementById('propStatSelect').value;
-  const line = parseFloat(document.getElementById('propLineInp')?.value)||0;
+  const line = parseFloat(document.getElementById('propLineInp')?.value) || 0;
 
-  let games = [..._gameLog].reverse(); // oldest→newest left→right
-  if(_chartWin==='l5')  games = games.slice(-5);
-  if(_chartWin==='l10') games = games.slice(-10);
+  let games = [..._gameLog].reverse();
+  if (_chartWin === 'l5') games = games.slice(-5);
+  if (_chartWin === 'l10') games = games.slice(-10);
 
-  const vals   = games.map(g=>safeNum(g[stat],0));
+  const vals = games.map(g => safeNum(g[stat], 0));
   const maxVal = Math.max(...vals, line, 1);
 
   container.innerHTML = '';
-  xAxis.innerHTML     = '';
+  xAxis.innerHTML = '';
 
-  games.forEach(game=>{
-    const val      = safeNum(game[stat],0);
-    const over     = line>0 ? val>=line : true;
-    const barH     = Math.max(Math.round((val/(maxVal*1.1))*140),3);
-    const valTopPx = 150-barH-14;
+  games.forEach(game => {
+    const val = safeNum(game[stat], 0);
+    const over = line > 0 ? val >= line : true;
+    const barH = Math.max(Math.round((val / (maxVal * 1.1)) * 140), 3);
 
     const wrap = document.createElement('div');
     wrap.className = 'bar-wrap';
 
     const valLbl = document.createElement('div');
     valLbl.className = 'bar-val';
-    valLbl.style.bottom = `${barH+2}px`;
+    valLbl.style.bottom = `${barH + 2}px`;
     valLbl.textContent = val;
 
     const bar = document.createElement('div');
-    bar.className = `bar-rect ${over?'over':'under'}`;
+    bar.className = `bar-rect ${over ? 'over' : 'under'}`;
     bar.style.height = `${barH}px`;
-    bar.title = `${val} vs ${game.opponent||'?'} (${game.result||'?'}) ${game.date||''}`;
+    bar.title = `${val} vs ${game.opponent || '?'} (${game.result || '?'}) ${game.date || ''}`;
 
     wrap.appendChild(valLbl);
     wrap.appendChild(bar);
@@ -1286,68 +605,80 @@ function redrawBars(){
 
     const xl = document.createElement('div');
     xl.className = 'x-label';
-    const opp = (game.opponent||'???').substring(0,4).toUpperCase();
-    xl.innerHTML = `<div>${esc(game.round||'')}</div><div>${esc(opp)}</div>`;
+    const opp = (game.opponent || '???').substring(0, 4).toUpperCase();
+    xl.innerHTML = `<div>${esc(game.round || '')}</div><div>${esc(opp)}</div>`;
     xAxis.appendChild(xl);
   });
 
-  // Dashed line
-  if(dashedEl && line>0){
-    const linePx = Math.round((line/(maxVal*1.1))*140);
-    const bottomPx = linePx + 22; // 22 = x-axis height approx
+  if (dashedEl && line > 0) {
+    const linePx = Math.round((line / (maxVal * 1.1)) * 140);
+    const bottomPx = linePx + 22;
     dashedEl.style.bottom = `${bottomPx}px`;
     dashedEl.style.display = 'block';
-  } else if(dashedEl){
+  } else if (dashedEl) {
     dashedEl.style.display = 'none';
   }
 
-  // Update hit rate pills
-  const allVals  = _gameLog.map(g=>safeNum(g[stat],0));
-  const l5v  = allVals.slice(0,5);
-  const l10v = allVals.slice(0,10);
-  function hr(arr){ return arr.length?Math.round(arr.filter(v=>v>=line).length/arr.length*100):0; }
+  const allVals = _gameLog.map(g => safeNum(g[stat], 0));
+  const l5v = allVals.slice(0, 5);
+  const l10v = allVals.slice(0, 10);
 
-  const hpL5  = document.getElementById('hp-l5');
+  function hr(arr) {
+    return arr.length ? Math.round(arr.filter(v => v >= line).length / arr.length * 100) : 0;
+  }
+
+  const hpL5 = document.getElementById('hp-l5');
   const hpL10 = document.getElementById('hp-l10');
   const hpAll = document.getElementById('hp-all');
-  if(hpL5)  hpL5.textContent  = `L5 ${hr(l5v)}%`;
-  if(hpL10) hpL10.textContent = `L10 ${hr(l10v)}%`;
-  if(hpAll) hpAll.textContent = `All ${hr(allVals)}%`;
+  if (hpL5) hpL5.textContent = `L5 ${hr(l5v)}%`;
+  if (hpL10) hpL10.textContent = `L10 ${hr(l10v)}%`;
+  if (hpAll) hpAll.textContent = `All ${hr(allVals)}%`;
 }
 
-// ── Reset helpers ─────────────────────────────────────────────────
-function resetPlayerState(){
-  _allPlayers = []; _selPlayerId = null; _gameLog = [];
+// ── Reset helpers ────────────────────────────────────────────────
+function resetPlayerState() {
+  _allPlayers = [];
+  _selPlayerId = null;
+  _selPlayer = null;
+  _gameLog = [];
+
   document.getElementById('playerCount').textContent = '—';
   document.getElementById('propPlayerListInner').innerHTML =
     '<div class="prop-empty" style="padding:30px;"><p>Select a match</p></div>';
+
   resetChart();
 }
 
-function resetChart(){
-  _selPlayerId = null; _gameLog = [];
-  document.getElementById('propChartPanel').innerHTML =
-    `<div class="prop-empty" style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:12px;padding:60px 20px;">
-      <i class="bi bi-bar-chart-fill"></i><p>Select a player to see their prop chart</p>
-    </div>`;
+function resetChart() {
+  _selPlayerId = null;
+  _selPlayer = null;
+  _gameLog = [];
+
+  document.getElementById('propChartPanel').innerHTML = `
+    <div class="prop-empty" style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:12px;padding:60px 20px;">
+      <i class="bi bi-bar-chart-fill"></i>
+      <p>Select a player to see their prop chart</p>
+    </div>
+  `;
 }
 
-// ── Jump from fixtures tab ────────────────────────────────────────
-function jumpToTeam(home, away, venue, side){
+// ── Jump from fixtures tab ───────────────────────────────────────
+function jumpToTeam(home, away, venue, side) {
   const playerTab = document.querySelector('.afl-tab[data-tab="players"]');
   switchTab('players', playerTab);
 
-  _home = home; _away = away; _venue = venue;
+  _home = home;
+  _away = away;
+  _venue = venue;
 
-  // Find and set the match selector
   const sel = document.getElementById('matchSelector');
-  for(let opt of sel.options){
-    if(opt.value.startsWith(`${home}|${away}`)){
-      sel.value = opt.value; break;
+  for (const opt of sel.options) {
+    if (opt.value.startsWith(`${home}|${away}`)) {
+      sel.value = opt.value;
+      break;
     }
   }
 
-  // Show team buttons
   const wrap = document.getElementById('teamTabsWrap');
   wrap.style.display = 'flex';
   document.getElementById('teamBtnHome').textContent = home;
@@ -1356,52 +687,79 @@ function jumpToTeam(home, away, venue, side){
   selectTeam(side);
 }
 
-// ── Value finder ──────────────────────────────────────────────────
-function loadValueFinder(){
+// ── Value finder ─────────────────────────────────────────────────
+function loadValueFinder() {
   const el = document.getElementById('valueResults');
-  const market  = document.getElementById('valueMarket').value;
-  const minEdge = document.getElementById('minEdge').value||2;
+  const market = document.getElementById('valueMarket').value;
+  const minEdge = document.getElementById('minEdge').value || 2;
 
   el.innerHTML = '<div class="prop-empty"><span class="spinner-sm"></span></div>';
 
-  fetch(`/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=${encodeURIComponent(minEdge)}`)
-    .then(r=>{ if(!r.ok) throw new Error(); return r.json(); })
-    .then(data=>{
-      if(!data.bets?.length){
+  fetch(`/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=${encodeURIComponent(minEdge)}&year=${_SEASON}`)
+    .then(r => {
+      if (!r.ok) throw new Error();
+      return r.json();
+    })
+    .then(data => {
+      if (!data.bets?.length) {
         el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No value bets found. Load Odds API props first.</p></div>';
         return;
       }
-      const rows = data.bets.map(bet=>{
-        const edge=safeNum(bet.edge,0);
-        const cls=edge>=2?'pos':edge<=-2?'neg':'neu';
-        return `<tr>
-          <td style="font-weight:700;">${esc(bet.player||'')}</td>
-          <td>${esc(bet.team||'')}</td><td>${esc(bet.opponent||'')}</td>
-          <td>${esc(bet.bookmaker||'')}</td><td>${esc(bet.market||'')}</td>
-          <td style="font-family:'DM Mono',monospace;">${safeNum(bet.book_line,0)}</td>
-          <td style="font-family:'DM Mono',monospace;">${safeNum(bet.season_avg,0)}</td>
-          <td style="font-family:'DM Mono',monospace;">${safeNum(bet.last5_avg,0)}</td>
-          <td style="font-family:'DM Mono',monospace;">${safeNum(bet.hist_pct,0)}%</td>
-          <td style="font-family:'DM Mono',monospace;">${safeNum(bet.model_prediction,0)}</td>
-          <td><span class="edge-chip ${cls}">${edge>0?'+':''}${edge}</span></td>
-        </tr>`;
+
+      const rows = data.bets.map(bet => {
+        const edge = safeNum(bet.edge, 0);
+        const cls = edge >= 2 ? 'pos' : edge <= -2 ? 'neg' : 'neu';
+
+        return `
+          <tr>
+            <td style="font-weight:700;">${esc(bet.player || '')}</td>
+            <td>${esc(bet.team || '')}</td>
+            <td>${esc(bet.opponent || '')}</td>
+            <td>${esc(bet.bookmaker || '')}</td>
+            <td>${esc(bet.market || '')}</td>
+            <td style="font-family:'DM Mono',monospace;">${safeNum(bet.book_line, 0)}</td>
+            <td style="font-family:'DM Mono',monospace;">${safeNum(bet.season_avg, 0)}</td>
+            <td style="font-family:'DM Mono',monospace;">${safeNum(bet.last5_avg, 0)}</td>
+            <td style="font-family:'DM Mono',monospace;">${safeNum(bet.hist_pct, 0)}%</td>
+            <td style="font-family:'DM Mono',monospace;">${safeNum(bet.model_prediction, 0)}</td>
+            <td><span class="edge-chip ${cls}">${edge > 0 ? '+' : ''}${edge}</span></td>
+          </tr>
+        `;
       }).join('');
-      el.innerHTML = `<div class="scroll-x"><table class="value-table">
-        <thead><tr><th>Player</th><th>Team</th><th>Opp</th><th>Book</th><th>Market</th><th>Line</th><th>Season</th><th>L5</th><th>Hit%</th><th>Model</th><th>Edge</th></tr></thead>
-        <tbody>${rows}</tbody></table></div>`;
+
+      el.innerHTML = `
+        <div class="scroll-x">
+          <table class="value-table">
+            <thead>
+              <tr><th>Player</th><th>Team</th><th>Opp</th><th>Book</th><th>Market</th><th>Line</th><th>Season</th><th>L5</th><th>Hit%</th><th>Model</th><th>Edge</th></tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
     })
-    .catch(()=>{ el.innerHTML='<div class="prop-empty" style="color:var(--danger);">Value finder failed.</div>'; });
+    .catch(() => {
+      el.innerHTML = '<div class="prop-empty" style="color:var(--danger);">Value finder failed.</div>';
+    });
 }
 
-// ── Global refresh ────────────────────────────────────────────────
-function refreshAll(){
+// ── Global refresh ───────────────────────────────────────────────
+function refreshAll() {
   const btn = document.getElementById('refreshBtn');
-  if(!btn) return;
+  if (!btn) return;
+
   btn.innerHTML = '<span class="spinner-sm"></span>';
   btn.disabled = true;
-  fetch('/api/afl/refresh',{method:'POST'})
-    .then(r=>{ if(!r.ok) throw new Error(); window.location.reload(); })
-    .catch(()=>{ btn.innerHTML='<i class="bi bi-arrow-clockwise"></i> Refresh'; btn.disabled=false; });
+
+  fetch('/api/afl/refresh', { method: 'POST' })
+    .then(r => {
+      if (!r.ok) throw new Error();
+      window.location.reload();
+    })
+    .catch(() => {
+      btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Refresh';
+      btn.disabled = false;
+    });
 }
 </script>
 {% endblock %}
