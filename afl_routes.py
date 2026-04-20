@@ -1148,8 +1148,19 @@ def afl_nightly_sync(app_context, db):
     except Exception as exc:
         logger.error("  ✗ Ladder sync failed: %s", exc)
 
+    # FORCE include current season (fixes 2026 not saving)
     latest_stats_season = _db_latest_player_stats_season(db) or (CURRENT_YEAR - 1)
-    seasons_to_try = list(range(max(2019, latest_stats_season - 3), latest_stats_season + 2))
+
+    seasons_to_try = list(set([
+        CURRENT_YEAR,                  # ← critical fix
+        latest_stats_season,
+        latest_stats_season - 1,
+        latest_stats_season - 2,
+        latest_stats_season - 3,
+    ]))
+
+seasons_to_try = [s for s in seasons_to_try if s >= 2019]
+seasons_to_try.sort()
     total_stats = 0
 
     for season in seasons_to_try:
