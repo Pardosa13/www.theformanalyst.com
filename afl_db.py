@@ -494,9 +494,8 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
                     f"{row.get('player_first_name')}_{row.get('player_last_name')}_{row.get('player_team')}"
                 )) % 10_000_000
 
-# still skip if match_id is invalid
-if not match_id:
-    continue
+            if not match_id:
+                continue
 
             conn.execute(sql, {
                 "match_id": match_id,
