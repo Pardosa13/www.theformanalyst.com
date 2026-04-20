@@ -2,8 +2,8 @@ name: Fetch AFL 2026 Stats
 
 on:
   schedule:
-    - cron: '0 3 * * *'  # 3 AM UTC daily
-  workflow_dispatch:  # Manual trigger
+    - cron: '0 3 * * *'
+  workflow_dispatch:
 
 jobs:
   fetch-stats:
@@ -18,8 +18,8 @@ jobs:
       
       - name: Install fitzRoy and fetch data
         run: |
-          R --slave -e "
-          install.packages('fitzRoy', repos='http://cran.r-project.org')
+          sudo R --slave -e "
+          install.packages('fitzRoy', repos='http://cran.r-project.org', dependencies=TRUE)
           library(fitzRoy)
           data <- fetch_player_stats(season = 2026, source = 'afltables')
           write.csv(data, 'data/afl_2026_stats.csv', row.names = FALSE)
