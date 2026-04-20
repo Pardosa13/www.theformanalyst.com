@@ -1240,7 +1240,6 @@ def _group_players(rows: list[dict]) -> dict:
 
     return players
 
-
 def _format_game_log_row(game: dict, player_team: str) -> dict:
     winner = game.get("match_winner")
     result = "W" if winner == player_team else "L" if winner else "—"
@@ -1249,6 +1248,8 @@ def _format_game_log_row(game: dict, player_team: str) -> dict:
         "date": game.get("match_date", ""),
         "season": game.get("season"),
         "round": game.get("match_round", ""),
+        "home_team": game.get("match_home_team", ""),
+        "away_team": game.get("match_away_team", ""),
         "opponent": _get_opponent(game, player_team) if player_team else "",
         "venue": game.get("venue_name", ""),
         "result": result,
@@ -1261,6 +1262,7 @@ def _format_game_log_row(game: dict, player_team: str) -> dict:
         "fantasy": game.get("afl_fantasy_score", 0),
         "supercoach": game.get("supercoach_score", 0),
     }
+
 
 
 def _merge_fixture_tips(db, fixtures: list[dict], year: int, round_number: int | None = None) -> list[dict]:
