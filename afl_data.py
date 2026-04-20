@@ -4,8 +4,8 @@ afl_data.py
 Data layer for The Form Analyst AFL section.
 
 Strategy:
-- Historical advanced stats: Fryzigg RDS (same source fitzRoy uses)
-- Current-season player stats: official AFL API fallback (same source family fitzRoy uses by default)
+- Historical advanced stats: Fryzigg RDS
+- Current-season player stats: official AFL API first, Fryzigg fallback
 - Fixtures / ladder / tips: Squiggle
 - Optional props: The Odds API
 """
@@ -72,15 +72,16 @@ SQUIGGLE_TEAM_IDS = {
     "Western Bulldogs": 18,
 }
 
-_FRYZIGG_CACHE = {
+_FRYZIGG_CACHE: dict[str, Any] = {
     "df": None,
     "loaded": False,
 }
 
-_AFL_TOKEN_CACHE = {
+_AFL_TOKEN_CACHE: dict[str, Any] = {
     "token": None,
     "loaded_at": None,
 }
+
 
 # ─────────────────────────────────────────────
 # GENERIC HELPERS
@@ -89,6 +90,7 @@ _AFL_TOKEN_CACHE = {
 def _get(url: str, params: Optional[dict] = None, retries: int = 3) -> Optional[Any]:
     """HTTP GET with retries and rate-limit handling."""
     for attempt in range(retries):
+        response = None
         try:
             response = requests.get(url, params=params, headers=HEADERS, timeout=30)
 
@@ -106,7 +108,7 @@ def _get(url: str, params: Optional[dict] = None, retries: int = 3) -> Optional[
             return response.json()
 
         except json.JSONDecodeError as exc:
-            body = response.text[:300] if "response" in locals() else ""
+            body = response.text[:300] if response is not None else ""
             logger.error("JSON decode error from %s: %s — body=%r", url, exc, body)
             return None
         except requests.RequestException as exc:
@@ -117,7 +119,7 @@ def _get(url: str, params: Optional[dict] = None, retries: int = 3) -> Optional[
     return None
 
 
-def _coerce_int(value, default=0):
+def _coerce_int(value: Any, default: int = 0) -> int:
     if value is None:
         return default
     try:
@@ -129,9 +131,11 @@ def _coerce_int(value, default=0):
         return int(float(value))
     except Exception:
         return default
-def _coerce_match_id(value, default=0):
+
+
+def _coerce_match_id(value: Any, default: int = 0) -> int:
     """
-    Convert AFL match ids like 'CD_M20260140601' into a stable integer.
+    Convert ids like 'CD_M20260140601' into a stable integer.
     """
     if value is None:
         return default
@@ -142,8 +146,8 @@ def _coerce_match_id(value, default=0):
     except Exception:
         pass
 
-    s = str(value).strip()
-    digits = "".join(ch for ch in s if ch.isdigit())
+    raw = str(value).strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
 
     if not digits:
         return default
@@ -153,7 +157,8 @@ def _coerce_match_id(value, default=0):
     except Exception:
         return default
 
-def _coerce_float(value, default=0.0):
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
     if value is None:
         return default
     try:
@@ -167,7 +172,7 @@ def _coerce_float(value, default=0.0):
         return default
 
 
-def _coerce_str(value, default=""):
+def _coerce_str(value: Any, default: str = "") -> str:
     if value is None:
         return default
     try:
@@ -178,7 +183,7 @@ def _coerce_str(value, default=""):
     return str(value).strip()
 
 
-def _coerce_bool(value, default=False):
+def _coerce_bool(value: Any, default: bool = False) -> bool:
     if value is None:
         return default
     try:
@@ -191,7 +196,7 @@ def _coerce_bool(value, default=False):
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
 
 
-def _coerce_date(value):
+def _coerce_date(value: Any):
     if value is None:
         return None
     try:
@@ -200,12 +205,15 @@ def _coerce_date(value):
     except Exception:
         pass
     try:
-        return pd.to_datetime(value).date()
+        ts = pd.to_datetime(value, errors="coerce")
+        if pd.isna(ts):
+            return None
+        return ts.date()
     except Exception:
         return None
 
 
-def _coerce_datetime(value):
+def _coerce_datetime(value: Any):
     if value is None:
         return None
     try:
@@ -214,7 +222,10 @@ def _coerce_datetime(value):
     except Exception:
         pass
     try:
-        return pd.to_datetime(value)
+        ts = pd.to_datetime(value, errors="coerce", utc=True)
+        if pd.isna(ts):
+            return None
+        return ts
     except Exception:
         return None
 
@@ -230,12 +241,37 @@ def _first_existing(columns: set[str], *names: str) -> Optional[str]:
     return None
 
 
+def _normalise_team_name(name: Any) -> str:
+    raw = _coerce_str(name)
+    mapping = {
+        "West Coast Eagles": "West Coast",
+        "Greater Western Sydney": "GWS Giants",
+        "GWS": "GWS Giants",
+        "Footscray": "Western Bulldogs",
+        "Brisbane": "Brisbane Lions",
+    }
+    return mapping.get(raw, raw)
+
+
+def _safe_series_get(row: pd.Series, column_name: Optional[str]):
+    if not column_name:
+        return None
+    return row[column_name] if column_name in row.index else None
+
+
+def _pick_from_dict(data: dict, *keys: str, default=None):
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, "", []):
+            return value
+    return default
+
+
 # ─────────────────────────────────────────────
 # SQUIGGLE API
 # ─────────────────────────────────────────────
 
 def fetch_squiggle_games(year: int, round_number: int = None) -> list[dict]:
-    """Fetch fixtures/results from Squiggle."""
     params = {"q": "games", "year": year}
     if round_number is not None:
         params["round"] = round_number
@@ -248,7 +284,6 @@ def fetch_squiggle_games(year: int, round_number: int = None) -> list[dict]:
 
 
 def fetch_squiggle_standings(year: int, round_number: int = None) -> list[dict]:
-    """Fetch ladder standings from Squiggle."""
     params = {"q": "standings", "year": year}
     if round_number is not None:
         params["round"] = round_number
@@ -260,12 +295,7 @@ def fetch_squiggle_standings(year: int, round_number: int = None) -> list[dict]:
     return data.get("standings", [])
 
 
-def fetch_squiggle_tips(
-    year: int,
-    round_number: int = None,
-    source_id: int = 8,
-) -> list[dict]:
-    """Fetch model tips from Squiggle."""
+def fetch_squiggle_tips(year: int, round_number: int = None, source_id: int = 8) -> list[dict]:
     params = {"q": "tips", "year": year, "source": source_id}
     if round_number is not None:
         params["round"] = round_number
@@ -278,7 +308,6 @@ def fetch_squiggle_tips(
 
 
 def fetch_squiggle_current_round(year: int = None) -> int:
-    """Get the current round from incomplete games."""
     y = year or CURRENT_YEAR
     params = {"q": "games", "year": y, "complete": "!100"}
 
@@ -295,7 +324,6 @@ def fetch_squiggle_current_round(year: int = None) -> int:
 
 
 def fetch_squiggle_upcoming_games(year: int = None) -> list[dict]:
-    """Fetch all unplayed games for the season."""
     y = year or CURRENT_YEAR
     params = {"q": "games", "year": y, "complete": "0"}
 
@@ -311,7 +339,6 @@ def fetch_squiggle_upcoming_games(year: int = None) -> list[dict]:
 # ─────────────────────────────────────────────
 
 def _afl_parse_response(response: requests.Response) -> Optional[dict]:
-    """Parse AFL API JSON safely."""
     try:
         response.raise_for_status()
         if "application/json" not in response.headers.get("Content-Type", ""):
@@ -325,10 +352,6 @@ def _afl_parse_response(response: requests.Response) -> Optional[dict]:
 
 
 def _get_afl_cookie(force_refresh: bool = False) -> Optional[str]:
-    """
-    Get AFL token used in x-media-mis-token header.
-    Cached for a short period to avoid unnecessary token requests.
-    """
     now = time.time()
     cached = _AFL_TOKEN_CACHE.get("token")
     loaded_at = _AFL_TOKEN_CACHE.get("loaded_at") or 0
@@ -356,8 +379,12 @@ def _get_afl_cookie(force_refresh: bool = False) -> Optional[str]:
         return None
 
 
-def _afl_get(url: str, params: Optional[dict] = None, token: Optional[str] = None, retries: int = 2) -> Optional[dict]:
-    """GET helper for AFL APIs."""
+def _afl_get(
+    url: str,
+    params: Optional[dict] = None,
+    token: Optional[str] = None,
+    retries: int = 2,
+) -> Optional[dict]:
     for attempt in range(retries):
         try:
             headers = dict(HEADERS)
@@ -380,21 +407,24 @@ def _afl_get(url: str, params: Optional[dict] = None, token: Optional[str] = Non
 
 
 def _find_comp_id(comp: str = "AFLM") -> Optional[int]:
-    """Find AFL competition id."""
     comp_code = "AFL" if comp == "AFLM" else comp
     data = _afl_get(f"{AFL_META_BASE}/afl/v2/competitions", params={"pageSize": 50})
     if not data or "competitions" not in data:
         return None
 
     comps = data.get("competitions") or []
-    matches = [c for c in comps if "Legacy" not in _coerce_str(c.get("name")) and c.get("code") == comp_code]
-    ids = [c.get("id") for c in matches if c.get("id") is not None]
+    matches = [
+        comp_row
+        for comp_row in comps
+        if "Legacy" not in _coerce_str(comp_row.get("name"))
+        and comp_row.get("code") == comp_code
+    ]
+    ids = [comp_row.get("id") for comp_row in matches if comp_row.get("id") is not None]
 
     return min(ids) if ids else None
 
 
 def _find_season_id(season: int, comp: str = "AFLM") -> Optional[int]:
-    """Find AFL compSeason id."""
     import re
 
     comp_id = _find_comp_id(comp)
@@ -433,7 +463,6 @@ def _find_round_ids(
     comp: str = "AFLM",
     future_rounds: bool = True,
 ) -> list[int]:
-    """Find AFL round ids (NOT providerIds)."""
     season_id = _find_season_id(season, comp)
     if not season_id:
         return []
@@ -448,30 +477,27 @@ def _find_round_ids(
     rounds = data.get("rounds") or []
 
     if not future_rounds:
-        today = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.utcnow()
         filtered = []
-        for r in rounds:
-            utc_start = _coerce_datetime(r.get("utcStartTime"))
-            if utc_start is not None and getattr(utc_start, "tzinfo", None) is not None:
-                utc_start = utc_start.tz_convert(None)
-            if utc_start is not None and utc_start < today:
-                filtered.append(r)
+        for round_row in rounds:
+            utc_start = _coerce_datetime(round_row.get("utcStartTime"))
+            if utc_start is not None and utc_start < now:
+                filtered.append(round_row)
         rounds = filtered
 
     if round_number is None:
-        ids = [r.get("id") for r in rounds if r.get("id") is not None]
+        ids = [round_row.get("id") for round_row in rounds if round_row.get("id") is not None]
     else:
         ids = [
-            r.get("id")
-            for r in rounds
-            if r.get("id") is not None and r.get("roundNumber") == round_number
+            round_row.get("id")
+            for round_row in rounds
+            if round_row.get("id") is not None and round_row.get("roundNumber") == round_number
         ]
 
     return [int(x) for x in ids if x is not None]
 
 
 def _fetch_round_matches_afl(round_id: int, token: Optional[str] = None) -> list[dict]:
-    """Fetch all match items for a round id."""
     token = token or _get_afl_cookie()
     if not token:
         return []
@@ -488,13 +514,6 @@ def _fetch_round_matches_afl(round_id: int, token: Optional[str] = None) -> list
 
 
 def fetch_fixture_afl(season: int, round_number: int = None, comp: str = "AFLM") -> list[dict]:
-    """
-    Fetch AFL official fixture using the same endpoint pattern fitzRoy uses:
-    https://aflapi.afl.com.au/afl/v2/matches
-
-    Returns match rows that include providerId, which is then used to fetch
-    current-season player stats from the AFL API.
-    """
     comp_season_id = _find_season_id(season, comp)
     if comp_season_id is None:
         logger.warning("AFL fixture: no compSeasonId for season=%s comp=%s", season, comp)
@@ -522,36 +541,35 @@ def fetch_fixture_afl(season: int, round_number: int = None, comp: str = "AFLM")
     if not isinstance(matches, list):
         return []
 
-    # fitzRoy filters back down to the requested season as a safety check
     filtered = []
     for match in matches:
         comp_season = match.get("compSeason") or {}
-        comp_season_name = _coerce_str(comp_season.get("name"))
+        comp_season_name = _coerce_str(comp_season.get("shortName") or comp_season.get("name"))
         if str(season) in comp_season_name:
             filtered.append(match)
 
     logger.info(
         "AFL fixture: %s matches for season %s round=%s via afl/v2/matches",
-        len(filtered), season, round_number
+        len(filtered),
+        season,
+        round_number,
     )
     return filtered
 
 
 def _clean_names_playerstats_afl(df: pd.DataFrame) -> pd.DataFrame:
-    """Mirror fitzRoy AFL player stats name cleaning."""
     if df is None or df.empty:
         return df
 
     cleaned = df.copy()
-    cleaned.columns = [str(c) for c in cleaned.columns]
-    cleaned.columns = [c.replace("playerStats.", "") for c in cleaned.columns]
-    cleaned.columns = [c.replace("stats.", "") for c in cleaned.columns]
-    cleaned.columns = [c.replace("playerName.", "") for c in cleaned.columns]
+    cleaned.columns = [str(col) for col in cleaned.columns]
+    cleaned.columns = [col.replace("playerStats.", "") for col in cleaned.columns]
+    cleaned.columns = [col.replace("stats.", "") for col in cleaned.columns]
+    cleaned.columns = [col.replace("playerName.", "") for col in cleaned.columns]
     return cleaned
 
 
 def _fetch_match_stats_afl(match_provider_id: int, token: Optional[str] = None) -> pd.DataFrame:
-    """Fetch AFL official player stats for one match."""
     token = token or _get_afl_cookie()
     if not token:
         return pd.DataFrame()
@@ -562,43 +580,6 @@ def _fetch_match_stats_afl(match_provider_id: int, token: Optional[str] = None) 
     )
     if not data:
         return pd.DataFrame()
-
-    # DEBUG: log the top-level structure once so we can see what AFL is actually returning
-    try:
-        logger.info("AFL stats debug match %s top-level keys: %s", match_provider_id, list(data.keys())[:50])
-
-        for key in [
-            "homeTeamPlayerStats",
-            "awayTeamPlayerStats",
-            "playerStats",
-            "players",
-            "items",
-            "home",
-            "away",
-            "match",
-            "teamStats",
-        ]:
-            value = data.get(key)
-            if isinstance(value, list):
-                logger.info("AFL stats debug match %s key=%s list_len=%s", match_provider_id, key, len(value))
-                if value:
-                    first = value[0]
-                    if isinstance(first, dict):
-                        logger.info(
-                            "AFL stats debug match %s key=%s first_item_keys=%s",
-                            match_provider_id,
-                            key,
-                            list(first.keys())[:50],
-                        )
-            elif isinstance(value, dict):
-                logger.info(
-                    "AFL stats debug match %s key=%s dict_keys=%s",
-                    match_provider_id,
-                    key,
-                    list(value.keys())[:50],
-                )
-    except Exception as exc:
-        logger.warning("AFL stats debug logging failed for %s: %s", match_provider_id, exc)
 
     home_stats = data.get("homeTeamPlayerStats") or []
     away_stats = data.get("awayTeamPlayerStats") or []
@@ -621,17 +602,12 @@ def _fetch_match_stats_afl(match_provider_id: int, token: Optional[str] = None) 
     away_df = _to_df(away_stats, "away")
 
     if home_df.empty and away_df.empty:
-        logger.warning("AFL stats debug match %s produced no home/away player rows", match_provider_id)
         return pd.DataFrame()
 
-    combined = pd.concat([home_df, away_df], ignore_index=True)
-    logger.info("AFL stats debug match %s dataframe columns: %s", match_provider_id, list(combined.columns)[:100])
-    logger.info("AFL stats debug match %s dataframe rowcount: %s", match_provider_id, len(combined))
-    return combined
+    return pd.concat([home_df, away_df], ignore_index=True)
 
 
 def _normalise_afl_fixture_match(match: dict) -> dict:
-    """Normalise one AFL official match row into something we can merge against player stats."""
     home_name = (
         (((match.get("home") or {}).get("team") or {}).get("name"))
         or (((match.get("home") or {}).get("team") or {}).get("club", {}) or {}).get("name")
@@ -655,17 +631,19 @@ def _normalise_afl_fixture_match(match: dict) -> dict:
         "round.name": round_obj.get("name") or "",
         "round.roundNumber": round_obj.get("roundNumber"),
         "venue.name": venue_name,
-        "home.team.name": home_name,
-        "away.team.name": away_name,
+        "home.team.name": _normalise_team_name(home_name),
+        "away.team.name": _normalise_team_name(away_name),
     }
 
 
-def fetch_afl_player_stats_current_season(season: int, round_number: int = None, comp: str = "AFLM") -> list[dict]:
+def fetch_afl_player_stats_current_season(
+    season: int,
+    round_number: int = None,
+    comp: str = "AFLM",
+) -> list[dict]:
     """
-    Fetch current-season player stats using AFL official API,
-    but only for rounds/matches that should already have stats available.
+    Fetch current-season player stats using AFL official API.
     """
-    # If no round provided, only go up to the current round from Squiggle
     if round_number is None:
         try:
             round_number = fetch_squiggle_current_round(season)
@@ -677,17 +655,14 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
         logger.warning("AFL current-season stats: no fixtures found for season %s round=%s", season, round_number)
         return []
 
-    # Keep only matches that have already started / are not future scheduled matches
     now_utc = pd.Timestamp.utcnow()
-
     filtered_matches = []
+
     for match in matches:
         utc_start = _coerce_datetime(match.get("utcStartTime"))
         status = _coerce_str(match.get("status")).lower()
 
         include = False
-
-        # AFL statuses vary, so allow several non-future cases
         if status in {"concluded", "complete", "finished", "closed", "final"}:
             include = True
         elif utc_start is not None and utc_start <= now_utc:
@@ -699,7 +674,8 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
     if not filtered_matches:
         logger.warning(
             "AFL current-season stats: no completed/started matches found for season %s round=%s",
-            season, round_number
+            season,
+            round_number,
         )
         return []
 
@@ -713,13 +689,12 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
         return []
 
     match_details_map = {
-        m.get("providerId"): _normalise_afl_fixture_match(m)
-        for m in filtered_matches
-        if m.get("providerId")
+        match.get("providerId"): _normalise_afl_fixture_match(match)
+        for match in filtered_matches
+        if match.get("providerId")
     }
 
     all_rows: list[dict] = []
-
     for match_provider_id in match_provider_ids:
         try:
             stats_df = _fetch_match_stats_afl(match_provider_id, token=token)
@@ -727,33 +702,30 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
                 continue
 
             details = match_details_map.get(match_provider_id, {})
-
             for _, row in stats_df.iterrows():
-                all_rows.append(_build_afl_current_row(row, details, season, match_provider_id))
+                mapped_row = _build_afl_current_row(row, details, season, match_provider_id)
+                if mapped_row.get("match_id") and mapped_row.get("player_id"):
+                    all_rows.append(mapped_row)
 
             time.sleep(0.1)
-
         except Exception as exc:
             logger.warning("AFL match stats fetch failed for match %s: %s", match_provider_id, exc)
 
-    all_rows = [r for r in all_rows if r.get("match_id") and r.get("player_id")]
-
     logger.info(
         "AFL current-season stats: prepared %s rows for season %s round=%s",
-        len(all_rows), season, round_number
+        len(all_rows),
+        season,
+        round_number,
     )
     return all_rows
 
 
 def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id: int) -> dict:
-    """Map AFL current-season row into your DB shape."""
+    """Map AFL current-season row into DB shape."""
     row_dict = row.to_dict() if hasattr(row, "to_dict") else dict(row)
 
     def pick(*keys, default=None):
-        for key in keys:
-            if key in row_dict and row_dict.get(key) not in (None, "", []):
-                return row_dict.get(key)
-        return default
+        return _pick_from_dict(row_dict, *keys, default=default)
 
     first_name = _coerce_str(
         pick(
@@ -778,6 +750,7 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id:
             "player.displayName",
             "player.player.displayName",
             "displayName",
+            "playerName",
         )
     )
 
@@ -786,10 +759,10 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id:
         first_name = parts[0] if parts else ""
         last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
 
-    home_team = _coerce_str(details.get("home.team.name"))
-    away_team = _coerce_str(details.get("away.team.name"))
+    home_team = _normalise_team_name(details.get("home.team.name"))
+    away_team = _normalise_team_name(details.get("away.team.name"))
 
-    player_team = _coerce_str(pick("team.name"))
+    player_team = _normalise_team_name(pick("team.name", "team.teamName", "teamName"))
     if not player_team:
         player_team = home_team if _coerce_str(row_dict.get("teamStatus")) == "home" else away_team
 
@@ -825,7 +798,7 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id:
         "playerId",
         "id",
     )
-    player_id_digits = ''.join(c for c in str(player_id_raw) if c.isdigit())
+    player_id = _coerce_int(player_id_raw)
 
     return {
         "match_id": _coerce_match_id(match_id),
@@ -842,7 +815,7 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id:
         "match_attendance": 0,
         "venue_name": _coerce_str(details.get("venue.name")),
         "season": season,
-        "player_id": int(player_id_digits) if player_id_digits else 0,
+        "player_id": player_id,
         "player_first_name": first_name,
         "player_last_name": last_name,
         "player_team": player_team,
@@ -902,14 +875,14 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id:
 
 def _download_fryzigg_rds() -> pd.DataFrame:
     """Download and cache Fryzigg RDS as DataFrame."""
-    import os
     if not os.environ.get("AFL_CRON_MODE"):
         raise RuntimeError("Fryzigg RDS blocked outside cron. Set AFL_CRON_MODE=1 to allow.")
-    
+
     global _FRYZIGG_CACHE
     if _FRYZIGG_CACHE["loaded"] and _FRYZIGG_CACHE["df"] is not None:
         logger.info("Fryzigg: using cached DataFrame (%s rows)", len(_FRYZIGG_CACHE["df"]))
         return _FRYZIGG_CACHE["df"]
+
     logger.info("Fryzigg: downloading %s ...", FRYZIGG_RDS_URL)
     response = requests.get(FRYZIGG_RDS_URL, timeout=120)
     response.raise_for_status()
@@ -927,7 +900,7 @@ def _download_fryzigg_rds() -> pd.DataFrame:
         if df is None or df.empty:
             raise ValueError("Fryzigg RDS loaded but DataFrame is empty")
 
-        df.columns = [str(c).strip().lower() for c in df.columns]
+        df.columns = [str(col).strip().lower() for col in df.columns]
         _FRYZIGG_CACHE["df"] = df
         _FRYZIGG_CACHE["loaded"] = True
 
@@ -943,7 +916,7 @@ def _download_fryzigg_rds() -> pd.DataFrame:
 def _fetch_fryzigg_player_stats_from_rds(season: int) -> list[dict]:
     """
     Load Fryzigg player stats for one season from the .rds file.
-    Mirrors fitzRoy logic: filter by date range, not by assuming a season column.
+    Filter by date range.
     """
     try:
         df = _download_fryzigg_rds()
@@ -989,20 +962,20 @@ def _fetch_fryzigg_player_stats_from_rds(season: int) -> list[dict]:
     c_weight = _first_existing(cols, "player_weight_kg", "weight_kg")
     c_retired = _first_existing(cols, "player_is_retired", "is_retired")
 
-    def build_row(row) -> dict:
-        def g(col):
-            return row[col] if col in row.index and col is not None else None
+    def build_row(row: pd.Series) -> dict:
+        def g(column_name: Optional[str]):
+            return _safe_series_get(row, column_name)
 
         return {
-            "match_id": _coerce_int(g(c_match_id)),
+            "match_id": _coerce_match_id(g(c_match_id)),
             "match_date": _coerce_date(g(match_date_col)),
             "match_round": _coerce_str(g(c_match_round)),
-            "match_home_team": _coerce_str(g(c_home_team)),
-            "match_away_team": _coerce_str(g(c_away_team)),
+            "match_home_team": _normalise_team_name(g(c_home_team)),
+            "match_away_team": _normalise_team_name(g(c_away_team)),
             "match_home_team_score": _coerce_int(g(c_home_score)),
             "match_away_team_score": _coerce_int(g(c_away_score)),
             "match_margin": _coerce_int(g(c_match_margin)),
-            "match_winner": _coerce_str(g(c_match_winner)),
+            "match_winner": _normalise_team_name(g(c_match_winner)),
             "match_weather_temp_c": _coerce_int(g(c_weather_temp)),
             "match_weather_type": _coerce_str(g(c_weather_type)),
             "match_attendance": _coerce_int(g(c_attendance)),
@@ -1011,12 +984,11 @@ def _fetch_fryzigg_player_stats_from_rds(season: int) -> list[dict]:
             "player_id": _coerce_int(g(c_player_id)),
             "player_first_name": _coerce_str(g(c_first)),
             "player_last_name": _coerce_str(g(c_last)),
-            "player_team": _coerce_str(g(c_team)),
+            "player_team": _normalise_team_name(g(c_team)),
             "guernsey_number": _coerce_int(g(c_guernsey)),
             "player_height_cm": _coerce_int(g(c_height)),
             "player_weight_kg": _coerce_int(g(c_weight)),
             "player_is_retired": _coerce_bool(g(c_retired), False),
-
             "kicks": _coerce_int(g(_first_existing(cols, "kicks"))),
             "marks": _coerce_int(g(_first_existing(cols, "marks"))),
             "handballs": _coerce_int(g(_first_existing(cols, "handballs"))),
@@ -1054,7 +1026,7 @@ def _fetch_fryzigg_player_stats_from_rds(season: int) -> list[dict]:
         }
 
     rows = [build_row(row) for _, row in season_df.iterrows()]
-    rows = [r for r in rows if r["player_id"] and r["match_id"]]
+    rows = [row for row in rows if row["player_id"] and row["match_id"]]
 
     logger.info("Fryzigg: prepared %s rows for season %s", len(rows), season)
     return rows
@@ -1063,28 +1035,25 @@ def _fetch_fryzigg_player_stats_from_rds(season: int) -> list[dict]:
 def fetch_fryzigg_player_stats(season: int) -> list[dict]:
     """
     Unified player stats fetch.
-
-    Rules:
-    - For current season: try AFL official current-season stats first.
-    - If AFL official returns nothing, fall back to Fryzigg RDS.
-    - For past seasons: use Fryzigg RDS directly.
     """
     if season >= CURRENT_YEAR:
         logger.info("Player stats: trying AFL official current-season source for %s", season)
         current_rows = fetch_afl_player_stats_current_season(
-    season,
-    round_number=fetch_squiggle_current_round(season)
-)
+            season,
+            round_number=fetch_squiggle_current_round(season),
+        )
         if current_rows:
             return current_rows
 
-        logger.warning("Player stats: AFL current-season source returned no rows for %s, falling back to Fryzigg", season)
+        logger.warning(
+            "Player stats: AFL current-season source returned no rows for %s, falling back to Fryzigg",
+            season,
+        )
 
     return _fetch_fryzigg_player_stats_from_rds(season)
 
 
 def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dict]:
-    """Fetch multiple seasons."""
     all_stats: list[dict] = []
 
     for year in range(start_year, end_year + 1):
@@ -1101,7 +1070,6 @@ def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dic
 # ─────────────────────────────────────────────
 
 def fetch_afltables_results(year: int) -> list[dict]:
-    """Scrape basic season results from AFL Tables."""
     from bs4 import BeautifulSoup
 
     url = f"{AFLTABLES_BASE}/seas/{year}.html"
@@ -1149,7 +1117,6 @@ def fetch_afltables_results(year: int) -> list[dict]:
 # ─────────────────────────────────────────────
 
 def fetch_afl_player_props(api_key: str, market: str = "player_disposals") -> list[dict]:
-    """Fetch live AFL player prop lines from The Odds API."""
     if not api_key:
         logger.warning("No Odds API key configured — skipping prop fetch")
         return []
@@ -1184,20 +1151,20 @@ def fetch_afl_player_props(api_key: str, market: str = "player_disposals") -> li
         commence = odds_data.get("commence_time", "")
 
         for bookmaker in odds_data.get("bookmakers", []):
-            bk_name = bookmaker.get("title", "")
+            bookmaker_name = bookmaker.get("title", "")
 
-            for mkt in bookmaker.get("markets", []):
-                if mkt.get("key") != market:
+            for market_row in bookmaker.get("markets", []):
+                if market_row.get("key") != market:
                     continue
 
-                for outcome in mkt.get("outcomes", []):
+                for outcome in market_row.get("outcomes", []):
                     props.append(
                         {
                             "event_id": event_id,
                             "home_team": home,
                             "away_team": away,
                             "commence_time": commence,
-                            "bookmaker": bk_name,
+                            "bookmaker": bookmaker_name,
                             "market": market,
                             "player": outcome.get("description", ""),
                             "name": outcome.get("name", ""),
@@ -1216,7 +1183,6 @@ def fetch_afl_player_props(api_key: str, market: str = "player_disposals") -> li
 # ─────────────────────────────────────────────
 
 def get_player_season_averages(player_stats: list[dict]) -> dict:
-    """Calculate season averages across key stats."""
     if not player_stats:
         return {}
 
@@ -1255,10 +1221,12 @@ def get_player_season_averages(player_stats: list[dict]) -> dict:
 
 
 def get_player_vs_opponent(player_stats: list[dict], opponent_team: str) -> dict:
-    """Filter a player's game log to games against one opponent."""
+    opponent_team = _normalise_team_name(opponent_team)
     opp_games = [
-        g for g in player_stats
-        if g.get("match_home_team") == opponent_team or g.get("match_away_team") == opponent_team
+        game
+        for game in player_stats
+        if _normalise_team_name(game.get("match_home_team")) == opponent_team
+        or _normalise_team_name(game.get("match_away_team")) == opponent_team
     ]
 
     if not opp_games:
@@ -1266,31 +1234,22 @@ def get_player_vs_opponent(player_stats: list[dict], opponent_team: str) -> dict
 
     averages = get_player_season_averages(opp_games)
 
-    disp_lines = [15, 20, 25, 30, 35]
+    disposal_lines = [15, 20, 25, 30, 35]
     hit_rates = {}
-    for line in disp_lines:
-        hits = sum(1 for g in opp_games if (g.get("disposals") or 0) >= line)
+    for line in disposal_lines:
+        hits = sum(1 for game in opp_games if (game.get("disposals") or 0) >= line)
         hit_rates[f"disp_{line}+"] = round(hits / len(opp_games) * 100, 1)
 
     return {
         "games": len(opp_games),
         "averages": averages,
         "hit_rates": hit_rates,
-        "last_5": sorted(
-            opp_games,
-            key=lambda x: x.get("match_date", ""),
-            reverse=True,
-        )[:5],
+        "last_5": sorted(opp_games, key=lambda x: x.get("match_date", ""), reverse=True)[:5],
     }
 
 
 def get_player_last_n_games(player_stats: list[dict], n: int = 5) -> list[dict]:
-    """Return the n most recent games for a player."""
-    sorted_games = sorted(
-        player_stats,
-        key=lambda x: x.get("match_date", ""),
-        reverse=True,
-    )
+    sorted_games = sorted(player_stats, key=lambda x: x.get("match_date", ""), reverse=True)
     return sorted_games[:n]
 
 
@@ -1300,7 +1259,6 @@ def calculate_disposal_edge(
     vs_opp_avg: float = None,
     last5_avg: float = None,
 ) -> dict:
-    """Calculate edge between model prediction and book line."""
     model_pred = player_avg
 
     if vs_opp_avg and vs_opp_avg > 0:
