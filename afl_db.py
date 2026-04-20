@@ -486,10 +486,17 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
     with db.engine.begin() as conn:
         for row in stats:
             match_id = _match_id(row.get("match_id"))
-            player_id = _i(row.get("player_id"))
 
-            if not match_id or not player_id:
-                continue
+# FIX: ensure player_id always exists (needed for 2026 fallback data)
+player_id = _i(row.get("player_id"))
+if not player_id:
+    player_id = abs(hash(
+        f"{row.get('player_first_name')}_{row.get('player_last_name')}_{row.get('player_team')}"
+    )) % 10_000_000
+
+# still skip if match_id is invalid
+if not match_id:
+    continue
 
             conn.execute(sql, {
                 "match_id": match_id,
