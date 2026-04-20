@@ -17,3 +17,4 @@ numpy==1.26.4
 optuna==3.6.1
 pyreadr>=0.5.0
 beautifulsoup4==4.9.3
+rpy2==3.4.5
