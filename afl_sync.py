@@ -52,6 +52,7 @@ def sync_afl_all(season: int = None):
         fetch_squiggle_current_round,
         fetch_fryzigg_player_stats,
         fetch_afl_player_stats_current_season,
+        fetch_2026_stats_from_csv,
         fetch_afl_player_props,
     )
     from afl_db import (
@@ -103,19 +104,22 @@ def sync_afl_all(season: int = None):
             logger.error("  ✗ Ladder sync failed: %s", exc)
             _safe_log_sync(db, "squiggle_standings", season=season, status="error", error=str(exc))
 
-        # ── 3. Player stats (last 5 seasons) ──────────────────────
-        # Current season may come from AFL official first, with Fryzigg fallback.
+                # ── 3. Player stats (last 5 seasons) ──────────────────────
         player_stats_total = 0
         seasons_to_sync = list(range(season - 4, season + 1))
 
         for yr in seasons_to_sync:
             try:
-                stats = fetch_fryzigg_player_stats(yr)
+                if yr == 2026:
+                    logger.info("  • Loading 2026 player stats from committed CSV")
+                    stats = fetch_2026_stats_from_csv()
 
-                # Critical retry for current season if first attempt returned nothing
-                if yr == season and not stats:
-                    logger.warning("Retrying %s without round filter...", yr)
-                    stats = fetch_afl_player_stats_current_season(yr, round_number=None)
+                    # fallback attempt only if csv missing/empty
+                    if not stats:
+                        logger.warning("  • 2026 CSV returned no rows, trying AFL official current-season source")
+                        stats = fetch_afl_player_stats_current_season(yr, round_number=None)
+                else:
+                    stats = fetch_fryzigg_player_stats(yr)
 
                 if stats:
                     count = upsert_player_stats(db, stats, yr)
@@ -131,7 +135,11 @@ def sync_afl_all(season: int = None):
                 logger.error("  ✗ Player stats %s failed: %s", yr, exc)
                 _safe_log_sync(db, "player_stats", season=yr, status="error", error=str(exc))
 
-        logger.info("  ✓ Player stats total: %s rows across %s seasons", player_stats_total, len(seasons_to_sync))
+        logger.info(
+            "  ✓ Player stats total: %s rows across %s seasons",
+            player_stats_total,
+            len(seasons_to_sync),
+        )
 
         # ── 4. Prop lines (skip if no key) ────────────────────────
         api_key = os.environ.get("ODDS_API_KEY", "")
