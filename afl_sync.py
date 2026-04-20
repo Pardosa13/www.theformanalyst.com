@@ -51,6 +51,7 @@ def sync_afl_all(season: int = None):
         fetch_squiggle_standings,
         fetch_squiggle_current_round,
         fetch_fryzigg_player_stats,
+        fetch_afl_player_stats_current_season,
         fetch_afl_player_props,
     )
     from afl_db import (
@@ -110,6 +111,12 @@ def sync_afl_all(season: int = None):
         for yr in seasons_to_sync:
             try:
                 stats = fetch_fryzigg_player_stats(yr)
+
+                # Critical retry for current season if first attempt returned nothing
+                if yr == season and not stats:
+                    logger.warning("Retrying %s without round filter...", yr)
+                    stats = fetch_afl_player_stats_current_season(yr, round_number=None)
+
                 if stats:
                     count = upsert_player_stats(db, stats, yr)
                     player_stats_total += count
