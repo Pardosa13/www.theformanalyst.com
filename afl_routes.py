@@ -433,7 +433,7 @@ def register_afl_routes(app, db):
 
         return jsonify({"opponent": opponent, "season_from": season_from, **result})
 
-    @app.route("/api/afl/team-players")
+@app.route("/api/afl/team-players")
 @login_required
 def api_afl_team_players():
     team = request.args.get("team", "").strip()
