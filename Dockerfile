@@ -5,6 +5,8 @@ RUN apt-get update && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
+# Install R fitzRoy package
+RUN R --slave -e "install.packages('fitzRoy', repos='http://cran.r-project.org')"
 WORKDIR /app
 COPY . .
 # Upgrade pip, setuptools, wheel
