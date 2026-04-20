@@ -1035,17 +1035,17 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
 
     # ── 1. AFL Tables (PRIMARY for current year) ──
     if season >= CURRENT_YEAR:
-        logger.info("Player stats: trying AFL Tables for %s", season)
-        
-        afl_tables_games = fetch_afltables_results(season)
-        
-        if afl_tables_games:
-            logger.info("Player stats: found %s games from AFL Tables for %s", len(afl_tables_games), season)
-            return afl_tables_games
-        
-        logger.warning("AFL Tables returned no rows for %s", season)
+    logger.info("Player stats: trying fitzRoy R package for %s", season)
+    
+    fitzroy_rows = fetch_afltables_player_stats_rpy2(season)
+    
+    if fitzroy_rows:
+        logger.info("Player stats: got %s rows from fitzRoy for %s", len(fitzroy_rows), season)
+        return fitzroy_rows
+    
+    logger.warning("fitzRoy returned no rows for %s", season)
 
-    return _fetch_fryzigg_player_stats_from_rds(season)
+return _fetch_fryzigg_player_stats_from_rds(season)
 
 
 def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dict]:
