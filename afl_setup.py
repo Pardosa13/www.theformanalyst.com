@@ -99,7 +99,7 @@ def run_setup(db, start_year: int = 2019, end_year: int = None):
         for year in range(start_year, end_year + 1):
             try:
                 # First attempt: normal fetch path
-                stats = fetch_fryzigg_player_stats(year)
+                stats = fetch_2026_stats_from_csv() if year == 2026 else fetch_fryzigg_player_stats(year)
 
                 # Critical retry for current season if first attempt returned nothing
                 if year == CURRENT_YEAR and not stats:
