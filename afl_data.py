@@ -1047,6 +1047,76 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
 
 return _fetch_fryzigg_player_stats_from_rds(season)
 
+def fetch_afltables_player_stats_rpy2(season: int) -> list[dict]:
+    """
+    Fetch player stats from fitzRoy R package via rpy2.
+    """
+    try:
+        from rpy2.robjects.packages import importr
+        import rpy2.robjects as ro
+        from rpy2.robjects import pandas2ri
+        pandas2ri.activate()
+        
+        fitzroy = importr('fitzRoy')
+        
+        logger.info("fitzRoy: fetching player stats for season %s", season)
+        
+        # Call R's fetch_player_stats function
+        r_result = fitzroy.fetch_player_stats(season=season, source='afltables')
+        
+        # Convert R DataFrame to Pandas
+        df = pandas2ri.rpy2py(r_result)
+        
+        if df is None or df.empty:
+            logger.warning("fitzRoy: no data for season %s", season)
+            return []
+        
+        logger.info("fitzRoy: got %s rows for season %s", len(df), season)
+        
+        # Convert DataFrame rows to dict list matching your schema
+        rows = []
+        for _, row in df.iterrows():
+            rows.append({
+                "match_id": _coerce_match_id(row.get("Game")),
+                "match_date": _coerce_date(row.get("Date")),
+                "match_round": _coerce_str(row.get("Round")),
+                "match_home_team": _normalise_team_name(row.get("Home.Team")),
+                "match_away_team": _normalise_team_name(row.get("Away.Team")),
+                "season": season,
+                "player_id": _coerce_int(row.get("ID")),
+                "player_first_name": _coerce_str(row.get("First.Name")),
+                "player_last_name": _coerce_str(row.get("Last.Name")),
+                "player_team": _normalise_team_name(row.get("Team")),
+                "guernsey_number": _coerce_int(row.get("Number")),
+                "kicks": _coerce_int(row.get("KI")),
+                "marks": _coerce_int(row.get("MK")),
+                "handballs": _coerce_int(row.get("HB")),
+                "disposals": _coerce_int(row.get("DI")),
+                "effective_disposals": _coerce_int(row.get("DA")),
+                "goals": _coerce_int(row.get("GL")),
+                "behinds": _coerce_int(row.get("BH")),
+                "hitouts": _coerce_int(row.get("HO")),
+                "tackles": _coerce_int(row.get("TK")),
+                "rebounds": _coerce_int(row.get("RB")),
+                "inside_fifties": _coerce_int(row.get("IF")),
+                "clearances": _coerce_int(row.get("CL")),
+                "clangers": _coerce_int(row.get("CG")),
+                "free_kicks_for": _coerce_int(row.get("FF")),
+                "free_kicks_against": _coerce_int(row.get("FA")),
+                "contested_possessions": _coerce_int(row.get("CP")),
+                "uncontested_possessions": _coerce_int(row.get("UP")),
+                "contested_marks": _coerce_int(row.get("CM")),
+                "one_percenters": _coerce_int(row.get("1%")),
+                "bounces": _coerce_int(row.get("BO")),
+                "goal_assists": _coerce_int(row.get("GA")),
+                "afl_fantasy_score": _coerce_int(row.get("Fantasy")),
+            })
+        
+        return rows
+        
+    except Exception as exc:
+        logger.error("fitzRoy fetch failed for season %s: %s", season, exc)
+        return []
 
 def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dict]:
     all_stats: list[dict] = []
