@@ -1066,10 +1066,10 @@ function renderPropCard(player) {
       </div>
 
       <div class="analysis-tabs">
-        <button class="atab active" onclick="switchAtab('vs',this)">vs ${esc(opponent || 'Opp')} (0)</button>
-        <button class="atab" onclick="switchAtab('last5',this)">Last 5</button>
-        <button class="atab" onclick="switchAtab('split',this)">Home / Away</button>
-        <button class="atab" onclick="switchAtab('venue',this)">Venue (0)</button>
+      <button class="atab active" onclick="switchAtab('vs',this)">vs ${esc(opponent || 'Opp')} (loading)</button>
+      <button class="atab" onclick="switchAtab('last5',this)">Last 5</button>
+      <button class="atab" onclick="switchAtab('split',this)">Home / Away</button>
+      <button class="atab" onclick="switchAtab('venue',this)">${_venue ? esc(_venue) + ' (loading)' : 'Venue'}</button>
       </div>
 
       <div id="apanel-vs" class="analysis-panel active">
