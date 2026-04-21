@@ -918,7 +918,7 @@ def register_afl_routes(app, db):
     @app.route("/api/afl/sync/props", methods=["POST"])
     @login_required
     def api_afl_sync_props():
-        api_key = current_app.config.get("ODDS_API_KEY", "")
+        api_key = get_odds_api_key()
         market = request.json.get("market", "player_disposals") if request.json else "player_disposals"
 
         if not api_key:
@@ -1382,7 +1382,7 @@ def afl_nightly_sync(app_context, db):
     logger.info("  ✓ Fryzigg total: %s rows", total_stats)
 
     try:
-        api_key = current_app.config.get("ODDS_API_KEY", "")
+        api_key = get_odds_api_key()
     except Exception:
         api_key = ""
 
