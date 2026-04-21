@@ -40,6 +40,9 @@ ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 AFL_API_BASE = "https://api.afl.com.au"
 AFL_META_BASE = "https://aflapi.afl.com.au"
 
+_ODDS_API_ENV_VARS = ("ODDS_API_KEY", "THE_ODDS_API_KEY", "ODDSAPI_KEY")
+_ODDS_API_KEY_MIN_LENGTH = 10
+
 HEADERS = {
     "User-Agent": (
         "TheFormAnalyst/1.0 "
@@ -104,7 +107,7 @@ def _get(url: str, params: Optional[dict] = None, retries: int = 3) -> Optional[
             response.raise_for_status()
 
             if not response.text or not response.text.strip():
-                logger.warning("Empty response from %s (params=%s)", url, params)
+                logger.warning("Empty response from %s", url)
                 return None
 
             return response.json()
@@ -1298,12 +1301,94 @@ def get_odds_api_key() -> str:
     Read The Odds API key from Railway environment variables.
     Supports a couple of common variable names.
     """
-    return (
+    key = (
         os.environ.get("ODDS_API_KEY")
         or os.environ.get("THE_ODDS_API_KEY")
         or os.environ.get("ODDSAPI_KEY")
         or ""
     ).strip()
+
+    if not key:
+        logger.error("No Odds API key found in environment variables")
+        logger.info("Set ODDS_API_KEY in Railway environment variables")
+        return ""
+
+    if len(key) < _ODDS_API_KEY_MIN_LENGTH:
+        logger.error("Odds API key appears invalid (too short: %d characters)", len(key))
+        return ""
+
+    logger.info("Found Odds API key in environment (%d characters)", len(key))
+    return key
+
+
+def validate_odds_api_key(api_key: str) -> bool:
+    """Validate The Odds API key by making a test request to the sports endpoint."""
+    if not api_key or len(api_key.strip()) < _ODDS_API_KEY_MIN_LENGTH:
+        return False
+
+    test_url = f"{ODDS_API_BASE}/sports"
+    test_data = _get(test_url, {"api_key": api_key.strip()})
+
+    if test_data and isinstance(test_data, list):
+        logger.info("Odds API key validation successful")
+        return True
+
+    logger.error("Odds API key validation failed — check that ODDS_API_KEY is correct in Railway")
+    return False
+
+
+def debug_railway_environment() -> None:
+    """Log Railway environment variables relevant to The Odds API."""
+    logger.info("Debugging Railway environment variables:")
+
+    odds_key = os.environ.get("ODDS_API_KEY")
+    if odds_key:
+        logger.info("ODDS_API_KEY found (%d characters)", len(odds_key))
+    else:
+        logger.error("ODDS_API_KEY not found")
+
+    related = [k for k in os.environ if k in _ODDS_API_ENV_VARS]
+    if related:
+        logger.info("Related environment variables: %s", related)
+    else:
+        logger.info("No related environment variables found")
+
+
+def test_odds_api_integration(api_key: Optional[str] = None) -> dict:
+    """Test The Odds API integration with current configuration."""
+    results: dict = {
+        "api_key_found": False,
+        "api_key_valid": False,
+        "afl_events_found": False,
+        "props_available": False,
+        "error_messages": [],
+    }
+
+    try:
+        key = api_key or get_odds_api_key()
+        if key:
+            results["api_key_found"] = True
+
+            if validate_odds_api_key(key):
+                results["api_key_valid"] = True
+
+                events = fetch_afl_events(api_key=key)
+                if events:
+                    results["afl_events_found"] = True
+
+                    props = fetch_afl_player_props(
+                        api_key=key,
+                        markets="player_disposals",
+                        event_limit=1,
+                    )
+                    if props:
+                        results["props_available"] = True
+
+    except Exception as exc:
+        results["error_messages"].append(str(exc))
+        logger.exception("Unexpected error during Odds API integration test: %s", exc)
+
+    return results
 
 
 def fetch_afl_events(api_key: Optional[str] = None) -> list[dict]:
@@ -1316,12 +1401,13 @@ def fetch_afl_events(api_key: Optional[str] = None) -> list[dict]:
         return []
 
     url = f"{ODDS_API_BASE}/sports/aussierules_afl/events"
-    data = _get(url, {"apiKey": key})
+    data = _get(url, {"api_key": key})
 
     if not data or not isinstance(data, list):
         logger.warning("Odds API returned no AFL events")
         return []
 
+    logger.info("Fetched %d AFL events from Odds API", len(data))
     return data
 
 
@@ -1342,7 +1428,7 @@ def fetch_afl_match_odds(
 
     url = f"{ODDS_API_BASE}/sports/aussierules_afl/odds"
     params = {
-        "apiKey": key,
+        "api_key": key,
         "regions": regions,
         "markets": markets,
         "oddsFormat": "decimal",
@@ -1467,7 +1553,7 @@ def fetch_afl_player_props(
 
         odds_url = f"{ODDS_API_BASE}/sports/aussierules_afl/events/{event_id}/odds"
         params = {
-            "apiKey": key,
+            "api_key": key,
             "regions": regions,
             "markets": market_string,
             "oddsFormat": "decimal",
