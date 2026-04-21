@@ -1198,30 +1198,6 @@ function renderLast5Panel(games, stat) {
   `;
 }
 
-function computeHomeAwaySplit(games, playerTeam, stat) {
-  const homeGames = games.filter(g => norm(g.home_team) === norm(playerTeam));
-  const awayGames = games.filter(g => norm(g.away_team) === norm(playerTeam));
-
-  function avg(arr) {
-    const vals = arr.map(g => safeNum(g[stat], 0));
-    return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '—';
-  }
-
-  function best(arr) {
-    const vals = arr.map(g => safeNum(g[stat], 0));
-    return vals.length ? Math.max(...vals) : '—';
-  }
-
-  return {
-    homeAvg: avg(homeGames),
-    homeGames: homeGames.length,
-    homeBest: best(homeGames),
-    awayAvg: avg(awayGames),
-    awayGames: awayGames.length,
-    awayBest: best(awayGames),
-  };
-}
-
 function renderSplitPanel(player, stat) {
   function avg(arr) {
     const vals = arr.map(g => safeNum(g[stat], 0));
