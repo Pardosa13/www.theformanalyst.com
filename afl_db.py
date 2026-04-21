@@ -7,6 +7,7 @@ Run init_afl_tables(db) once to create all tables.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any
 
@@ -193,7 +194,7 @@ AFL_SCHEMA_STATEMENTS = [
         line            FLOAT,
         odds            FLOAT,
         fetched_at      TIMESTAMP DEFAULT NOW(),
-        UNIQUE(event_id, bookmaker, market, player_name, line_type)
+        UNIQUE(event_id, bookmaker, market, player_name, line_type, line)
     )
     """,
     """
@@ -490,9 +491,9 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             # FIX: ensure player_id always exists (needed for 2026 fallback data)
             player_id = _i(row.get("player_id"))
             if not player_id:
-                player_id = abs(hash(
-                    f"{row.get('player_first_name')}_{row.get('player_last_name')}_{row.get('player_team')}"
-                )) % 10_000_000
+                player_id = int(hashlib.md5(
+                    f"{row.get('player_first_name')}_{row.get('player_last_name')}_{row.get('player_team')}".encode('utf-8')
+                ).hexdigest(), 16) % 10_000_000
 
             if not match_id:
                 continue
@@ -628,13 +629,12 @@ def upsert_player_props(db, props: list[dict]) -> int:
             :event_id, :home_team, :away_team, :commence_time,
             :bookmaker, :market, :player_name, :line_type, :line, :odds, NOW()
         )
-        ON CONFLICT (event_id, bookmaker, market, player_name, line_type) DO UPDATE SET
-            home_team   = EXCLUDED.home_team,
-            away_team   = EXCLUDED.away_team,
+        ON CONFLICT (event_id, bookmaker, market, player_name, line_type, line) DO UPDATE SET
+            home_team     = EXCLUDED.home_team,
+            away_team     = EXCLUDED.away_team,
             commence_time = EXCLUDED.commence_time,
-            line        = EXCLUDED.line,
-            odds        = EXCLUDED.odds,
-            fetched_at  = NOW()
+            odds          = EXCLUDED.odds,
+            fetched_at    = NOW()
     """)
 
     count = 0
@@ -647,8 +647,8 @@ def upsert_player_props(db, props: list[dict]) -> int:
                 "commence_time": prop.get("commence_time"),
                 "bookmaker": _s(prop.get("bookmaker")),
                 "market": _s(prop.get("market")),
-                "player_name": _s(prop.get("player")),
-                "line_type": _s(prop.get("name")),
+                "player_name": _s(prop.get("player_name", prop.get("player"))),
+                "line_type": _s(prop.get("line_type", prop.get("selection_name"))),
                 "line": prop.get("line", 0),
                 "odds": prop.get("odds", 0),
             })

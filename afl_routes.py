@@ -1265,11 +1265,11 @@ def _db_get_standings(db, year: int, round_number: int | None = None) -> list[di
 def _db_get_props(db, market: str = "player_disposals") -> list[dict]:
     sql = db.text(
         """
-        SELECT DISTINCT ON (player_name, line_type) *
+        SELECT DISTINCT ON (player_name, line_type, line) *
         FROM afl_player_props
         WHERE market = :market
           AND fetched_at > NOW() - INTERVAL '24 hours'
-        ORDER BY player_name, line_type, fetched_at DESC
+        ORDER BY player_name, line_type, line, fetched_at DESC
         """
     )
     with db.engine.connect() as conn:

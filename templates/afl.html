@@ -609,10 +609,15 @@
           <option value="player_disposals">Player Disposals</option>
           <option value="player_marks">Player Marks</option>
           <option value="player_tackles">Player Tackles</option>
+          <option value="player_goals">Player Goals</option>
+          <option value="player_afl_fantasy_points">AFL Fantasy Points</option>
         </select>
         <input type="number" class="form-control" id="minEdge" value="2" step="0.5" style="max-width:140px;" placeholder="Min edge">
         <button class="btn btn-primary" onclick="loadValueFinder()">
           <i class="bi bi-search"></i> Find Value
+        </button>
+        <button class="btn btn-secondary" id="loadPropsBtn" onclick="loadOddsProps()" title="Fetch latest prop lines from Odds API">
+          <i class="bi bi-cloud-download"></i> Load Props
         </button>
       </div>
       <div id="valueResults">
@@ -1548,6 +1553,33 @@ function jumpToTeam(home, away, venue, side) {
   document.getElementById('teamBtnHome').textContent = home;
   document.getElementById('teamBtnAway').textContent = away;
   selectTeam(side);
+}
+
+// ── Load Odds API props ──────────────────────────────────────────
+function loadOddsProps() {
+  const btn = document.getElementById('loadPropsBtn');
+  const market = document.getElementById('valueMarket').value;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-sm"></span> Loading…'; }
+
+  fetch('/api/afl/sync/props', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ market }),
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Load Props'; }
+      if (data.status === 'ok') {
+        const el = document.getElementById('valueResults');
+        if (el) el.innerHTML = `<div class="prop-empty"><i class="bi bi-check-circle" style="color:var(--success);"></i><p>Loaded ${data.rows_synced || 0} prop lines. Click <strong>Find Value</strong> to analyse.</p></div>`;
+      } else {
+        alert(data.message || 'Failed to load props. Check ODDS_API_KEY is configured.');
+      }
+    })
+    .catch(() => {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Load Props'; }
+      alert('Failed to load props. Check ODDS_API_KEY is configured.');
+    });
 }
 
 // ── Value finder ─────────────────────────────────────────────────
