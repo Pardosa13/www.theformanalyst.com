@@ -1606,7 +1606,7 @@ function loadValueFinder() {
     });
 }
 function loadVsOpponentHistory(playerId, opponent) {
-  fetch(`/api/afl/player-vs-opponent?player_id=${playerId}&opponent=${encodeURIComponent(opponent)}&season_from=2022`)
+  return fetch(`/api/afl/player-vs-opponent?player_id=${playerId}&opponent=${encodeURIComponent(opponent)}&season_from=2022`)
     .then(r => r.json())
     .then(data => {
       _vsHistoryLog = data.game_log || [];
@@ -1632,7 +1632,7 @@ function loadVsOpponentHistory(playerId, opponent) {
 }
 
 function loadVenueHistory(playerId, venue) {
-  fetch(`/api/afl/player-vs-venue?player_id=${playerId}&venue=${encodeURIComponent(venue)}&season_from=2022`)
+ return fetch(`/api/afl/player-vs-venue?player_id=${playerId}&venue=${encodeURIComponent(venue)}&season_from=2022`)
     .then(r => r.json())
     .then(data => {
       _venueHistoryLog = data.game_log || [];
@@ -1658,7 +1658,7 @@ function loadVenueHistory(playerId, venue) {
     });
 }
   function loadHomeAwayHistory(playerId, playerTeam) {
-  fetch(`/api/afl/player-home-away?player_id=${playerId}&team=${encodeURIComponent(playerTeam)}&season_from=2022`)
+return fetch(`/api/afl/player-home-away?player_id=${playerId}&team=${encodeURIComponent(playerTeam)}&season_from=2022`)
     .then(r => r.json())
     .then(data => {
       _historyHomeGames = data.home_games || [];
