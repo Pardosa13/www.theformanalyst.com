@@ -1293,66 +1293,247 @@ def fetch_afltables_results(year: int) -> list[dict]:
 # THE ODDS API
 # ─────────────────────────────────────────────
 
-def fetch_afl_player_props(api_key: str, market: str = "player_disposals") -> list[dict]:
-    if not api_key:
+def get_odds_api_key() -> str:
+    """
+    Read The Odds API key from Railway environment variables.
+    Supports a couple of common variable names.
+    """
+    return (
+        os.environ.get("ODDS_API_KEY")
+        or os.environ.get("THE_ODDS_API_KEY")
+        or os.environ.get("ODDSAPI_KEY")
+        or ""
+    ).strip()
+
+
+def fetch_afl_events(api_key: Optional[str] = None) -> list[dict]:
+    """
+    Fetch upcoming AFL events from The Odds API.
+    """
+    key = (api_key or get_odds_api_key()).strip()
+    if not key:
+        logger.warning("No Odds API key configured — skipping AFL events fetch")
+        return []
+
+    url = f"{ODDS_API_BASE}/sports/aussierules_afl/events"
+    data = _get(url, {"apiKey": key})
+
+    if not data or not isinstance(data, list):
+        logger.warning("Odds API returned no AFL events")
+        return []
+
+    return data
+
+
+def fetch_afl_match_odds(
+    api_key: Optional[str] = None,
+    markets: str = "h2h,spreads,totals",
+    regions: str = "au",
+    event_limit: Optional[int] = None,
+) -> list[dict]:
+    """
+    Fetch featured AFL match odds for upcoming events.
+    Useful for head-to-head / line / totals cards on the website.
+    """
+    key = (api_key or get_odds_api_key()).strip()
+    if not key:
+        logger.warning("No Odds API key configured — skipping match odds fetch")
+        return []
+
+    url = f"{ODDS_API_BASE}/sports/aussierules_afl/odds"
+    params = {
+        "apiKey": key,
+        "regions": regions,
+        "markets": markets,
+        "oddsFormat": "decimal",
+    }
+
+    data = _get(url, params)
+    if not data or not isinstance(data, list):
+        return []
+
+    if event_limit is not None:
+        data = data[:event_limit]
+
+    rows: list[dict] = []
+
+    for event in data:
+        event_id = event.get("id", "")
+        home_team = event.get("home_team", "")
+        away_team = event.get("away_team", "")
+        commence_time = event.get("commence_time", "")
+
+        for bookmaker in event.get("bookmakers", []) or []:
+            bookmaker_key = bookmaker.get("key", "")
+            bookmaker_name = bookmaker.get("title", "")
+            last_update = bookmaker.get("last_update", "")
+
+            for market in bookmaker.get("markets", []) or []:
+                market_key = market.get("key", "")
+
+                for outcome in market.get("outcomes", []) or []:
+                    rows.append(
+                        {
+                            "event_id": event_id,
+                            "home_team": home_team,
+                            "away_team": away_team,
+                            "commence_time": commence_time,
+                            "bookmaker_key": bookmaker_key,
+                            "bookmaker": bookmaker_name,
+                            "last_update": last_update,
+                            "market": market_key,
+                            "selection_name": outcome.get("name", ""),
+                            "line": outcome.get("point"),
+                            "odds": outcome.get("price"),
+                        }
+                    )
+
+    logger.info("Odds API: fetched %s AFL match odds rows", len(rows))
+    return rows
+
+
+def fetch_afl_player_props(
+    api_key: Optional[str] = None,
+    markets: Optional[list[str]] = None,
+    regions: str = "au",
+    bookmakers: Optional[list[str]] = None,
+    event_limit: int = 9,
+) -> list[dict]:
+    """
+    Fetch AFL player props from The Odds API.
+
+    Notes:
+    - Player props are queried via the event-specific odds endpoint.
+    - `markets` can include one or many AFL player prop market keys.
+    """
+    key = (api_key or get_odds_api_key()).strip()
+    if not key:
         logger.warning("No Odds API key configured — skipping prop fetch")
         return []
 
-    events_url = f"{ODDS_API_BASE}/sports/aussierules_afl/events"
-    events_data = _get(events_url, {"apiKey": api_key, "regions": "au"})
+    if not markets:
+        markets = [
+            "player_disposals",
+            "player_afl_fantasy_points",
+            "player_marks_over",
+            "player_tackles_over",
+            "player_goals_scored_over",
+        ]
 
-    if not events_data or not isinstance(events_data, list):
+    events = fetch_afl_events(api_key=key)
+    if not events:
         return []
+
+    if event_limit:
+        events = events[:event_limit]
+
+    market_string = ",".join(markets)
+    bookmaker_string = ",".join(bookmakers) if bookmakers else None
 
     props: list[dict] = []
 
-    for event in events_data[:9]:
+    for event in events:
         event_id = event.get("id")
         if not event_id:
             continue
 
         odds_url = f"{ODDS_API_BASE}/sports/aussierules_afl/events/{event_id}/odds"
         params = {
-            "apiKey": api_key,
-            "regions": "au",
-            "markets": market,
+            "apiKey": key,
+            "regions": regions,
+            "markets": market_string,
             "oddsFormat": "decimal",
         }
+        if bookmaker_string:
+            params["bookmakers"] = bookmaker_string
 
         odds_data = _get(odds_url, params)
         if not odds_data or not isinstance(odds_data, dict):
             continue
 
-        home = odds_data.get("home_team", "")
-        away = odds_data.get("away_team", "")
-        commence = odds_data.get("commence_time", "")
+        home_team = odds_data.get("home_team", "")
+        away_team = odds_data.get("away_team", "")
+        commence_time = odds_data.get("commence_time", "")
 
-        for bookmaker in odds_data.get("bookmakers", []):
+        for bookmaker in odds_data.get("bookmakers", []) or []:
+            bookmaker_key = bookmaker.get("key", "")
             bookmaker_name = bookmaker.get("title", "")
+            last_update = bookmaker.get("last_update", "")
 
-            for market_row in bookmaker.get("markets", []):
-                if market_row.get("key") != market:
-                    continue
+            for market_row in bookmaker.get("markets", []) or []:
+                market_key = market_row.get("key", "")
 
-                for outcome in market_row.get("outcomes", []):
+                for outcome in market_row.get("outcomes", []) or []:
                     props.append(
                         {
                             "event_id": event_id,
-                            "home_team": home,
-                            "away_team": away,
-                            "commence_time": commence,
+                            "home_team": home_team,
+                            "away_team": away_team,
+                            "commence_time": commence_time,
+                            "bookmaker_key": bookmaker_key,
                             "bookmaker": bookmaker_name,
-                            "market": market,
+                            "last_update": last_update,
+                            "market": market_key,
                             "player": outcome.get("description", ""),
-                            "name": outcome.get("name", ""),
-                            "line": outcome.get("point", 0),
-                            "odds": outcome.get("price", 0),
+                            "selection_name": outcome.get("name", ""),
+                            "line": outcome.get("point"),
+                            "odds": outcome.get("price"),
+                            "deep_link": outcome.get("link", ""),
                         }
                     )
 
-        time.sleep(0.5)
+        time.sleep(0.3)
 
+    logger.info(
+        "Odds API: fetched %s AFL player prop rows across %s market(s)",
+        len(props),
+        len(markets),
+    )
     return props
+
+
+def get_best_afl_player_props(
+    markets: Optional[list[str]] = None,
+    bookmakers: Optional[list[str]] = None,
+) -> list[dict]:
+    """
+    Deduplicate player props to the best available odds per:
+    (event, player, market, line, selection_name)
+    """
+    rows = fetch_afl_player_props(markets=markets, bookmakers=bookmakers)
+    if not rows:
+        return []
+
+    best: dict[tuple, dict] = {}
+
+    for row in rows:
+        key = (
+            row.get("event_id"),
+            row.get("player"),
+            row.get("market"),
+            row.get("line"),
+            row.get("selection_name"),
+        )
+
+        current_best = best.get(key)
+        current_price = _coerce_float(current_best.get("odds")) if current_best else 0.0
+        new_price = _coerce_float(row.get("odds"))
+
+        if current_best is None or new_price > current_price:
+            best[key] = row
+
+    result = list(best.values())
+    result.sort(
+        key=lambda x: (
+            _coerce_str(x.get("commence_time")),
+            _coerce_str(x.get("player")),
+            _coerce_str(x.get("market")),
+            _coerce_float(x.get("line")),
+        )
+    )
+
+    logger.info("Odds API: reduced %s prop rows to %s best-price rows", len(rows), len(result))
+    return result
 
 
 # ─────────────────────────────────────────────
