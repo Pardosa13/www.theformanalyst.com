@@ -770,6 +770,8 @@ let _propStat = 'disposals';
 let _selPlayerId = null;
 let _selPlayer = null;
 let _gameLog = [];
+let _vsHistoryLog = [];
+let _venueHistoryLog = [];
 let _chartWin = 'all';
 
 // ── Shared utils ─────────────────────────────────────────────────
@@ -1508,6 +1510,8 @@ function loadVsOpponentHistory(playerId, opponent) {
   fetch(`/api/afl/player-vs-opponent?player_id=${playerId}&opponent=${encodeURIComponent(opponent)}&season_from=2022`)
     .then(r => r.json())
     .then(data => {
+      _vsHistoryLog = data.game_log || [];
+
       const body = document.querySelector('#apanel-vs .analysis-body');
       const tabBtn = document.querySelector('.atab[onclick*="switchAtab(\'vs\'"]');
 
@@ -1518,35 +1522,41 @@ function loadVsOpponentHistory(playerId, opponent) {
       if (!body) return;
 
       body.innerHTML = renderVsOpponentPanel(
-        data.game_log || [],
+        _vsHistoryLog,
         document.getElementById('propStatSelect').value,
         opponent
       );
     })
-    .catch(() => {});
+    .catch(() => {
+      _vsHistoryLog = [];
+    });
 }
 
 function loadVenueHistory(playerId, venue) {
   fetch(`/api/afl/player-vs-venue?player_id=${playerId}&venue=${encodeURIComponent(venue)}&season_from=2022`)
     .then(r => r.json())
     .then(data => {
+      _venueHistoryLog = data.game_log || [];
+
       const body = document.querySelector('#apanel-venue .analysis-body');
       const venueTab = document.querySelector('.atab[onclick*="switchAtab(\'venue\'"]');
 
       if (venueTab) {
-        venueTab.textContent = `Venue (${safeNum(data.games, 0)})`;
+        venueTab.textContent = `${venue} (${safeNum(data.games, 0)})`;
       }
 
       if (!body) return;
 
       body.innerHTML = renderVenuePanel(
-        data.game_log || [],
+        _venueHistoryLog,
         document.getElementById('propStatSelect').value,
         venue,
-        data.game_log || []
+        _venueHistoryLog
       );
     })
-    .catch(() => {});
+    .catch(() => {
+      _venueHistoryLog = [];
+    });
 }
 // ── Global refresh ───────────────────────────────────────────────
 function refreshAll() {
