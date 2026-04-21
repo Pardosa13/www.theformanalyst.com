@@ -965,6 +965,15 @@ function selectPlayer(id) {
       }
 
       renderPropCard(data);
+      const opponent = _teamSide === 'home' ? _away : _home;
+
+if (opponent) {
+  loadVsOpponentHistory(id, opponent);
+}
+
+if (_venue) {
+  loadVenueHistory(id, _venue);
+}
     })
     .catch(() => {
       panel.innerHTML = '<div class="prop-empty" style="padding:40px;color:var(--danger);">Failed to load player data</div>';
