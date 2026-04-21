@@ -1276,12 +1276,15 @@ function renderVenuePanel(venueGames, stat, venue, allGames) {
 
 function filterByVenue(venueStr) {
   const stat = document.getElementById('propStatSelect').value;
+
   const filtered = venueStr
-    ? _gameLog.filter(g => norm(g.venue) === norm(venueStr))
-    : _gameLog;
+    ? _venueHistoryLog.filter(g => norm(g.venue) === norm(venueStr))
+    : _venueHistoryLog;
 
   const venueVals = filtered.map(g => safeNum(g[stat], 0));
-  const venueAvg = venueVals.length ? (venueVals.reduce((a, b) => a + b, 0) / venueVals.length).toFixed(1) : '—';
+  const venueAvg = venueVals.length
+    ? (venueVals.reduce((a, b) => a + b, 0) / venueVals.length).toFixed(1)
+    : '—';
 
   const wrap = document.getElementById('venueTableWrap');
   if (!wrap) return;
