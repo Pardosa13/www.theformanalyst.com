@@ -1504,7 +1504,50 @@ function loadValueFinder() {
       el.innerHTML = '<div class="prop-empty" style="color:var(--danger);">Value finder failed.</div>';
     });
 }
+function loadVsOpponentHistory(playerId, opponent) {
+  fetch(`/api/afl/player-vs-opponent?player_id=${playerId}&opponent=${encodeURIComponent(opponent)}&season_from=2022`)
+    .then(r => r.json())
+    .then(data => {
+      const body = document.querySelector('#apanel-vs .analysis-body');
+      const tabBtn = document.querySelector('.atab[onclick*="switchAtab(\'vs\'"]');
 
+      if (tabBtn) {
+        tabBtn.textContent = `vs ${opponent} (${safeNum(data.games, 0)})`;
+      }
+
+      if (!body) return;
+
+      body.innerHTML = renderVsOpponentPanel(
+        data.game_log || [],
+        document.getElementById('propStatSelect').value,
+        opponent
+      );
+    })
+    .catch(() => {});
+}
+
+function loadVenueHistory(playerId, venue) {
+  fetch(`/api/afl/player-vs-venue?player_id=${playerId}&venue=${encodeURIComponent(venue)}&season_from=2022`)
+    .then(r => r.json())
+    .then(data => {
+      const body = document.querySelector('#apanel-venue .analysis-body');
+      const venueTab = document.querySelector('.atab[onclick*="switchAtab(\'venue\'"]');
+
+      if (venueTab) {
+        venueTab.textContent = `Venue (${safeNum(data.games, 0)})`;
+      }
+
+      if (!body) return;
+
+      body.innerHTML = renderVenuePanel(
+        data.game_log || [],
+        document.getElementById('propStatSelect').value,
+        venue,
+        data.game_log || []
+      );
+    })
+    .catch(() => {});
+}
 // ── Global refresh ───────────────────────────────────────────────
 function refreshAll() {
   const btn = document.getElementById('refreshBtn');
