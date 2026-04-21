@@ -1615,7 +1615,10 @@ function loadVenueHistory(playerId, venue) {
 
       body.innerHTML = renderSplitPanel(_selPlayer, document.getElementById('propStatSelect').value);
     })
-    .catch(() => {});
+        .catch(() => {
+      _historyHomeGames = [];
+      _historyAwayGames = [];
+    });
 }
 // ── Global refresh ───────────────────────────────────────────────
 function refreshAll() {
