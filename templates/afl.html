@@ -999,7 +999,7 @@ function renderPropCard(player) {
 
   const allVals = sourceGames.map(g => safeNum(g[stat], 0));
   const l5v = allVals.slice(0, 5);
-  const l10v = allVals.slice(0, 10);10);
+  const l10v = allVals.slice(0, 10)
 
   function hr(arr, line) {
     return arr.length ? Math.round(arr.filter(v => v >= line).length / arr.length * 100) : 0;
