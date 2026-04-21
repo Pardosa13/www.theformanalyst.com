@@ -1017,12 +1017,21 @@ function renderPropCard(player) {
         <div style="flex:1;min-width:0;">
           <div class="player-hdr-name">${esc(player.name || '')}</div>
           <div class="player-hdr-meta">
-            <span class="meta-pill">${esc(player.team || '')}</span>
-            ${player.guernsey ? `<span class="meta-pill">#${esc(player.guernsey)}</span>` : ''}
-            <span class="meta-pill">${player.games_played || 0} games</span>
-            ${opponent ? `<span class="meta-pill" style="color:var(--accent);border-color:var(--border-accent);">vs ${esc(opponent)}</span>` : ''}
-            ${_venue ? `<span class="meta-pill" style="color:#fbbf24;border-color:rgba(245,158,11,.3);">@ ${esc(_venue)}</span>` : ''}
-          </div>
+  <span class="meta-pill">${esc(player.team || '')}</span>
+  ${player.guernsey ? `<span class="meta-pill">#${esc(player.guernsey)}</span>` : ''}
+  <span class="meta-pill">${player.games_played || 0} games</span>
+
+  <span class="meta-pill" style="background:rgba(102,126,234,.15);border-color:var(--border-accent);color:var(--accent);">
+    2026 form
+  </span>
+
+  <span class="meta-pill" style="background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.3);color:#fbbf24;">
+    History: 2022+
+  </span>
+
+  ${opponent ? `<span class="meta-pill" style="color:var(--accent);border-color:var(--border-accent);">vs ${esc(opponent)}</span>` : ''}
+  ${_venue ? `<span class="meta-pill" style="color:#fbbf24;border-color:rgba(245,158,11,.3);">@ ${esc(_venue)}</span>` : ''}
+</div>
         </div>
       </div>
 
