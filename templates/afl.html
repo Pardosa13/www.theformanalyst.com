@@ -1583,6 +1583,20 @@ function loadVenueHistory(playerId, venue) {
       _venueHistoryLog = [];
     });
 }
+  function loadHomeAwayHistory(playerId, playerTeam) {
+  fetch(`/api/afl/player-home-away?player_id=${playerId}&team=${encodeURIComponent(playerTeam)}&season_from=2022`)
+    .then(r => r.json())
+    .then(data => {
+      _historyHomeGames = data.home_games || [];
+      _historyAwayGames = data.away_games || [];
+
+      const body = document.querySelector('#apanel-split .analysis-body');
+      if (!body || !_selPlayer) return;
+
+      body.innerHTML = renderSplitPanel(_selPlayer, document.getElementById('propStatSelect').value);
+    })
+    .catch(() => {});
+}
 // ── Global refresh ───────────────────────────────────────────────
 function refreshAll() {
   const btn = document.getElementById('refreshBtn');
