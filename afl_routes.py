@@ -31,6 +31,7 @@ from afl_data import (
     fetch_squiggle_standings,
     fetch_squiggle_tips,
     fetch_squiggle_upcoming_games,
+    get_odds_api_key,
     get_player_last_n_games,
     get_player_season_averages,
     get_player_vs_opponent,
