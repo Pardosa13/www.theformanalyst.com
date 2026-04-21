@@ -652,34 +652,34 @@ def register_afl_routes(app, db):
             book_line = prop.get("line", 0)
 
             # split prop name like "J. Smith"
-parts = player_name.replace(".", "").split()
-if len(parts) >= 2:
-    first_initial = parts[0][0].lower()
-    last_name = parts[-1].lower()
-else:
-    continue
+            parts = player_name.replace(".", "").split()
+            if len(parts) >= 2:
+                first_initial = parts[0][0].lower()
+                last_name = parts[-1].lower()
+            else:
+                continue
 
-sql = db.text("""
-    SELECT *
-    FROM afl_player_stats
-    WHERE LOWER(player_last_name) = :last_name
-      AND LOWER(player_first_name) LIKE :first_initial
-      AND season = ANY(:seasons)
-    ORDER BY season DESC, match_date DESC
-    LIMIT 200
-""")
+            sql = db.text("""
+                SELECT *
+                FROM afl_player_stats
+                WHERE LOWER(player_last_name) = :last_name
+                  AND LOWER(player_first_name) LIKE :first_initial
+                  AND season = ANY(:seasons)
+                ORDER BY season DESC, match_date DESC
+                LIMIT 200
+            """)
 
-with db.engine.connect() as conn:
-    rows = conn.execute(sql, {
-        "last_name": last_name,
-        "first_initial": f"{first_initial}%",
-        "seasons": effective_seasons
-    }).mappings().fetchall()
+            with db.engine.connect() as conn:
+                rows = conn.execute(sql, {
+                    "last_name": last_name,
+                    "first_initial": f"{first_initial}%",
+                    "seasons": effective_seasons
+                }).mappings().fetchall()
 
-player_rows = [dict(r) for r in rows]
+            player_rows = [dict(r) for r in rows]
 
-if not player_rows:
-    continue
+            if not player_rows:
+                continue
 
             grouped = _group_players(player_rows)
             if len(grouped) != 1:
