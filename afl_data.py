@@ -1392,15 +1392,42 @@ def fetch_afl_match_odds(
     return rows
 
 
+def _normalise_prop_market(market_key: str) -> str:
+    mapping = {
+        "player_disposals": "player_disposals",
+        "player_marks": "player_marks",
+        "player_marks_over": "player_marks",
+        "player_tackles": "player_tackles",
+        "player_tackles_over": "player_tackles",
+        "player_goals": "player_goals",
+        "player_goals_scored_over": "player_goals",
+        "player_afl_fantasy_points": "player_afl_fantasy_points",
+    }
+    return mapping.get(_coerce_str(market_key), _coerce_str(market_key))
+
+
+def _normalise_line_type(value: Any) -> str:
+    v = _coerce_str(value).strip().lower()
+    if v == "over":
+        return "Over"
+    if v == "under":
+        return "Under"
+    return _coerce_str(value)
+
+
 def fetch_afl_player_props(
     api_key: Optional[str] = None,
-    markets: Optional[list[str]] = None,
+    markets: Optional[str | list[str]] = None,
     regions: str = "au",
     bookmakers: Optional[list[str]] = None,
     event_limit: int = 9,
 ) -> list[dict]:
     """
     Fetch AFL player props from The Odds API.
+
+    Supports either:
+    - a single market string
+    - a list of market strings
 
     Notes:
     - Player props are queried via the event-specific odds endpoint.
@@ -1414,11 +1441,12 @@ def fetch_afl_player_props(
     if not markets:
         markets = [
             "player_disposals",
-            "player_afl_fantasy_points",
-            "player_marks_over",
-            "player_tackles_over",
-            "player_goals_scored_over",
+            "player_marks",
+            "player_tackles",
+            "player_goals",
         ]
+    elif isinstance(markets, str):
+        markets = [markets]
 
     events = fetch_afl_events(api_key=key)
     if not events:
@@ -1461,7 +1489,7 @@ def fetch_afl_player_props(
             last_update = bookmaker.get("last_update", "")
 
             for market_row in bookmaker.get("markets", []) or []:
-                market_key = market_row.get("key", "")
+                market_key = _normalise_prop_market(market_row.get("key", ""))
 
                 for outcome in market_row.get("outcomes", []) or []:
                     props.append(
@@ -1474,7 +1502,8 @@ def fetch_afl_player_props(
                             "bookmaker": bookmaker_name,
                             "last_update": last_update,
                             "market": market_key,
-                            "player": outcome.get("description", ""),
+                            "player_name": outcome.get("description", ""),
+                            "line_type": _normalise_line_type(outcome.get("name", "")),
                             "selection_name": outcome.get("name", ""),
                             "line": outcome.get("point"),
                             "odds": outcome.get("price"),
@@ -1509,7 +1538,7 @@ def get_best_afl_player_props(
     for row in rows:
         key = (
             row.get("event_id"),
-            row.get("player"),
+            row.get("player_name"),
             row.get("market"),
             row.get("line"),
             row.get("selection_name"),
@@ -1526,7 +1555,7 @@ def get_best_afl_player_props(
     result.sort(
         key=lambda x: (
             _coerce_str(x.get("commence_time")),
-            _coerce_str(x.get("player")),
+            _coerce_str(x.get("player_name")),
             _coerce_str(x.get("market")),
             _coerce_float(x.get("line")),
         )
