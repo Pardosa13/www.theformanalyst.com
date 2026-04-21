@@ -606,12 +606,14 @@
     <div class="afl-card-body">
       <div class="value-finder-bar">
         <select class="form-select" id="valueMarket" style="width:200px;">
-          <option value="player_disposals">Player Disposals</option>
-          <option value="player_marks">Player Marks</option>
-          <option value="player_tackles">Player Tackles</option>
-          <option value="player_goals">Player Goals</option>
-          <option value="player_afl_fantasy_points">AFL Fantasy Points</option>
-        </select>
+  <option value="player_disposals">Player Disposals</option>
+  <option value="player_marks_over">Player Marks</option>
+  <option value="player_tackles_over">Player Tackles</option>
+  <option value="player_goals_scored_over">Player Goals</option>
+  <option value="player_afl_fantasy_points">AFL Fantasy Points</option>
+  <option value="player_kicks_over">Player Kicks</option>
+  <option value="player_handballs_over">Player Handballs</option>
+</select>
         <input type="number" class="form-control" id="minEdge" value="2" step="0.5" style="max-width:140px;" placeholder="Min edge">
         <button class="btn btn-primary" onclick="loadValueFinder()">
           <i class="bi bi-search"></i> Find Value
