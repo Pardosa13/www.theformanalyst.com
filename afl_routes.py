@@ -62,8 +62,9 @@ def register_afl_routes(app, db):
         value_bets = _db_count(
             db,
             """
-            SELECT COUNT(DISTINCT player_name)
+            SELECT COUNT(*)
             FROM afl_player_props
+            WHERE market = :market
             WHERE fetched_at > NOW() - INTERVAL '24 hours'
             """,
         )
@@ -650,14 +651,35 @@ def register_afl_routes(app, db):
             player_name = prop.get("player_name", "")
             book_line = prop.get("line", 0)
 
-            player_rows = _db_player_search(
-                db,
-                name=player_name,
-                seasons=effective_seasons,
-                limit=200,
-            )
-            if not player_rows:
-                continue
+            # split prop name like "J. Smith"
+parts = player_name.replace(".", "").split()
+if len(parts) >= 2:
+    first_initial = parts[0][0].lower()
+    last_name = parts[-1].lower()
+else:
+    continue
+
+sql = db.text("""
+    SELECT *
+    FROM afl_player_stats
+    WHERE LOWER(player_last_name) = :last_name
+      AND LOWER(player_first_name) LIKE :first_initial
+      AND season = ANY(:seasons)
+    ORDER BY season DESC, match_date DESC
+    LIMIT 200
+""")
+
+with db.engine.connect() as conn:
+    rows = conn.execute(sql, {
+        "last_name": last_name,
+        "first_initial": f"{first_initial}%",
+        "seasons": effective_seasons
+    }).mappings().fetchall()
+
+player_rows = [dict(r) for r in rows]
+
+if not player_rows:
+    continue
 
             grouped = _group_players(player_rows)
             if len(grouped) != 1:
