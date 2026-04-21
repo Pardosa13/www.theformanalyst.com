@@ -729,7 +729,83 @@ def register_afl_routes(app, db):
                 "count": len(value_bets),
             }
         )
+    @app.route("/api/afl/player-home-away")
+    @login_required
+    def api_afl_player_home_away():
+        player_id = request.args.get("player_id", type=int)
+        name = request.args.get("name", "").strip()
+        team = request.args.get("team", "").strip()
+        season_from = request.args.get("season_from", 2022, type=int)
 
+        if not player_id and not name:
+            return jsonify({"error": "Provide player_id or name"}), 400
+
+        seasons = [s for s in range(CURRENT_YEAR, season_from - 1, -1) if s >= 2019]
+
+        rows = _resolve_player_rows(
+            db=db,
+            player_id=player_id,
+            name=name,
+            team=team,
+            seasons=seasons,
+            limit=500,
+        )
+
+        if not rows:
+            return jsonify(
+                {
+                    "games": 0,
+                    "season_from": season_from,
+                    "home_games": [],
+                    "away_games": [],
+                    "home_avg": 0.0,
+                    "away_avg": 0.0,
+                    "home_best": 0,
+                    "away_best": 0,
+                }
+            )
+
+        grouped = _group_players(rows)
+
+        if player_id and player_id in grouped:
+            player = grouped[player_id]
+        elif len(grouped) == 1:
+            player = next(iter(grouped.values()))
+        else:
+            matches = [
+                {
+                    "player_id": p["player_id"],
+                    "name": p["name"],
+                    "team": p["team"],
+                }
+                for p in grouped.values()
+            ]
+            matches.sort(key=lambda x: (x["name"].lower(), x["team"].lower()))
+            return jsonify(
+                {
+                    "error": "Multiple players matched",
+                    "season_from": season_from,
+                    "matches": matches,
+                }
+            ), 409
+
+        games = sorted(player["games"], key=_sort_date_key, reverse=True)
+        player_team = player["team"]
+
+        home_games = [g for g in games if g.get("match_home_team") == player_team]
+        away_games = [g for g in games if g.get("match_away_team") == player_team]
+
+        return jsonify(
+            {
+                "player_id": player["player_id"],
+                "name": player["name"],
+                "team": player_team,
+                "season_from": season_from,
+                "games": len(games),
+                "home_games": [_format_game_log_row(g, player_team) for g in home_games],
+                "away_games": [_format_game_log_row(g, player_team) for g in away_games],
+            }
+        )
     @app.route("/api/afl/match-props")
     @login_required
     def api_afl_match_props():
