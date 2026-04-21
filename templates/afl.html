@@ -1360,18 +1360,52 @@ function setWin(win) {
   });
   redrawBars();
 }
+function setChartFilter(filter) {
+  _chartFilter = filter;
 
+  const seasonBtn = document.getElementById('filterBtnSeason');
+  const vsBtn = document.getElementById('filterBtnVs');
+  const venueBtn = document.getElementById('filterBtnVenue');
+
+  if (seasonBtn) {
+    seasonBtn.style.boxShadow = filter === 'season' ? '0 0 0 2px rgba(102,126,234,.25)' : 'none';
+  }
+  if (vsBtn) {
+    vsBtn.style.boxShadow = filter === 'vs' ? '0 0 0 2px rgba(102,126,234,.25)' : 'none';
+  }
+  if (venueBtn) {
+    venueBtn.style.boxShadow = filter === 'venue' ? '0 0 0 2px rgba(245,158,11,.25)' : 'none';
+  }
+
+  redrawBars();
+}
 // ── Bar chart renderer ───────────────────────────────────────────
 function redrawBars() {
   const container = document.getElementById('propBarsContainer');
   const xAxis = document.getElementById('propXAxis');
   const dashedEl = document.getElementById('propDashedLine');
-  if (!container || !_gameLog.length) return;
+  if (!container) return;
 
   const stat = document.getElementById('propStatSelect').value;
   const line = parseFloat(document.getElementById('propLineInp')?.value) || 0;
 
-  let games = [..._gameLog].reverse();
+  let sourceGames = [];
+  if (_chartFilter === 'vs') {
+    sourceGames = [..._vsHistoryLog];
+  } else if (_chartFilter === 'venue') {
+    sourceGames = [..._venueHistoryLog];
+  } else {
+    sourceGames = [..._gameLog];
+  }
+
+  if (!sourceGames.length) {
+    container.innerHTML = '';
+    xAxis.innerHTML = '';
+    if (dashedEl) dashedEl.style.display = 'none';
+    return;
+  }
+
+  let games = [...sourceGames].reverse();
   if (_chartWin === 'l5') games = games.slice(-5);
   if (_chartWin === 'l10') games = games.slice(-10);
 
