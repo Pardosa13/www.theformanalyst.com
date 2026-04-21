@@ -992,13 +992,14 @@ function renderPropCard(player) {
   const avgs = player.averages || {};
   _gameLog = player.game_log || [];
   _chartWin = 'all';
+  _chartFilter = 'season';
 
   const seasonAvg = safeNum(avgs[stat], 0);
   const defLine = Math.round(seasonAvg * 2) / 2;
 
-  const allVals = _gameLog.map(g => safeNum(g[stat], 0));
-  const l5vals = allVals.slice(0, 5);
-  const l10vals = allVals.slice(0, 10);
+  const allVals = sourceGames.map(g => safeNum(g[stat], 0));
+  const l5v = allVals.slice(0, 5);
+  const l10v = allVals.slice(0, 10);10);
 
   function hr(arr, line) {
     return arr.length ? Math.round(arr.filter(v => v >= line).length / arr.length * 100) : 0;
@@ -1141,6 +1142,7 @@ function renderPropCard(player) {
   `;
 
   redrawBars();
+  setChartFilter('season');
 }
 
 // ── Analysis panel renderers ─────────────────────────────────────
