@@ -775,6 +775,7 @@ let _venueHistoryLog = [];
 let _historyHomeGames = [];
 let _historyAwayGames = [];
 let _chartWin = 'all';
+let _chartFilter = 'season';
 
 // ── Shared utils ─────────────────────────────────────────────────
 function safeNum(v, fb = 0) {
@@ -1025,16 +1026,43 @@ function renderPropCard(player) {
   ${player.guernsey ? `<span class="meta-pill">#${esc(player.guernsey)}</span>` : ''}
   <span class="meta-pill">${player.games_played || 0} games</span>
 
-  <span class="meta-pill" style="background:rgba(102,126,234,.15);border-color:var(--border-accent);color:var(--accent);">
+  <button
+    id="filterBtnSeason"
+    class="meta-pill"
+    style="cursor:pointer;background:rgba(102,126,234,.15);border-color:var(--border-accent);color:var(--accent);"
+    onclick="setChartFilter('season')"
+    type="button"
+  >
     2026 form
-  </span>
+  </button>
 
   <span class="meta-pill" style="background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.3);color:#fbbf24;">
     History: 2022+
   </span>
 
-  ${opponent ? `<span class="meta-pill" style="color:var(--accent);border-color:var(--border-accent);">vs ${esc(opponent)}</span>` : ''}
-  ${_venue ? `<span class="meta-pill" style="color:#fbbf24;border-color:rgba(245,158,11,.3);">@ ${esc(_venue)}</span>` : ''}
+  ${opponent ? `
+    <button
+      id="filterBtnVs"
+      class="meta-pill"
+      style="cursor:pointer;color:var(--accent);border-color:var(--border-accent);"
+      onclick="setChartFilter('vs')"
+      type="button"
+    >
+      vs ${esc(opponent)}
+    </button>
+  ` : ''}
+
+  ${_venue ? `
+    <button
+      id="filterBtnVenue"
+      class="meta-pill"
+      style="cursor:pointer;color:#fbbf24;border-color:rgba(245,158,11,.3);"
+      onclick="setChartFilter('venue')"
+      type="button"
+    >
+      @ ${esc(_venue)}
+    </button>
+  ` : ''}
 </div>
         </div>
       </div>
