@@ -978,6 +978,8 @@ if (opponent) {
 if (_venue) {
   loadVenueHistory(id, _venue);
 }
+
+loadHomeAwayHistory(id, data.team || _selPlayer?.team || '');
     })
     .catch(() => {
       panel.innerHTML = '<div class="prop-empty" style="padding:40px;color:var(--danger);">Failed to load player data</div>';
