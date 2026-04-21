@@ -970,17 +970,37 @@ function selectPlayer(id) {
       }
 
       renderPropCard(data);
-      const opponent = _teamSide === 'home' ? _away : _home;
+const opponent = _teamSide === 'home' ? _away : _home;
+
+// Build promises array for all async loads
+const promises = [];
 
 if (opponent) {
-  loadVsOpponentHistory(id, opponent);
+  promises.push(
+    loadVsOpponentHistory(id, opponent)
+  );
 }
 
 if (_venue) {
-  loadVenueHistory(id, _venue);
+  promises.push(
+    loadVenueHistory(id, _venue)
+  );
 }
 
-loadHomeAwayHistory(id, data.team || _selPlayer?.team || '');
+promises.push(
+  loadHomeAwayHistory(id, data.team || _selPlayer?.team || '')
+);
+
+// Wait for all data to load, then set the default filter
+Promise.all(promises).then(() => {
+  setChartFilter('season');
+  redrawBars();
+}).catch(err => {
+  console.error('Error loading player history:', err);
+  // Fallback: still set filter even if some loads fail
+  setChartFilter('season');
+  redrawBars();
+});
     })
     .catch(() => {
       panel.innerHTML = '<div class="prop-empty" style="padding:40px;color:var(--danger);">Failed to load player data</div>';
@@ -997,17 +1017,17 @@ function renderPropCard(player) {
   const seasonAvg = safeNum(avgs[stat], 0);
   const defLine = Math.round(seasonAvg * 2) / 2;
 
-  const allVals = sourceGames.map(g => safeNum(g[stat], 0));
-  const l5v = allVals.slice(0, 5);
-  const l10v = allVals.slice(0, 10);
+  const allVals = _gameLog.map(g => safeNum(g[stat], 0));
+const l5v = allVals.slice(0, 5);
+const l10v = allVals.slice(0, 10);
 
-  function hr(arr, line) {
-    return arr.length ? Math.round(arr.filter(v => v >= line).length / arr.length * 100) : 0;
-  }
+function hr(arr, line) {
+  return arr.length ? Math.round(arr.filter(v => v >= line).length / arr.length * 100) : 0;
+}
 
-  const hrAll = hr(allVals, defLine);
-  const hrL10 = hr(l10vals, defLine);
-  const hrL5 = hr(l5vals, defLine);
+const hrAll = hr(allVals, defLine);
+const hrL10 = hr(l10v, defLine);
+const hrL5 = hr(l5v, defLine);
 
   const opponent = _teamSide === 'home' ? _away : _home;
   const venueGames = [];
@@ -1142,7 +1162,6 @@ function renderPropCard(player) {
   `;
 
   redrawBars();
-  setChartFilter('season');
 }
 
 // ── Analysis panel renderers ─────────────────────────────────────
