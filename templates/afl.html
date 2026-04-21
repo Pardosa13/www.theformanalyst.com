@@ -993,13 +993,8 @@ function renderPropCard(player) {
   const hrL5 = hr(l5vals, defLine);
 
   const opponent = _teamSide === 'home' ? _away : _home;
-  const venueGames = _venue
-    ? _gameLog.filter(g => norm(g.venue) === norm(_venue))
-    : [];
-
-  const vsGames = opponent
-    ? _gameLog.filter(g => norm(g.opponent) === norm(opponent))
-    : [];
+  const venueGames = [];
+  const vsGames = [];
 
   const panel = document.getElementById('propChartPanel');
 
