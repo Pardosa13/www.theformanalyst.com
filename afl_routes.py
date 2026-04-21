@@ -786,6 +786,59 @@ def register_afl_routes(app, db):
             log_sync(db, "fryzigg", season=season, status="error", error=str(exc))
             return jsonify({"status": "error", "message": str(exc)}), 500
 
+    @app.route("/api/afl/player-vs-venue")
+    @login_required
+    def api_afl_player_vs_venue():
+        player_id = request.args.get("player_id", type=int)
+        venue = request.args.get("venue", "").strip()
+        season_from = request.args.get("season_from", CURRENT_YEAR - 4, type=int)
+
+        if not player_id:
+            return jsonify({"error": "player_id parameter required"}), 400
+        if not venue:
+            return jsonify({"error": "venue parameter required"}), 400
+
+        sql = db.text("""
+            SELECT *
+            FROM afl_player_stats
+            WHERE player_id = :player_id
+              AND season >= :season_from
+              AND LOWER(venue_name) LIKE LOWER(:venue)
+            ORDER BY match_date DESC
+        """)
+
+        with db.engine.connect() as conn:
+            rows = conn.execute(
+                sql,
+                {
+                    "player_id": player_id,
+                    "season_from": season_from,
+                    "venue": f"%{venue}%",
+                },
+            ).mappings().fetchall()
+
+        rows = [dict(r) for r in rows]
+
+        if not rows:
+            return jsonify({
+                "venue": venue,
+                "season_from": season_from,
+                "games": 0,
+                "averages": {},
+                "hit_rates": {},
+                "game_log": [],
+            })
+
+        averages = get_player_season_averages(rows)
+
+        return jsonify({
+            "venue": venue,
+            "season_from": season_from,
+            "games": len(rows),
+            "averages": averages,
+            "game_log": [_format_game_log_row(g, g.get("player_team", "")) for g in rows[:20]],
+        })
+  
     @app.route("/api/afl/sync/props", methods=["POST"])
     @login_required
     def api_afl_sync_props():
