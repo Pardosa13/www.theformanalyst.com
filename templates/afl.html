@@ -1223,7 +1223,24 @@ function computeHomeAwaySplit(games, playerTeam, stat) {
 }
 
 function renderSplitPanel(player, stat) {
-  const split = computeHomeAwaySplit(_gameLog, player.team || '', stat);
+  function avg(arr) {
+    const vals = arr.map(g => safeNum(g[stat], 0));
+    return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '—';
+  }
+
+  function best(arr) {
+    const vals = arr.map(g => safeNum(g[stat], 0));
+    return vals.length ? Math.max(...vals) : '—';
+  }
+
+  const homeGames = _historyHomeGames.length ? _historyHomeGames : [];
+  const awayGames = _historyAwayGames.length ? _historyAwayGames : [];
+
+  const homeAvg = avg(homeGames);
+  const awayAvg = avg(awayGames);
+  const homeBest = best(homeGames);
+  const awayBest = best(awayGames);
+
   const l5 = safeNum(player.last5_avg?.[stat], 0);
   const l10 = safeNum(player.last10_avg?.[stat], 0);
   const seasonAvg = safeNum(player.averages?.[stat], 0);
@@ -1232,24 +1249,27 @@ function renderSplitPanel(player, stat) {
     <div class="split-grid">
       <div class="split-card">
         <h6>🏠 Home</h6>
-        <div class="split-stat"><span class="split-stat-lbl">Avg ${esc(stat)}</span><span class="split-stat-val">${split.homeAvg}</span></div>
-        <div class="split-stat"><span class="split-stat-lbl">Games</span><span class="split-stat-val">${split.homeGames}</span></div>
-        <div class="split-stat"><span class="split-stat-lbl">Best</span><span class="split-stat-val">${split.homeBest}</span></div>
+        <div class="split-stat"><span class="split-stat-lbl">Avg ${esc(stat)}</span><span class="split-stat-val">${homeAvg}</span></div>
+        <div class="split-stat"><span class="split-stat-lbl">Games</span><span class="split-stat-val">${homeGames.length}</span></div>
+        <div class="split-stat"><span class="split-stat-lbl">Best</span><span class="split-stat-val">${homeBest}</span></div>
       </div>
       <div class="split-card">
         <h6>✈️ Away</h6>
-        <div class="split-stat"><span class="split-stat-lbl">Avg ${esc(stat)}</span><span class="split-stat-val">${split.awayAvg}</span></div>
-        <div class="split-stat"><span class="split-stat-lbl">Games</span><span class="split-stat-val">${split.awayGames}</span></div>
-        <div class="split-stat"><span class="split-stat-lbl">Best</span><span class="split-stat-val">${split.awayBest}</span></div>
+        <div class="split-stat"><span class="split-stat-lbl">Avg ${esc(stat)}</span><span class="split-stat-val">${awayAvg}</span></div>
+        <div class="split-stat"><span class="split-stat-lbl">Games</span><span class="split-stat-val">${awayGames.length}</span></div>
+        <div class="split-stat"><span class="split-stat-lbl">Best</span><span class="split-stat-val">${awayBest}</span></div>
       </div>
     </div>
     <div style="margin-top:10px;font-size:11px;color:var(--text-muted);">
-      Season avg:
+      2026 season avg:
       <span style="font-family:'DM Mono',monospace;color:var(--text-primary);">${seasonAvg}</span>
-      · L5:
+      · 2026 L5:
       <span style="font-family:'DM Mono',monospace;color:var(--text-primary);">${l5}</span>
-      · L10:
+      · 2026 L10:
       <span style="font-family:'DM Mono',monospace;color:var(--text-primary);">${l10}</span>
+    </div>
+    <div style="margin-top:6px;font-size:11px;color:var(--text-muted);">
+      Home/Away sample uses history from 2022 onward.
     </div>
   `;
 }
