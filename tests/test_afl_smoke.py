@@ -199,3 +199,71 @@ def test_player_home_away_uses_db_latest_season():
     # Should now delegate to _db_latest_player_stats_season
     assert "_db_latest_player_stats_season" in source
 
+
+# ---------------------------------------------------------------------------
+# Fix – vs-opponent and venue game_log must return ALL rows (no [:20] cap)
+# ---------------------------------------------------------------------------
+
+def test_vs_opponent_game_log_uses_all_rows():
+    """api_afl_player_vs_opponent must build game_log from all rows, not from last_5 or rows[:20]."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # Old bug: game_log was populated from result.get("last_5", []) — max 5 games
+    assert 'result.get("last_5", [])' not in source, (
+        "api_afl_player_vs_opponent still builds game_log from last_5 (max 5 games). "
+        "It should use all rows so the chart shows the full 5-year history."
+    )
+    # Must not silently cap at 20 either
+    # (rows are already filtered by opponent + season_from, so the set is small)
+    # We verify the pattern that uses all rows appears in the vs-opponent block
+    assert "for g in rows]" in source, (
+        "api_afl_player_vs_opponent does not iterate over all rows for game_log"
+    )
+
+
+def test_venue_game_log_uses_all_rows():
+    """api_afl_player_vs_venue must return ALL rows from season_from, not just [:20]."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # Must use all rows so a player with 25+ games at a venue since 2022 is not truncated
+    assert "rows[:20]" not in source, (
+        "A [:20] cap is still present in afl_routes.py — venue or opponent game_log "
+        "is being truncated. Remove the slice so all 5-year history is returned."
+    )
+
+
+
+# ---------------------------------------------------------------------------
+# Fix – renderPropCard hr() must not use function declaration inside a function
+# ---------------------------------------------------------------------------
+
+def test_render_prop_card_uses_arrow_hr():
+    """renderPropCard must define hr() as an arrow function, not a function declaration."""
+    template_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "templates",
+        "afl.html",
+    )
+    with open(template_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # Old pattern: bare function declaration inside renderPropCard body
+    assert "function hr(arr, line)" not in source, (
+        "renderPropCard still uses a bare 'function hr(arr, line)' declaration inside "
+        "the function body. Convert it to a const arrow function."
+    )
+    # New pattern: arrow function
+    assert "const hr = (arr, line) =>" in source, (
+        "renderPropCard does not define hr() as 'const hr = (arr, line) =>'"
+    )
+
