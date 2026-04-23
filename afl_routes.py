@@ -425,8 +425,9 @@ def register_afl_routes(app, db):
             )
 
         result = get_player_vs_opponent(rows, opponent)
-        # rows is already sorted by match_date DESC; return up to 20 games (not just last_5)
-        result["game_log"] = [_format_game_log_row(g, g.get("player_team", "")) for g in rows[:20]]
+        # rows is already filtered by opponent and sorted by match_date DESC;
+        # return ALL games since season_from so the chart shows the full 5-year history.
+        result["game_log"] = [_format_game_log_row(g, g.get("player_team", "")) for g in rows]
         result.pop("last_5", None)
 
         return jsonify({"opponent": opponent, "season_from": season_from, **result})
@@ -957,7 +958,8 @@ def register_afl_routes(app, db):
             "season_from": season_from,
             "games": len(rows),
             "averages": averages,
-            "game_log": [_format_game_log_row(g, g.get("player_team", "")) for g in rows[:20]],
+            # Return ALL games since season_from so the chart shows the full 5-year history.
+            "game_log": [_format_game_log_row(g, g.get("player_team", "")) for g in rows],
         })
   
     @app.route("/api/afl/sync/props", methods=["POST"])

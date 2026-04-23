@@ -1665,7 +1665,7 @@ function loadVsOpponentHistory(playerId, opponent) {
 }
 
 function loadVenueHistory(playerId, venue) {
- return fetch(`/api/afl/player-vs-venue?player_id=${playerId}&venue=${encodeURIComponent(venue)}&season_from=2022`)
+  return fetch(`/api/afl/player-vs-venue?player_id=${playerId}&venue=${encodeURIComponent(venue)}&season_from=2022`)
     .then(r => r.json())
     .then(data => {
       _venueHistoryLog = data.game_log || [];

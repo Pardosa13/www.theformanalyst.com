@@ -201,11 +201,11 @@ def test_player_home_away_uses_db_latest_season():
 
 
 # ---------------------------------------------------------------------------
-# Fix – vs-opponent game_log must use all rows, not just last_5
+# Fix – vs-opponent and venue game_log must return ALL rows (no [:20] cap)
 # ---------------------------------------------------------------------------
 
 def test_vs_opponent_game_log_uses_all_rows():
-    """api_afl_player_vs_opponent must build game_log from rows[:20], not from last_5."""
+    """api_afl_player_vs_opponent must build game_log from all rows, not from last_5 or rows[:20]."""
     routes_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "afl_routes.py",
@@ -216,12 +216,31 @@ def test_vs_opponent_game_log_uses_all_rows():
     # Old bug: game_log was populated from result.get("last_5", []) — max 5 games
     assert 'result.get("last_5", [])' not in source, (
         "api_afl_player_vs_opponent still builds game_log from last_5 (max 5 games). "
-        "It should use rows[:20] so the bar chart has sufficient data."
+        "It should use all rows so the chart shows the full 5-year history."
     )
-    # New behaviour: use rows directly
-    assert "rows[:20]" in source, (
-        "api_afl_player_vs_opponent does not slice rows[:20] for game_log"
+    # Must not silently cap at 20 either
+    # (rows are already filtered by opponent + season_from, so the set is small)
+    # We verify the pattern that uses all rows appears in the vs-opponent block
+    assert "for g in rows]" in source, (
+        "api_afl_player_vs_opponent does not iterate over all rows for game_log"
     )
+
+
+def test_venue_game_log_uses_all_rows():
+    """api_afl_player_vs_venue must return ALL rows from season_from, not just [:20]."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # Must use all rows so a player with 25+ games at a venue since 2022 is not truncated
+    assert "rows[:20]" not in source, (
+        "A [:20] cap is still present in afl_routes.py — venue or opponent game_log "
+        "is being truncated. Remove the slice so all 5-year history is returned."
+    )
+
 
 
 # ---------------------------------------------------------------------------
