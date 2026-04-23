@@ -961,7 +961,95 @@ def register_afl_routes(app, db):
             # Return ALL games since season_from so the chart shows the full 5-year history.
             "game_log": [_format_game_log_row(g, g.get("player_team", "")) for g in rows],
         })
-  
+
+    @app.route("/api/afl/disposal-lines")
+    @login_required
+    def api_afl_disposal_lines():
+        """Return per-player disposal hit rates at 10/15/20/25/30+ thresholds.
+
+        Accepts ``home`` and/or ``away`` team names.  Returns every player from
+        those teams who appeared in the current (or requested) season, together
+        with their season average, last-5 average, and hit-rate % at each of
+        the standard disposal-line thresholds.  No Odds API key required.
+        """
+        home_team = request.args.get("home", "").strip()
+        away_team = request.args.get("away", "").strip()
+        requested_season = request.args.get("year", type=int)
+
+        if not home_team and not away_team:
+            return jsonify({"error": "Provide home and/or away team"}), 400
+
+        effective_season = _resolve_stats_season(db, requested_season)
+        effective_seasons = _resolve_stats_seasons(db, requested_season)
+
+        DISPOSAL_LINES = [10, 15, 20, 25, 30]
+
+        teams = [t for t in [home_team, away_team] if t]
+        all_players = []
+
+        for team in teams:
+            rows = _resolve_player_rows(
+                db=db,
+                player_id=None,
+                name="",
+                team=team,
+                seasons=effective_seasons,
+                limit=500,
+            )
+
+            if not rows:
+                continue
+
+            grouped = _group_players(rows)
+
+            for player_id, player in grouped.items():
+                games = sorted(player["games"], key=_sort_date_key, reverse=True)
+                # Only use games from the effective (current) season for the
+                # "form" columns; the hit-rate calculation uses all available
+                # seasons so sample sizes stay meaningful.
+                season_games = [g for g in games if g.get("season") == effective_season]
+
+                if not season_games:
+                    continue
+
+                season_avg = _safe_avg(season_games, "disposals")
+                last5_avg = _safe_avg(season_games[:5], "disposals")
+
+                # Hit-rate at each threshold uses all loaded seasons for a
+                # larger, more reliable sample.
+                hit_rates: dict[str, float] = {}
+                for line in DISPOSAL_LINES:
+                    total = len(games)
+                    hits = sum(
+                        1 for g in games if (g.get("disposals") or 0) >= line
+                    )
+                    hit_rates[str(line)] = round(hits / total * 100, 1) if total else 0.0
+
+                all_players.append(
+                    {
+                        "player_id": player_id,
+                        "name": player["name"],
+                        "team": player["team"],
+                        "games": len(season_games),
+                        "season_avg": round(season_avg, 1) if season_avg is not None else 0.0,
+                        "last5_avg": round(last5_avg, 1) if last5_avg is not None else 0.0,
+                        "hit_rates": hit_rates,
+                    }
+                )
+
+        all_players.sort(key=lambda x: x.get("season_avg", 0), reverse=True)
+
+        return jsonify(
+            {
+                "home_team": home_team,
+                "away_team": away_team,
+                "season": effective_season,
+                "players": all_players,
+                "count": len(all_players),
+                "disposal_lines": DISPOSAL_LINES,
+            }
+        )
+
     @app.route("/api/afl/sync/props", methods=["POST"])
     @login_required
     def api_afl_sync_props():

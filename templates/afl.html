@@ -630,6 +630,29 @@
       </div>
     </div>
   </div>
+
+  <!-- ── Disposal Lines Analysis (no odds needed) ─────────────── -->
+  <div class="afl-card" style="margin-top:16px;">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-bar-chart-steps"></i> Disposal Lines</h4>
+      <span style="font-size:11px;color:var(--text-muted);">Hit-rate at 10 / 15 / 20 / 25 / 30+ · no odds required</span>
+    </div>
+    <div class="afl-card-body">
+      <div class="value-finder-bar">
+        <span style="font-size:12px;color:var(--text-muted);">Match:</span>
+        <span id="dlMatchLabel" style="font-size:12px;color:var(--text-primary);">— select a match on the Players tab first —</span>
+        <button class="btn btn-primary" id="dlAnalyseBtn" onclick="loadDisposalLines()" disabled>
+          <i class="bi bi-table"></i> Analyse Lines
+        </button>
+      </div>
+      <div id="disposalLinesResults">
+        <div class="prop-empty">
+          <i class="bi bi-bar-chart-steps"></i>
+          <p>Select a match on the <strong>Players</strong> tab, then click <strong>Analyse Lines</strong>.</p>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════
@@ -857,6 +880,7 @@ function onMatchSelect() {
   if (!val) {
     resetPlayerState();
     document.getElementById('teamTabsWrap').style.display = 'none';
+    _updateDisposalLinesLabel('');
     return;
   }
 
@@ -870,6 +894,14 @@ function onMatchSelect() {
   document.getElementById('teamBtnHome').textContent = _home;
   document.getElementById('teamBtnAway').textContent = _away;
   selectTeam('home');
+  _updateDisposalLinesLabel(`${_home} vs ${_away}`);
+}
+
+function _updateDisposalLinesLabel(label) {
+  const el = document.getElementById('dlMatchLabel');
+  const btn = document.getElementById('dlAnalyseBtn');
+  if (el) el.textContent = label || '— select a match on the Players tab first —';
+  if (btn) btn.disabled = !label;
 }
 
 function selectTeam(side) {
@@ -1047,7 +1079,7 @@ function renderPropCard(player) {
       <div class="player-hdr-top">
         <div class="player-avatar">${esc((player.first_name || '')[0] || '')}${esc((player.last_name || '')[0] || '')}</div>
         <div style="flex:1;min-width:0;">
-          <div class="player-hdr-name">${esc(player.name || '')}</div>
+          <div class="player-hdr-name" style="cursor:pointer;" onclick="setChartFilter('all')" title="Show all history since 2022">${esc(player.name || '')}</div>
           <div class="player-hdr-meta">
   <span class="meta-pill">${esc(player.team || '')}</span>
   ${player.guernsey ? `<span class="meta-pill">#${esc(player.guernsey)}</span>` : ''}
@@ -1063,9 +1095,16 @@ function renderPropCard(player) {
     2026 form
   </button>
 
-  <span class="meta-pill" style="background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.3);color:#fbbf24;">
+  <button
+    id="filterBtnAll"
+    class="meta-pill"
+    style="cursor:pointer;background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.3);color:#fbbf24;"
+    onclick="setChartFilter('all')"
+    type="button"
+    title="Show all matches since 2022"
+  >
     History: 2022+
-  </span>
+  </button>
 
   ${opponent ? `
     <button
@@ -1391,17 +1430,36 @@ function setChartFilter(filter) {
   _chartFilter = filter;
 
   const seasonBtn = document.getElementById('filterBtnSeason');
-  const vsBtn = document.getElementById('filterBtnVs');
-  const venueBtn = document.getElementById('filterBtnVenue');
+  const allBtn    = document.getElementById('filterBtnAll');
+  const vsBtn     = document.getElementById('filterBtnVs');
+  const venueBtn  = document.getElementById('filterBtnVenue');
 
   if (seasonBtn) {
-    seasonBtn.style.boxShadow = filter === 'season' ? '0 0 0 2px rgba(102,126,234,.25)' : 'none';
+    seasonBtn.style.boxShadow = filter === 'season' ? '0 0 0 2px rgba(102,126,234,.5)' : 'none';
+    seasonBtn.style.background = filter === 'season' ? 'rgba(102,126,234,.3)' : 'rgba(102,126,234,.15)';
+  }
+  if (allBtn) {
+    allBtn.style.boxShadow = filter === 'all' ? '0 0 0 2px rgba(245,158,11,.5)' : 'none';
+    allBtn.style.background = filter === 'all' ? 'rgba(245,158,11,.25)' : 'rgba(245,158,11,.12)';
   }
   if (vsBtn) {
-    vsBtn.style.boxShadow = filter === 'vs' ? '0 0 0 2px rgba(102,126,234,.25)' : 'none';
+    vsBtn.style.boxShadow = filter === 'vs' ? '0 0 0 2px rgba(102,126,234,.5)' : 'none';
+    vsBtn.style.background = filter === 'vs' ? 'rgba(102,126,234,.3)' : '';
   }
   if (venueBtn) {
-    venueBtn.style.boxShadow = filter === 'venue' ? '0 0 0 2px rgba(245,158,11,.25)' : 'none';
+    venueBtn.style.boxShadow = filter === 'venue' ? '0 0 0 2px rgba(245,158,11,.5)' : 'none';
+    venueBtn.style.background = filter === 'venue' ? 'rgba(245,158,11,.25)' : '';
+  }
+
+  // When filtering by venue, also switch to the venue analysis tab
+  if (filter === 'venue') {
+    const venueTabBtn = document.querySelector('.atab[onclick*="switchAtab(\'venue\'"]');
+    if (venueTabBtn) switchAtab('venue', venueTabBtn);
+  }
+  // When filtering by vs-opponent, also switch to the vs analysis tab
+  if (filter === 'vs') {
+    const vsTabBtn = document.querySelector('.atab[onclick*="switchAtab(\'vs\'"]');
+    if (vsTabBtn) switchAtab('vs', vsTabBtn);
   }
 
   redrawBars();
@@ -1421,6 +1479,16 @@ function redrawBars() {
     sourceGames = [..._vsHistoryLog];
   } else if (_chartFilter === 'venue') {
     sourceGames = [..._venueHistoryLog];
+  } else if (_chartFilter === 'all') {
+    // Combine home and away history (2022+) and sort newest-first,
+    // matching the order used by the other history sources.
+    const combined = [...(_historyHomeGames || []), ...(_historyAwayGames || [])];
+    combined.sort((a, b) => {
+      const da = a.date ? new Date(a.date) : new Date(0);
+      const db = b.date ? new Date(b.date) : new Date(0);
+      return db - da;
+    });
+    sourceGames = combined;
   } else {
     sourceGames = [..._gameLog];
   }
@@ -1636,6 +1704,73 @@ function loadValueFinder() {
     })
     .catch(() => {
       el.innerHTML = '<div class="prop-empty" style="color:var(--danger);">Value finder failed.</div>';
+    });
+}
+function loadDisposalLines() {
+  const el = document.getElementById('disposalLinesResults');
+  if (!el) return;
+
+  if (!_home && !_away) {
+    el.innerHTML = '<div class="prop-empty"><p>Select a match on the <strong>Players</strong> tab first.</p></div>';
+    return;
+  }
+
+  el.innerHTML = '<div class="prop-empty"><span class="spinner-sm"></span></div>';
+
+  const params = new URLSearchParams({ year: _SEASON });
+  if (_home) params.set('home', _home);
+  if (_away) params.set('away', _away);
+
+  fetch(`/api/afl/disposal-lines?${params}`)
+    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+    .then(data => {
+      const lines = data.disposal_lines || [10, 15, 20, 25, 30];
+      const players = data.players || [];
+
+      if (!players.length) {
+        el.innerHTML = '<div class="prop-empty"><i class="bi bi-bar-chart-steps"></i><p>No player data found for this match.</p></div>';
+        return;
+      }
+
+      const headerCells = lines.map(l => `<th style="text-align:center;">${l}+</th>`).join('');
+      const rows = players.map(p => {
+        const lineCells = lines.map(l => {
+          const pct = safeNum((p.hit_rates || {})[String(l)], 0);
+          const cls = pct >= 70 ? 'pos' : pct >= 50 ? 'neu' : 'neg';
+          return `<td style="text-align:center;"><span class="edge-chip ${cls}">${pct}%</span></td>`;
+        }).join('');
+        return `
+          <tr>
+            <td style="font-weight:700;">${esc(p.name || '')}</td>
+            <td>${esc(p.team || '')}</td>
+            <td style="font-family:'DM Mono',monospace;text-align:center;">${safeNum(p.season_avg, 0)}</td>
+            <td style="font-family:'DM Mono',monospace;text-align:center;">${safeNum(p.last5_avg, 0)}</td>
+            <td style="font-family:'DM Mono',monospace;text-align:center;">${p.games || 0}</td>
+            ${lineCells}
+          </tr>`;
+      }).join('');
+
+      el.innerHTML = `
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+          ${esc(_home)} vs ${esc(_away)} · ${data.season} season · hit-rate % at disposal thresholds (all available seasons)
+        </div>
+        <div class="scroll-x">
+          <table class="value-table">
+            <thead>
+              <tr>
+                <th>Player</th><th>Team</th>
+                <th style="text-align:center;">Avg</th>
+                <th style="text-align:center;">L5</th>
+                <th style="text-align:center;">Gms</th>
+                ${headerCells}
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    })
+    .catch(() => {
+      el.innerHTML = '<div class="prop-empty" style="color:var(--danger);">Failed to load disposal lines.</div>';
     });
 }
 function loadVsOpponentHistory(playerId, opponent) {
