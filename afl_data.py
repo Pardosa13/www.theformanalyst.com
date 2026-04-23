@@ -12,6 +12,7 @@ Strategy:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -161,6 +162,18 @@ def _coerce_match_id(value: Any, default: int = 0) -> int:
         return int(digits)
     except Exception:
         return default
+
+
+def _hash_match_key_to_bigint(match_key: str) -> int:
+    """
+    Derive a stable, collision-resistant signed 63-bit integer from a match key.
+    Uses SHA-1 of the key, keeping the first 8 bytes, clamped to signed BIGINT range.
+    Deterministic across runs (same key always produces the same integer).
+    """
+    digest = hashlib.sha1(match_key.encode("utf-8")).digest()
+    raw = int.from_bytes(digest[:8], "big")
+    # Clamp to signed 63-bit maximum so it fits in a PostgreSQL BIGINT column
+    return raw & 0x7FFFFFFFFFFFFFFF
 
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:
@@ -651,10 +664,16 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
     except Exception:
         current_round = round_number or 1
 
-    # If current round is 7, completed rounds are 1..6
-    completed_rounds = list(range(1, current_round + 1))
+    # If current_round is the first incomplete round (e.g. 7),
+    # completed rounds are 1..6 (i.e. range(1, current_round)).
+    # When current_round is 1, this correctly produces an empty list (no completed rounds yet).
+    completed_rounds = list(range(1, current_round))
     if not completed_rounds:
-        logger.warning("AFL current-season stats: no completed rounds yet for season %s", season)
+        logger.warning(
+            "AFL current-season stats: no completed rounds yet for season %s "
+            "(current_round=%s — season may not have started)",
+            season, current_round,
+        )
         return []
 
     all_matches = []
@@ -874,7 +893,16 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id:
 def _download_fryzigg_rds() -> pd.DataFrame:
     """Download and cache Fryzigg RDS as DataFrame."""
     if not os.environ.get("AFL_CRON_MODE"):
-        raise RuntimeError("Fryzigg RDS blocked outside cron. Set AFL_CRON_MODE=1 to allow.")
+        # Allow in local dev or when explicitly permitted
+        if not (
+            os.environ.get("FLASK_ENV") == "development"
+            or os.environ.get("ALLOW_FRYZIGG_RDS") == "1"
+        ):
+            raise RuntimeError(
+                "Fryzigg RDS blocked outside cron. "
+                "Set AFL_CRON_MODE=1 (cron), FLASK_ENV=development (local dev), "
+                "or ALLOW_FRYZIGG_RDS=1 to allow."
+            )
 
     global _FRYZIGG_CACHE
     if _FRYZIGG_CACHE["loaded"] and _FRYZIGG_CACHE["df"] is not None:
@@ -1169,12 +1197,12 @@ def fetch_2026_stats_from_csv(csv_path: Path | None = None) -> list[dict]:
             winner = away_team
             margin = away_score - home_score
 
-        # fitzRoy CSV does not include a stable match_id in your DB shape,
-        # so derive one from date + teams.
+        # fitzRoy CSV does not include a stable match_id in our DB shape,
+        # so derive a collision-resistant stable BIGINT from the match key.
         date_str = _coerce_str(col(row, "Date"))
         local_start = _coerce_str(col(row, "Local.start.time"))
         match_key = f"{season}|{date_str}|{home_team}|{away_team}|{local_start}"
-        derived_match_id = _coerce_match_id(match_key)
+        derived_match_id = _hash_match_key_to_bigint(match_key)
 
         # Time on Ground in this CSV is usually already percentage-like.
         tog_value = _coerce_int(col(row, "Time.on.Ground"))
@@ -1481,6 +1509,10 @@ def fetch_afl_match_odds(
 def _normalise_prop_market(market_key: str) -> str:
     mapping = {
         "player_disposals": "player_disposals",
+        "player_kicks": "player_kicks",
+        "player_kicks_over": "player_kicks",
+        "player_handballs": "player_handballs",
+        "player_handballs_over": "player_handballs",
         "player_marks": "player_marks",
         "player_marks_over": "player_marks",
         "player_tackles": "player_tackles",
