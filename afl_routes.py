@@ -64,7 +64,6 @@ def register_afl_routes(app, db):
             """
             SELECT COUNT(*)
             FROM afl_player_props
-            WHERE market = :market
             WHERE fetched_at > NOW() - INTERVAL '24 hours'
             """,
         )
@@ -639,6 +638,12 @@ def register_afl_routes(app, db):
             stat_name = "tackles"
         elif "goal" in market:
             stat_name = "goals"
+        elif "kick" in market:
+            stat_name = "kicks"
+        elif "handball" in market:
+            stat_name = "handballs"
+        elif "fantasy" in market:
+            stat_name = "afl_fantasy_score"
         else:
             stat_name = "disposals"
 
@@ -763,7 +768,7 @@ def register_afl_routes(app, db):
         if not player_id and not name:
             return jsonify({"error": "Provide player_id or name"}), 400
 
-        seasons = [s for s in range(CURRENT_YEAR, season_from - 1, -1) if s >= 2019]
+        seasons = [s for s in range(_db_latest_player_stats_season(db) or CURRENT_YEAR, season_from - 1, -1) if s >= 2019]
 
         rows = _resolve_player_rows(
             db=db,
@@ -881,6 +886,14 @@ def register_afl_routes(app, db):
             count = upsert_player_stats(db, stats, season)
             log_sync(db, "fryzigg", season=season, rows=count)
             return jsonify({"status": "ok", "rows_synced": count, "season": season})
+        except RuntimeError as exc:
+            # Fryzigg RDS is intentionally blocked outside the cron job.
+            log_sync(db, "fryzigg", season=season, status="error", error=str(exc))
+            return jsonify({
+                "status": "error",
+                "message": "Fryzigg stats sync is only available during the scheduled cron job. "
+                           "Trigger via Railway cron or set AFL_CRON_MODE=1 in your environment.",
+            }), 503
         except Exception as exc:
             log_sync(db, "fryzigg", season=season, status="error", error=str(exc))
             return jsonify({"status": "error", "message": str(exc)}), 500
@@ -948,7 +961,7 @@ def register_afl_routes(app, db):
             return jsonify({"status": "error", "message": "ODDS_API_KEY not configured"}), 400
 
         try:
-            props = fetch_afl_player_props(api_key, market)
+            props = fetch_afl_player_props(api_key=api_key, markets=market)
             count = upsert_player_props(db, props)
             log_sync(db, "odds_api", rows=count)
             return jsonify({"status": "ok", "rows_synced": count, "market": market})

@@ -12,6 +12,7 @@ Strategy:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -161,6 +162,22 @@ def _coerce_match_id(value: Any, default: int = 0) -> int:
         return int(digits)
     except Exception:
         return default
+
+
+def _hash_match_id(match_key: str) -> int:
+    """
+    Derive a stable, collision-resistant BIGINT match_id from a match_key string.
+
+    Uses SHA-256 digest truncated to a signed 64-bit integer so it fits in a
+    Postgres BIGINT column and avoids the entropy loss from digits-only stripping.
+
+    Example match_key: "2026|2026-04-05|Melbourne|GWS Giants|14:10"
+    """
+    digest = hashlib.sha256(match_key.encode("utf-8")).digest()
+    # Take the first 8 bytes as an unsigned int, then mod into the positive
+    # signed 64-bit range [0, 2^63-1] so it fits in a Postgres BIGINT column.
+    raw = int.from_bytes(digest[:8], byteorder="big", signed=False)
+    return (raw % (2**63)) or 1  # ensure non-zero (collision with 0 is astronomically unlikely)
 
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:
@@ -652,10 +669,11 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
         current_round = round_number or 1
 
     # If current round is 7, completed rounds are 1..6
-    completed_rounds = list(range(1, current_round + 1))
-    if not completed_rounds:
-        logger.warning("AFL current-season stats: no completed rounds yet for season %s", season)
+    # Squiggle returns the first incomplete round as "current round", so exclude it.
+    if current_round <= 1:
+        logger.warning("AFL current-season stats: no completed rounds yet for season %s (current_round=%s)", season, current_round)
         return []
+    completed_rounds = list(range(1, current_round))
 
     all_matches = []
     for rnd in completed_rounds:
@@ -1170,11 +1188,11 @@ def fetch_2026_stats_from_csv(csv_path: Path | None = None) -> list[dict]:
             margin = away_score - home_score
 
         # fitzRoy CSV does not include a stable match_id in your DB shape,
-        # so derive one from date + teams.
+        # so derive one from date + teams using a hash to avoid digit-stripping collisions.
         date_str = _coerce_str(col(row, "Date"))
         local_start = _coerce_str(col(row, "Local.start.time"))
         match_key = f"{season}|{date_str}|{home_team}|{away_team}|{local_start}"
-        derived_match_id = _coerce_match_id(match_key)
+        derived_match_id = _hash_match_id(match_key)
 
         # Time on Ground in this CSV is usually already percentage-like.
         tog_value = _coerce_int(col(row, "Time.on.Ground"))
@@ -1488,6 +1506,10 @@ def _normalise_prop_market(market_key: str) -> str:
         "player_goals": "player_goals",
         "player_goals_scored_over": "player_goals",
         "player_afl_fantasy_points": "player_afl_fantasy_points",
+        "player_kicks": "player_kicks",
+        "player_kicks_over": "player_kicks",
+        "player_handballs": "player_handballs",
+        "player_handballs_over": "player_handballs",
     }
     return mapping.get(_coerce_str(market_key), _coerce_str(market_key))
 
