@@ -1,19 +1,26 @@
 import os
 import csv
 import io
+import logging
 import requests
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class PuntingFormService:
     def __init__(self, api_key=None):
         self.api_key = api_key or os.environ.get('PUNTINGFORM_API_KEY')
         if not self.api_key:
-            raise ValueError("PuntingForm API key not found")
+            logger.warning(
+                "PUNTINGFORM_API_KEY is not set — PuntingForm features will be unavailable"
+            )
         self.base_url = 'https://www.puntingform.com.au/api/formdataservice'
 
     def _make_request(self, url):
         """Make authenticated request"""
+        if not self.api_key:
+            raise ValueError("PuntingForm API key not configured")
         try:
             response = requests.get(url, timeout=30)
             if not response.ok:
