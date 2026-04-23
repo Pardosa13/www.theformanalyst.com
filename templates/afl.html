@@ -607,12 +607,12 @@
       <div class="value-finder-bar">
         <select class="form-select" id="valueMarket" style="width:200px;">
   <option value="player_disposals">Player Disposals</option>
-  <option value="player_marks_over">Player Marks</option>
-  <option value="player_tackles_over">Player Tackles</option>
-  <option value="player_goals_scored_over">Player Goals</option>
+  <option value="player_marks">Player Marks</option>
+  <option value="player_tackles">Player Tackles</option>
+  <option value="player_goals">Player Goals</option>
   <option value="player_afl_fantasy_points">AFL Fantasy Points</option>
-  <option value="player_kicks_over">Player Kicks</option>
-  <option value="player_handballs_over">Player Handballs</option>
+  <option value="player_kicks">Player Kicks</option>
+  <option value="player_handballs">Player Handballs</option>
 </select>
         <input type="number" class="form-control" id="minEdge" value="2" step="0.5" style="max-width:140px;" placeholder="Min edge">
         <button class="btn btn-primary" onclick="loadValueFinder()">
@@ -1025,16 +1025,15 @@ function renderPropCard(player) {
   const defLine = Math.round(seasonAvg * 2) / 2;
 
   const allVals = _gameLog.map(g => safeNum(g[stat], 0));
-const l5v = allVals.slice(0, 5);
-const l10v = allVals.slice(0, 10);
+  const l5v = allVals.slice(0, 5);
+  const l10v = allVals.slice(0, 10);
 
-function hr(arr, line) {
-  return arr.length ? Math.round(arr.filter(v => v >= line).length / arr.length * 100) : 0;
-}
+  const hr = (arr, line) =>
+    arr.length ? Math.round(arr.filter(v => v >= line).length / arr.length * 100) : 0;
 
-const hrAll = hr(allVals, defLine);
-const hrL10 = hr(l10v, defLine);
-const hrL5 = hr(l5v, defLine);
+  const hrAll = hr(allVals, defLine);
+  const hrL10 = hr(l10v, defLine);
+  const hrL5 = hr(l5v, defLine);
 
   const opponent = _teamSide === 'home' ? _away : _home;
   const venueGames = [];
@@ -1666,7 +1665,7 @@ function loadVsOpponentHistory(playerId, opponent) {
 }
 
 function loadVenueHistory(playerId, venue) {
- return fetch(`/api/afl/player-vs-venue?player_id=${playerId}&venue=${encodeURIComponent(venue)}&season_from=2022`)
+  return fetch(`/api/afl/player-vs-venue?player_id=${playerId}&venue=${encodeURIComponent(venue)}&season_from=2022`)
     .then(r => r.json())
     .then(data => {
       _venueHistoryLog = data.game_log || [];
@@ -1691,8 +1690,8 @@ function loadVenueHistory(playerId, venue) {
       _venueHistoryLog = [];
     });
 }
-  function loadHomeAwayHistory(playerId, playerTeam) {
-return fetch(`/api/afl/player-home-away?player_id=${playerId}&team=${encodeURIComponent(playerTeam)}&season_from=2022`)
+function loadHomeAwayHistory(playerId, playerTeam) {
+  return fetch(`/api/afl/player-home-away?player_id=${playerId}&team=${encodeURIComponent(playerTeam)}&season_from=2022`)
     .then(r => r.json())
     .then(data => {
       _historyHomeGames = data.home_games || [];
@@ -1703,7 +1702,7 @@ return fetch(`/api/afl/player-home-away?player_id=${playerId}&team=${encodeURICo
 
       body.innerHTML = renderSplitPanel(_selPlayer, document.getElementById('propStatSelect').value);
     })
-        .catch(() => {
+    .catch(() => {
       _historyHomeGames = [];
       _historyAwayGames = [];
     });

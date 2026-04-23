@@ -23,6 +23,7 @@ from flask_login import login_required
 
 from afl_data import (
     CURRENT_YEAR,
+    _normalise_prop_market,
     calculate_disposal_edge,
     fetch_afl_player_props,
     fetch_fryzigg_player_stats,
@@ -61,11 +62,7 @@ def register_afl_routes(app, db):
         total_games = _db_count(db, "SELECT COUNT(*) FROM afl_games")
         value_bets = _db_count(
             db,
-            """
-            SELECT COUNT(*)
-            FROM afl_player_props
-            WHERE fetched_at > NOW() - INTERVAL '24 hours'
-            """,
+            "SELECT COUNT(*) FROM afl_player_props WHERE fetched_at > NOW() - INTERVAL '24 hours'",
         )
 
         sources = _check_data_sources(db)
@@ -428,7 +425,9 @@ def register_afl_routes(app, db):
             )
 
         result = get_player_vs_opponent(rows, opponent)
-        result["game_log"] = [_format_game_log_row(g, g.get("player_team", "")) for g in result.get("last_5", [])]
+        # rows is already filtered by opponent and sorted by match_date DESC;
+        # return ALL games since season_from so the chart shows the full 5-year history.
+        result["game_log"] = [_format_game_log_row(g, g.get("player_team", "")) for g in rows]
         result.pop("last_5", None)
 
         return jsonify({"opponent": opponent, "season_from": season_from, **result})
@@ -616,6 +615,9 @@ def register_afl_routes(app, db):
         min_edge = request.args.get("min_edge", 2.0, type=float)
         requested_season = request.args.get("year", type=int)
 
+        # Normalise incoming market key so it matches what is stored in the DB
+        market = _normalise_prop_market(market)
+
         effective_season = _resolve_stats_season(db, requested_season)
         effective_seasons = _resolve_stats_seasons(db, requested_season)
         props = _db_get_props(db, market=market)
@@ -632,16 +634,16 @@ def register_afl_routes(app, db):
 
         if "disposal" in market:
             stat_name = "disposals"
+        elif "kick" in market:
+            stat_name = "kicks"
+        elif "handball" in market:
+            stat_name = "handballs"
         elif "mark" in market:
             stat_name = "marks"
         elif "tackle" in market:
             stat_name = "tackles"
         elif "goal" in market:
             stat_name = "goals"
-        elif "kick" in market:
-            stat_name = "kicks"
-        elif "handball" in market:
-            stat_name = "handballs"
         elif "fantasy" in market:
             stat_name = "afl_fantasy_score"
         else:
@@ -887,16 +889,24 @@ def register_afl_routes(app, db):
             log_sync(db, "fryzigg", season=season, rows=count)
             return jsonify({"status": "ok", "rows_synced": count, "season": season})
         except RuntimeError as exc:
-            # Fryzigg RDS is intentionally blocked outside the cron job.
+            # Fryzigg RDS is intentionally blocked outside cron context.
+            # Return 503 (Service Unavailable) with a clear message.
+            msg = str(exc)
+            logger.warning("Fryzigg sync blocked: %s", msg)
+            log_sync(db, "fryzigg", season=season, status="blocked", error=msg)
+            return jsonify({
+                "status": "blocked",
+                "message": "Fryzigg RDS sync is blocked in this context. "
+                           "Set AFL_CRON_MODE=1, FLASK_ENV=development, or ALLOW_FRYZIGG_RDS=1.",
+                "season": season,
+            }), 503
+        except Exception as exc:
+            logger.error("Fryzigg sync error for season %s: %s (%s)", season, exc, type(exc).__name__)
             log_sync(db, "fryzigg", season=season, status="error", error=str(exc))
             return jsonify({
                 "status": "error",
-                "message": "Fryzigg stats sync is only available during the scheduled cron job. "
-                           "Trigger via Railway cron or set AFL_CRON_MODE=1 in your environment.",
-            }), 503
-        except Exception as exc:
-            log_sync(db, "fryzigg", season=season, status="error", error=str(exc))
-            return jsonify({"status": "error", "message": str(exc)}), 500
+                "message": f"Player stats sync failed ({type(exc).__name__}). Check server logs.",
+            }), 500
 
     @app.route("/api/afl/player-vs-venue")
     @login_required
@@ -948,7 +958,8 @@ def register_afl_routes(app, db):
             "season_from": season_from,
             "games": len(rows),
             "averages": averages,
-            "game_log": [_format_game_log_row(g, g.get("player_team", "")) for g in rows[:20]],
+            # Return ALL games since season_from so the chart shows the full 5-year history.
+            "game_log": [_format_game_log_row(g, g.get("player_team", "")) for g in rows],
         })
   
     @app.route("/api/afl/sync/props", methods=["POST"])
@@ -963,8 +974,10 @@ def register_afl_routes(app, db):
         try:
             props = fetch_afl_player_props(api_key=api_key, markets=market)
             count = upsert_player_props(db, props)
+            # Return the normalised market name so callers know what was stored
+            stored_market = _normalise_prop_market(market)
             log_sync(db, "odds_api", rows=count)
-            return jsonify({"status": "ok", "rows_synced": count, "market": market})
+            return jsonify({"status": "ok", "rows_synced": count, "market": stored_market})
         except Exception as exc:
             log_sync(db, "odds_api", status="error", error=str(exc))
             return jsonify({"status": "error", "message": str(exc)}), 500
