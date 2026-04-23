@@ -199,3 +199,52 @@ def test_player_home_away_uses_db_latest_season():
     # Should now delegate to _db_latest_player_stats_season
     assert "_db_latest_player_stats_season" in source
 
+
+# ---------------------------------------------------------------------------
+# Fix – vs-opponent game_log must use all rows, not just last_5
+# ---------------------------------------------------------------------------
+
+def test_vs_opponent_game_log_uses_all_rows():
+    """api_afl_player_vs_opponent must build game_log from rows[:20], not from last_5."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # Old bug: game_log was populated from result.get("last_5", []) — max 5 games
+    assert 'result.get("last_5", [])' not in source, (
+        "api_afl_player_vs_opponent still builds game_log from last_5 (max 5 games). "
+        "It should use rows[:20] so the bar chart has sufficient data."
+    )
+    # New behaviour: use rows directly
+    assert "rows[:20]" in source, (
+        "api_afl_player_vs_opponent does not slice rows[:20] for game_log"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix – renderPropCard hr() must not use function declaration inside a function
+# ---------------------------------------------------------------------------
+
+def test_render_prop_card_uses_arrow_hr():
+    """renderPropCard must define hr() as an arrow function, not a function declaration."""
+    template_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "templates",
+        "afl.html",
+    )
+    with open(template_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # Old pattern: bare function declaration inside renderPropCard body
+    assert "function hr(arr, line)" not in source, (
+        "renderPropCard still uses a bare 'function hr(arr, line)' declaration inside "
+        "the function body. Convert it to a const arrow function."
+    )
+    # New pattern: arrow function
+    assert "const hr = (arr, line) =>" in source, (
+        "renderPropCard does not define hr() as 'const hr = (arr, line) =>'"
+    )
+

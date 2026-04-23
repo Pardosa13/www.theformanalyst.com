@@ -425,7 +425,8 @@ def register_afl_routes(app, db):
             )
 
         result = get_player_vs_opponent(rows, opponent)
-        result["game_log"] = [_format_game_log_row(g, g.get("player_team", "")) for g in result.get("last_5", [])]
+        # rows is already sorted by match_date DESC; return up to 20 games (not just last_5)
+        result["game_log"] = [_format_game_log_row(g, g.get("player_team", "")) for g in rows[:20]]
         result.pop("last_5", None)
 
         return jsonify({"opponent": opponent, "season_from": season_from, **result})
