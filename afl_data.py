@@ -1520,6 +1520,10 @@ def _normalise_prop_market(market_key: str) -> str:
         "player_goals": "player_goals",
         "player_goals_scored_over": "player_goals",
         "player_afl_fantasy_points": "player_afl_fantasy_points",
+        "player_kicks": "player_kicks",
+        "player_kicks_over": "player_kicks",
+        "player_handballs": "player_handballs",
+        "player_handballs_over": "player_handballs",
     }
     return mapping.get(_coerce_str(market_key), _coerce_str(market_key))
 
