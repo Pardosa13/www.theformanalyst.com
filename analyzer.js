@@ -1,6 +1,7 @@
 let strikeRateData = { jockeys: {}, trainers: {} };
 let jockeyLookup = {};
 let trainerLookup = {};
+let parTimesLookup = {};
 
 function abbreviateName(fullName) {
     if (!fullName || typeof fullName !== 'string') return fullName;
@@ -933,6 +934,16 @@ if (horseSex === 'Colt') {
 //     score += 5;
 //     notes += '+ 5.0 : Snitzel × Colt combo (+215% ROI, 17 races, 29.4% SR)\n';
 // }
+
+    // ==========================================
+    // FORM TEMPO SCORING — ADDED 2026-04-24
+    // Compares last-race time against par time for that track/distance/condition.
+    // Based on 3,082 races: fast tempo = better ROI, very slow = value destroyer.
+    // ==========================================
+    const [tempoScore, tempoNote] = checkFormTempo(horseRow);
+    score += tempoScore;
+    notes += tempoNote;
+
     return [score, notes]; // Return the score and notes
 }
 
@@ -2528,6 +2539,67 @@ function isUndefeatedRecord(record) {
     return runs > 0 && wins === runs && seconds === 0 && thirds === 0;
 }
 
+// ==========================================
+// FORM TEMPO SCORING — ADDED 2026-04-24
+// Looks up the historical par time for the horse's last race
+// track/distance/condition and scores based on how fast/slow it was.
+// par_times passed from app.py (30+ sample minimum per combo).
+// ==========================================
+function checkFormTempo(horseRow) {
+    if (!parTimesLookup || Object.keys(parTimesLookup).length === 0) {
+        return [0, `+ 0.0 : Form Tempo — no par time database yet\n`];
+    }
+
+    const formTimeRaw = String(horseRow['form time'] || '').trim();
+    const formTrack   = String(horseRow['form track'] || '').trim().toLowerCase();
+    const formDist    = String(horseRow['form distance'] || '').trim();
+    const formCond    = String(horseRow['form track condition'] || '').trim().toLowerCase();
+
+    if (!formTimeRaw || !formTrack || !formDist || !formCond) {
+        return [0, `+ 0.0 : Form Tempo — missing last race track/distance/condition data\n`];
+    }
+    if (!formTimeRaw.includes(':')) {
+        return [0, `+ 0.0 : Form Tempo — last race time not in parseable format\n`];
+    }
+
+    let formSeconds;
+    try {
+        const parts = formTimeRaw.split(':');
+        formSeconds = parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+    } catch (e) {
+        return [0, `+ 0.0 : Form Tempo — last race time could not be parsed\n`];
+    }
+    if (isNaN(formSeconds) || formSeconds <= 0) {
+        return [0, `+ 0.0 : Form Tempo — last race time invalid\n`];
+    }
+
+    const parKey = `${formTrack}|${formDist}|${formCond}`;
+    const parSeconds = parTimesLookup[parKey];
+    if (!parSeconds) {
+        return [0, `+ 0.0 : Form Tempo — no par time for ${formTrack} ${formDist}m ${formCond} (<30 historical races)\n`];
+    }
+
+    // positive delta = horse's race was faster than par
+    const delta = parSeconds - formSeconds;
+    const sign  = delta >= 0 ? '+' : '';
+
+    if (delta >= 2.0) {
+        return [20, `+20.0 : Very Fast last race (${sign}${delta.toFixed(2)}s vs par) — aerobically tested\n`];
+    } else if (delta >= 1.0) {
+        return [15, `+15.0 : Fast last race (${sign}${delta.toFixed(2)}s vs par)\n`];
+    } else if (delta >= 0.3) {
+        return [10, `+10.0 : Above Par last race (${sign}${delta.toFixed(2)}s vs par)\n`];
+    } else if (delta >= -0.3) {
+        return [5, `+ 5.0 : Par last race (within 0.3s of par)\n`];
+    } else if (delta >= -1.0) {
+        return [-5, `- 5.0 : Below Par last race (${delta.toFixed(2)}s vs par)\n`];
+    } else if (delta >= -2.0) {
+        return [-10, `-10.0 : Slow last race (${delta.toFixed(2)}s vs par)\n`];
+    } else {
+        return [-15, `-15.0 : Very Slow last race (${delta.toFixed(2)}s vs par)\n`];
+    }
+}
+
 // FIRST-UP / SECOND-UP specialist — cleaned and closed
 function checkFirstUpSecondUp(horseRow) {
     let addScore = 0;
@@ -3530,6 +3602,7 @@ process.stdin.on('end', () => {
         // Try parsing as JSON first (new format)
         const input = JSON.parse(inputData);
         strikeRateData = input.strike_rate_data || { jockeys: {}, trainers: {} };
+        parTimesLookup = input.par_times || {};
 
         // Build normalized lookup maps
         jockeyLookup = {};
