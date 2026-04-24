@@ -1294,8 +1294,8 @@ def _db_player_search(
         params["name"] = f"%{normalized_name}%"
 
     if team:
-        conditions.append("LOWER(player_team) LIKE :team")
-        params["team"] = f"%{team.lower()}%"
+        conditions.append("LOWER(player_team) = :team")
+        params["team"] = team.lower()
 
     if seasons:
         conditions.append("season = ANY(:seasons)")
@@ -1425,8 +1425,8 @@ def _db_player_vs_opponent(
         filters.append("LOWER(TRIM(player_first_name || ' ' || player_last_name)) LIKE :name")
         params["name"] = f"%{_normalize_whitespace(name).lower()}%"
         if team:
-            filters.append("LOWER(player_team) LIKE :team")
-            params["team"] = f"%{team.lower()}%"
+            filters.append("LOWER(player_team) = :team")
+            params["team"] = team.lower()
     else:
         return []
 
