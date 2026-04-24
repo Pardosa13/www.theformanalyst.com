@@ -10253,5 +10253,194 @@ def export_all_data():
             zip_file.writestr(f'{table}.csv', csv_buffer.getvalue())
     
     zip_buffer.seek(0)
-    return flask_send_file(zip_buffer, mimetype='application/zip', 
+    return flask_send_file(zip_buffer, mimetype='application/zip',
                      as_attachment=True, download_name='database_export.zip')
+
+
+@app.route("/api/data/race-tempo-analysis")
+@login_required
+def api_race_tempo_analysis():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    from collections import defaultdict
+
+    track_filter = request.args.get('track', '')
+    date_from    = request.args.get('date_from', '')
+    date_to      = request.args.get('date_to', '')
+    limit_param  = request.args.get('limit', '200')
+    stake        = 10.0
+
+    # Build par time lookup from historical horses table
+    par_query = """
+        SELECT
+            csv_data->>'form track'           AS track,
+            csv_data->>'form distance'        AS distance,
+            csv_data->>'form track condition' AS condition,
+            COUNT(*)                          AS sample_size,
+            AVG(
+                (SPLIT_PART(csv_data->>'form time', ':', 1)::numeric * 60) +
+                SPLIT_PART(csv_data->>'form time', ':', 2)::numeric
+            )                                 AS par_seconds
+        FROM horses
+        WHERE
+            csv_data->>'form time' IS NOT NULL
+            AND csv_data->>'form time' ~ '^\\d+:\\d+\\.\\d+$'
+        GROUP BY
+            csv_data->>'form track',
+            csv_data->>'form distance',
+            csv_data->>'form track condition'
+        HAVING COUNT(*) >= 30
+    """
+    from sqlalchemy import text
+    par_rows = db.session.execute(text(par_query)).fetchall()
+
+    par_lookup = {}
+    for row in par_rows:
+        if row.track and row.distance and row.condition:
+            key = (row.track.strip().lower(), str(row.distance).strip(), row.condition.strip().lower())
+            par_lookup[key] = float(row.par_seconds)
+
+    if not par_lookup:
+        return jsonify({'error': 'No par time data available yet'}), 404
+
+    # Get race results
+    race_id_q = db.session.query(Race.id).join(
+        Meeting, Race.meeting_id == Meeting.id
+    ).join(Horse, Horse.race_id == Race.id
+    ).join(Result, Result.horse_id == Horse.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        race_id_q = race_id_q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        race_id_q = race_id_q.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        race_id_q = race_id_q.filter(Meeting.uploaded_at <= date_to)
+
+    all_ids = race_id_q.add_columns(Meeting.uploaded_at).distinct().order_by(
+        Meeting.uploaded_at.desc(), Race.id.desc()
+    ).all()
+
+    if limit_param == 'all':
+        race_ids = [r[0] for r in all_ids]
+    else:
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        race_ids = [r[0] for r in all_ids[:limit]]
+
+    if not race_ids:
+        return jsonify({'buckets': [], 'par_coverage': 0, 'total_horses': 0})
+
+    rows = db.session.query(
+        Race.id,
+        Meeting.id,
+        Race.race_number,
+        Horse.csv_data,
+        Prediction.score,
+        Result.finish_position,
+        Result.sp
+    ).join(Horse,      Horse.race_id        == Race.id
+    ).join(Meeting,    Race.meeting_id      == Meeting.id
+    ).join(Prediction, Prediction.horse_id  == Horse.id
+    ).join(Result,     Result.horse_id      == Horse.id
+    ).filter(
+        Result.finish_position > 0,
+        Race.id.in_(race_ids)
+    ).all()
+
+    # Group by race for top-pick analysis
+    races_map = defaultdict(list)
+    for row in rows:
+        key = (row[1], row[2])  # meeting_id, race_number
+        races_map[key].append(row)
+
+    buckets = {
+        'Very Fast (2s+ faster)':    {'races': 0, 'wins': 0, 'profit': 0.0},
+        'Fast (1-2s faster)':        {'races': 0, 'wins': 0, 'profit': 0.0},
+        'Above Par (0.3-1s faster)': {'races': 0, 'wins': 0, 'profit': 0.0},
+        'Par (±0.3s)':               {'races': 0, 'wins': 0, 'profit': 0.0},
+        'Below Par (0.3-1s slow)':   {'races': 0, 'wins': 0, 'profit': 0.0},
+        'Slow (1-2s slower)':        {'races': 0, 'wins': 0, 'profit': 0.0},
+        'Very Slow (2s+ slower)':    {'races': 0, 'wins': 0, 'profit': 0.0},
+        'No Par Data':               {'races': 0, 'wins': 0, 'profit': 0.0},
+    }
+
+    total_horses = 0
+    par_matched  = 0
+
+    def parse_form_time(t):
+        if not t or ':' not in t:
+            return None
+        try:
+            parts = str(t).split(':')
+            return float(parts[0]) * 60 + float(parts[1])
+        except (ValueError, IndexError):
+            return None
+
+    def get_tempo_bucket(delta):
+        if delta >= 2.0:   return 'Very Fast (2s+ faster)'
+        if delta >= 1.0:   return 'Fast (1-2s faster)'
+        if delta >= 0.3:   return 'Above Par (0.3-1s faster)'
+        if delta >= -0.3:  return 'Par (±0.3s)'
+        if delta >= -1.0:  return 'Below Par (0.3-1s slow)'
+        if delta >= -2.0:  return 'Slow (1-2s slower)'
+        return 'Very Slow (2s+ slower)'
+
+    for key, horse_list in races_map.items():
+        top = max(horse_list, key=lambda x: x[4] or 0)  # x[4] = score
+        csv  = top[3] or {}
+        won  = top[5] == 1
+        sp   = top[6] or 0
+        profit = (sp * stake - stake) if won else -stake
+        total_horses += 1
+
+        form_time_raw = csv.get('form time', '').strip()
+        form_track    = (csv.get('form track') or '').strip().lower()
+        form_dist     = str(csv.get('form distance', '') or '').strip()
+        form_cond     = (csv.get('form track condition') or '').strip().lower()
+        form_seconds  = parse_form_time(form_time_raw)
+
+        bucket = 'No Par Data'
+
+        if form_seconds and form_track and form_dist and form_cond:
+            par_key = (form_track, form_dist, form_cond)
+            par_seconds = par_lookup.get(par_key)
+            if par_seconds:
+                delta = par_seconds - form_seconds  # positive = horse's race was faster
+                bucket = get_tempo_bucket(delta)
+                par_matched += 1
+
+        buckets[bucket]['races']  += 1
+        buckets[bucket]['wins']   += 1 if won else 0
+        buckets[bucket]['profit'] += profit
+
+    result_list = []
+    bucket_order = [
+        'Very Fast (2s+ faster)', 'Fast (1-2s faster)', 'Above Par (0.3-1s faster)',
+        'Par (±0.3s)',
+        'Below Par (0.3-1s slow)', 'Slow (1-2s slower)', 'Very Slow (2s+ slower)',
+        'No Par Data',
+    ]
+    for label in bucket_order:
+        s = buckets[label]
+        n = s['races']
+        if n == 0:
+            continue
+        result_list.append({
+            'label':       label,
+            'races':       n,
+            'wins':        s['wins'],
+            'strike_rate': round(s['wins'] / n * 100, 1),
+            'roi':         round(s['profit'] / (n * stake) * 100, 1),
+            'profit':      round(s['profit'], 2),
+        })
+
+    db.session.expunge_all()
+    db.session.remove()
+
+    return jsonify({
+        'buckets':      result_list,
+        'total_horses': total_horses,
+        'par_coverage': round(par_matched / total_horses * 100, 1) if total_horses else 0,
+        'par_tracks':   len(par_lookup),
+    })
