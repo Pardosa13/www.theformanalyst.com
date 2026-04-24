@@ -1791,6 +1791,91 @@ function loadOddsProps() {
 // ── Value finder ─────────────────────────────────────────────────
 let _vfRawData = null; // cached result for client-side re-filtering
 
+// Render the value finder results table.
+// mode='props'  → raw props from /api/afl/props/all   (All Markets)
+// mode='bets'   → value bets from /api/afl/value-finder (specific market)
+// Returns an HTML string ready to assign to el.innerHTML.
+function _vfRenderTable(rows, mode, data) {
+  const market = document.getElementById('valueMarket')?.value || '';
+  const minEdge = parseFloat(document.getElementById('minEdge')?.value) || 2;
+
+  if (mode === 'props') {
+    const tableRows = rows.map(p => {
+      const ltCls = (p.line_type || '') === 'Over' ? 'lt-over' : 'lt-under';
+      const odds = parseFloat(p.odds) || 0;
+      const mktLabel = (p.market || '').replace('player_', '').replace(/_/g, ' ');
+      return `
+        <tr>
+          <td style="font-weight:700;">${esc(p.player_name || '')}</td>
+          <td style="font-size:11px;">${esc(p.home_team || '')} vs ${esc(p.away_team || '')}</td>
+          <td style="font-size:11px;">${esc(mktLabel)}</td>
+          <td><span class="${ltCls}">${esc(p.line_type || '')}</span></td>
+          <td style="font-family:'DM Mono',monospace;font-weight:700;">${p.line != null ? p.line : '—'}</td>
+          <td style="font-family:'DM Mono',monospace;">${odds > 0 ? odds.toFixed(2) : '—'}</td>
+          <td style="font-size:10px;color:var(--text-muted);">${esc(p.bookmaker || '')}</td>
+        </tr>
+      `;
+    }).join('');
+    return `
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+        ${esc(String(rows.length))} prop(s) from database · last 7 days
+      </div>
+      <div class="scroll-x">
+        <table class="value-table">
+          <thead><tr>
+            <th>Player</th><th>Match</th><th>Market</th>
+            <th>O/U</th><th>Line</th><th>Odds</th><th>Book</th>
+          </tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  // mode === 'bets'
+  const stat = (data && data.stat) || market.replace('player_', '');
+  const tableRows = rows.map(bet => {
+    const edge = safeNum(bet.edge, 0);
+    const cls = edge >= 2 ? 'pos' : edge <= -2 ? 'neg' : 'neu';
+    const ltCls = (bet.line_type || '') === 'Over' ? 'lt-over' : 'lt-under';
+    const odds = safeNum(bet.odds, 0);
+    return `
+      <tr>
+        <td style="font-weight:700;">${esc(bet.player || '')}</td>
+        <td style="font-size:11px;">${esc(bet.team || '')}</td>
+        <td style="font-size:11px;">${esc(bet.opponent || '')}</td>
+        <td style="font-size:10px;color:var(--text-muted);">${esc(bet.bookmaker || '')}</td>
+        <td><span class="${ltCls}">${esc(bet.line_type || '')}</span></td>
+        <td style="font-family:'DM Mono',monospace;font-weight:700;">${safeNum(bet.book_line, 0)}</td>
+        <td style="font-family:'DM Mono',monospace;">${odds > 0 ? odds.toFixed(2) : '—'}</td>
+        <td style="font-family:'DM Mono',monospace;">${bet.season_avg != null ? safeNum(bet.season_avg, 0).toFixed(1) : '—'}</td>
+        <td style="font-family:'DM Mono',monospace;">${bet.last5_avg != null ? safeNum(bet.last5_avg, 0).toFixed(1) : '—'}</td>
+        <td style="font-family:'DM Mono',monospace;">${bet.vs_opp_avg != null ? safeNum(bet.vs_opp_avg, 0).toFixed(1) : '—'}</td>
+        <td style="font-family:'DM Mono',monospace;">${safeNum(bet.hist_pct, 0)}%</td>
+        <td style="font-family:'DM Mono',monospace;">${bet.model_prediction != null ? safeNum(bet.model_prediction, 0).toFixed(1) : '—'}</td>
+        <td><span class="edge-chip ${cls}">${edge > 0 ? '+' : ''}${edge.toFixed(1)}</span></td>
+      </tr>
+    `;
+  }).join('');
+  return `
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+      ${esc(String(rows.length))} result(s) · market: <strong>${esc(market)}</strong> · stat: <strong>${esc(stat)}</strong> · min edge: ${esc(String(minEdge))} · season: ${esc(String((data && data.season) || _SEASON))}
+    </div>
+    <div class="scroll-x">
+      <table class="value-table">
+        <thead>
+          <tr>
+            <th>Player</th><th>Team</th><th>Opp</th><th>Book</th>
+            <th>O/U</th><th>Line</th><th>Odds</th>
+            <th>Season Avg</th><th>Last 5</th><th>vs Opponent</th><th>Hit%</th><th>Model</th><th>Edge</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
 function _vfApplyFilters(data) {
   const el = document.getElementById('valueResults');
   const market = document.getElementById('valueMarket')?.value || '';
@@ -1800,11 +1885,11 @@ function _vfApplyFilters(data) {
   const minEdge = parseFloat(document.getElementById('minEdge')?.value) || 2;
 
   if (!data) {
-    el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No props found in database for the last 7 days. Use <strong>Load All Props</strong> to sync from the Odds API.</p></div>';
+    el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No props found in database for the last 7 days. Use <strong>Refresh from API</strong> to sync from the Odds API.</p></div>';
     return;
   }
 
-  // Raw props mode (all markets)
+  // Raw props mode (All Markets)
   if (!market && data.props) {
     let rows = data.props || [];
     if (matchVal) {
@@ -1821,37 +1906,7 @@ function _vfApplyFilters(data) {
       el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No props match the selected filters.</p></div>';
       return;
     }
-    const tableRows = rows.map(p => {
-      const ltCls = (p.line_type || '') === 'Over' ? 'lt-over' : 'lt-under';
-      const odds = parseFloat(p.odds) || 0;
-      const mktLabel = (p.market || '').replace('player_', '').replace(/_/g, ' ');
-      return `
-        <tr>
-          <td style="font-weight:700;">${esc(p.player_name || '')}</td>
-          <td style="font-size:11px;">${esc(p.team || '')}</td>
-          <td style="font-size:11px;">${esc(p.home_team || '')} vs ${esc(p.away_team || '')}</td>
-          <td style="font-size:11px;">${esc(mktLabel)}</td>
-          <td><span class="${ltCls}">${esc(p.line_type || '')}</span></td>
-          <td style="font-family:'DM Mono',monospace;font-weight:700;">${p.line != null ? p.line : '—'}</td>
-          <td style="font-family:'DM Mono',monospace;">${odds > 0 ? odds.toFixed(2) : '—'}</td>
-          <td style="font-size:10px;color:var(--text-muted);">${esc(p.bookmaker || '')}</td>
-        </tr>
-      `;
-    }).join('');
-    el.innerHTML = `
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
-        ${esc(String(rows.length))} prop(s) from database · last 7 days
-      </div>
-      <div class="scroll-x">
-        <table class="value-table">
-          <thead><tr>
-            <th>Player</th><th>Team</th><th>Match</th><th>Market</th>
-            <th>O/U</th><th>Line</th><th>Odds</th><th>Book</th>
-          </tr></thead>
-          <tbody>${tableRows}</tbody>
-        </table>
-      </div>
-    `;
+    el.innerHTML = _vfRenderTable(rows, 'props', data);
     return;
   }
 
@@ -1875,52 +1930,11 @@ function _vfApplyFilters(data) {
     return;
   }
   if (!bets.length) {
-    el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No value bets found for these filters. Try <strong>Load All Props</strong> to refresh from the Odds API, or lower the min edge.</p></div>';
+    el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No value bets found for these filters. Try <strong>Refresh from API</strong> to reload from the Odds API, or lower the min edge.</p></div>';
     return;
   }
 
-  const tableRows = bets.map(bet => {
-    const edge = safeNum(bet.edge, 0);
-    const cls = edge >= 2 ? 'pos' : edge <= -2 ? 'neg' : 'neu';
-    const ltCls = (bet.line_type || '') === 'Over' ? 'lt-over' : 'lt-under';
-    const odds = safeNum(bet.odds, 0);
-    return `
-      <tr>
-        <td style="font-weight:700;">${esc(bet.player || '')}</td>
-        <td style="font-size:11px;">${esc(bet.team || '')}</td>
-        <td style="font-size:11px;">${esc(bet.opponent || '')}</td>
-        <td style="font-size:10px;color:var(--text-muted);">${esc(bet.bookmaker || '')}</td>
-        <td><span class="${ltCls}">${esc(bet.line_type || '')}</span></td>
-        <td style="font-family:'DM Mono',monospace;font-weight:700;">${safeNum(bet.book_line, 0)}</td>
-        <td style="font-family:'DM Mono',monospace;">${odds > 0 ? odds.toFixed(2) : '—'}</td>
-        <td style="font-family:'DM Mono',monospace;">${bet.season_avg != null ? safeNum(bet.season_avg, 0).toFixed(1) : '—'}</td>
-        <td style="font-family:'DM Mono',monospace;">${bet.last5_avg != null ? safeNum(bet.last5_avg, 0).toFixed(1) : '—'}</td>
-        <td style="font-family:'DM Mono',monospace;">${bet.vs_opp_avg != null ? safeNum(bet.vs_opp_avg, 0).toFixed(1) : '—'}</td>
-        <td style="font-family:'DM Mono',monospace;">${safeNum(bet.hist_pct, 0)}%</td>
-        <td style="font-family:'DM Mono',monospace;">${bet.model_prediction != null ? safeNum(bet.model_prediction, 0).toFixed(1) : '—'}</td>
-        <td><span class="edge-chip ${cls}">${edge > 0 ? '+' : ''}${edge.toFixed(1)}</span></td>
-      </tr>
-    `;
-  }).join('');
-
-  const stat = data.stat || market.replace('player_', '');
-  el.innerHTML = `
-    <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
-      ${esc(String(bets.length))} result(s) · market: <strong>${esc(market)}</strong> · stat: <strong>${esc(stat)}</strong> · min edge: ${esc(String(minEdge))} · season: ${esc(String(data.season || _SEASON))}
-    </div>
-    <div class="scroll-x">
-      <table class="value-table">
-        <thead>
-          <tr>
-            <th>Player</th><th>Team</th><th>Opp</th><th>Book</th>
-            <th>O/U</th><th>Line</th><th>Odds</th>
-            <th>Season</th><th>L5</th><th>vs Opp</th><th>Hit%</th><th>Model</th><th>Edge</th>
-          </tr>
-        </thead>
-        <tbody>${tableRows}</tbody>
-      </table>
-    </div>
-  `;
+  el.innerHTML = _vfRenderTable(bets, 'bets', data);
 }
 
 function _vfPopulateMatchSelector(matches) {

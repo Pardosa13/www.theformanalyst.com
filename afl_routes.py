@@ -1561,19 +1561,42 @@ def _db_get_props(
     min_line: float | None = None,
     max_line: float | None = None,
 ) -> list[dict]:
+    conditions = [
+        "market = :market",
+        "fetched_at > NOW() - INTERVAL '7 days'",
+    ]
+    params: dict = {"market": market}
+
+    if home_team:
+        conditions.append(
+            "(LOWER(home_team) LIKE LOWER(:home_team) OR LOWER(away_team) LIKE LOWER(:home_team))"
+        )
+        params["home_team"] = f"%{home_team}%"
+    if away_team:
+        conditions.append(
+            "(LOWER(home_team) LIKE LOWER(:away_team) OR LOWER(away_team) LIKE LOWER(:away_team))"
+        )
+        params["away_team"] = f"%{away_team}%"
+    if min_line is not None:
+        conditions.append("line >= :min_line")
+        params["min_line"] = min_line
+    if max_line is not None:
+        conditions.append("line <= :max_line")
+        params["max_line"] = max_line
+
+    where_clause = " AND ".join(conditions)
+    # where_clause is built entirely from hardcoded string literals above;
+    # all user-supplied values are passed via the parameterised `params` dict.
     sql = db.text(
-        """
+        f"""
         SELECT DISTINCT ON (player_name, line_type, line) *
         FROM afl_player_props
-        WHERE market = :market
-          AND fetched_at > NOW() - INTERVAL '7 days'
+        WHERE {where_clause}
         ORDER BY player_name, line_type, line, fetched_at DESC
         """
     )
     with db.engine.connect() as conn:
-        rows = conn.execute(sql, {
-            "market": market,
-        }).mappings().fetchall()
+        rows = conn.execute(sql, params).mappings().fetchall()
     return [dict(row) for row in rows]
 
 
