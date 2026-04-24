@@ -1563,9 +1563,12 @@ def fetch_afl_player_props(
     if not markets:
         markets = [
             "player_disposals",
+            "player_kicks",
+            "player_handballs",
             "player_marks",
             "player_tackles",
             "player_goals",
+            "player_afl_fantasy_points",
         ]
     elif isinstance(markets, str):
         markets = [markets]
