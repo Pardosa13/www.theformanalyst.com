@@ -1,0 +1,29 @@
+name: Fix 2026 Player ID Collisions (one-time repair)
+
+# Manual trigger only — run this ONCE after deploying the player_id collision fix.
+# It deletes all existing season=2026 rows from afl_player_stats and re-imports
+# them using the corrected ID mapping (first + last + club → historical Fryzigg id).
+on:
+  workflow_dispatch:
+
+jobs:
+  fix-player-ids:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install --quiet sqlalchemy psycopg2-binary pandas
+
+      - name: Delete 2026 rows and re-import with correct player IDs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python afl_fix_2026_ids.py

@@ -527,3 +527,200 @@ def test_db_get_props_applies_all_filters():
             f"_db_get_props does not use :{param} as a SQL bind parameter — "
             f"the filter is silently ignored"
         )
+
+
+# ---------------------------------------------------------------------------
+# 2026 player_id collision fix — new helpers in afl_db.py
+# ---------------------------------------------------------------------------
+
+# Inline mirror of the helpers added to afl_db.py so we can test them without
+# importing the full module (no DB / SQLAlchemy required).
+
+def _normalise_name(value: Any) -> str:
+    s = str(value).strip().lower() if value else ""
+    return " ".join(s.split())
+
+
+def _stable_debut_id(first: str, last: str, team: str) -> int:
+    key = f"2026|{first}|{last}|{team}"
+    digest = hashlib.sha256(key.encode("utf-8")).digest()
+    abs_id = int.from_bytes(digest[:7], "big") + 1
+    return -abs_id
+
+
+def test_normalise_name_basic():
+    """_normalise_name strips, lowercases and collapses whitespace."""
+    assert _normalise_name("Nick") == "nick"
+    assert _normalise_name("  Daicos  ") == "daicos"
+    assert _normalise_name("Tom  Mitchell") == "tom mitchell"
+    assert _normalise_name(None) == ""
+    assert _normalise_name("") == ""
+
+
+def test_normalise_name_unicode_passthrough():
+    """Non-ASCII characters are preserved (lowercased only)."""
+    assert _normalise_name("O'Connor") == "o'connor"
+
+
+def test_stable_debut_id_is_negative():
+    """_stable_debut_id must always return a negative integer."""
+    pid = _stable_debut_id("nick", "daicos", "collingwood")
+    assert pid < 0, f"Expected negative id, got {pid}"
+
+
+def test_stable_debut_id_is_deterministic():
+    """Same inputs must always produce the same id."""
+    pid_a = _stable_debut_id("nick", "daicos", "collingwood")
+    pid_b = _stable_debut_id("nick", "daicos", "collingwood")
+    assert pid_a == pid_b
+
+
+def test_stable_debut_id_different_players():
+    """Different players must receive different ids."""
+    pid_a = _stable_debut_id("nick", "daicos", "collingwood")
+    pid_b = _stable_debut_id("christian", "petracca", "melbourne")
+    assert pid_a != pid_b
+
+
+def test_stable_debut_id_different_clubs():
+    """Same name at different clubs must receive different ids."""
+    pid_a = _stable_debut_id("john", "smith", "sydney")
+    pid_b = _stable_debut_id("john", "smith", "richmond")
+    assert pid_a != pid_b
+
+
+def test_stable_debut_id_fits_bigint():
+    """Result must fit in a PostgreSQL signed BIGINT (-2^63 .. 2^63-1)."""
+    min_bigint = -(2 ** 63)
+    for first, last, team in [
+        ("nick", "daicos", "collingwood"),
+        ("christian", "petracca", "melbourne"),
+        ("a debut player", "nobody", "gold coast"),
+    ]:
+        pid = _stable_debut_id(first, last, team)
+        assert min_bigint <= pid < 0, (
+            f"stable_debut_id out of range for {first} {last} ({team}): {pid}"
+        )
+
+
+def test_stable_debut_id_never_zero():
+    """The result must never be zero (zero is treated as 'missing' in some checks)."""
+    pid = _stable_debut_id("", "", "")
+    assert pid != 0
+
+
+def test_afl_db_has_normalise_name():
+    """afl_db.py must define _normalise_name."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+    assert "def _normalise_name(" in source, "_normalise_name not found in afl_db.py"
+
+
+def test_afl_db_has_stable_debut_id():
+    """afl_db.py must define _stable_debut_id."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+    assert "def _stable_debut_id(" in source, "_stable_debut_id not found in afl_db.py"
+
+
+def test_afl_db_has_build_historical_id_map():
+    """afl_db.py must define _build_historical_id_map."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+    assert "def _build_historical_id_map(" in source, (
+        "_build_historical_id_map not found in afl_db.py"
+    )
+
+
+def test_afl_db_has_resolve_2026_player_id():
+    """afl_db.py must define _resolve_2026_player_id."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+    assert "def _resolve_2026_player_id(" in source, (
+        "_resolve_2026_player_id not found in afl_db.py"
+    )
+
+
+def test_upsert_player_stats_no_md5_modulo_fallback():
+    """upsert_player_stats must NOT use the old md5 % 10_000_000 fallback."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+    assert "% 10_000_000" not in source and "% 10000000" not in source, (
+        "afl_db.py still contains the unsafe md5 % 10_000_000 player_id fallback; "
+        "replace it with _stable_debut_id()"
+    )
+
+
+def test_upsert_player_stats_uses_resolve_2026():
+    """upsert_player_stats must call _resolve_2026_player_id for 2026 rows."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+    assert "_resolve_2026_player_id(" in source, (
+        "upsert_player_stats in afl_db.py does not call _resolve_2026_player_id"
+    )
+
+
+def test_upsert_player_stats_logs_2026_resolution():
+    """upsert_player_stats must log the 2026 player_id resolution summary."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+    assert "2026 player_id resolution" in source, (
+        "afl_db.py does not log a '2026 player_id resolution' summary line"
+    )
+
+
+def test_afl_fix_2026_script_exists():
+    """afl_fix_2026_ids.py repair script must exist in the repo root."""
+    script_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_fix_2026_ids.py",
+    )
+    assert os.path.isfile(script_path), (
+        "afl_fix_2026_ids.py not found in repo root; "
+        "it is needed to repair existing polluted 2026 rows"
+    )
+
+
+def test_afl_fix_2026_script_deletes_and_reimports():
+    """afl_fix_2026_ids.py must DELETE season=2026 rows and call upsert_player_stats."""
+    script_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_fix_2026_ids.py",
+    )
+    with open(script_path, encoding="utf-8") as f:
+        source = f.read()
+    assert "DELETE FROM afl_player_stats WHERE season = 2026" in source, (
+        "afl_fix_2026_ids.py does not DELETE season=2026 rows"
+    )
+    assert "upsert_player_stats" in source, (
+        "afl_fix_2026_ids.py does not call upsert_player_stats to re-import"
+    )
+
