@@ -615,20 +615,32 @@ def register_afl_routes(app, db):
         market = request.args.get("market", "player_disposals")
         min_edge = request.args.get("min_edge", 2.0, type=float)
         requested_season = request.args.get("year", type=int)
+        home_team = request.args.get("home", "").strip()
+        away_team = request.args.get("away", "").strip()
+        min_line = request.args.get("min_line", type=float)
+        max_line = request.args.get("max_line", type=float)
 
         market = _normalise_prop_market(market)
 
         effective_season = _resolve_stats_season(db, requested_season)
         effective_seasons = _resolve_stats_seasons(db, requested_season)
-        props = _db_get_props(db, market=market)
+        props = _db_get_props(
+            db,
+            market=market,
+            home_team=home_team or None,
+            away_team=away_team or None,
+            min_line=min_line,
+            max_line=max_line,
+        )
 
         if not props:
             return jsonify(
                 {
                     "bets": [],
                     "message": (
-                        "No prop lines in database for this market. "
-                        "Click 'Load All Props' on the Value Finder tab to fetch from the Odds API."
+                        "No prop lines found for this market. "
+                        "Props are synced daily — check back later or use "
+                        "'Load All Props' to manually refresh from the Odds API."
                     ),
                     "season": effective_season,
                     "seasons_used": effective_seasons,
@@ -768,6 +780,15 @@ def register_afl_routes(app, db):
                         "recommendation": "value" if abs(edge) >= 2.0 else "skip",
                     }
                 )
+
+        # Keep only the highest-edge bet per (player, direction) so a player
+        # with different lines from different bookmakers appears at most once.
+        best_per_player: dict[tuple, dict] = {}
+        for bet in value_bets:
+            key = (bet["player"], bet["line_type"])
+            if key not in best_per_player or abs(bet["edge"]) > abs(best_per_player[key]["edge"]):
+                best_per_player[key] = bet
+        value_bets = list(best_per_player.values())
 
         value_bets.sort(key=lambda x: abs(x.get("edge", 0)), reverse=True)
 
@@ -1033,11 +1054,14 @@ def register_afl_routes(app, db):
         venue_params = {f"v{i}": f"%{name}%" for i, name in enumerate(venue_aliases)}
 
         sql = db.text(f"""
-            SELECT *
-            FROM afl_player_stats
-            WHERE player_id = :player_id
-              AND season >= :season_from
-              AND ({alias_clauses})
+            SELECT * FROM (
+                SELECT DISTINCT ON (match_date, match_home_team, match_away_team) *
+                FROM afl_player_stats
+                WHERE player_id = :player_id
+                  AND season >= :season_from
+                  AND ({alias_clauses})
+                ORDER BY match_date, match_home_team, match_away_team, id DESC
+            ) deduped
             ORDER BY match_date DESC
         """)
 
@@ -1324,8 +1348,8 @@ def _db_player_search(
         params["name"] = f"%{normalized_name}%"
 
     if team:
-        conditions.append("LOWER(player_team) LIKE :team")
-        params["team"] = f"%{team.lower()}%"
+        conditions.append("LOWER(player_team) = :team")
+        params["team"] = team.lower()
 
     if seasons:
         conditions.append("season = ANY(:seasons)")
@@ -1337,9 +1361,12 @@ def _db_player_search(
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     sql = db.text(
         f"""
-        SELECT *
-        FROM afl_player_stats
-        {where}
+        SELECT * FROM (
+            SELECT DISTINCT ON (player_id, match_date, match_home_team, match_away_team) *
+            FROM afl_player_stats
+            {where}
+            ORDER BY player_id, match_date, match_home_team, match_away_team, id DESC
+        ) deduped
         ORDER BY season DESC, match_date DESC
         LIMIT :limit
         """
@@ -1370,10 +1397,13 @@ def _db_player_by_id(
 
     sql = db.text(
         f"""
-        SELECT *
-        FROM afl_player_stats
-        WHERE player_id = :player_id
-        {season_filter}
+        SELECT * FROM (
+            SELECT DISTINCT ON (match_date, match_home_team, match_away_team) *
+            FROM afl_player_stats
+            WHERE player_id = :player_id
+            {season_filter}
+            ORDER BY match_date, match_home_team, match_away_team, id DESC
+        ) deduped
         ORDER BY season DESC, match_date DESC
         LIMIT :limit
         """
@@ -1449,16 +1479,19 @@ def _db_player_vs_opponent(
         filters.append("LOWER(TRIM(player_first_name || ' ' || player_last_name)) LIKE :name")
         params["name"] = f"%{_normalize_whitespace(name).lower()}%"
         if team:
-            filters.append("LOWER(player_team) LIKE :team")
-            params["team"] = f"%{team.lower()}%"
+            filters.append("LOWER(player_team) = :team")
+            params["team"] = team.lower()
     else:
         return []
 
     sql = db.text(
         f"""
-        SELECT *
-        FROM afl_player_stats
-        WHERE {' AND '.join(filters)}
+        SELECT * FROM (
+            SELECT DISTINCT ON (player_id, match_date, match_home_team, match_away_team) *
+            FROM afl_player_stats
+            WHERE {' AND '.join(filters)}
+            ORDER BY player_id, match_date, match_home_team, match_away_team, id DESC
+        ) deduped
         ORDER BY match_date DESC
         """
     )
@@ -1520,7 +1553,14 @@ def _db_get_standings(db, year: int, round_number: int | None = None) -> list[di
     return [dict(row) for row in rows]
 
 
-def _db_get_props(db, market: str = "player_disposals") -> list[dict]:
+def _db_get_props(
+    db,
+    market: str = "player_disposals",
+    home_team: str | None = None,
+    away_team: str | None = None,
+    min_line: float | None = None,
+    max_line: float | None = None,
+) -> list[dict]:
     sql = db.text(
         """
         SELECT DISTINCT ON (player_name, line_type, line) *
@@ -1531,7 +1571,9 @@ def _db_get_props(db, market: str = "player_disposals") -> list[dict]:
         """
     )
     with db.engine.connect() as conn:
-        rows = conn.execute(sql, {"market": market}).mappings().fetchall()
+        rows = conn.execute(sql, {
+            "market": market,
+        }).mappings().fetchall()
     return [dict(row) for row in rows]
 
 
@@ -1716,6 +1758,9 @@ def _hit_rate(rows: list[dict], stat: str, line: float) -> float:
 
 def _group_players(rows: list[dict]) -> dict:
     players: dict[int, dict] = {}
+    # Track seen games per player to deduplicate rows from different data sources
+    # that share the same natural game identity but different match_ids.
+    seen_games: dict[int, set] = {}
 
     for row in rows:
         player_id = row.get("player_id")
@@ -1734,6 +1779,18 @@ def _group_players(rows: list[dict]) -> dict:
                 "weight_kg": row.get("player_weight_kg"),
                 "games": [],
             }
+            seen_games[player_id] = set()
+
+        # Deduplicate by natural game identity — prevents two data-source rows
+        # (different match_ids, same game) from both appearing in the game log.
+        game_key = (
+            str(row.get("match_date", "")),
+            str(row.get("match_home_team", "") or "").lower(),
+            str(row.get("match_away_team", "") or "").lower(),
+        )
+        if game_key in seen_games[player_id]:
+            continue
+        seen_games[player_id].add(game_key)
 
         players[player_id]["games"].append(dict(row))
 

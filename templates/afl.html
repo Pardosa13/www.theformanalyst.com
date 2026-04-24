@@ -658,8 +658,8 @@
           <i class="bi bi-search"></i> Find Value
         </button>
         <button class="btn btn-secondary" id="loadPropsBtn" onclick="loadOddsProps()"
-          title="Fetch ALL prop markets (disposals, marks, kicks, handballs, tackles, goals, fantasy) from Odds API in one shot">
-          <i class="bi bi-cloud-download"></i> Load All Props
+          title="Manually fetch ALL prop markets from Odds API (requires ODDS_API_KEY)">
+          <i class="bi bi-cloud-download"></i> Refresh from API
         </button>
         <span id="propsStatus" style="font-size:11px;color:var(--text-muted);"></span>
       </div>
@@ -1771,7 +1771,7 @@ function loadOddsProps() {
   })
     .then(r => r.json())
     .then(data => {
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Load All Props'; }
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Refresh from API'; }
       if (data.status === 'ok') {
         const n = data.rows_synced || 0;
         if (statusEl) statusEl.textContent = `✓ ${n} lines loaded`;
@@ -1782,7 +1782,7 @@ function loadOddsProps() {
       }
     })
     .catch(() => {
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Load All Props'; }
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Refresh from API'; }
       if (statusEl) statusEl.textContent = '✗ Network error';
       alert('Failed to connect. Check that ODDS_API_KEY is configured.');
     });
