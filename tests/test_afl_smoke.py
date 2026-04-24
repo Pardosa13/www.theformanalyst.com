@@ -11,11 +11,46 @@ import hashlib
 import os
 import re
 import sys
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Inline implementations of pure-Python helpers under test
 # (mirrors the code in afl_data.py / afl_routes.py exactly)
 # ---------------------------------------------------------------------------
+
+
+def _s(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _team(value: Any) -> str:
+    raw = _s(value)
+    mapping = {
+        # Legacy / short-name aliases
+        "West Coast Eagles": "West Coast",
+        "Greater Western Sydney": "GWS Giants",
+        "GWS": "GWS Giants",
+        "Footscray": "Western Bulldogs",
+        "Brisbane": "Brisbane Lions",
+        # Full names with mascots as returned by The Odds API
+        "Adelaide Crows": "Adelaide",
+        "Carlton Blues": "Carlton",
+        "Collingwood Magpies": "Collingwood",
+        "Essendon Bombers": "Essendon",
+        "Fremantle Dockers": "Fremantle",
+        "Geelong Cats": "Geelong",
+        "Gold Coast Suns": "Gold Coast",
+        "Hawthorn Hawks": "Hawthorn",
+        "Melbourne Demons": "Melbourne",
+        "North Melbourne Kangaroos": "North Melbourne",
+        "Port Adelaide Power": "Port Adelaide",
+        "Richmond Tigers": "Richmond",
+        "St Kilda Saints": "St Kilda",
+        "Sydney Swans": "Sydney",
+    }
+    return mapping.get(raw, raw)
 
 _NORMALISE_PROP_MARKET_MAP = {
     "player_disposals": "player_disposals",
@@ -266,4 +301,67 @@ def test_render_prop_card_uses_arrow_hr():
     assert "const hr = (arr, line) =>" in source, (
         "renderPropCard does not define hr() as 'const hr = (arr, line) =>'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Fix – _team() strips AFL mascot suffixes from Odds API team names
+# ---------------------------------------------------------------------------
+
+def test_team_normalisation_mascot_names():
+    """Full team names from The Odds API must be stripped to the canonical short name."""
+    assert _team("Fremantle Dockers") == "Fremantle"
+    assert _team("Carlton Blues") == "Carlton"
+    assert _team("St Kilda Saints") == "St Kilda"
+    assert _team("Richmond Tigers") == "Richmond"
+    assert _team("Melbourne Demons") == "Melbourne"
+    assert _team("Sydney Swans") == "Sydney"
+    assert _team("Adelaide Crows") == "Adelaide"
+    assert _team("Collingwood Magpies") == "Collingwood"
+    assert _team("Essendon Bombers") == "Essendon"
+    assert _team("Geelong Cats") == "Geelong"
+    assert _team("Gold Coast Suns") == "Gold Coast"
+    assert _team("Hawthorn Hawks") == "Hawthorn"
+    assert _team("North Melbourne Kangaroos") == "North Melbourne"
+    assert _team("Port Adelaide Power") == "Port Adelaide"
+
+
+def test_team_normalisation_canonical_names_unchanged():
+    """Canonical team names (already correct) must pass through unchanged."""
+    assert _team("Brisbane Lions") == "Brisbane Lions"
+    assert _team("GWS Giants") == "GWS Giants"
+    assert _team("Western Bulldogs") == "Western Bulldogs"
+    assert _team("West Coast") == "West Coast"
+    assert _team("Fremantle") == "Fremantle"
+    assert _team("Melbourne") == "Melbourne"
+
+
+def test_team_normalisation_legacy_aliases():
+    """Legacy/shorthand aliases (existing mapping) must still work."""
+    assert _team("West Coast Eagles") == "West Coast"
+    assert _team("Greater Western Sydney") == "GWS Giants"
+    assert _team("GWS") == "GWS Giants"
+    assert _team("Footscray") == "Western Bulldogs"
+    assert _team("Brisbane") == "Brisbane Lions"
+
+
+def test_team_normalisation_source_has_mascot_entries():
+    """afl_db.py _team() mapping must contain the mascot-name entries."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+
+    for full_name in (
+        "Fremantle Dockers",
+        "Carlton Blues",
+        "St Kilda Saints",
+        "Richmond Tigers",
+        "Melbourne Demons",
+        "Sydney Swans",
+    ):
+        assert full_name in source, (
+            f"_team() in afl_db.py is missing an entry for {full_name!r}"
+        )
 

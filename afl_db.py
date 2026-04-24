@@ -250,11 +250,27 @@ def _b(value: Any, default: bool = False) -> bool:
 def _team(value: Any) -> str:
     raw = _s(value)
     mapping = {
+        # Legacy / short-name aliases
         "West Coast Eagles": "West Coast",
         "Greater Western Sydney": "GWS Giants",
         "GWS": "GWS Giants",
         "Footscray": "Western Bulldogs",
         "Brisbane": "Brisbane Lions",
+        # Full names with mascots as returned by The Odds API
+        "Adelaide Crows": "Adelaide",
+        "Carlton Blues": "Carlton",
+        "Collingwood Magpies": "Collingwood",
+        "Essendon Bombers": "Essendon",
+        "Fremantle Dockers": "Fremantle",
+        "Geelong Cats": "Geelong",
+        "Gold Coast Suns": "Gold Coast",
+        "Hawthorn Hawks": "Hawthorn",
+        "Melbourne Demons": "Melbourne",
+        "North Melbourne Kangaroos": "North Melbourne",
+        "Port Adelaide Power": "Port Adelaide",
+        "Richmond Tigers": "Richmond",
+        "St Kilda Saints": "St Kilda",
+        "Sydney Swans": "Sydney",
     }
     return mapping.get(raw, raw)
 
