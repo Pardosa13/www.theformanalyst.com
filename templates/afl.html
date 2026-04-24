@@ -530,9 +530,18 @@
   /* ── Responsive ──────────────────────────────────────────────── */
   @media (max-width:900px) {
     .prop-split { flex-direction:column; }
-    .prop-sidebar { width:100%; }
+    .prop-sidebar { width:100%; max-width:100%; }
     #propPlayerListInner { display:grid; grid-template-columns:repeat(2,1fr); }
     .vf-cards-grid { grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); }
+    /* Bar chart: allow horizontal scroll so bars never collapse below readable width */
+    .chart-body { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    #propBarsContainer { min-width:min-content; flex-wrap:nowrap; }
+    #propXAxis { min-width:min-content; flex-wrap:nowrap; }
+    .bar-wrap { min-width:18px; flex-shrink:0; }
+    .x-label { min-width:18px; flex-shrink:0; }
+    /* Analysis tabs: scroll horizontally instead of wrapping */
+    .analysis-tabs { overflow-x:auto; -webkit-overflow-scrolling:touch; flex-wrap:nowrap; }
+    .atab { flex-shrink:0; }
   }
   @media (max-width:768px) {
     .stat-row { grid-template-columns:1fr 1fr; }
@@ -547,7 +556,8 @@
     .stat-row { grid-template-columns:1fr 1fr; gap:8px; }
     .stat-tile { padding:12px 14px; }
     .stat-tile h2 { font-size:1.5rem; }
-    .player-stat-row { grid-template-columns:repeat(3,1fr); }
+    /* 4-col stat row: 7 stats = 2 rows (4+3) — balanced and readable */
+    .player-stat-row { grid-template-columns:repeat(4,1fr); }
     .margin-bar-row { flex-direction:column; align-items:stretch; gap:6px; }
     .margin-label,.margin-meta { width:auto; }
     .vf-cards-grid { grid-template-columns:1fr; }
@@ -557,8 +567,21 @@
     .value-finder-bar .form-select,
     .value-finder-bar .form-control,
     .value-finder-bar .btn { width:100% !important; max-width:100% !important; min-height:44px; }
-    .prop-selector-bar { flex-direction:column; align-items:stretch; gap:8px; padding:10px 14px; }
-    .prop-selector-bar .form-select { width:100% !important; }
+    /* Selector bar: wrap so round-nav stays on one line, selects drop below */
+    .prop-selector-bar { flex-wrap:wrap; align-items:center; gap:8px; padding:10px 12px; }
+    .prop-selector-bar .round-nav-btn { flex-shrink:0; width:36px; height:36px; }
+    #roundLabel { flex-shrink:0; }
+    #matchSelector { flex-basis:100%; max-width:100% !important; width:100% !important; }
+    #teamTabsWrap { flex-basis:100%; }
+    #teamTabsWrap button { flex:1; }
+    #propStatSelect { flex-basis:100%; width:100% !important; max-width:100% !important; margin-left:0 !important; }
+    /* Player list: single column on small phones for easier tapping */
+    #propPlayerListInner { grid-template-columns:1fr; }
+    .prow-name { font-size:13px; }
+    /* Player header: tighten up */
+    .player-hdr-top { padding:10px 12px; gap:10px; }
+    .player-avatar { width:40px; height:40px; font-size:13px; }
+    .player-hdr-name { font-size:14px; }
     .afl-tabs { padding:3px; gap:2px; }
     .afl-tab { min-width:0; padding:8px 6px; font-size:10px; }
     .afl-card-body { padding:12px; }
@@ -570,7 +593,7 @@
     .stat-tile h5 { font-size:10px; }
     .psr-val { font-size:12px; }
     .value-finder-bar { gap:6px; }
-    .prop-selector-bar { gap:6px; padding:8px 12px; }
+    .prop-selector-bar { gap:6px; padding:8px 10px; }
     .afl-card-body { padding:10px; }
     .afl-tabs { gap:1px; }
     .afl-tab { padding:7px 4px; font-size:10px; }
