@@ -1540,7 +1540,7 @@ function redrawBars() {
     const deduped = combined.filter(g => {
       const matchKey = g.date && g.home_team && g.away_team
         ? `${g.date}-${g.home_team}-${g.away_team}`
-        : `${g.date}-${g.opponent}`;
+        : `${g.season}-${g.round}-${g.date}-${g.opponent}`;
       if (seen.has(matchKey)) return false;
       seen.add(matchKey);
       return true;
