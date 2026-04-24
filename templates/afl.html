@@ -634,16 +634,13 @@
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-lightning-charge-fill"></i> Value Finder</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Odds API · Over &amp; Under · all prop markets</span>
+      <span style="font-size:11px;color:var(--text-muted);">DB props · Over &amp; Under · all prop markets · synced daily</span>
     </div>
     <div class="afl-card-body">
-      {% if not (data_sources and data_sources.odds_api) %}
-      <div class="props-banner">
-        <i class="bi bi-exclamation-triangle-fill"></i>
-        <span>No recent props in database. Click <strong>Load All Props</strong> to fetch from The Odds API (requires ODDS_API_KEY to be set).</span>
-      </div>
-      {% endif %}
       <div class="value-finder-bar">
+        <select class="form-select" id="valueMatch" style="width:220px;" onchange="loadValueFinder()">
+          <option value="">All Matches</option>
+        </select>
         <select class="form-select" id="valueMarket" style="width:200px;" onchange="loadValueFinder()">
           <option value="player_disposals">Player Disposals</option>
           <option value="player_marks">Player Marks</option>
@@ -653,20 +650,21 @@
           <option value="player_handballs">Player Handballs</option>
           <option value="player_afl_fantasy_points">AFL Fantasy Points</option>
         </select>
+        <input type="number" class="form-control" id="minLine" value="" step="0.5" style="max-width:110px;" placeholder="Min line" title="Minimum line value">
+        <input type="number" class="form-control" id="maxLine" value="" step="0.5" style="max-width:110px;" placeholder="Max line" title="Maximum line value">
         <input type="number" class="form-control" id="minEdge" value="2" step="0.5" style="max-width:120px;" placeholder="Min edge">
         <button class="btn btn-primary" onclick="loadValueFinder()">
           <i class="bi bi-search"></i> Find Value
         </button>
         <button class="btn btn-secondary" id="loadPropsBtn" onclick="loadOddsProps()"
-          title="Fetch ALL prop markets (disposals, marks, kicks, handballs, tackles, goals, fantasy) from Odds API in one shot">
-          <i class="bi bi-cloud-download"></i> Load All Props
+          title="Manually fetch ALL prop markets from Odds API (requires ODDS_API_KEY)">
+          <i class="bi bi-cloud-download"></i> Refresh from API
         </button>
         <span id="propsStatus" style="font-size:11px;color:var(--text-muted);"></span>
       </div>
       <div id="valueResults">
         <div class="prop-empty">
-          <i class="bi bi-lightning-charge"></i>
-          <p>1. Click <strong>Load All Props</strong> to fetch today's lines.<br>2. Click <strong>Find Value</strong> to compare against player averages.</p>
+          <span class="spinner-sm"></span>
         </div>
       </div>
     </div>
@@ -891,6 +889,10 @@ function switchTab(name, btn) {
   document.querySelectorAll('.afl-tab').forEach(t => t.classList.remove('active'));
   document.getElementById(`tab-${name}`)?.classList.add('active');
   btn?.classList.add('active');
+  if (name === 'value') {
+    populateValueFinderMatches();
+    loadValueFinder();
+  }
 }
 
 // ── Round navigation ─────────────────────────────────────────────
@@ -1755,7 +1757,7 @@ function loadOddsProps() {
   })
     .then(r => r.json())
     .then(data => {
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Load All Props'; }
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Refresh from API'; }
       if (data.status === 'ok') {
         const n = data.rows_synced || 0;
         if (statusEl) statusEl.textContent = `✓ ${n} lines loaded`;
@@ -1766,21 +1768,58 @@ function loadOddsProps() {
       }
     })
     .catch(() => {
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Load All Props'; }
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Refresh from API'; }
       if (statusEl) statusEl.textContent = '✗ Network error';
       alert('Failed to connect. Check that ODDS_API_KEY is configured.');
     });
 }
 
 // ── Value finder ─────────────────────────────────────────────────
+function populateValueFinderMatches() {
+  const sel = document.getElementById('valueMatch');
+  if (!sel) return;
+  fetch('/api/afl/value-finder/matches')
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (!data?.matches?.length) return;
+      const current = sel.value;
+      sel.innerHTML = '<option value="">All Matches</option>';
+      data.matches.forEach(m => {
+        const val = `${m.home_team}|${m.away_team}`;
+        const opt = document.createElement('option');
+        opt.value = val;
+        opt.textContent = `${m.home_team} vs ${m.away_team}`;
+        sel.appendChild(opt);
+      });
+      if (current) sel.value = current;
+    })
+    .catch(() => {});
+}
+
 function loadValueFinder() {
   const el = document.getElementById('valueResults');
   const market = document.getElementById('valueMarket').value;
   const minEdge = document.getElementById('minEdge').value || 2;
+  const matchVal = document.getElementById('valueMatch')?.value || '';
+  const minLine = document.getElementById('minLine')?.value || '';
+  const maxLine = document.getElementById('maxLine')?.value || '';
 
   el.innerHTML = '<div class="prop-empty"><span class="spinner-sm"></span></div>';
 
-  fetch(`/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=${encodeURIComponent(minEdge)}&year=${_SEASON}`)
+  const params = new URLSearchParams({
+    market,
+    min_edge: minEdge,
+    year: _SEASON,
+  });
+  if (matchVal) {
+    const [home, away] = matchVal.split('|');
+    if (home && home.trim()) params.set('home', home.trim());
+    if (away && away.trim()) params.set('away', away.trim());
+  }
+  if (minLine) params.set('min_line', minLine);
+  if (maxLine) params.set('max_line', maxLine);
+
+  fetch(`/api/afl/value-finder?${params}`)
     .then(r => {
       if (!r.ok) throw new Error();
       return r.json();
@@ -1791,7 +1830,7 @@ function loadValueFinder() {
         return;
       }
       if (!data.bets?.length) {
-        el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No value bets found for this market. Try <strong>Load All Props</strong> first, then lower the min edge.</p></div>';
+        el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No value bets found for this market. Try lowering the min edge or selecting a different market.</p></div>';
         return;
       }
 

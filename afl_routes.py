@@ -615,20 +615,32 @@ def register_afl_routes(app, db):
         market = request.args.get("market", "player_disposals")
         min_edge = request.args.get("min_edge", 2.0, type=float)
         requested_season = request.args.get("year", type=int)
+        home_team = request.args.get("home", "").strip()
+        away_team = request.args.get("away", "").strip()
+        min_line = request.args.get("min_line", type=float)
+        max_line = request.args.get("max_line", type=float)
 
         market = _normalise_prop_market(market)
 
         effective_season = _resolve_stats_season(db, requested_season)
         effective_seasons = _resolve_stats_seasons(db, requested_season)
-        props = _db_get_props(db, market=market)
+        props = _db_get_props(
+            db,
+            market=market,
+            home_team=home_team or None,
+            away_team=away_team or None,
+            min_line=min_line,
+            max_line=max_line,
+        )
 
         if not props:
             return jsonify(
                 {
                     "bets": [],
                     "message": (
-                        "No prop lines in database for this market. "
-                        "Click 'Load All Props' on the Value Finder tab to fetch from the Odds API."
+                        "No prop lines found for this market. "
+                        "Props are synced daily — check back later or use "
+                        "'Load All Props' to manually refresh from the Odds API."
                     ),
                     "season": effective_season,
                     "seasons_used": effective_seasons,
@@ -782,6 +794,28 @@ def register_afl_routes(app, db):
                 "count": len(value_bets),
             }
         )
+
+    @app.route("/api/afl/value-finder/matches")
+    @login_required
+    def api_afl_value_finder_matches():
+        sql = db.text(
+            """
+            SELECT DISTINCT home_team, away_team
+            FROM afl_player_props
+            WHERE fetched_at > NOW() - INTERVAL '7 days'
+              AND home_team IS NOT NULL AND home_team <> ''
+              AND away_team IS NOT NULL AND away_team <> ''
+            ORDER BY home_team, away_team
+            """
+        )
+        with db.engine.connect() as conn:
+            rows = conn.execute(sql).mappings().fetchall()
+        matches = [
+            {"home_team": r["home_team"], "away_team": r["away_team"]}
+            for r in rows
+        ]
+        return jsonify({"matches": matches})
+
     @app.route("/api/afl/player-home-away")
     @login_required
     def api_afl_player_home_away():
@@ -1440,18 +1474,35 @@ def _db_get_standings(db, year: int, round_number: int | None = None) -> list[di
     return [dict(row) for row in rows]
 
 
-def _db_get_props(db, market: str = "player_disposals") -> list[dict]:
+def _db_get_props(
+    db,
+    market: str = "player_disposals",
+    home_team: str | None = None,
+    away_team: str | None = None,
+    min_line: float | None = None,
+    max_line: float | None = None,
+) -> list[dict]:
     sql = db.text(
         """
         SELECT DISTINCT ON (player_name, line_type, line) *
         FROM afl_player_props
         WHERE market = :market
-          AND fetched_at > NOW() - INTERVAL '24 hours'
+          AND fetched_at > NOW() - INTERVAL '7 days'
+          AND (:home IS NULL OR LOWER(home_team) LIKE LOWER(:home))
+          AND (:away IS NULL OR LOWER(away_team) LIKE LOWER(:away))
+          AND (:min_line IS NULL OR line >= :min_line)
+          AND (:max_line IS NULL OR line <= :max_line)
         ORDER BY player_name, line_type, line, fetched_at DESC
         """
     )
     with db.engine.connect() as conn:
-        rows = conn.execute(sql, {"market": market}).mappings().fetchall()
+        rows = conn.execute(sql, {
+            "market": market,
+            "home": f"%{home_team}%" if home_team else None,
+            "away": f"%{away_team}%" if away_team else None,
+            "min_line": min_line,
+            "max_line": max_line,
+        }).mappings().fetchall()
     return [dict(row) for row in rows]
 
 
