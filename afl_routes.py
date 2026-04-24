@@ -781,6 +781,15 @@ def register_afl_routes(app, db):
                     }
                 )
 
+        # Keep only the highest-edge bet per (player, direction) so a player
+        # with different lines from different bookmakers appears at most once.
+        best_per_player: dict[tuple, dict] = {}
+        for bet in value_bets:
+            key = (bet["player"], bet["line_type"])
+            if key not in best_per_player or abs(bet["edge"]) > abs(best_per_player[key]["edge"]):
+                best_per_player[key] = bet
+        value_bets = list(best_per_player.values())
+
         value_bets.sort(key=lambda x: abs(x.get("edge", 0)), reverse=True)
 
         return jsonify(
@@ -803,7 +812,10 @@ def register_afl_routes(app, db):
             SELECT DISTINCT home_team, away_team
             FROM afl_player_props
             WHERE fetched_at > NOW() - INTERVAL '7 days'
-              AND (commence_time IS NULL OR commence_time >= NOW() - INTERVAL '3 hours')
+              AND (
+                commence_time >= NOW() - INTERVAL '3 hours'
+                OR (commence_time IS NULL AND fetched_at > NOW() - INTERVAL '24 hours')
+              )
               AND home_team IS NOT NULL AND home_team <> ''
               AND away_team IS NOT NULL AND away_team <> ''
             ORDER BY home_team, away_team
@@ -1489,7 +1501,10 @@ def _db_get_props(
         FROM afl_player_props
         WHERE market = :market
           AND fetched_at > NOW() - INTERVAL '7 days'
-          AND (commence_time IS NULL OR commence_time >= NOW() - INTERVAL '3 hours')
+          AND (
+            commence_time >= NOW() - INTERVAL '3 hours'
+            OR (commence_time IS NULL AND fetched_at > NOW() - INTERVAL '24 hours')
+          )
           AND (:home IS NULL OR LOWER(home_team) LIKE LOWER(:home))
           AND (:away IS NULL OR LOWER(away_team) LIKE LOWER(:away))
           AND (:min_line IS NULL OR line >= :min_line)
@@ -1516,7 +1531,10 @@ def _db_get_match_props(db, home_team: str, away_team: str) -> list[dict]:
         WHERE (LOWER(home_team) LIKE LOWER(:home) OR LOWER(away_team) LIKE LOWER(:home))
           AND (LOWER(home_team) LIKE LOWER(:away) OR LOWER(away_team) LIKE LOWER(:away))
           AND fetched_at > NOW() - INTERVAL '7 days'
-          AND (commence_time IS NULL OR commence_time >= NOW() - INTERVAL '3 hours')
+          AND (
+            commence_time >= NOW() - INTERVAL '3 hours'
+            OR (commence_time IS NULL AND fetched_at > NOW() - INTERVAL '24 hours')
+          )
         ORDER BY market, player_name, line_type
         """
     )
