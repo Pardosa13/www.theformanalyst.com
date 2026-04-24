@@ -11,11 +11,46 @@ import hashlib
 import os
 import re
 import sys
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Inline implementations of pure-Python helpers under test
 # (mirrors the code in afl_data.py / afl_routes.py exactly)
 # ---------------------------------------------------------------------------
+
+
+def _s(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _team(value: Any) -> str:
+    raw = _s(value)
+    mapping = {
+        # Legacy / short-name aliases
+        "West Coast Eagles": "West Coast",
+        "Greater Western Sydney": "GWS Giants",
+        "GWS": "GWS Giants",
+        "Footscray": "Western Bulldogs",
+        "Brisbane": "Brisbane Lions",
+        # Full names with mascots as returned by The Odds API
+        "Adelaide Crows": "Adelaide",
+        "Carlton Blues": "Carlton",
+        "Collingwood Magpies": "Collingwood",
+        "Essendon Bombers": "Essendon",
+        "Fremantle Dockers": "Fremantle",
+        "Geelong Cats": "Geelong",
+        "Gold Coast Suns": "Gold Coast",
+        "Hawthorn Hawks": "Hawthorn",
+        "Melbourne Demons": "Melbourne",
+        "North Melbourne Kangaroos": "North Melbourne",
+        "Port Adelaide Power": "Port Adelaide",
+        "Richmond Tigers": "Richmond",
+        "St Kilda Saints": "St Kilda",
+        "Sydney Swans": "Sydney",
+    }
+    return mapping.get(raw, raw)
 
 _NORMALISE_PROP_MARKET_MAP = {
     "player_disposals": "player_disposals",
@@ -265,5 +300,128 @@ def test_render_prop_card_uses_arrow_hr():
     # New pattern: arrow function
     assert "const hr = (arr, line) =>" in source, (
         "renderPropCard does not define hr() as 'const hr = (arr, line) =>'"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix – _team() strips AFL mascot suffixes from Odds API team names
+# ---------------------------------------------------------------------------
+
+def test_team_normalisation_mascot_names():
+    """Full team names from The Odds API must be stripped to the canonical short name."""
+    assert _team("Fremantle Dockers") == "Fremantle"
+    assert _team("Carlton Blues") == "Carlton"
+    assert _team("St Kilda Saints") == "St Kilda"
+    assert _team("Richmond Tigers") == "Richmond"
+    assert _team("Melbourne Demons") == "Melbourne"
+    assert _team("Sydney Swans") == "Sydney"
+    assert _team("Adelaide Crows") == "Adelaide"
+    assert _team("Collingwood Magpies") == "Collingwood"
+    assert _team("Essendon Bombers") == "Essendon"
+    assert _team("Geelong Cats") == "Geelong"
+    assert _team("Gold Coast Suns") == "Gold Coast"
+    assert _team("Hawthorn Hawks") == "Hawthorn"
+    assert _team("North Melbourne Kangaroos") == "North Melbourne"
+    assert _team("Port Adelaide Power") == "Port Adelaide"
+
+
+def test_team_normalisation_canonical_names_unchanged():
+    """Canonical team names (already correct) must pass through unchanged."""
+    assert _team("Brisbane Lions") == "Brisbane Lions"
+    assert _team("GWS Giants") == "GWS Giants"
+    assert _team("Western Bulldogs") == "Western Bulldogs"
+    assert _team("West Coast") == "West Coast"
+    assert _team("Fremantle") == "Fremantle"
+    assert _team("Melbourne") == "Melbourne"
+
+
+def test_team_normalisation_legacy_aliases():
+    """Legacy/shorthand aliases (existing mapping) must still work."""
+    assert _team("West Coast Eagles") == "West Coast"
+    assert _team("Greater Western Sydney") == "GWS Giants"
+    assert _team("GWS") == "GWS Giants"
+    assert _team("Footscray") == "Western Bulldogs"
+    assert _team("Brisbane") == "Brisbane Lions"
+
+
+def test_team_normalisation_source_has_mascot_entries():
+    """afl_db.py _team() mapping must contain all 14 mascot-name entries."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+
+    for full_name in (
+        "Adelaide Crows",
+        "Carlton Blues",
+        "Collingwood Magpies",
+        "Essendon Bombers",
+        "Fremantle Dockers",
+        "Geelong Cats",
+        "Gold Coast Suns",
+        "Hawthorn Hawks",
+        "Melbourne Demons",
+        "North Melbourne Kangaroos",
+        "Port Adelaide Power",
+        "Richmond Tigers",
+        "St Kilda Saints",
+        "Sydney Swans",
+    ):
+        assert full_name in source, (
+            f"_team() in afl_db.py is missing an entry for {full_name!r}"
+        )
+
+
+def test_normalise_team_name_in_afl_data_has_mascot_entries():
+    """afl_data.py _normalise_team_name() must also contain all 14 mascot-name entries
+    so that existing DB rows are normalised at read time (no data deletion required)."""
+    data_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_data.py",
+    )
+    with open(data_path, encoding="utf-8") as f:
+        source = f.read()
+
+    for full_name in (
+        "Adelaide Crows",
+        "Carlton Blues",
+        "Collingwood Magpies",
+        "Essendon Bombers",
+        "Fremantle Dockers",
+        "Geelong Cats",
+        "Gold Coast Suns",
+        "Hawthorn Hawks",
+        "Melbourne Demons",
+        "North Melbourne Kangaroos",
+        "Port Adelaide Power",
+        "Richmond Tigers",
+        "St Kilda Saints",
+        "Sydney Swans",
+    ):
+        assert full_name in source, (
+            f"_normalise_team_name() in afl_data.py is missing an entry for {full_name!r}"
+        )
+
+
+def test_value_finder_normalises_team_names_at_read_time():
+    """api_afl_value_finder() must call _normalise_team_name on home_team/away_team
+    from the props row so existing DB rows with mascot names work without data deletion."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    assert "_normalise_team_name" in source, (
+        "_normalise_team_name is not imported or used in afl_routes.py"
+    )
+    assert '_normalise_team_name(prop.get("home_team"' in source, (
+        'api_afl_value_finder does not normalise home_team from props at read time'
+    )
+    assert '_normalise_team_name(prop.get("away_team"' in source, (
+        'api_afl_value_finder does not normalise away_team from props at read time'
     )
 

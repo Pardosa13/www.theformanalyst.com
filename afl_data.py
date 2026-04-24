@@ -262,11 +262,27 @@ def _first_existing(columns: set[str], *names: str) -> Optional[str]:
 def _normalise_team_name(name: Any) -> str:
     raw = _coerce_str(name)
     mapping = {
+        # Legacy / short-name aliases
         "West Coast Eagles": "West Coast",
         "Greater Western Sydney": "GWS Giants",
         "GWS": "GWS Giants",
         "Footscray": "Western Bulldogs",
         "Brisbane": "Brisbane Lions",
+        # Full names with mascots as returned by The Odds API
+        "Adelaide Crows": "Adelaide",
+        "Carlton Blues": "Carlton",
+        "Collingwood Magpies": "Collingwood",
+        "Essendon Bombers": "Essendon",
+        "Fremantle Dockers": "Fremantle",
+        "Geelong Cats": "Geelong",
+        "Gold Coast Suns": "Gold Coast",
+        "Hawthorn Hawks": "Hawthorn",
+        "Melbourne Demons": "Melbourne",
+        "North Melbourne Kangaroos": "North Melbourne",
+        "Port Adelaide Power": "Port Adelaide",
+        "Richmond Tigers": "Richmond",
+        "St Kilda Saints": "St Kilda",
+        "Sydney Swans": "Sydney",
     }
     return mapping.get(raw, raw)
 
