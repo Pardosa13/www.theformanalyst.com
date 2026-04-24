@@ -357,7 +357,7 @@ def _build_historical_id_map(db) -> tuple[dict, set, dict, dict]:
     name_to_ids: dict = defaultdict(set)
 
     for key, ids in key_to_ids.items():
-        first, last, _team_key = key
+        first, last, _ = key
         if len(ids) == 1:
             pid = next(iter(ids))
             mapping[key] = pid

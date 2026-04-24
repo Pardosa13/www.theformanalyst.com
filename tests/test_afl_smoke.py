@@ -879,23 +879,27 @@ def _resolve_2026_player_id_impl(row, name_to_ids, hist_map, id_to_name_keys):
 
 
 def test_resolve_reuses_id_by_name_same_club():
-    """When a player's name uniquely maps to one historical id, reuse it (same club)."""
+    """When a player's name uniquely maps to one historical id, reuse it (same club).
+    The incoming player_id from the CSV is intentionally different to confirm it is
+    ignored — the historical Fryzigg id is always used when a name match exists."""
     name_to_ids = {("nick", "daicos"): {12345}}
     hist_map = {("nick", "daicos", "collingwood"): 12345}
     row = {"player_first_name": "Nick", "player_last_name": "Daicos",
-           "player_team": "Collingwood", "player_id": 99999}
+           "player_team": "Collingwood", "player_id": 99999}  # AFLTables ID — ignored
     pid, res = _resolve_2026_player_id_impl(row, name_to_ids, hist_map, {})
     assert pid == 12345
     assert res == "reused_by_name"
 
 
 def test_resolve_reuses_id_by_name_traded_player():
-    """Traded player (different club in 2026) must reuse historical id via name match."""
+    """Traded player (different club in 2026) must reuse historical id via name match.
+    The incoming player_id from the CSV is intentionally different to confirm the
+    new logic ignores it and reuses the correct historical Fryzigg id."""
     # Player was Carlton in history, now plays for Sydney in 2026
     name_to_ids = {("charlie", "curnow"): {12345}}
     hist_map = {("charlie", "curnow", "carlton"): 12345}
     row = {"player_first_name": "Charlie", "player_last_name": "Curnow",
-           "player_team": "Sydney", "player_id": 99999}
+           "player_team": "Sydney", "player_id": 99999}  # AFLTables ID — ignored
     pid, res = _resolve_2026_player_id_impl(row, name_to_ids, hist_map, {})
     assert pid == 12345
     assert res == "reused_by_name"
