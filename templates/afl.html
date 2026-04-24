@@ -534,7 +534,7 @@
     #propPlayerListInner { display:grid; grid-template-columns:repeat(2,1fr); }
     .vf-cards-grid { grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); }
     /* Bar chart: allow horizontal scroll so bars never collapse below readable width */
-    .chart-body { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    .chart-body { overflow-x:auto; -webkit-overflow-scrolling:touch; overscroll-behavior-x:contain; }
     #propBarsContainer { min-width:min-content; flex-wrap:nowrap; }
     #propXAxis { min-width:min-content; flex-wrap:nowrap; }
     .bar-wrap { min-width:18px; flex-shrink:0; }
@@ -2239,5 +2239,21 @@ function refreshAll() {
       btn.disabled = false;
     });
 }
+
+// Prevent horizontal swipe on the bar chart from scrolling the page (iOS Safari scroll-chaining fix)
+(function() {
+  const cb = document.getElementById('chartBody');
+  if (!cb) return;
+  let startX = 0, startY = 0;
+  cb.addEventListener('touchstart', function(e) {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+  cb.addEventListener('touchmove', function(e) {
+    const dx = Math.abs(e.touches[0].clientX - startX);
+    const dy = Math.abs(e.touches[0].clientY - startY);
+    if (dx > dy) e.preventDefault();
+  }, { passive: false });
+})();
 </script>
 {% endblock %}
