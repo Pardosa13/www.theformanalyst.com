@@ -634,17 +634,12 @@
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-lightning-charge-fill"></i> Value Finder</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Odds API · Over &amp; Under · all prop markets</span>
+      <span style="font-size:11px;color:var(--text-muted);">Props from database · Over &amp; Under · all prop markets</span>
     </div>
     <div class="afl-card-body">
-      {% if not (data_sources and data_sources.odds_api) %}
-      <div class="props-banner">
-        <i class="bi bi-exclamation-triangle-fill"></i>
-        <span>No recent props in database. Click <strong>Load All Props</strong> to fetch from The Odds API (requires ODDS_API_KEY to be set).</span>
-      </div>
-      {% endif %}
       <div class="value-finder-bar">
-        <select class="form-select" id="valueMarket" style="width:200px;" onchange="loadValueFinder()">
+        <select class="form-select" id="valueMarket" style="width:200px;" onchange="_vfRawData=null; loadValueFinder()">
+          <option value="">All Markets</option>
           <option value="player_disposals">Player Disposals</option>
           <option value="player_marks">Player Marks</option>
           <option value="player_tackles">Player Tackles</option>
@@ -653,7 +648,12 @@
           <option value="player_handballs">Player Handballs</option>
           <option value="player_afl_fantasy_points">AFL Fantasy Points</option>
         </select>
-        <input type="number" class="form-control" id="minEdge" value="2" step="0.5" style="max-width:120px;" placeholder="Min edge">
+        <select class="form-select" id="valueMatch" style="width:220px;" onchange="_vfRawData ? _vfApplyFilters(_vfRawData) : loadValueFinder()">
+          <option value="">All Matches</option>
+        </select>
+        <input type="number" class="form-control" id="minLine" placeholder="Min line" step="0.5" style="max-width:100px;" onchange="_vfRawData ? _vfApplyFilters(_vfRawData) : null">
+        <input type="number" class="form-control" id="maxLine" placeholder="Max line" step="0.5" style="max-width:100px;" onchange="_vfRawData ? _vfApplyFilters(_vfRawData) : null">
+        <input type="number" class="form-control" id="minEdge" value="2" step="0.5" style="max-width:120px;" placeholder="Min edge" onchange="_vfRawData ? _vfApplyFilters(_vfRawData) : null">
         <button class="btn btn-primary" onclick="loadValueFinder()">
           <i class="bi bi-search"></i> Find Value
         </button>
@@ -665,8 +665,7 @@
       </div>
       <div id="valueResults">
         <div class="prop-empty">
-          <i class="bi bi-lightning-charge"></i>
-          <p>1. Click <strong>Load All Props</strong> to fetch today's lines.<br>2. Click <strong>Find Value</strong> to compare against player averages.</p>
+          <span class="spinner-sm"></span>
         </div>
       </div>
     </div>
@@ -891,6 +890,14 @@ function switchTab(name, btn) {
   document.querySelectorAll('.afl-tab').forEach(t => t.classList.remove('active'));
   document.getElementById(`tab-${name}`)?.classList.add('active');
   btn?.classList.add('active');
+  if (name === 'value') {
+    // Only fetch from server if we don't have cached data yet
+    if (_vfRawData) {
+      _vfApplyFilters(_vfRawData);
+    } else {
+      loadValueFinder();
+    }
+  }
 }
 
 // ── Round navigation ─────────────────────────────────────────────
@@ -1773,76 +1780,204 @@ function loadOddsProps() {
 }
 
 // ── Value finder ─────────────────────────────────────────────────
+let _vfRawData = null; // cached result for client-side re-filtering
+
+function _vfApplyFilters(data) {
+  const el = document.getElementById('valueResults');
+  const market = document.getElementById('valueMarket')?.value || '';
+  const matchVal = document.getElementById('valueMatch')?.value || '';
+  const minLine = parseFloat(document.getElementById('minLine')?.value) || null;
+  const maxLine = parseFloat(document.getElementById('maxLine')?.value) || null;
+  const minEdge = parseFloat(document.getElementById('minEdge')?.value) || 2;
+
+  if (!data) {
+    el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No props found in database for the last 7 days. Use <strong>Load All Props</strong> to sync from the Odds API.</p></div>';
+    return;
+  }
+
+  // Raw props mode (all markets)
+  if (!market && data.props) {
+    let rows = data.props || [];
+    if (matchVal) {
+      const [ht, at] = matchVal.split('||');
+      rows = rows.filter(p =>
+        (p.home_team || '').toLowerCase().includes((ht || '').toLowerCase()) ||
+        (p.away_team || '').toLowerCase().includes((at || '').toLowerCase())
+      );
+    }
+    if (minLine !== null) rows = rows.filter(p => (p.line || 0) >= minLine);
+    if (maxLine !== null) rows = rows.filter(p => (p.line || 0) <= maxLine);
+
+    if (!rows.length) {
+      el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No props match the selected filters.</p></div>';
+      return;
+    }
+    const tableRows = rows.map(p => {
+      const ltCls = (p.line_type || '') === 'Over' ? 'lt-over' : 'lt-under';
+      const odds = parseFloat(p.odds) || 0;
+      const mktLabel = (p.market || '').replace('player_', '').replace(/_/g, ' ');
+      return `
+        <tr>
+          <td style="font-weight:700;">${esc(p.player_name || '')}</td>
+          <td style="font-size:11px;">${esc(p.team || '')}</td>
+          <td style="font-size:11px;">${esc(p.home_team || '')} vs ${esc(p.away_team || '')}</td>
+          <td style="font-size:11px;">${esc(mktLabel)}</td>
+          <td><span class="${ltCls}">${esc(p.line_type || '')}</span></td>
+          <td style="font-family:'DM Mono',monospace;font-weight:700;">${p.line != null ? p.line : '—'}</td>
+          <td style="font-family:'DM Mono',monospace;">${odds > 0 ? odds.toFixed(2) : '—'}</td>
+          <td style="font-size:10px;color:var(--text-muted);">${esc(p.bookmaker || '')}</td>
+        </tr>
+      `;
+    }).join('');
+    el.innerHTML = `
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+        ${esc(String(rows.length))} prop(s) from database · last 7 days
+      </div>
+      <div class="scroll-x">
+        <table class="value-table">
+          <thead><tr>
+            <th>Player</th><th>Team</th><th>Match</th><th>Market</th>
+            <th>O/U</th><th>Line</th><th>Odds</th><th>Book</th>
+          </tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+    `;
+    return;
+  }
+
+  // Value bets mode (specific market with edge calculation)
+  let bets = (data.bets || []);
+  if (matchVal) {
+    const [ht, at] = matchVal.split('||');
+    bets = bets.filter(b =>
+      (b.home_team || '').toLowerCase().includes((ht || '').toLowerCase()) ||
+      (b.away_team || '').toLowerCase().includes((at || '').toLowerCase()) ||
+      (b.team || '').toLowerCase().includes((ht || '').toLowerCase()) ||
+      (b.team || '').toLowerCase().includes((at || '').toLowerCase())
+    );
+  }
+  if (minLine !== null) bets = bets.filter(b => (b.book_line || 0) >= minLine);
+  if (maxLine !== null) bets = bets.filter(b => (b.book_line || 0) <= maxLine);
+  bets = bets.filter(b => Math.abs(safeNum(b.edge, 0)) >= minEdge);
+
+  if (data.message && !bets.length) {
+    el.innerHTML = `<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>${esc(data.message)}</p></div>`;
+    return;
+  }
+  if (!bets.length) {
+    el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No value bets found for these filters. Try <strong>Load All Props</strong> to refresh from the Odds API, or lower the min edge.</p></div>';
+    return;
+  }
+
+  const tableRows = bets.map(bet => {
+    const edge = safeNum(bet.edge, 0);
+    const cls = edge >= 2 ? 'pos' : edge <= -2 ? 'neg' : 'neu';
+    const ltCls = (bet.line_type || '') === 'Over' ? 'lt-over' : 'lt-under';
+    const odds = safeNum(bet.odds, 0);
+    return `
+      <tr>
+        <td style="font-weight:700;">${esc(bet.player || '')}</td>
+        <td style="font-size:11px;">${esc(bet.team || '')}</td>
+        <td style="font-size:11px;">${esc(bet.opponent || '')}</td>
+        <td style="font-size:10px;color:var(--text-muted);">${esc(bet.bookmaker || '')}</td>
+        <td><span class="${ltCls}">${esc(bet.line_type || '')}</span></td>
+        <td style="font-family:'DM Mono',monospace;font-weight:700;">${safeNum(bet.book_line, 0)}</td>
+        <td style="font-family:'DM Mono',monospace;">${odds > 0 ? odds.toFixed(2) : '—'}</td>
+        <td style="font-family:'DM Mono',monospace;">${bet.season_avg != null ? safeNum(bet.season_avg, 0).toFixed(1) : '—'}</td>
+        <td style="font-family:'DM Mono',monospace;">${bet.last5_avg != null ? safeNum(bet.last5_avg, 0).toFixed(1) : '—'}</td>
+        <td style="font-family:'DM Mono',monospace;">${bet.vs_opp_avg != null ? safeNum(bet.vs_opp_avg, 0).toFixed(1) : '—'}</td>
+        <td style="font-family:'DM Mono',monospace;">${safeNum(bet.hist_pct, 0)}%</td>
+        <td style="font-family:'DM Mono',monospace;">${bet.model_prediction != null ? safeNum(bet.model_prediction, 0).toFixed(1) : '—'}</td>
+        <td><span class="edge-chip ${cls}">${edge > 0 ? '+' : ''}${edge.toFixed(1)}</span></td>
+      </tr>
+    `;
+  }).join('');
+
+  const stat = data.stat || market.replace('player_', '');
+  el.innerHTML = `
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+      ${esc(String(bets.length))} result(s) · market: <strong>${esc(market)}</strong> · stat: <strong>${esc(stat)}</strong> · min edge: ${esc(String(minEdge))} · season: ${esc(String(data.season || _SEASON))}
+    </div>
+    <div class="scroll-x">
+      <table class="value-table">
+        <thead>
+          <tr>
+            <th>Player</th><th>Team</th><th>Opp</th><th>Book</th>
+            <th>O/U</th><th>Line</th><th>Odds</th>
+            <th>Season</th><th>L5</th><th>vs Opp</th><th>Hit%</th><th>Model</th><th>Edge</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function _vfPopulateMatchSelector(matches) {
+  const sel = document.getElementById('valueMatch');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">All Matches</option>';
+  (matches || []).forEach(m => {
+    const [ht, at] = m.split(' vs ');
+    const opt = document.createElement('option');
+    opt.value = `${ht}||${at}`;
+    opt.textContent = m;
+    if (prev === opt.value) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
 function loadValueFinder() {
   const el = document.getElementById('valueResults');
-  const market = document.getElementById('valueMarket').value;
-  const minEdge = document.getElementById('minEdge').value || 2;
+  const market = document.getElementById('valueMarket')?.value || '';
+  const minEdge = document.getElementById('minEdge')?.value || 2;
 
   el.innerHTML = '<div class="prop-empty"><span class="spinner-sm"></span></div>';
 
-  fetch(`/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=${encodeURIComponent(minEdge)}&year=${_SEASON}`)
-    .then(r => {
-      if (!r.ok) throw new Error();
-      return r.json();
-    })
-    .then(data => {
-      if (data.message && !data.bets?.length) {
-        el.innerHTML = `<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>${esc(data.message)}</p></div>`;
-        return;
-      }
-      if (!data.bets?.length) {
-        el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No value bets found for this market. Try <strong>Load All Props</strong> first, then lower the min edge.</p></div>';
-        return;
-      }
+  if (!market) {
+    // All markets: fetch raw props from DB
+    const params = new URLSearchParams();
+    const matchVal = document.getElementById('valueMatch')?.value || '';
+    const minLine = document.getElementById('minLine')?.value;
+    const maxLine = document.getElementById('maxLine')?.value;
+    if (matchVal) {
+      const [ht, at] = matchVal.split('||');
+      if (ht) params.set('home_team', ht);
+      if (at) params.set('away_team', at);
+    }
+    if (minLine) params.set('min_line', minLine);
+    if (maxLine) params.set('max_line', maxLine);
 
-      const rows = data.bets.map(bet => {
-        const edge = safeNum(bet.edge, 0);
-        const cls = edge >= 2 ? 'pos' : edge <= -2 ? 'neg' : 'neu';
-        const ltCls = (bet.line_type || '') === 'Over' ? 'lt-over' : 'lt-under';
-        const odds = safeNum(bet.odds, 0);
-
-        return `
-          <tr>
-            <td style="font-weight:700;">${esc(bet.player || '')}</td>
-            <td style="font-size:11px;">${esc(bet.team || '')}</td>
-            <td style="font-size:11px;">${esc(bet.opponent || '')}</td>
-            <td style="font-size:10px;color:var(--text-muted);">${esc(bet.bookmaker || '')}</td>
-            <td><span class="${ltCls}">${esc(bet.line_type || '')}</span></td>
-            <td style="font-family:'DM Mono',monospace;font-weight:700;">${safeNum(bet.book_line, 0)}</td>
-            <td style="font-family:'DM Mono',monospace;">${odds > 0 ? odds.toFixed(2) : '—'}</td>
-            <td style="font-family:'DM Mono',monospace;">${bet.season_avg != null ? safeNum(bet.season_avg, 0).toFixed(1) : '—'}</td>
-            <td style="font-family:'DM Mono',monospace;">${bet.last5_avg != null ? safeNum(bet.last5_avg, 0).toFixed(1) : '—'}</td>
-            <td style="font-family:'DM Mono',monospace;">${bet.vs_opp_avg != null ? safeNum(bet.vs_opp_avg, 0).toFixed(1) : '—'}</td>
-            <td style="font-family:'DM Mono',monospace;">${safeNum(bet.hist_pct, 0)}%</td>
-            <td style="font-family:'DM Mono',monospace;">${bet.model_prediction != null ? safeNum(bet.model_prediction, 0).toFixed(1) : '—'}</td>
-            <td><span class="edge-chip ${cls}">${edge > 0 ? '+' : ''}${edge.toFixed(1)}</span></td>
-          </tr>
-        `;
-      }).join('');
-
-      const stat = data.stat || market.replace('player_', '');
-
-      el.innerHTML = `
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
-          ${esc(data.count || 0)} result(s) · market: <strong>${esc(market)}</strong> · stat: <strong>${esc(stat)}</strong> · min edge: ${esc(String(minEdge))} · season: ${esc(String(data.season || _SEASON))}
-        </div>
-        <div class="scroll-x">
-          <table class="value-table">
-            <thead>
-              <tr>
-                <th>Player</th><th>Team</th><th>Opp</th><th>Book</th>
-                <th>O/U</th><th>Line</th><th>Odds</th>
-                <th>Season</th><th>L5</th><th>vs Opp</th><th>Hit%</th><th>Model</th><th>Edge</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-      `;
-    })
-    .catch(() => {
-      el.innerHTML = '<div class="prop-empty" style="color:var(--danger);">Value finder failed. Check server logs.</div>';
-    });
+    fetch(`/api/afl/props/all?${params}`)
+      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+      .then(data => {
+        _vfRawData = data;
+        _vfPopulateMatchSelector(data.matches || []);
+        _vfApplyFilters(data);
+      })
+      .catch(() => {
+        el.innerHTML = '<div class="prop-empty" style="color:var(--danger);">Failed to load props from database.</div>';
+      });
+  } else {
+    // Specific market: fetch value bets with edge calculation
+    fetch(`/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=0&year=${_SEASON}`)
+      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+      .then(data => {
+        _vfRawData = data;
+        // Populate match selector from bets
+        const matchSet = new Set();
+        (data.bets || []).forEach(b => {
+          if (b.home_team && b.away_team) matchSet.add(`${b.home_team} vs ${b.away_team}`);
+        });
+        _vfPopulateMatchSelector([...matchSet].sort());
+        _vfApplyFilters(data);
+      })
+      .catch(() => {
+        el.innerHTML = '<div class="prop-empty" style="color:var(--danger);">Value finder failed. Check server logs.</div>';
+      });
+  }
 }
 function loadDisposalLines() {
   const el = document.getElementById('disposalLinesResults');
