@@ -425,3 +425,105 @@ def test_value_finder_normalises_team_names_at_read_time():
         'api_afl_value_finder does not normalise away_team from props at read time'
     )
 
+
+# ---------------------------------------------------------------------------
+# Value Finder JS functions must all exist in templates/afl.html
+# ---------------------------------------------------------------------------
+
+def test_value_finder_js_functions_exist():
+    """All five Value Finder JS functions must be defined in templates/afl.html."""
+    template_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "templates",
+        "afl.html",
+    )
+    with open(template_path, encoding="utf-8") as f:
+        source = f.read()
+
+    required_functions = [
+        "function loadValueFinder(",
+        "function loadOddsProps(",
+        "function _vfApplyFilters(",
+        "function _vfPopulateMatchSelector(",
+        "function _vfRenderTable(",
+    ]
+    for fn in required_functions:
+        assert fn in source, (
+            f"Value Finder JS function missing from templates/afl.html: {fn!r}"
+        )
+
+
+def test_value_finder_render_table_called_by_apply_filters():
+    """_vfApplyFilters must delegate rendering to _vfRenderTable (not inline)."""
+    template_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "templates",
+        "afl.html",
+    )
+    with open(template_path, encoding="utf-8") as f:
+        source = f.read()
+
+    assert "_vfRenderTable(" in source, (
+        "_vfRenderTable is not called anywhere in templates/afl.html"
+    )
+    # Verify it is called inside _vfApplyFilters (i.e. after that function declaration)
+    apply_idx = source.find("function _vfApplyFilters(")
+    render_call_idx = source.find("_vfRenderTable(", apply_idx)
+    assert render_call_idx != -1, (
+        "_vfRenderTable is not called within _vfApplyFilters"
+    )
+
+
+def test_value_finder_raw_props_table_has_no_missing_team_column():
+    """Raw-props table (All Markets mode) must not reference p.team —
+    afl_player_props has no team column; the match column is home_team vs away_team."""
+    template_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "templates",
+        "afl.html",
+    )
+    with open(template_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # Extract _vfRenderTable body: from its definition to the next function keyword
+    render_fn_start = source.find("function _vfRenderTable(")
+    assert render_fn_start != -1, "function _vfRenderTable not found"
+    next_fn = source.find("\nfunction ", render_fn_start + 1)
+    render_fn_body = source[render_fn_start:] if next_fn == -1 else source[render_fn_start:next_fn]
+
+    # In props mode the table row must show p.home_team / p.away_team for the match
+    assert "p.home_team" in render_fn_body, (
+        "_vfRenderTable props mode must render p.home_team for the Match column"
+    )
+    assert "p.away_team" in render_fn_body, (
+        "_vfRenderTable props mode must render p.away_team for the Match column"
+    )
+    # Must NOT use the non-existent p.team column for the props table
+    # (team info is not stored in afl_player_props)
+    assert "p.team" not in render_fn_body, (
+        "_vfRenderTable props mode references p.team which is not a column "
+        "in afl_player_props; use p.home_team/p.away_team instead"
+    )
+
+
+def test_db_get_props_applies_all_filters():
+    """_db_get_props in afl_routes.py must apply home_team, away_team,
+    min_line and max_line as SQL conditions, not ignore them."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # Extract _db_get_props body: from its definition to the next function/class
+    fn_idx = source.find("def _db_get_props(")
+    assert fn_idx != -1, "_db_get_props not found in afl_routes.py"
+    next_def = source.find("\ndef ", fn_idx + 1)
+    fn_body = source[fn_idx:] if next_def == -1 else source[fn_idx:next_def]
+
+    for param in ("home_team", "away_team", "min_line", "max_line"):
+        assert f":{param}" in fn_body, (
+            f"_db_get_props does not use :{param} as a SQL bind parameter — "
+            f"the filter is silently ignored"
+        )
