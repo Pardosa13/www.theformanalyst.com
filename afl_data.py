@@ -1161,14 +1161,276 @@ def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dic
         time.sleep(1)
 
     return all_stats
+
+
+def _filter_valid_stat_rows(rows: list[dict]) -> list[dict]:
+    """Drop rows that are missing a player_id or match_id (cannot be upserted)."""
+    valid = [r for r in rows if r.get("player_id") and r.get("match_id")]
+    dropped = len(rows) - len(valid)
+    if dropped:
+        logger.warning("Dropped %s rows with missing player_id or match_id", dropped)
+    return valid
+
+
+def _parse_fryzigg_csv_df(df: pd.DataFrame, cols: set, season: int) -> list[dict]:
+    """
+    Parse a Fryzigg-format DataFrame into DB-ready rows.
+
+    Fryzigg column names (e.g. from fitzRoy fetch_player_stats(source='fryzigg'))
+    already match the DB schema.  player_id is the stable Fryzigg ID — identical
+    to those stored for 2019-2025 — so no name-matching override is needed for
+    existing players, and no hash derivation is needed for match_id.
+    """
+    c_match_id       = _first_existing(cols, "match_id", "game_id")
+    match_date_col   = _first_existing(cols, "match_date", "date")
+    c_match_round    = _first_existing(cols, "match_round", "round")
+    c_home_team      = _first_existing(cols, "match_home_team", "home_team")
+    c_away_team      = _first_existing(cols, "match_away_team", "away_team")
+    c_home_score     = _first_existing(cols, "match_home_team_score", "home_score")
+    c_away_score     = _first_existing(cols, "match_away_team_score", "away_score")
+    c_margin         = _first_existing(cols, "match_margin", "margin")
+    c_winner         = _first_existing(cols, "match_winner", "winner")
+    c_weather_temp   = _first_existing(cols, "match_weather_temp_c", "weather_temp_c")
+    c_weather_type   = _first_existing(cols, "match_weather_type", "weather_type")
+    c_attendance     = _first_existing(cols, "match_attendance", "attendance")
+    c_venue          = _first_existing(cols, "venue_name", "venue")
+    c_player_id      = _first_existing(cols, "player_id")
+    c_first          = _first_existing(cols, "player_first_name", "first_name")
+    c_last           = _first_existing(cols, "player_last_name", "last_name")
+    c_team           = _first_existing(cols, "player_team", "team")
+    c_guernsey       = _first_existing(cols, "guernsey_number", "guernsey")
+    c_height         = _first_existing(cols, "player_height_cm", "height_cm")
+    c_weight         = _first_existing(cols, "player_weight_kg", "weight_kg")
+    c_retired        = _first_existing(cols, "player_is_retired", "is_retired")
+    c_kicks          = _first_existing(cols, "kicks")
+    c_marks          = _first_existing(cols, "marks")
+    c_handballs      = _first_existing(cols, "handballs")
+    c_disposals      = _first_existing(cols, "disposals")
+    c_eff_disp       = _first_existing(cols, "effective_disposals")
+    c_disp_pct       = _first_existing(cols, "disposal_efficiency_percentage")
+    c_goals          = _first_existing(cols, "goals")
+    c_behinds        = _first_existing(cols, "behinds")
+    c_hitouts        = _first_existing(cols, "hitouts")
+    c_tackles        = _first_existing(cols, "tackles")
+    c_rebounds       = _first_existing(cols, "rebounds")
+    c_i50            = _first_existing(cols, "inside_fifties")
+    c_clearances     = _first_existing(cols, "clearances")
+    c_clangers       = _first_existing(cols, "clangers")
+    c_free_for       = _first_existing(cols, "free_kicks_for")
+    c_free_against   = _first_existing(cols, "free_kicks_against")
+    c_brownlow       = _first_existing(cols, "brownlow_votes")
+    c_cont_poss      = _first_existing(cols, "contested_possessions")
+    c_uncont_poss    = _first_existing(cols, "uncontested_possessions")
+    c_cont_marks     = _first_existing(cols, "contested_marks")
+    c_marks_i50      = _first_existing(cols, "marks_inside_fifty")
+    c_one_pct        = _first_existing(cols, "one_percenters")
+    c_bounces        = _first_existing(cols, "bounces")
+    c_goal_assists   = _first_existing(cols, "goal_assists")
+    c_tog            = _first_existing(cols, "time_on_ground_percentage")
+    c_fantasy        = _first_existing(cols, "afl_fantasy_score")
+    c_supercoach     = _first_existing(cols, "supercoach_score")
+    c_centre_clear   = _first_existing(cols, "centre_clearances")
+    c_stop_clear     = _first_existing(cols, "stoppage_clearances")
+    c_score_inv      = _first_existing(cols, "score_involvements")
+    c_metres         = _first_existing(cols, "metres_gained")
+    c_turnovers      = _first_existing(cols, "turnovers")
+    c_intercepts     = _first_existing(cols, "intercepts")
+    c_tackles_i50    = _first_existing(cols, "tackles_inside_fifty")
+    c_def_losses     = _first_existing(cols, "contest_def_losses")
+    c_def_1v1        = _first_existing(cols, "contest_def_one_on_ones")
+    c_off_1v1        = _first_existing(cols, "contest_off_one_on_ones")
+
+    def build_row(row: pd.Series) -> dict:
+        def g(col_name):
+            return _safe_series_get(row, col_name)
+        return {
+            "match_id":                       _coerce_match_id(g(c_match_id)),
+            "match_date":                     _coerce_date(g(match_date_col)),
+            "match_round":                    _coerce_str(g(c_match_round)),
+            "match_home_team":                _normalise_team_name(g(c_home_team)),
+            "match_away_team":                _normalise_team_name(g(c_away_team)),
+            "match_home_team_score":          _coerce_int(g(c_home_score)),
+            "match_away_team_score":          _coerce_int(g(c_away_score)),
+            "match_margin":                   _coerce_int(g(c_margin)),
+            "match_winner":                   _normalise_team_name(g(c_winner)),
+            "match_weather_temp_c":           _coerce_int(g(c_weather_temp)),
+            "match_weather_type":             _coerce_str(g(c_weather_type)),
+            "match_attendance":               _coerce_int(g(c_attendance)),
+            "venue_name":                     _coerce_str(g(c_venue)),
+            "season":                         season,
+            "player_id":                      _coerce_int(g(c_player_id)),
+            "player_first_name":              _coerce_str(g(c_first)),
+            "player_last_name":               _coerce_str(g(c_last)),
+            "player_team":                    _normalise_team_name(g(c_team)),
+            "guernsey_number":                _coerce_int(g(c_guernsey)),
+            "player_height_cm":               _coerce_int(g(c_height)),
+            "player_weight_kg":               _coerce_int(g(c_weight)),
+            "player_is_retired":              _coerce_bool(g(c_retired), False),
+            "kicks":                          _coerce_int(g(c_kicks)),
+            "marks":                          _coerce_int(g(c_marks)),
+            "handballs":                      _coerce_int(g(c_handballs)),
+            "disposals":                      _coerce_int(g(c_disposals)),
+            "effective_disposals":            _coerce_int(g(c_eff_disp)),
+            "disposal_efficiency_percentage": _coerce_int(g(c_disp_pct)),
+            "goals":                          _coerce_int(g(c_goals)),
+            "behinds":                        _coerce_int(g(c_behinds)),
+            "hitouts":                        _coerce_int(g(c_hitouts)),
+            "tackles":                        _coerce_int(g(c_tackles)),
+            "rebounds":                       _coerce_int(g(c_rebounds)),
+            "inside_fifties":                 _coerce_int(g(c_i50)),
+            "clearances":                     _coerce_int(g(c_clearances)),
+            "clangers":                       _coerce_int(g(c_clangers)),
+            "free_kicks_for":                 _coerce_int(g(c_free_for)),
+            "free_kicks_against":             _coerce_int(g(c_free_against)),
+            "brownlow_votes":                 _coerce_int(g(c_brownlow)),
+            "contested_possessions":          _coerce_int(g(c_cont_poss)),
+            "uncontested_possessions":        _coerce_int(g(c_uncont_poss)),
+            "contested_marks":                _coerce_int(g(c_cont_marks)),
+            "marks_inside_fifty":             _coerce_int(g(c_marks_i50)),
+            "one_percenters":                 _coerce_int(g(c_one_pct)),
+            "bounces":                        _coerce_int(g(c_bounces)),
+            "goal_assists":                   _coerce_int(g(c_goal_assists)),
+            "time_on_ground_percentage":      _coerce_int(g(c_tog)),
+            "afl_fantasy_score":              _coerce_int(g(c_fantasy)),
+            "supercoach_score":               _coerce_int(g(c_supercoach)),
+            "centre_clearances":              _coerce_int(g(c_centre_clear)),
+            "stoppage_clearances":            _coerce_int(g(c_stop_clear)),
+            "score_involvements":             _coerce_int(g(c_score_inv)),
+            "metres_gained":                  _coerce_int(g(c_metres)),
+            "turnovers":                      _coerce_int(g(c_turnovers)),
+            "intercepts":                     _coerce_int(g(c_intercepts)),
+            "tackles_inside_fifty":           _coerce_int(g(c_tackles_i50)),
+            "contest_def_losses":             _coerce_int(g(c_def_losses)),
+            "contest_def_one_on_ones":        _coerce_int(g(c_def_1v1)),
+            "contest_off_one_on_ones":        _coerce_int(g(c_off_1v1)),
+        }
+
+    rows = [build_row(row) for _, row in df.iterrows()]
+    rows = _filter_valid_stat_rows(rows)
+    logger.info("2026 Fryzigg CSV: prepared %s rows for DB upsert", len(rows))
+    return rows
+
+
+def _parse_afltables_csv_df(df: pd.DataFrame, cols: set, season: int) -> list[dict]:
+    """
+    Parse an AFLTables-format DataFrame (legacy source='afltables' CSV).
+
+    Column names use dot-separated capitalised form (First.name, Surname, etc.)
+    and the ID column is an AFLTables player ID that may collide numerically with
+    Fryzigg IDs.  upsert_player_stats() will apply name-matching to resolve the
+    correct historical player_id when it detects a collision.
+    """
+    def col(row, name, default=None):
+        return row[name] if name in row.index else default
+
+    rows: list[dict] = []
+    for _, row in df.iterrows():
+        first_name  = _coerce_str(col(row, "first.name"))
+        last_name   = _coerce_str(col(row, "surname"))
+        player_id   = _coerce_int(col(row, "id"))
+        row_season  = _coerce_int(col(row, "season"), season)
+
+        home_team   = _coerce_str(col(row, "home.team"))
+        away_team   = _coerce_str(col(row, "away.team"))
+        home_score  = _coerce_int(col(row, "home.score"))
+        away_score  = _coerce_int(col(row, "away.score"))
+
+        winner, margin = "", 0
+        if home_score > away_score:
+            winner, margin = home_team, home_score - away_score
+        elif away_score > home_score:
+            winner, margin = away_team, away_score - home_score
+
+        date_str    = _coerce_str(col(row, "date"))
+        local_start = _coerce_str(col(row, "local.start.time"))
+        match_key   = f"{row_season}|{date_str}|{home_team}|{away_team}|{local_start}"
+
+        rows.append({
+            "match_id":                       _hash_match_key_to_bigint(match_key),
+            "match_date":                     _coerce_date(col(row, "date")),
+            "match_round":                    _coerce_str(col(row, "round")),
+            "match_home_team":                home_team,
+            "match_away_team":                away_team,
+            "match_home_team_score":          home_score,
+            "match_away_team_score":          away_score,
+            "match_margin":                   margin,
+            "match_winner":                   winner,
+            "match_weather_temp_c":           0,
+            "match_weather_type":             "",
+            "match_attendance":               _coerce_int(col(row, "attendance")),
+            "venue_name":                     _coerce_str(col(row, "venue")),
+            "season":                         row_season,
+            "player_id":                      player_id,
+            "player_first_name":              first_name,
+            "player_last_name":               last_name,
+            "player_team":                    _coerce_str(col(row, "playing.for")),
+            "guernsey_number":                _coerce_int(col(row, "jumper.no.")),
+            "player_height_cm":               0,
+            "player_weight_kg":               0,
+            "player_is_retired":              False,
+            "kicks":                          _coerce_int(col(row, "kicks")),
+            "marks":                          _coerce_int(col(row, "marks")),
+            "handballs":                      _coerce_int(col(row, "handballs")),
+            "disposals":                      _coerce_int(col(row, "disposals")),
+            "effective_disposals":            0,
+            "disposal_efficiency_percentage": 0,
+            "goals":                          _coerce_int(col(row, "goals")),
+            "behinds":                        _coerce_int(col(row, "behinds")),
+            "hitouts":                        _coerce_int(col(row, "hit.outs")),
+            "tackles":                        _coerce_int(col(row, "tackles")),
+            "rebounds":                       _coerce_int(col(row, "rebounds")),
+            "inside_fifties":                 _coerce_int(col(row, "inside.50s")),
+            "clearances":                     _coerce_int(col(row, "clearances")),
+            "clangers":                       _coerce_int(col(row, "clangers")),
+            "free_kicks_for":                 _coerce_int(col(row, "frees.for")),
+            "free_kicks_against":             _coerce_int(col(row, "frees.against")),
+            "brownlow_votes":                 _coerce_int(col(row, "brownlow.votes")),
+            "contested_possessions":          _coerce_int(col(row, "contested.possessions")),
+            "uncontested_possessions":        _coerce_int(col(row, "uncontested.possessions")),
+            "contested_marks":                _coerce_int(col(row, "contested.marks")),
+            "marks_inside_fifty":             _coerce_int(col(row, "marks.inside.50")),
+            "one_percenters":                 _coerce_int(col(row, "one.percenters")),
+            "bounces":                        _coerce_int(col(row, "bounces")),
+            "goal_assists":                   _coerce_int(col(row, "goal.assists")),
+            "time_on_ground_percentage":      _coerce_int(col(row, "time.on.ground")),
+            "afl_fantasy_score":              0,
+            "supercoach_score":               0,
+            "centre_clearances":              0,
+            "stoppage_clearances":            0,
+            "score_involvements":             0,
+            "metres_gained":                  0,
+            "turnovers":                      0,
+            "intercepts":                     0,
+            "tackles_inside_fifty":           0,
+            "contest_def_losses":             0,
+            "contest_def_one_on_ones":        0,
+            "contest_off_one_on_ones":        0,
+        })
+
+    rows = _filter_valid_stat_rows(rows)
+    logger.info("2026 AFLTables CSV: prepared %s rows for DB upsert", len(rows))
+    return rows
+
+
 def fetch_2026_stats_from_csv(csv_path: Path | None = None) -> list[dict]:
     """
-    Load 2026 AFL stats from a locally committed CSV generated by fitzRoy/GitHub Actions.
+    Load 2026 AFL stats from the locally committed CSV generated by the
+    'Fetch AFL 2026 Stats' GitHub Actions workflow.
 
-    Expected source:
-        data/afl_2026_stats.csv
+    Supports two CSV formats (auto-detected by column names):
 
-    Returns rows mapped into the same schema used by upsert_player_stats().
+    Fryzigg format  (source='fryzigg', preferred)
+        Column names are snake_case and match the DB schema directly.
+        player_id is the stable Fryzigg ID — identical to those in 2019-2025 —
+        so no collision fix is needed for established players, and debut players
+        receive the real Fryzigg-assigned ID that will remain consistent in
+        future seasons.
+
+    AFLTables legacy format  (source='afltables')
+        Column names use dot-separated capitalised form (First.name, Surname…).
+        player_id is an AFLTables ID that may collide with Fryzigg IDs.
+        upsert_player_stats() applies name-matching to resolve the correct
+        historical player_id for each row.
     """
     path = csv_path or AFL_2026_CSV_PATH
 
@@ -1186,108 +1448,21 @@ def fetch_2026_stats_from_csv(csv_path: Path | None = None) -> list[dict]:
         logger.warning("2026 CSV stats file is empty: %s", path)
         return []
 
-    logger.info("2026 CSV: loaded %s rows from %s", len(df), path)
+    # Compute lower-cased column set for format detection first, then normalise
+    # the DataFrame's own column names so the parsers can access them uniformly.
+    cols = {str(c).strip().lower() for c in df.columns}
+    df.columns = [str(c).strip().lower() for c in df.columns]
 
-    def col(row, name, default=None):
-        return row[name] if name in row.index else default
+    logger.info("2026 CSV: loaded %s rows, %s columns from %s", len(df), len(cols), path)
 
-    rows: list[dict] = []
+    # ── Fryzigg format: stable player_id column present ───────────────────
+    if "player_id" in cols:
+        logger.info("2026 CSV: Fryzigg format detected — player_id values are stable Fryzigg IDs")
+        return _parse_fryzigg_csv_df(df, cols, season=2026)
 
-    for _, row in df.iterrows():
-        first_name = _coerce_str(col(row, "First.name"))
-        last_name = _coerce_str(col(row, "Surname"))
-        player_id = _coerce_int(col(row, "ID"))
-        season = _coerce_int(col(row, "Season"), 2026)
-
-        home_team = _coerce_str(col(row, "Home.team"))
-        away_team = _coerce_str(col(row, "Away.team"))
-        home_score = _coerce_int(col(row, "Home.score"))
-        away_score = _coerce_int(col(row, "Away.score"))
-
-        winner = ""
-        margin = 0
-        if home_score > away_score:
-            winner = home_team
-            margin = home_score - away_score
-        elif away_score > home_score:
-            winner = away_team
-            margin = away_score - home_score
-
-        # fitzRoy CSV does not include a stable match_id in our DB shape,
-        # so derive a collision-resistant stable BIGINT from the match key.
-        date_str = _coerce_str(col(row, "Date"))
-        local_start = _coerce_str(col(row, "Local.start.time"))
-        match_key = f"{season}|{date_str}|{home_team}|{away_team}|{local_start}"
-        derived_match_id = _hash_match_key_to_bigint(match_key)
-
-        # Time on Ground in this CSV is usually already percentage-like.
-        tog_value = _coerce_int(col(row, "Time.on.Ground"))
-
-        rows.append(
-            {
-                "match_id": derived_match_id,
-                "match_date": _coerce_date(col(row, "Date")),
-                "match_round": _coerce_str(col(row, "Round")),
-                "match_home_team": home_team,
-                "match_away_team": away_team,
-                "match_home_team_score": home_score,
-                "match_away_team_score": away_score,
-                "match_margin": margin,
-                "match_winner": winner,
-                "match_weather_temp_c": 0,
-                "match_weather_type": "",
-                "match_attendance": _coerce_int(col(row, "Attendance")),
-                "venue_name": _coerce_str(col(row, "Venue")),
-                "season": season,
-                "player_id": player_id,
-                "player_first_name": first_name,
-                "player_last_name": last_name,
-                "player_team": _coerce_str(col(row, "Playing.for")),
-                "guernsey_number": _coerce_int(col(row, "Jumper.No.")),
-                "player_height_cm": 0,
-                "player_weight_kg": 0,
-                "player_is_retired": False,
-                "kicks": _coerce_int(col(row, "Kicks")),
-                "marks": _coerce_int(col(row, "Marks")),
-                "handballs": _coerce_int(col(row, "Handballs")),
-                "disposals": _coerce_int(col(row, "Disposals")),
-                "effective_disposals": 0,
-                "disposal_efficiency_percentage": 0,
-                "goals": _coerce_int(col(row, "Goals")),
-                "behinds": _coerce_int(col(row, "Behinds")),
-                "hitouts": _coerce_int(col(row, "Hit.Outs")),
-                "tackles": _coerce_int(col(row, "Tackles")),
-                "rebounds": _coerce_int(col(row, "Rebounds")),
-                "inside_fifties": _coerce_int(col(row, "Inside.50s")),
-                "clearances": _coerce_int(col(row, "Clearances")),
-                "clangers": _coerce_int(col(row, "Clangers")),
-                "free_kicks_for": _coerce_int(col(row, "Frees.For")),
-                "free_kicks_against": _coerce_int(col(row, "Frees.Against")),
-                "brownlow_votes": _coerce_int(col(row, "Brownlow.Votes")),
-                "contested_possessions": _coerce_int(col(row, "Contested.Possessions")),
-                "uncontested_possessions": _coerce_int(col(row, "Uncontested.Possessions")),
-                "contested_marks": _coerce_int(col(row, "Contested.Marks")),
-                "marks_inside_fifty": _coerce_int(col(row, "Marks.Inside.50")),
-                "one_percenters": _coerce_int(col(row, "One.Percenters")),
-                "bounces": _coerce_int(col(row, "Bounces")),
-                "goal_assists": _coerce_int(col(row, "Goal.Assists")),
-                "time_on_ground_percentage": tog_value,
-                "afl_fantasy_score": 0,
-                "supercoach_score": 0,
-                "centre_clearances": 0,
-                "stoppage_clearances": 0,
-                "score_involvements": 0,
-                "metres_gained": 0,
-                "turnovers": 0,
-                "intercepts": 0,
-                "tackles_inside_fifty": 0,
-            }
-        )
-
-    rows = [r for r in rows if r["player_id"] and r["match_id"]]
-
-    logger.info("2026 CSV: prepared %s rows for DB upsert", len(rows))
-    return rows
+    # ── AFLTables legacy format ────────────────────────────────────────────
+    logger.info("2026 CSV: AFLTables legacy format detected — player_id will be resolved via name-matching")
+    return _parse_afltables_csv_df(df, cols, season=2026)
 
 # ─────────────────────────────────────────────
 # AFL TABLES
