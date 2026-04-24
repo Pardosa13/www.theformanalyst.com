@@ -957,6 +957,14 @@ function maxFromGames(games, stat) {
   return vals.length ? Math.max(...vals) : '—';
 }
 
+function _selectDropdownByValue(selectId, value) {
+  const sel = document.getElementById(selectId);
+  if (!sel || !value) return;
+  for (let i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === value) { sel.selectedIndex = i; return; }
+  }
+}
+
 // ── Tab switching ────────────────────────────────────────────────
 function switchTab(name, btn) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -966,16 +974,7 @@ function switchTab(name, btn) {
   if (name === 'value') {
     // Pre-populate Value Finder match selector from Player Props tab selection
     if (_home && _away) {
-      const sel = document.getElementById('valueMatch');
-      if (sel) {
-        const target = `${_home}||${_away}`;
-        for (let i = 0; i < sel.options.length; i++) {
-          if (sel.options[i].value === target) {
-            sel.selectedIndex = i;
-            break;
-          }
-        }
-      }
+      _selectDropdownByValue('valueMatch', `${_home}||${_away}`);
     }
     // Only fetch from server if we don't have cached data yet
     if (_vfRawData) {
@@ -1033,17 +1032,10 @@ function onMatchSelect() {
 
 function _updateDisposalLinesLabel(label) {
   // Sync the Disposal Lines match dropdown when a match is selected on the Players tab
-  const sel = document.getElementById('dlMatchSelector');
-  const btn = document.getElementById('dlAnalyseBtn');
-  if (sel && label && _home && _away) {
-    const target = `${_home}|${_away}`;
-    for (let i = 0; i < sel.options.length; i++) {
-      if (sel.options[i].value === target) {
-        sel.selectedIndex = i;
-        break;
-      }
-    }
+  if (label && _home && _away) {
+    _selectDropdownByValue('dlMatchSelector', `${_home}|${_away}`);
   }
+  const btn = document.getElementById('dlAnalyseBtn');
   if (btn) btn.disabled = !label;
 }
 

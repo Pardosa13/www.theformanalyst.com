@@ -2002,10 +2002,11 @@ def calculate_market_edge(
     from math import sqrt, erfc
 
     # Build blended model prediction (same weighting as calculate_disposal_edge)
-    model_pred = float(player_avg) if player_avg else 0.0
+    base_pred = float(player_avg) if player_avg else 0.0
+    model_pred = base_pred
 
     if vs_opp_avg and vs_opp_avg > 0:
-        model_pred = player_avg * 0.50 + vs_opp_avg * 0.30 + model_pred * 0.20
+        model_pred = base_pred * 0.50 + vs_opp_avg * 0.30 + base_pred * 0.20
 
     if last5_avg and last5_avg > 0:
         model_pred = model_pred * 0.80 + last5_avg * 0.20
@@ -2021,9 +2022,10 @@ def calculate_market_edge(
             sigma = max(sqrt(mu), 0.1)
             model_prob_over = float(scipy_norm.sf(book_line, loc=mu, scale=sigma))
         else:
-            # Rare events: Poisson.  P(X > line) = P(X >= floor(line)+1)
+            # Rare events: Poisson.  sf(k, mu) = P(X > k) = 1 - CDF(k),
+            # with better numerical accuracy than explicit subtraction.
             k = int(book_line)
-            model_prob_over = float(1.0 - scipy_poisson.cdf(k, mu=mu))
+            model_prob_over = float(scipy_poisson.sf(k, mu=mu))
     except ImportError:
         # Fallback using math.erfc (normal approximation) when scipy unavailable
         sigma = max(sqrt(mu), 0.1)
