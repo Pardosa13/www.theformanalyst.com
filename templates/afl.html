@@ -542,7 +542,11 @@
     .vf-card-stats { grid-template-columns:repeat(4, 1fr); }
   }
   @media (max-width:480px) {
+    .afl-wrap { padding-bottom:40px; }
+    .afl-header h2 { font-size:1.2rem; }
     .stat-row { grid-template-columns:1fr 1fr; gap:8px; }
+    .stat-tile { padding:12px 14px; }
+    .stat-tile h2 { font-size:1.5rem; }
     .player-stat-row { grid-template-columns:repeat(3,1fr); }
     .margin-bar-row { flex-direction:column; align-items:stretch; gap:6px; }
     .margin-label,.margin-meta { width:auto; }
@@ -551,7 +555,27 @@
     .vf-stat-rec { grid-column:span 2; }
     .value-finder-bar { flex-direction:column; align-items:stretch; }
     .value-finder-bar .form-select,
-    .value-finder-bar .form-control { width:100% !important; max-width:100% !important; }
+    .value-finder-bar .form-control,
+    .value-finder-bar .btn { width:100% !important; max-width:100% !important; min-height:44px; }
+    .prop-selector-bar { flex-direction:column; align-items:stretch; gap:8px; padding:10px 14px; }
+    .prop-selector-bar .form-select { width:100% !important; }
+    .afl-tabs { padding:3px; gap:2px; }
+    .afl-tab { min-width:0; padding:8px 6px; font-size:10px; }
+    .afl-card-body { padding:12px; }
+  }
+  @media (max-width:390px) {
+    .afl-header h2 { font-size:1.1rem; }
+    .stat-tile { padding:10px 12px; }
+    .stat-tile h2 { font-size:1.3rem; }
+    .stat-tile h5 { font-size:10px; }
+    .psr-val { font-size:12px; }
+    .value-finder-bar { gap:6px; }
+    .prop-selector-bar { gap:6px; padding:8px 12px; }
+    .afl-card-body { padding:10px; }
+    .afl-tabs { gap:1px; }
+    .afl-tab { padding:7px 4px; font-size:10px; }
+    .fixture-row { flex-direction:column; align-items:flex-start; gap:6px; }
+    .fixture-teams { min-width:0; width:100%; }
   }
 </style>
 {% endblock %}
@@ -740,7 +764,7 @@
   </div>
 
   <!-- ── Disposal Lines Analysis (no odds needed) ─────────────── -->
-  <div class="afl-card" style="margin-top:16px;">
+  <div class="afl-card" style="margin-top:16px;display:none;">
     <div class="afl-card-header">
       <h4><i class="bi bi-bar-chart-steps"></i> Disposal Lines</h4>
       <span style="font-size:11px;color:var(--text-muted);">Hit-rate at 10 / 15 / 20 / 25 / 30+ · no odds required</span>
