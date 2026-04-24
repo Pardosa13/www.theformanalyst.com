@@ -1589,7 +1589,7 @@ _VENUE_GROUPS: list[list[str]] = [
     ["Marvel Stadium", "Docklands", "Etihad Stadium"],
     ["GMHBA Stadium", "Kardinia Park", "Simonds Stadium"],
     ["Optus Stadium", "Perth Stadium"],
-    ["People First Stadium", "Metricon Stadium"],
+    ["People First Stadium", "Metricon Stadium", "Carrara", "Gold Coast Stadium"],
     ["ENGIE Stadium", "Spotless Stadium", "Sydney Showground", "Stadium Australia"],
     ["Blundstone Arena", "Bellerive Oval"],
     ["University of Tasmania Stadium", "York Park", "Aurora Stadium"],
@@ -1603,6 +1603,8 @@ _VENUE_GROUPS: list[list[str]] = [
 def _venue_search_names(venue: str) -> list[str]:
     """Return all known alias names for a given venue string."""
     v_lower = venue.lower().strip()
+    if not v_lower:
+        return [venue]
     for group in _VENUE_GROUPS:
         if any(v_lower == g.lower() or v_lower in g.lower() for g in group):
             return group

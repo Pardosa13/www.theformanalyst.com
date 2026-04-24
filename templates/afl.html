@@ -374,6 +374,32 @@
   .edge-chip.neu { background:var(--bg-elevated); border:1px solid var(--border-mid); color:var(--text-muted); }
   .lt-over  { color:#34d399; font-weight:700; font-size:11px; font-family:'DM Mono',monospace; }
   .lt-under { color:#f87171; font-weight:700; font-size:11px; font-family:'DM Mono',monospace; }
+
+  /* ── Live odds inline strip ──────────────────────────────────── */
+  .live-odds-wrap {
+    display:flex; flex-wrap:wrap; gap:6px 12px;
+    padding:8px 16px 10px; border-top:1px solid var(--border-subtle);
+    background:var(--bg-elevated);
+  }
+  .live-odds-header {
+    width:100%; font-size:10px; font-weight:700; color:var(--text-muted);
+    letter-spacing:.06em; margin-bottom:2px;
+  }
+  .live-odds-market { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+  .lom-label {
+    font-size:10px; font-weight:700; color:var(--text-muted);
+    letter-spacing:.05em; min-width:30px;
+  }
+  .lom-lines { display:flex; flex-wrap:wrap; gap:3px; }
+  .odds-line-wrap {
+    display:inline-flex; align-items:center; gap:2px;
+    background:var(--bg-surface); border:1px solid var(--border-subtle);
+    border-radius:6px; padding:2px 5px; font-size:10px;
+  }
+  .odds-line-num { font-family:'DM Mono',monospace; font-weight:700; color:var(--text-secondary); }
+  .lc-chip { font-family:'DM Mono',monospace; font-size:10px; padding:1px 4px; border-radius:4px; }
+  .lc-over  { background:rgba(16,185,129,.15); color:#10b981; }
+  .lc-under { background:rgba(239,68,68,.12);  color:#f87171; }
   .props-banner {
     padding:10px 14px; border-radius:8px; font-size:12px; margin-bottom:12px;
     background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.25); color:#fbbf24;
@@ -1024,6 +1050,7 @@ function selectPlayer(id) {
       }
 
       renderPropCard(data);
+      injectLiveOddsForPlayer(data.name);
 const opponent = _teamSide === 'home' ? _away : _home;
 
 // Build promises array for all async loads
@@ -1163,6 +1190,10 @@ function renderPropCard(player) {
             <div class="psr-lbl">${lbl}</div>
           </div>
         `).join('')}
+      </div>
+
+      <div id="liveOddsSection" style="min-height:0;">
+        ${_home && _away ? '<div class="live-odds-wrap"><span style="font-size:10px;color:var(--text-muted);">Loading live odds…</span></div>' : ''}
       </div>
 
       <div class="chart-controls">
@@ -1505,7 +1536,8 @@ function redrawBars() {
     });
     sourceGames = combined;
   } else {
-    sourceGames = [..._gameLog];
+    // 'season' filter — current season only so the chart never mixes years
+    sourceGames = _gameLog.filter(g => !g.season || g.season == _SEASON);
   }
 
   if (!sourceGames.length) {
@@ -1550,7 +1582,9 @@ function redrawBars() {
     const xl = document.createElement('div');
     xl.className = 'x-label';
     const opp = (game.opponent || '???').substring(0, 4).toUpperCase();
-    xl.innerHTML = `<div>${esc(game.round || '')}</div><div>${esc(opp)}</div>`;
+    const yrSuffix = game.season && game.season != _SEASON
+      ? `<div style="font-size:8px;color:var(--text-muted);">'${String(game.season).slice(2)}</div>` : '';
+    xl.innerHTML = `<div>R${esc(String(game.round || ''))}</div><div>${esc(opp)}</div>${yrSuffix}`;
     xAxis.appendChild(xl);
   });
 
@@ -1637,6 +1671,73 @@ function jumpToTeam(home, away, venue, side) {
   document.getElementById('teamBtnHome').textContent = home;
   document.getElementById('teamBtnAway').textContent = away;
   selectTeam(side);
+}
+
+// ── Live odds injection ──────────────────────────────────────────
+const _MARKET_DISPLAY = {
+  player_disposals: 'DISP',
+  player_kicks: 'KICK',
+  player_handballs: 'HB',
+  player_marks: 'MRK',
+  player_tackles: 'TKL',
+  player_goals: 'GOAL',
+  player_afl_fantasy_points: 'FAN',
+};
+const _MARKET_ORDER = Object.keys(_MARKET_DISPLAY);
+
+function _normPropName(name) {
+  return String(name || '').toLowerCase().replace(/[^a-z]/g, '');
+}
+
+function injectLiveOddsForPlayer(playerName) {
+  const section = document.getElementById('liveOddsSection');
+  if (!section) return;
+  if (!_home || !_away) { section.innerHTML = ''; return; }
+
+  fetch(`/api/afl/match-props?home=${encodeURIComponent(_home)}&away=${encodeURIComponent(_away)}`)
+    .then(r => r.json())
+    .then(data => {
+      const allProps = data.props || [];
+      const pNorm = _normPropName(playerName);
+      const playerProps = allProps.filter(p => _normPropName(p.player_name) === pNorm);
+
+      if (!playerProps.length) {
+        section.innerHTML = '';
+        return;
+      }
+
+      // Group by market → line → best Over / best Under
+      const byMarket = {};
+      for (const prop of playerProps) {
+        if (!byMarket[prop.market]) byMarket[prop.market] = {};
+        const key = String(prop.line);
+        if (!byMarket[prop.market][key]) byMarket[prop.market][key] = { over: null, under: null };
+        const slot = byMarket[prop.market][key];
+        if (prop.line_type === 'Over' && (!slot.over || prop.odds > slot.over.odds)) slot.over = prop;
+        if (prop.line_type === 'Under' && (!slot.under || prop.odds > slot.under.odds)) slot.under = prop;
+      }
+
+      const marketsHtml = _MARKET_ORDER
+        .filter(m => byMarket[m])
+        .map(market => {
+          const label = _MARKET_DISPLAY[market];
+          const lines = Object.entries(byMarket[market])
+            .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]));
+          const linesHtml = lines.map(([line, { over, under }]) => `
+            <span class="odds-line-wrap">
+              <span class="odds-line-num">${parseFloat(line)}</span>
+              ${over ? `<span class="lc-chip lc-over">O ${over.odds.toFixed(2)}</span>` : ''}
+              ${under ? `<span class="lc-chip lc-under">U ${under.odds.toFixed(2)}</span>` : ''}
+            </span>`).join('');
+          return `<div class="live-odds-market"><span class="lom-label">${esc(label)}</span><div class="lom-lines">${linesHtml}</div></div>`;
+        }).join('');
+
+      section.innerHTML = `<div class="live-odds-wrap">
+        <div class="live-odds-header"><i class="bi bi-lightning-charge-fill" style="color:#fbbf24;"></i> LIVE BOOKMAKER ODDS</div>
+        ${marketsHtml}
+      </div>`;
+    })
+    .catch(() => { section.innerHTML = ''; });
 }
 
 // ── Load Odds API props ──────────────────────────────────────────
