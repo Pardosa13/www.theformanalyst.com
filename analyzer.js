@@ -2546,28 +2546,38 @@ function isUndefeatedRecord(record) {
 // par_times passed from app.py (30+ sample minimum per combo).
 // ==========================================
 function checkFormTempo(horseRow) {
-    if (!parTimesLookup || Object.keys(parTimesLookup).length === 0) return [0, ''];
+    if (!parTimesLookup || Object.keys(parTimesLookup).length === 0) {
+        return [0, `+ 0.0 : Form Tempo — no par time database yet\n`];
+    }
 
     const formTimeRaw = String(horseRow['form time'] || '').trim();
     const formTrack   = String(horseRow['form track'] || '').trim().toLowerCase();
     const formDist    = String(horseRow['form distance'] || '').trim();
     const formCond    = String(horseRow['form track condition'] || '').trim().toLowerCase();
 
-    if (!formTimeRaw || !formTrack || !formDist || !formCond) return [0, ''];
-    if (!formTimeRaw.includes(':')) return [0, ''];
+    if (!formTimeRaw || !formTrack || !formDist || !formCond) {
+        return [0, `+ 0.0 : Form Tempo — missing last race track/distance/condition data\n`];
+    }
+    if (!formTimeRaw.includes(':')) {
+        return [0, `+ 0.0 : Form Tempo — last race time not in parseable format\n`];
+    }
 
     let formSeconds;
     try {
         const parts = formTimeRaw.split(':');
         formSeconds = parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
     } catch (e) {
-        return [0, ''];
+        return [0, `+ 0.0 : Form Tempo — last race time could not be parsed\n`];
     }
-    if (isNaN(formSeconds) || formSeconds <= 0) return [0, ''];
+    if (isNaN(formSeconds) || formSeconds <= 0) {
+        return [0, `+ 0.0 : Form Tempo — last race time invalid\n`];
+    }
 
     const parKey = `${formTrack}|${formDist}|${formCond}`;
     const parSeconds = parTimesLookup[parKey];
-    if (!parSeconds) return [0, ''];
+    if (!parSeconds) {
+        return [0, `+ 0.0 : Form Tempo — no par time for ${formTrack} ${formDist}m ${formCond} (<30 historical races)\n`];
+    }
 
     // positive delta = horse's race was faster than par
     const delta = parSeconds - formSeconds;
