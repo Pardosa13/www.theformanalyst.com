@@ -26,6 +26,7 @@ from afl_data import (
     _normalise_prop_market,
     _normalise_team_name,
     calculate_disposal_edge,
+    calculate_market_edge,
     fetch_afl_player_props,
     fetch_fryzigg_player_stats,
     fetch_squiggle_current_round,
@@ -668,44 +669,47 @@ def register_afl_routes(app, db):
                 seen[key] = prop
         deduped_props = list(seen.values())
 
-        value_bets = []
-
+        # ── Batch load all required player stats in ONE query (Issue #5) ──────
+        # Extract unique (first_initial, last_name) pairs from all props upfront
+        # so we avoid issuing one SQL query per prop row.
+        prop_name_keys: list[tuple[str, str, str]] = []  # (player_name, first_initial, last_name)
         for prop in deduped_props:
-            line_type = prop.get("line_type", "")
-            if line_type not in ("Over", "Under"):
-                continue
-
-            player_name = prop.get("player_name", "")
-            book_line = prop.get("line", 0)
-            if not player_name or book_line is None:
-                continue
-
-            # Match "J. Smith" or "Jayden Smith" — extract first initial + last name
-            parts = player_name.replace(".", " ").split()
+            pname = prop.get("player_name", "")
+            parts = pname.replace(".", " ").split()
             parts = [p for p in parts if p]
-            if len(parts) < 2:
-                continue
-            first_initial = parts[0][0].lower()
-            last_name = parts[-1].lower()
+            if len(parts) >= 2:
+                prop_name_keys.append((pname, parts[0][0].lower(), parts[-1].lower()))
 
-            sql = db.text("""
+        all_last_names = list({k[2] for k in prop_name_keys})
+
+        all_stats_rows: list[dict] = []
+        if all_last_names:
+            bulk_sql = db.text("""
                 SELECT *
                 FROM afl_player_stats
-                WHERE LOWER(player_last_name) = :last_name
-                  AND LOWER(player_first_name) LIKE :first_initial
+                WHERE LOWER(player_last_name) = ANY(:last_names)
                   AND season = ANY(:seasons)
                 ORDER BY season DESC, match_date DESC
-                LIMIT 200
             """)
-
             with db.engine.connect() as conn:
-                rows = conn.execute(sql, {
-                    "last_name": last_name,
-                    "first_initial": f"{first_initial}%",
+                bulk_rows = conn.execute(bulk_sql, {
+                    "last_names": all_last_names,
                     "seasons": effective_seasons,
                 }).mappings().fetchall()
+            all_stats_rows = [dict(r) for r in bulk_rows]
 
-            player_rows = [dict(r) for r in rows]
+        # Index by (first_initial, last_name) → list[dict]
+        stats_by_key: dict[tuple[str, str], list[dict]] = defaultdict(list)
+        for row in all_stats_rows:
+            ln = (row.get("player_last_name") or "").lower()
+            fn = (row.get("player_first_name") or "").lower()
+            if ln and fn:
+                stats_by_key[(fn[0], ln)].append(row)
+
+        value_bets = []
+
+        for pname, first_initial, last_name in prop_name_keys:
+            player_rows = stats_by_key.get((first_initial, last_name), [])
             if not player_rows:
                 continue
 
@@ -718,68 +722,84 @@ def register_afl_routes(app, db):
             team_name = player.get("team", "")
 
             season_avg = _safe_avg(games, stat_name)
-            home_team = _normalise_team_name(prop.get("home_team", ""))
-            away_team = _normalise_team_name(prop.get("away_team", ""))
-            opponent = (
-                away_team if home_team == team_name
-                else home_team if away_team == team_name
-                else (away_team or home_team)
-            )
 
-            # Exact opponent match (same fix as _db_player_vs_opponent)
-            opp_lower = opponent.lower()
-            opp_rows = [
-                r for r in games
-                if (r.get("match_home_team") or "").lower() == opp_lower
-                or (r.get("match_away_team") or "").lower() == opp_lower
-            ]
-            vs_opp_avg = _safe_avg(opp_rows, stat_name) if opp_rows else None
-            last5_avg = _safe_avg(games[:5], stat_name) if games else None
+            # Process all deduped props matching this player name
+            for prop in deduped_props:
+                if prop.get("player_name", "") != pname:
+                    continue
 
-            edge_data = calculate_disposal_edge(
-                player_avg=season_avg,
-                book_line=book_line,
-                vs_opp_avg=vs_opp_avg,
-                last5_avg=last5_avg,
-            )
+                line_type = prop.get("line_type", "")
+                if line_type not in ("Over", "Under"):
+                    continue
 
-            # For Under bets flip the sign: negative edge means player likely goes Under
-            edge = edge_data["edge"]
-            if line_type == "Under":
-                edge = -edge
+                book_line = prop.get("line", 0)
+                if book_line is None:
+                    continue
 
-            if abs(edge) >= min_edge:
-                total = len(games)
-                if line_type == "Over":
-                    hits = sum(1 for r in games if (r.get(stat_name, 0) or 0) >= book_line)
-                else:
-                    hits = sum(1 for r in games if (r.get(stat_name, 0) or 0) < book_line)
-                hist_pct = round(hits / total * 100, 1) if total else 0.0
-
-                value_bets.append(
-                    {
-                        "player": player_name,
-                        "player_id": player.get("player_id"),
-                        "team": team_name,
-                        "opponent": opponent,
-                        "home_team": home_team,
-                        "away_team": away_team,
-                        "commence_time": str(prop.get("commence_time", "")),
-                        "bookmaker": prop.get("bookmaker", ""),
-                        "market": market,
-                        "line_type": line_type,
-                        "book_line": book_line,
-                        "odds": prop.get("odds", 0),
-                        "season_avg": season_avg,
-                        "vs_opp_avg": vs_opp_avg,
-                        "last5_avg": last5_avg,
-                        "hist_pct": hist_pct,
-                        "model_prediction": edge_data["model_prediction"],
-                        "edge": round(edge, 1),
-                        "edge_pct": edge_data["edge_pct"],
-                        "recommendation": "value" if abs(edge) >= 2.0 else "skip",
-                    }
+                odds = prop.get("odds", 0) or 0
+                prop_home_team = _normalise_team_name(prop.get("home_team", ""))
+                prop_away_team = _normalise_team_name(prop.get("away_team", ""))
+                opponent = (
+                    prop_away_team if prop_home_team == team_name
+                    else prop_home_team if prop_away_team == team_name
+                    else (prop_away_team or prop_home_team)
                 )
+
+                opp_lower = opponent.lower()
+                opp_rows = [
+                    r for r in games
+                    if (r.get("match_home_team") or "").lower() == opp_lower
+                    or (r.get("match_away_team") or "").lower() == opp_lower
+                ]
+                vs_opp_avg = _safe_avg(opp_rows, stat_name) if opp_rows else None
+                last5_avg = _safe_avg(games[:5], stat_name) if games else None
+
+                edge_data = calculate_market_edge(
+                    player_avg=season_avg,
+                    book_line=book_line,
+                    odds=odds,
+                    line_type=line_type,
+                    market=market,
+                    vs_opp_avg=vs_opp_avg,
+                    last5_avg=last5_avg,
+                )
+
+                edge = edge_data["edge"]
+
+                if abs(edge) >= min_edge:
+                    total = len(games)
+                    if line_type == "Over":
+                        hits = sum(1 for r in games if (r.get(stat_name, 0) or 0) >= book_line)
+                    else:
+                        hits = sum(1 for r in games if (r.get(stat_name, 0) or 0) < book_line)
+                    hist_pct = round(hits / total * 100, 1) if total else 0.0
+
+                    value_bets.append(
+                        {
+                            "player": pname,
+                            "player_id": player.get("player_id"),
+                            "team": team_name,
+                            "opponent": opponent,
+                            "home_team": prop_home_team,
+                            "away_team": prop_away_team,
+                            "commence_time": str(prop.get("commence_time", "")),
+                            "bookmaker": prop.get("bookmaker", ""),
+                            "market": market,
+                            "line_type": line_type,
+                            "book_line": book_line,
+                            "odds": odds,
+                            "season_avg": season_avg,
+                            "vs_opp_avg": vs_opp_avg,
+                            "last5_avg": last5_avg,
+                            "hist_pct": hist_pct,
+                            "model_prediction": edge_data["model_prediction"],
+                            "model_prob": edge_data.get("model_prob"),
+                            "implied_prob": edge_data.get("implied_prob"),
+                            "edge": round(edge, 1),
+                            "edge_pct": edge_data["edge_pct"],
+                            "recommendation": edge_data["recommendation"],
+                        }
+                    )
 
         # Keep only the highest-edge bet per (player, direction) so a player
         # with different lines from different bookmakers appears at most once.
@@ -1710,13 +1730,23 @@ def afl_nightly_sync(app_context, db):
         api_key = ""
 
     if api_key:
-        try:
-            props = fetch_afl_player_props(api_key, "player_disposals")
-            count = upsert_player_props(db, props)
-            log_sync(db, "odds_api", rows=count)
-            logger.info("  ✓ Props: %s rows synced", count)
-        except Exception as exc:
-            logger.error("  ✗ Props sync failed: %s", exc)
+        total_props = 0
+        for market in [
+            "player_disposals",
+            "player_kicks",
+            "player_marks",
+            "player_tackles",
+            "player_goals",
+        ]:
+            try:
+                props = fetch_afl_player_props(api_key, market)
+                count = upsert_player_props(db, props)
+                log_sync(db, "odds_api", rows=count)
+                total_props += count
+                logger.info("  ✓ Props (%s): %s rows synced", market, count)
+            except Exception as exc:
+                logger.error("  ✗ Props sync failed for %s: %s", market, exc)
+        logger.info("  ✓ Props total: %s rows synced", total_props)
     else:
         logger.info("  - Props: skipped (ODDS_API_KEY not configured)")
 

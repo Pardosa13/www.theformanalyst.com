@@ -1980,3 +1980,80 @@ def calculate_disposal_edge(
         "edge_pct": round(abs(edge) / book_line * 100, 1) if book_line else 0,
         "recommendation": "value" if edge >= 2.0 else "skip",
     }
+
+
+def calculate_market_edge(
+    player_avg: float,
+    book_line: float,
+    odds: float,
+    line_type: str,
+    market: str = "player_disposals",
+    vs_opp_avg: float = None,
+    last5_avg: float = None,
+) -> dict:
+    """
+    Probability-based edge calculation.
+
+    - Disposals (high-volume): normal distribution approximation.
+    - Goals, marks, tackles, kicks (rare events): Poisson distribution.
+
+    Returns edge in percentage points: positive = model says bet has value.
+    """
+    from math import sqrt, erfc
+
+    # Build blended model prediction (same weighting as calculate_disposal_edge)
+    base_pred = float(player_avg) if player_avg else 0.0
+    model_pred = base_pred
+
+    if vs_opp_avg and vs_opp_avg > 0:
+        model_pred = base_pred * 0.50 + vs_opp_avg * 0.30 + base_pred * 0.20
+
+    if last5_avg and last5_avg > 0:
+        model_pred = model_pred * 0.80 + last5_avg * 0.20
+
+    mu = max(model_pred, 0.01)
+
+    # Compute P(X > book_line) using the appropriate distribution
+    try:
+        from scipy.stats import norm as scipy_norm, poisson as scipy_poisson
+
+        if market == "player_disposals":
+            # High-volume: normal approximation (mean=mu, std=sqrt(mu))
+            sigma = max(sqrt(mu), 0.1)
+            model_prob_over = float(scipy_norm.sf(book_line, loc=mu, scale=sigma))
+        else:
+            # Rare events: Poisson.  sf(k, mu) = P(X > k) = 1 - CDF(k),
+            # with better numerical accuracy than explicit subtraction.
+            k = int(book_line)
+            model_prob_over = float(scipy_poisson.sf(k, mu=mu))
+    except ImportError:
+        # Fallback using math.erfc (normal approximation) when scipy unavailable
+        sigma = max(sqrt(mu), 0.1)
+        z = (book_line - mu) / (sigma * sqrt(2))
+        model_prob_over = max(0.001, min(0.999, 0.5 * erfc(z)))
+
+    model_prob_over = max(0.001, min(0.999, model_prob_over))
+
+    if line_type == "Under":
+        model_prob = 1.0 - model_prob_over
+    else:
+        model_prob = model_prob_over
+
+    # Implied probability from decimal odds (remove vig is not applied here;
+    # raw implied prob is sufficient for edge signal)
+    implied_prob = 1.0 / max(float(odds), 1.01) if odds and odds > 1 else 0.5
+    implied_prob = max(0.001, min(0.999, implied_prob))
+
+    # Edge: positive means our model gives higher probability than bookie implies
+    edge_pct = (model_prob - implied_prob) * 100.0
+
+    return {
+        "model_prediction": round(model_pred, 1),
+        "model_prob": round(model_prob * 100.0, 1),
+        "implied_prob": round(implied_prob * 100.0, 1),
+        "book_line": book_line,
+        "edge": round(edge_pct, 1),
+        "edge_positive": edge_pct > 0,
+        "edge_pct": round(abs(edge_pct), 1),
+        "recommendation": "value" if edge_pct >= 2.0 else "skip",
+    }

@@ -465,22 +465,93 @@
   .spinner-sm { display:inline-block; width:14px; height:14px; border:2px solid rgba(255,255,255,.3); border-top-color:white; border-radius:50%; animation:spin .6s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
 
+  /* ── Value Finder cards ──────────────────────────────────────── */
+  .vf-results-meta {
+    font-size:11px; color:var(--text-muted); margin-bottom:12px; padding:0 2px;
+  }
+  .vf-cards-grid {
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:12px;
+  }
+  .vf-card {
+    background:var(--bg-surface); border:1px solid var(--border-subtle);
+    border-radius:12px; overflow:hidden;
+    transition:border-color .15s, box-shadow .15s;
+  }
+  .vf-card:hover {
+    border-color:var(--border-mid); box-shadow:0 4px 16px rgba(0,0,0,.18);
+  }
+  .vf-card-header {
+    display:flex; justify-content:space-between; align-items:flex-start;
+    padding:12px 14px 10px; border-bottom:1px solid var(--border-subtle);
+    background:var(--bg-elevated);
+  }
+  .vf-player-info { display:flex; flex-direction:column; gap:2px; }
+  .vf-player-name { font-weight:700; font-size:14px; color:var(--text-primary); }
+  .vf-player-team { font-size:11px; color:var(--text-muted); }
+  .vf-match-info {
+    display:flex; flex-direction:column; align-items:flex-end; gap:2px; font-size:11px; color:var(--text-secondary);
+  }
+  .vf-card-body { padding:10px 14px 8px; border-bottom:1px solid var(--border-subtle); }
+  .vf-bet-line {
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+    margin-bottom:8px;
+  }
+  .vf-market-label {
+    font-size:10px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.06em; color:var(--text-muted); background:var(--bg-elevated);
+    padding:2px 6px; border-radius:4px; border:1px solid var(--border-mid);
+  }
+  .vf-line-num { font-family:'DM Mono',monospace; font-weight:700; font-size:15px; color:var(--text-primary); }
+  .vf-odds { font-family:'DM Mono',monospace; font-size:13px; color:var(--accent); font-weight:700; }
+  .vf-prob-row {
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:11px;
+  }
+  .vf-prob-item { color:var(--text-secondary); }
+  .vf-prob-sep { color:var(--border-mid); }
+  .vf-card-stats {
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:6px;
+    padding:10px 14px; align-items:center;
+  }
+  .vf-stat-item { display:flex; flex-direction:column; gap:1px; }
+  .vf-stat-label { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); }
+  .vf-stat-val { font-family:'DM Mono',monospace; font-size:12px; font-weight:700; color:var(--text-primary); }
+  .vf-stat-rec { grid-column:span 4; display:flex; justify-content:flex-end; }
+  .vf-rec-badge {
+    display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:6px;
+    font-size:10px; font-weight:800; letter-spacing:.08em;
+  }
+  .vf-rec-value {
+    background:rgba(16,185,129,.15); border:1px solid rgba(16,185,129,.4); color:#34d399;
+  }
+  .vf-rec-skip {
+    background:var(--bg-elevated); border:1px solid var(--border-mid); color:var(--text-muted);
+  }
+
   /* ── Responsive ──────────────────────────────────────────────── */
   @media (max-width:900px) {
     .prop-split { flex-direction:column; }
     .prop-sidebar { width:100%; }
     #propPlayerListInner { display:grid; grid-template-columns:repeat(2,1fr); }
+    .vf-cards-grid { grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); }
   }
   @media (max-width:768px) {
     .stat-row { grid-template-columns:1fr 1fr; }
     .player-stat-row { grid-template-columns:repeat(4,1fr); }
     .split-grid { grid-template-columns:1fr; }
+    .vf-cards-grid { grid-template-columns:1fr 1fr; }
+    .vf-card-stats { grid-template-columns:repeat(4, 1fr); }
   }
   @media (max-width:480px) {
     .stat-row { grid-template-columns:1fr 1fr; gap:8px; }
     .player-stat-row { grid-template-columns:repeat(3,1fr); }
     .margin-bar-row { flex-direction:column; align-items:stretch; gap:6px; }
     .margin-label,.margin-meta { width:auto; }
+    .vf-cards-grid { grid-template-columns:1fr; }
+    .vf-card-stats { grid-template-columns:repeat(2, 1fr); }
+    .vf-stat-rec { grid-column:span 2; }
+    .value-finder-bar { flex-direction:column; align-items:stretch; }
+    .value-finder-bar .form-select,
+    .value-finder-bar .form-control { width:100% !important; max-width:100% !important; }
   }
 </style>
 {% endblock %}
@@ -639,14 +710,11 @@
     <div class="afl-card-body">
       <div class="value-finder-bar">
         <select class="form-select" id="valueMarket" style="width:200px;" onchange="_vfRawData=null; loadValueFinder()">
-          <option value="">All Markets</option>
           <option value="player_disposals">Player Disposals</option>
           <option value="player_marks">Player Marks</option>
           <option value="player_tackles">Player Tackles</option>
           <option value="player_goals">Player Goals</option>
           <option value="player_kicks">Player Kicks</option>
-          <option value="player_handballs">Player Handballs</option>
-          <option value="player_afl_fantasy_points">AFL Fantasy Points</option>
         </select>
         <select class="form-select" id="valueMatch" style="width:220px;" onchange="_vfRawData ? _vfApplyFilters(_vfRawData) : loadValueFinder()">
           <option value="">All Matches</option>
@@ -680,7 +748,12 @@
     <div class="afl-card-body">
       <div class="value-finder-bar">
         <span style="font-size:12px;color:var(--text-muted);">Match:</span>
-        <span id="dlMatchLabel" style="font-size:12px;color:var(--text-primary);">— select a match on the Players tab first —</span>
+        <select class="form-select" id="dlMatchSelector" style="max-width:280px;" onchange="onDlMatchSelect()">
+          <option value="">Select match...</option>
+          {% for f in fixtures %}
+          <option value="{{ f.hteam }}|{{ f.ateam }}">{{ f.hteam }} vs {{ f.ateam }}</option>
+          {% endfor %}
+        </select>
         <button class="btn btn-primary" id="dlAnalyseBtn" onclick="loadDisposalLines()" disabled>
           <i class="bi bi-table"></i> Analyse Lines
         </button>
@@ -884,6 +957,14 @@ function maxFromGames(games, stat) {
   return vals.length ? Math.max(...vals) : '—';
 }
 
+function _selectDropdownByValue(selectId, value) {
+  const sel = document.getElementById(selectId);
+  if (!sel || !value) return;
+  for (let i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === value) { sel.selectedIndex = i; return; }
+  }
+}
+
 // ── Tab switching ────────────────────────────────────────────────
 function switchTab(name, btn) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -891,6 +972,10 @@ function switchTab(name, btn) {
   document.getElementById(`tab-${name}`)?.classList.add('active');
   btn?.classList.add('active');
   if (name === 'value') {
+    // Pre-populate Value Finder match selector from Player Props tab selection
+    if (_home && _away) {
+      _selectDropdownByValue('valueMatch', `${_home}||${_away}`);
+    }
     // Only fetch from server if we don't have cached data yet
     if (_vfRawData) {
       _vfApplyFilters(_vfRawData);
@@ -946,10 +1031,25 @@ function onMatchSelect() {
 }
 
 function _updateDisposalLinesLabel(label) {
-  const el = document.getElementById('dlMatchLabel');
+  // Sync the Disposal Lines match dropdown when a match is selected on the Players tab
+  if (label && _home && _away) {
+    _selectDropdownByValue('dlMatchSelector', `${_home}|${_away}`);
+  }
   const btn = document.getElementById('dlAnalyseBtn');
-  if (el) el.textContent = label || '— select a match on the Players tab first —';
   if (btn) btn.disabled = !label;
+}
+
+function onDlMatchSelect() {
+  const val = document.getElementById('dlMatchSelector').value;
+  const btn = document.getElementById('dlAnalyseBtn');
+  if (!val) {
+    if (btn) btn.disabled = true;
+    return;
+  }
+  const parts = val.split('|');
+  _home = parts[0] || '';
+  _away = parts[1] || '';
+  if (btn) btn.disabled = false;
 }
 
 function selectTeam(side) {
@@ -1791,94 +1891,77 @@ function loadOddsProps() {
 // ── Value finder ─────────────────────────────────────────────────
 let _vfRawData = null; // cached result for client-side re-filtering
 
-// Render the value finder results table.
-// mode='props'  → raw props from /api/afl/props/all   (All Markets)
-// mode='bets'   → value bets from /api/afl/value-finder (specific market)
+// Render value finder results as polished cards matching Player Props quality.
 // Returns an HTML string ready to assign to el.innerHTML.
-function _vfRenderTable(rows, mode, data) {
-  const market = document.getElementById('valueMarket')?.value || '';
+function _vfRenderTable(rows, data) {
+  const market = document.getElementById('valueMarket')?.value || 'player_disposals';
   const minEdge = parseFloat(document.getElementById('minEdge')?.value) || 2;
+  const mktLabel = market.replace('player_', '').replace(/_/g, ' ');
+  const season = (data && data.season) || _SEASON;
 
-  if (mode === 'props') {
-    const tableRows = rows.map(p => {
-      const ltCls = (p.line_type || '') === 'Over' ? 'lt-over' : 'lt-under';
-      const odds = parseFloat(p.odds) || 0;
-      const mktLabel = (p.market || '').replace('player_', '').replace(/_/g, ' ');
-      return `
-        <tr>
-          <td style="font-weight:700;">${esc(p.player_name || '')}</td>
-          <td style="font-size:11px;">${esc(p.home_team || '')} vs ${esc(p.away_team || '')}</td>
-          <td style="font-size:11px;">${esc(mktLabel)}</td>
-          <td><span class="${ltCls}">${esc(p.line_type || '')}</span></td>
-          <td style="font-family:'DM Mono',monospace;font-weight:700;">${p.line != null ? p.line : '—'}</td>
-          <td style="font-family:'DM Mono',monospace;">${odds > 0 ? odds.toFixed(2) : '—'}</td>
-          <td style="font-size:10px;color:var(--text-muted);">${esc(p.bookmaker || '')}</td>
-        </tr>
-      `;
-    }).join('');
-    return `
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
-        ${esc(String(rows.length))} prop(s) from database · last 7 days
-      </div>
-      <div class="scroll-x">
-        <table class="value-table">
-          <thead><tr>
-            <th>Player</th><th>Match</th><th>Market</th>
-            <th>O/U</th><th>Line</th><th>Odds</th><th>Book</th>
-          </tr></thead>
-          <tbody>${tableRows}</tbody>
-        </table>
-      </div>
-    `;
-  }
-
-  // mode === 'bets'
-  const stat = (data && data.stat) || market.replace('player_', '');
-  const tableRows = rows.map(bet => {
+  const cards = rows.map(bet => {
     const edge = safeNum(bet.edge, 0);
-    const cls = edge >= 2 ? 'pos' : edge <= -2 ? 'neg' : 'neu';
+    const edgeCls = edge >= 4 ? 'pos' : edge >= 2 ? 'neu' : edge <= -2 ? 'neg' : 'neu';
     const ltCls = (bet.line_type || '') === 'Over' ? 'lt-over' : 'lt-under';
     const odds = safeNum(bet.odds, 0);
+    const isValue = (bet.recommendation || '') === 'value';
+    const recBadge = isValue
+      ? '<span class="vf-rec-badge vf-rec-value"><i class="bi bi-check-circle-fill"></i> VALUE</span>'
+      : '<span class="vf-rec-badge vf-rec-skip">SKIP</span>';
+
+    const modelProb = bet.model_prob != null ? safeNum(bet.model_prob, 0).toFixed(1) + '%' : '—';
+    const impliedProb = bet.implied_prob != null ? safeNum(bet.implied_prob, 0).toFixed(1) + '%' : '—';
+
     return `
-      <tr>
-        <td style="font-weight:700;">${esc(bet.player || '')}</td>
-        <td style="font-size:11px;">${esc(bet.team || '')}</td>
-        <td style="font-size:11px;">${esc(bet.opponent || '')}</td>
-        <td style="font-size:10px;color:var(--text-muted);">${esc(bet.bookmaker || '')}</td>
-        <td><span class="${ltCls}">${esc(bet.line_type || '')}</span></td>
-        <td style="font-family:'DM Mono',monospace;font-weight:700;">${safeNum(bet.book_line, 0)}</td>
-        <td style="font-family:'DM Mono',monospace;">${odds > 0 ? odds.toFixed(2) : '—'}</td>
-        <td style="font-family:'DM Mono',monospace;">${bet.season_avg != null ? safeNum(bet.season_avg, 0).toFixed(1) : '—'}</td>
-        <td style="font-family:'DM Mono',monospace;">${bet.last5_avg != null ? safeNum(bet.last5_avg, 0).toFixed(1) : '—'}</td>
-        <td style="font-family:'DM Mono',monospace;">${bet.vs_opp_avg != null ? safeNum(bet.vs_opp_avg, 0).toFixed(1) : '—'}</td>
-        <td style="font-family:'DM Mono',monospace;">${safeNum(bet.hist_pct, 0)}%</td>
-        <td style="font-family:'DM Mono',monospace;">${bet.model_prediction != null ? safeNum(bet.model_prediction, 0).toFixed(1) : '—'}</td>
-        <td><span class="edge-chip ${cls}">${edge > 0 ? '+' : ''}${edge.toFixed(1)}</span></td>
-      </tr>
+      <div class="vf-card">
+        <div class="vf-card-header">
+          <div class="vf-player-info">
+            <span class="vf-player-name">${esc(bet.player || '')}</span>
+            <span class="vf-player-team">${esc(bet.team || '')}</span>
+          </div>
+          <div class="vf-match-info">
+            <span>vs ${esc(bet.opponent || '—')}</span>
+            <span style="font-size:10px;color:var(--text-muted);">${esc(bet.bookmaker || '')}</span>
+          </div>
+        </div>
+        <div class="vf-card-body">
+          <div class="vf-bet-line">
+            <span class="vf-market-label">${esc(mktLabel)}</span>
+            <span class="${ltCls}">${esc(bet.line_type || '')}</span>
+            <span class="vf-line-num">${safeNum(bet.book_line, 0)}</span>
+            <span style="color:var(--text-muted);font-size:11px;">@</span>
+            <span class="vf-odds">${odds > 0 ? odds.toFixed(2) : '—'}</span>
+          </div>
+          <div class="vf-prob-row">
+            <span class="vf-prob-item">Model <strong>${esc(modelProb)}</strong></span>
+            <span class="vf-prob-sep">·</span>
+            <span class="vf-prob-item">Implied <strong>${esc(impliedProb)}</strong></span>
+            <span class="vf-prob-sep">·</span>
+            <span class="vf-prob-item">Edge <strong><span class="edge-chip ${edgeCls}" style="min-width:auto;padding:2px 6px;">${edge > 0 ? '+' : ''}${edge.toFixed(1)}%</span></strong></span>
+          </div>
+        </div>
+        <div class="vf-card-stats">
+          <div class="vf-stat-item"><span class="vf-stat-label">Season Avg</span><span class="vf-stat-val">${bet.season_avg != null ? safeNum(bet.season_avg, 0).toFixed(1) : '—'}</span></div>
+          <div class="vf-stat-item"><span class="vf-stat-label">Last 5</span><span class="vf-stat-val">${bet.last5_avg != null ? safeNum(bet.last5_avg, 0).toFixed(1) : '—'}</span></div>
+          <div class="vf-stat-item"><span class="vf-stat-label">vs Opp</span><span class="vf-stat-val">${bet.vs_opp_avg != null ? safeNum(bet.vs_opp_avg, 0).toFixed(1) : '—'}</span></div>
+          <div class="vf-stat-item"><span class="vf-stat-label">Hit Rate</span><span class="vf-stat-val">${safeNum(bet.hist_pct, 0)}%</span></div>
+          <div class="vf-stat-item vf-stat-rec">${recBadge}</div>
+        </div>
+      </div>
     `;
   }).join('');
+
   return `
-    <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
-      ${esc(String(rows.length))} result(s) · market: <strong>${esc(market)}</strong> · stat: <strong>${esc(stat)}</strong> · min edge: ${esc(String(minEdge))} · season: ${esc(String((data && data.season) || _SEASON))}
+    <div class="vf-results-meta">
+      ${esc(String(rows.length))} result(s) · <strong>${esc(mktLabel)}</strong> · min edge: ${esc(String(minEdge))}% · season: ${esc(String(season))}
     </div>
-    <div class="scroll-x">
-      <table class="value-table">
-        <thead>
-          <tr>
-            <th>Player</th><th>Team</th><th>Opp</th><th>Book</th>
-            <th>O/U</th><th>Line</th><th>Odds</th>
-            <th>Season Avg</th><th>Last 5</th><th>vs Opponent</th><th>Hit%</th><th>Model</th><th>Edge</th>
-          </tr>
-        </thead>
-        <tbody>${tableRows}</tbody>
-      </table>
-    </div>
+    <div class="vf-cards-grid">${cards}</div>
   `;
 }
 
 function _vfApplyFilters(data) {
   const el = document.getElementById('valueResults');
-  const market = document.getElementById('valueMarket')?.value || '';
+  const market = document.getElementById('valueMarket')?.value || 'player_disposals';
   const matchVal = document.getElementById('valueMatch')?.value || '';
   const minLine = parseFloat(document.getElementById('minLine')?.value) || null;
   const maxLine = parseFloat(document.getElementById('maxLine')?.value) || null;
@@ -1886,27 +1969,6 @@ function _vfApplyFilters(data) {
 
   if (!data) {
     el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No props found in database for the last 7 days. Use <strong>Refresh from API</strong> to sync from the Odds API.</p></div>';
-    return;
-  }
-
-  // Raw props mode (All Markets)
-  if (!market && data.props) {
-    let rows = data.props || [];
-    if (matchVal) {
-      const [ht, at] = matchVal.split('||');
-      rows = rows.filter(p =>
-        (p.home_team || '').toLowerCase().includes((ht || '').toLowerCase()) ||
-        (p.away_team || '').toLowerCase().includes((at || '').toLowerCase())
-      );
-    }
-    if (minLine !== null) rows = rows.filter(p => (p.line || 0) >= minLine);
-    if (maxLine !== null) rows = rows.filter(p => (p.line || 0) <= maxLine);
-
-    if (!rows.length) {
-      el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No props match the selected filters.</p></div>';
-      return;
-    }
-    el.innerHTML = _vfRenderTable(rows, 'props', data);
     return;
   }
 
@@ -1934,7 +1996,7 @@ function _vfApplyFilters(data) {
     return;
   }
 
-  el.innerHTML = _vfRenderTable(bets, 'bets', data);
+  el.innerHTML = _vfRenderTable(bets, data);
 }
 
 function _vfPopulateMatchSelector(matches) {
@@ -1954,53 +2016,26 @@ function _vfPopulateMatchSelector(matches) {
 
 function loadValueFinder() {
   const el = document.getElementById('valueResults');
-  const market = document.getElementById('valueMarket')?.value || '';
-  const minEdge = document.getElementById('minEdge')?.value || 2;
+  const market = document.getElementById('valueMarket')?.value || 'player_disposals';
 
   el.innerHTML = '<div class="prop-empty"><span class="spinner-sm"></span></div>';
 
-  if (!market) {
-    // All markets: fetch raw props from DB
-    const params = new URLSearchParams();
-    const matchVal = document.getElementById('valueMatch')?.value || '';
-    const minLine = document.getElementById('minLine')?.value;
-    const maxLine = document.getElementById('maxLine')?.value;
-    if (matchVal) {
-      const [ht, at] = matchVal.split('||');
-      if (ht) params.set('home_team', ht);
-      if (at) params.set('away_team', at);
-    }
-    if (minLine) params.set('min_line', minLine);
-    if (maxLine) params.set('max_line', maxLine);
-
-    fetch(`/api/afl/props/all?${params}`)
-      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-      .then(data => {
-        _vfRawData = data;
-        _vfPopulateMatchSelector(data.matches || []);
-        _vfApplyFilters(data);
-      })
-      .catch(() => {
-        el.innerHTML = '<div class="prop-empty" style="color:var(--danger);">Failed to load props from database.</div>';
+  // Specific market: fetch value bets with edge calculation
+  fetch(`/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=0&year=${_SEASON}`)
+    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+    .then(data => {
+      _vfRawData = data;
+      // Populate match selector from bets
+      const matchSet = new Set();
+      (data.bets || []).forEach(b => {
+        if (b.home_team && b.away_team) matchSet.add(`${b.home_team} vs ${b.away_team}`);
       });
-  } else {
-    // Specific market: fetch value bets with edge calculation
-    fetch(`/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=0&year=${_SEASON}`)
-      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-      .then(data => {
-        _vfRawData = data;
-        // Populate match selector from bets
-        const matchSet = new Set();
-        (data.bets || []).forEach(b => {
-          if (b.home_team && b.away_team) matchSet.add(`${b.home_team} vs ${b.away_team}`);
-        });
-        _vfPopulateMatchSelector([...matchSet].sort());
-        _vfApplyFilters(data);
-      })
-      .catch(() => {
-        el.innerHTML = '<div class="prop-empty" style="color:var(--danger);">Value finder failed. Check server logs.</div>';
-      });
-  }
+      _vfPopulateMatchSelector([...matchSet].sort());
+      _vfApplyFilters(data);
+    })
+    .catch(() => {
+      el.innerHTML = '<div class="prop-empty" style="color:var(--danger);">Value finder failed. Check server logs.</div>';
+    });
 }
 function loadDisposalLines() {
   const el = document.getElementById('disposalLinesResults');
