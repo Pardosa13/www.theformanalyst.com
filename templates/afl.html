@@ -891,7 +891,12 @@ function switchTab(name, btn) {
   document.getElementById(`tab-${name}`)?.classList.add('active');
   btn?.classList.add('active');
   if (name === 'value') {
-    loadValueFinder();
+    // Only fetch from server if we don't have cached data yet
+    if (_vfRawData) {
+      _vfApplyFilters(_vfRawData);
+    } else {
+      loadValueFinder();
+    }
   }
 }
 

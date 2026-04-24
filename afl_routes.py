@@ -828,6 +828,8 @@ def register_afl_routes(app, db):
             params["max_line"] = max_line
 
         where_clause = " AND ".join(conditions)
+        # where_clause is built entirely from hardcoded string literals above;
+        # all user-supplied values are passed via the parameterised `params` dict.
         sql = db.text(
             f"""
             SELECT DISTINCT ON (player_name, market, line_type, line)
