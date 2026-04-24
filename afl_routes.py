@@ -804,30 +804,84 @@ def register_afl_routes(app, db):
             }
         )
 
-    @app.route("/api/afl/value-finder/matches")
+    @app.route("/api/afl/props/all")
     @login_required
-    def api_afl_value_finder_matches():
+    def api_afl_props_all():
+        """Return raw props from the database with optional filtering.
+
+        Query params:
+          market     – e.g. player_disposals (optional, all markets if omitted)
+          home_team  – partial match on home_team (optional)
+          away_team  – partial match on away_team (optional)
+          min_line   – minimum line value (optional)
+          max_line   – maximum line value (optional)
+        """
+        market = request.args.get("market", "").strip()
+        home_team = request.args.get("home_team", "").strip()
+        away_team = request.args.get("away_team", "").strip()
+        min_line = request.args.get("min_line", type=float)
+        max_line = request.args.get("max_line", type=float)
+
+        if market:
+            market = _normalise_prop_market(market)
+
+        conditions = ["fetched_at > NOW() - INTERVAL '7 days'"]
+        params: dict = {}
+
+        if market:
+            conditions.append("market = :market")
+            params["market"] = market
+        if home_team:
+            conditions.append(
+                "(LOWER(home_team) LIKE LOWER(:home_team) OR LOWER(away_team) LIKE LOWER(:home_team))"
+            )
+            params["home_team"] = f"%{home_team}%"
+        if away_team:
+            conditions.append(
+                "(LOWER(home_team) LIKE LOWER(:away_team) OR LOWER(away_team) LIKE LOWER(:away_team))"
+            )
+            params["away_team"] = f"%{away_team}%"
+        if min_line is not None:
+            conditions.append("line >= :min_line")
+            params["min_line"] = min_line
+        if max_line is not None:
+            conditions.append("line <= :max_line")
+            params["max_line"] = max_line
+
+        where_clause = " AND ".join(conditions)
+        # where_clause is built entirely from hardcoded string literals above;
+        # all user-supplied values are passed via the parameterised `params` dict.
         sql = db.text(
-            """
-            SELECT DISTINCT home_team, away_team
+            f"""
+            SELECT DISTINCT ON (player_name, market, line_type, line)
+                   player_name, team, home_team, away_team, market,
+                   line_type, line, odds, bookmaker, commence_time, fetched_at
             FROM afl_player_props
-            WHERE fetched_at > NOW() - INTERVAL '7 days'
-              AND (
-                commence_time >= NOW() - INTERVAL '3 hours'
-                OR (commence_time IS NULL AND fetched_at > NOW() - INTERVAL '24 hours')
-              )
-              AND home_team IS NOT NULL AND home_team <> ''
-              AND away_team IS NOT NULL AND away_team <> ''
-            ORDER BY home_team, away_team
+            WHERE {where_clause}
+            ORDER BY player_name, market, line_type, line, fetched_at DESC
             """
         )
+
         with db.engine.connect() as conn:
-            rows = conn.execute(sql).mappings().fetchall()
-        matches = [
-            {"home_team": r["home_team"], "away_team": r["away_team"]}
-            for r in rows
-        ]
-        return jsonify({"matches": matches})
+            rows = conn.execute(sql, params).mappings().fetchall()
+
+        props = []
+        for r in rows:
+            row = dict(r)
+            row["commence_time"] = str(row.get("commence_time", "") or "")
+            row["fetched_at"] = str(row.get("fetched_at", "") or "")
+            props.append(row)
+
+        # Build distinct match list for UI filter
+        matches = sorted(
+            {
+                f"{r.get('home_team', '')} vs {r.get('away_team', '')}"
+                for r in props
+                if r.get("home_team") and r.get("away_team")
+            }
+        )
+
+        return jsonify({"props": props, "count": len(props), "matches": matches})
 
     @app.route("/api/afl/player-home-away")
     @login_required
@@ -1513,24 +1567,12 @@ def _db_get_props(
         FROM afl_player_props
         WHERE market = :market
           AND fetched_at > NOW() - INTERVAL '7 days'
-          AND (
-            commence_time >= NOW() - INTERVAL '3 hours'
-            OR (commence_time IS NULL AND fetched_at > NOW() - INTERVAL '24 hours')
-          )
-          AND (:home IS NULL OR LOWER(home_team) LIKE LOWER(:home))
-          AND (:away IS NULL OR LOWER(away_team) LIKE LOWER(:away))
-          AND (:min_line IS NULL OR line >= :min_line)
-          AND (:max_line IS NULL OR line <= :max_line)
         ORDER BY player_name, line_type, line, fetched_at DESC
         """
     )
     with db.engine.connect() as conn:
         rows = conn.execute(sql, {
             "market": market,
-            "home": f"%{home_team}%" if home_team else None,
-            "away": f"%{away_team}%" if away_team else None,
-            "min_line": min_line,
-            "max_line": max_line,
         }).mappings().fetchall()
     return [dict(row) for row in rows]
 
@@ -1543,10 +1585,6 @@ def _db_get_match_props(db, home_team: str, away_team: str) -> list[dict]:
         WHERE (LOWER(home_team) LIKE LOWER(:home) OR LOWER(away_team) LIKE LOWER(:home))
           AND (LOWER(home_team) LIKE LOWER(:away) OR LOWER(away_team) LIKE LOWER(:away))
           AND fetched_at > NOW() - INTERVAL '7 days'
-          AND (
-            commence_time >= NOW() - INTERVAL '3 hours'
-            OR (commence_time IS NULL AND fetched_at > NOW() - INTERVAL '24 hours')
-          )
         ORDER BY market, player_name, line_type
         """
     )
@@ -1564,7 +1602,7 @@ def _db_has_props(db, home_team: str, away_team: str) -> bool:
         SELECT 1
         FROM afl_player_props
         WHERE (LOWER(home_team) LIKE LOWER(:home) OR LOWER(away_team) LIKE LOWER(:home))
-          AND fetched_at > NOW() - INTERVAL '24 hours'
+          AND fetched_at > NOW() - INTERVAL '7 days'
         LIMIT 1
         """
     )
