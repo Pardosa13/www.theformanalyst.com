@@ -797,15 +797,15 @@ def test_fryzigg_csv_parser_no_hash_derivation():
     )
 
 
-def test_build_historical_id_map_returns_three_values():
-    """_build_historical_id_map must return a 3-tuple including the inverse id_to_name_keys map."""
+def test_build_historical_id_map_returns_four_values():
+    """_build_historical_id_map must return a 4-tuple including name_to_ids."""
     db_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "afl_db.py",
     )
     with open(db_path, encoding="utf-8") as f:
         source = f.read()
-    # The function should return three values
+    # The function should return four values
     fn_start = source.find("def _build_historical_id_map(")
     assert fn_start != -1
     fn_end = source.find("\ndef ", fn_start + 1)
@@ -813,13 +813,16 @@ def test_build_historical_id_map_returns_three_values():
     assert "id_to_name_keys" in fn_body, (
         "_build_historical_id_map does not build an id_to_name_keys inverse map"
     )
-    assert "return mapping, ambiguous, dict(id_to_name_keys)" in fn_body, (
-        "_build_historical_id_map does not return a 3-tuple with id_to_name_keys"
+    assert "name_to_ids" in fn_body, (
+        "_build_historical_id_map does not build a name_to_ids map"
+    )
+    assert "return mapping, ambiguous, dict(id_to_name_keys), dict(name_to_ids)" in fn_body, (
+        "_build_historical_id_map does not return a 4-tuple with name_to_ids"
     )
 
 
 def test_resolve_2026_player_id_accepts_id_to_name_keys_param():
-    """_resolve_2026_player_id must accept an id_to_name_keys parameter."""
+    """_resolve_2026_player_id must accept name_to_ids and id_to_name_keys parameters."""
     db_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "afl_db.py",
@@ -836,6 +839,9 @@ def test_resolve_2026_player_id_accepts_id_to_name_keys_param():
     assert "id_to_name_keys" in fn_sig, (
         "_resolve_2026_player_id does not accept id_to_name_keys parameter"
     )
+    assert "name_to_ids" in fn_sig, (
+        "_resolve_2026_player_id does not accept name_to_ids parameter"
+    )
 
 
 # Inline implementation of the updated _resolve_2026_player_id for unit tests.
@@ -848,102 +854,101 @@ def _i_test(value, default=0):
         return default
 
 
-def _resolve_2026_player_id_impl(row, hist_map, ambiguous_keys, id_to_name_keys):
+def _resolve_2026_player_id_impl(row, name_to_ids, hist_map, id_to_name_keys):
     """Mirror of the updated _resolve_2026_player_id in afl_db.py."""
     first = _normalise_name(row.get("player_first_name"))
     last  = _normalise_name(row.get("player_last_name"))
     team  = _team(row.get("player_team", ""))
     team  = _normalise_name(team)
-    key   = (first, last, team)
 
-    incoming_pid = _i_test(row.get("player_id"))
+    name_key      = (first, last)
+    name_team_key = (first, last, team)
 
-    if incoming_pid:
-        historical_pid = hist_map.get(key)
+    candidate_ids = name_to_ids.get(name_key, set())
 
-        if historical_pid is not None:
-            if incoming_pid == historical_pid:
-                return incoming_pid, "trusted"
-            else:
-                return historical_pid, "historical"
+    if len(candidate_ids) == 1:
+        return next(iter(candidate_ids)), "reused_by_name"
 
-        if key in ambiguous_keys:
-            return _stable_debut_id(first, last, team), "ambiguous"
-
-        known_keys_for_pid = id_to_name_keys.get(incoming_pid)
-        if known_keys_for_pid and key not in known_keys_for_pid:
-            return _stable_debut_id(first, last, team), "collision_debut"
-
-        return incoming_pid, "trusted"
-
-    if key in hist_map:
-        return hist_map[key], "historical"
-    if key in ambiguous_keys:
+    if len(candidate_ids) > 1:
+        hist_pid = hist_map.get(name_team_key)
+        if hist_pid is not None:
+            return hist_pid, "reused_by_name_team"
         return _stable_debut_id(first, last, team), "ambiguous"
-    return _stable_debut_id(first, last, team), "debut"
+
+    return _stable_debut_id(first, last, team), "debut_generated"
 
 
-def test_resolve_trusts_fryzigg_id_for_historical_player():
-    """When incoming player_id matches the historical Fryzigg ID → 'trusted'."""
+def test_resolve_reuses_id_by_name_same_club():
+    """When a player's name uniquely maps to one historical id, reuse it (same club)."""
+    name_to_ids = {("nick", "daicos"): {12345}}
     hist_map = {("nick", "daicos", "collingwood"): 12345}
     row = {"player_first_name": "Nick", "player_last_name": "Daicos",
-           "player_team": "Collingwood", "player_id": 12345}
-    pid, res = _resolve_2026_player_id_impl(row, hist_map, set(), {})
+           "player_team": "Collingwood", "player_id": 99999}
+    pid, res = _resolve_2026_player_id_impl(row, name_to_ids, hist_map, {})
     assert pid == 12345
-    assert res == "trusted"
+    assert res == "reused_by_name"
 
 
-def test_resolve_overrides_afltables_collision():
-    """When incoming player_id differs from the historical Fryzigg ID → 'historical' override."""
-    hist_map = {("nick", "daicos", "collingwood"): 12345}
-    row = {"player_first_name": "Nick", "player_last_name": "Daicos",
-           "player_team": "Collingwood", "player_id": 99999}  # wrong AFLTables ID
-    pid, res = _resolve_2026_player_id_impl(row, hist_map, set(), {})
+def test_resolve_reuses_id_by_name_traded_player():
+    """Traded player (different club in 2026) must reuse historical id via name match."""
+    # Player was Carlton in history, now plays for Sydney in 2026
+    name_to_ids = {("charlie", "curnow"): {12345}}
+    hist_map = {("charlie", "curnow", "carlton"): 12345}
+    row = {"player_first_name": "Charlie", "player_last_name": "Curnow",
+           "player_team": "Sydney", "player_id": 99999}
+    pid, res = _resolve_2026_player_id_impl(row, name_to_ids, hist_map, {})
     assert pid == 12345
-    assert res == "historical"
+    assert res == "reused_by_name"
 
 
-def test_resolve_trusts_fryzigg_id_for_debut_player():
-    """A debut player (no history) with a valid incoming Fryzigg ID → 'trusted' (not stable_debut_id)."""
-    hist_map: dict = {}
-    row = {"player_first_name": "New", "player_last_name": "Player",
-           "player_team": "Carlton", "player_id": 55555}
-    pid, res = _resolve_2026_player_id_impl(row, hist_map, set(), {})
-    assert pid == 55555, f"Expected 55555, got {pid}"
-    assert res == "trusted"
+def test_resolve_reuses_id_by_name_team_tiebreaker():
+    """When name is ambiguous, resolve via (name, team) tiebreaker."""
+    # Two players named "James" "Smith" with different historical ids
+    name_to_ids = {("james", "smith"): {11111, 22222}}
+    hist_map = {
+        ("james", "smith", "richmond"): 11111,
+        ("james", "smith", "geelong"): 22222,
+    }
+    row = {"player_first_name": "James", "player_last_name": "Smith",
+           "player_team": "Richmond", "player_id": 0}
+    pid, res = _resolve_2026_player_id_impl(row, name_to_ids, hist_map, {})
+    assert pid == 11111
+    assert res == "reused_by_name_team"
 
 
-def test_resolve_stable_id_for_debut_no_incoming_id():
-    """A debut with no incoming player_id gets a stable negative debut id."""
-    hist_map: dict = {}
-    row = {"player_first_name": "Mystery", "player_last_name": "Player",
-           "player_team": "Hawthorn", "player_id": None}
-    pid, res = _resolve_2026_player_id_impl(row, hist_map, set(), {})
+def test_resolve_ambiguous_name_no_team_match_gets_debut_id():
+    """Ambiguous name with no team tiebreaker → stable debut id."""
+    name_to_ids = {("james", "smith"): {11111, 22222}}
+    hist_map = {
+        ("james", "smith", "richmond"): 11111,
+        ("james", "smith", "geelong"): 22222,
+    }
+    row = {"player_first_name": "James", "player_last_name": "Smith",
+           "player_team": "Carlton", "player_id": 0}
+    pid, res = _resolve_2026_player_id_impl(row, name_to_ids, hist_map, {})
     assert pid < 0
-    assert res == "debut"
+    assert res == "ambiguous"
 
 
-def test_resolve_collision_debut_afltables_clash():
-    """When incoming ID belongs to a different historical player → 'collision_debut' fallback."""
-    # ID 12345 belongs to Ed Langdon (Melbourne) in history
-    hist_map = {("ed", "langdon", "melbourne"): 12345}
-    id_to_name_keys = {12345: {("ed", "langdon", "melbourne")}}
-    # But the 2026 row says it's Lachie Weller (Gold Coast) — classic afltables collision
-    row = {"player_first_name": "Lachie", "player_last_name": "Weller",
-           "player_team": "Gold Coast", "player_id": 12345}
-    pid, res = _resolve_2026_player_id_impl(row, hist_map, id_to_name_keys=id_to_name_keys,
-                                             ambiguous_keys=set())
-    assert pid < 0, f"Expected negative debut id, got {pid}"
-    assert res == "collision_debut"
+def test_resolve_debut_player_no_history():
+    """Completely new player with no historical record gets a stable negative debut id."""
+    name_to_ids: dict = {}
+    hist_map: dict = {}
+    row = {"player_first_name": "Brand", "player_last_name": "New",
+           "player_team": "Carlton", "player_id": 55555}
+    pid, res = _resolve_2026_player_id_impl(row, name_to_ids, hist_map, {})
+    assert pid < 0
+    assert res == "debut_generated"
 
 
 def test_resolve_stable_id_is_stable_across_calls():
     """The debut id generated for the same player is identical across multiple calls."""
+    name_to_ids: dict = {}
     hist_map: dict = {}
     row = {"player_first_name": "Consistent", "player_last_name": "Debut",
            "player_team": "Sydney", "player_id": None}
-    pid1, _ = _resolve_2026_player_id_impl(row, hist_map, set(), {})
-    pid2, _ = _resolve_2026_player_id_impl(row, hist_map, set(), {})
+    pid1, _ = _resolve_2026_player_id_impl(row, name_to_ids, hist_map, {})
+    pid2, _ = _resolve_2026_player_id_impl(row, name_to_ids, hist_map, {})
     assert pid1 == pid2
 
 
