@@ -345,7 +345,7 @@ def test_team_normalisation_legacy_aliases():
 
 
 def test_team_normalisation_source_has_mascot_entries():
-    """afl_db.py _team() mapping must contain the mascot-name entries."""
+    """afl_db.py _team() mapping must contain all 14 mascot-name entries."""
     db_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "afl_db.py",
@@ -354,14 +354,74 @@ def test_team_normalisation_source_has_mascot_entries():
         source = f.read()
 
     for full_name in (
-        "Fremantle Dockers",
+        "Adelaide Crows",
         "Carlton Blues",
-        "St Kilda Saints",
-        "Richmond Tigers",
+        "Collingwood Magpies",
+        "Essendon Bombers",
+        "Fremantle Dockers",
+        "Geelong Cats",
+        "Gold Coast Suns",
+        "Hawthorn Hawks",
         "Melbourne Demons",
+        "North Melbourne Kangaroos",
+        "Port Adelaide Power",
+        "Richmond Tigers",
+        "St Kilda Saints",
         "Sydney Swans",
     ):
         assert full_name in source, (
             f"_team() in afl_db.py is missing an entry for {full_name!r}"
         )
+
+
+def test_normalise_team_name_in_afl_data_has_mascot_entries():
+    """afl_data.py _normalise_team_name() must also contain all 14 mascot-name entries
+    so that existing DB rows are normalised at read time (no data deletion required)."""
+    data_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_data.py",
+    )
+    with open(data_path, encoding="utf-8") as f:
+        source = f.read()
+
+    for full_name in (
+        "Adelaide Crows",
+        "Carlton Blues",
+        "Collingwood Magpies",
+        "Essendon Bombers",
+        "Fremantle Dockers",
+        "Geelong Cats",
+        "Gold Coast Suns",
+        "Hawthorn Hawks",
+        "Melbourne Demons",
+        "North Melbourne Kangaroos",
+        "Port Adelaide Power",
+        "Richmond Tigers",
+        "St Kilda Saints",
+        "Sydney Swans",
+    ):
+        assert full_name in source, (
+            f"_normalise_team_name() in afl_data.py is missing an entry for {full_name!r}"
+        )
+
+
+def test_value_finder_normalises_team_names_at_read_time():
+    """api_afl_value_finder() must call _normalise_team_name on home_team/away_team
+    from the props row so existing DB rows with mascot names work without data deletion."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    assert "_normalise_team_name" in source, (
+        "_normalise_team_name is not imported or used in afl_routes.py"
+    )
+    assert '_normalise_team_name(prop.get("home_team"' in source, (
+        'api_afl_value_finder does not normalise home_team from props at read time'
+    )
+    assert '_normalise_team_name(prop.get("away_team"' in source, (
+        'api_afl_value_finder does not normalise away_team from props at read time'
+    )
 

@@ -24,6 +24,7 @@ from flask_login import login_required
 from afl_data import (
     CURRENT_YEAR,
     _normalise_prop_market,
+    _normalise_team_name,
     calculate_disposal_edge,
     fetch_afl_player_props,
     fetch_fryzigg_player_stats,
@@ -705,8 +706,8 @@ def register_afl_routes(app, db):
             team_name = player.get("team", "")
 
             season_avg = _safe_avg(games, stat_name)
-            home_team = prop.get("home_team", "")
-            away_team = prop.get("away_team", "")
+            home_team = _normalise_team_name(prop.get("home_team", ""))
+            away_team = _normalise_team_name(prop.get("away_team", ""))
             opponent = (
                 away_team if home_team == team_name
                 else home_team if away_team == team_name
