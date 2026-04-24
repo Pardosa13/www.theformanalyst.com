@@ -1000,11 +1000,14 @@ def register_afl_routes(app, db):
         venue_params = {f"v{i}": f"%{name}%" for i, name in enumerate(venue_aliases)}
 
         sql = db.text(f"""
-            SELECT *
-            FROM afl_player_stats
-            WHERE player_id = :player_id
-              AND season >= :season_from
-              AND ({alias_clauses})
+            SELECT * FROM (
+                SELECT DISTINCT ON (match_date, match_home_team, match_away_team) *
+                FROM afl_player_stats
+                WHERE player_id = :player_id
+                  AND season >= :season_from
+                  AND ({alias_clauses})
+                ORDER BY match_date, match_home_team, match_away_team, id DESC
+            ) deduped
             ORDER BY match_date DESC
         """)
 
@@ -1304,9 +1307,12 @@ def _db_player_search(
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     sql = db.text(
         f"""
-        SELECT *
-        FROM afl_player_stats
-        {where}
+        SELECT * FROM (
+            SELECT DISTINCT ON (player_id, match_date, match_home_team, match_away_team) *
+            FROM afl_player_stats
+            {where}
+            ORDER BY player_id, match_date, match_home_team, match_away_team, id DESC
+        ) deduped
         ORDER BY season DESC, match_date DESC
         LIMIT :limit
         """
@@ -1337,10 +1343,13 @@ def _db_player_by_id(
 
     sql = db.text(
         f"""
-        SELECT *
-        FROM afl_player_stats
-        WHERE player_id = :player_id
-        {season_filter}
+        SELECT * FROM (
+            SELECT DISTINCT ON (match_date, match_home_team, match_away_team) *
+            FROM afl_player_stats
+            WHERE player_id = :player_id
+            {season_filter}
+            ORDER BY match_date, match_home_team, match_away_team, id DESC
+        ) deduped
         ORDER BY season DESC, match_date DESC
         LIMIT :limit
         """
@@ -1423,9 +1432,12 @@ def _db_player_vs_opponent(
 
     sql = db.text(
         f"""
-        SELECT *
-        FROM afl_player_stats
-        WHERE {' AND '.join(filters)}
+        SELECT * FROM (
+            SELECT DISTINCT ON (player_id, match_date, match_home_team, match_away_team) *
+            FROM afl_player_stats
+            WHERE {' AND '.join(filters)}
+            ORDER BY player_id, match_date, match_home_team, match_away_team, id DESC
+        ) deduped
         ORDER BY match_date DESC
         """
     )
@@ -1708,6 +1720,9 @@ def _hit_rate(rows: list[dict], stat: str, line: float) -> float:
 
 def _group_players(rows: list[dict]) -> dict:
     players: dict[int, dict] = {}
+    # Track seen games per player to deduplicate rows from different data sources
+    # that share the same natural game identity but different match_ids.
+    seen_games: dict[int, set] = {}
 
     for row in rows:
         player_id = row.get("player_id")
@@ -1726,6 +1741,18 @@ def _group_players(rows: list[dict]) -> dict:
                 "weight_kg": row.get("player_weight_kg"),
                 "games": [],
             }
+            seen_games[player_id] = set()
+
+        # Deduplicate by natural game identity — prevents two data-source rows
+        # (different match_ids, same game) from both appearing in the game log.
+        game_key = (
+            str(row.get("match_date", "")),
+            str(row.get("match_home_team", "") or "").lower(),
+            str(row.get("match_away_team", "") or "").lower(),
+        )
+        if game_key in seen_games[player_id]:
+            continue
+        seen_games[player_id].add(game_key)
 
         players[player_id]["games"].append(dict(row))
 
