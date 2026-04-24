@@ -475,8 +475,10 @@ def test_value_finder_render_table_called_by_apply_filters():
 
 
 def test_value_finder_raw_props_table_has_no_missing_team_column():
-    """Raw-props table (All Markets mode) must not reference p.team —
-    afl_player_props has no team column; the match column is home_team vs away_team."""
+    """Value Finder card rendering must use bet.home_team / bet.away_team (or bet.opponent)
+    rather than any non-existent team column from afl_player_props.
+    The 'All Markets' raw-props mode has been removed; only the value-bets card
+    mode remains, which drives match info via home_team/away_team on the backend."""
     template_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "templates",
@@ -491,18 +493,13 @@ def test_value_finder_raw_props_table_has_no_missing_team_column():
     next_fn = source.find("\nfunction ", render_fn_start + 1)
     render_fn_body = source[render_fn_start:] if next_fn == -1 else source[render_fn_start:next_fn]
 
-    # In props mode the table row must show p.home_team / p.away_team for the match
-    assert "p.home_team" in render_fn_body, (
-        "_vfRenderTable props mode must render p.home_team for the Match column"
+    # The card renderer must reference bet fields (not raw prop p.* fields)
+    assert "bet.home_team" in render_fn_body or "bet.opponent" in render_fn_body, (
+        "_vfRenderTable must render match info using bet.home_team/bet.away_team or bet.opponent"
     )
-    assert "p.away_team" in render_fn_body, (
-        "_vfRenderTable props mode must render p.away_team for the Match column"
-    )
-    # Must NOT use the non-existent p.team column for the props table
-    # (team info is not stored in afl_player_props)
+    # Must NOT use the non-existent p.team column from afl_player_props
     assert "p.team" not in render_fn_body, (
-        "_vfRenderTable props mode references p.team which is not a column "
-        "in afl_player_props; use p.home_team/p.away_team instead"
+        "_vfRenderTable must not reference p.team which is not a column in afl_player_props"
     )
 
 
