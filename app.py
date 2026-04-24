@@ -337,6 +337,38 @@ def run_analyzer(csv_data, track_condition, is_advanced=False, strike_rate_data=
         'strike_rate_data': strike_rate_data or {'jockeys': {}, 'trainers': {}}
     }
 
+    # Query par times (avg race time per track/distance/condition, min 30 samples)
+    try:
+        from sqlalchemy import text as _text
+        _par_query = """
+            SELECT
+                csv_data->>'form track'           AS track,
+                csv_data->>'form distance'        AS distance,
+                csv_data->>'form track condition' AS condition,
+                AVG(
+                    (SPLIT_PART(csv_data->>'form time', ':', 1)::numeric * 60) +
+                    SPLIT_PART(csv_data->>'form time', ':', 2)::numeric
+                ) AS par_seconds
+            FROM horses
+            WHERE
+                csv_data->>'form time' IS NOT NULL
+                AND csv_data->>'form time' ~ '^\\d+:\\d+\\.\\d+$'
+            GROUP BY
+                csv_data->>'form track',
+                csv_data->>'form distance',
+                csv_data->>'form track condition'
+            HAVING COUNT(*) >= 30
+        """
+        _par_rows = db.session.execute(_text(_par_query)).fetchall()
+        par_times = {}
+        for _row in _par_rows:
+            if _row.track and _row.distance and _row.condition:
+                _key = f"{_row.track.strip().lower()}|{str(_row.distance).strip()}|{_row.condition.strip().lower()}"
+                par_times[_key] = float(_row.par_seconds)
+        input_data['par_times'] = par_times
+    except Exception:
+        input_data['par_times'] = {}
+
     analyzer_path = os.path.join(os.path.dirname(__file__), 'analyzer.js')
 
     try:
@@ -1274,6 +1306,15 @@ def parse_notes_components(notes):
         (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(meeting expectations', 'Market Expectation - Neutral'),
         # FIX: "near field average" maps to Neutral (it's not a named bucket in old patterns)
         (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(near field average', 'Market Expectation - Neutral'),
+
+        # ====== FORM TEMPO ======
+        (r'\+\s*20\.0\s*:\s*Very Fast last race',  'Form Tempo - Very Fast (2s+ faster than par)'),
+        (r'\+\s*15\.0\s*:\s*Fast last race',       'Form Tempo - Fast (1-2s faster than par)'),
+        (r'\+\s*10\.0\s*:\s*Above Par last race',  'Form Tempo - Above Par (0.3-1s faster)'),
+        (r'\+\s*5\.0\s*:\s*Par last race',         'Form Tempo - Par (±0.3s)'),
+        (r'-\s*5\.0\s*:\s*Below Par last race',    'Form Tempo - Below Par (0.3-1s slower)'),
+        (r'-\s*10\.0\s*:\s*Slow last race',        'Form Tempo - Slow (1-2s slower)'),
+        (r'-\s*15\.0\s*:\s*Very Slow last race',   'Form Tempo - Very Slow (2s+ slower)'),
 
     ]
 
