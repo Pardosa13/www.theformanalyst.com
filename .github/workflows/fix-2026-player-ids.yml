@@ -1,29 +1,80 @@
 name: Fix 2026 Player ID Collisions (one-time repair)
 
-# Manual trigger only — run this ONCE after deploying the player_id collision fix.
-# It deletes all existing season=2026 rows from afl_player_stats and re-imports
-# them using the corrected ID mapping (first + last + club → historical Fryzigg id).
+# Manual trigger only — run this ONCE after merging the player_id collision fix.
+#
+# What this workflow does (in order):
+#   1. Fetches fresh 2026 player stats from Fryzigg via fitzRoy
+#      (source='fryzigg' gives stable player_ids consistent with 2019-2025).
+#   2. Commits the regenerated CSV to data/afl_2026_stats.csv.
+#   3. Deletes all existing season=2026 rows from afl_player_stats in Postgres.
+#   4. Re-imports the fresh Fryzigg CSV — upsert_player_stats() will trust the
+#      stable Fryzigg player_ids, eliminating all prior collisions.
+#
+# After this runs, the nightly 'Fetch AFL 2026 Stats' workflow (also updated
+# to use source='fryzigg') will keep 2026 data clean going forward.
 on:
   workflow_dispatch:
 
 jobs:
   fix-player-ids:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # needed to commit the regenerated Fryzigg CSV
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
+      # ── Step 1: regenerate the CSV from Fryzigg ──────────────────────────
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.3'
+
+      - name: Install R packages
+        run: |
+          Rscript -e "install.packages(c('fitzRoy', 'readr'), repos='https://cloud.r-project.org')"
+
+      - name: Fetch 2026 Fryzigg player stats (regenerate CSV)
+        run: |
+          Rscript -e "
+          library(fitzRoy)
+          library(readr)
+
+          cat('Fetching 2026 player stats from Fryzigg...\n')
+          data <- fetch_player_stats(season = 2026, source = 'fryzigg')
+
+          if (is.null(data) || nrow(data) == 0) {
+            stop('No rows returned — cannot proceed with repair')
+          }
+
+          dir.create('data', showWarnings = FALSE)
+          write_csv(data, 'data/afl_2026_stats.csv')
+          cat('CSV written:', nrow(data), 'rows,', ncol(data), 'columns\n')
+          cat('Columns:', paste(names(data), collapse=', '), '\n')
+          "
+
+      - name: Commit regenerated Fryzigg CSV
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/afl_2026_stats.csv
+          git diff --cached --quiet || git commit -m "chore: regenerate 2026 stats CSV from Fryzigg source for player_id repair"
+          git push
+
+      # ── Step 2: delete corrupted rows and re-import ───────────────────────
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
-          pip install --quiet sqlalchemy psycopg2-binary pandas
+          pip install --quiet sqlalchemy psycopg2-binary pandas pyreadr requests flask flask-login
 
-      - name: Delete 2026 rows and re-import with correct player IDs
+      - name: Delete 2026 rows and re-import with correct Fryzigg player IDs
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python afl_fix_2026_ids.py

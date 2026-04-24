@@ -35,16 +35,19 @@ jobs:
       - name: Create data directory
         run: mkdir -p data
 
-      - name: Fetch 2026 AFL Tables player stats
+      - name: Fetch 2026 Fryzigg player stats
         run: |
           Rscript -e "
           library(fitzRoy)
           library(readr)
 
-          data <- fetch_player_stats(season = 2026, source = 'afltables')
+          # Use source='fryzigg' so player_id values are the stable Fryzigg IDs
+          # that are consistent with 2019-2025 data already stored in Postgres.
+          # This prevents player_id collisions between seasons.
+          data <- fetch_player_stats(season = 2026, source = 'fryzigg')
 
           if (is.null(data) || nrow(data) == 0) {
-            stop('No rows returned from fitzRoy::fetch_player_stats(season = 2026, source = \"afltables\")')
+            stop('No rows returned from fitzRoy::fetch_player_stats(season = 2026, source = \"fryzigg\")')
           }
 
           write_csv(data, 'data/afl_2026_stats.csv')

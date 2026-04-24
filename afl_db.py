@@ -310,15 +310,23 @@ def _stable_debut_id(first: str, last: str, team: str) -> int:
     return -abs_id
 
 
-def _build_historical_id_map(db) -> tuple[dict, set]:
+def _build_historical_id_map(db) -> tuple[dict, set, dict]:
     """
-    Query existing 2019–2025 player stats and return a lookup for 2026 ID resolution.
+    Query existing 2019–2025 player stats and return three lookups for 2026 ID resolution.
 
     Returns:
-        unambiguous_map: {(norm_first, norm_last, norm_team): player_id}
-        ambiguous_keys:  set of (norm_first, norm_last, norm_team) tuples that
-                         mapped to more than one historical player_id (very rare;
-                         treat as unresolvable and fall back to debut id).
+        unambiguous_map:  {(norm_first, norm_last, norm_team): player_id}
+            Maps a normalised (name, team) key to the single historical Fryzigg
+            player_id.  Used to resolve the correct ID for established players.
+
+        ambiguous_keys:   set of (norm_first, norm_last, norm_team) tuples that
+            mapped to more than one historical player_id (very rare; treated as
+            unresolvable and given a stable debut id).
+
+        id_to_name_keys:  {player_id: set of (norm_first, norm_last, norm_team)}
+            Inverse map — used to detect when an incoming player_id from a
+            non-Fryzigg source (e.g. AFLTables) already belongs to a different
+            historical player (collision detection for debut rows).
     """
     sql_text = """
         SELECT player_first_name, player_last_name, player_team, player_id
@@ -339,13 +347,17 @@ def _build_historical_id_map(db) -> tuple[dict, set]:
                     key_to_ids[(first, last, team)].add(pid)
     except Exception as exc:
         logger.warning("Could not build historical player_id map: %s", exc)
-        return {}, set()
+        return {}, set(), {}
 
     mapping: dict = {}
     ambiguous: set = set()
+    id_to_name_keys: dict = defaultdict(set)
+
     for key, ids in key_to_ids.items():
         if len(ids) == 1:
-            mapping[key] = next(iter(ids))
+            pid = next(iter(ids))
+            mapping[key] = pid
+            id_to_name_keys[pid].add(key)
         else:
             ambiguous.add(key)
 
@@ -354,36 +366,84 @@ def _build_historical_id_map(db) -> tuple[dict, set]:
         len(mapping),
         len(ambiguous),
     )
-    return mapping, ambiguous
+    return mapping, ambiguous, dict(id_to_name_keys)
 
 
 def _resolve_2026_player_id(
     row: dict,
     hist_map: dict,
     ambiguous_keys: set,
+    id_to_name_keys: dict,
 ) -> tuple[int, str]:
     """
     Determine the correct player_id for a 2026 stat row.
 
-    Matching order:
-    1. (first, last, team) → exactly one historical id  → reuse it
-    2. (first, last, team) → ambiguous (>1 historical ids) → debut id + warning
-    3. No historical match (genuine debut) → debut id
+    Resolution order (with incoming_pid = the player_id already on the row):
 
-    Returns (player_id, resolution_type) where resolution_type is one of
-    'historical', 'ambiguous', or 'debut'.
+    1. incoming_pid is valid AND matches the historical ID for (first,last,team)
+       → "trusted"  — Fryzigg source; ID is already correct, use as-is.
+
+    2. incoming_pid is valid AND (first,last,team) has a *different* historical ID
+       → "historical"  — AFLTables collision; override with the correct Fryzigg ID.
+
+    3. incoming_pid is valid AND player has no history (debut) AND the incoming
+       pid does NOT belong to any other known player
+       → "trusted"  — New Fryzigg-assigned ID for a debut player; trust it so it
+         stays consistent with future Fryzigg seasons.
+
+    4. incoming_pid is valid AND player has no history AND the incoming pid IS
+       already assigned to a different historical player
+       → "collision_debut"  — AFLTables-style collision on a debut; use stable id.
+
+    5. No incoming_pid, (first,last,team) found unambiguously in history
+       → "historical"  — derive from name-match.
+
+    6. No incoming_pid, (first,last,team) is ambiguous
+       → "ambiguous"  — stable debut id.
+
+    7. No incoming_pid, not in history
+       → "debut"  — stable debut id.
+
+    Returns (player_id, resolution_type).
     """
     first = _normalise_name(row.get("player_first_name"))
-    last = _normalise_name(row.get("player_last_name"))
-    team = _normalise_name(_team(row.get("player_team")))
-    key = (first, last, team)
+    last  = _normalise_name(row.get("player_last_name"))
+    team  = _normalise_name(_team(row.get("player_team")))
+    key   = (first, last, team)
 
+    incoming_pid = _i(row.get("player_id"))
+
+    if incoming_pid:
+        historical_pid = hist_map.get(key)
+
+        if historical_pid is not None:
+            if incoming_pid == historical_pid:
+                # Fryzigg source: ID is already the correct Fryzigg ID.
+                return incoming_pid, "trusted"
+            else:
+                # AFLTables collision: incoming ID differs from the known Fryzigg
+                # ID for this (name, team) — override with the Fryzigg ID.
+                return historical_pid, "historical"
+
+        # Player not found in 2019–2025 (potential debut).
+        if key in ambiguous_keys:
+            return _stable_debut_id(first, last, team), "ambiguous"
+
+        # Check whether this incoming ID already belongs to a *different* player.
+        known_keys_for_pid = id_to_name_keys.get(incoming_pid)
+        if known_keys_for_pid and key not in known_keys_for_pid:
+            # AFLTables-style collision on a debut row — fall back to stable id.
+            return _stable_debut_id(first, last, team), "collision_debut"
+
+        # Clean debut (Fryzigg-assigned ID, or truly novel): trust the incoming ID
+        # so it stays consistent with future Fryzigg seasons for this player.
+        return incoming_pid, "trusted"
+
+    # ── No incoming player_id ─────────────────────────────────────────────
     if key in hist_map:
         return hist_map[key], "historical"
-
     if key in ambiguous_keys:
         return _stable_debut_id(first, last, team), "ambiguous"
-
     return _stable_debut_id(first, last, team), "debut"
 
 
@@ -606,15 +666,18 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
 
     # For season 2026, build the historical player_id lookup once before the main loop.
     # This maps (norm_first, norm_last, norm_team) → historical Fryzigg player_id so that
-    # 2026 CSV rows inherit the same player_id their owner had in 2019–2025.
+    # 2026 rows inherit the same player_id their owner had in 2019–2025.
     _hist_map_2026: dict = {}
     _ambiguous_keys_2026: set = set()
-    _reused_hist_2026 = 0
-    _new_debut_2026 = 0
-    _ambig_fallback_2026 = 0
+    _id_to_name_keys_2026: dict = {}
+    _trusted_2026 = 0       # incoming Fryzigg ID accepted (consistent or new debut)
+    _historical_2026 = 0    # AFLTables collision corrected to proper Fryzigg ID
+    _debut_2026 = 0         # no incoming ID, no history → stable debut id
+    _ambig_2026 = 0         # ambiguous history → stable debut id
+    _collision_debut_2026 = 0  # incoming ID belongs to different player → stable debut id
     is_2026_sync = (season == 2026)
     if is_2026_sync:
-        _hist_map_2026, _ambiguous_keys_2026 = _build_historical_id_map(db)
+        _hist_map_2026, _ambiguous_keys_2026, _id_to_name_keys_2026 = _build_historical_id_map(db)
 
     count = 0
     with db.engine.begin() as conn:
@@ -625,21 +688,27 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             row_season = _i(row.get("season"), season)
             if row_season == 2026:
                 player_id, resolution = _resolve_2026_player_id(
-                    row, _hist_map_2026, _ambiguous_keys_2026
+                    row, _hist_map_2026, _ambiguous_keys_2026, _id_to_name_keys_2026
                 )
-                if resolution == "historical":
-                    _reused_hist_2026 += 1
-                elif resolution == "ambiguous":
-                    _ambig_fallback_2026 += 1
+                if resolution == "trusted":
+                    _trusted_2026 += 1
+                elif resolution == "historical":
+                    _historical_2026 += 1
+                elif resolution in ("ambiguous", "collision_debut"):
+                    if resolution == "ambiguous":
+                        _ambig_2026 += 1
+                    else:
+                        _collision_debut_2026 += 1
                     logger.warning(
-                        "Ambiguous historical match for %s %s (%s) — assigned debut id %s",
+                        "2026 player_id fallback (%s) for %s %s (%s) — assigned id %s",
+                        resolution,
                         row.get("player_first_name"),
                         row.get("player_last_name"),
                         row.get("player_team"),
                         player_id,
                     )
                 else:
-                    _new_debut_2026 += 1
+                    _debut_2026 += 1
             else:
                 player_id = _i(row.get("player_id"))
                 if not player_id:
@@ -720,10 +789,14 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
 
     if is_2026_sync:
         logger.info(
-            "2026 player_id resolution — reused historical: %s | new debut: %s | ambiguous fallback: %s",
-            _reused_hist_2026,
-            _new_debut_2026,
-            _ambig_fallback_2026,
+            "2026 player_id resolution — trusted (Fryzigg): %s | "
+            "historical override (collision fixed): %s | "
+            "new debut id: %s | ambiguous fallback: %s | collision debut fallback: %s",
+            _trusted_2026,
+            _historical_2026,
+            _debut_2026,
+            _ambig_2026,
+            _collision_debut_2026,
         )
 
     return count
