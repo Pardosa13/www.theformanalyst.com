@@ -1536,12 +1536,21 @@ function redrawBars() {
     // Combine home and away history (2022+) and sort newest-first,
     // matching the order used by the other history sources.
     const combined = [...(_historyHomeGames || []), ...(_historyAwayGames || [])];
-    combined.sort((a, b) => {
+    const seen = new Set();
+    const deduped = combined.filter(g => {
+      const matchKey = g.date && g.home_team && g.away_team
+        ? `${g.date}-${g.home_team}-${g.away_team}`
+        : `${g.date}-${g.opponent}`;
+      if (seen.has(matchKey)) return false;
+      seen.add(matchKey);
+      return true;
+    });
+    deduped.sort((a, b) => {
       const da = a.date ? new Date(a.date) : new Date(0);
       const db = b.date ? new Date(b.date) : new Date(0);
       return db - da;
     });
-    sourceGames = combined;
+    sourceGames = deduped;
   } else {
     // 'season' filter — current season only so the chart never mixes years
     sourceGames = _gameLog.filter(g => !g.season || g.season == _SEASON);
@@ -2102,8 +2111,8 @@ function loadHomeAwayHistory(playerId, playerTeam) {
   return fetch(`/api/afl/player-home-away?player_id=${playerId}&team=${encodeURIComponent(playerTeam)}&season_from=2022`)
     .then(r => r.json())
     .then(data => {
-      _historyHomeGames = data.home_games || [];
-      _historyAwayGames = data.away_games || [];
+      _historyHomeGames = (data.home_games || []).filter(g => !playerTeam || g.home_team === playerTeam);
+      _historyAwayGames = (data.away_games || []).filter(g => !playerTeam || g.away_team === playerTeam);
 
       const body = document.querySelector('#apanel-split .analysis-body');
       if (!body || !_selPlayer) return;
