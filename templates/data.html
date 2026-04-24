@@ -682,6 +682,14 @@
     <div class="card-body text-center"><p class="text-muted">Click to expand and load race confidence analysis...</p></div>
   </div>
 </div>
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#raceTempoAnalysis" aria-expanded="false">
+    <h5>⏱️ Race Tempo Analysis</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="raceTempoAnalysis" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load race tempo analysis...</p></div>
+  </div>
+</div>
 {% if total_races == 0 %}
 <div class="analytics-empty">
   <h5>No results data yet!</h5>
@@ -738,6 +746,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (winProbFilter) { winProbFilter.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('win-prob-filter')) { loadWinProbFilter(); } }); }
     const raceConfidence = document.getElementById('raceConfidence');
     if (raceConfidence) { raceConfidence.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('race-confidence')) { loadRaceConfidence(); } }); }
+    const raceTempoAnalysis = document.getElementById('raceTempoAnalysis');
+    if (raceTempoAnalysis) { raceTempoAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('race-tempo')) { loadRaceTempo(); } }); }
     const pfaiAnalysis = document.getElementById('pfaiAnalysis');
     if (pfaiAnalysis) { 
         pfaiAnalysis.addEventListener('show.bs.collapse', function() { 
@@ -3161,6 +3171,118 @@ function renderRaceConfidence(data) {
             plugins: { legend: { labels: { color: '#9090a8', font: { size: 11 } } } }
         }
     });
+}
+
+function loadRaceTempo() {
+    const container = document.getElementById('raceTempoAnalysis');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Calculating tempo deltas against historical par times...</p></div>';
+    fetch(`/api/data/race-tempo-analysis?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderRaceTempo(data); loadedSections.add('race-tempo'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading data.</div>'; console.error(err); });
+}
+
+function renderRaceTempo(data) {
+    const container = document.getElementById('raceTempoAnalysis');
+
+    if (data.error) {
+        container.innerHTML = `<div class="card-body"><div class="analytics-empty"><h5>No Par Time Data</h5><p>${data.error}</p></div></div>`;
+        return;
+    }
+
+    if (!data.buckets || data.buckets.length === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No data yet.</p></div>';
+        return;
+    }
+
+    let html = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px;margin-bottom:16px">
+            Compares each horse's last race time against the historical par time for that track/distance/condition.
+            Fast race last start = horse was battle-tested at pace. Slow race = form may be flattered.
+            <br><strong style="color:var(--text-primary)">${data.par_coverage}% of races matched to a par time</strong>
+            (${data.par_tracks} track/distance/condition combos with 30+ historical races).
+            Performance shown is top pick in each race.
+        </p>
+
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">`;
+
+    for (const b of data.buckets) {
+        if (b.label === 'No Par Data') continue;
+        const roiCol  = b.roi >= 10 ? '#34d399' : b.roi >= 0 ? '#fbbf24' : '#f87171';
+        const isPar   = b.label.includes('Par (');
+        const isFast  = b.label.includes('faster') || b.label.includes('Fast');
+        const border  = isFast ? 'border:1.5px solid rgba(52,211,153,0.5)' : isPar ? 'border:1.5px solid rgba(102,126,234,0.5)' : 'border:1px solid var(--border-subtle)';
+        html += `<div style="flex:1;min-width:130px;${border};border-radius:10px;padding:12px;text-align:center">
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">${b.label}</div>
+            <div style="font-size:1.3rem;font-weight:800;font-family:'DM Mono',monospace;color:${roiCol}">${b.roi >= 0 ? '+' : ''}${b.roi}%</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${b.wins}/${b.races} · ${b.strike_rate}%</div>
+        </div>`;
+    }
+
+    html += `</div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Last Race Tempo vs Par</th>
+                        <th class="text-center">Races</th>
+                        <th class="text-center">Wins</th>
+                        <th class="text-center">Strike %</th>
+                        <th class="text-center">ROI %</th>
+                        <th class="text-center">P&L</th>
+                    </tr>
+                </thead><tbody>`;
+
+    for (const b of data.buckets) {
+        const isFast = b.label.includes('faster') || b.label.includes('Fast');
+        const rowStyle = isFast ? 'background:rgba(52,211,153,0.04)' : '';
+        html += `<tr style="${rowStyle}">
+            <td><strong>${b.label}</strong>${isFast ? ' 🔥' : ''}</td>
+            <td class="text-center">${b.races}</td>
+            <td class="text-center">${b.wins}</td>
+            <td class="text-center ${b.strike_rate >= 20 ? 'text-success' : b.strike_rate < 10 ? 'text-danger' : ''}">${b.strike_rate}%</td>
+            <td class="text-center ${b.roi >= 0 ? 'text-success' : 'text-danger'}">${b.roi >= 0 ? '+' : ''}${b.roi}%</td>
+            <td class="text-center ${b.profit >= 0 ? 'text-success' : 'text-danger'}">$${b.profit.toFixed(2)}</td>
+        </tr>`;
+    }
+
+    html += `</tbody></table></div>
+        <canvas id="tempoChart" height="120" class="mt-3"></canvas>
+        <div class="alert alert-info mt-3">
+            <strong>💡 What to look for:</strong>
+            If fast race horses (1s+ quicker than par) show meaningfully higher ROI, this is a genuine edge —
+            horses coming out of genuine tempo are aerobically tested and their form is more reliable.
+            If confirmed, you could add a tempo bonus (+5 to +15 points) to analyzer.js using the <code>form time</code> field.
+            The "No Par Data" bucket means the track/distance/condition combo had fewer than 30 historical races in your database.
+        </div>
+    </div>`;
+
+    container.innerHTML = html;
+
+    const chartBuckets = data.buckets.filter(b => b.label !== 'No Par Data');
+    if (chartBuckets.length > 0 && document.getElementById('tempoChart')) {
+        new Chart(document.getElementById('tempoChart'), {
+            type: 'bar',
+            data: {
+                labels: chartBuckets.map(b => b.label),
+                datasets: [{
+                    label: 'ROI %',
+                    data: chartBuckets.map(b => b.roi),
+                    backgroundColor: chartBuckets.map(b => b.roi >= 0 ? 'rgba(52,211,153,0.65)' : 'rgba(248,113,113,0.65)'),
+                    borderColor:     chartBuckets.map(b => b.roi >= 0 ? 'rgba(52,211,153,1)'    : 'rgba(248,113,113,1)'),
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { ticks: { color: '#9090a8', font: { size: 11 }, callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    x: { ticks: { color: '#9090a8', font: { size: 11 }, maxRotation: 30 }, grid: { display: false } }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
 }
 </script>
 
