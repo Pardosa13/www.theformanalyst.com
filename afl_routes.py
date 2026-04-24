@@ -615,7 +615,6 @@ def register_afl_routes(app, db):
         min_edge = request.args.get("min_edge", 2.0, type=float)
         requested_season = request.args.get("year", type=int)
 
-        # Normalise incoming market key so it matches what is stored in the DB
         market = _normalise_prop_market(market)
 
         effective_season = _resolve_stats_season(db, requested_season)
@@ -626,45 +625,55 @@ def register_afl_routes(app, db):
             return jsonify(
                 {
                     "bets": [],
-                    "message": "No prop lines loaded. Configure The Odds API key.",
+                    "message": (
+                        "No prop lines in database for this market. "
+                        "Click 'Load All Props' on the Value Finder tab to fetch from the Odds API."
+                    ),
                     "season": effective_season,
                     "seasons_used": effective_seasons,
                 }
             )
 
-        if "disposal" in market:
-            stat_name = "disposals"
-        elif "kick" in market:
-            stat_name = "kicks"
-        elif "handball" in market:
-            stat_name = "handballs"
-        elif "mark" in market:
-            stat_name = "marks"
-        elif "tackle" in market:
-            stat_name = "tackles"
-        elif "goal" in market:
-            stat_name = "goals"
-        elif "fantasy" in market:
-            stat_name = "afl_fantasy_score"
-        else:
-            stat_name = "disposals"
+        # Map market key → DB stat column
+        _MARKET_STAT: dict[str, str] = {
+            "player_disposals": "disposals",
+            "player_kicks": "kicks",
+            "player_handballs": "handballs",
+            "player_marks": "marks",
+            "player_tackles": "tackles",
+            "player_goals": "goals",
+            "player_afl_fantasy_points": "afl_fantasy_score",
+        }
+        stat_name = _MARKET_STAT.get(market, "disposals")
+
+        # Deduplicate: keep the best (highest) odds per (player, line_type, line)
+        seen: dict[tuple, dict] = {}
+        for prop in props:
+            key = (prop.get("player_name", ""), prop.get("line_type", ""), prop.get("line", 0))
+            existing = seen.get(key)
+            if existing is None or (prop.get("odds") or 0) > (existing.get("odds") or 0):
+                seen[key] = prop
+        deduped_props = list(seen.values())
 
         value_bets = []
 
-        for prop in props:
-            if prop.get("line_type") != "Over":
+        for prop in deduped_props:
+            line_type = prop.get("line_type", "")
+            if line_type not in ("Over", "Under"):
                 continue
 
             player_name = prop.get("player_name", "")
             book_line = prop.get("line", 0)
-
-            # split prop name like "J. Smith"
-            parts = player_name.replace(".", "").split()
-            if len(parts) >= 2:
-                first_initial = parts[0][0].lower()
-                last_name = parts[-1].lower()
-            else:
+            if not player_name or book_line is None:
                 continue
+
+            # Match "J. Smith" or "Jayden Smith" — extract first initial + last name
+            parts = player_name.replace(".", " ").split()
+            parts = [p for p in parts if p]
+            if len(parts) < 2:
+                continue
+            first_initial = parts[0][0].lower()
+            last_name = parts[-1].lower()
 
             sql = db.text("""
                 SELECT *
@@ -680,11 +689,10 @@ def register_afl_routes(app, db):
                 rows = conn.execute(sql, {
                     "last_name": last_name,
                     "first_initial": f"{first_initial}%",
-                    "seasons": effective_seasons
+                    "seasons": effective_seasons,
                 }).mappings().fetchall()
 
             player_rows = [dict(r) for r in rows]
-
             if not player_rows:
                 continue
 
@@ -693,10 +701,10 @@ def register_afl_routes(app, db):
                 continue
 
             player = next(iter(grouped.values()))
-            player_rows = sorted(player["games"], key=_sort_date_key, reverse=True)
+            games = sorted(player["games"], key=_sort_date_key, reverse=True)
             team_name = player.get("team", "")
 
-            season_avg = _safe_avg(player_rows, stat_name)
+            season_avg = _safe_avg(games, stat_name)
             home_team = prop.get("home_team", "")
             away_team = prop.get("away_team", "")
             opponent = (
@@ -705,14 +713,15 @@ def register_afl_routes(app, db):
                 else (away_team or home_team)
             )
 
+            # Exact opponent match (same fix as _db_player_vs_opponent)
+            opp_lower = opponent.lower()
             opp_rows = [
-                row for row in player_rows
-                if row.get("match_home_team") == opponent or row.get("match_away_team") == opponent
+                r for r in games
+                if (r.get("match_home_team") or "").lower() == opp_lower
+                or (r.get("match_away_team") or "").lower() == opp_lower
             ]
             vs_opp_avg = _safe_avg(opp_rows, stat_name) if opp_rows else None
-
-            last5 = player_rows[:5]
-            last5_avg = _safe_avg(last5, stat_name) if last5 else None
+            last5_avg = _safe_avg(games[:5], stat_name) if games else None
 
             edge_data = calculate_disposal_edge(
                 player_avg=season_avg,
@@ -721,9 +730,17 @@ def register_afl_routes(app, db):
                 last5_avg=last5_avg,
             )
 
-            if abs(edge_data["edge"]) >= min_edge or edge_data["recommendation"] == "value":
-                total = len(player_rows)
-                hits = sum(1 for row in player_rows if (row.get(stat_name, 0) or 0) >= book_line)
+            # For Under bets flip the sign: negative edge means player likely goes Under
+            edge = edge_data["edge"]
+            if line_type == "Under":
+                edge = -edge
+
+            if abs(edge) >= min_edge:
+                total = len(games)
+                if line_type == "Over":
+                    hits = sum(1 for r in games if (r.get(stat_name, 0) or 0) >= book_line)
+                else:
+                    hits = sum(1 for r in games if (r.get(stat_name, 0) or 0) < book_line)
                 hist_pct = round(hits / total * 100, 1) if total else 0.0
 
                 value_bets.append(
@@ -737,13 +754,17 @@ def register_afl_routes(app, db):
                         "commence_time": str(prop.get("commence_time", "")),
                         "bookmaker": prop.get("bookmaker", ""),
                         "market": market,
+                        "line_type": line_type,
                         "book_line": book_line,
-                        "over_odds": prop.get("odds", 0),
+                        "odds": prop.get("odds", 0),
                         "season_avg": season_avg,
                         "vs_opp_avg": vs_opp_avg,
                         "last5_avg": last5_avg,
                         "hist_pct": hist_pct,
-                        **edge_data,
+                        "model_prediction": edge_data["model_prediction"],
+                        "edge": round(edge, 1),
+                        "edge_pct": edge_data["edge_pct"],
+                        "recommendation": "value" if abs(edge) >= 2.0 else "skip",
                     }
                 )
 
@@ -752,6 +773,7 @@ def register_afl_routes(app, db):
         return jsonify(
             {
                 "market": market,
+                "stat": stat_name,
                 "min_edge": min_edge,
                 "season": effective_season,
                 "seasons_used": effective_seasons,
@@ -920,12 +942,21 @@ def register_afl_routes(app, db):
         if not venue:
             return jsonify({"error": "venue parameter required"}), 400
 
-        sql = db.text("""
+        # Expand the venue to all known aliases (e.g. "MCG" → also search
+        # "Melbourne Cricket Ground" and "M.C.G.") so Squiggle short-names
+        # match Fryzigg/fitzRoy full-names already stored in the DB.
+        venue_aliases = _venue_search_names(venue)
+        alias_clauses = " OR ".join(
+            f"LOWER(venue_name) LIKE LOWER(:v{i})" for i in range(len(venue_aliases))
+        )
+        venue_params = {f"v{i}": f"%{name}%" for i, name in enumerate(venue_aliases)}
+
+        sql = db.text(f"""
             SELECT *
             FROM afl_player_stats
             WHERE player_id = :player_id
               AND season >= :season_from
-              AND LOWER(venue_name) LIKE LOWER(:venue)
+              AND ({alias_clauses})
             ORDER BY match_date DESC
         """)
 
@@ -935,7 +966,7 @@ def register_afl_routes(app, db):
                 {
                     "player_id": player_id,
                     "season_from": season_from,
-                    "venue": f"%{venue}%",
+                    **venue_params,
                 },
             ).mappings().fetchall()
 
@@ -958,7 +989,6 @@ def register_afl_routes(app, db):
             "season_from": season_from,
             "games": len(rows),
             "averages": averages,
-            # Return ALL games since season_from so the chart shows the full 5-year history.
             "game_log": [_format_game_log_row(g, g.get("player_team", "")) for g in rows],
         })
 
@@ -1054,18 +1084,27 @@ def register_afl_routes(app, db):
     @login_required
     def api_afl_sync_props():
         api_key = get_odds_api_key()
-        market = request.json.get("market", "player_disposals") if request.json else "player_disposals"
-
         if not api_key:
             return jsonify({"status": "error", "message": "ODDS_API_KEY not configured"}), 400
 
+        body = request.json or {}
+        load_all = body.get("all_markets", True)
+        market = body.get("market")
+
+        # When all_markets=True (the default) fetch every supported market in
+        # one batch — this is the same number of Odds API calls as fetching one
+        # market, but returns the complete prop dataset in a single click.
+        markets_arg = None if load_all or not market else market
+
         try:
-            props = fetch_afl_player_props(api_key=api_key, markets=market)
+            props = fetch_afl_player_props(api_key=api_key, markets=markets_arg)
             count = upsert_player_props(db, props)
-            # Return the normalised market name so callers know what was stored
-            stored_market = _normalise_prop_market(market)
             log_sync(db, "odds_api", rows=count)
-            return jsonify({"status": "ok", "rows_synced": count, "market": stored_market})
+            return jsonify({
+                "status": "ok",
+                "rows_synced": count,
+                "markets": "all" if markets_arg is None else markets_arg,
+            })
         except Exception as exc:
             log_sync(db, "odds_api", status="error", error=str(exc))
             return jsonify({"status": "error", "message": str(exc)}), 500
@@ -1315,10 +1354,11 @@ def _db_player_vs_opponent(
     opponent: str = "",
     season_from: int = 2019,
 ) -> list[dict]:
-    params = {"season_from": season_from, "opp": f"%{opponent}%"}
+    # Exact match only — prevents "Melbourne" from matching "North Melbourne"
+    params = {"season_from": season_from, "opp": opponent.lower().strip()}
     filters = [
         "season >= :season_from",
-        "(LOWER(match_home_team) LIKE LOWER(:opp) OR LOWER(match_away_team) LIKE LOWER(:opp))",
+        "(LOWER(match_home_team) = :opp OR LOWER(match_away_team) = :opp)",
     ]
 
     if player_id:
@@ -1535,6 +1575,38 @@ def afl_nightly_sync(app_context, db):
         logger.info("  - Props: skipped (ODDS_API_KEY not configured)")
 
     logger.info("=== AFL sync complete ===")
+
+
+# ─────────────────────────────────────────────
+# VENUE ALIAS GROUPS
+# Squiggle uses short names (MCG, SCG); Fryzigg/fitzRoy use full names.
+# Any name in a group is treated as equivalent when querying venue history.
+# ─────────────────────────────────────────────
+
+_VENUE_GROUPS: list[list[str]] = [
+    ["MCG", "Melbourne Cricket Ground", "M.C.G."],
+    ["SCG", "Sydney Cricket Ground", "S.C.G."],
+    ["Marvel Stadium", "Docklands", "Etihad Stadium"],
+    ["GMHBA Stadium", "Kardinia Park", "Simonds Stadium"],
+    ["Optus Stadium", "Perth Stadium"],
+    ["People First Stadium", "Metricon Stadium"],
+    ["ENGIE Stadium", "Spotless Stadium", "Sydney Showground", "Stadium Australia"],
+    ["Blundstone Arena", "Bellerive Oval"],
+    ["University of Tasmania Stadium", "York Park", "Aurora Stadium"],
+    ["TIO Stadium", "Marrara"],
+    ["Adelaide Oval", "Football Park"],
+    ["Gabba", "Brisbane Cricket Ground"],
+    ["Cazalys Stadium", "Cazalys"],
+]
+
+
+def _venue_search_names(venue: str) -> list[str]:
+    """Return all known alias names for a given venue string."""
+    v_lower = venue.lower().strip()
+    for group in _VENUE_GROUPS:
+        if any(v_lower == g.lower() or v_lower in g.lower() for g in group):
+            return group
+    return [venue]
 
 
 def _sort_date_key(row: dict):

@@ -353,7 +353,7 @@
   .prop-empty p { font-size:13px; margin:0; }
 
   /* ── Value finder ────────────────────────────────────────────── */
-  .value-finder-bar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+  .value-finder-bar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; align-items:center; }
   .value-table { width:100%; border-collapse:collapse; }
   .value-table thead th {
     background:var(--bg-elevated); padding:9px 12px;
@@ -372,6 +372,13 @@
   .edge-chip.pos { background:rgba(16,185,129,.12); border:1px solid rgba(16,185,129,.3); color:#34d399; }
   .edge-chip.neg { background:rgba(239,68,68,.12);  border:1px solid rgba(239,68,68,.3);  color:#f87171; }
   .edge-chip.neu { background:var(--bg-elevated); border:1px solid var(--border-mid); color:var(--text-muted); }
+  .lt-over  { color:#34d399; font-weight:700; font-size:11px; font-family:'DM Mono',monospace; }
+  .lt-under { color:#f87171; font-weight:700; font-size:11px; font-family:'DM Mono',monospace; }
+  .props-banner {
+    padding:10px 14px; border-radius:8px; font-size:12px; margin-bottom:12px;
+    background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.25); color:#fbbf24;
+    display:flex; align-items:center; gap:8px;
+  }
 
   /* ── Fixtures ────────────────────────────────────────────────── */
   .fixture-row {
@@ -601,31 +608,39 @@
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-lightning-charge-fill"></i> Value Finder</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Needs Odds API prop lines</span>
+      <span style="font-size:11px;color:var(--text-muted);">Odds API · Over &amp; Under · all prop markets</span>
     </div>
     <div class="afl-card-body">
+      {% if not (data_sources and data_sources.odds_api) %}
+      <div class="props-banner">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        <span>No recent props in database. Click <strong>Load All Props</strong> to fetch from The Odds API (requires ODDS_API_KEY to be set).</span>
+      </div>
+      {% endif %}
       <div class="value-finder-bar">
         <select class="form-select" id="valueMarket" style="width:200px;">
-  <option value="player_disposals">Player Disposals</option>
-  <option value="player_marks">Player Marks</option>
-  <option value="player_tackles">Player Tackles</option>
-  <option value="player_goals">Player Goals</option>
-  <option value="player_afl_fantasy_points">AFL Fantasy Points</option>
-  <option value="player_kicks">Player Kicks</option>
-  <option value="player_handballs">Player Handballs</option>
-</select>
-        <input type="number" class="form-control" id="minEdge" value="2" step="0.5" style="max-width:140px;" placeholder="Min edge">
+          <option value="player_disposals">Player Disposals</option>
+          <option value="player_marks">Player Marks</option>
+          <option value="player_tackles">Player Tackles</option>
+          <option value="player_goals">Player Goals</option>
+          <option value="player_kicks">Player Kicks</option>
+          <option value="player_handballs">Player Handballs</option>
+          <option value="player_afl_fantasy_points">AFL Fantasy Points</option>
+        </select>
+        <input type="number" class="form-control" id="minEdge" value="2" step="0.5" style="max-width:120px;" placeholder="Min edge">
         <button class="btn btn-primary" onclick="loadValueFinder()">
           <i class="bi bi-search"></i> Find Value
         </button>
-        <button class="btn btn-secondary" id="loadPropsBtn" onclick="loadOddsProps()" title="Fetch latest prop lines from Odds API">
-          <i class="bi bi-cloud-download"></i> Load Props
+        <button class="btn btn-secondary" id="loadPropsBtn" onclick="loadOddsProps()"
+          title="Fetch ALL prop markets (disposals, marks, kicks, handballs, tackles, goals, fantasy) from Odds API in one shot">
+          <i class="bi bi-cloud-download"></i> Load All Props
         </button>
+        <span id="propsStatus" style="font-size:11px;color:var(--text-muted);"></span>
       </div>
       <div id="valueResults">
         <div class="prop-empty">
           <i class="bi bi-lightning-charge"></i>
-          <p>Run value finder to compare prop lines against player averages.</p>
+          <p>1. Click <strong>Load All Props</strong> to fetch today's lines.<br>2. Click <strong>Find Value</strong> to compare against player averages.</p>
         </div>
       </div>
     </div>
@@ -1627,27 +1642,33 @@ function jumpToTeam(home, away, venue, side) {
 // ── Load Odds API props ──────────────────────────────────────────
 function loadOddsProps() {
   const btn = document.getElementById('loadPropsBtn');
-  const market = document.getElementById('valueMarket').value;
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-sm"></span> Loading…'; }
+  const statusEl = document.getElementById('propsStatus');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-sm"></span> Loading all markets…'; }
+  if (statusEl) statusEl.textContent = '';
 
+  // all_markets:true fetches every supported prop market in one batch
   fetch('/api/afl/sync/props', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ market }),
+    body: JSON.stringify({ all_markets: true }),
   })
     .then(r => r.json())
     .then(data => {
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Load Props'; }
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Load All Props'; }
       if (data.status === 'ok') {
+        const n = data.rows_synced || 0;
+        if (statusEl) statusEl.textContent = `✓ ${n} lines loaded`;
         const el = document.getElementById('valueResults');
-        if (el) el.innerHTML = `<div class="prop-empty"><i class="bi bi-check-circle" style="color:var(--success);"></i><p>Loaded ${data.rows_synced || 0} prop lines. Click <strong>Find Value</strong> to analyse.</p></div>`;
+        if (el) el.innerHTML = `<div class="prop-empty"><i class="bi bi-check-circle" style="color:var(--success);"></i><p>Loaded <strong>${n}</strong> prop lines across all markets. Click <strong>Find Value</strong> to analyse.</p></div>`;
       } else {
-        alert(data.message || 'Failed to load props. Check ODDS_API_KEY is configured.');
+        if (statusEl) statusEl.textContent = '✗ Failed';
+        alert(data.message || 'Failed to load props. Ensure ODDS_API_KEY is set in Railway environment.');
       }
     })
     .catch(() => {
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Load Props'; }
-      alert('Failed to load props. Check ODDS_API_KEY is configured.');
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Load All Props'; }
+      if (statusEl) statusEl.textContent = '✗ Network error';
+      alert('Failed to connect. Check that ODDS_API_KEY is configured.');
     });
 }
 
@@ -1665,37 +1686,54 @@ function loadValueFinder() {
       return r.json();
     })
     .then(data => {
+      if (data.message && !data.bets?.length) {
+        el.innerHTML = `<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>${esc(data.message)}</p></div>`;
+        return;
+      }
       if (!data.bets?.length) {
-        el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No value bets found. Load Odds API props first.</p></div>';
+        el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No value bets found for this market. Try <strong>Load All Props</strong> first, then lower the min edge.</p></div>';
         return;
       }
 
       const rows = data.bets.map(bet => {
         const edge = safeNum(bet.edge, 0);
         const cls = edge >= 2 ? 'pos' : edge <= -2 ? 'neg' : 'neu';
+        const ltCls = (bet.line_type || '') === 'Over' ? 'lt-over' : 'lt-under';
+        const odds = safeNum(bet.odds, 0);
 
         return `
           <tr>
             <td style="font-weight:700;">${esc(bet.player || '')}</td>
-            <td>${esc(bet.team || '')}</td>
-            <td>${esc(bet.opponent || '')}</td>
-            <td>${esc(bet.bookmaker || '')}</td>
-            <td>${esc(bet.market || '')}</td>
-            <td style="font-family:'DM Mono',monospace;">${safeNum(bet.book_line, 0)}</td>
+            <td style="font-size:11px;">${esc(bet.team || '')}</td>
+            <td style="font-size:11px;">${esc(bet.opponent || '')}</td>
+            <td style="font-size:10px;color:var(--text-muted);">${esc(bet.bookmaker || '')}</td>
+            <td><span class="${ltCls}">${esc(bet.line_type || '')}</span></td>
+            <td style="font-family:'DM Mono',monospace;font-weight:700;">${safeNum(bet.book_line, 0)}</td>
+            <td style="font-family:'DM Mono',monospace;">${odds > 0 ? odds.toFixed(2) : '—'}</td>
             <td style="font-family:'DM Mono',monospace;">${safeNum(bet.season_avg, 0)}</td>
             <td style="font-family:'DM Mono',monospace;">${safeNum(bet.last5_avg, 0)}</td>
+            <td style="font-family:'DM Mono',monospace;">${safeNum(bet.vs_opp_avg, 0) || '—'}</td>
             <td style="font-family:'DM Mono',monospace;">${safeNum(bet.hist_pct, 0)}%</td>
             <td style="font-family:'DM Mono',monospace;">${safeNum(bet.model_prediction, 0)}</td>
-            <td><span class="edge-chip ${cls}">${edge > 0 ? '+' : ''}${edge}</span></td>
+            <td><span class="edge-chip ${cls}">${edge > 0 ? '+' : ''}${edge.toFixed(1)}</span></td>
           </tr>
         `;
       }).join('');
 
+      const stat = data.stat || market.replace('player_', '');
+
       el.innerHTML = `
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+          ${esc(data.count || 0)} result(s) · market: <strong>${esc(market)}</strong> · stat: <strong>${esc(stat)}</strong> · min edge: ${esc(String(minEdge))} · season: ${esc(String(data.season || _SEASON))}
+        </div>
         <div class="scroll-x">
           <table class="value-table">
             <thead>
-              <tr><th>Player</th><th>Team</th><th>Opp</th><th>Book</th><th>Market</th><th>Line</th><th>Season</th><th>L5</th><th>Hit%</th><th>Model</th><th>Edge</th></tr>
+              <tr>
+                <th>Player</th><th>Team</th><th>Opp</th><th>Book</th>
+                <th>O/U</th><th>Line</th><th>Odds</th>
+                <th>Season</th><th>L5</th><th>vs Opp</th><th>Hit%</th><th>Model</th><th>Edge</th>
+              </tr>
             </thead>
             <tbody>${rows}</tbody>
           </table>
@@ -1703,7 +1741,7 @@ function loadValueFinder() {
       `;
     })
     .catch(() => {
-      el.innerHTML = '<div class="prop-empty" style="color:var(--danger);">Value finder failed.</div>';
+      el.innerHTML = '<div class="prop-empty" style="color:var(--danger);">Value finder failed. Check server logs.</div>';
     });
 }
 function loadDisposalLines() {
