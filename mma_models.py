@@ -51,6 +51,10 @@ def init_mma_tables(db):
         total_fights = db.Column(db.Integer, default=0)
         recent_form = db.Column(db.String(20))  # e.g. "W-W-L-W"
 
+        # ESPN profile + headshot (populated by mma_sync when ESPN URLs are available)
+        espn_url = db.Column(db.String(500))
+        headshot_url = db.Column(db.String(500))
+
         created_at = db.Column(db.DateTime, default=datetime.utcnow)
         updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

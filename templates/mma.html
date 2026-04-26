@@ -315,6 +315,27 @@
 }
 .stat-cell .lbl { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
 
+/* ── Fighter avatar image ──────────────────────────────────── */
+.fighter-avatar-img {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--border-mid);
+  background: var(--bg-elevated);
+  display: block;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.fighter-avatar-img:hover {
+  border-color: rgba(239,68,68,.5);
+  box-shadow: 0 0 0 3px rgba(239,68,68,.12);
+}
+.modal-headshot {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 10px;
+}
+
 /* ── Loading ──────────────────────────────────────────────── */
 .mma-loading {
   text-align: center;
@@ -517,14 +538,22 @@ function fightCardHTML(fight) {
     <div class="${cardCls}" onclick="openFighterModal('${escHtml(f1)}', '${escHtml(f2)}', ${fight.id})">
       <div class="fight-vs">
         <div class="fighter-side">
-          <div class="fighter-avatar">🥊</div>
+          <div class="fighter-avatar">
+            ${fight.f1_headshot_url
+              ? `<img class="fighter-avatar-img" src="${escHtml(fight.f1_headshot_url)}" alt="${escHtml(f1)}" onerror="this.parentElement.innerHTML='🥊'">`
+              : '🥊'}
+          </div>
           <div class="fighter-name">${escHtml(f1)}</div>
           ${f1Rec ? `<div class="fighter-record">${escHtml(f1Rec)}</div>` : ''}
           ${fight.f1_stats?.Stance ? `<div class="fighter-stats-mini">${fight.f1_stats.Stance}</div>` : ''}
         </div>
         <div class="vs-divider">VS</div>
         <div class="fighter-side right">
-          <div class="fighter-avatar">🥊</div>
+          <div class="fighter-avatar">
+            ${fight.f2_headshot_url
+              ? `<img class="fighter-avatar-img" src="${escHtml(fight.f2_headshot_url)}" alt="${escHtml(f2)}" onerror="this.parentElement.innerHTML='🥊'">`
+              : '🥊'}
+          </div>
           <div class="fighter-name">${escHtml(f2)}</div>
           ${f2Rec ? `<div class="fighter-record">${escHtml(f2Rec)}</div>` : ''}
           ${fight.f2_stats?.Stance ? `<div class="fighter-stats-mini">${fight.f2_stats.Stance}</div>` : ''}
@@ -600,8 +629,8 @@ async function openFighterModal(f1Name, f2Name, fightId) {
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      ${fighterStatBlock(f1Name, fight?.f1_stats || {}, s1)}
-      ${fighterStatBlock(f2Name, fight?.f2_stats || {}, s2)}
+      ${fighterStatBlock(f1Name, fight?.f1_stats || {}, s1, fight?.f1_headshot_url || s1?.headshot_url)}
+      ${fighterStatBlock(f2Name, fight?.f2_stats || {}, s2, fight?.f2_headshot_url || s2?.headshot_url)}
     </div>
 
     ${predSection}
@@ -618,14 +647,18 @@ async function openFighterModal(f1Name, f2Name, fightId) {
   }
 }
 
-function fighterStatBlock(name, bioStats, dbStats) {
+function fighterStatBlock(name, bioStats, dbStats, headshotUrl) {
   const rec = bioStats.Record || (dbStats ? `${dbStats.wins}-${dbStats.losses}-${dbStats.draws || 0}` : '—');
   const stance = bioStats.Stance || dbStats?.stance || '—';
   const reach = bioStats.Reach ? `${bioStats.Reach}"` : (dbStats?.reach_cm ? `${dbStats.reach_cm}cm` : '—');
 
   const stats = dbStats?.stats || {};
+  const avatarHtml = headshotUrl
+    ? `<img class="fighter-avatar-img modal-headshot" src="${escHtml(headshotUrl)}" alt="${escHtml(name)}" onerror="this.style.display='none'">`
+    : `<div class="fighter-avatar" style="margin-bottom:10px">🥊</div>`;
   return `
     <div>
+      ${avatarHtml}
       <div style="font-weight:700;font-size:0.95rem;color:var(--text-primary);margin-bottom:8px">${escHtml(name)}</div>
       <div style="font-size:11px;color:var(--text-muted);font-family:'DM Mono',monospace;margin-bottom:10px">
         ${rec} · ${stance} · Reach ${reach}

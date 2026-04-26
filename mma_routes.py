@@ -65,9 +65,23 @@ def register_mma_routes(app, db):
                         f.f1_height, f.f1_reach, f.f1_stance, f.f1_record,
                         f.f2_height, f.f2_reach, f.f2_stance, f.f2_record,
                         p.predicted_winner, p.f1_win_probability,
-                        p.f2_win_probability, p.confidence, p.factors_json
+                        p.f2_win_probability, p.confidence, p.factors_json,
+                        COALESCE(
+                            mf1.headshot_url,
+                            (SELECT headshot_url FROM mma_fighters
+                             WHERE LOWER(full_name) = LOWER(f.fighter_1_name)
+                             LIMIT 1)
+                        ) AS f1_headshot_url,
+                        COALESCE(
+                            mf2.headshot_url,
+                            (SELECT headshot_url FROM mma_fighters
+                             WHERE LOWER(full_name) = LOWER(f.fighter_2_name)
+                             LIMIT 1)
+                        ) AS f2_headshot_url
                     FROM mma_fights f
                     LEFT JOIN mma_predictions p ON p.fight_id = f.id
+                    LEFT JOIN mma_fighters mf1 ON mf1.id = f.fighter_1_id
+                    LEFT JOIN mma_fighters mf2 ON mf2.id = f.fighter_2_id
                     WHERE f.event_id = :eid
                     ORDER BY f.is_main_card DESC, f.id ASC
                 """)
@@ -79,7 +93,8 @@ def register_mma_routes(app, db):
                      winner, method, rnd, t_end,
                      f1h, f1r, f1s, f1rec,
                      f2h, f2r, f2s, f2rec,
-                     pred_winner, f1_prob, f2_prob, conf, factors_json) = fr
+                     pred_winner, f1_prob, f2_prob, conf, factors_json,
+                     f1_headshot_url, f2_headshot_url) = fr
 
                     factors = {}
                     if factors_json:
@@ -109,6 +124,8 @@ def register_mma_routes(app, db):
                             'Height': f2h, 'Reach': f2r,
                             'Stance': f2s, 'Record': f2rec,
                         },
+                        'f1_headshot_url': f1_headshot_url or None,
+                        'f2_headshot_url': f2_headshot_url or None,
                         'prediction': {
                             'winner': pred_winner,
                             'f1_prob': float(f1_prob) if f1_prob else 0.5,
@@ -146,7 +163,8 @@ def register_mma_routes(app, db):
                        glicko_rating, glicko_rd,
                        ema_slpm, ema_sapm, ema_td_avg, ema_td_def,
                        ema_kd_rate, ema_sub_rate, ema_ctrl_pct,
-                       streak, win_rate, total_fights, recent_form
+                       streak, win_rate, total_fights, recent_form,
+                       headshot_url
                 FROM mma_fighters
                 WHERE LOWER(full_name) = LOWER(:name)
                 LIMIT 1
@@ -172,6 +190,7 @@ def register_mma_routes(app, db):
                 },
                 'streak': row[19], 'win_rate': round(row[20], 3) if row[20] else 0,
                 'total_fights': row[21], 'recent_form': row[22],
+                'headshot_url': row[23] or None,
             })
         except Exception as e:
             logger.error(f"Fighter API error: {e}", exc_info=True)
