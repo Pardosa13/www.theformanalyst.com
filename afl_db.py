@@ -271,17 +271,17 @@ def _b(value: Any, default: bool = False) -> bool:
 
 
 def _headshot_url(player_id: int | None) -> str | None:
-    """Return AFL.com.au CDN headshot URL for positive (Fryzigg/ChampID) player IDs.
+    """Return proxy headshot URL for positive (Fryzigg/ChampID) player IDs.
 
     Returns None for negative or zero IDs (debut placeholders) so that the UI
     can gracefully fall back to initials.
+    
+    Uses the /api/afl/player-headshot/ endpoint to avoid CORS/hotlink blocks
+    from the direct CDN URL.
     """
     if not player_id or player_id <= 0:
         return None
-    return (
-        f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/"
-        f"ChampIDImages/{player_id}.png"
-    )
+    return f"/api/afl/player-headshot/{player_id}"
 
 
 def _team(value: Any) -> str:
