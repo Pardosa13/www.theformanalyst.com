@@ -172,7 +172,7 @@ def register_afl_routes(app, db):
                     "guernsey": player["guernsey"],
                     "height_cm": player["height_cm"],
                     "weight_kg": player["weight_kg"],
-                    "headshot_url": afl_player_headshot_url(player["player_id"]),
+                    "headshot_url": afl_player_headshot_url(player["player_id"], first_name=player["first_name"], last_name=player["last_name"]),
                     "season": effective_season,
                     "seasons_used": effective_seasons,
                     "games_played": len(games),
@@ -306,7 +306,7 @@ def register_afl_routes(app, db):
                 "guernsey": player["guernsey"],
                 "height_cm": player["height_cm"],
                 "weight_kg": player["weight_kg"],
-                "headshot_url": afl_player_headshot_url(player["player_id"]),
+                "headshot_url": afl_player_headshot_url(player["player_id"], first_name=player["first_name"], last_name=player["last_name"]),
                 "season": effective_season,
                 "seasons_used": effective_seasons,
                 "games_played": len(games),
@@ -496,7 +496,7 @@ def register_afl_routes(app, db):
                     "guernsey": player["guernsey"],
                     "height_cm": player["height_cm"],
                     "weight_kg": player["weight_kg"],
-                    "headshot_url": afl_player_headshot_url(player["player_id"]),
+                    "headshot_url": afl_player_headshot_url(player["player_id"], first_name=player["first_name"], last_name=player["last_name"]),
                     "season": effective_season,
                     "games_played": len(games),
                     "averages": avgs,
@@ -1315,10 +1315,20 @@ def register_afl_routes(app, db):
     @app.route("/api/afl/player-headshot/<int:player_id>")
     @login_required
     def api_afl_player_headshot(player_id):
-        """Proxy AFL player headshot images through this server to avoid CDN hotlink blocks."""
+        """Proxy AFL player headshot images.
+
+        Matches by first + last name (query params ?fn= and ?ln=) against
+        the player_headshot_url stored in Postgres during sync — the same
+        pattern the MMA page uses with ESPN CDN URLs.
+
+        The stored URL uses the real AFL ChampID from the AFL API, so it
+        works correctly for 2026 players where the Fryzigg player_id is
+        different from the AFL ChampID.
+        """
         if player_id <= 0:
             abort(404)
 
+        # In-memory cache: keyed by player_id
         if player_id in _headshot_cache:
             entry = _headshot_cache[player_id]
             if entry is None:
@@ -1329,26 +1339,52 @@ def register_afl_routes(app, db):
             resp.headers["Cache-Control"] = "public, max-age=86400"
             return resp
 
-        cdn_urls = [
-            f"https://fantasy.afl.com.au/assets/mug-shots/afl/{player_id}.webp",
-            f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/ChampIDImages/{player_id}.png",
-        ]
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; TheFormAnalyst/1.0)"}
+        # Look up the stored headshot URL from Postgres by first + last name.
+        # The URL was written during sync using the AFL ChampID, not the
+        # Fryzigg player_id, so it is reliable for all seasons including 2026.
+        first_name = request.args.get("fn", "").strip()
+        last_name  = request.args.get("ln", "").strip()
 
-        for url in cdn_urls:
+        cdn_url = None
+
+        if first_name and last_name:
             try:
-                cdn_resp = _requests.get(url, timeout=5, headers=headers)
-                if cdn_resp.ok:
-                    mime = cdn_resp.headers.get("Content-Type", "image/png")
-                    entry = (cdn_resp.content, mime)
-                    if len(_headshot_cache) < _HEADSHOT_CACHE_MAX:
-                        _headshot_cache[player_id] = entry
-                    resp = make_response(cdn_resp.content)
-                    resp.headers["Content-Type"] = mime
-                    resp.headers["Cache-Control"] = "public, max-age=86400"
-                    return resp
-            except Exception:
-                continue
+                sql = db.text("""
+                    SELECT player_headshot_url
+                    FROM afl_player_stats
+                    WHERE LOWER(player_first_name) = LOWER(:fn)
+                      AND LOWER(player_last_name)  = LOWER(:ln)
+                      AND player_headshot_url IS NOT NULL
+                      AND player_headshot_url <> ''
+                    ORDER BY season DESC
+                    LIMIT 1
+                """)
+                with db.engine.connect() as conn:
+                    row = conn.execute(sql, {"fn": first_name, "ln": last_name}).fetchone()
+                if row:
+                    cdn_url = row[0]
+            except Exception as exc:
+                logger.warning("Headshot DB lookup failed for %s %s: %s", first_name, last_name, exc)
+
+        if not cdn_url:
+            if len(_headshot_cache) < _HEADSHOT_CACHE_MAX:
+                _headshot_cache[player_id] = None
+            abort(404)
+
+        try:
+            headers = {"User-Agent": "Mozilla/5.0 (compatible; TheFormAnalyst/1.0)"}
+            cdn_resp = _requests.get(cdn_url, timeout=5, headers=headers)
+            if cdn_resp.ok:
+                mime = cdn_resp.headers.get("Content-Type", "image/webp")
+                entry = (cdn_resp.content, mime)
+                if len(_headshot_cache) < _HEADSHOT_CACHE_MAX:
+                    _headshot_cache[player_id] = entry
+                resp = make_response(cdn_resp.content)
+                resp.headers["Content-Type"] = mime
+                resp.headers["Cache-Control"] = "public, max-age=86400"
+                return resp
+        except Exception as exc:
+            logger.warning("Headshot CDN fetch failed for %s: %s", cdn_url, exc)
 
         if len(_headshot_cache) < _HEADSHOT_CACHE_MAX:
             _headshot_cache[player_id] = None

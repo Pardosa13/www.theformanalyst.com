@@ -313,16 +313,21 @@ def fetch_squiggle_teams() -> list[dict]:
     return data.get("teams", [])
 
 
-def afl_player_headshot_url(player_id: int | None) -> str | None:
+def afl_player_headshot_url(player_id: int | None, first_name: str = "", last_name: str = "") -> str | None:
     """Return the server-side proxy URL for an AFL player headshot.
 
-    Routes through /api/afl/player-headshot/<id> so the server fetches from
-    the AFL CDN, avoiding cross-origin hotlink blocks.
+    Passes first_name and last_name as query params so the proxy route can
+    look up the stored AFL Fantasy CDN URL from Postgres by name — the same
+    approach the MMA page uses with ESPN CDN URLs.
     Returns None for invalid/negative IDs (debut placeholders).
     """
     if not player_id or player_id <= 0:
         return None
-    return f"/api/afl/player-headshot/{player_id}"
+    base = f"/api/afl/player-headshot/{player_id}"
+    if first_name or last_name:
+        from urllib.parse import urlencode
+        base += "?" + urlencode({"fn": first_name, "ln": last_name})
+    return base
 
 
 def fetch_squiggle_games(year: int, round_number: int = None) -> list[dict]:
@@ -869,6 +874,7 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id:
         "venue_name": _coerce_str(details.get("venue.name")),
         "season": season,
         "player_id": player_id,
+        "player_champ_id": player_id,  # AFL API player.playerId IS the AFL ChampID
         "player_first_name": first_name,
         "player_last_name": last_name,
         "player_team": player_team,

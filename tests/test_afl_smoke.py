@@ -1010,39 +1010,36 @@ def test_init_afl_tables_skips_migrations_when_lock_not_acquired():
 
 
 # ---------------------------------------------------------------------------
-# Player headshots — stored in DB during upsert
+# Player headshots — stored in DB during upsert using AFL ChampID
 # ---------------------------------------------------------------------------
 
-def _headshot_url_impl(player_id):
-    """Mirror of _headshot_url from afl_db.py."""
-    if not player_id or player_id <= 0:
+def _headshot_url_impl(champ_id):
+    """Mirror of _headshot_url from afl_db.py — uses AFL Fantasy CDN with ChampID."""
+    if not champ_id or champ_id <= 0:
         return None
-    return (
-        f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/"
-        f"ChampIDImages/{player_id}.png"
-    )
+    return f"https://fantasy.afl.com.au/assets/mug-shots/afl/{champ_id}.webp"
 
 
 def test_headshot_url_positive_id():
-    """Positive player_id should produce a valid AFL CDN URL."""
+    """Positive champ_id should produce an AFL Fantasy CDN URL."""
     url = _headshot_url_impl(12345)
     assert url is not None
     assert "12345" in url
-    assert url.startswith("https://www.afl.com.au/staticfile/")
+    assert url.startswith("https://fantasy.afl.com.au/assets/mug-shots/afl/")
 
 
 def test_headshot_url_negative_id_returns_none():
-    """Negative player_id (debut placeholder) must return None."""
+    """Negative champ_id (debut placeholder) must return None."""
     assert _headshot_url_impl(-999) is None
 
 
 def test_headshot_url_zero_returns_none():
-    """Zero player_id must return None."""
+    """Zero champ_id must return None."""
     assert _headshot_url_impl(0) is None
 
 
 def test_headshot_url_none_returns_none():
-    """None player_id must return None."""
+    """None champ_id must return None."""
     assert _headshot_url_impl(None) is None
 
 
@@ -1060,7 +1057,9 @@ def test_afl_db_has_headshot_url_helper():
 
 
 def test_upsert_player_stats_stores_headshot_url():
-    """upsert_player_stats must include player_headshot_url in the INSERT statement."""
+    """upsert_player_stats must include player_headshot_url in the INSERT statement,
+    computed from player_champ_id (the AFL ChampID from the AFL API) — not from
+    the Fryzigg player_id which is a different numbering scheme."""
     db_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "afl_db.py",
@@ -1078,8 +1077,12 @@ def test_upsert_player_stats_stores_headshot_url():
         "upsert_player_stats does not include player_headshot_url in INSERT; "
         "headshots will never be stored in the DB"
     )
-    assert "_headshot_url(player_id)" in fn_body, (
-        "upsert_player_stats does not call _headshot_url(player_id) to compute the URL"
+    assert "player_champ_id" in fn_body, (
+        "upsert_player_stats does not use player_champ_id; "
+        "headshot URL must be built from the AFL ChampID, not the Fryzigg player_id"
+    )
+    assert "_headshot_url(player_champ_id)" in fn_body, (
+        "upsert_player_stats must call _headshot_url(player_champ_id) to build the URL"
     )
 
 
