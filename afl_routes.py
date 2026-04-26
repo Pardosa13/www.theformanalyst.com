@@ -1282,6 +1282,59 @@ def register_afl_routes(app, db):
 
         return jsonify({"status": "ok", "stats_season": stats_season, "synced": results})
 
+    @app.route("/api/afl/player-headshot/<int:player_id>")
+    def api_afl_player_headshot(player_id):
+        """Proxy AFL player headshot images through this server to avoid CDN hotlink blocks."""
+        first_name = request.args.get("first_name")
+        last_name = request.args.get("last_name")
+
+        fantasy_id = None
+        if first_name and last_name:
+            fantasy_id = _fantasy_photo_id_from_name(first_name, last_name)
+
+        photo_id = fantasy_id or player_id
+
+        if not photo_id or photo_id <= 0:
+            abort(404)
+
+        cache_key = str(photo_id)
+
+        if cache_key in _headshot_cache:
+            entry = _headshot_cache[cache_key]
+            if entry is None:
+                abort(404)
+            content, mime = entry
+            resp = make_response(content)
+            resp.headers["Content-Type"] = mime
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+
+        cdn_urls = [
+            f"https://fantasy.afl.com.au/assets/media/players/afl/{photo_id}_450.png",
+            f"https://fantasy.afl.com.au/assets/mug-shots/afl/{photo_id}.webp",
+            f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/ChampIDImages/{photo_id}.png",
+        ]
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; TheFormAnalyst/1.0)"}
+
+        for url in cdn_urls:
+            try:
+                cdn_resp = _requests.get(url, timeout=5, headers=headers)
+                if cdn_resp.ok:
+                    mime = cdn_resp.headers.get("Content-Type", "image/png")
+                    entry = (cdn_resp.content, mime)
+                    if len(_headshot_cache) < _HEADSHOT_CACHE_MAX:
+                        _headshot_cache[cache_key] = entry
+                    resp = make_response(cdn_resp.content)
+                    resp.headers["Content-Type"] = mime
+                    resp.headers["Cache-Control"] = "public, max-age=86400"
+                    return resp
+            except Exception:
+                continue
+
+        if len(_headshot_cache) < _HEADSHOT_CACHE_MAX:
+            _headshot_cache[cache_key] = None
+        abort(404)
+  
     @app.route("/api/afl/debug")
     @login_required
     def api_afl_debug():
@@ -1367,60 +1420,6 @@ def register_afl_routes(app, db):
             return None
 
         return None
-
-    @app.route("/api/afl/player-headshot/<int:player_id>")
-    def api_afl_player_headshot(player_id):
-        """Proxy AFL player headshot images through this server to avoid CDN hotlink blocks."""
-        first_name = request.args.get("first_name")
-        last_name = request.args.get("last_name")
-
-        fantasy_id = None
-        if first_name and last_name:
-            fantasy_id = _fantasy_photo_id_from_name(first_name, last_name)
-
-        photo_id = fantasy_id or player_id
-
-        if not photo_id or photo_id <= 0:
-            abort(404)
-
-        cache_key = str(photo_id)
-
-        if cache_key in _headshot_cache:
-            entry = _headshot_cache[cache_key]
-            if entry is None:
-                abort(404)
-            content, mime = entry
-            resp = make_response(content)
-            resp.headers["Content-Type"] = mime
-            resp.headers["Cache-Control"] = "public, max-age=86400"
-            return resp
-
-        cdn_urls = [
-            f"https://fantasy.afl.com.au/assets/media/players/afl/{photo_id}_450.png",
-            f"https://fantasy.afl.com.au/assets/mug-shots/afl/{photo_id}.webp",
-            f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/ChampIDImages/{photo_id}.png",
-        ]
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; TheFormAnalyst/1.0)"}
-
-        for url in cdn_urls:
-            try:
-                cdn_resp = _requests.get(url, timeout=5, headers=headers)
-                if cdn_resp.ok:
-                    mime = cdn_resp.headers.get("Content-Type", "image/png")
-                    entry = (cdn_resp.content, mime)
-                    if len(_headshot_cache) < _HEADSHOT_CACHE_MAX:
-                        _headshot_cache[cache_key] = entry
-                    resp = make_response(cdn_resp.content)
-                    resp.headers["Content-Type"] = mime
-                    resp.headers["Cache-Control"] = "public, max-age=86400"
-                    return resp
-            except Exception:
-                continue
-
-        if len(_headshot_cache) < _HEADSHOT_CACHE_MAX:
-            _headshot_cache[cache_key] = None
-        abort(404)
-
 
 # ─────────────────────────────────────────────
 # PRIVATE DB QUERY HELPERS
