@@ -127,7 +127,7 @@ login_manager.login_view = "login"
 login_manager.init_app(app)
 
 register_afl_routes(app, db)
-
+register_mma_routes(app, db)
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
