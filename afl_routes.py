@@ -490,6 +490,7 @@ def register_afl_routes(app, db):
                     "guernsey": player["guernsey"],
                     "height_cm": player["height_cm"],
                     "weight_kg": player["weight_kg"],
+                    "headshot_url": afl_player_headshot_url(player["player_id"]),
                     "season": effective_season,
                     "games_played": len(games),
                     "averages": avgs,
@@ -1262,10 +1263,67 @@ def register_afl_routes(app, db):
 
         return jsonify({"status": "ok", "stats_season": stats_season, "synced": results})
 
+    @app.route("/api/afl/debug")
+    @login_required
+    def api_afl_debug():
+        """Diagnostic endpoint — confirms logo and headshot keys in API payloads."""
+        year = request.args.get("year", CURRENT_YEAR, type=int)
+
+        fixtures = _db_get_fixtures(db, year=year)[:3]
+        standings = _db_get_standings(db, year=year)[:3]
+
+        fixture_sample = [
+            {k: v for k, v in f.items() if k in (
+                "id", "hteam", "hteamid", "ateam", "ateamid",
+                "hteam_logo_url", "ateam_logo_url",
+            )}
+            for f in fixtures
+        ]
+        standing_sample = [
+            {k: v for k, v in s.items() if k in (
+                "rank", "team", "teamid", "team_logo_url",
+            )}
+            for s in standings
+        ]
+
+        headshot_sample = None
+        try:
+            with db.engine.connect() as conn:
+                row = conn.execute(db.text(
+                    "SELECT player_id, player_first_name, player_last_name, "
+                    "player_headshot_url "
+                    "FROM afl_player_stats "
+                    "WHERE player_headshot_url IS NOT NULL LIMIT 1"
+                )).mappings().fetchone()
+            if row:
+                headshot_sample = dict(row)
+        except Exception as exc:
+            headshot_sample = {"error": str(exc)}
+
+        return jsonify({
+            "fixtures": fixture_sample,
+            "standings": standing_sample,
+            "headshot_sample": headshot_sample,
+        })
+
 
 # ─────────────────────────────────────────────
 # PRIVATE DB QUERY HELPERS
 # ─────────────────────────────────────────────
+
+# Squiggle stores logo paths as root-relative URLs (e.g. /wp-content/...).
+# Prefix them so browsers can actually load the images.
+_SQUIGGLE_SITE = "https://squiggle.com.au"
+
+
+def _abs_logo(url: str | None) -> str | None:
+    """Return an absolute logo URL, prefixing Squiggle's site for relative paths."""
+    if not url:
+        return None
+    if url.startswith("/"):
+        return _SQUIGGLE_SITE + url
+    return url
+
 
 def _db_current_round(db, year: int) -> int:
     sql = db.text(
@@ -1553,7 +1611,13 @@ def _db_get_fixtures(db, year: int, round_number: int | None = None) -> list[dic
     with db.engine.connect() as conn:
         rows = conn.execute(sql, params).mappings().fetchall()
 
-    return [dict(row) for row in rows]
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["hteam_logo_url"] = _abs_logo(d.get("hteam_logo_url"))
+        d["ateam_logo_url"] = _abs_logo(d.get("ateam_logo_url"))
+        result.append(d)
+    return result
 
 
 def _db_get_standings(db, year: int, round_number: int | None = None) -> list[dict]:
@@ -1579,7 +1643,12 @@ def _db_get_standings(db, year: int, round_number: int | None = None) -> list[di
     with db.engine.connect() as conn:
         rows = conn.execute(sql, params).mappings().fetchall()
 
-    return [dict(row) for row in rows]
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["team_logo_url"] = _abs_logo(d.get("team_logo_url"))
+        result.append(d)
+    return result
 
 
 def _db_get_props(
