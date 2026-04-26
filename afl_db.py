@@ -238,6 +238,10 @@ AFL_MIGRATIONS = [
 # Fits in PostgreSQL BIGINT and is consistent across all workers/restarts.
 _AFL_MIGRATION_LOCK_KEY = int(hashlib.md5(b"afl_migrations").hexdigest()[:16], 16) % (2 ** 63)
 
+# Squiggle returns logo paths as root-relative URLs (e.g. /wp-content/...).
+# Always prefix with this base so stored and returned URLs are absolute.
+SQUIGGLE_SITE = "https://squiggle.com.au"
+
 
 # ─────────────────────────────────────────────
 # NORMALISERS / COERCERS
@@ -989,6 +993,8 @@ def upsert_team_logos(db, teams: list[dict]) -> int:
             tid = team.get("id")
             name = team.get("name", "")
             logo = team.get("logo") or team.get("logo_url") or ""
+            if logo.startswith("/"):
+                logo = SQUIGGLE_SITE + logo
             abbrev = team.get("abbrev") or team.get("abbreviation") or ""
             if not tid or not name:
                 continue
