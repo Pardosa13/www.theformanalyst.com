@@ -21,6 +21,7 @@ import sys
 import json
 import time
 import re
+import tempfile
 import unicodedata
 import math
 import logging
@@ -50,6 +51,12 @@ if DATABASE_URL.startswith('postgres://'):
 # Model file lives in the repo root alongside this script
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'models', 'catboost_ufc_model.pkl')
+
+# Octagon-AI source-of-truth CSVs (the model was trained on these)
+_OCTAGON_CSV_BASE = (
+    'https://raw.githubusercontent.com/sbalagan22/Octagon-AI/main/newdata'
+)
+_OCTAGON_CSV_FILES = ['Fights.csv', 'Fighters.csv', 'Events.csv', 'current_glicko.csv']
 
 HEADERS = {
     'User-Agent': (
@@ -280,8 +287,122 @@ def scrape_fighter_profile(url):
         return {}
 
 
+def _parse_espn_schedule_json(data, seen_ids):
+    """
+    Extract events from the ESPN __espnfitt__ JSON on a schedule page.
+    Returns a list of event dicts with the same keys as scrape_upcoming_events.
+    """
+    events = []
+    today = date.today()
+    # ESPN schedule pages embed events under several possible paths
+    page = data.get('page', {})
+    content = page.get('content', {})
+    # Try 'schedule' key first, then 'events'
+    schedule = content.get('schedule') or {}
+    raw_events = []
+    if isinstance(schedule, dict):
+        for _, week_data in schedule.items():
+            if isinstance(week_data, list):
+                raw_events.extend(week_data)
+            elif isinstance(week_data, dict):
+                raw_events.extend(week_data.get('events', []))
+    if not raw_events:
+        raw_events = content.get('events', []) or []
+
+    for ev in raw_events:
+        ev_id = str(ev.get('id', ''))
+        if not ev_id or ev_id in seen_ids:
+            continue
+        name = ev.get('name') or ev.get('shortName') or ''
+        raw_date = ev.get('date', '')
+        try:
+            ev_date = pd.to_datetime(raw_date).date()
+        except Exception:
+            continue
+        links = ev.get('links', [])
+        ev_url = next((lk.get('href', '') for lk in links if 'href' in lk), '')
+        if ev_url and not ev_url.startswith('http'):
+            ev_url = 'https://www.espn.com' + ev_url
+        venues = ev.get('venues', []) or []
+        loc = ''
+        if venues:
+            v = venues[0]
+            addr = v.get('address', v.get('venue', {}).get('address', {}))
+            city = addr.get('city', '')
+            state = addr.get('state', '')
+            loc = ', '.join(filter(None, [city, state])) or 'TBD'
+        seen_ids.add(ev_id)
+        events.append({
+            'event_id': ev_id,
+            'event_name': name,
+            'date': ev_date,
+            'location': loc or 'TBD',
+            'url': ev_url,
+        })
+    return events
+
+
+def _fetch_espn_schedule_api(year, seen_ids):
+    """
+    Fetch UFC schedule from the ESPN public scoreboard API for a given year.
+    Returns a list of event dicts.
+    """
+    events = []
+    start = f"{year}0101"
+    end = f"{year}1231"
+    url = (
+        f"https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard"
+        f"?limit=100&dates={start}-{end}"
+    )
+    log.info(f"  Trying ESPN API: {url}")
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        log.warning(f"  ESPN API fetch failed: {e}")
+        return events
+
+    for ev in data.get('events', []):
+        ev_id = str(ev.get('id', ''))
+        if not ev_id or ev_id in seen_ids:
+            continue
+        name = ev.get('name') or ev.get('shortName') or ''
+        raw_date = ev.get('date', '')
+        try:
+            ev_date = pd.to_datetime(raw_date).date()
+        except Exception:
+            continue
+        links = ev.get('links', [])
+        ev_url = next((lk.get('href', '') for lk in links if 'href' in lk), '')
+        if ev_url and not ev_url.startswith('http'):
+            ev_url = 'https://www.espn.com' + ev_url
+        venues = ev.get('venues', [])
+        loc = 'TBD'
+        if venues:
+            addr = venues[0].get('address', {})
+            city = addr.get('city', '')
+            state = addr.get('state', '')
+            loc = ', '.join(filter(None, [city, state])) or 'TBD'
+        seen_ids.add(ev_id)
+        events.append({
+            'event_id': ev_id,
+            'event_name': name,
+            'date': ev_date,
+            'location': loc,
+            'url': ev_url,
+        })
+    return events
+
+
 def scrape_upcoming_events():
-    """Scrape ESPN UFC schedule for upcoming + most recent completed event."""
+    """Scrape ESPN UFC schedule for upcoming + most recent completed event.
+
+    Tries three strategies in order for each year:
+      1. ESPN public scoreboard API (JSON, most reliable)
+      2. __espnfitt__ JSON embedded in the schedule HTML page
+      3. DOM table parsing (legacy fallback)
+    """
     today = date.today()
     current_year = today.year
     next_year = current_year + 1
@@ -290,12 +411,51 @@ def scrape_upcoming_events():
     seen_ids = set()
 
     for year in [current_year, next_year]:
+        # ── Strategy 1: ESPN public API ───────────────────────────────────────
+        year_events = _fetch_espn_schedule_api(year, seen_ids)
+        if year_events:
+            log.info(f"  ESPN API returned {len(year_events)} events for {year}")
+            events.extend(year_events)
+            time.sleep(0.5)
+            continue
+
+        # ── Strategy 2 & 3: HTML page ─────────────────────────────────────────
         url = f"https://www.espn.com/mma/schedule/_/year/{year}/league/ufc"
-        log.info(f"Fetching schedule: {url}")
+        log.info(f"Fetching schedule HTML: {url}")
         soup = get_soup(url)
         if not soup:
             continue
 
+        # Strategy 2: __espnfitt__ JSON
+        _PATTERNS = [
+            "window['__espnfitt__']=",
+            'window["__espnfitt__"]=',
+            "window.__espnfitt__ =",
+            "window.__espnfitt__=",
+        ]
+        for script in soup.find_all('script'):
+            if not script.string:
+                continue
+            matched = next((p for p in _PATTERNS if p in script.string), None)
+            if matched:
+                try:
+                    json_str = script.string.split(matched)[1].strip().rstrip(';')
+                    data = json.loads(json_str)
+                    json_events = _parse_espn_schedule_json(data, seen_ids)
+                    if json_events:
+                        log.info(f"  __espnfitt__ JSON returned {len(json_events)} events for {year}")
+                        year_events = json_events
+                except Exception as e:
+                    log.warning(f"  Schedule JSON parse error: {e}")
+                break
+
+        if year_events:
+            events.extend(year_events)
+            time.sleep(1)
+            continue
+
+        # Strategy 3: DOM table fallback
+        log.info(f"  Falling back to DOM parsing for {year}")
         tables = soup.find_all('table', class_='Table')
         for table in tables:
             for row in table.find_all('tr', class_='Table__TR'):
@@ -328,7 +488,7 @@ def scrape_upcoming_events():
                     continue
 
                 seen_ids.add(event_id)
-                events.append({
+                year_events.append({
                     'event_id': event_id,
                     'event_name': event_name,
                     'date': event_date,
@@ -336,6 +496,7 @@ def scrape_upcoming_events():
                     'url': event_url,
                 })
 
+        events.extend(year_events)
         time.sleep(1)
 
     events.sort(key=lambda x: x['date'])
@@ -365,11 +526,23 @@ def scrape_event_details(event_url, event_id):
     fights = []
 
     # Strategy 1: embedded __espnfitt__ JSON (most reliable)
+    # ESPN uses both window['__espnfitt__']= and window.__espnfitt__ = variants
+    _ESPNFITT_PATTERNS = [
+        "window['__espnfitt__']=",
+        'window["__espnfitt__"]=',
+        "window.__espnfitt__ =",
+        "window.__espnfitt__=",
+    ]
     for script in soup.find_all('script'):
-        if script.string and "window['__espnfitt__']=" in script.string:
+        if not script.string:
+            continue
+        matched_pattern = next(
+            (p for p in _ESPNFITT_PATTERNS if p in script.string), None
+        )
+        if matched_pattern:
             try:
                 content = script.string
-                json_str = content.split("window['__espnfitt__']=")[1].strip().rstrip(';')
+                json_str = content.split(matched_pattern)[1].strip().rstrip(';')
                 data = json.loads(json_str)
                 gp = data.get('page', {}).get('content', {}).get('gamepackage', {})
                 if 'cardSegs' in gp:
@@ -558,6 +731,13 @@ def rebuild_stats_from_db(conn):
         result_1 = 'W' if winner == n1 else ('L' if winner else 'D')
         result_2 = 'L' if winner == n1 else ('W' if winner else 'D')
 
+        # fid1/fid2 may be NULL when the seed CSV didn't link fighter IDs;
+        # fall back to the name map so historical fights still build stats.
+        if not fid1:
+            fid1 = name_to_id.get(normalize_name(n1))
+        if not fid2:
+            fid2 = name_to_id.get(normalize_name(n2))
+
         for fid, result in [(fid1, result_1), (fid2, result_2)]:
             if not fid:
                 continue
@@ -577,6 +757,166 @@ def rebuild_stats_from_db(conn):
     return stats_tracker, name_to_id
 
 
+# ── Octagon-AI CSV stat builder ───────────────────────────────────────────────
+
+def download_octagon_data(tmpdir):
+    """Download Octagon-AI CSV files into *tmpdir* for stat computation."""
+    for fname in _OCTAGON_CSV_FILES:
+        url = f"{_OCTAGON_CSV_BASE}/{fname}"
+        dest = os.path.join(tmpdir, fname)
+        log.info(f"  Downloading {fname}…")
+        r = requests.get(url, timeout=60)
+        r.raise_for_status()
+        with open(dest, 'wb') as fh:
+            fh.write(r.content)
+        log.info(f"  {fname}: {len(r.content):,} bytes")
+
+
+def _parse_height_cm(val):
+    """Convert height string (e.g. \"5' 11\\\"\") to centimetres."""
+    try:
+        if pd.isnull(val):
+            return 175.0
+        s = str(val)
+        if "'" in s:
+            parts = s.split("'")
+            feet = int(parts[0].strip())
+            inches = int(parts[1].replace('"', '').strip()) if len(parts) > 1 and parts[1].strip() else 0
+            return round(feet * 30.48 + inches * 2.54, 1)
+        v = float(s)
+        return v if v > 100 else 175.0
+    except Exception:
+        return 175.0
+
+
+def _parse_reach_cm(val):
+    """Convert reach in inches to centimetres."""
+    try:
+        return 175.0 if pd.isnull(val) else round(float(val) * 2.54, 1)
+    except Exception:
+        return 175.0
+
+
+def _parse_ctrl_sec(val):
+    """Convert control-time string \"M:SS\" to seconds."""
+    s = str(val).strip()
+    if not s or s in ('nan', '--'):
+        return 0
+    try:
+        if ':' in s:
+            m, sec = map(int, s.split(':'))
+            return m * 60 + sec
+        return int(float(s))
+    except Exception:
+        return 0
+
+
+def rebuild_stats_from_csv(data_dir):
+    """
+    Build EMA stats tracker, name→ID map, and fighter bio dict from
+    Octagon-AI CSV files in *data_dir*.  Mirrors the stat-building logic
+    in Octagon-AI's predict_model.py so feature vectors are consistent
+    with the CatBoost model's training distribution.
+
+    Returns (stats_tracker, name_to_id, fighter_bio).
+    """
+    log.info("Building fighter stats from Octagon-AI CSV files…")
+
+    fights_df   = pd.read_csv(os.path.join(data_dir, 'Fights.csv'))
+    fighters_df = pd.read_csv(os.path.join(data_dir, 'Fighters.csv'))
+    events_df   = pd.read_csv(os.path.join(data_dir, 'Events.csv'))
+    glicko_df   = pd.read_csv(os.path.join(data_dir, 'current_glicko.csv'))
+
+    # ── Name → Fighter_Id + bio ───────────────────────────────
+    name_to_id, fighter_exp, fighter_bio = {}, {}, {}
+    for _, row in fighters_df.iterrows():
+        name = normalize_name(str(row.get('Full Name') or ''))
+        fid  = str(row['Fighter_Id'])
+        exp  = int(row.get('W', 0) or 0) + int(row.get('L', 0) or 0)
+        if name and (name not in name_to_id or exp > fighter_exp.get(name, -1)):
+            name_to_id[name] = fid
+            fighter_exp[name] = exp
+        if fid not in fighter_bio:
+            fighter_bio[fid] = {
+                'height':    _parse_height_cm(row.get('Height')),
+                'reach':     _parse_reach_cm(row.get('Reach')),
+                'stance':    str(row.get('Stance') or 'Orthodox'),
+                'glicko':    1500.0,
+                'glicko_rd': 350.0,
+            }
+
+    # ── Glicko-2 ratings from pre-computed CSV ────────────────
+    for _, row in glicko_df.iterrows():
+        fid = str(row['Fighter_Id'])
+        if fid in fighter_bio:
+            fighter_bio[fid]['glicko']    = float(row.get('Rating', 1500) or 1500)
+            fighter_bio[fid]['glicko_rd'] = float(row.get('RD',     350)  or 350)
+
+    # ── Build EMA stats chronologically ──────────────────────
+    fights_df = fights_df.merge(
+        events_df[['Event_Id', 'Date']], on='Event_Id', how='left'
+    )
+    fights_df['Date'] = pd.to_datetime(fights_df['Date'])
+    fights_df = fights_df.sort_values('Date').reset_index(drop=True)
+
+    stats_tracker = {}
+
+    def _f(row, col, default=0.0):
+        v = row.get(col)
+        return float(v) if pd.notnull(v) else default
+
+    def _t(t_str, rnd):
+        try:
+            m, s = map(int, str(t_str).split(':'))
+            return (int(rnd) - 1) * 300 + m * 60 + s
+        except Exception:
+            return 300
+
+    log.info(f"  Processing {len(fights_df):,} historical fights…")
+    for _, row in fights_df.iterrows():
+        fid1 = str(row.get('Fighter_Id_1', '') or '')
+        fid2 = str(row.get('Fighter_Id_2', '') or '')
+        if not fid1 or not fid2 or fid1 == 'nan' or fid2 == 'nan':
+            continue
+        res1 = str(row.get('Result_1', ''))
+        if res1 not in ('W', 'L', 'D'):
+            continue
+
+        fight_date = row['Date']
+        time_sec   = _t(row.get('Fight_Time', '5:00'), row.get('Round', 3))
+        res2       = 'L' if res1 == 'W' else ('W' if res1 == 'L' else 'D')
+
+        str1 = _f(row, 'STR_1');  str2 = _f(row, 'STR_2')
+        pct1 = max(_f(row, 'Sig. Str. %_1', 0.5), 0.01)  # guard division-by-zero
+        pct2 = max(_f(row, 'Sig. Str. %_2', 0.5), 0.01)
+        td1  = _f(row, 'TD_1');   td2  = _f(row, 'TD_2')
+        kd1  = _f(row, 'KD_1');   kd2  = _f(row, 'KD_2')
+        sub1 = _f(row, 'SUB_1');  sub2 = _f(row, 'SUB_2')
+        ctrl1 = _parse_ctrl_sec(row.get('Ctrl_1'))
+        ctrl2 = _parse_ctrl_sec(row.get('Ctrl_2'))
+
+        for fid, res, s_l, s_a, td_l, td_a, o_td_a, o_td_l, kd, sub, ctrl, sig, hd, bd, lg, dt, cl, gr in [
+            (fid1, res1, str1, str2, td1, td1/0.4 if td1 > 0 else 0, td2/0.4 if td2 > 0 else 0, td2,
+             kd1, sub1, ctrl1,
+             _f(row,'Sig. Str. %_1',0.45), _f(row,'Head_%_1',0.7), _f(row,'Body_%_1',0.15),
+             _f(row,'Leg_%_1',0.15), _f(row,'Distance_%_1',0.8), _f(row,'Clinch_%_1',0.1), _f(row,'Ground_%_1',0.1)),
+            (fid2, res2, str2, str1, td2, td2/0.4 if td2 > 0 else 0, td1/0.4 if td1 > 0 else 0, td1,
+             kd2, sub2, ctrl2,
+             _f(row,'Sig. Str. %_2',0.45), _f(row,'Head_%_2',0.7), _f(row,'Body_%_2',0.15),
+             _f(row,'Leg_%_2',0.15), _f(row,'Distance_%_2',0.8), _f(row,'Clinch_%_2',0.1), _f(row,'Ground_%_2',0.1)),
+        ]:
+            if fid not in stats_tracker:
+                stats_tracker[fid] = FighterStats()
+            stats_tracker[fid].update(
+                res, fight_date, time_sec,
+                s_l, s_a, td_l, td_a, o_td_a, o_td_l,
+                kd, sub, ctrl, sig, hd, bd, lg, dt, cl, gr,
+            )
+
+    log.info(f"  Stats built for {len(stats_tracker):,} fighters")
+    return stats_tracker, name_to_id, fighter_bio
+
+
 # ── Prediction model ──────────────────────────────────────────────────────────
 
 def load_model():
@@ -592,7 +932,36 @@ def load_model():
         return None
 
 
-def build_feature_row(st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0):
+def map_weight_class(raw):
+    """
+    Map ESPN weight class strings to the '### lbs' format the model was trained on.
+    Falls back to '155 lbs' (Lightweight) when the value is unrecognised.
+    """
+    if not raw:
+        return '155 lbs'
+    lc = str(raw).lower().strip()
+    # Already in correct format (e.g. "155 lbs") — pass through directly
+    if lc.endswith(' lbs') and lc.split()[0].isdigit():
+        return lc
+    mapping = {
+        'heavyweight': '265 lbs',
+        'light heavyweight': '205 lbs',
+        'middleweight': '185 lbs',
+        'welterweight': '170 lbs',
+        'lightweight': '155 lbs',
+        'featherweight': '145 lbs',
+        'bantamweight': '135 lbs',
+        'flyweight': '125 lbs',
+        "women's strawweight": '115 lbs',
+        "women's flyweight": '125 lbs',
+        "women's bantamweight": '135 lbs',
+        "women's featherweight": '145 lbs',
+    }
+    return mapping.get(lc, '155 lbs')
+
+
+def build_feature_row(st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0,
+                      weight_class=''):
     """Build a feature dict matching the CatBoost model's expected columns."""
     ath_age1 = st1.get('ath_age', 0)
     ath_age2 = st2.get('ath_age', 0)
@@ -628,16 +997,18 @@ def build_feature_row(st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0):
         'is_altitude': is_altitude,
         'stance_1': b1.get('stance') or 'Orthodox',
         'stance_2': b2.get('stance') or 'Orthodox',
-        'weight_class': '155 lbs',  # default; override if known
+        'weight_class': map_weight_class(weight_class),
     }
 
 
-def predict_fight(model, st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0):
+def predict_fight(model, st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0,
+                  weight_class=''):
     """Returns probability that fighter 1 wins."""
     if model is None:
         return 0.5
     try:
-        features = build_feature_row(st1, st2, b1, b2, g1, g2, is_apex, is_altitude)
+        features = build_feature_row(st1, st2, b1, b2, g1, g2, is_apex, is_altitude,
+                                     weight_class=weight_class)
         df = pd.DataFrame([features])
         prob = model.predict_proba(df)[0][1]
         return float(prob)
@@ -809,11 +1180,15 @@ def main():
     # Load model
     model = load_model()
 
-    # Rebuild stats from DB fight history
-    stats_tracker, name_to_id = rebuild_stats_from_db(conn)
-
-    # Load fighter bio
-    fighter_bio = load_fighters_bio(conn)
+    # Build stats from Octagon-AI CSV data (falls back to DB if download fails)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            download_octagon_data(tmpdir)
+            stats_tracker, name_to_id, fighter_bio = rebuild_stats_from_csv(tmpdir)
+    except Exception as e:
+        log.warning(f"CSV data unavailable ({e}); falling back to DB stats.")
+        stats_tracker, name_to_id = rebuild_stats_from_db(conn)
+        fighter_bio = load_fighters_bio(conn)
 
     # Scrape upcoming events
     log.info("Scraping ESPN schedule...")
@@ -861,7 +1236,8 @@ def main():
             apex = is_apex_event(event['event_name'], event['location'])
             alt = is_altitude(event['location'])
 
-            prob = predict_fight(model, st1, st2, b1, b2, g1, g2, apex, alt)
+            prob = predict_fight(model, st1, st2, b1, b2, g1, g2, apex, alt,
+                                weight_class=fight.get('weight_class', ''))
 
             winner = fight['fighter_1'] if prob > 0.5 else fight['fighter_2']
             confidence = f"{max(prob, 1 - prob) * 100:.1f}%"
