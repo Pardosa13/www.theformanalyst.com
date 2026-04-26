@@ -720,7 +720,7 @@ def upsert_fight(conn, event_id, fight):
                         round_ended = %s, time_ended = %s
                     WHERE id = %s
                 """, (r.get('winner'), r.get('method'),
-                      r.get('round'), r.get('time'), fight_id))
+                      parse_round(r.get('round')), r.get('time'), fight_id))
                 conn.commit()
             return fight_id
 
@@ -750,7 +750,7 @@ def upsert_fight(conn, event_id, fight):
             fight.get('f2_stats', {}).get('Record'),
             fight.get('result', {}).get('winner') if fight.get('result') else None,
             fight.get('result', {}).get('method') if fight.get('result') else None,
-            fight.get('result', {}).get('round') if fight.get('result') else None,
+            parse_round(fight.get('result', {}).get('round')) if fight.get('result') else None,
             fight.get('result', {}).get('time') if fight.get('result') else None,
         ))
         conn.commit()
