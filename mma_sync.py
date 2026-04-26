@@ -49,7 +49,7 @@ if DATABASE_URL.startswith('postgres://'):
 
 # Model file lives in the repo root alongside this script
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, 'models', 'catboost_ufc_model.pkl')
+MODEL_PATH = os.path.join(BASE_DIR, 'Models', 'catboost_ufc_model.pkl')
 
 HEADERS = {
     'User-Agent': (
