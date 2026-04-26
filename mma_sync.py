@@ -294,7 +294,7 @@ def _parse_espn_schedule_json(data, seen_ids):
     schedule = content.get('schedule') or {}
     raw_events = []
     if isinstance(schedule, dict):
-        for _week, week_data in schedule.items():
+        for _, week_data in schedule.items():
             if isinstance(week_data, list):
                 raw_events.extend(week_data)
             elif isinstance(week_data, dict):
@@ -316,7 +316,7 @@ def _parse_espn_schedule_json(data, seen_ids):
         ev_url = next((lk.get('href', '') for lk in links if 'href' in lk), '')
         if ev_url and not ev_url.startswith('http'):
             ev_url = 'https://www.espn.com' + ev_url
-        venues = ev.get('venues', []) or ev.get('competitions', [{}])
+        venues = ev.get('venues', []) or []
         loc = ''
         if venues:
             v = venues[0]
@@ -404,8 +404,6 @@ def scrape_upcoming_events():
     seen_ids = set()
 
     for year in [current_year, next_year]:
-        year_events = []
-
         # ── Strategy 1: ESPN public API ───────────────────────────────────────
         year_events = _fetch_espn_schedule_api(year, seen_ids)
         if year_events:
