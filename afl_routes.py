@@ -25,6 +25,7 @@ from afl_data import (
     CURRENT_YEAR,
     _normalise_prop_market,
     _normalise_team_name,
+    afl_player_headshot_url,
     calculate_disposal_edge,
     calculate_market_edge,
     fetch_afl_player_props,
@@ -40,6 +41,7 @@ from afl_data import (
     get_player_vs_opponent,
 )
 from afl_db import (
+    get_team_logo_map,
     log_sync,
     upsert_games,
     upsert_player_props,
@@ -164,6 +166,7 @@ def register_afl_routes(app, db):
                     "guernsey": player["guernsey"],
                     "height_cm": player["height_cm"],
                     "weight_kg": player["weight_kg"],
+                    "headshot_url": afl_player_headshot_url(player["player_id"]),
                     "season": effective_season,
                     "seasons_used": effective_seasons,
                     "games_played": len(games),
@@ -297,6 +300,7 @@ def register_afl_routes(app, db):
                 "guernsey": player["guernsey"],
                 "height_cm": player["height_cm"],
                 "weight_kg": player["weight_kg"],
+                "headshot_url": afl_player_headshot_url(player["player_id"]),
                 "season": effective_season,
                 "seasons_used": effective_seasons,
                 "games_played": len(games),
@@ -1532,8 +1536,12 @@ def _db_get_fixtures(db, year: int, round_number: int | None = None) -> list[dic
 
     sql = db.text(
         f"""
-        SELECT g.*
+        SELECT g.*,
+               hl.logo_url AS hteam_logo_url,
+               al.logo_url AS ateam_logo_url
         FROM afl_games g
+        LEFT JOIN afl_team_logos hl ON hl.squiggle_id = g.hteamid
+        LEFT JOIN afl_team_logos al ON al.squiggle_id = g.ateamid
         WHERE g.year = :year
           AND g.complete < 100
           {round_filter}
@@ -1553,17 +1561,18 @@ def _db_get_standings(db, year: int, round_number: int | None = None) -> list[di
 
     if round_number:
         params["round"] = round_number
-        round_filter = "AND round = :round"
+        round_filter = "AND s.round = :round"
     else:
-        round_filter = "AND round = (SELECT MAX(round) FROM afl_standings WHERE year = :year)"
+        round_filter = "AND s.round = (SELECT MAX(round) FROM afl_standings WHERE year = :year)"
 
     sql = db.text(
         f"""
-        SELECT *
-        FROM afl_standings
-        WHERE year = :year
+        SELECT s.*, tl.logo_url AS team_logo_url
+        FROM afl_standings s
+        LEFT JOIN afl_team_logos tl ON tl.squiggle_id = s.teamid
+        WHERE s.year = :year
           {round_filter}
-        ORDER BY rank ASC
+        ORDER BY s.rank ASC
         """
     )
 

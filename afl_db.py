@@ -218,6 +218,20 @@ AFL_SCHEMA_STATEMENTS = [
         synced_at   TIMESTAMP DEFAULT NOW()
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS afl_team_logos (
+        squiggle_id INTEGER PRIMARY KEY,
+        team_name   TEXT NOT NULL,
+        abbrev      TEXT,
+        logo_url    TEXT,
+        updated_at  TIMESTAMP DEFAULT NOW()
+    )
+    """,
+]
+
+# Columns added after initial schema deployment — run as migrations on startup.
+AFL_MIGRATIONS = [
+    "ALTER TABLE afl_player_stats ADD COLUMN IF NOT EXISTS player_headshot_url TEXT",
 ]
 
 
@@ -435,6 +449,8 @@ def init_afl_tables(db):
         with db.engine.begin() as conn:
             for statement in AFL_SCHEMA_STATEMENTS:
                 conn.execute(db.text(statement))
+            for migration in AFL_MIGRATIONS:
+                conn.execute(db.text(migration))
         logger.info("AFL tables initialised")
     except Exception as exc:
         logger.error("Failed to init AFL tables: %s", exc)
@@ -897,3 +913,59 @@ def log_sync(
             "status": status,
             "error": error,
         })
+
+
+# ─────────────────────────────────────────────
+# TEAM LOGOS
+# ─────────────────────────────────────────────
+
+def upsert_team_logos(db, teams: list[dict]) -> int:
+    """Upsert team logo rows from Squiggle ?q=teams response."""
+    if not teams:
+        return 0
+
+    sql = db.text("""
+        INSERT INTO afl_team_logos (squiggle_id, team_name, abbrev, logo_url, updated_at)
+        VALUES (:squiggle_id, :team_name, :abbrev, :logo_url, NOW())
+        ON CONFLICT (squiggle_id) DO UPDATE SET
+            team_name  = EXCLUDED.team_name,
+            abbrev     = EXCLUDED.abbrev,
+            logo_url   = EXCLUDED.logo_url,
+            updated_at = NOW()
+    """)
+
+    count = 0
+    with db.engine.begin() as conn:
+        for team in teams:
+            tid = team.get("id")
+            name = team.get("name", "")
+            logo = team.get("logo") or team.get("logo_url") or ""
+            abbrev = team.get("abbrev") or team.get("abbreviation") or ""
+            if not tid or not name:
+                continue
+            conn.execute(sql, {
+                "squiggle_id": tid,
+                "team_name": name,
+                "abbrev": abbrev,
+                "logo_url": logo,
+            })
+            count += 1
+
+    return count
+
+
+def get_team_logo_map(db) -> dict:
+    """Return {team_name_lower: logo_url} and {squiggle_id: logo_url} merged into one dict."""
+    sql = db.text("SELECT squiggle_id, team_name, logo_url FROM afl_team_logos WHERE logo_url IS NOT NULL AND logo_url != ''")
+    result = {}
+    try:
+        with db.engine.connect() as conn:
+            rows = conn.execute(sql).fetchall()
+        for row in rows:
+            sid, name, logo = row[0], row[1], row[2]
+            if logo:
+                result[name.lower()] = logo
+                result[str(sid)] = logo
+    except Exception as exc:
+        logger.warning("Could not load team logo map: %s", exc)
+    return result
