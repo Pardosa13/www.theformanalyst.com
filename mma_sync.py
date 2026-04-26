@@ -811,7 +811,88 @@ def _parse_ctrl_sec(val):
         return 0
 
 
-def rebuild_stats_from_csv(data_dir):
+def _sync_fighters_to_db(conn, fighters_df, glicko_df, stats_tracker, today):
+    """Write CSV fighters into mma_fighters so ESPN headshots can be linked by name."""
+    glicko_map = {}
+    for _, row in glicko_df.iterrows():
+        fid = str(row['Fighter_Id'])
+        glicko_map[fid] = {
+            'rating': float(row.get('Rating', 1500) or 1500),
+            'rd':     float(row.get('RD', 350)     or 350),
+            'vol':    float(row.get('Vol', 0.06)    or 0.06),
+        }
+
+    count = 0
+    with conn.cursor() as cur:
+        for _, row in fighters_df.iterrows():
+            fid  = str(row.get('Fighter_Id') or '').strip()
+            name = str(row.get('Full Name') or '').strip()
+            if not fid or not name:
+                continue
+            g  = glicko_map.get(fid, {'rating': 1500.0, 'rd': 350.0, 'vol': 0.06})
+            st = stats_tracker.get(fid)
+            sv = st.get_stat_vector(today) if st else {}
+            cur.execute("""
+                INSERT INTO mma_fighters (
+                    id, full_name, height_cm, weight_lbs, reach_cm, stance,
+                    wins, losses, draws,
+                    glicko_rating, glicko_rd, glicko_vol,
+                    ema_slpm, ema_sapm, ema_td_acc, ema_td_avg, ema_td_def,
+                    ema_kd_rate, ema_sub_rate, ema_ctrl_pct, ema_sig_str_acc,
+                    streak, win_rate, total_fights, recent_form,
+                    created_at, updated_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, NOW(), NOW()
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    full_name       = EXCLUDED.full_name,
+                    wins            = EXCLUDED.wins,
+                    losses          = EXCLUDED.losses,
+                    draws           = EXCLUDED.draws,
+                    glicko_rating   = EXCLUDED.glicko_rating,
+                    glicko_rd       = EXCLUDED.glicko_rd,
+                    glicko_vol      = EXCLUDED.glicko_vol,
+                    ema_slpm        = EXCLUDED.ema_slpm,
+                    ema_sapm        = EXCLUDED.ema_sapm,
+                    ema_td_acc      = EXCLUDED.ema_td_acc,
+                    ema_td_avg      = EXCLUDED.ema_td_avg,
+                    ema_td_def      = EXCLUDED.ema_td_def,
+                    ema_kd_rate     = EXCLUDED.ema_kd_rate,
+                    ema_sub_rate    = EXCLUDED.ema_sub_rate,
+                    ema_ctrl_pct    = EXCLUDED.ema_ctrl_pct,
+                    ema_sig_str_acc = EXCLUDED.ema_sig_str_acc,
+                    streak          = EXCLUDED.streak,
+                    win_rate        = EXCLUDED.win_rate,
+                    total_fights    = EXCLUDED.total_fights,
+                    recent_form     = EXCLUDED.recent_form,
+                    updated_at      = NOW()
+            """, (
+                fid, name,
+                _parse_height_cm(row.get('Height')),
+                float(row.get('Weight', 0) or 0) or None,
+                _parse_reach_cm(row.get('Reach')),
+                str(row.get('Stance') or 'Orthodox'),
+                int(row.get('W', 0) or 0),
+                int(row.get('L', 0) or 0),
+                int(row.get('D', 0) or 0),
+                g['rating'], g['rd'], g['vol'],
+                sv.get('slpm', 0.0), sv.get('sapm', 0.0),
+                sv.get('td_acc', 0.4), sv.get('td_avg', 1.0),
+                sv.get('td_def', 0.5), sv.get('kd_rate', 0.2),
+                sv.get('sub_rate', 0.2), sv.get('ctrl_rate', 10.0),
+                sv.get('sig_str_acc', 0.45),
+                sv.get('streak', 0), sv.get('win_rate', 0.5),
+                sv.get('wins', 0) + sv.get('losses', 0),
+                sv.get('recent_form', 'N/A'),
+            ))
+            count += 1
+    conn.commit()
+    log.info(f"  Synced {count:,} fighters to DB")
+
+
+def rebuild_stats_from_csv(data_dir, conn=None):
     """
     Build EMA stats tracker, name→ID map, and fighter bio dict from
     Octagon-AI CSV files in *data_dir*.  Mirrors the stat-building logic
@@ -914,6 +995,10 @@ def rebuild_stats_from_csv(data_dir):
             )
 
     log.info(f"  Stats built for {len(stats_tracker):,} fighters")
+
+    if conn is not None:
+        _sync_fighters_to_db(conn, fighters_df, glicko_df, stats_tracker, datetime.utcnow())
+
     return stats_tracker, name_to_id, fighter_bio
 
 
@@ -1261,7 +1346,7 @@ def main():
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             download_octagon_data(tmpdir)
-            stats_tracker, name_to_id, fighter_bio = rebuild_stats_from_csv(tmpdir)
+            stats_tracker, name_to_id, fighter_bio = rebuild_stats_from_csv(tmpdir, conn)
     except Exception as e:
         log.warning(f"CSV data unavailable ({e}); falling back to DB stats.")
         stats_tracker, name_to_id = rebuild_stats_from_db(conn)
