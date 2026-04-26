@@ -953,3 +953,180 @@ def test_resolve_stable_id_is_stable_across_calls():
     assert pid1 == pid2
 
 
+# ---------------------------------------------------------------------------
+# Deadlock fix — advisory lock guards AFL DDL migrations
+# ---------------------------------------------------------------------------
+
+def test_init_afl_tables_uses_advisory_lock():
+    """init_afl_tables must use pg_try_advisory_xact_lock to guard DDL migrations."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+
+    assert "pg_try_advisory_xact_lock" in source, (
+        "init_afl_tables does not use pg_try_advisory_xact_lock; "
+        "concurrent Gunicorn workers will deadlock on ALTER TABLE migrations"
+    )
+
+
+def test_init_afl_tables_advisory_lock_key_defined():
+    """A stable advisory lock key constant must be defined in afl_db.py."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+
+    assert "_AFL_MIGRATION_LOCK_KEY" in source, (
+        "afl_db.py does not define _AFL_MIGRATION_LOCK_KEY; "
+        "the advisory lock needs a stable integer key"
+    )
+
+
+def test_init_afl_tables_skips_migrations_when_lock_not_acquired():
+    """init_afl_tables must skip migrations when the advisory lock is not acquired."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # Find the body of init_afl_tables
+    fn_start = source.find("def init_afl_tables(")
+    assert fn_start != -1, "init_afl_tables not found"
+    fn_end = source.find("\ndef ", fn_start + 1)
+    fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
+
+    # Must branch on the lock result
+    assert "if acquired" in fn_body, (
+        "init_afl_tables does not branch on the advisory lock acquisition result; "
+        "non-lock-holding workers must skip migrations"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Player headshots — stored in DB during upsert
+# ---------------------------------------------------------------------------
+
+def _headshot_url_impl(player_id):
+    """Mirror of _headshot_url from afl_db.py."""
+    if not player_id or player_id <= 0:
+        return None
+    return (
+        f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/"
+        f"ChampIDImages/{player_id}.png"
+    )
+
+
+def test_headshot_url_positive_id():
+    """Positive player_id should produce a valid AFL CDN URL."""
+    url = _headshot_url_impl(12345)
+    assert url is not None
+    assert "12345" in url
+    assert url.startswith("https://www.afl.com.au/staticfile/")
+
+
+def test_headshot_url_negative_id_returns_none():
+    """Negative player_id (debut placeholder) must return None."""
+    assert _headshot_url_impl(-999) is None
+
+
+def test_headshot_url_zero_returns_none():
+    """Zero player_id must return None."""
+    assert _headshot_url_impl(0) is None
+
+
+def test_headshot_url_none_returns_none():
+    """None player_id must return None."""
+    assert _headshot_url_impl(None) is None
+
+
+def test_afl_db_has_headshot_url_helper():
+    """afl_db.py must define _headshot_url helper."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+    assert "def _headshot_url(" in source, (
+        "_headshot_url not found in afl_db.py"
+    )
+
+
+def test_upsert_player_stats_stores_headshot_url():
+    """upsert_player_stats must include player_headshot_url in the INSERT statement."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # Find the INSERT SQL in upsert_player_stats
+    fn_start = source.find("def upsert_player_stats(")
+    assert fn_start != -1, "upsert_player_stats not found in afl_db.py"
+    fn_end = source.find("\ndef ", fn_start + 1)
+    fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
+
+    assert "player_headshot_url" in fn_body, (
+        "upsert_player_stats does not include player_headshot_url in INSERT; "
+        "headshots will never be stored in the DB"
+    )
+    assert "_headshot_url(player_id)" in fn_body, (
+        "upsert_player_stats does not call _headshot_url(player_id) to compute the URL"
+    )
+
+
+def test_db_get_fixtures_joins_team_logos():
+    """_db_get_fixtures must JOIN afl_team_logos to attach logo URLs."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    fn_start = source.find("def _db_get_fixtures(")
+    assert fn_start != -1, "_db_get_fixtures not found"
+    fn_end = source.find("\ndef ", fn_start + 1)
+    fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
+
+    assert "hteam_logo_url" in fn_body, (
+        "_db_get_fixtures does not select hteam_logo_url; "
+        "team logos will not appear in fixtures"
+    )
+    assert "ateam_logo_url" in fn_body, (
+        "_db_get_fixtures does not select ateam_logo_url"
+    )
+    assert "afl_team_logos" in fn_body, (
+        "_db_get_fixtures does not join afl_team_logos"
+    )
+
+
+def test_db_get_standings_joins_team_logos():
+    """_db_get_standings must JOIN afl_team_logos to attach logo URLs."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    fn_start = source.find("def _db_get_standings(")
+    assert fn_start != -1, "_db_get_standings not found"
+    fn_end = source.find("\ndef ", fn_start + 1)
+    fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
+
+    assert "team_logo_url" in fn_body, (
+        "_db_get_standings does not select team_logo_url; "
+        "team logos will not appear in the ladder"
+    )
+    assert "afl_team_logos" in fn_body, (
+        "_db_get_standings does not join afl_team_logos"
+    )
