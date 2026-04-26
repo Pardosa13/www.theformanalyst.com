@@ -1385,47 +1385,29 @@ def register_afl_routes(app, db):
 # PRIVATE DB QUERY HELPERS
 # ─────────────────────────────────────────────
 def _fantasy_photo_id_from_name(first_name: str, last_name: str) -> "int | None":
-        """Look up the AFL Fantasy photo id for a player by name."""
-        key = f"{first_name.strip().lower()}|{last_name.strip().lower()}"
-
-        if key in _fantasy_player_id_cache:
-            return _fantasy_player_id_cache[key]
-
-        try:
-            resp = _requests.get(
-                "https://fantasy.afl.com.au/data/afl/players.json",
-                timeout=8,
-                headers={"User-Agent": "Mozilla/5.0 (compatible; TheFormAnalyst/1.0)"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-            players = data.get("players", data)
-
-            for p in players:
-                fn = str(
-                    p.get("first_name")
-                    or p.get("firstname")
-                    or p.get("given_name")
-                    or ""
-                ).strip().lower()
-
-                ln = str(
-                    p.get("last_name")
-                    or p.get("lastname")
-                    or p.get("surname")
-                    or ""
-                ).strip().lower()
-
-                pid = p.get("id") or p.get("player_id")
-
-                if fn == first_name.strip().lower() and ln == last_name.strip().lower() and pid:
-                    _fantasy_player_id_cache[key] = int(pid)
-                    return int(pid)
-        except Exception:
-            return None
-
+    """Look up the AFL Fantasy photo id for a player by name."""
+    key = f"{first_name.strip().lower()}|{last_name.strip().lower()}"
+    if key in _fantasy_player_id_cache:
+        return _fantasy_player_id_cache[key]
+    try:
+        resp = _requests.get(
+            "https://fantasy.afl.com.au/data/afl/players.json",
+            timeout=3,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; TheFormAnalyst/1.0)"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        players = data.get("players", data)
+        for p in players:
+            fn = str(p.get("first_name") or p.get("firstname") or p.get("given_name") or "").strip().lower()
+            ln = str(p.get("last_name") or p.get("lastname") or p.get("surname") or "").strip().lower()
+            pid = p.get("id") or p.get("player_id")
+            if fn == first_name.strip().lower() and ln == last_name.strip().lower() and pid:
+                _fantasy_player_id_cache[key] = int(pid)
+                return int(pid)
+    except Exception:
         return None
+    return None
 
 def _abs_logo(url: str | None) -> str | None:
     """Return an absolute logo URL, prefixing Squiggle's site for relative paths."""
