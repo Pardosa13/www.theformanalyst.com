@@ -317,6 +317,12 @@ with app.app_context():
         print("✓ AFL tables initialised")
     except Exception as e:
         print(f"AFL table init: {e}")
+    try:
+        from mma_models import init_mma_tables
+        init_mma_tables(db)
+        print("✓ MMA tables initialised")
+    except Exception as e:
+        print(f"MMA table init: {e}")
     # Create default admin if doesn't exist
     admin = User.query.filter_by(username='admin').first()
     if not admin:
