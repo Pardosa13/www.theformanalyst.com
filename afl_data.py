@@ -314,22 +314,20 @@ def fetch_squiggle_teams() -> list[dict]:
     return data.get("teams", [])
 
 
-def afl_player_headshot_url(
-    player_id: int | None,
-    first_name: str | None = None,
-    last_name: str | None = None,
-) -> str | None:
+def afl_player_headshot_url(player_id: int | None, first_name: str = "", last_name: str = "") -> str | None:
+    """
+    Return the public headshot URL for a player.
+
+    For positive (Fryzigg) player IDs, returns a proxy URL via /api/afl/player-headshot/
+    to avoid CORS/hotlink blocks on the CDN.
+    For zero/negative IDs (2026 debuts), returns None so the UI falls back to initials.
+    """
     if not player_id or player_id <= 0:
         return None
-
+    params = ""
     if first_name and last_name:
-        qs = urlencode({
-            "first_name": first_name,
-            "last_name": last_name,
-        })
-        return f"/api/afl/player-headshot/{player_id}?{qs}"
-
-    return f"/api/afl/player-headshot/{player_id}"
+        params = f"?first_name={first_name}&last_name={last_name}"
+    return f"/api/afl/player-headshot/{player_id}{params}"
 
 
 def fetch_squiggle_games(year: int, round_number: int = None) -> list[dict]:
