@@ -314,14 +314,15 @@ def fetch_squiggle_teams() -> list[dict]:
 
 
 def afl_player_headshot_url(player_id: int | None) -> str | None:
-    """Build an AFL player headshot URL from a Fryzigg ChampID.
+    """Return the server-side proxy URL for an AFL player headshot.
 
-    Uses the official AFL.com.au CDN which serves headshots keyed by ChampID.
+    Routes through /api/afl/player-headshot/<id> so the server fetches from
+    the AFL CDN, avoiding cross-origin hotlink blocks.
     Returns None for invalid/negative IDs (debut placeholders).
     """
     if not player_id or player_id <= 0:
         return None
-    return f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/ChampIDImages/{player_id}.png"
+    return f"/api/afl/player-headshot/{player_id}"
 
 
 def fetch_squiggle_games(year: int, round_number: int = None) -> list[dict]:

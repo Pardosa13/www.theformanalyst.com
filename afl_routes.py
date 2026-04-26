@@ -18,8 +18,13 @@ import logging
 import time
 from collections import defaultdict
 
-from flask import current_app, jsonify, render_template, request
+import requests as _requests
+from flask import abort, current_app, jsonify, make_response, render_template, request
 from flask_login import login_required
+
+# Simple in-memory cache for player headshot images: player_id -> (bytes, mime) | None
+_headshot_cache: dict[int, tuple[bytes, str] | None] = {}
+_HEADSHOT_CACHE_MAX = 2000
 
 from afl_data import (
     CURRENT_YEAR,
@@ -1306,6 +1311,48 @@ def register_afl_routes(app, db):
             "standings": standing_sample,
             "headshot_sample": headshot_sample,
         })
+
+    @app.route("/api/afl/player-headshot/<int:player_id>")
+    @login_required
+    def api_afl_player_headshot(player_id):
+        """Proxy AFL player headshot images through this server to avoid CDN hotlink blocks."""
+        if player_id <= 0:
+            abort(404)
+
+        if player_id in _headshot_cache:
+            entry = _headshot_cache[player_id]
+            if entry is None:
+                abort(404)
+            content, mime = entry
+            resp = make_response(content)
+            resp.headers["Content-Type"] = mime
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+
+        cdn_urls = [
+            f"https://fantasy.afl.com.au/assets/mug-shots/afl/{player_id}.webp",
+            f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/ChampIDImages/{player_id}.png",
+        ]
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; TheFormAnalyst/1.0)"}
+
+        for url in cdn_urls:
+            try:
+                cdn_resp = _requests.get(url, timeout=5, headers=headers)
+                if cdn_resp.ok:
+                    mime = cdn_resp.headers.get("Content-Type", "image/png")
+                    entry = (cdn_resp.content, mime)
+                    if len(_headshot_cache) < _HEADSHOT_CACHE_MAX:
+                        _headshot_cache[player_id] = entry
+                    resp = make_response(cdn_resp.content)
+                    resp.headers["Content-Type"] = mime
+                    resp.headers["Cache-Control"] = "public, max-age=86400"
+                    return resp
+            except Exception:
+                continue
+
+        if len(_headshot_cache) < _HEADSHOT_CACHE_MAX:
+            _headshot_cache[player_id] = None
+        abort(404)
 
 
 # ─────────────────────────────────────────────
