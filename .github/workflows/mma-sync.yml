@@ -7,6 +7,9 @@ on:
     - cron: '0 9 * * 0'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   mma-sync:
     runs-on: ubuntu-latest

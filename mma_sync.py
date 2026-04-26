@@ -606,12 +606,15 @@ def load_model():
 
 def map_weight_class(raw):
     """
-    Map ESPN weight class strings to the '###  lbs' format the model was trained on.
+    Map ESPN weight class strings to the '### lbs' format the model was trained on.
     Falls back to '155 lbs' (Lightweight) when the value is unrecognised.
     """
     if not raw:
         return '155 lbs'
     lc = str(raw).lower().strip()
+    # Already in correct format (e.g. "155 lbs") — pass through directly
+    if lc.endswith(' lbs') and lc.split()[0].isdigit():
+        return lc
     mapping = {
         'heavyweight': '265 lbs',
         'light heavyweight': '205 lbs',
@@ -625,16 +628,6 @@ def map_weight_class(raw):
         "women's flyweight": '125 lbs',
         "women's bantamweight": '135 lbs',
         "women's featherweight": '145 lbs',
-        # numeric passthrough (already in expected format)
-        '265 lbs': '265 lbs',
-        '205 lbs': '205 lbs',
-        '185 lbs': '185 lbs',
-        '170 lbs': '170 lbs',
-        '155 lbs': '155 lbs',
-        '145 lbs': '145 lbs',
-        '135 lbs': '135 lbs',
-        '125 lbs': '125 lbs',
-        '115 lbs': '115 lbs',
     }
     return mapping.get(lc, '155 lbs')
 
