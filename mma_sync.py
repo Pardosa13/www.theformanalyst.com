@@ -887,8 +887,8 @@ def rebuild_stats_from_csv(data_dir):
         res2       = 'L' if res1 == 'W' else ('W' if res1 == 'L' else 'D')
 
         str1 = _f(row, 'STR_1');  str2 = _f(row, 'STR_2')
-        pct1 = _f(row, 'Sig. Str. %_1', 0.5) or 0.01
-        pct2 = _f(row, 'Sig. Str. %_2', 0.5) or 0.01
+        pct1 = max(_f(row, 'Sig. Str. %_1', 0.5), 0.01)  # guard division-by-zero
+        pct2 = max(_f(row, 'Sig. Str. %_2', 0.5), 0.01)
         td1  = _f(row, 'TD_1');   td2  = _f(row, 'TD_2')
         kd1  = _f(row, 'KD_1');   kd2  = _f(row, 'KD_2')
         sub1 = _f(row, 'SUB_1');  sub2 = _f(row, 'SUB_2')
