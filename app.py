@@ -18,6 +18,7 @@ from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessa
 from puntingform_service import PuntingFormService
 from ladbrokes import match_race_uuid, fetch_race_odds
 from afl_routes import register_afl_routes, afl_nightly_sync
+from mma_routes import register_mma_routes
 
 import logging
 import sys
