@@ -688,6 +688,9 @@ body.modal-open .main-container {
                             <a class="nav-link {{ 'active' if request.endpoint == 'afl_hub' }}" href="{{ url_for('afl_hub') }}">
     🏉 AFL
 </a>
+                 <a class="nav-link {{ 'active' if request.endpoint in ['mma.mma_hub'] }}" href="{{ url_for('mma.mma_hub') }}">
+                                🥊 MMA
+                            </a>
                         </li>
                         {% if current_user.is_admin %}
                         <li class="nav-item">
