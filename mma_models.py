@@ -134,6 +134,18 @@ def init_mma_tables(db):
     # Register all models then create tables
     db.create_all()
 
+    # Add columns that may be missing from pre-existing tables (CREATE TABLE IF NOT EXISTS
+    # never adds new columns to tables that already exist).
+    _migrations = [
+        "ALTER TABLE mma_fighters ADD COLUMN IF NOT EXISTS espn_url VARCHAR(500)",
+        "ALTER TABLE mma_fighters ADD COLUMN IF NOT EXISTS headshot_url VARCHAR(500)",
+        "ALTER TABLE mma_events   ADD COLUMN IF NOT EXISTS espn_url VARCHAR(500)",
+    ]
+    with db.engine.connect() as _conn:
+        for _sql in _migrations:
+            _conn.execute(db.text(_sql))
+        _conn.commit()
+
     return {
         'MMAFighter': MMAFighter,
         'MMAEvent': MMAEvent,
