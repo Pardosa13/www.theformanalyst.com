@@ -127,6 +127,7 @@ login_manager.login_view = "login"
 login_manager.init_app(app)
 
 register_afl_routes(app, db)
+print([r.rule for r in app.url_map.iter_rules() if 'headshot' in r.rule])
 register_mma_routes(app, db)
 @login_manager.user_loader
 def load_user(user_id):
