@@ -1285,19 +1285,11 @@ def register_afl_routes(app, db):
     @app.route("/api/afl/player-headshot/<int:player_id>")
     def api_afl_player_headshot(player_id):
         """Proxy AFL player headshot images through this server to avoid CDN hotlink blocks."""
-        first_name = request.args.get("first_name")
-        last_name = request.args.get("last_name")
-
-        fantasy_id = None
-        if first_name and last_name:
-            fantasy_id = _fantasy_photo_id_from_name(first_name, last_name)
-
-        photo_id = fantasy_id or player_id
-
-        if not photo_id or photo_id <= 0:
+        if not player_id or player_id <= 0:
             abort(404)
 
-        cache_key = str(photo_id)
+        # Always cache under player_id so frontend and direct requests share the same slot.
+        cache_key = str(player_id)
 
         if cache_key in _headshot_cache:
             entry = _headshot_cache[cache_key]
@@ -1309,10 +1301,21 @@ def register_afl_routes(app, db):
             resp.headers["Cache-Control"] = "public, max-age=86400"
             return resp
 
+        first_name = request.args.get("first_name")
+        last_name = request.args.get("last_name")
+
+        fantasy_id = None
+        if first_name and last_name:
+            fantasy_id = _fantasy_photo_id_from_name(first_name, last_name)
+
+        # fantasy_id is the AFL Fantasy photo ID; player_id is the ChampID.
+        # They are different ID spaces — keep them separate in the URL list.
+        photo_id = fantasy_id or player_id
         cdn_urls = [
             f"https://fantasy.afl.com.au/assets/media/players/afl/{photo_id}_450.png",
             f"https://fantasy.afl.com.au/assets/mug-shots/afl/{photo_id}.webp",
-            f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/ChampIDImages/{photo_id}.png",
+            # ChampID URL must use the original player_id, not the fantasy ID.
+            f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/ChampIDImages/{player_id}.png",
         ]
         headers = {"User-Agent": "Mozilla/5.0 (compatible; TheFormAnalyst/1.0)"}
 
