@@ -686,7 +686,15 @@ def upsert_event(conn, event):
             event.get('url', ''),
         ))
     conn.commit()
-
+  
+def parse_round(val):
+    """Convert 'R3' or 3 or '3' to int, or None."""
+    if val is None:
+        return None
+    try:
+        return int(str(val).replace('R', '').replace('r', '').strip())
+    except (ValueError, TypeError):
+        return None
 
 def upsert_fight(conn, event_id, fight):
     """Insert fight if not already present. Returns fight DB id."""
