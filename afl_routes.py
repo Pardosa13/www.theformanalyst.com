@@ -22,8 +22,9 @@ import requests as _requests
 from flask import abort, current_app, jsonify, make_response, render_template, request
 from flask_login import login_required
 
-# Simple in-memory cache for player headshot images: player_id -> (bytes, mime) | None
-_headshot_cache: dict[int, tuple[bytes, str] | None] = {}
+# Simple in-memory cache for player headshot images: str(photo_id) -> (bytes, mime) | None
+_headshot_cache: dict[str, tuple[bytes, str] | None] = {}
+_fantasy_player_id_cache: dict[str, int] = {}
 _HEADSHOT_CACHE_MAX = 2000
 
 from afl_data import (
@@ -1312,15 +1313,69 @@ def register_afl_routes(app, db):
             "headshot_sample": headshot_sample,
         })
 
+    def _fantasy_photo_id_from_name(first_name: str, last_name: str) -> "int | None":
+        """Look up the AFL Fantasy photo id for a player by name."""
+        key = f"{first_name.strip().lower()}|{last_name.strip().lower()}"
+
+        if key in _fantasy_player_id_cache:
+            return _fantasy_player_id_cache[key]
+
+        try:
+            resp = _requests.get(
+                "https://fantasy.afl.com.au/data/afl/players.json",
+                timeout=8,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; TheFormAnalyst/1.0)"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            players = data.get("players", data)
+
+            for p in players:
+                fn = str(
+                    p.get("first_name")
+                    or p.get("firstname")
+                    or p.get("given_name")
+                    or ""
+                ).strip().lower()
+
+                ln = str(
+                    p.get("last_name")
+                    or p.get("lastname")
+                    or p.get("surname")
+                    or ""
+                ).strip().lower()
+
+                pid = p.get("id") or p.get("player_id")
+
+                if fn == first_name.strip().lower() and ln == last_name.strip().lower() and pid:
+                    _fantasy_player_id_cache[key] = int(pid)
+                    return int(pid)
+        except Exception:
+            return None
+
+        return None
+
     @app.route("/api/afl/player-headshot/<int:player_id>")
     @login_required
     def api_afl_player_headshot(player_id):
         """Proxy AFL player headshot images through this server to avoid CDN hotlink blocks."""
-        if player_id <= 0:
+        first_name = request.args.get("first_name")
+        last_name = request.args.get("last_name")
+
+        fantasy_id = None
+        if first_name and last_name:
+            fantasy_id = _fantasy_photo_id_from_name(first_name, last_name)
+
+        photo_id = fantasy_id or player_id
+
+        if not photo_id or photo_id <= 0:
             abort(404)
 
-        if player_id in _headshot_cache:
-            entry = _headshot_cache[player_id]
+        cache_key = str(photo_id)
+
+        if cache_key in _headshot_cache:
+            entry = _headshot_cache[cache_key]
             if entry is None:
                 abort(404)
             content, mime = entry
@@ -1330,8 +1385,8 @@ def register_afl_routes(app, db):
             return resp
 
         cdn_urls = [
-            f"https://fantasy.afl.com.au/assets/mug-shots/afl/{player_id}.webp",
-            f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/ChampIDImages/{player_id}.png",
+            f"https://fantasy.afl.com.au/assets/mug-shots/afl/{photo_id}.webp",
+            f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/ChampIDImages/{photo_id}.png",
         ]
         headers = {"User-Agent": "Mozilla/5.0 (compatible; TheFormAnalyst/1.0)"}
 
@@ -1342,7 +1397,7 @@ def register_afl_routes(app, db):
                     mime = cdn_resp.headers.get("Content-Type", "image/png")
                     entry = (cdn_resp.content, mime)
                     if len(_headshot_cache) < _HEADSHOT_CACHE_MAX:
-                        _headshot_cache[player_id] = entry
+                        _headshot_cache[cache_key] = entry
                     resp = make_response(cdn_resp.content)
                     resp.headers["Content-Type"] = mime
                     resp.headers["Cache-Control"] = "public, max-age=86400"
@@ -1351,7 +1406,7 @@ def register_afl_routes(app, db):
                 continue
 
         if len(_headshot_cache) < _HEADSHOT_CACHE_MAX:
-            _headshot_cache[player_id] = None
+            _headshot_cache[cache_key] = None
         abort(404)
 
 
