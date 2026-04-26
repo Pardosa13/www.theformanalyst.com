@@ -1,0 +1,716 @@
+{% extends "base.html" %}
+
+{% block title %}MMA Hub — The Form Analyst{% endblock %}
+
+{% block extra_css %}
+<style>
+/* ── Layout ───────────────────────────────────────────────── */
+.mma-wrap { padding-bottom: 80px; }
+
+.mma-header {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.mma-header h2 {
+  font-size: 1.5rem;
+  font-weight: 800;
+  margin: 0 0 3px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mma-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(239,68,68,.18), rgba(220,38,38,.12));
+  border: 1px solid rgba(239,68,68,.35);
+  color: #ef4444;
+  letter-spacing: .05em;
+}
+.mma-header p { margin: 0; font-size: 12px; color: var(--text-muted); }
+
+/* ── Event tabs ───────────────────────────────────────────── */
+.event-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.event-tab {
+  padding: 7px 16px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border-mid);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  transition: all 0.15s;
+  font-family: 'DM Mono', monospace;
+}
+.event-tab:hover { border-color: var(--border-accent); color: var(--text-primary); }
+.event-tab.active {
+  background: linear-gradient(135deg, rgba(239,68,68,.15), rgba(220,38,38,.08));
+  border-color: rgba(239,68,68,.4);
+  color: #ef4444;
+}
+.event-tab.completed { opacity: 0.6; }
+
+/* ── Event header card ────────────────────────────────────── */
+.event-hero {
+  background: linear-gradient(135deg, rgba(239,68,68,.08), transparent);
+  border: 1px solid rgba(239,68,68,.2);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+}
+.event-hero::before {
+  content: '🥊';
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 60px;
+  opacity: 0.08;
+}
+.event-hero h3 {
+  font-size: 1.4rem;
+  font-weight: 800;
+  margin: 0 0 6px;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+.event-meta { display: flex; gap: 16px; flex-wrap: wrap; }
+.event-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: 'DM Mono', monospace;
+}
+
+/* ── Section labels ───────────────────────────────────────── */
+.card-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 20px 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+/* ── Fight card ───────────────────────────────────────────── */
+.fight-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 12px;
+  transition: border-color 0.15s;
+  cursor: pointer;
+}
+.fight-card:hover { border-color: var(--border-mid); }
+.fight-card.title-fight {
+  border-color: rgba(245,158,11,.3);
+  background: linear-gradient(135deg, rgba(245,158,11,.04), var(--bg-surface));
+}
+
+/* ── VS layout ────────────────────────────────────────────── */
+.fight-vs {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 16px;
+  align-items: center;
+}
+.fighter-side { display: flex; flex-direction: column; }
+.fighter-side.right { align-items: flex-end; text-align: right; }
+
+.fighter-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--bg-elevated), var(--bg-hover));
+  border: 2px solid var(--border-mid);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+.fighter-side.right .fighter-avatar { margin-left: auto; }
+
+.fighter-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+  line-height: 1.2;
+}
+.fighter-record {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'DM Mono', monospace;
+}
+.fighter-stats-mini {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.vs-divider {
+  font-size: 1rem;
+  font-weight: 900;
+  color: #ef4444;
+  padding: 0 4px;
+}
+
+/* ── Prediction bar ───────────────────────────────────────── */
+.pred-bar-wrap { margin-top: 14px; }
+.pred-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 5px;
+  font-family: 'DM Mono', monospace;
+}
+.pred-pct-1 { color: #3b82f6; }
+.pred-pct-2 { color: #ef4444; }
+.pred-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+  display: flex;
+}
+.pred-bar-fill-1 {
+  background: #3b82f6;
+  transition: width 0.5s ease;
+}
+.pred-bar-fill-2 {
+  background: #ef4444;
+  transition: width 0.5s ease;
+}
+.pred-winner-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  text-align: center;
+  font-family: 'DM Mono', monospace;
+}
+.pred-winner-label strong { color: var(--text-secondary); }
+
+/* ── Fight meta badges ────────────────────────────────────── */
+.fight-meta-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.fight-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+.fight-badge.title { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.3); color: #f59e0b; }
+.fight-badge.main  { background: rgba(102,126,234,.10); border-color: var(--border-accent); color: var(--accent); }
+
+/* ── Result overlay ───────────────────────────────────────── */
+.fight-result {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(16,185,129,.08);
+  border: 1px solid rgba(16,185,129,.2);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: 'DM Mono', monospace;
+}
+.fight-result strong { color: #10b981; }
+
+/* ── Radar placeholder ────────────────────────────────────── */
+.radar-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+/* ── Fighter modal ────────────────────────────────────────── */
+.mma-modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.75);
+  z-index: 9000;
+  padding: 20px;
+  overflow-y: auto;
+}
+.mma-modal-overlay.active { display: flex; align-items: flex-start; justify-content: center; }
+.mma-modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-mid);
+  border-radius: 20px;
+  padding: 28px;
+  width: 100%;
+  max-width: 600px;
+  margin: auto;
+}
+.mma-modal-close {
+  float: right;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+/* ── Stat grid ────────────────────────────────────────────── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 16px;
+}
+.stat-cell {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: center;
+}
+.stat-cell .val {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: 'DM Mono', monospace;
+}
+.stat-cell .lbl { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+/* ── Loading ──────────────────────────────────────────────── */
+.mma-loading {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+}
+.mma-loading .spinner {
+  width: 32px; height: 32px;
+  border: 3px solid var(--border-mid);
+  border-top-color: #ef4444;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto 16px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Empty state ──────────────────────────────────────────── */
+.mma-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mma-wrap">
+
+  <!-- Header -->
+  <div class="mma-header">
+    <div>
+      <h2>
+        🥊 MMA Hub
+        <span class="mma-badge">AI PREDICTIONS</span>
+      </h2>
+      <p>Upcoming UFC events · CatBoost + Glicko-2 model · Updated weekly</p>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <span class="round-pill" id="last-updated">Loading...</span>
+    </div>
+  </div>
+
+  <!-- Event tabs -->
+  <div class="event-tabs" id="event-tabs"></div>
+
+  <!-- Main content area -->
+  <div id="mma-content">
+    <div class="mma-loading">
+      <div class="spinner"></div>
+      <p>Loading fight cards...</p>
+    </div>
+  </div>
+
+</div>
+
+<!-- Fighter modal -->
+<div class="mma-modal-overlay" id="fighter-modal">
+  <div class="mma-modal">
+    <button class="mma-modal-close" onclick="closeModal()">×</button>
+    <div id="modal-content"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+let allEvents = [];
+let activeEventIdx = 0;
+
+// ── Fetch events ─────────────────────────────────────────────
+async function loadEvents() {
+  try {
+    const res = await fetch('/api/mma/events');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    allEvents = await res.json();
+    if (!allEvents.length) {
+      showEmpty('No upcoming events found. Check back after the weekly sync.');
+      return;
+    }
+    renderTabs();
+    renderEvent(0);
+    document.getElementById('last-updated').textContent = 'Live';
+  } catch (e) {
+    showEmpty('Failed to load events: ' + e.message);
+  }
+}
+
+// ── Tabs ─────────────────────────────────────────────────────
+function renderTabs() {
+  const container = document.getElementById('event-tabs');
+  container.innerHTML = allEvents.map((ev, i) => {
+    const label = ev.event_name.replace('UFC Fight Night: ', '').replace('UFC ', '');
+    const cls = [
+      'event-tab',
+      i === 0 ? 'active' : '',
+      ev.is_completed ? 'completed' : '',
+    ].filter(Boolean).join(' ');
+    return `<button class="${cls}" onclick="selectEvent(${i})">${label}</button>`;
+  }).join('');
+}
+
+function selectEvent(idx) {
+  activeEventIdx = idx;
+  document.querySelectorAll('.event-tab').forEach((t, i) => {
+    t.classList.toggle('active', i === idx);
+  });
+  renderEvent(idx);
+}
+
+// ── Render event ─────────────────────────────────────────────
+function renderEvent(idx) {
+  const ev = allEvents[idx];
+  const content = document.getElementById('mma-content');
+
+  const dateStr = ev.date ? new Date(ev.date + 'T00:00:00').toLocaleDateString('en-AU', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  }) : 'TBD';
+
+  const mainCard = ev.fights.filter(f => f.is_main_card);
+  const prelims  = ev.fights.filter(f => !f.is_main_card);
+
+  content.innerHTML = `
+    <div class="event-hero">
+      <h3>${ev.event_name}</h3>
+      <div class="event-meta">
+        <span class="event-meta-item">📅 ${dateStr}</span>
+        <span class="event-meta-item">📍 ${ev.location || 'TBD'}</span>
+        ${ev.is_completed ? '<span class="event-meta-item" style="color:#10b981">✓ Completed</span>' : '<span class="event-meta-item" style="color:#f59e0b">⏳ Upcoming</span>'}
+      </div>
+    </div>
+
+    ${mainCard.length ? `
+      <div class="card-section-label">Main Card</div>
+      ${mainCard.map(f => fightCardHTML(f)).join('')}
+    ` : ''}
+
+    ${prelims.length ? `
+      <div class="card-section-label">Preliminary Card</div>
+      ${prelims.map(f => fightCardHTML(f)).join('')}
+    ` : ''}
+
+    ${!ev.fights.length ? '<div class="mma-empty">Fight card not yet announced.</div>' : ''}
+  `;
+}
+
+// ── Fight card HTML ───────────────────────────────────────────
+function fightCardHTML(fight) {
+  const pred = fight.prediction;
+  const f1 = fight.fighter_1;
+  const f2 = fight.fighter_2;
+
+  const f1Rec = fight.f1_stats?.Record || '';
+  const f2Rec = fight.f2_stats?.Record || '';
+
+  let predHTML = '';
+  if (pred) {
+    const p1 = (pred.f1_prob * 100).toFixed(1);
+    const p2 = (pred.f2_prob * 100).toFixed(1);
+    const winnerLabel = pred.winner === f1 ? `${f1} favoured` : `${f2} favoured`;
+    predHTML = `
+      <div class="pred-bar-wrap">
+        <div class="pred-bar-labels">
+          <span class="pred-pct-1">${p1}%</span>
+          <span style="color:var(--text-muted);font-size:10px">WIN PROBABILITY</span>
+          <span class="pred-pct-2">${p2}%</span>
+        </div>
+        <div class="pred-bar">
+          <div class="pred-bar-fill-1" style="width:${p1}%"></div>
+          <div class="pred-bar-fill-2" style="width:${p2}%"></div>
+        </div>
+        <div class="pred-winner-label">🏆 <strong>${pred.winner}</strong> · ${pred.confidence} confidence</div>
+      </div>
+    `;
+  } else if (!fight.result) {
+    predHTML = `<div class="pred-winner-label" style="margin-top:10px">Prediction pending</div>`;
+  }
+
+  let resultHTML = '';
+  if (fight.result?.winner) {
+    const r = fight.result;
+    resultHTML = `
+      <div class="fight-result">
+        <strong>${r.winner}</strong> won by ${r.method || 'decision'}
+        ${r.round ? `— R${r.round} ${r.time || ''}` : ''}
+      </div>
+    `;
+  }
+
+  const badges = [
+    fight.is_title_fight ? '<span class="fight-badge title">🏆 Title Fight</span>' : '',
+    fight.is_main_card   ? '<span class="fight-badge main">Main Card</span>' : '',
+    fight.weight_class   ? `<span class="fight-badge">${fight.weight_class}</span>` : '',
+  ].filter(Boolean).join('');
+
+  const cardCls = ['fight-card', fight.is_title_fight ? 'title-fight' : ''].filter(Boolean).join(' ');
+
+  return `
+    <div class="${cardCls}" onclick="openFighterModal('${escHtml(f1)}', '${escHtml(f2)}', ${fight.id})">
+      <div class="fight-vs">
+        <div class="fighter-side">
+          <div class="fighter-avatar">🥊</div>
+          <div class="fighter-name">${escHtml(f1)}</div>
+          ${f1Rec ? `<div class="fighter-record">${escHtml(f1Rec)}</div>` : ''}
+          ${fight.f1_stats?.Stance ? `<div class="fighter-stats-mini">${fight.f1_stats.Stance}</div>` : ''}
+        </div>
+        <div class="vs-divider">VS</div>
+        <div class="fighter-side right">
+          <div class="fighter-avatar">🥊</div>
+          <div class="fighter-name">${escHtml(f2)}</div>
+          ${f2Rec ? `<div class="fighter-record">${escHtml(f2Rec)}</div>` : ''}
+          ${fight.f2_stats?.Stance ? `<div class="fighter-stats-mini">${fight.f2_stats.Stance}</div>` : ''}
+        </div>
+      </div>
+
+      ${predHTML}
+      ${resultHTML}
+
+      ${badges ? `<div class="fight-meta-row">${badges}</div>` : ''}
+    </div>
+  `;
+}
+
+// ── Fighter modal ─────────────────────────────────────────────
+async function openFighterModal(f1Name, f2Name, fightId) {
+  document.getElementById('fighter-modal').classList.add('active');
+  const mc = document.getElementById('modal-content');
+
+  // Find the fight in current event data
+  const ev = allEvents[activeEventIdx];
+  const fight = ev.fights.find(f => f.id === fightId);
+  const pred = fight?.prediction;
+
+  // Fetch fighter stats
+  const [s1, s2] = await Promise.all([
+    fetchFighterStats(f1Name),
+    fetchFighterStats(f2Name),
+  ]);
+
+  let predSection = '';
+  if (pred) {
+    const f1 = pred.factors?.[f1Name] || {};
+    const f2 = pred.factors?.[f2Name] || {};
+    const p1 = (pred.f1_prob * 100).toFixed(1);
+    const p2 = (pred.f2_prob * 100).toFixed(1);
+    predSection = `
+      <hr style="border-color:var(--border-subtle);margin:20px 0">
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px;color:var(--text-primary)">🤖 AI Prediction</div>
+      <div class="pred-bar-labels">
+        <span class="pred-pct-1">${f1Name.split(' ').pop()} ${p1}%</span>
+        <span class="pred-pct-2">${p2}% ${f2Name.split(' ').pop()}</span>
+      </div>
+      <div class="pred-bar" style="height:8px;margin:6px 0 4px">
+        <div class="pred-bar-fill-1" style="width:${p1}%"></div>
+        <div class="pred-bar-fill-2" style="width:${p2}%"></div>
+      </div>
+      <div class="pred-winner-label">🏆 <strong>${pred.winner}</strong> · ${pred.confidence} confidence</div>
+      ${f1.glicko ? `
+        <div class="stat-grid" style="margin-top:14px">
+          <div class="stat-cell">
+            <div class="val">${f1.glicko || '—'}</div>
+            <div class="lbl">${f1Name.split(' ').pop()} Glicko</div>
+          </div>
+          <div class="stat-cell">
+            <div class="val" style="color:#10b981">${pred.confidence}</div>
+            <div class="lbl">Confidence</div>
+          </div>
+          <div class="stat-cell">
+            <div class="val">${f2.glicko || '—'}</div>
+            <div class="lbl">${f2Name.split(' ').pop()} Glicko</div>
+          </div>
+        </div>
+      ` : ''}
+    `;
+  }
+
+  mc.innerHTML = `
+    <div style="margin-bottom:20px">
+      <div style="font-size:11px;color:var(--text-muted);font-family:'DM Mono',monospace;margin-bottom:6px">FIGHT BREAKDOWN</div>
+      <div style="font-size:1.2rem;font-weight:800;color:var(--text-primary)">${escHtml(f1Name)} vs ${escHtml(f2Name)}</div>
+      ${fight?.weight_class ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">${fight.weight_class}</div>` : ''}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      ${fighterStatBlock(f1Name, fight?.f1_stats || {}, s1)}
+      ${fighterStatBlock(f2Name, fight?.f2_stats || {}, s2)}
+    </div>
+
+    ${predSection}
+
+    <div style="margin-top:16px;font-size:11px;color:var(--text-muted);text-align:center">
+      Click outside to close
+    </div>
+  `;
+
+  // Draw radar charts if Chart.js loaded
+  if (s1 && s2) {
+    renderRadar('radar-f1', s1, '#3b82f6');
+    renderRadar('radar-f2', s2, '#ef4444');
+  }
+}
+
+function fighterStatBlock(name, bioStats, dbStats) {
+  const rec = bioStats.Record || (dbStats ? `${dbStats.wins}-${dbStats.losses}-${dbStats.draws || 0}` : '—');
+  const stance = bioStats.Stance || dbStats?.stance || '—';
+  const reach = bioStats.Reach ? `${bioStats.Reach}"` : (dbStats?.reach_cm ? `${dbStats.reach_cm}cm` : '—');
+
+  const stats = dbStats?.stats || {};
+  return `
+    <div>
+      <div style="font-weight:700;font-size:0.95rem;color:var(--text-primary);margin-bottom:8px">${escHtml(name)}</div>
+      <div style="font-size:11px;color:var(--text-muted);font-family:'DM Mono',monospace;margin-bottom:10px">
+        ${rec} · ${stance} · Reach ${reach}
+      </div>
+      <canvas id="radar-${name.replace(/\s/g,'')}" width="160" height="160"></canvas>
+      ${stats.slpm !== undefined ? `
+        <div style="font-size:11px;color:var(--text-muted);margin-top:10px;font-family:'DM Mono',monospace">
+          SLpM ${stats.slpm?.toFixed(1) || '—'} ·
+          SApM ${stats.sapm?.toFixed(1) || '—'} ·
+          TD ${stats.td_avg?.toFixed(1) || '—'}/15m
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+async function fetchFighterStats(name) {
+  try {
+    const r = await fetch(`/api/mma/fighter/${encodeURIComponent(name)}`);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+function renderRadar(canvasId, fighterData, color) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !fighterData?.stats) return;
+  const s = fighterData.stats;
+  // Normalise to 0-100 scale (rough percentiles)
+  const normalise = (v, max) => Math.min(100, Math.round((v / max) * 100));
+  new Chart(canvas, {
+    type: 'radar',
+    data: {
+      labels: ['Striking', 'Defence', 'Takedowns', 'Grappling', 'KO Power', 'Submissions'],
+      datasets: [{
+        data: [
+          normalise(s.slpm,   8),
+          normalise(1 - (s.sapm / 8), 1),
+          normalise(s.td_avg, 5),
+          normalise(s.td_def, 1),
+          normalise(s.kd_rate,  3),
+          normalise(s.sub_rate, 3),
+        ],
+        backgroundColor: color + '22',
+        borderColor: color,
+        borderWidth: 2,
+        pointBackgroundColor: color,
+        pointRadius: 3,
+      }]
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        r: {
+          min: 0, max: 100,
+          ticks: { display: false },
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          angleLines: { color: 'rgba(255,255,255,0.06)' },
+          pointLabels: { color: '#9090a8', font: { size: 9 } },
+        }
+      }
+    }
+  });
+}
+
+function closeModal() {
+  document.getElementById('fighter-modal').classList.remove('active');
+}
+document.getElementById('fighter-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// ── Utilities ─────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str || '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])
+  );
+}
+
+function showEmpty(msg) {
+  document.getElementById('mma-content').innerHTML =
+    `<div class="mma-empty">${msg}</div>`;
+}
+
+// ── Init ──────────────────────────────────────────────────────
+loadEvents();
+</script>
+{% endblock %}
