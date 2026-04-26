@@ -1378,7 +1378,10 @@ def register_afl_routes(app, db):
             "headshot_sample": headshot_sample,
         })
 
-    def _fantasy_photo_id_from_name(first_name: str, last_name: str) -> "int | None":
+# ─────────────────────────────────────────────
+# PRIVATE DB QUERY HELPERS
+# ─────────────────────────────────────────────
+def _fantasy_photo_id_from_name(first_name: str, last_name: str) -> "int | None":
         """Look up the AFL Fantasy photo id for a player by name."""
         key = f"{first_name.strip().lower()}|{last_name.strip().lower()}"
 
@@ -1420,11 +1423,6 @@ def register_afl_routes(app, db):
             return None
 
         return None
-
-# ─────────────────────────────────────────────
-# PRIVATE DB QUERY HELPERS
-# ─────────────────────────────────────────────
-
 
 def _abs_logo(url: str | None) -> str | None:
     """Return an absolute logo URL, prefixing Squiggle's site for relative paths."""
