@@ -232,6 +232,7 @@ AFL_SCHEMA_STATEMENTS = [
 # Columns added after initial schema deployment — run as migrations on startup.
 AFL_MIGRATIONS = [
     "ALTER TABLE afl_player_stats ADD COLUMN IF NOT EXISTS player_headshot_url TEXT",
+    "ALTER TABLE afl_player_stats ADD COLUMN IF NOT EXISTS player_champ_id INTEGER",
 ]
 
 # Stable advisory-lock key derived from a namespace string.
@@ -270,18 +271,18 @@ def _b(value: Any, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
 
 
-def _headshot_url(player_id: int | None) -> str | None:
-    """Return AFL.com.au CDN headshot URL for positive (Fryzigg/ChampID) player IDs.
+def _headshot_url(champ_id: int | None) -> str | None:
+    """Return AFL Fantasy CDN headshot URL for a known AFL ChampID.
 
-    Returns None for negative or zero IDs (debut placeholders) so that the UI
-    can gracefully fall back to initials.
+    Uses the same direct-URL pattern as the MMA page (ESPN CDN): store the
+    real CDN URL in the DB during sync so the frontend can use it straight
+    from the API response — no proxy needed.
+
+    Returns None for negative or zero IDs (debut placeholders / unknown).
     """
-    if not player_id or player_id <= 0:
+    if not champ_id or champ_id <= 0:
         return None
-    return (
-        f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/"
-        f"ChampIDImages/{player_id}.png"
-    )
+    return f"https://fantasy.afl.com.au/assets/mug-shots/afl/{champ_id}.webp"
 
 
 def _team(value: Any) -> str:
@@ -625,7 +626,7 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             score_involvements, metres_gained, turnovers,
             intercepts, tackles_inside_fifty,
             contest_def_losses, contest_def_one_on_ones, contest_off_one_on_ones,
-            player_headshot_url
+            player_headshot_url, player_champ_id
         )
         VALUES (
             :match_id, :match_date, :match_round,
@@ -650,7 +651,7 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             :score_involvements, :metres_gained, :turnovers,
             :intercepts, :tackles_inside_fifty,
             :contest_def_losses, :contest_def_one_on_ones, :contest_off_one_on_ones,
-            :player_headshot_url
+            :player_headshot_url, :player_champ_id
         )
         ON CONFLICT (match_id, player_id) DO UPDATE SET
             match_date                      = EXCLUDED.match_date,
@@ -710,7 +711,8 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             contest_def_losses              = EXCLUDED.contest_def_losses,
             contest_def_one_on_ones         = EXCLUDED.contest_def_one_on_ones,
             contest_off_one_on_ones         = EXCLUDED.contest_off_one_on_ones,
-            player_headshot_url             = EXCLUDED.player_headshot_url
+            player_headshot_url             = COALESCE(EXCLUDED.player_headshot_url, afl_player_stats.player_headshot_url),
+            player_champ_id                 = COALESCE(EXCLUDED.player_champ_id, afl_player_stats.player_champ_id)
     """)
 
     # For season 2026, build the historical player_id lookup once before the main loop.
@@ -736,6 +738,12 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
 
             # ── Resolve player_id ──────────────────────────────────────────
             row_season = _i(row.get("season"), season)
+            # Capture the raw AFL API player ID (ChampID) before any resolution.
+            # For 2026 rows from the AFL API, row["player_id"] IS the AFL ChampID.
+            # For historical Fryzigg rows, Fryzigg ID ≈ AFL ChampID.
+            player_champ_id = _i(row.get("player_champ_id") or row.get("player_id")) or None
+            if player_champ_id and player_champ_id <= 0:
+                player_champ_id = None
             if row_season == 2026:
                 player_id, resolution = _resolve_2026_player_id(
                     row, _name_to_ids_2026, _hist_map_2026, _id_to_name_keys_2026
@@ -831,7 +839,8 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
                 "contest_def_losses": _i(row.get("contest_def_losses")),
                 "contest_def_one_on_ones": _i(row.get("contest_def_one_on_ones")),
                 "contest_off_one_on_ones": _i(row.get("contest_off_one_on_ones")),
-                "player_headshot_url": _headshot_url(player_id),
+                "player_headshot_url": _headshot_url(player_champ_id),
+                "player_champ_id": player_champ_id,
             })
             count += 1
 
