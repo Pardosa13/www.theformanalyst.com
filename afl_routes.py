@@ -1369,7 +1369,6 @@ def register_afl_routes(app, db):
         return None
 
     @app.route("/api/afl/player-headshot/<int:player_id>")
-    @login_required
     def api_afl_player_headshot(player_id):
         """Proxy AFL player headshot images through this server to avoid CDN hotlink blocks."""
         first_name = request.args.get("first_name")
