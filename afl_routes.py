@@ -41,6 +41,7 @@ from afl_data import (
     get_player_vs_opponent,
 )
 from afl_db import (
+    SQUIGGLE_SITE,
     get_team_logo_map,
     log_sync,
     upsert_games,
@@ -1297,8 +1298,8 @@ def register_afl_routes(app, db):
                 )).mappings().fetchone()
             if row:
                 headshot_sample = dict(row)
-        except Exception as exc:
-            headshot_sample = {"error": str(exc)}
+        except Exception:
+            headshot_sample = {"error": "query failed — check server logs"}
 
         return jsonify({
             "fixtures": fixture_sample,
@@ -1311,17 +1312,13 @@ def register_afl_routes(app, db):
 # PRIVATE DB QUERY HELPERS
 # ─────────────────────────────────────────────
 
-# Squiggle stores logo paths as root-relative URLs (e.g. /wp-content/...).
-# Prefix them so browsers can actually load the images.
-_SQUIGGLE_SITE = "https://squiggle.com.au"
-
 
 def _abs_logo(url: str | None) -> str | None:
     """Return an absolute logo URL, prefixing Squiggle's site for relative paths."""
     if not url:
         return None
     if url.startswith("/"):
-        return _SQUIGGLE_SITE + url
+        return SQUIGGLE_SITE + url
     return url
 
 
