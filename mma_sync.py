@@ -1034,7 +1034,84 @@ def is_apex_event(name, location):
     return 1 if ('fight night' in n and 'las vegas' in l) or 'apex' in l else 0
 
 
-# ── Write to DB ───────────────────────────────────────────────────────────────
+# ── ESPN headshot helpers ─────────────────────────────────────────────────────
+
+def espn_headshot_url(espn_url):
+    """Derive ESPN CDN headshot URL from an ESPN fighter profile URL.
+
+    Matches the approach used in sbalagan22/Octagon-AI (HomeClient.tsx /
+    FightCard.tsx): extract the numeric fighter ID from the URL path and
+    build the standard ESPN combiner endpoint URL.
+
+    Example:
+        https://www.espn.com/mma/fighter/_/id/3090197/gilbert-burns
+        -> https://a.espncdn.com/combiner/i?img=/i/headshots/mma/players/full/3090197.png&w=500&h=360
+    """
+    if not espn_url:
+        return None
+    m = re.search(r'/id/(\d+)/', espn_url)
+    if not m:
+        return None
+    fighter_id = m.group(1)
+    return (
+        f'https://a.espncdn.com/combiner/i?img=/i/headshots/mma/players/full/'
+        f'{fighter_id}.png&w=500&h=360'
+    )
+
+
+def upsert_fighter_espn_info(conn, name, espn_url):
+    """Persist espn_url and headshot_url on mma_fighters row matched by name.
+
+    Safe to call repeatedly – only writes when the URL would change.
+    No-ops silently when the fighter is not found in mma_fighters.
+    """
+    if not espn_url:
+        return
+    headshot = espn_headshot_url(espn_url)
+    if not headshot:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE mma_fighters
+                SET espn_url = %s, headshot_url = %s
+                WHERE LOWER(full_name) = LOWER(%s)
+                  AND (espn_url IS DISTINCT FROM %s OR headshot_url IS DISTINCT FROM %s)
+                """,
+                (espn_url, headshot, name, espn_url, headshot),
+            )
+        conn.commit()
+    except Exception as e:
+        log.warning(f"Could not update ESPN info for {name}: {e}")
+        conn.rollback()
+
+
+def link_fight_fighters(conn, fight_id, fid1, fid2):
+    """Back-fill fighter_1_id / fighter_2_id on mma_fights when known.
+
+    Uses COALESCE so existing non-NULL values are never overwritten.
+    """
+    if not fid1 and not fid2:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE mma_fights
+                SET fighter_1_id = COALESCE(fighter_1_id, %s),
+                    fighter_2_id = COALESCE(fighter_2_id, %s)
+                WHERE id = %s
+                """,
+                (fid1, fid2, fight_id),
+            )
+        conn.commit()
+    except Exception as e:
+        log.warning(f"Could not link fighter IDs for fight {fight_id}: {e}")
+        conn.rollback()
+
+
+
 
 def upsert_event(conn, event):
     sql = """
@@ -1212,17 +1289,26 @@ def main():
         for fight in fights:
             fight_id = upsert_fight(conn, event['event_id'], fight)
 
+            # Resolve fighter IDs (needed for headshot linking + predictions)
+            f1_norm = normalize_name(fight['fighter_1'])
+            f2_norm = normalize_name(fight['fighter_2'])
+            fid1 = name_to_id.get(f1_norm)
+            fid2 = name_to_id.get(f2_norm)
+
+            # Back-fill fighter_1_id / fighter_2_id on the fight row
+            link_fight_fighters(conn, fight_id, fid1, fid2)
+
+            # Persist ESPN profile URLs + derived headshot URLs on fighter rows
+            if fight.get('fighter_1_url'):
+                upsert_fighter_espn_info(conn, fight['fighter_1'], fight['fighter_1_url'])
+            if fight.get('fighter_2_url'):
+                upsert_fighter_espn_info(conn, fight['fighter_2'], fight['fighter_2_url'])
+
             # Skip prediction for completed fights that already have one
             if event['is_completed']:
                 log.info(f"  Skipping prediction for completed fight: "
                          f"{fight['fighter_1']} vs {fight['fighter_2']}")
                 continue
-
-            # Resolve fighter IDs
-            f1_norm = normalize_name(fight['fighter_1'])
-            f2_norm = normalize_name(fight['fighter_2'])
-            fid1 = name_to_id.get(f1_norm)
-            fid2 = name_to_id.get(f2_norm)
 
             st1 = stats_tracker.get(fid1, default_stats).get_stat_vector(today) if fid1 else default_sv
             st2 = stats_tracker.get(fid2, default_stats).get_stat_vector(today) if fid2 else default_sv

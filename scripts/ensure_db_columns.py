@@ -60,6 +60,8 @@ def main():
         print("WARNING: 'races' table not found. Skipping races columns.")
     if "horses" not in table_names:
         print("WARNING: 'horses' table not found. Skipping horses columns.")
+    if "mma_fighters" not in table_names:
+        print("WARNING: 'mma_fighters' table not found. Skipping mma_fighters columns.")
 
     # Define columns to add
     races_columns = {
@@ -72,6 +74,11 @@ def main():
         "final_odds": "FLOAT",
         "result_settled_at": "TIMESTAMP",
         "result_source": "VARCHAR(50)"
+    }
+
+    mma_fighters_columns = {
+        "espn_url": "VARCHAR(500)",
+        "headshot_url": "VARCHAR(500)",
     }
 
     with engine.begin() as conn:
@@ -103,6 +110,17 @@ def main():
                 print(f"  Executing: {index_sql}")
                 conn.execute(text(index_sql))
                 print("  ✓ Index on 'betfair_selection_id' verified/created.")
+
+        # Add mma_fighters ESPN columns
+        if "mma_fighters" in table_names:
+            print("\nProcessing 'mma_fighters' table:")
+            existing_cols = [c["name"] for c in inspector.get_columns("mma_fighters")]
+            for col_name, col_type in mma_fighters_columns.items():
+                if col_name in existing_cols:
+                    print(f"  ✓ Column '{col_name}' already exists.")
+                else:
+                    ensure_column(conn, "mma_fighters", col_name, col_type)
+                    print(f"  ✓ Added column '{col_name}'.")
 
     print("\n" + "=" * 60)
     print("Done. All required columns verified/added.")
