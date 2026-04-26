@@ -365,11 +365,23 @@ def scrape_event_details(event_url, event_id):
     fights = []
 
     # Strategy 1: embedded __espnfitt__ JSON (most reliable)
+    # ESPN uses both window['__espnfitt__']= and window.__espnfitt__ = variants
+    _ESPNFITT_PATTERNS = [
+        "window['__espnfitt__']=",
+        'window["__espnfitt__"]=',
+        "window.__espnfitt__ =",
+        "window.__espnfitt__=",
+    ]
     for script in soup.find_all('script'):
-        if script.string and "window['__espnfitt__']=" in script.string:
+        if not script.string:
+            continue
+        matched_pattern = next(
+            (p for p in _ESPNFITT_PATTERNS if p in script.string), None
+        )
+        if matched_pattern:
             try:
                 content = script.string
-                json_str = content.split("window['__espnfitt__']=")[1].strip().rstrip(';')
+                json_str = content.split(matched_pattern)[1].strip().rstrip(';')
                 data = json.loads(json_str)
                 gp = data.get('page', {}).get('content', {}).get('gamepackage', {})
                 if 'cardSegs' in gp:
@@ -592,7 +604,43 @@ def load_model():
         return None
 
 
-def build_feature_row(st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0):
+def map_weight_class(raw):
+    """
+    Map ESPN weight class strings to the '###  lbs' format the model was trained on.
+    Falls back to '155 lbs' (Lightweight) when the value is unrecognised.
+    """
+    if not raw:
+        return '155 lbs'
+    lc = str(raw).lower().strip()
+    mapping = {
+        'heavyweight': '265 lbs',
+        'light heavyweight': '205 lbs',
+        'middleweight': '185 lbs',
+        'welterweight': '170 lbs',
+        'lightweight': '155 lbs',
+        'featherweight': '145 lbs',
+        'bantamweight': '135 lbs',
+        'flyweight': '125 lbs',
+        "women's strawweight": '115 lbs',
+        "women's flyweight": '125 lbs',
+        "women's bantamweight": '135 lbs',
+        "women's featherweight": '145 lbs',
+        # numeric passthrough (already in expected format)
+        '265 lbs': '265 lbs',
+        '205 lbs': '205 lbs',
+        '185 lbs': '185 lbs',
+        '170 lbs': '170 lbs',
+        '155 lbs': '155 lbs',
+        '145 lbs': '145 lbs',
+        '135 lbs': '135 lbs',
+        '125 lbs': '125 lbs',
+        '115 lbs': '115 lbs',
+    }
+    return mapping.get(lc, '155 lbs')
+
+
+def build_feature_row(st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0,
+                      weight_class=''):
     """Build a feature dict matching the CatBoost model's expected columns."""
     ath_age1 = st1.get('ath_age', 0)
     ath_age2 = st2.get('ath_age', 0)
@@ -628,16 +676,18 @@ def build_feature_row(st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0):
         'is_altitude': is_altitude,
         'stance_1': b1.get('stance') or 'Orthodox',
         'stance_2': b2.get('stance') or 'Orthodox',
-        'weight_class': '155 lbs',  # default; override if known
+        'weight_class': map_weight_class(weight_class),
     }
 
 
-def predict_fight(model, st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0):
+def predict_fight(model, st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0,
+                  weight_class=''):
     """Returns probability that fighter 1 wins."""
     if model is None:
         return 0.5
     try:
-        features = build_feature_row(st1, st2, b1, b2, g1, g2, is_apex, is_altitude)
+        features = build_feature_row(st1, st2, b1, b2, g1, g2, is_apex, is_altitude,
+                                     weight_class=weight_class)
         df = pd.DataFrame([features])
         prob = model.predict_proba(df)[0][1]
         return float(prob)
@@ -861,7 +911,8 @@ def main():
             apex = is_apex_event(event['event_name'], event['location'])
             alt = is_altitude(event['location'])
 
-            prob = predict_fight(model, st1, st2, b1, b2, g1, g2, apex, alt)
+            prob = predict_fight(model, st1, st2, b1, b2, g1, g2, apex, alt,
+                                weight_class=fight.get('weight_class', ''))
 
             winner = fight['fighter_1'] if prob > 0.5 else fight['fighter_2']
             confidence = f"{max(prob, 1 - prob) * 100:.1f}%"
