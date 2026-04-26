@@ -706,7 +706,7 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             contest_def_losses              = EXCLUDED.contest_def_losses,
             contest_def_one_on_ones         = EXCLUDED.contest_def_one_on_ones,
             contest_off_one_on_ones         = EXCLUDED.contest_off_one_on_ones,
-            player_headshot_url             = COALESCE(EXCLUDED.player_headshot_url, afl_player_stats.player_headshot_url)
+            player_headshot_url             = EXCLUDED.player_headshot_url
     """)
 
     # For season 2026, build the historical player_id lookup once before the main loop.

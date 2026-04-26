@@ -1003,8 +1003,7 @@ def test_init_afl_tables_skips_migrations_when_lock_not_acquired():
     fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
 
     # Must branch on the lock result
-    assert "if acquired" in fn_body or "if not acquired" in fn_body or \
-           "if row" in fn_body, (
+    assert "if acquired" in fn_body, (
         "init_afl_tables does not branch on the advisory lock acquisition result; "
         "non-lock-holding workers must skip migrations"
     )
@@ -1029,7 +1028,7 @@ def test_headshot_url_positive_id():
     url = _headshot_url_impl(12345)
     assert url is not None
     assert "12345" in url
-    assert url.startswith("https://www.afl.com.au")
+    assert url.startswith("https://www.afl.com.au/staticfile/")
 
 
 def test_headshot_url_negative_id_returns_none():
