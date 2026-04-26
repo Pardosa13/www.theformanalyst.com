@@ -234,6 +234,10 @@ AFL_MIGRATIONS = [
     "ALTER TABLE afl_player_stats ADD COLUMN IF NOT EXISTS player_headshot_url TEXT",
 ]
 
+# Stable advisory-lock key derived from a namespace string.
+# Fits in PostgreSQL BIGINT and is consistent across all workers/restarts.
+_AFL_MIGRATION_LOCK_KEY = int(hashlib.md5(b"afl_migrations").hexdigest()[:16], 16) % (2 ** 63)
+
 
 # ─────────────────────────────────────────────
 # NORMALISERS / COERCERS
@@ -260,6 +264,20 @@ def _b(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
+
+
+def _headshot_url(player_id: int | None) -> str | None:
+    """Return AFL.com.au CDN headshot URL for positive (Fryzigg/ChampID) player IDs.
+
+    Returns None for negative or zero IDs (debut placeholders) so that the UI
+    can gracefully fall back to initials.
+    """
+    if not player_id or player_id <= 0:
+        return None
+    return (
+        f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/"
+        f"ChampIDImages/{player_id}.png"
+    )
 
 
 def _team(value: Any) -> str:
@@ -444,17 +462,44 @@ def _resolve_2026_player_id(
 # ─────────────────────────────────────────────
 
 def init_afl_tables(db):
-    """Create all AFL tables. Safe to call multiple times."""
+    """Create all AFL tables and run pending migrations.
+
+    Schema creation (CREATE TABLE IF NOT EXISTS) is safe to run concurrently
+    because Postgres handles those idempotently without exclusive table locks.
+
+    DDL *migrations* (ALTER TABLE ADD COLUMN …) take an AccessExclusiveLock and
+    will deadlock when multiple Gunicorn workers attempt them simultaneously.
+    We guard them with a PostgreSQL transaction-level advisory lock so that only
+    one worker ever runs the migration statements; any other worker that cannot
+    acquire the lock assumes the first worker is handling it and skips.
+    """
     try:
         with db.engine.begin() as conn:
             for statement in AFL_SCHEMA_STATEMENTS:
                 conn.execute(db.text(statement))
-            for migration in AFL_MIGRATIONS:
-                conn.execute(db.text(migration))
-        logger.info("AFL tables initialised")
     except Exception as exc:
-        logger.error("Failed to init AFL tables: %s", exc)
+        logger.error("Failed to create AFL schema: %s", exc)
         raise
+
+    # Advisory-lock-guarded migrations — only one worker runs DDL at a time.
+    try:
+        with db.engine.begin() as conn:
+            acquired = conn.execute(
+                db.text("SELECT pg_try_advisory_xact_lock(:key)"),
+                {"key": _AFL_MIGRATION_LOCK_KEY},
+            ).scalar()
+            if acquired:
+                for migration in AFL_MIGRATIONS:
+                    conn.execute(db.text(migration))
+                logger.debug("AFL migrations applied under advisory lock")
+            else:
+                logger.info(
+                    "AFL migrations skipped — another worker holds the advisory lock"
+                )
+    except Exception as exc:
+        logger.warning("AFL migration lock/run error (non-fatal): %s", exc)
+
+    logger.info("AFL tables initialised")
 
 
 # ─────────────────────────────────────────────
@@ -575,7 +620,8 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             centre_clearances, stoppage_clearances,
             score_involvements, metres_gained, turnovers,
             intercepts, tackles_inside_fifty,
-            contest_def_losses, contest_def_one_on_ones, contest_off_one_on_ones
+            contest_def_losses, contest_def_one_on_ones, contest_off_one_on_ones,
+            player_headshot_url
         )
         VALUES (
             :match_id, :match_date, :match_round,
@@ -599,7 +645,8 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             :centre_clearances, :stoppage_clearances,
             :score_involvements, :metres_gained, :turnovers,
             :intercepts, :tackles_inside_fifty,
-            :contest_def_losses, :contest_def_one_on_ones, :contest_off_one_on_ones
+            :contest_def_losses, :contest_def_one_on_ones, :contest_off_one_on_ones,
+            :player_headshot_url
         )
         ON CONFLICT (match_id, player_id) DO UPDATE SET
             match_date                      = EXCLUDED.match_date,
@@ -658,7 +705,8 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             tackles_inside_fifty            = EXCLUDED.tackles_inside_fifty,
             contest_def_losses              = EXCLUDED.contest_def_losses,
             contest_def_one_on_ones         = EXCLUDED.contest_def_one_on_ones,
-            contest_off_one_on_ones         = EXCLUDED.contest_off_one_on_ones
+            contest_off_one_on_ones         = EXCLUDED.contest_off_one_on_ones,
+            player_headshot_url             = COALESCE(EXCLUDED.player_headshot_url, afl_player_stats.player_headshot_url)
     """)
 
     # For season 2026, build the historical player_id lookup once before the main loop.
@@ -779,6 +827,7 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
                 "contest_def_losses": _i(row.get("contest_def_losses")),
                 "contest_def_one_on_ones": _i(row.get("contest_def_one_on_ones")),
                 "contest_off_one_on_ones": _i(row.get("contest_off_one_on_ones")),
+                "player_headshot_url": _headshot_url(player_id),
             })
             count += 1
 
