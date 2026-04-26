@@ -21,6 +21,7 @@ import time
 from datetime import datetime
 from typing import Any, Optional
 from pathlib import Path
+from urllib.parse import urlencode
 
 import pandas as pd
 import pyreadr
@@ -313,15 +314,21 @@ def fetch_squiggle_teams() -> list[dict]:
     return data.get("teams", [])
 
 
-def afl_player_headshot_url(player_id: int | None) -> str | None:
-    """Return the server-side proxy URL for an AFL player headshot.
-
-    Routes through /api/afl/player-headshot/<id> so the server fetches from
-    the AFL CDN, avoiding cross-origin hotlink blocks.
-    Returns None for invalid/negative IDs (debut placeholders).
-    """
+def afl_player_headshot_url(
+    player_id: int | None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+) -> str | None:
     if not player_id or player_id <= 0:
         return None
+
+    if first_name and last_name:
+        qs = urlencode({
+            "first_name": first_name,
+            "last_name": last_name,
+        })
+        return f"/api/afl/player-headshot/{player_id}?{qs}"
+
     return f"/api/afl/player-headshot/{player_id}"
 
 
