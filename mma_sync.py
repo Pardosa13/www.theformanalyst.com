@@ -280,8 +280,122 @@ def scrape_fighter_profile(url):
         return {}
 
 
+def _parse_espn_schedule_json(data, seen_ids):
+    """
+    Extract events from the ESPN __espnfitt__ JSON on a schedule page.
+    Returns a list of event dicts with the same keys as scrape_upcoming_events.
+    """
+    events = []
+    today = date.today()
+    # ESPN schedule pages embed events under several possible paths
+    page = data.get('page', {})
+    content = page.get('content', {})
+    # Try 'schedule' key first, then 'events'
+    schedule = content.get('schedule') or {}
+    raw_events = []
+    if isinstance(schedule, dict):
+        for _week, week_data in schedule.items():
+            if isinstance(week_data, list):
+                raw_events.extend(week_data)
+            elif isinstance(week_data, dict):
+                raw_events.extend(week_data.get('events', []))
+    if not raw_events:
+        raw_events = content.get('events', []) or []
+
+    for ev in raw_events:
+        ev_id = str(ev.get('id', ''))
+        if not ev_id or ev_id in seen_ids:
+            continue
+        name = ev.get('name') or ev.get('shortName') or ''
+        raw_date = ev.get('date', '')
+        try:
+            ev_date = pd.to_datetime(raw_date).date()
+        except Exception:
+            continue
+        links = ev.get('links', [])
+        ev_url = next((lk.get('href', '') for lk in links if 'href' in lk), '')
+        if ev_url and not ev_url.startswith('http'):
+            ev_url = 'https://www.espn.com' + ev_url
+        venues = ev.get('venues', []) or ev.get('competitions', [{}])
+        loc = ''
+        if venues:
+            v = venues[0]
+            addr = v.get('address', v.get('venue', {}).get('address', {}))
+            city = addr.get('city', '')
+            state = addr.get('state', '')
+            loc = ', '.join(filter(None, [city, state])) or 'TBD'
+        seen_ids.add(ev_id)
+        events.append({
+            'event_id': ev_id,
+            'event_name': name,
+            'date': ev_date,
+            'location': loc or 'TBD',
+            'url': ev_url,
+        })
+    return events
+
+
+def _fetch_espn_schedule_api(year, seen_ids):
+    """
+    Fetch UFC schedule from the ESPN public scoreboard API for a given year.
+    Returns a list of event dicts.
+    """
+    events = []
+    start = f"{year}0101"
+    end = f"{year}1231"
+    url = (
+        f"https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard"
+        f"?limit=100&dates={start}-{end}"
+    )
+    log.info(f"  Trying ESPN API: {url}")
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        log.warning(f"  ESPN API fetch failed: {e}")
+        return events
+
+    for ev in data.get('events', []):
+        ev_id = str(ev.get('id', ''))
+        if not ev_id or ev_id in seen_ids:
+            continue
+        name = ev.get('name') or ev.get('shortName') or ''
+        raw_date = ev.get('date', '')
+        try:
+            ev_date = pd.to_datetime(raw_date).date()
+        except Exception:
+            continue
+        links = ev.get('links', [])
+        ev_url = next((lk.get('href', '') for lk in links if 'href' in lk), '')
+        if ev_url and not ev_url.startswith('http'):
+            ev_url = 'https://www.espn.com' + ev_url
+        venues = ev.get('venues', [])
+        loc = 'TBD'
+        if venues:
+            addr = venues[0].get('address', {})
+            city = addr.get('city', '')
+            state = addr.get('state', '')
+            loc = ', '.join(filter(None, [city, state])) or 'TBD'
+        seen_ids.add(ev_id)
+        events.append({
+            'event_id': ev_id,
+            'event_name': name,
+            'date': ev_date,
+            'location': loc,
+            'url': ev_url,
+        })
+    return events
+
+
 def scrape_upcoming_events():
-    """Scrape ESPN UFC schedule for upcoming + most recent completed event."""
+    """Scrape ESPN UFC schedule for upcoming + most recent completed event.
+
+    Tries three strategies in order for each year:
+      1. ESPN public scoreboard API (JSON, most reliable)
+      2. __espnfitt__ JSON embedded in the schedule HTML page
+      3. DOM table parsing (legacy fallback)
+    """
     today = date.today()
     current_year = today.year
     next_year = current_year + 1
@@ -290,12 +404,53 @@ def scrape_upcoming_events():
     seen_ids = set()
 
     for year in [current_year, next_year]:
+        year_events = []
+
+        # ── Strategy 1: ESPN public API ───────────────────────────────────────
+        year_events = _fetch_espn_schedule_api(year, seen_ids)
+        if year_events:
+            log.info(f"  ESPN API returned {len(year_events)} events for {year}")
+            events.extend(year_events)
+            time.sleep(0.5)
+            continue
+
+        # ── Strategy 2 & 3: HTML page ─────────────────────────────────────────
         url = f"https://www.espn.com/mma/schedule/_/year/{year}/league/ufc"
-        log.info(f"Fetching schedule: {url}")
+        log.info(f"Fetching schedule HTML: {url}")
         soup = get_soup(url)
         if not soup:
             continue
 
+        # Strategy 2: __espnfitt__ JSON
+        _PATTERNS = [
+            "window['__espnfitt__']=",
+            'window["__espnfitt__"]=',
+            "window.__espnfitt__ =",
+            "window.__espnfitt__=",
+        ]
+        for script in soup.find_all('script'):
+            if not script.string:
+                continue
+            matched = next((p for p in _PATTERNS if p in script.string), None)
+            if matched:
+                try:
+                    json_str = script.string.split(matched)[1].strip().rstrip(';')
+                    data = json.loads(json_str)
+                    json_events = _parse_espn_schedule_json(data, seen_ids)
+                    if json_events:
+                        log.info(f"  __espnfitt__ JSON returned {len(json_events)} events for {year}")
+                        year_events = json_events
+                except Exception as e:
+                    log.warning(f"  Schedule JSON parse error: {e}")
+                break
+
+        if year_events:
+            events.extend(year_events)
+            time.sleep(1)
+            continue
+
+        # Strategy 3: DOM table fallback
+        log.info(f"  Falling back to DOM parsing for {year}")
         tables = soup.find_all('table', class_='Table')
         for table in tables:
             for row in table.find_all('tr', class_='Table__TR'):
@@ -328,7 +483,7 @@ def scrape_upcoming_events():
                     continue
 
                 seen_ids.add(event_id)
-                events.append({
+                year_events.append({
                     'event_id': event_id,
                     'event_name': event_name,
                     'date': event_date,
@@ -336,6 +491,7 @@ def scrape_upcoming_events():
                     'url': event_url,
                 })
 
+        events.extend(year_events)
         time.sleep(1)
 
     events.sort(key=lambda x: x['date'])
@@ -569,6 +725,13 @@ def rebuild_stats_from_db(conn):
         time_sec = pars_time(t_str, rnd) if t_str and rnd else 300
         result_1 = 'W' if winner == n1 else ('L' if winner else 'D')
         result_2 = 'L' if winner == n1 else ('W' if winner else 'D')
+
+        # fid1/fid2 may be NULL when the seed CSV didn't link fighter IDs;
+        # fall back to the name map so historical fights still build stats.
+        if not fid1:
+            fid1 = name_to_id.get(normalize_name(n1))
+        if not fid2:
+            fid2 = name_to_id.get(normalize_name(n2))
 
         for fid, result in [(fid1, result_1), (fid2, result_2)]:
             if not fid:
