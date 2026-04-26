@@ -416,12 +416,38 @@
   .fixture-teams { flex:1; display:flex; align-items:center; gap:8px; min-width:200px; }
   .team-name { font-weight:700; font-size:13px; color:var(--text-primary); flex:1; text-align:right; }
   .team-name.away { text-align:left; }
+  .team-logo-wrap { display:flex; flex-direction:column; align-items:center; gap:3px; flex-shrink:0; }
+  .team-logo {
+    width:36px; height:36px; object-fit:contain; border-radius:6px;
+    background:var(--bg-elevated); padding:2px;
+  }
+  .team-logo-placeholder {
+    width:36px; height:36px; border-radius:6px;
+    background:var(--bg-elevated); border:1px solid var(--border-subtle);
+    display:flex; align-items:center; justify-content:center;
+    font-size:9px; font-weight:700; color:var(--text-muted);
+    font-family:'DM Mono',monospace;
+  }
   .vs-divider {
     font-size:10px; font-weight:700; color:var(--text-muted);
     background:var(--bg-hover); border:1px solid var(--border-mid);
     border-radius:4px; padding:2px 6px; font-family:'DM Mono',monospace; flex-shrink:0;
   }
   .fixture-venue { font-size:11px; color:var(--text-muted); min-width:110px; }
+
+  /* ── Player headshot ─────────────────────────────────────────── */
+  .prow-headshot {
+    width:36px; height:36px; border-radius:50%; object-fit:cover;
+    background:var(--bg-elevated); border:1px solid var(--border-subtle);
+    flex-shrink:0;
+  }
+  .prow-headshot-placeholder {
+    width:36px; height:36px; border-radius:50%;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    display:flex; align-items:center; justify-content:center;
+    font-size:11px; font-weight:800; color:white;
+    font-family:'DM Mono',monospace; flex-shrink:0;
+  }
   .tip-badge {
     font-size:10px; font-weight:700; padding:2px 9px; border-radius:5px;
     font-family:'DM Mono',monospace;
@@ -835,9 +861,25 @@
             {% else %}TBC{% endif %}
           </div>
           <div class="fixture-teams">
+            <div class="team-logo-wrap">
+              {% if f.hteam_logo_url %}
+                <img class="team-logo" src="{{ f.hteam_logo_url }}" alt="{{ f.hteam }}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div class="team-logo-placeholder" style="display:none;">{{ (f.hteam or 'H')[:3].upper() }}</div>
+              {% else %}
+                <div class="team-logo-placeholder">{{ (f.hteam or 'H')[:3].upper() }}</div>
+              {% endif %}
+            </div>
             <div class="team-name">{{ f.hteam or 'Home' }}</div>
             <div class="vs-divider">VS</div>
             <div class="team-name away">{{ f.ateam or 'Away' }}</div>
+            <div class="team-logo-wrap">
+              {% if f.ateam_logo_url %}
+                <img class="team-logo" src="{{ f.ateam_logo_url }}" alt="{{ f.ateam }}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div class="team-logo-placeholder" style="display:none;">{{ (f.ateam or 'A')[:3].upper() }}</div>
+              {% else %}
+                <div class="team-logo-placeholder">{{ (f.ateam or 'A')[:3].upper() }}</div>
+              {% endif %}
+            </div>
           </div>
           <div class="fixture-venue"><i class="bi bi-geo-alt" style="font-size:10px;"></i> {{ f.venue or '—' }}</div>
           {% if f.squiggle_tip %}
@@ -885,7 +927,14 @@
               {% set pa = s.against_score if s.against_score is defined else (s['against'] if s['against'] is defined else '—') %}
               <tr>
                 <td><span class="pos-badge {% if s.rank<=2 %}top2{% elif s.rank<=8 %}finals{% endif %}">{{ s.rank or '—' }}</span></td>
-                <td style="font-weight:600;">{{ s.team or s.name or '—' }}</td>
+                <td style="font-weight:600;">
+                  <div style="display:flex;align-items:center;gap:7px;">
+                    {% if s.team_logo_url %}
+                      <img src="{{ s.team_logo_url }}" alt="{{ s.team }}" style="width:22px;height:22px;object-fit:contain;" loading="lazy" onerror="this.style.display='none'">
+                    {% endif %}
+                    {{ s.team or s.name or '—' }}
+                  </div>
+                </td>
                 <td style="color:var(--success);font-family:'DM Mono',monospace;">{{ s.wins or 0 }}</td>
                 <td style="color:var(--danger);font-family:'DM Mono',monospace;">{{ s.losses or 0 }}</td>
                 <td style="color:var(--text-muted);font-family:'DM Mono',monospace;">{{ s.draws or 0 }}</td>
@@ -1139,12 +1188,20 @@ function renderPlayerList() {
   inner.innerHTML = _allPlayers.map(player => {
     const avg = safeNum(player.averages?.[stat], 0);
     const selected = player.player_id === _selPlayerId ? 'selected' : '';
+    const initials = ((player.first_name || '')[0] || '') + ((player.last_name || '')[0] || '');
+    const photoHtml = player.headshot_url
+      ? `<img class="prow-headshot" src="${esc(player.headshot_url)}" alt="${esc(player.name)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+        + `<div class="prow-headshot-placeholder" style="display:none;">${esc(initials)}</div>`
+      : `<div class="prow-headshot-placeholder">${esc(initials)}</div>`;
 
     return `
       <div class="prop-player-row ${selected}" id="prow-${player.player_id}" onclick="selectPlayer(${player.player_id})">
-        <div>
-          <div class="prow-name">${esc(player.name)}</div>
-          <div class="prow-team">${esc(player.team)}</div>
+        <div style="display:flex;align-items:center;gap:9px;">
+          ${photoHtml}
+          <div>
+            <div class="prow-name">${esc(player.name)}</div>
+            <div class="prow-team">${esc(player.team)}</div>
+          </div>
         </div>
         <span class="prow-avg">${avg}</span>
       </div>
@@ -1273,7 +1330,10 @@ function renderPropCard(player) {
     <div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:14px;overflow:hidden;">
 
       <div class="player-hdr-top">
-        <div class="player-avatar">${esc((player.first_name || '')[0] || '')}${esc((player.last_name || '')[0] || '')}</div>
+        ${player.headshot_url
+          ? `<img src="${esc(player.headshot_url)}" alt="${esc(player.name)}" style="width:48px;height:48px;border-radius:12px;object-fit:cover;background:var(--bg-elevated);border:1px solid var(--border-subtle);flex-shrink:0;" loading="lazy" onerror="this.outerHTML='<div class=\\'player-avatar\\'>' + esc((player.first_name||'')[0]||'') + esc((player.last_name||'')[0]||'') + '</div>'">`
+          : `<div class="player-avatar">${esc((player.first_name || '')[0] || '')}${esc((player.last_name || '')[0] || '')}</div>`
+        }
         <div style="flex:1;min-width:0;">
           <div class="player-hdr-name" style="cursor:pointer;" onclick="setChartFilter('all')" title="Show all history since 2022">${esc(player.name || '')}</div>
           <div class="player-hdr-meta">

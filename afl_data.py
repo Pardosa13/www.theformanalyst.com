@@ -305,6 +305,25 @@ def _pick_from_dict(data: dict, *keys: str, default=None):
 # SQUIGGLE API
 # ─────────────────────────────────────────────
 
+def fetch_squiggle_teams() -> list[dict]:
+    """Fetch all AFL teams from Squiggle, including logo URLs."""
+    data = _get(SQUIGGLE_BASE, {"q": "teams"})
+    if not data or not isinstance(data, dict):
+        return []
+    return data.get("teams", [])
+
+
+def afl_player_headshot_url(player_id: int | None) -> str | None:
+    """Build an AFL player headshot URL from a Fryzigg ChampID.
+
+    Uses the AFL Fantasy CDN which serves headshots by ChampID.
+    Returns None for invalid/negative IDs (debut placeholders).
+    """
+    if not player_id or player_id <= 0:
+        return None
+    return f"https://fantasy.afl.com.au/assets/mug-shots/afl/{player_id}.webp"
+
+
 def fetch_squiggle_games(year: int, round_number: int = None) -> list[dict]:
     params = {"q": "games", "year": year}
     if round_number is not None:

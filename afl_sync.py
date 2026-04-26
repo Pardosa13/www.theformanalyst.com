@@ -50,6 +50,7 @@ def sync_afl_all(season: int = None):
         fetch_squiggle_games,
         fetch_squiggle_standings,
         fetch_squiggle_current_round,
+        fetch_squiggle_teams,
         fetch_fryzigg_player_stats,
         fetch_afl_player_stats_current_season,
         fetch_2026_stats_from_csv,
@@ -60,6 +61,7 @@ def sync_afl_all(season: int = None):
         upsert_standings,
         upsert_player_stats,
         upsert_player_props,
+        upsert_team_logos,
     )
 
     if season is None:
@@ -141,7 +143,17 @@ def sync_afl_all(season: int = None):
             len(seasons_to_sync),
         )
 
-        # ── 4. Prop lines (skip if no key) ────────────────────────
+        # ── 4. Team logos ─────────────────────────────────────────
+        try:
+            teams = fetch_squiggle_teams()
+            count = upsert_team_logos(db, teams)
+            _safe_log_sync(db, "team_logos", rows=count)
+            logger.info("  ✓ Team logos: %s teams synced", count)
+        except Exception as exc:
+            logger.error("  ✗ Team logos sync failed: %s", exc)
+            _safe_log_sync(db, "team_logos", status="error", error=str(exc))
+
+        # ── 5. Prop lines (skip if no key) ────────────────────────
         api_key = os.environ.get("ODDS_API_KEY", "")
         if api_key:
             total_props = 0
