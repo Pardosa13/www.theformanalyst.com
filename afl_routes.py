@@ -173,7 +173,11 @@ def register_afl_routes(app, db):
                     "guernsey": player["guernsey"],
                     "height_cm": player["height_cm"],
                     "weight_kg": player["weight_kg"],
-                    "headshot_url": afl_player_headshot_url(player["player_id"]),
+                    "headshot_url": afl_player_headshot_url(
+                     player["player_id"],
+                     player["first_name"],
+                     player["last_name"],
+                     ),
                     "season": effective_season,
                     "seasons_used": effective_seasons,
                     "games_played": len(games),
@@ -1385,6 +1389,7 @@ def register_afl_routes(app, db):
             return resp
 
         cdn_urls = [
+            f"https://fantasy.afl.com.au/assets/media/players/afl/{photo_id}_450.png",
             f"https://fantasy.afl.com.au/assets/mug-shots/afl/{photo_id}.webp",
             f"https://www.afl.com.au/staticfile/AFL%20Tenant/AFL/Players/ChampIDImages/{photo_id}.png",
         ]
