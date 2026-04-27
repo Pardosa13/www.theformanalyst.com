@@ -709,10 +709,10 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
     except Exception:
         current_round = round_number or 1
 
-    # If current_round is the first incomplete round (e.g. 7),
-    # completed rounds are 1..6 (i.e. range(1, current_round)).
-    # When current_round is 1, this correctly produces an empty list (no completed rounds yet).
-    completed_rounds = list(range(1, current_round))
+    # current_round is the first round with any incomplete game (from Squiggle complete!=100).
+    # Include it so mid-round syncs (e.g. Monday after a weekend round) capture the games
+    # already played. Unplayed matches return empty stats and are skipped gracefully.
+    completed_rounds = list(range(1, current_round + 1))
     if not completed_rounds:
         logger.warning(
             "AFL current-season stats: no completed rounds yet for season %s "
