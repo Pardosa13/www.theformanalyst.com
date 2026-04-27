@@ -726,21 +726,30 @@ def test_afl_fix_2026_script_deletes_and_reimports():
 # Fryzigg source — updated workflow and CSV format detection
 # ---------------------------------------------------------------------------
 
-def test_r_workflow_uses_fryzigg_source():
-    """The fetch-afl-2026 workflow must use source='fryzigg' (not 'afltables')."""
+def test_r_workflow_uses_afltables_with_fryzigg_fallback():
+    """The fetch-afl-2026 workflow must use source='afltables' as the primary
+    source (with fryzigg as a fallback).  The fryzigg source started returning
+    0 rows for 2026 from April 25 2026, causing the CSV to go stale; afltables
+    updates within a day of each round finishing and is now the reliable option.
+    The afltables player_id collision issue is handled by the name-matching
+    resolution in upsert_player_stats / _resolve_player_id_2026."""
     wf_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         ".github", "workflows", "fetch-afl-2026.yml",
     )
     with open(wf_path, encoding="utf-8") as f:
         source = f.read()
-    assert "source = 'fryzigg'" in source, (
-        "fetch-afl-2026.yml does not use source = 'fryzigg'; "
-        "update it so 2026 player_ids are stable Fryzigg IDs"
+    assert "source = 'afltables'" in source, (
+        "fetch-afl-2026.yml does not use source = 'afltables'; "
+        "fryzigg has been returning 0 rows for 2026 since April 25"
     )
-    assert "source = 'afltables'" not in source, (
-        "fetch-afl-2026.yml still references source = 'afltables'; "
-        "this produces IDs that collide with 2019-2025 Fryzigg data"
+    # fryzigg may still appear as a fallback — that is fine.
+    # Verify afltables appears before fryzigg (primary, not just present).
+    afltables_pos = source.find("source = 'afltables'")
+    fryzigg_pos = source.find("source = 'fryzigg'")
+    assert afltables_pos < fryzigg_pos, (
+        "afltables must appear before fryzigg in fetch-afl-2026.yml "
+        "(afltables is the primary source, fryzigg is the fallback)"
     )
 
 
@@ -1129,4 +1138,62 @@ def test_db_get_standings_joins_team_logos():
     )
     assert "afl_team_logos" in fn_body, (
         "_db_get_standings does not join afl_team_logos"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix – value finder match filter must use exact team name equality, not
+# substring includes() which causes Melbourne to match North Melbourne
+# ---------------------------------------------------------------------------
+
+def test_value_finder_match_filter_uses_exact_equality():
+    """_vfApplyFilters match filter must use === not .includes() for team names.
+    Using .includes() causes 'Melbourne' to match inside 'North Melbourne',
+    showing North Melbourne players when a Melbourne match is selected."""
+    template_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "templates",
+        "afl.html",
+    )
+    with open(template_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # Locate _vfApplyFilters body
+    fn_start = source.find("function _vfApplyFilters(")
+    assert fn_start != -1, "function _vfApplyFilters not found in afl.html"
+    fn_end = source.find("\nfunction ", fn_start + 1)
+    fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
+
+    # Must NOT use .includes() for team name filtering (substring match)
+    assert ".includes(" not in fn_body, (
+        "_vfApplyFilters still uses .includes() for match/team filtering — "
+        "this causes 'Melbourne' to match inside 'North Melbourne'. "
+        "Use === exact equality instead."
+    )
+
+    # Must use strict equality (===) for team comparison
+    assert "===" in fn_body, (
+        "_vfApplyFilters does not use === for team name comparison"
+    )
+
+
+def test_fetch_afl_2026_workflow_uses_afltables_source():
+    """fetch-afl-2026.yml must use source='afltables' as the primary source.
+    source='fryzigg' has been returning 0 rows since April 25 2026, causing
+    the CSV to go stale and Round 8+ data to not update on the website."""
+    workflow_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        ".github", "workflows", "fetch-afl-2026.yml",
+    )
+    with open(workflow_path, encoding="utf-8") as f:
+        source = f.read()
+
+    assert "source = 'afltables'" in source, (
+        "fetch-afl-2026.yml does not use source='afltables'. "
+        "The fryzigg source returns 0 rows for 2026, causing the CSV to go stale."
+    )
+
+    # Must NOT hard-stop when fryzigg returns nothing — afltables is the primary
+    assert "source = 'fryzigg'" not in source or "afltables" in source, (
+        "fetch-afl-2026.yml still uses fryzigg as primary without afltables fallback"
     )

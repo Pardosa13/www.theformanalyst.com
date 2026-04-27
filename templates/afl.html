@@ -2092,12 +2092,15 @@ function _vfApplyFilters(data) {
   let bets = (data.bets || []);
   if (matchVal) {
     const [ht, at] = matchVal.split('||');
-    bets = bets.filter(b =>
-      (b.home_team || '').toLowerCase().includes((ht || '').toLowerCase()) ||
-      (b.away_team || '').toLowerCase().includes((at || '').toLowerCase()) ||
-      (b.team || '').toLowerCase().includes((ht || '').toLowerCase()) ||
-      (b.team || '').toLowerCase().includes((at || '').toLowerCase())
-    );
+    const fht = (ht || '').toLowerCase();
+    const fat = (at || '').toLowerCase();
+    bets = bets.filter(b => {
+      const bht = (b.home_team || '').toLowerCase();
+      const bat = (b.away_team || '').toLowerCase();
+      const bt  = (b.team || '').toLowerCase();
+      return (bht === fht && bat === fat) ||
+             bt === fht || bt === fat;
+    });
   }
   if (minLine !== null) bets = bets.filter(b => (b.book_line || 0) >= minLine);
   if (maxLine !== null) bets = bets.filter(b => (b.book_line || 0) <= maxLine);

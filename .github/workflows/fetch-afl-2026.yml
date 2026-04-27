@@ -35,19 +35,50 @@ jobs:
       - name: Create data directory
         run: mkdir -p data
 
-      - name: Fetch 2026 Fryzigg player stats
+      - name: Fetch 2026 player stats
         run: |
           Rscript -e "
           library(fitzRoy)
           library(readr)
 
-          # Use source='fryzigg' so player_id values are the stable Fryzigg IDs
-          # that are consistent with 2019-2025 data already stored in Postgres.
-          # This prevents player_id collisions between seasons.
-          data <- fetch_player_stats(season = 2026, source = 'fryzigg')
+          data <- NULL
+
+          # Try afltables first — it updates within a day of each round finishing
+          # and is the most reliable source for current-season data.
+          tryCatch({
+            cat('Trying source=afltables ...\n')
+            data <- fetch_player_stats(season = 2026, source = 'afltables')
+            if (!is.null(data) && nrow(data) > 0) {
+              cat('afltables returned', nrow(data), 'rows\n')
+            } else {
+              cat('afltables returned 0 rows\n')
+              data <- NULL
+            }
+          }, error = function(e) {
+            cat('afltables failed:', conditionMessage(e), '\n')
+            data <<- NULL
+          })
+
+          # Fall back to fryzigg if afltables returned nothing.
+          # Fryzigg typically lags 1-2 weeks behind the current round.
+          if (is.null(data) || nrow(data) == 0) {
+            tryCatch({
+              cat('Trying source=fryzigg ...\n')
+              data <- fetch_player_stats(season = 2026, source = 'fryzigg')
+              if (!is.null(data) && nrow(data) > 0) {
+                cat('fryzigg returned', nrow(data), 'rows\n')
+              } else {
+                cat('fryzigg returned 0 rows\n')
+                data <- NULL
+              }
+            }, error = function(e) {
+              cat('fryzigg failed:', conditionMessage(e), '\n')
+              data <<- NULL
+            })
+          }
 
           if (is.null(data) || nrow(data) == 0) {
-            stop('No rows returned from fitzRoy::fetch_player_stats(season = 2026, source = \"fryzigg\")')
+            stop('No rows returned from either afltables or fryzigg for season 2026')
           }
 
           write_csv(data, 'data/afl_2026_stats.csv')
