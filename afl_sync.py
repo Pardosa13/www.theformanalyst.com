@@ -155,19 +155,14 @@ def sync_afl_all(season: int = None):
         # ── 5. Prop lines (skip if no key) ────────────────────────
         api_key = os.environ.get("ODDS_API_KEY", "")
         if api_key:
-            total_props = 0
-            for market in ["player_disposals", "player_marks", "player_goals"]:
-                try:
-                    props = fetch_afl_player_props(api_key, market)
-                    count = upsert_player_props(db, props)
-                    total_props += count
-                    _safe_log_sync(db, "odds_api", season=season, rows=count)
-                    logger.info("  ✓ Props (%s): %s lines synced", market, count)
-                except Exception as exc:
-                    logger.error("  ✗ Props sync failed for %s: %s", market, exc)
-                    _safe_log_sync(db, "odds_api", season=season, status="error", error=str(exc))
-
-            logger.info("  ✓ Props total: %s lines", total_props)
+            try:
+                props = fetch_afl_player_props(api_key)
+                count = upsert_player_props(db, props)
+                _safe_log_sync(db, "odds_api", season=season, rows=count)
+                logger.info("  ✓ Props: %s lines synced", count)
+            except Exception as exc:
+                logger.error("  ✗ Props sync failed: %s", exc)
+                _safe_log_sync(db, "odds_api", season=season, status="error", error=str(exc))
         else:
             logger.info("  - Props: skipped (ODDS_API_KEY not configured)")
 
