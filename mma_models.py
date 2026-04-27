@@ -131,6 +131,21 @@ def init_mma_tables(db):
         model_version = db.Column(db.String(50), default='catboost_v1')
         generated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    class MMAFightOdds(db.Model):
+        """Live h2h odds from The Odds API — one row per (event, bookmaker, fighter)."""
+        __tablename__ = 'mma_fight_odds'
+        __table_args__ = {'extend_existing': True}
+
+        id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+        event_key = db.Column(db.String(200))          # Odds API event ID
+        fighter_1_name = db.Column(db.String(200))     # "home_team" from Odds API
+        fighter_2_name = db.Column(db.String(200))     # "away_team" from Odds API
+        commence_time = db.Column(db.DateTime)
+        bookmaker = db.Column(db.String(200))
+        fighter_name = db.Column(db.String(200))       # which fighter these odds are for
+        odds = db.Column(db.Float)                     # decimal odds
+        fetched_at = db.Column(db.DateTime, default=datetime.utcnow)
+
     # Register all models then create tables
     db.create_all()
 
@@ -140,6 +155,10 @@ def init_mma_tables(db):
         "ALTER TABLE mma_fighters ADD COLUMN IF NOT EXISTS espn_url VARCHAR(500)",
         "ALTER TABLE mma_fighters ADD COLUMN IF NOT EXISTS headshot_url VARCHAR(500)",
         "ALTER TABLE mma_events   ADD COLUMN IF NOT EXISTS espn_url VARCHAR(500)",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_mma_fight_odds_event_bk_fighter
+        ON mma_fight_odds (event_key, bookmaker, fighter_name)
+        """,
     ]
     with db.engine.connect() as _conn:
         for _sql in _migrations:
@@ -151,4 +170,48 @@ def init_mma_tables(db):
         'MMAEvent': MMAEvent,
         'MMAFight': MMAFight,
         'MMAPrediction': MMAPrediction,
+        'MMAFightOdds': MMAFightOdds,
     }
+
+
+def upsert_mma_fight_odds(db, rows: list[dict]) -> int:
+    """
+    Upsert h2h odds rows into mma_fight_odds.
+    Uses INSERT … ON CONFLICT DO UPDATE so repeated cron runs are idempotent.
+
+    db can be either a Flask-SQLAlchemy db object or a SimpleNamespace with
+    engine and text attributes (as used in mma_sync.py).
+    """
+    if not rows:
+        return 0
+
+    sql = db.text("""
+        INSERT INTO mma_fight_odds
+            (event_key, fighter_1_name, fighter_2_name, commence_time,
+             bookmaker, fighter_name, odds, fetched_at)
+        VALUES
+            (:event_key, :fighter_1_name, :fighter_2_name, :commence_time,
+             :bookmaker, :fighter_name, :odds, NOW())
+        ON CONFLICT (event_key, bookmaker, fighter_name) DO UPDATE SET
+            fighter_1_name = EXCLUDED.fighter_1_name,
+            fighter_2_name = EXCLUDED.fighter_2_name,
+            commence_time  = EXCLUDED.commence_time,
+            odds           = EXCLUDED.odds,
+            fetched_at     = NOW()
+    """)
+
+    count = 0
+    with db.engine.begin() as conn:
+        for row in rows:
+            conn.execute(sql, {
+                "event_key": row.get("event_key", ""),
+                "fighter_1_name": row.get("fighter_1_name", ""),
+                "fighter_2_name": row.get("fighter_2_name", ""),
+                "commence_time": row.get("commence_time"),
+                "bookmaker": row.get("bookmaker", ""),
+                "fighter_name": row.get("fighter_name", ""),
+                "odds": row.get("odds", 0.0),
+            })
+            count += 1
+
+    return count

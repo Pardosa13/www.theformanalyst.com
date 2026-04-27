@@ -359,6 +359,147 @@
   color: var(--text-muted);
   font-size: 14px;
 }
+
+/* ── Main section tabs ────────────────────────────────────── */
+.mma-nav-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 4px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+.mma-nav-tab {
+  flex: 1;
+  min-width: 120px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  transition: all .15s;
+  white-space: nowrap;
+}
+.mma-nav-tab.active {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.mma-nav-tab:hover:not(.active) { color: var(--text-primary); }
+
+/* ── Section panels ───────────────────────────────────────── */
+.mma-section { display: none; }
+.mma-section.active { display: block; }
+
+/* ── Edge Finder ──────────────────────────────────────────── */
+.edge-finder-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.ef-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+  transition: border-color .15s;
+}
+.ef-card:hover { border-color: var(--border-mid); }
+.ef-card.value-bet {
+  border-color: rgba(16,185,129,.35);
+  background: linear-gradient(135deg, rgba(16,185,129,.04), var(--bg-surface));
+}
+.ef-card.long-shot {
+  border-color: rgba(245,158,11,.3);
+  background: linear-gradient(135deg, rgba(245,158,11,.04), var(--bg-surface));
+}
+.ef-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.ef-fighter-name {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+.ef-vs-line {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  font-family: 'DM Mono', monospace;
+}
+.ef-event-name {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+.ef-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.ef-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+.ef-badge.value { background: rgba(16,185,129,.12); border-color: rgba(16,185,129,.3); color: #34d399; }
+.ef-badge.longshot { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.3); color: #f59e0b; }
+.ef-badge.title { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.3); color: #f59e0b; }
+.ef-badge.main { background: rgba(102,126,234,.10); border-color: var(--border-accent); color: var(--accent); }
+.edge-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  font-weight: 800;
+}
+.edge-chip.pos { background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.3); color: #34d399; }
+.edge-chip.neg { background: rgba(239,68,68,.12);  border: 1px solid rgba(239,68,68,.3);  color: #f87171; }
+.edge-chip.neu { background: var(--bg-elevated); border: 1px solid var(--border-mid); color: var(--text-muted); }
+.ef-prob-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 10px;
+  font-family: 'DM Mono', monospace;
+}
+.ef-prob-item strong { color: var(--text-secondary); }
+.ef-cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+@media (max-width: 600px) {
+  .ef-cards-grid { grid-template-columns: 1fr; }
+  .edge-finder-bar { flex-direction: column; align-items: stretch; }
+  .edge-finder-bar .form-control,
+  .edge-finder-bar .btn { width: 100% !important; }
+}
+.ef-no-odds-note {
+  background: rgba(245,158,11,.08);
+  border: 1px solid rgba(245,158,11,.25);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 12px;
+  color: #fbbf24;
+  margin-bottom: 16px;
+}
 </style>
 {% endblock %}
 
@@ -379,14 +520,62 @@
     </div>
   </div>
 
-  <!-- Event tabs -->
-  <div class="event-tabs" id="event-tabs"></div>
+  <!-- Main navigation tabs -->
+  <div class="mma-nav-tabs">
+    <button class="mma-nav-tab active" onclick="switchSection('fights', this)">🥊 Fight Cards</button>
+    <button class="mma-nav-tab" onclick="switchSection('edge', this)">⚡ Edge Finder</button>
+  </div>
 
-  <!-- Main content area -->
-  <div id="mma-content">
-    <div class="mma-loading">
-      <div class="spinner"></div>
-      <p>Loading fight cards...</p>
+  <!-- ── SECTION: Fight Cards ─────────────────────────────── -->
+  <div id="section-fights" class="mma-section active">
+    <!-- Event tabs -->
+    <div class="event-tabs" id="event-tabs"></div>
+
+    <!-- Main content area -->
+    <div id="mma-content">
+      <div class="mma-loading">
+        <div class="spinner"></div>
+        <p>Loading fight cards...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SECTION: Edge Finder ─────────────────────────────── -->
+  <div id="section-edge" class="mma-section">
+    <div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:14px;padding:20px 22px;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <h4 style="margin:0;font-size:1.1rem;font-weight:800;color:var(--text-primary);">
+          ⚡ UFC Edge Finder
+        </h4>
+        <span style="font-size:11px;color:var(--text-muted);">Model win probability vs bookmaker implied odds</span>
+      </div>
+
+      <div id="ef-no-odds-note" class="ef-no-odds-note" style="display:none;">
+        ⚠️ No UFC odds loaded yet. Click <strong>Refresh Odds</strong> to fetch live fight odds from The Odds API (requires <code>ODDS_API_KEY</code>).
+      </div>
+
+      <div class="edge-finder-bar">
+        <input type="number" class="form-control" id="efMinEdge" value="2" step="0.5"
+               style="max-width:130px;" placeholder="Min edge %"
+               aria-label="Minimum edge percentage"
+               onchange="applyEdgeFilters()">
+        <button class="btn btn-primary" onclick="loadEdgeFinder()" aria-label="Find value bets">
+          <i class="bi bi-search"></i> Find Value
+        </button>
+        <button class="btn btn-secondary" id="efRefreshBtn" onclick="refreshMmaOdds()"
+                title="Fetch latest UFC fight odds from The Odds API (requires ODDS_API_KEY)"
+                aria-label="Refresh UFC odds from The Odds API">
+          <i class="bi bi-cloud-download"></i> Refresh Odds
+        </button>
+        <span id="efStatus" style="font-size:11px;color:var(--text-muted);"></span>
+      </div>
+
+      <div id="ef-results">
+        <div class="mma-loading" style="padding:40px 20px;">
+          <div class="spinner"></div>
+          <p>Loading edge data...</p>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -406,6 +595,16 @@
 <script>
 let allEvents = [];
 let activeEventIdx = 0;
+let _efRawData = null;
+
+// ── Section switching ─────────────────────────────────────
+function switchSection(name, btn) {
+  document.querySelectorAll('.mma-section').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.mma-nav-tab').forEach(el => el.classList.remove('active'));
+  document.getElementById('section-' + name).classList.add('active');
+  btn.classList.add('active');
+  if (name === 'edge' && !_efRawData) loadEdgeFinder();
+}
 
 // ── Fetch events ─────────────────────────────────────────────
 async function loadEvents() {
@@ -741,6 +940,140 @@ function escHtml(str) {
 function showEmpty(msg) {
   document.getElementById('mma-content').innerHTML =
     `<div class="mma-empty">${msg}</div>`;
+}
+
+// ── Edge Finder ───────────────────────────────────────────────
+
+async function loadEdgeFinder() {
+  const minEdge = parseFloat(document.getElementById('efMinEdge').value) || 2.0;
+  const el = document.getElementById('ef-results');
+  el.innerHTML = '<div class="mma-loading" style="padding:40px 20px;"><div class="spinner"></div><p>Calculating edges…</p></div>';
+  document.getElementById('efStatus').textContent = '';
+
+  try {
+    const res = await fetch(`/api/mma/edge-finder?min_edge=0`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    _efRawData = await res.json();
+    applyEdgeFilters();
+  } catch (e) {
+    el.innerHTML = `<div class="mma-empty">Failed to load edge data: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function applyEdgeFilters() {
+  if (!_efRawData) { loadEdgeFinder(); return; }
+
+  const minEdge = parseFloat(document.getElementById('efMinEdge').value) || 2.0;
+  const el = document.getElementById('ef-results');
+  const noOddsNote = document.getElementById('ef-no-odds-note');
+
+  // Show warning if no odds are loaded at all
+  noOddsNote.style.display = (_efRawData.total_odds_rows === 0) ? 'block' : 'none';
+
+  let bets = (_efRawData.bets || []).filter(b => Math.abs(b.edge || 0) >= minEdge);
+
+  if (_efRawData.message && !bets.length) {
+    el.innerHTML = `<div class="mma-empty">${escHtml(_efRawData.message)}</div>`;
+    return;
+  }
+
+  if (!bets.length) {
+    el.innerHTML = `<div class="mma-empty">No value bets found at edge ≥ ${minEdge.toFixed(1)}%. Try lowering the threshold or refreshing odds.</div>`;
+    return;
+  }
+
+  const valueBets = bets.filter(b => b.recommendation === 'value');
+  const allBets   = bets;
+
+  const summary = `${allBets.length} result(s) · min edge: ${minEdge.toFixed(1)}%`;
+
+  el.innerHTML = `
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;font-family:'DM Mono',monospace;">
+      ${escHtml(summary)}
+    </div>
+    <div class="ef-cards-grid">
+      ${allBets.map(bet => efCardHTML(bet)).join('')}
+    </div>
+  `;
+}
+
+function efCardHTML(bet) {
+  const edge = bet.edge || 0;
+  const edgeCls = edge >= 5 ? 'pos' : edge >= 2 ? 'pos' : edge <= -2 ? 'neg' : 'neu';
+  const isValue = bet.recommendation === 'value';
+  const isLongShot = (bet.odds || 0) > 3.5;
+
+  const cardCls = [
+    'ef-card',
+    isValue ? 'value-bet' : '',
+    isLongShot ? 'long-shot' : '',
+  ].filter(Boolean).join(' ');
+
+  const badges = [
+    isValue    ? '<span class="ef-badge value">✓ VALUE</span>' : '',
+    isLongShot ? '<span class="ef-badge longshot">🎯 Long Shot</span>' : '',
+    bet.is_title_fight ? '<span class="ef-badge title">🏆 Title Fight</span>' : '',
+    bet.is_main_card   ? '<span class="ef-badge main">Main Card</span>' : '',
+    bet.weight_class   ? `<span class="ef-badge">${escHtml(bet.weight_class)}</span>` : '',
+  ].filter(Boolean).join('');
+
+  const eventDate = bet.event_date
+    ? new Date(bet.event_date + 'T00:00:00').toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'})
+    : '';
+
+  return `
+    <div class="${cardCls}">
+      <div class="ef-header">
+        <div>
+          <div class="ef-fighter-name">${escHtml(bet.fighter)}</div>
+          <div class="ef-vs-line">vs ${escHtml(bet.opponent)}</div>
+          <div class="ef-event-name">📅 ${escHtml(eventDate)} · ${escHtml(bet.event_name || '')}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+          <span class="edge-chip ${edgeCls}">${edge > 0 ? '+' : ''}${edge.toFixed(1)}%</span>
+          <div style="font-family:'DM Mono',monospace;font-size:1.1rem;font-weight:800;color:var(--text-primary);">
+            $${(bet.odds || 0).toFixed(2)}
+          </div>
+          <div style="font-size:10px;color:var(--text-muted);">${escHtml(bet.bookmaker || '')}</div>
+        </div>
+      </div>
+      ${badges ? `<div class="ef-badges" style="margin-bottom:10px;">${badges}</div>` : ''}
+      <div class="ef-prob-row">
+        <span class="ef-prob-item">Model <strong>${(bet.model_prob || 0).toFixed(1)}%</strong></span>
+        <span class="ef-prob-item">Implied <strong>${(bet.implied_prob || 0).toFixed(1)}%</strong></span>
+        <span class="ef-prob-item">Opponent <strong>${(bet.opponent_model_prob || 0).toFixed(1)}%</strong></span>
+        <span class="ef-prob-item">Confidence <strong>${escHtml(bet.confidence || '')}</strong></span>
+      </div>
+    </div>
+  `;
+}
+
+async function refreshMmaOdds() {
+  const btn = document.getElementById('efRefreshBtn');
+  const status = document.getElementById('efStatus');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Fetching…';
+  status.textContent = '';
+
+  try {
+    const res = await fetch('/api/mma/sync/odds', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || data.status === 'error') {
+      status.textContent = '✗ ' + (data.message || 'Error');
+      status.style.color = 'var(--danger)';
+    } else {
+      status.textContent = `✓ ${data.rows_synced} odds rows synced`;
+      status.style.color = 'var(--success)';
+      _efRawData = null;
+      loadEdgeFinder();
+    }
+  } catch (e) {
+    status.textContent = '✗ ' + e.message;
+    status.style.color = 'var(--danger)';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-cloud-download"></i> Refresh Odds';
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────

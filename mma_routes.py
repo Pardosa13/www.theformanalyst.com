@@ -6,6 +6,8 @@ Routes:
   GET  /mma              -> mma.html (main page)
   GET  /api/mma/events   -> JSON: upcoming events + predictions
   GET  /api/mma/fighter/<name> -> JSON: fighter stats
+  GET  /api/mma/edge-finder    -> JSON: value bets based on model vs bookmaker odds
+  POST /api/mma/sync/odds      -> Trigger manual odds refresh from The Odds API
 """
 
 import json
@@ -195,6 +197,177 @@ def register_mma_routes(app, db):
         except Exception as e:
             logger.error(f"Fighter API error: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
+
+    @mma_bp.route('/api/mma/edge-finder')
+    @login_required
+    def api_mma_edge_finder():
+        """
+        Returns edge bets for upcoming UFC fights.
+
+        For each fight that has a model prediction AND bookmaker odds in
+        mma_fight_odds, calculates:
+            edge = (model_win_prob − bookmaker_implied_prob) × 100
+
+        Query params:
+            min_edge  float  minimum |edge| to include (default 2.0)
+        """
+        try:
+            from sqlalchemy import text
+            from mma_data import calculate_mma_edge, names_match, normalise_name
+
+            # Clamp min_edge to a sensible range
+            min_edge = max(0.0, min(100.0, request.args.get('min_edge', 2.0, type=float)))
+
+            # ── 1. Fetch upcoming fights with predictions ─────────────────────
+            fights_sql = text("""
+                SELECT
+                    f.id, f.fighter_1_name, f.fighter_2_name,
+                    f.weight_class, f.is_main_card, f.is_title_fight,
+                    e.id  AS event_id,
+                    e.name AS event_name, e.date AS event_date,
+                    p.predicted_winner,
+                    p.f1_win_probability, p.f2_win_probability, p.confidence
+                FROM mma_fights f
+                JOIN mma_events e ON e.id = f.event_id
+                LEFT JOIN mma_predictions p ON p.fight_id = f.id
+                WHERE e.is_completed = FALSE
+                  AND p.predicted_winner IS NOT NULL
+                ORDER BY e.date ASC, f.is_main_card DESC, f.id ASC
+            """)
+            fight_rows = db.session.execute(fights_sql).fetchall()
+
+            if not fight_rows:
+                return jsonify({
+                    'bets': [],
+                    'message': (
+                        'No upcoming fights with predictions found. '
+                        'Run the weekly MMA sync to generate predictions.'
+                    ),
+                })
+
+            # ── 2. Fetch all stored h2h odds ──────────────────────────────────
+            odds_sql = text("""
+                SELECT event_key, fighter_1_name, fighter_2_name,
+                       commence_time, bookmaker, fighter_name, odds
+                FROM mma_fight_odds
+                ORDER BY fetched_at DESC
+            """)
+            odds_rows = db.session.execute(odds_sql).fetchall()
+
+            # Index: normalised_fighter_name → list of odds rows
+            odds_by_fighter: dict[str, list] = {}
+            for row in odds_rows:
+                key = normalise_name(row.fighter_name)
+                odds_by_fighter.setdefault(key, []).append(row)
+
+            # ── 3. Build edge bets ────────────────────────────────────────────
+            bets = []
+
+            for fr in fight_rows:
+                (fight_id, f1, f2, wc, is_main, is_title,
+                 event_id, event_name, event_date,
+                 pred_winner, f1_prob, f2_prob, confidence) = fr
+
+                if f1_prob is None or f2_prob is None:
+                    continue
+
+                for fighter_name, model_prob in [(f1, float(f1_prob)), (f2, float(f2_prob))]:
+                    # Find matching odds rows for this fighter
+                    best_odds = None
+                    best_bookmaker = None
+                    for norm_key, odds_list in odds_by_fighter.items():
+                        if names_match(fighter_name, norm_key):
+                            for orow in odds_list:
+                                if best_odds is None or (orow.odds or 0) > best_odds:
+                                    best_odds = orow.odds
+                                    best_bookmaker = orow.bookmaker
+
+                    if not best_odds or best_odds <= 1.0:
+                        continue
+
+                    edge_data = calculate_mma_edge(
+                        model_prob=model_prob,
+                        odds=best_odds,
+                    )
+                    edge = edge_data['edge']
+
+                    if abs(edge) < min_edge:
+                        continue
+
+                    opponent = f2 if fighter_name == f1 else f1
+                    opponent_prob = float(f2_prob) if fighter_name == f1 else float(f1_prob)
+
+                    bets.append({
+                        'fight_id': fight_id,
+                        'event_id': event_id,
+                        'event_name': event_name,
+                        'event_date': event_date.isoformat() if event_date else None,
+                        'fighter': fighter_name,
+                        'opponent': opponent,
+                        'weight_class': wc or '',
+                        'is_main_card': bool(is_main),
+                        'is_title_fight': bool(is_title),
+                        'predicted_winner': pred_winner,
+                        'confidence': confidence or '',
+                        'model_prob': edge_data['model_prob'],
+                        'opponent_model_prob': round(opponent_prob * 100.0, 1),
+                        'implied_prob': edge_data['implied_prob'],
+                        'odds': edge_data['odds'],
+                        'bookmaker': best_bookmaker or '',
+                        'edge': edge_data['edge'],
+                        'edge_pct': edge_data['edge_pct'],
+                        'recommendation': edge_data['recommendation'],
+                    })
+
+            # Keep only the best edge per fight-fighter pair and sort
+            bets.sort(key=lambda x: abs(x.get('edge', 0)), reverse=True)
+
+            odds_count_sql = text("SELECT COUNT(*) FROM mma_fight_odds")
+            total_odds = db.session.execute(odds_count_sql).scalar() or 0
+
+            return jsonify({
+                'bets': bets,
+                'count': len(bets),
+                'min_edge': min_edge,
+                'total_odds_rows': total_odds,
+                'message': None if bets else (
+                    'No value bets found. Odds may not yet be loaded — '
+                    'use "Refresh Odds" to fetch from The Odds API, '
+                    'or lower the minimum edge threshold.'
+                ),
+            })
+
+        except Exception as e:
+            logger.error("MMA edge-finder API error: %s", e, exc_info=True)
+            return jsonify({'error': 'Internal server error'}), 500
+
+    @mma_bp.route('/api/mma/sync/odds', methods=['POST'])
+    @login_required
+    def api_mma_sync_odds():
+        """Manually trigger a UFC odds refresh from The Odds API."""
+        try:
+            from mma_data import fetch_mma_fight_odds, get_odds_api_key
+            from mma_models import upsert_mma_fight_odds
+            from sqlalchemy import text
+
+            api_key = get_odds_api_key()
+            if not api_key:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'ODDS_API_KEY not configured in environment variables.',
+                }), 400
+
+            rows = fetch_mma_fight_odds(api_key=api_key)
+            count = upsert_mma_fight_odds(db, rows)
+
+            return jsonify({
+                'status': 'ok',
+                'rows_synced': count,
+            })
+
+        except Exception as e:
+            logger.error("MMA odds sync error: %s", e, exc_info=True)
+            return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
     app.register_blueprint(mma_bp)
     logger.info("✓ MMA routes registered")
