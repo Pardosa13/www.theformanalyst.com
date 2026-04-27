@@ -2053,8 +2053,8 @@ def _preload_fantasy_ids():
             headers={"User-Agent": "Mozilla/5.0 (compatible; TheFormAnalyst/1.0)"},
         )
         resp.raise_for_status()
-        players = resp.json()
-        players = players.get("players", players)
+        data = resp.json()
+        players = data if isinstance(data, list) else data.get("players", [])
         for p in players:
             fn = str(p.get("first_name") or p.get("firstname") or p.get("given_name") or "").strip().lower()
             ln = str(p.get("last_name") or p.get("lastname") or p.get("surname") or "").strip().lower()
@@ -2066,7 +2066,6 @@ def _preload_fantasy_ids():
     except Exception as e:
         logger.warning("Fantasy ID preload failed: %s", e)
 
-# Call once at import time
 _preload_fantasy_ids()
 
 def _merge_fixture_tips(db, fixtures: list[dict], year: int, round_number: int | None = None) -> list[dict]:
