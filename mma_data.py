@@ -15,7 +15,7 @@ import os
 import time
 import unicodedata
 import re
-from typing import Optional
+from typing import Optional, Union
 
 import requests
 
@@ -30,7 +30,7 @@ _ODDS_API_KEY_MIN_LENGTH = 10
 
 # ─── HTTP helper ─────────────────────────────────────────────────────────────
 
-def _get(url: str, params: dict) -> Optional[dict | list]:
+def _get(url: str, params: dict) -> Optional[Union[dict, list]]:
     """Simple GET with basic error handling."""
     try:
         resp = requests.get(url, params=params, timeout=20)
@@ -76,6 +76,10 @@ def _normalise_name(name: str) -> str:
     name = name.lower().replace("-", " ")
     name = re.sub(r"[^a-z0-9\s]", "", name)
     return " ".join(name.split())
+
+
+# Public alias (imported by mma_routes.py)
+normalise_name = _normalise_name
 
 
 def names_match(a: str, b: str) -> bool:

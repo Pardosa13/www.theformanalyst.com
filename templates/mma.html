@@ -522,8 +522,8 @@
 
   <!-- Main navigation tabs -->
   <div class="mma-nav-tabs">
-    <button class="mma-nav-tab active" onclick="switchSection('fights')">🥊 Fight Cards</button>
-    <button class="mma-nav-tab" onclick="switchSection('edge')">⚡ Edge Finder</button>
+    <button class="mma-nav-tab active" onclick="switchSection('fights', this)">🥊 Fight Cards</button>
+    <button class="mma-nav-tab" onclick="switchSection('edge', this)">⚡ Edge Finder</button>
   </div>
 
   <!-- ── SECTION: Fight Cards ─────────────────────────────── -->
@@ -557,12 +557,14 @@
       <div class="edge-finder-bar">
         <input type="number" class="form-control" id="efMinEdge" value="2" step="0.5"
                style="max-width:130px;" placeholder="Min edge %"
+               aria-label="Minimum edge percentage"
                onchange="applyEdgeFilters()">
-        <button class="btn btn-primary" onclick="loadEdgeFinder()">
+        <button class="btn btn-primary" onclick="loadEdgeFinder()" aria-label="Find value bets">
           <i class="bi bi-search"></i> Find Value
         </button>
         <button class="btn btn-secondary" id="efRefreshBtn" onclick="refreshMmaOdds()"
-                title="Fetch latest UFC fight odds from The Odds API (requires ODDS_API_KEY)">
+                title="Fetch latest UFC fight odds from The Odds API (requires ODDS_API_KEY)"
+                aria-label="Refresh UFC odds from The Odds API">
           <i class="bi bi-cloud-download"></i> Refresh Odds
         </button>
         <span id="efStatus" style="font-size:11px;color:var(--text-muted);"></span>
@@ -596,11 +598,11 @@ let activeEventIdx = 0;
 let _efRawData = null;
 
 // ── Section switching ─────────────────────────────────────
-function switchSection(name) {
+function switchSection(name, btn) {
   document.querySelectorAll('.mma-section').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.mma-nav-tab').forEach(el => el.classList.remove('active'));
   document.getElementById('section-' + name).classList.add('active');
-  event.currentTarget.classList.add('active');
+  btn.classList.add('active');
   if (name === 'edge' && !_efRawData) loadEdgeFinder();
 }
 

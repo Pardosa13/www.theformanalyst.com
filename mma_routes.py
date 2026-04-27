@@ -213,9 +213,10 @@ def register_mma_routes(app, db):
         """
         try:
             from sqlalchemy import text
-            from mma_data import calculate_mma_edge, names_match
+            from mma_data import calculate_mma_edge, names_match, normalise_name
 
-            min_edge = request.args.get('min_edge', 2.0, type=float)
+            # Clamp min_edge to a sensible range
+            min_edge = max(0.0, min(100.0, request.args.get('min_edge', 2.0, type=float)))
 
             # ── 1. Fetch upcoming fights with predictions ─────────────────────
             fights_sql = text("""
@@ -254,10 +255,9 @@ def register_mma_routes(app, db):
             odds_rows = db.session.execute(odds_sql).fetchall()
 
             # Index: normalised_fighter_name → list of odds rows
-            from mma_data import _normalise_name
             odds_by_fighter: dict[str, list] = {}
             for row in odds_rows:
-                key = _normalise_name(row.fighter_name)
+                key = normalise_name(row.fighter_name)
                 odds_by_fighter.setdefault(key, []).append(row)
 
             # ── 3. Build edge bets ────────────────────────────────────────────
@@ -338,8 +338,8 @@ def register_mma_routes(app, db):
             })
 
         except Exception as e:
-            logger.error(f"MMA edge-finder API error: {e}", exc_info=True)
-            return jsonify({'error': str(e)}), 500
+            logger.error("MMA edge-finder API error: %s", e, exc_info=True)
+            return jsonify({'error': 'Internal server error'}), 500
 
     @mma_bp.route('/api/mma/sync/odds', methods=['POST'])
     @login_required
@@ -366,8 +366,8 @@ def register_mma_routes(app, db):
             })
 
         except Exception as e:
-            logger.error(f"MMA odds sync error: {e}", exc_info=True)
-            return jsonify({'status': 'error', 'message': str(e)}), 500
+            logger.error("MMA odds sync error: %s", e, exc_info=True)
+            return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
     app.register_blueprint(mma_bp)
     logger.info("✓ MMA routes registered")
