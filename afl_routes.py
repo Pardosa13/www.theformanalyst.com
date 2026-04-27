@@ -2044,6 +2044,30 @@ def _format_game_log_row(game: dict, player_team: str) -> dict:
         "supercoach": game.get("supercoach_score", 0),
     }
 
+def _preload_fantasy_ids():
+    """Fetch all Fantasy player IDs once at startup and cache them."""
+    try:
+        resp = _requests.get(
+            "https://fantasy.afl.com.au/data/afl/players.json",
+            timeout=10,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; TheFormAnalyst/1.0)"},
+        )
+        resp.raise_for_status()
+        players = resp.json()
+        players = players.get("players", players)
+        for p in players:
+            fn = str(p.get("first_name") or p.get("firstname") or p.get("given_name") or "").strip().lower()
+            ln = str(p.get("last_name") or p.get("lastname") or p.get("surname") or "").strip().lower()
+            pid = p.get("id") or p.get("player_id")
+            if fn and ln and pid:
+                key = f"{fn}|{ln}"
+                _fantasy_player_id_cache[key] = int(pid)
+        logger.info("Fantasy ID cache loaded: %s players", len(_fantasy_player_id_cache))
+    except Exception as e:
+        logger.warning("Fantasy ID preload failed: %s", e)
+
+# Call once at import time
+_preload_fantasy_ids()
 
 def _merge_fixture_tips(db, fixtures: list[dict], year: int, round_number: int | None = None) -> list[dict]:
     if not fixtures:
