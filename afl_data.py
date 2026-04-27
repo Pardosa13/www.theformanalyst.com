@@ -106,6 +106,10 @@ def _get(url: str, params: Optional[dict] = None, retries: int = 3) -> Optional[
                 time.sleep(10)
                 continue
 
+            if 400 <= response.status_code < 500:
+                logger.warning("Client error %s from %s — not retrying", response.status_code, url)
+                return None
+
             response.raise_for_status()
 
             if not response.text or not response.text.strip():
