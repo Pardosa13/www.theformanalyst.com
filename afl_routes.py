@@ -1765,14 +1765,14 @@ def _db_get_props(
 
     if home_team:
         conditions.append(
-            "(LOWER(home_team) LIKE LOWER(:home_team) OR LOWER(away_team) LIKE LOWER(:home_team))"
+            "(LOWER(home_team) = LOWER(:home_team) OR LOWER(away_team) = LOWER(:home_team))"
         )
-        params["home_team"] = f"%{home_team}%"
+        params["home_team"] = home_team.strip()
     if away_team:
         conditions.append(
-            "(LOWER(home_team) LIKE LOWER(:away_team) OR LOWER(away_team) LIKE LOWER(:away_team))"
+            "(LOWER(home_team) = LOWER(:away_team) OR LOWER(away_team) = LOWER(:away_team))"
         )
-        params["away_team"] = f"%{away_team}%"
+        params["away_team"] = away_team.strip()
     if min_line is not None:
         conditions.append("line >= :min_line")
         params["min_line"] = min_line
@@ -1801,8 +1801,8 @@ def _db_get_match_props(db, home_team: str, away_team: str) -> list[dict]:
         """
         SELECT *
         FROM afl_player_props
-        WHERE (LOWER(home_team) LIKE LOWER(:home) OR LOWER(away_team) LIKE LOWER(:home))
-          AND (LOWER(home_team) LIKE LOWER(:away) OR LOWER(away_team) LIKE LOWER(:away))
+        WHERE (LOWER(home_team) = LOWER(:home) OR LOWER(away_team) = LOWER(:home))
+          AND (LOWER(home_team) = LOWER(:away) OR LOWER(away_team) = LOWER(:away))
           AND fetched_at > NOW() - INTERVAL '7 days'
         ORDER BY market, player_name, line_type
         """
@@ -1810,7 +1810,7 @@ def _db_get_match_props(db, home_team: str, away_team: str) -> list[dict]:
     with db.engine.connect() as conn:
         rows = conn.execute(
             sql,
-            {"home": f"%{home_team}%", "away": f"%{away_team}%"},
+            {"home": home_team.strip(), "away": away_team.strip()},
         ).mappings().fetchall()
     return [dict(row) for row in rows]
 
@@ -1820,13 +1820,13 @@ def _db_has_props(db, home_team: str, away_team: str) -> bool:
         """
         SELECT 1
         FROM afl_player_props
-        WHERE (LOWER(home_team) LIKE LOWER(:home) OR LOWER(away_team) LIKE LOWER(:home))
+        WHERE (LOWER(home_team) = LOWER(:home) OR LOWER(away_team) = LOWER(:home))
           AND fetched_at > NOW() - INTERVAL '7 days'
         LIMIT 1
         """
     )
     with db.engine.connect() as conn:
-        result = conn.execute(sql, {"home": f"%{home_team}%"}).fetchone()
+        result = conn.execute(sql, {"home": home_team.strip()}).fetchone()
     return result is not None
 
 

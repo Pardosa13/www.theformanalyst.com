@@ -113,13 +113,12 @@ def sync_afl_all(season: int = None):
         for yr in seasons_to_sync:
             try:
                 if yr == 2026:
-                    logger.info("  • Loading 2026 player stats from committed CSV")
-                    stats = fetch_2026_stats_from_csv()
+                    logger.info("  • Loading 2026 player stats from AFL official API")
+                    stats = fetch_afl_player_stats_current_season(yr, round_number=None)
 
-                    # fallback attempt only if csv missing/empty
                     if not stats:
-                        logger.warning("  • 2026 CSV returned no rows, trying AFL official current-season source")
-                        stats = fetch_afl_player_stats_current_season(yr, round_number=None)
+                        logger.warning("  • AFL API returned no rows, falling back to committed CSV")
+                        stats = fetch_2026_stats_from_csv()
                 else:
                     stats = fetch_fryzigg_player_stats(yr)
 
@@ -156,19 +155,14 @@ def sync_afl_all(season: int = None):
         # ── 5. Prop lines (skip if no key) ────────────────────────
         api_key = os.environ.get("ODDS_API_KEY", "")
         if api_key:
-            total_props = 0
-            for market in ["player_disposals", "player_marks", "player_goals"]:
-                try:
-                    props = fetch_afl_player_props(api_key, market)
-                    count = upsert_player_props(db, props)
-                    total_props += count
-                    _safe_log_sync(db, "odds_api", season=season, rows=count)
-                    logger.info("  ✓ Props (%s): %s lines synced", market, count)
-                except Exception as exc:
-                    logger.error("  ✗ Props sync failed for %s: %s", market, exc)
-                    _safe_log_sync(db, "odds_api", season=season, status="error", error=str(exc))
-
-            logger.info("  ✓ Props total: %s lines", total_props)
+            try:
+                props = fetch_afl_player_props(api_key)
+                count = upsert_player_props(db, props)
+                _safe_log_sync(db, "odds_api", season=season, rows=count)
+                logger.info("  ✓ Props: %s lines synced", count)
+            except Exception as exc:
+                logger.error("  ✗ Props sync failed: %s", exc)
+                _safe_log_sync(db, "odds_api", season=season, status="error", error=str(exc))
         else:
             logger.info("  - Props: skipped (ODDS_API_KEY not configured)")
 
