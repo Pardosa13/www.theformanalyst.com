@@ -510,7 +510,7 @@
   <div class="mma-header">
     <div>
       <h2>
-        🥊 MMA Hub
+        🥊 UFC Hub
         <span class="mma-badge">AI PREDICTIONS</span>
       </h2>
       <p>Upcoming UFC events · CatBoost + Glicko-2 model · Updated weekly</p>
@@ -970,7 +970,7 @@ function applyEdgeFilters() {
   // Show warning if no odds are loaded at all
   noOddsNote.style.display = (_efRawData.total_odds_rows === 0) ? 'block' : 'none';
 
-  let bets = (_efRawData.bets || []).filter(b => Math.abs(b.edge || 0) >= minEdge);
+  let bets = (_efRawData.bets || []).filter(b => (b.edge || 0) >= minEdge);
 
   if (_efRawData.message && !bets.length) {
     el.innerHTML = `<div class="mma-empty">${escHtml(_efRawData.message)}</div>`;
