@@ -799,31 +799,36 @@ def register_afl_routes(app, db):
                     hist_pct = round(hits / total * 100, 1) if total else 0.0
 
                     value_bets.append(
-                        {
-                            "player": pname,
-                            "player_id": player.get("player_id"),
-                            "team": team_name,
-                            "opponent": opponent,
-                            "home_team": prop_home_team,
-                            "away_team": prop_away_team,
-                            "commence_time": str(prop.get("commence_time", "")),
-                            "bookmaker": prop.get("bookmaker", ""),
-                            "market": market,
-                            "line_type": line_type,
-                            "book_line": book_line,
-                            "odds": odds,
-                            "season_avg": season_avg,
-                            "vs_opp_avg": vs_opp_avg,
-                            "last5_avg": last5_avg,
-                            "hist_pct": hist_pct,
-                            "model_prediction": edge_data["model_prediction"],
-                            "model_prob": edge_data.get("model_prob"),
-                            "implied_prob": edge_data.get("implied_prob"),
-                            "edge": round(edge, 1),
-                            "edge_pct": edge_data["edge_pct"],
-                            "recommendation": edge_data["recommendation"],
-                        }
-                    )
+    {
+        "player": pname,
+        "player_id": player.get("player_id"),
+        "team": team_name,
+        "opponent": opponent,
+        "home_team": prop_home_team,
+        "away_team": prop_away_team,
+        "commence_time": str(prop.get("commence_time", "")),
+        "bookmaker": prop.get("bookmaker", ""),
+        "market": market,
+        "line_type": line_type,
+        "book_line": book_line,
+        "odds": odds,
+        "season_avg": season_avg,
+        "vs_opp_avg": vs_opp_avg,
+        "last5_avg": last5_avg,
+        "hist_pct": hist_pct,
+        "model_prediction": edge_data["model_prediction"],
+        "model_prob": edge_data.get("model_prob"),
+        "implied_prob": edge_data.get("implied_prob"),
+        "edge": round(edge, 1),
+        "edge_pct": edge_data["edge_pct"],
+        "recommendation": edge_data["recommendation"],
+        "headshot_url": afl_player_headshot_url(
+            player.get("player_id"),
+            player.get("first_name", ""),
+            player.get("last_name", ""),
+        ),
+    }
+)
 
         # Keep only the highest-edge bet per (player, direction) so a player
         # with different lines from different bookmakers appears at most once.
