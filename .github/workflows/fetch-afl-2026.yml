@@ -35,20 +35,25 @@ jobs:
       - name: Create data directory
         run: mkdir -p data
 
-      - name: Fetch 2026 Fryzigg player stats
+      - name: Fetch 2026 player stats (fryzigg then afltables fallback)
         run: |
           Rscript -e "
           library(fitzRoy)
           library(readr)
 
-          # Use source='fryzigg' so player_id values are the stable Fryzigg IDs
-          # that are consistent with 2019-2025 data already stored in Postgres.
-          # This prevents player_id collisions between seasons.
-          data <- fetch_player_stats(season = 2026, source = 'fryzigg')
-
-          if (is.null(data) || nrow(data) == 0) {
-            stop('No rows returned from fitzRoy::fetch_player_stats(season = 2026, source = \"fryzigg\")')
-          }
+          data <- tryCatch({
+            # Prefer fryzigg: stable player_id values consistent with 2019-2025 data.
+            d <- fetch_player_stats(season = 2026, source = 'fryzigg')
+            if (is.null(d) || nrow(d) == 0) stop('fryzigg returned 0 rows')
+            cat('Source: fryzigg\n')
+            d
+          }, error = function(e) {
+            cat('fryzigg failed:', conditionMessage(e), '— falling back to afltables\n')
+            d <- fetch_player_stats(season = 2026, source = 'afltables')
+            if (is.null(d) || nrow(d) == 0) stop('afltables also returned 0 rows')
+            cat('Source: afltables\n')
+            d
+          })
 
           write_csv(data, 'data/afl_2026_stats.csv')
           cat('Rows written:', nrow(data), '\n')

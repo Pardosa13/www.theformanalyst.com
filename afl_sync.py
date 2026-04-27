@@ -55,6 +55,7 @@ def sync_afl_all(season: int = None):
         fetch_afl_player_stats_current_season,
         fetch_2026_stats_from_csv,
         fetch_afl_player_props,
+        _filter_valid_stat_rows,
     )
     from afl_db import (
         upsert_games,
@@ -117,7 +118,18 @@ def sync_afl_all(season: int = None):
                     stats = fetch_afl_player_stats_current_season(yr, round_number=None)
 
                     if not stats:
-                        logger.warning("  • AFL API returned no rows, falling back to committed CSV")
+                        logger.warning("  • AFL API returned no rows, trying Fryzigg/fitzRoy")
+                        try:
+                            stats = fetch_fryzigg_player_stats(yr)
+                            if stats:
+                                stats = _filter_valid_stat_rows(stats)
+                                logger.info("  ✓ 2026 stats loaded from Fryzigg/fitzRoy (%s rows)", len(stats))
+                        except Exception as exc:
+                            logger.warning("  • Fryzigg/fitzRoy failed for 2026: %s", exc)
+                            stats = []
+
+                    if not stats:
+                        logger.warning("  • Fryzigg returned no rows, falling back to committed CSV")
                         stats = fetch_2026_stats_from_csv()
                 else:
                     stats = fetch_fryzigg_player_stats(yr)

@@ -94,7 +94,7 @@ _AFL_TOKEN_CACHE: dict[str, Any] = {
 # GENERIC HELPERS
 # ─────────────────────────────────────────────
 
-def _get(url: str, params: Optional[dict] = None, retries: int = 3) -> Optional[Any]:
+def _get(url: str, params: Optional[dict] = None, retries: int = 3, silent_4xx: bool = False) -> Optional[Any]:
     """HTTP GET with retries and rate-limit handling."""
     for attempt in range(retries):
         response = None
@@ -107,7 +107,10 @@ def _get(url: str, params: Optional[dict] = None, retries: int = 3) -> Optional[
                 continue
 
             if 400 <= response.status_code < 500:
-                logger.warning("Client error %s from %s — not retrying", response.status_code, url)
+                if not silent_4xx:
+                    logger.warning("Client error %s from %s — not retrying", response.status_code, url)
+                else:
+                    logger.debug("Client error %s from %s — not retrying", response.status_code, url)
                 return None
 
             response.raise_for_status()
@@ -605,11 +608,24 @@ def fetch_fixture_afl(season: int, round_number: int = None, comp: str = "AFLM")
         return []
 
     filtered = []
+    seen_names: set[str] = set()
     for match in matches:
         comp_season = match.get("compSeason") or {}
         comp_season_name = _coerce_str(comp_season.get("shortName") or comp_season.get("name"))
-        if str(season) in comp_season_name:
+        seen_names.add(comp_season_name)
+        # Accept matches where season year appears in the name, or where the
+        # name is empty/missing (API already filtered by compSeasonId).
+        if not comp_season_name or str(season) in comp_season_name:
             filtered.append(match)
+
+    if matches and not filtered:
+        logger.warning(
+            "AFL fixture: %s matches returned but none passed season=%s filter "
+            "(comp_season names seen: %s)",
+            len(matches),
+            season,
+            list(seen_names)[:5],
+        )
 
     logger.info(
         "AFL fixture: %s matches for season %s round=%s via afl/v2/matches",
@@ -1820,7 +1836,8 @@ def fetch_afl_player_props(
         if bookmaker_string:
             params["bookmakers"] = bookmaker_string
 
-        odds_data = _get(odds_url, params)
+        # 422 = no bookmaker has priced these markets yet (expected for future games)
+        odds_data = _get(odds_url, params, silent_4xx=True)
         if not odds_data or not isinstance(odds_data, dict):
             continue
 
