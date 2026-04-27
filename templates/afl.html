@@ -2017,12 +2017,12 @@ function _vfRenderTable(rows, data) {
     const odds = safeNum(bet.odds, 0);
     const isValue = (bet.recommendation || '') === 'value';
     const recBadge = isValue
+    ? '<span class="vf-rec-badge vf-rec-value"><i class="bi bi-check-circle-fill"></i> VALUE</span>'
+    : '<span class="vf-rec-badge vf-rec-skip">SKIP</span>';
     const _vfInitials = (bet.player || '').split(' ').map(w => w[0] || '').join('').substring(0, 2).toUpperCase();
     const _vfPhoto = bet.headshot_url
-      ? `<img src="${esc(bet.headshot_url)}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border-subtle);" loading="lazy" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div style="display:none;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));align-items:center;justify-content:center;font-size:12px;font-weight:800;color:white;flex-shrink:0;">${_vfInitials}</div>`
-      : `<div style="display:flex;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));align-items:center;justify-content:center;font-size:12px;font-weight:800;color:white;flex-shrink:0;">${_vfInitials}</div>`;
-      ? '<span class="vf-rec-badge vf-rec-value"><i class="bi bi-check-circle-fill"></i> VALUE</span>'
-      : '<span class="vf-rec-badge vf-rec-skip">SKIP</span>';
+    ? `<img src="${esc(bet.headshot_url)}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border-subtle);" loading="lazy" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div style="display:none;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));align-items:center;justify-content:center;font-size:12px;font-weight:800;color:white;flex-shrink:0;">${_vfInitials}</div>`
+    : `<div style="display:flex;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));align-items:center;justify-content:center;font-size:12px;font-weight:800;color:white;flex-shrink:0;">${_vfInitials}</div>`;
 
     const modelProb = bet.model_prob != null ? safeNum(bet.model_prob, 0).toFixed(1) + '%' : '—';
     const impliedProb = bet.implied_prob != null ? safeNum(bet.implied_prob, 0).toFixed(1) + '%' : '—';
