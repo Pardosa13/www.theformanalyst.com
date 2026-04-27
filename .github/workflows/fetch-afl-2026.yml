@@ -2,7 +2,7 @@ name: Fetch AFL 2026 Stats
 
 on:
   schedule:
-    - cron: '0 3 * * *'
+    - cron: '0 10 * * *'
   workflow_dispatch:
 
 permissions:
