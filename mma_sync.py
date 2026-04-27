@@ -7,13 +7,13 @@ What it does (in order):
   3. Loads the trained CatBoost model and generates win probabilities
   4. Writes upcoming events, fights, and predictions to Postgres
   5. Also scrapes ESPN for the most recently completed event to capture results
+  6. Fetches UFC h2h fight odds from The Odds API → mma_fight_odds table
 
 Railway cron schedule: 0 9 * * 0  (Sundays at 9am UTC)
 
-Environment variables required (already in Railway):
-  DATABASE_URL
-
-No new env vars needed.
+Environment variables required:
+  DATABASE_URL  – already in Railway
+  ODDS_API_KEY  – optional; if set, UFC fight odds are fetched and stored
 """
 
 import os
@@ -1449,6 +1449,30 @@ def main():
         time.sleep(1)
 
     conn.close()
+
+    # ── 6. Sync UFC fight odds from The Odds API ──────────────────────────────
+    odds_api_key = os.environ.get('ODDS_API_KEY', '')
+    if odds_api_key:
+        log.info("Fetching UFC fight odds from The Odds API …")
+        try:
+            from mma_data import fetch_mma_fight_odds
+            from mma_models import upsert_mma_fight_odds
+            from sqlalchemy import create_engine, text
+            from types import SimpleNamespace
+
+            odds_rows = fetch_mma_fight_odds(api_key=odds_api_key)
+            if odds_rows:
+                odds_engine = create_engine(DATABASE_URL)
+                odds_db = SimpleNamespace(engine=odds_engine, text=text)
+                count = upsert_mma_fight_odds(odds_db, odds_rows)
+                log.info(f"  ✓ UFC odds synced: {count} rows")
+            else:
+                log.info("  - No UFC odds returned (no upcoming events?)")
+        except Exception as exc:
+            log.error(f"  ✗ UFC odds sync failed: {exc}")
+    else:
+        log.info("  - UFC odds: skipped (ODDS_API_KEY not configured)")
+
     log.info("=== MMA Sync Complete ===")
 
 
