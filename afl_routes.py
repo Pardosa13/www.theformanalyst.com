@@ -650,25 +650,26 @@ def register_afl_routes(app, db):
 
         effective_season = _resolve_stats_season(db, requested_season)
         effective_seasons = _resolve_stats_seasons(db, requested_season)
+      
         if round_number and not home_team and not away_team:
-    fixtures = _db_get_fixtures(
-        db,
-        year=requested_season or CURRENT_YEAR,
-        round_number=round_number
-    )
+            fixtures = _db_get_fixtures(
+                db,
+                year=requested_season or CURRENT_YEAR,
+                round_number=round_number
+            )
 
-    props = []
+            props = []
 
-    for fixture in fixtures:
-        fixture_props = _db_get_props(
-            db,
-            market=market,
-            home_team=fixture.get("hteam"),
-            away_team=fixture.get("ateam"),
-            min_line=min_line,
-            max_line=max_line,
-        )
-        props.extend(fixture_props)
+            for fixture in fixtures:
+                fixture_props = _db_get_props(
+                    db,
+                    market=market,
+                    home_team=fixture.get("hteam"),
+                    away_team=fixture.get("ateam"),
+                    min_line=min_line,
+                    max_line=max_line,
+                )
+                props.extend(fixture_props)
 
 else:
     props = _db_get_props(
