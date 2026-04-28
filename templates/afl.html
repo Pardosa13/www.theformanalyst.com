@@ -2154,7 +2154,7 @@ function loadValueFinder() {
     .then(fixturesData => {
   _vfPopulateMatchSelector(fixturesData.games || []);
 
-  return fetch(`/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=0&year=${_SEASON}`)
+  return fetch(`/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=0&year={{ year }}&round=${_round}`)
         .then(r => { if (!r.ok) throw new Error(); return r.json(); })
         .then(data => {
           _vfRawData = data;
