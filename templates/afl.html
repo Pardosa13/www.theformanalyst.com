@@ -1111,11 +1111,7 @@ function changeRound(dir) {
 
 function _vfGetBets(data) {
   // Primary contract from backend: data.bets
-  const raw = Array.isArray(data?.bets)
-    ? data.bets
-    : Array.isArray(data?.value_finders)
-    ? data.value_finders
-    : [];
+  const raw = Array.isArray(data?.bets) ? data.bets : [];
 
   return raw.map(b => {
     const edge = (b?.edge != null) ? safeNum(b.edge, 0) : safeNum(b?.edge_pct, 0);
@@ -2150,6 +2146,15 @@ function _vfApplyFilters(data) {
     return;
   }
 
+  _vfRender(bets, data);
+}
+
+function _vfRender(bets, data) {
+  const el = document.getElementById('valueResults');
+  if (!el) {
+    console.warn('[ValueFinder] Missing #valueResults container');
+    return;
+  }
   el.innerHTML = _vfRenderTable(bets, data);
 }
 
