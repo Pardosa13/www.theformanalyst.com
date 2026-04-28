@@ -2145,15 +2145,12 @@ function loadValueFinder() {
 
   el.innerHTML = '<div class="prop-empty"><span class="spinner-sm"></span></div>';
 
-  // Fetch current round fixtures first (same as Player Props tab)
   fetch(`/api/afl/fixtures?year={{ year }}&round=${_round}`)
     .then(r => r.json())
     .then(fixturesData => {
-      // Build match list from current round fixtures ONLY
       const matches = (fixturesData.games || []).map(f => `${f.hteam} vs ${f.ateam}`);
       _vfPopulateMatchSelector(matches);
 
-      // Then fetch value bets
       return fetch(`/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=0&year=${_SEASON}`)
         .then(r => { if (!r.ok) throw new Error(); return r.json(); })
         .then(data => {
@@ -2161,6 +2158,10 @@ function loadValueFinder() {
           _vfApplyFilters(data);
         });
     })
+    .catch(() => {
+      el.innerHTML = '<div class="prop-empty">Error loading value finder</div>';
+    });
+}
 function loadDisposalLines() {
   const el = document.getElementById('disposalLinesResults');
   if (!el) return;
