@@ -633,7 +633,280 @@ def register_afl_routes(app, db):
                 standings = _db_get_standings(db, year=year)
 
         return jsonify({"year": year, "standings": standings, "count": len(standings)})
+    @app.route("/api/afl/value-finder")
+    @login_required
+    def api_afl_value_finder():
+    market = request.args.get("market", "player_disposals")
+    min_edge = request.args.get("min_edge", 2.0, type=float)
+    requested_season = request.args.get("year", type=int)
+    round_number = request.args.get("round", type=int)
+    home_team = request.args.get("home", "").strip()
+    away_team = request.args.get("away", "").strip()
+    min_line = request.args.get("min_line", type=float)
+    max_line = request.args.get("max_line", type=float)
 
+    market = _normalise_prop_market(market)
+
+    effective_season = _resolve_stats_season(db, requested_season)
+    effective_seasons = _resolve_stats_seasons(db, requested_season)
+
+    if round_number and not home_team and not away_team:
+        fixtures = _db_get_fixtures(
+            db,
+            year=requested_season or CURRENT_YEAR,
+            round_number=round_number,
+        )
+
+        props = []
+
+        for fixture in fixtures:
+            fixture_props = _db_get_props(
+                db,
+                market=market,
+                home_team=fixture.get("hteam"),
+                away_team=fixture.get("ateam"),
+                min_line=min_line,
+                max_line=max_line,
+            )
+            props.extend(fixture_props)
+    else:
+        props = _db_get_props(
+            db,
+            market=market,
+            home_team=home_team or None,
+            away_team=away_team or None,
+            min_line=min_line,
+            max_line=max_line,
+        )
+
+    if not props:
+        return jsonify(
+            {
+                "bets": [],
+                "message": (
+                    "No prop lines found for this market. "
+                    "Props are synced daily — check back later or use "
+                    "'Load All Props' to manually refresh from the Odds API."
+                ),
+                "season": effective_season,
+                "seasons_used": effective_seasons,
+            }
+        )
+
+    _MARKET_STAT: dict[str, str] = {
+        "player_disposals": "disposals",
+        "player_kicks": "kicks",
+        "player_handballs": "handballs",
+        "player_marks": "marks",
+        "player_tackles": "tackles",
+        "player_goals": "goals",
+        "player_afl_fantasy_points": "afl_fantasy_score",
+    }
+
+    stat_name = _MARKET_STAT.get(market, "disposals")
+
+    seen: dict[tuple, dict] = {}
+
+    for prop in props:
+        key = (
+            prop.get("player_name", ""),
+            prop.get("line_type", ""),
+            prop.get("line", 0),
+        )
+
+        existing = seen.get(key)
+
+        if existing is None or (prop.get("odds") or 0) > (existing.get("odds") or 0):
+            seen[key] = prop
+
+    deduped_props = list(seen.values())
+
+    prop_name_keys: list[tuple[str, str, str]] = []
+
+    for prop in deduped_props:
+        pname = prop.get("player_name", "")
+        parts = pname.replace(".", " ").split()
+        parts = [p for p in parts if p]
+
+        if len(parts) >= 2:
+            prop_name_keys.append((pname, parts[0][0].lower(), parts[-1].lower()))
+
+    all_last_names = list({k[2] for k in prop_name_keys})
+
+    all_stats_rows: list[dict] = []
+
+    if all_last_names:
+        bulk_sql = db.text(
+            """
+            SELECT *
+            FROM afl_player_stats
+            WHERE LOWER(player_last_name) = ANY(:last_names)
+              AND season = ANY(:seasons)
+            ORDER BY season DESC, match_date DESC
+            """
+        )
+
+        with db.engine.connect() as conn:
+            bulk_rows = conn.execute(
+                bulk_sql,
+                {
+                    "last_names": all_last_names,
+                    "seasons": effective_seasons,
+                },
+            ).mappings().fetchall()
+
+        all_stats_rows = [dict(r) for r in bulk_rows]
+
+    stats_by_key: dict[tuple[str, str], list[dict]] = defaultdict(list)
+
+    for row in all_stats_rows:
+        ln = (row.get("player_last_name") or "").lower()
+        fn = (row.get("player_first_name") or "").lower()
+
+        if ln and fn:
+            stats_by_key[(fn[0], ln)].append(row)
+
+    value_bets = []
+
+    for pname, first_initial, last_name in prop_name_keys:
+        player_rows = stats_by_key.get((first_initial, last_name), [])
+
+        if not player_rows:
+            continue
+
+        grouped = _group_players(player_rows)
+
+        if len(grouped) != 1:
+            continue
+
+        player = next(iter(grouped.values()))
+        games = sorted(player["games"], key=_sort_date_key, reverse=True)
+        team_name = player.get("team", "")
+
+        season_avg = _safe_avg(games, stat_name)
+
+        for prop in deduped_props:
+            if prop.get("player_name", "") != pname:
+                continue
+
+            line_type = prop.get("line_type", "")
+
+            if line_type not in ("Over", "Under"):
+                continue
+
+            book_line = prop.get("line", 0)
+
+            if book_line is None:
+                continue
+
+            odds = prop.get("odds", 0) or 0
+            prop_home_team = _normalise_team_name(prop.get("home_team", ""))
+            prop_away_team = _normalise_team_name(prop.get("away_team", ""))
+
+            opponent = (
+                prop_away_team
+                if prop_home_team == team_name
+                else prop_home_team
+                if prop_away_team == team_name
+                else (prop_away_team or prop_home_team)
+            )
+
+            opp_lower = opponent.lower()
+
+            opp_rows = [
+                r
+                for r in games
+                if (r.get("match_home_team") or "").lower() == opp_lower
+                or (r.get("match_away_team") or "").lower() == opp_lower
+            ]
+
+            vs_opp_avg = _safe_avg(opp_rows, stat_name) if opp_rows else None
+            last5_avg = _safe_avg(games[:5], stat_name) if games else None
+
+            edge_data = calculate_market_edge(
+                player_avg=season_avg,
+                book_line=book_line,
+                odds=odds,
+                line_type=line_type,
+                market=market,
+                vs_opp_avg=vs_opp_avg,
+                last5_avg=last5_avg,
+            )
+
+            edge = edge_data["edge"]
+
+            if abs(edge) >= min_edge:
+                total = len(games)
+
+                if line_type == "Over":
+                    hits = sum(
+                        1
+                        for r in games
+                        if (r.get(stat_name, 0) or 0) >= book_line
+                    )
+                else:
+                    hits = sum(
+                        1
+                        for r in games
+                        if (r.get(stat_name, 0) or 0) < book_line
+                    )
+
+                hist_pct = round(hits / total * 100, 1) if total else 0.0
+
+                value_bets.append(
+                    {
+                        "player": pname,
+                        "player_id": player.get("player_id"),
+                        "team": team_name,
+                        "opponent": opponent,
+                        "home_team": prop_home_team,
+                        "away_team": prop_away_team,
+                        "commence_time": str(prop.get("commence_time", "")),
+                        "bookmaker": prop.get("bookmaker", ""),
+                        "market": market,
+                        "line_type": line_type,
+                        "book_line": book_line,
+                        "odds": odds,
+                        "season_avg": season_avg,
+                        "vs_opp_avg": vs_opp_avg,
+                        "last5_avg": last5_avg,
+                        "hist_pct": hist_pct,
+                        "model_prediction": edge_data["model_prediction"],
+                        "model_prob": edge_data.get("model_prob"),
+                        "implied_prob": edge_data.get("implied_prob"),
+                        "edge": round(edge, 1),
+                        "edge_pct": edge_data["edge_pct"],
+                        "recommendation": edge_data["recommendation"],
+                        "headshot_url": afl_player_headshot_url(
+                            player.get("player_id"),
+                            player.get("first_name", ""),
+                            player.get("last_name", ""),
+                        ),
+                    }
+                )
+
+    best_per_player: dict[tuple, dict] = {}
+
+    for bet in value_bets:
+        key = (bet["player"], bet["line_type"])
+
+        if key not in best_per_player or abs(bet["edge"]) > abs(best_per_player[key]["edge"]):
+            best_per_player[key] = bet
+
+    value_bets = list(best_per_player.values())
+    value_bets.sort(key=lambda x: abs(x.get("edge", 0)), reverse=True)
+
+    return jsonify(
+        {
+            "market": market,
+            "stat": stat_name,
+            "min_edge": min_edge,
+            "season": effective_season,
+            "seasons_used": effective_seasons,
+            "bets": value_bets,
+            "count": len(value_bets),
+        }
+    )
        
     @app.route("/api/afl/props/all")
     @login_required
