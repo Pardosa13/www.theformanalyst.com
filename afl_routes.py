@@ -987,12 +987,6 @@ def register_afl_routes(app, db):
 
         return jsonify({"props": props, "count": len(props), "matches": matches})
 
-    @app.route("/api/afl/props")
-    @login_required
-    def api_afl_props():
-        """Backward-compatible alias for /api/afl/props/all."""
-        return api_afl_props_all()
-
     @app.route("/api/afl/player-home-away")
     @login_required
     def api_afl_player_home_away():
