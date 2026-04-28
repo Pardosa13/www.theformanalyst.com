@@ -276,9 +276,13 @@ def register_afl_routes(app, db):
             ), 409
 
         games = sorted(player["games"], key=_sort_date_key, reverse=True)
-        averages = get_player_season_averages(games)
-        last5 = get_player_last_n_games(games, 5)
-        last10 = get_player_last_n_games(games, 10)
+        season_games = [g for g in games if g.get("season") == effective_season] or games
+
+        # "Season avg" cards should reflect the requested season (e.g. 2026),
+        # while history tabs still use the broader multi-season sample.
+        averages = get_player_season_averages(season_games)
+        last5 = get_player_last_n_games(season_games, 5)
+        last10 = get_player_last_n_games(season_games, 10)
 
         opponents = defaultdict(list)
         for game in games:
@@ -335,12 +339,12 @@ def register_afl_routes(app, db):
                     "goals": _safe_avg(last10, "goals"),
                 },
                 "hit_rates": {
-                    "disp_20_plus": _hit_rate(games, "disposals", 20),
-                    "disp_25_plus": _hit_rate(games, "disposals", 25),
-                    "disp_30_plus": _hit_rate(games, "disposals", 30),
-                    "marks_5_plus": _hit_rate(games, "marks", 5),
-                    "tackles_5_plus": _hit_rate(games, "tackles", 5),
-                    "goals_1_plus": _hit_rate(games, "goals", 1),
+                    "disp_20_plus": _hit_rate(season_games, "disposals", 20),
+                    "disp_25_plus": _hit_rate(season_games, "disposals", 25),
+                    "disp_30_plus": _hit_rate(season_games, "disposals", 30),
+                    "marks_5_plus": _hit_rate(season_games, "marks", 5),
+                    "tackles_5_plus": _hit_rate(season_games, "tackles", 5),
+                    "goals_1_plus": _hit_rate(season_games, "goals", 1),
                 },
                 "opponent_splits": opponent_splits,
                 "game_log": [_format_game_log_row(g, player["team"]) for g in games[:20]],
@@ -781,9 +785,10 @@ def register_afl_routes(app, db):
 
             player = next(iter(grouped.values()))
             games = sorted(player["games"], key=_sort_date_key, reverse=True)
+            season_games = [g for g in games if g.get("season") == effective_season] or games
             team_name = player.get("team", "")
 
-            season_avg = _safe_avg(games, stat_name)
+            season_avg = _safe_avg(season_games, stat_name)
 
             for prop in deduped_props:
                 if prop.get("player_name", "") != pname:
@@ -821,7 +826,7 @@ def register_afl_routes(app, db):
                 ]
 
                 vs_opp_avg = _safe_avg(opp_rows, stat_name) if opp_rows else None
-                last5_avg = _safe_avg(games[:5], stat_name) if games else None
+                last5_avg = _safe_avg(season_games[:5], stat_name) if season_games else None
 
                 edge_data = calculate_market_edge(
                     player_avg=season_avg,
