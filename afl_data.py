@@ -1739,13 +1739,30 @@ def _normalise_prop_market(market_key: str) -> str:
         "player_tackles_over": "player_tackles",
         "player_goals": "player_goals",
         "player_goals_scored_over": "player_goals",
+        "player_goals_over": "player_goals",
         "player_afl_fantasy_points": "player_afl_fantasy_points",
-        "player_kicks": "player_kicks",
-        "player_kicks_over": "player_kicks",
-        "player_handballs": "player_handballs",
-        "player_handballs_over": "player_handballs",
     }
     return mapping.get(_coerce_str(market_key), _coerce_str(market_key))
+
+
+def _to_odds_api_market(market_key: str) -> str:
+    """
+    Convert canonical/internal market names into the Odds API keys.
+
+    Odds API uses the *_over suffix for several AFL props. We still store and
+    query everything internally by canonical names (e.g. player_marks), but we
+    must request the provider's exact key when fetching.
+    """
+    canonical = _normalise_prop_market(market_key)
+    return {
+        "player_disposals": "player_disposals",
+        "player_kicks": "player_kicks_over",
+        "player_handballs": "player_handballs_over",
+        "player_marks": "player_marks_over",
+        "player_tackles": "player_tackles_over",
+        "player_goals": "player_goals_scored_over",
+        "player_afl_fantasy_points": "player_afl_fantasy_points",
+    }.get(canonical, canonical)
 
 
 def _normalise_line_type(value: Any) -> str:
@@ -1800,7 +1817,15 @@ def fetch_afl_player_props(
     if event_limit:
         events = events[:event_limit]
 
-    market_string = ",".join(markets)
+    odds_api_markets = []
+    seen_markets = set()
+    for market in markets:
+        provider_market = _to_odds_api_market(market)
+        if provider_market and provider_market not in seen_markets:
+            odds_api_markets.append(provider_market)
+            seen_markets.add(provider_market)
+
+    market_string = ",".join(odds_api_markets)
     bookmaker_string = ",".join(bookmakers) if bookmakers else None
 
     props: list[dict] = []
@@ -1861,7 +1886,7 @@ def fetch_afl_player_props(
     logger.info(
         "Odds API: fetched %s AFL player prop rows across %s market(s)",
         len(props),
-        len(markets),
+        len(odds_api_markets),
     )
     return props
 
