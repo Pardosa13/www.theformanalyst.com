@@ -908,6 +908,7 @@ def register_afl_routes(app, db):
             }
         )
        
+    @app.route("/api/afl/props")
     @app.route("/api/afl/props/all")
     @login_required
     def api_afl_props_all():
