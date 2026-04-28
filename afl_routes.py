@@ -934,8 +934,18 @@ def register_afl_routes(app, db):
         params: dict = {}
 
         if market:
-            conditions.append("market = :market")
-            params["market"] = market
+            market_aliases = [market]
+            market_aliases.extend(
+                {
+                    "player_kicks": ["player_kicks_over"],
+                    "player_handballs": ["player_handballs_over"],
+                    "player_marks": ["player_marks_over"],
+                    "player_tackles": ["player_tackles_over"],
+                    "player_goals": ["player_goals_scored_over", "player_goals_over"],
+                }.get(market, [])
+            )
+            conditions.append("market = ANY(:markets)")
+            params["markets"] = market_aliases
         if home_team:
             conditions.append(
                 "(LOWER(home_team) LIKE LOWER(:home_team) OR LOWER(away_team) LIKE LOWER(:home_team))"
@@ -1813,11 +1823,22 @@ def _db_get_props(
     min_line: float | None = None,
     max_line: float | None = None,
 ) -> list[dict]:
+    canonical_market = _normalise_prop_market(market)
+    market_aliases = [canonical_market]
+    _legacy_market_aliases = {
+        "player_kicks": ["player_kicks_over"],
+        "player_handballs": ["player_handballs_over"],
+        "player_marks": ["player_marks_over"],
+        "player_tackles": ["player_tackles_over"],
+        "player_goals": ["player_goals_scored_over", "player_goals_over"],
+    }
+    market_aliases.extend(_legacy_market_aliases.get(canonical_market, []))
+
     conditions = [
-        "market = :market",
+        "market = ANY(:markets)",
         "fetched_at > NOW() - INTERVAL '7 days'",
     ]
-    params: dict = {"market": market}
+    params: dict = {"markets": market_aliases}
 
     if home_team:
         conditions.append(
