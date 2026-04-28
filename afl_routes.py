@@ -655,16 +655,16 @@ def register_afl_routes(app, db):
     props = []
 
     for fixture in fixtures:
-        props.extend(
-            _db_get_props(
-                db,
-                market=market,
-                home_team=fixture.get("hteam"),
-                away_team=fixture.get("ateam"),
-                min_line=min_line,
-                max_line=max_line,
-            )
-        )
+        fixture_props = _db_get_props(
+    db,
+    market=market,
+    home_team=fixture.get("hteam"),
+    away_team=fixture.get("ateam"),
+    min_line=min_line,
+    max_line=max_line,
+)
+
+props.extend(fixture_props)
 else:
     props = _db_get_props(
         db,
