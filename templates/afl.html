@@ -2124,21 +2124,25 @@ function _vfApplyFilters(data) {
   el.innerHTML = _vfRenderTable(bets, data);
 }
 
-function _vfPopulateMatchSelector(matches) {
+function _vfPopulateMatchSelector(fixtures) {
   const sel = document.getElementById('valueMatch');
   if (!sel) return;
+
   const prev = sel.value;
   sel.innerHTML = '<option value="">All Matches</option>';
-  (matches || []).forEach(m => {
-    const [ht, at] = m.split(' vs ');
+
+  (fixtures || []).forEach(f => {
+    const home = f.hteam || '';
+    const away = f.ateam || '';
+    if (!home || !away) return;
+
     const opt = document.createElement('option');
-    opt.value = `${ht}||${at}`;
-    opt.textContent = m;
+    opt.value = `${home}||${away}`;
+    opt.textContent = `${home} vs ${away}`;
     if (prev === opt.value) opt.selected = true;
     sel.appendChild(opt);
   });
 }
-
 function loadValueFinder() {
   const el = document.getElementById('valueResults');
   const market = document.getElementById('valueMarket')?.value || 'player_disposals';
