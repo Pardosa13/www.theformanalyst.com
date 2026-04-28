@@ -114,11 +114,38 @@ def sync_afl_all(season: int = None):
             try:
                 if yr == 2026:
                     logger.info("  • Loading 2026 player stats from AFL official API")
-                    stats = fetch_afl_player_stats_current_season(yr, round_number=None)
+                    api_stats = fetch_afl_player_stats_current_season(yr, round_number=None)
 
-                    if not stats:
-                        logger.warning("  • AFL API returned no rows, falling back to committed CSV")
+                    # Determine the latest round the AFL API actually returned data for.
+                    # If the API is lagging (e.g. round 8 finished but API only has 1-7),
+                    # fall back to the CSV which is updated daily by GitHub Actions via
+                    # afltables and is typically 1-2 hours ahead of the AFL API after a round.
+                    api_max_round = (
+                        max((int(s.get("match_round") or 0) for s in api_stats), default=0)
+                        if api_stats else 0
+                    )
+                    try:
+                        current_round = fetch_squiggle_current_round(yr)
+                    except Exception:
+                        current_round = 0
+
+                    # Allow API to be 1 round behind: current_round from Squiggle is the
+                    # first *incomplete* round, so API having data through current_round-1
+                    # means it's fully up to date with completed play.
+                    if api_stats and (current_round == 0 or api_max_round >= current_round - 1):
+                        stats = api_stats
+                        logger.info("  • AFL API: %s rows, max round %s", len(stats), api_max_round)
+                    else:
+                        if api_stats:
+                            logger.warning(
+                                "  • AFL API only has data through round %s (current: %s) — using CSV",
+                                api_max_round, current_round,
+                            )
+                        else:
+                            logger.warning("  • AFL API returned no rows, falling back to CSV")
                         stats = fetch_2026_stats_from_csv()
+                        if not stats:
+                            stats = api_stats or []
                 else:
                     stats = fetch_fryzigg_player_stats(yr)
 
