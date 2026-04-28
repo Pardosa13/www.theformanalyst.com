@@ -1084,6 +1084,7 @@ function switchTab(name, btn) {
 // ── Round navigation ─────────────────────────────────────────────
 function changeRound(dir) {
   _round = Math.max(1, _round + dir);
+  _vfRawData = null; // force Value Finder reload for the newly selected round
   document.getElementById('roundLabel').textContent = `Round ${_round}`;
   resetPlayerState();
 
@@ -1106,6 +1107,16 @@ function changeRound(dir) {
       }
     })
     .catch(() => {});
+}
+
+function _vfGetBets(data) {
+  // Primary contract from backend: data.bets
+  const raw = Array.isArray(data?.bets) ? data.bets : [];
+
+  return raw.map(b => {
+    const edge = (b?.edge != null) ? safeNum(b.edge, 0) : safeNum(b?.edge_pct, 0);
+    return { ...b, edge };
+  });
 }
 
 // ── Match selector ───────────────────────────────────────────────
@@ -2082,6 +2093,10 @@ function _vfRenderTable(rows, data) {
 
 function _vfApplyFilters(data) {
   const el = document.getElementById('valueResults');
+  if (!el) {
+    console.warn('[ValueFinder] Missing #valueResults container');
+    return;
+  }
   const market = document.getElementById('valueMarket')?.value || 'player_disposals';
   const matchVal = document.getElementById('valueMatch')?.value || '';
   const minLine = parseFloat(document.getElementById('minLine')?.value) || null;
@@ -2094,7 +2109,7 @@ function _vfApplyFilters(data) {
   }
 
   // Value bets mode (specific market with edge calculation)
-  let bets = (data.bets || []);
+  let bets = _vfGetBets(data);
   if (matchVal) {
     const [ht, at] = matchVal.split('||');
     const fht = (ht || '').toLowerCase();
@@ -2111,6 +2126,16 @@ function _vfApplyFilters(data) {
   if (maxLine !== null) bets = bets.filter(b => (b.book_line || 0) <= maxLine);
   bets = bets.filter(b => Math.abs(safeNum(b.edge, 0)) >= minEdge);
   bets = bets.filter(b => (b.recommendation || '') === 'value');
+  bets.sort((a, b) => Math.abs(safeNum(b.edge, 0)) - Math.abs(safeNum(a.edge, 0)));
+
+  console.debug('[ValueFinder] applying filters', {
+    market,
+    total: _vfGetBets(data).length,
+    shown: bets.length,
+    round: _round,
+    match: matchVal || 'all',
+    minEdge,
+  });
 
   if (data.message && !bets.length) {
     el.innerHTML = `<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>${esc(data.message)}</p></div>`;
@@ -2121,6 +2146,15 @@ function _vfApplyFilters(data) {
     return;
   }
 
+  _vfRender(bets, data);
+}
+
+function _vfRender(bets, data) {
+  const el = document.getElementById('valueResults');
+  if (!el) {
+    console.warn('[ValueFinder] Missing #valueResults container');
+    return;
+  }
   el.innerHTML = _vfRenderTable(bets, data);
 }
 
@@ -2145,6 +2179,10 @@ function _vfPopulateMatchSelector(fixtures) {
 }
 function loadValueFinder() {
   const el = document.getElementById('valueResults');
+  if (!el) {
+    console.warn('[ValueFinder] Missing #valueResults container');
+    return;
+  }
   const market = document.getElementById('valueMarket')?.value || 'player_disposals';
 
   el.innerHTML = '<div class="prop-empty"><span class="spinner-sm"></span></div>';
@@ -2158,6 +2196,11 @@ function loadValueFinder() {
         .then(r => { if (!r.ok) throw new Error(); return r.json(); })
         .then(data => {
           _vfRawData = data;
+          console.debug('[ValueFinder] response received', {
+            market,
+            round: _round,
+            count: _vfGetBets(data).length,
+          });
           _vfApplyFilters(data);
         });
     })
