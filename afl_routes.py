@@ -640,6 +640,7 @@ def register_afl_routes(app, db):
         market = request.args.get("market", "player_disposals")
         min_edge = request.args.get("min_edge", 2.0, type=float)
         requested_season = request.args.get("year", type=int)
+        round_number = request.args.get("round", type=int)
         home_team = request.args.get("home", "").strip()
         away_team = request.args.get("away", "").strip()
         min_line = request.args.get("min_line", type=float)
