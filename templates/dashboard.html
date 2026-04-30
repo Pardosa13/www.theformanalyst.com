@@ -341,28 +341,24 @@
 <!-- Stat strip -->
 <div class="stat-strip">
   <div class="stat-tile">
+    <div class="stat-tile-label">Upcoming Best Bets</div>
+    <div class="stat-tile-value">{{ upcoming_best_bets_count if upcoming_best_bets_count is defined else '—' }}</div>
+    <div class="stat-tile-sub">From best bets</div>
+  </div>
+  <div class="stat-tile">
+    <div class="stat-tile-label">Last 100 Races</div>
+    <div class="stat-tile-value amber">{{ stats.last_100_strike_rate if stats is defined and stats.last_100_strike_rate is defined else (stats.strike_rate if stats is defined else '—') }}</div>
+    <div class="stat-tile-sub">ROI: {{ stats.last_100_roi if stats is defined and stats.last_100_roi is defined else (stats.roi_90d if stats is defined else '—') }}</div>
+  </div>
+  <div class="stat-tile">
+    <div class="stat-tile-label">Best Bets Win % & ROI</div>
+    <div class="stat-tile-value green">{{ best_bets_stats.strike_rate|round(1) ~ '%' if best_bets_stats is defined and best_bets_stats else '—' }}</div>
+    <div class="stat-tile-sub">ROI: {{ best_bets_stats.roi|round(1) ~ '%' if best_bets_stats is defined and best_bets_stats else '—' }}</div>
+  </div>
+  <div class="stat-tile">
     <div class="stat-tile-label">Meetings Analysed</div>
     <div class="stat-tile-value">{{ stats.meetings_total if stats is defined else '—' }}</div>
-    <div class="stat-tile-sub">↑ {{ stats.meetings_this_month if stats is defined else '0' }} this month</div>
-  </div>
-  <div class="stat-tile">
-    <div class="stat-tile-label">Last Meeting</div>
-    <div class="stat-tile-value" style="font-size:1.1rem; padding-top:3px">
-      {% if recent_meetings %}{{ recent_meetings[0].meeting_name }}{% else %}—{% endif %}
-    </div>
-    <div class="stat-tile-sub">
-      {% if recent_meetings %}{{ recent_meetings[0].uploaded_at.strftime('%d %b') }} · analysis complete{% else %}No meetings yet{% endif %}
-    </div>
-  </div>
-  <div class="stat-tile">
-    <div class="stat-tile-label">Backtest ROI (90d)</div>
-    <div class="stat-tile-value green">{{ stats.roi_90d if stats is defined else '—' }}</div>
-    <div class="stat-tile-sub">Flat stake · all tracks</div>
-  </div>
-  <div class="stat-tile">
-    <div class="stat-tile-label">Win Strike Rate</div>
-    <div class="stat-tile-value amber">{{ stats.strike_rate if stats is defined else '—' }}</div>
-    <div class="stat-tile-sub">Top-ranked selections</div>
+    <div class="stat-tile-sub">From data page totals</div>
   </div>
 </div>
 
@@ -385,16 +381,16 @@
     <h2>Quick Access</h2>
     <p>Jump straight to your most-used tools.</p>
     <div style="display:flex; flex-direction:column; gap:9px;">
-      <a href="{{ url_for('best_bets') }}" class="quick-link">
-        <i class="bi bi-fire" style="color:var(--accent)"></i> Best Bets
-        <i class="bi bi-chevron-right chevron"></i>
-      </a>
-      <a href="{{ url_for('backtest') }}" class="quick-link">
-        <i class="bi bi-cpu" style="color:var(--accent)"></i> Backtest Report
+      <a href="{{ url_for('import_from_api') }}" class="quick-link">
+        <i class="bi bi-calendar2-week" style="color:var(--accent)"></i> Race Meetings
         <i class="bi bi-chevron-right chevron"></i>
       </a>
       <a href="{{ url_for('data_analytics') }}" class="quick-link">
-        <i class="bi bi-bar-chart-line" style="color:var(--accent)"></i> Data Analytics
+        <i class="bi bi-bar-chart-line" style="color:var(--accent)"></i> Data
+        <i class="bi bi-chevron-right chevron"></i>
+      </a>
+      <a href="{{ url_for('best_bets') }}" class="quick-link">
+        <i class="bi bi-fire" style="color:var(--accent)"></i> Best Bets
         <i class="bi bi-chevron-right chevron"></i>
       </a>
     </div>
@@ -405,7 +401,7 @@
 <!-- Recent analyses -->
 {% if recent_meetings %}
 <div class="section-head">
-  <h2>Recent Analyses</h2>
+  <h2>Recent Meetings Assessments</h2>
   <a href="{{ url_for('history') }}">View all →</a>
 </div>
 
