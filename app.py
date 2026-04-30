@@ -2446,12 +2446,99 @@ def dashboard():
     if not current_user.is_admin:
         flash("Access denied. Admin privileges required.", "danger")
         return redirect(url_for("history"))
-    # Get all recent meetings (shared across all users)
+
     recent_meetings = Meeting.query\
         .order_by(Meeting.uploaded_at.desc())\
         .limit(5)\
         .all()
-    return render_template("dashboard.html", recent_meetings=recent_meetings)
+
+    # Upcoming best bets: flagged predictions with no result recorded yet
+    upcoming_best_bets_count = db.session.query(Prediction).join(
+        Horse, Prediction.horse_id == Horse.id
+    ).outerjoin(
+        Result, Result.horse_id == Horse.id
+    ).filter(
+        Prediction.best_bet_flagged_at.isnot(None),
+        Result.id.is_(None)
+    ).count()
+
+    # Stats from the last 100 races with results
+    from collections import defaultdict
+    rows = db.session.query(
+        Meeting.id,
+        Race.race_number,
+        Prediction.score,
+        Result.finish_position,
+        Result.sp
+    ).join(Race,       Race.meeting_id     == Meeting.id
+    ).join(Horse,      Horse.race_id       == Race.id
+    ).join(Prediction, Prediction.horse_id == Horse.id
+    ).join(Result,     Result.horse_id     == Horse.id
+    ).filter(Result.finish_position > 0
+    ).order_by(Meeting.uploaded_at.desc(), Race.id.desc()
+    ).all()
+
+    race_map = defaultdict(list)
+    race_keys = []
+    for mid, rnum, score, fpos, sp in rows:
+        key = (mid, rnum)
+        if key not in race_map:
+            race_keys.append(key)
+        race_map[key].append({'score': score, 'finish_pos': fpos, 'sp': sp or 0})
+
+    stake = 10.0
+    total_races = top_pick_wins = 0
+    total_profit = 0.0
+    for key in race_keys[:100]:
+        horses = race_map[key]
+        top = max(horses, key=lambda x: x['score'])
+        total_races += 1
+        if top['finish_pos'] == 1:
+            top_pick_wins += 1
+            total_profit += top['sp'] * stake - stake
+        else:
+            total_profit -= stake
+
+    stats = {
+        'last_100_strike_rate': f"{top_pick_wins / total_races * 100:.1f}%" if total_races else '—',
+        'last_100_roi': f"{total_profit / (total_races * stake) * 100:.1f}%" if total_races else '—',
+        'meetings_total': Meeting.query.count(),
+    }
+
+    # Best bets performance (flagged predictions that have results)
+    best_bets_stats = None
+    try:
+        bb_rows = db.session.query(Prediction, Result).join(
+            Horse, Prediction.horse_id == Horse.id
+        ).join(
+            Result, Horse.id == Result.horse_id
+        ).filter(
+            Prediction.best_bet_flagged_at.isnot(None),
+            Result.finish_position > 0
+        ).limit(500).all()
+
+        if bb_rows:
+            total_bets = len(bb_rows)
+            wins = sum(1 for pred, res in bb_rows if res.finish_position == 1)
+            total_staked = total_bets * stake
+            total_return = sum(
+                stake * res.sp for pred, res in bb_rows
+                if res.finish_position == 1 and res.sp
+            )
+            profit = total_return - total_staked
+            best_bets_stats = {
+                'strike_rate': wins / total_bets * 100 if total_bets else 0,
+                'roi': profit / total_staked * 100 if total_staked else 0,
+            }
+    except Exception as e:
+        logger.error(f"Dashboard best_bets_stats error: {e}")
+
+    return render_template("dashboard.html",
+        recent_meetings=recent_meetings,
+        upcoming_best_bets_count=upcoming_best_bets_count,
+        stats=stats,
+        best_bets_stats=best_bets_stats,
+    )
 # ----- PuntingForm API Routes -----
 
 @app.route("/api/meetings/today")
