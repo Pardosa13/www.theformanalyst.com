@@ -6,49 +6,139 @@
 {% block content %}
 
 <style>
-  /* ── Dashboard — dark premium theme ── */
+  /* ── Dashboard styles ── */
 
   .dash-header {
-    margin-bottom: 28px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--border-subtle);
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 12px;
+    margin-bottom: 28px;
+    padding-bottom: 22px;
+    border-bottom: 1px solid var(--border-subtle);
   }
 
   .dash-header h1 {
-    font-size: 1.55rem;
+    font-size: 1.6rem;
     font-weight: 700;
-    margin: 0;
+    letter-spacing: -0.02em;
     color: var(--text-primary);
+    margin: 0 0 4px;
   }
 
   .dash-header p {
-    margin: 4px 0 0;
-    font-size: 0.85rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
     color: var(--text-muted);
+    margin: 0;
+    letter-spacing: 0.04em;
+  }
+
+  .live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 14px;
+    background: rgba(102,126,234,0.08);
+    border: 1px solid var(--border-accent);
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
     font-family: 'DM Mono', monospace;
   }
 
-  /* ── Action cards grid ── */
-  .action-grid {
+  .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: blink 2s ease infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* ── Stat strip ── */
+  .stat-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+
+  .stat-tile {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 18px 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .stat-tile:hover {
+    border-color: var(--border-accent);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+
+  .stat-tile::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .stat-tile:hover::after { opacity: 1; }
+
+  .stat-tile-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    font-family: 'DM Mono', monospace;
+    margin-bottom: 10px;
+  }
+
+  .stat-tile-value {
+    font-size: 1.55rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
+    line-height: 1;
+  }
+
+  .stat-tile-value.green { color: var(--success); }
+  .stat-tile-value.amber { color: var(--warning); }
+
+  .stat-tile-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 5px;
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* ── Action cards ── */
+  .action-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 16px;
-    margin-bottom: 24px;
+    margin-bottom: 28px;
   }
 
   .action-card {
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
     border-radius: 14px;
-    padding: 24px;
+    padding: 26px 28px;
     position: relative;
     overflow: hidden;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    transition: border-color 0.2s, box-shadow 0.2s;
   }
 
   .action-card::before {
@@ -58,190 +148,81 @@
     height: 2px;
     background: linear-gradient(90deg, var(--accent), var(--accent-2));
     opacity: 0;
-    transition: opacity 0.2s ease;
+    transition: opacity 0.2s;
   }
 
   .action-card:hover {
     border-color: var(--border-accent);
     box-shadow: 0 6px 28px rgba(0,0,0,0.35);
   }
+  .action-card:hover::before { opacity: 1; }
 
-  .action-card:hover::before {
-    opacity: 1;
+  .action-card.primary-card {
+    background: linear-gradient(135deg, rgba(102,126,234,0.07) 0%, rgba(118,75,162,0.05) 100%);
+    border-color: var(--border-accent);
   }
+  .action-card.primary-card::before { opacity: 1; }
 
-  /* Card icon */
   .action-card-icon {
-    width: 44px;
-    height: 44px;
+    width: 42px; height: 42px;
     background: linear-gradient(135deg, rgba(102,126,234,0.15), rgba(118,75,162,0.15));
     border: 1px solid var(--border-accent);
     border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    margin-bottom: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; margin-bottom: 14px;
   }
 
   .action-card h2 {
-    font-size: 1rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 0 0 8px;
+    font-size: 1.05rem; font-weight: 700;
+    color: var(--text-primary); margin: 0 0 7px;
   }
 
   .action-card p {
-    font-size: 0.825rem;
-    color: var(--text-muted);
-    margin: 0 0 20px;
-    line-height: 1.5;
+    font-size: 13px; color: var(--text-muted);
+    margin: 0 0 20px; line-height: 1.55;
   }
 
-  /* ── Form elements inside dashboard ── */
-  .dash-file-input {
-    width: 100%;
-    padding: 9px 12px;
+  .quick-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
     background: var(--bg-elevated);
     border: 1px solid var(--border-mid);
     border-radius: 8px;
-    color: var(--text-secondary);
-    font-size: 13px;
-    cursor: pointer;
-    margin-bottom: 12px;
-    transition: border-color 0.2s;
-    box-sizing: border-box;
-  }
-  .dash-file-input:hover { border-color: var(--accent); }
-  .dash-file-input::file-selector-button {
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    color: white;
-    border: none;
-    padding: 5px 12px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    margin-right: 10px;
-    font-family: 'Outfit', sans-serif;
-  }
-
-  .dash-select {
-    width: 100%;
-    padding: 9px 12px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-mid);
-    border-radius: 8px;
-    color: var(--text-primary);
-    font-size: 13px;
-    margin-bottom: 12px;
-    cursor: pointer;
-    transition: border-color 0.2s;
-    box-sizing: border-box;
-    appearance: none;
-    -webkit-appearance: none;
-    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%239090a8' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
-    background-repeat: no-repeat;
-    background-position: right 12px center;
-    background-size: 13px;
-  }
-  .dash-select:focus {
-    outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-glow);
-  }
-  .dash-select option {
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-  }
-
-  /* ── Toggle switch ── */
-  .toggle-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
-    cursor: pointer;
-  }
-
-  .toggle-wrap {
-    position: relative;
-    display: inline-block;
-    width: 44px;
-    height: 24px;
-    flex-shrink: 0;
-  }
-
-  .toggle-wrap input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-    position: absolute;
-  }
-
-  .toggle-track {
-    position: absolute;
-    cursor: pointer;
-    inset: 0;
-    background: var(--bg-hover);
-    border: 1px solid var(--border-mid);
-    border-radius: 24px;
-    transition: background 0.25s, border-color 0.25s;
-  }
-
-  .toggle-thumb {
-    position: absolute;
-    height: 18px;
-    width: 18px;
-    left: 3px;
-    bottom: 3px;
-    background: var(--text-muted);
-    border-radius: 50%;
-    transition: transform 0.25s, background 0.25s;
-  }
-
-  #advanced_mode:checked ~ .toggle-track {
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    border-color: var(--accent);
-  }
-
-  #advanced_mode:checked ~ .toggle-track .toggle-thumb {
-    transform: translateX(20px);
-    background: white;
-  }
-
-  .toggle-label {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    user-select: none;
-  }
-
-  /* ── Recent analyses section ── */
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 16px;
-  }
-
-  .section-header h2 {
-    font-size: 1rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 0;
-  }
-
-  .section-header a {
-    font-size: 12px;
-    color: var(--accent);
     text-decoration: none;
-    font-weight: 500;
-    transition: color 0.15s;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    transition: border-color 0.18s, color 0.18s;
   }
-  .section-header a:hover { color: #8ba4f5; }
+  .quick-link:hover {
+    border-color: var(--border-accent);
+    color: var(--text-primary);
+  }
+  .quick-link .chevron {
+    margin-left: auto;
+    opacity: 0.4;
+  }
 
-  /* Recent meetings panel */
+  /* ── Recent analyses ── */
+  .section-head {
+    display: flex; align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+
+  .section-head h2 {
+    font-size: 0.95rem; font-weight: 700;
+    color: var(--text-primary); margin: 0;
+  }
+
+  .section-head a {
+    font-size: 12px; color: var(--accent);
+    text-decoration: none; font-weight: 500;
+  }
+  .section-head a:hover { color: #8ba4f5; }
+
   .recent-panel {
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
@@ -249,10 +230,7 @@
     overflow: hidden;
   }
 
-  .recent-table {
-    width: 100%;
-    border-collapse: collapse;
-  }
+  .recent-table { width: 100%; border-collapse: collapse; }
 
   .recent-table thead tr {
     background: var(--bg-elevated);
@@ -262,116 +240,89 @@
   .recent-table th {
     padding: 11px 18px;
     text-align: left;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--text-muted);
   }
 
   .recent-table tbody tr {
     border-bottom: 1px solid var(--border-subtle);
-    transition: background 0.15s ease;
+    transition: background 0.15s;
   }
-
-  .recent-table tbody tr:last-child {
-    border-bottom: none;
-  }
-
-  .recent-table tbody tr:hover {
-    background: var(--bg-elevated);
-  }
+  .recent-table tbody tr:last-child { border-bottom: none; }
+  .recent-table tbody tr:hover { background: var(--bg-elevated); }
 
   .recent-table td {
     padding: 13px 18px;
-    font-size: 13px;
-    color: var(--text-secondary);
+    font-size: 13px; color: var(--text-secondary);
     vertical-align: middle;
   }
 
   .meeting-name-cell {
-    font-weight: 600;
-    color: var(--text-primary) !important;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    font-weight: 600; color: var(--text-primary) !important;
+    display: flex; align-items: center; gap: 10px;
   }
 
   .meeting-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
+    width: 7px; height: 7px; border-radius: 50%;
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     flex-shrink: 0;
   }
 
   .date-cell {
     font-family: 'DM Mono', monospace;
-    font-size: 12px !important;
-    color: var(--text-muted) !important;
+    font-size: 12px !important; color: var(--text-muted) !important;
   }
 
-  .btn-view-results {
-    font-size: 11px !important;
-    padding: 5px 14px !important;
+  .btn-sm-view {
+    font-size: 11px; padding: 5px 14px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-mid);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-weight: 600;
+    transition: all 0.18s;
     white-space: nowrap;
   }
-
-  /* ── Empty state ── */
-  .empty-recent {
-    padding: 40px;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 13px;
+  .btn-sm-view:hover {
+    border-color: var(--border-accent);
+    color: var(--accent);
+    background: rgba(102,126,234,0.06);
   }
 
+  /* ── CSV upload — hidden, preserved ── */
+  .csv-hidden-block { display: none; }
+
   /* ── Responsive ── */
+  @media (max-width: 992px) {
+    .stat-strip { grid-template-columns: repeat(2, 1fr); }
+  }
+
   @media (max-width: 768px) {
-    .action-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .dash-header {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-
-    /* Mobile table cards */
+    .action-row { grid-template-columns: 1fr; }
+    .stat-strip { grid-template-columns: repeat(2, 1fr); }
+    .dash-header { flex-direction: column; align-items: flex-start; }
     .recent-table thead { display: none; }
-
     .recent-table tbody tr {
-      display: block;
-      margin: 0;
+      display: block; padding: 14px 16px;
       border-bottom: 1px solid var(--border-subtle);
-      padding: 14px 16px;
     }
-
-    .recent-table tbody tr:last-child { border-bottom: none; }
-
-    .recent-table td {
-      display: block;
-      padding: 3px 0;
-      border: none;
-    }
-
+    .recent-table td { display: block; padding: 3px 0; border: none; }
     .recent-table td::before {
       content: attr(data-label);
-      font-weight: 700;
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
-      display: block;
-      margin-bottom: 2px;
+      font-weight: 700; font-size: 10px;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--text-muted); display: block; margin-bottom: 2px;
     }
-
     .recent-table td:last-child { margin-top: 10px; }
-
-    .btn-view-results { width: 100%; text-align: center; }
+    .btn-sm-view { width: 100%; text-align: center; display: block; }
   }
 
   @media (max-width: 480px) {
+    .stat-strip { grid-template-columns: 1fr 1fr; gap: 10px; }
     .action-card { padding: 18px; }
+    .stat-tile { padding: 14px 16px; }
   }
 </style>
 
@@ -379,107 +330,157 @@
 <div class="dash-header">
   <div>
     <h1>Racing Analysis Dashboard</h1>
-    <p>The Form Analyst — Partington Probability Engine</p>
+    <p>THE FORM ANALYST · PARTINGTON PROBABILITY ENGINE</p>
+  </div>
+  <div class="live-badge">
+    <div class="live-dot"></div>
+    PPE v2 Active
+  </div>
+</div>
+
+<!-- Stat strip -->
+<div class="stat-strip">
+  <div class="stat-tile">
+    <div class="stat-tile-label">Meetings Analysed</div>
+    <div class="stat-tile-value">{{ stats.meetings_total if stats is defined else '—' }}</div>
+    <div class="stat-tile-sub">↑ {{ stats.meetings_this_month if stats is defined else '0' }} this month</div>
+  </div>
+  <div class="stat-tile">
+    <div class="stat-tile-label">Last Meeting</div>
+    <div class="stat-tile-value" style="font-size:1.1rem; padding-top:3px">
+      {% if recent_meetings %}{{ recent_meetings[0].meeting_name }}{% else %}—{% endif %}
+    </div>
+    <div class="stat-tile-sub">
+      {% if recent_meetings %}{{ recent_meetings[0].uploaded_at.strftime('%d %b') }} · analysis complete{% else %}No meetings yet{% endif %}
+    </div>
+  </div>
+  <div class="stat-tile">
+    <div class="stat-tile-label">Backtest ROI (90d)</div>
+    <div class="stat-tile-value green">{{ stats.roi_90d if stats is defined else '—' }}</div>
+    <div class="stat-tile-sub">Flat stake · all tracks</div>
+  </div>
+  <div class="stat-tile">
+    <div class="stat-tile-label">Win Strike Rate</div>
+    <div class="stat-tile-value amber">{{ stats.strike_rate if stats is defined else '—' }}</div>
+    <div class="stat-tile-sub">Top-ranked selections</div>
   </div>
 </div>
 
 <!-- Action cards -->
-<div class="action-grid">
+<div class="action-row">
 
-  <!-- API Import -->
-  <div class="action-card">
+  <!-- API Import — primary action -->
+  <div class="action-card primary-card">
     <div class="action-card-icon">🌐</div>
     <h2>Import from API</h2>
-    <p>Automatically fetch and analyse meetings directly from PuntingForm.</p>
-    <a href="{{ url_for('import_from_api') }}" class="btn btn-primary" style="width:100%;">
-      Browse Meetings
+    <p>Fetch and analyse meetings directly from PuntingForm — no file needed.</p>
+    <a href="{{ url_for('import_from_api') }}" class="btn btn-primary" style="width:100%; justify-content:center;">
+      <i class="bi bi-arrow-down-circle"></i> Browse Meetings
     </a>
   </div>
 
-  <!-- Manual Upload -->
+  <!-- Quick Access -->
   <div class="action-card">
-    <div class="action-card-icon">📁</div>
-    <h2>Manual CSV Upload</h2>
-    <form method="POST" action="{{ url_for('analyze') }}" enctype="multipart/form-data">
-
-      <input type="file"
-             id="csv_file"
-             name="csv_file"
-             accept=".csv"
-             required
-             class="dash-file-input">
-
-      <select id="track_condition" name="track_condition" class="dash-select">
-        <option value="firm">Firm</option>
-        <option value="good" selected>Good</option>
-        <option value="soft">Soft</option>
-        <option value="heavy">Heavy</option>
-        <option value="synthetic">Synthetic</option>
-      </select>
-
-      <!-- Toggle switch — identical IDs/name to original -->
-      <label class="toggle-row" for="advanced_mode">
-        <div class="toggle-wrap">
-          <input type="checkbox" id="advanced_mode" name="advanced_mode">
-          <div class="toggle-track">
-            <div class="toggle-thumb"></div>
-          </div>
-        </div>
-        <span class="toggle-label">Advanced Mode</span>
-      </label>
-
-      <button type="submit" class="btn btn-primary" style="width:100%;">
-        Analyze Meeting
-      </button>
-
-    </form>
+    <div class="action-card-icon">⚡</div>
+    <h2>Quick Access</h2>
+    <p>Jump straight to your most-used tools.</p>
+    <div style="display:flex; flex-direction:column; gap:9px;">
+      <a href="{{ url_for('best_bets') }}" class="quick-link">
+        <i class="bi bi-fire" style="color:var(--accent)"></i> Best Bets
+        <i class="bi bi-chevron-right chevron"></i>
+      </a>
+      <a href="{{ url_for('backtest') }}" class="quick-link">
+        <i class="bi bi-cpu" style="color:var(--accent)"></i> Backtest Report
+        <i class="bi bi-chevron-right chevron"></i>
+      </a>
+      <a href="{{ url_for('data_analytics') }}" class="quick-link">
+        <i class="bi bi-bar-chart-line" style="color:var(--accent)"></i> Data Analytics
+        <i class="bi bi-chevron-right chevron"></i>
+      </a>
+    </div>
   </div>
 
 </div>
 
 <!-- Recent analyses -->
 {% if recent_meetings %}
-<div>
-  <div class="section-header">
-    <h2>Recent Analyses</h2>
-    <a href="{{ url_for('history') }}">View all →</a>
-  </div>
+<div class="section-head">
+  <h2>Recent Analyses</h2>
+  <a href="{{ url_for('history') }}">View all →</a>
+</div>
 
-  <div class="recent-panel">
-    <div class="table-responsive">
-      <table class="recent-table">
-        <thead>
-          <tr>
-            <th>Meeting</th>
-            <th>Date</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for meeting in recent_meetings %}
-          <tr>
-            <td data-label="Meeting">
-              <span class="meeting-name-cell">
-                <span class="meeting-dot"></span>
-                {{ meeting.meeting_name }}
-              </span>
-            </td>
-            <td data-label="Date" class="date-cell">
-              {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
-            </td>
-            <td data-label="Action">
-              <a href="{{ url_for('view_meeting', meeting_id=meeting.id) }}"
-                 class="btn btn-primary btn-view-results">
-                View Results
-              </a>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+<div class="recent-panel">
+  <div class="table-responsive">
+    <table class="recent-table">
+      <thead>
+        <tr>
+          <th>Meeting</th>
+          <th>Date</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for meeting in recent_meetings %}
+        <tr>
+          <td data-label="Meeting">
+            <span class="meeting-name-cell">
+              <span class="meeting-dot"></span>
+              {{ meeting.meeting_name }}
+            </span>
+          </td>
+          <td data-label="Date" class="date-cell">
+            {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
+          </td>
+          <td data-label="Action">
+            <a href="{{ url_for('view_meeting', meeting_id=meeting.id) }}" class="btn-sm-view">
+              View Results →
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
 {% endif %}
+
+<!--
+  ═══════════════════════════════════════════════════
+  CSV UPLOAD BLOCK — PRESERVED IN FULL, HIDDEN
+  To restore: remove `.csv-hidden-block { display: none; }` from CSS above
+  ═══════════════════════════════════════════════════
+-->
+<div class="csv-hidden-block">
+  <div style="margin-top:24px;">
+    <div class="section-head">
+      <h2>Manual CSV Upload</h2>
+    </div>
+    <div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:14px;padding:24px 28px;">
+      <form method="POST" action="{{ url_for('analyze') }}" enctype="multipart/form-data">
+        <input type="file" id="csv_file" name="csv_file" accept=".csv" required
+               style="width:100%;padding:9px 12px;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:8px;color:var(--text-secondary);font-size:13px;cursor:pointer;margin-bottom:12px;">
+
+        <select id="track_condition" name="track_condition"
+                style="width:100%;padding:9px 12px;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:8px;color:var(--text-primary);font-size:13px;margin-bottom:12px;">
+          <option value="firm">Firm</option>
+          <option value="good" selected>Good</option>
+          <option value="soft">Soft</option>
+          <option value="heavy">Heavy</option>
+          <option value="synthetic">Synthetic</option>
+        </select>
+
+        <label style="display:flex;align-items:center;gap:10px;margin-bottom:16px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text-secondary);">
+          <input type="checkbox" id="advanced_mode" name="advanced_mode" style="accent-color:var(--accent);">
+          Advanced Mode
+        </label>
+
+        <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">
+          Analyze Meeting
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+<!-- END CSV UPLOAD BLOCK -->
 
 {% endblock %}
