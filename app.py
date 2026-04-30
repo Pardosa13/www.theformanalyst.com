@@ -2502,7 +2502,7 @@ def dashboard():
     stats = {
         'last_100_strike_rate': f"{top_pick_wins / total_races * 100:.1f}%" if total_races else '—',
         'last_100_roi': f"{total_profit / (total_races * stake) * 100:.1f}%" if total_races else '—',
-        'meetings_total': Meeting.query.count(),
+        'races_total': len(race_keys),
     }
 
     # Best bets performance (flagged predictions that have results)
