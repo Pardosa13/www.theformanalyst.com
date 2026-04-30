@@ -70,6 +70,12 @@
     margin-bottom: 24px;
   }
 
+  .stat-tile-link {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+
   .stat-tile {
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
@@ -340,26 +346,34 @@
 
 <!-- Stat strip -->
 <div class="stat-strip">
-  <div class="stat-tile">
-    <div class="stat-tile-label">Upcoming Best Bets</div>
-    <div class="stat-tile-value">{{ upcoming_best_bets_count if upcoming_best_bets_count is defined else '—' }}</div>
-    <div class="stat-tile-sub">From best bets</div>
-  </div>
-  <div class="stat-tile">
-    <div class="stat-tile-label">Last 100 Races</div>
-    <div class="stat-tile-value amber">{{ stats.last_100_strike_rate if stats is defined and stats.last_100_strike_rate is defined else (stats.strike_rate if stats is defined else '—') }}</div>
-    <div class="stat-tile-sub">ROI: {{ stats.last_100_roi if stats is defined and stats.last_100_roi is defined else (stats.roi_90d if stats is defined else '—') }}</div>
-  </div>
-  <div class="stat-tile">
-    <div class="stat-tile-label">Best Bets Win % & ROI</div>
-    <div class="stat-tile-value green">{{ best_bets_stats.strike_rate|round(1) ~ '%' if best_bets_stats is defined and best_bets_stats else '—' }}</div>
-    <div class="stat-tile-sub">ROI: {{ best_bets_stats.roi|round(1) ~ '%' if best_bets_stats is defined and best_bets_stats else '—' }}</div>
-  </div>
-  <div class="stat-tile">
-    <div class="stat-tile-label">Meetings Analysed</div>
-    <div class="stat-tile-value">{{ stats.meetings_total if stats is defined else '—' }}</div>
-    <div class="stat-tile-sub">From data page totals</div>
-  </div>
+  <a class="stat-tile-link" href="{{ url_for('best_bets') }}">
+    <div class="stat-tile">
+      <div class="stat-tile-label">Upcoming Best Bets</div>
+      <div class="stat-tile-value">{{ upcoming_best_bets_count if upcoming_best_bets_count is defined else '—' }}</div>
+      <div class="stat-tile-sub">From best bets</div>
+    </div>
+  </a>
+  <a class="stat-tile-link" href="{{ url_for('data_analytics') }}">
+    <div class="stat-tile">
+      <div class="stat-tile-label">Last 100 Races</div>
+      <div class="stat-tile-value amber">{{ stats.last_100_strike_rate if stats is defined and stats.last_100_strike_rate is defined else (stats.strike_rate if stats is defined else '—') }}</div>
+      <div class="stat-tile-sub">ROI: {{ stats.last_100_roi if stats is defined and stats.last_100_roi is defined else (stats.roi_90d if stats is defined else '—') }}</div>
+    </div>
+  </a>
+  <a class="stat-tile-link" href="{{ url_for('best_bets') }}">
+    <div class="stat-tile">
+      <div class="stat-tile-label">Best Bets Win % & ROI</div>
+      <div class="stat-tile-value green">{{ best_bets_stats.strike_rate|round(1) ~ '%' if best_bets_stats is defined and best_bets_stats else '—' }}</div>
+      <div class="stat-tile-sub">ROI: {{ best_bets_stats.roi|round(1) ~ '%' if best_bets_stats is defined and best_bets_stats else '—' }}</div>
+    </div>
+  </a>
+  <a class="stat-tile-link" href="{{ url_for('data_analytics') }}">
+    <div class="stat-tile">
+      <div class="stat-tile-label">Meetings Analysed</div>
+      <div class="stat-tile-value">{{ stats.meetings_total if stats is defined else '—' }}</div>
+      <div class="stat-tile-sub">From data page totals</div>
+    </div>
+  </a>
 </div>
 
 <!-- Action cards -->
