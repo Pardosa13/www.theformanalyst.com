@@ -1133,8 +1133,33 @@ function loadBettingEdges() {
         el.textContent = 'No betting edges found for current filters.';
         return;
       }
-      el.innerHTML = `<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Selection</th><th>Bookmaker</th><th>Best Odds</th><th>Consensus</th><th>Edge %</th><th>Line Edge</th></tr></thead><tbody>${
-        rows.slice(0, 120).map(r => `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${esc(r.selection_name || r.market)}</td><td>${esc(r.bookmaker)}</td><td>${safeNum(r.odds).toFixed(2)}</td><td>${safeNum(r.consensus_odds).toFixed(2)}</td><td><strong>${safeNum(r.edge_pct).toFixed(2)}%</strong></td><td>${r.line_edge == null ? '—' : safeNum(r.line_edge).toFixed(1)}</td></tr>`).join('')
+      const fmtPct = v => v == null ? '—' : safeNum(v).toFixed(1) + '%';
+      const fmtOdds = v => v == null ? '—' : safeNum(v).toFixed(2);
+      const fmtMargin = v => v == null ? '—' : (v >= 0 ? '+' : '') + safeNum(v).toFixed(1);
+      el.innerHTML = `<div class="scroll-x"><table class="ladder-table"><thead><tr>
+        <th>Match</th><th>Market</th><th>Selection</th><th>Bookmaker</th>
+        <th>Best Odds</th><th>Consensus</th><th>Edge %</th>
+        <th>Pred Margin</th><th>Line Edge</th>
+        <th>Model%</th><th>Mkt%</th><th>Prob Edge</th>
+      </tr></thead><tbody>${
+        rows.slice(0, 120).map(r => {
+          const leClass = r.line_edge == null ? '' : r.line_edge > 0 ? ' style="color:var(--accent-green,#4caf50);font-weight:600"' : ' style="color:var(--accent-red,#e57373)"';
+          const peClass = r.prob_edge == null ? '' : r.prob_edge > 0 ? ' style="color:var(--accent-green,#4caf50);font-weight:600"' : ' style="color:var(--accent-red,#e57373)"';
+          return `<tr>
+            <td>${esc(r.home_team)} vs ${esc(r.away_team)}</td>
+            <td>${esc(r.market)}</td>
+            <td>${esc(r.selection_name || '—')}</td>
+            <td>${esc(r.bookmaker)}</td>
+            <td>${fmtOdds(r.odds)}</td>
+            <td>${fmtOdds(r.consensus_odds)}</td>
+            <td><strong>${safeNum(r.edge_pct).toFixed(2)}%</strong></td>
+            <td>${fmtMargin(r.predicted_margin)}</td>
+            <td${leClass}>${fmtMargin(r.line_edge)}</td>
+            <td>${r.model_prob == null ? '—' : (safeNum(r.model_prob)*100).toFixed(1)+'%'}</td>
+            <td>${r.market_prob == null ? '—' : (safeNum(r.market_prob)*100).toFixed(1)+'%'}</td>
+            <td${peClass}>${r.prob_edge == null ? '—' : fmtPct(r.prob_edge)}</td>
+          </tr>`;
+        }).join('')
       }</tbody></table></div>`;
     })
     .catch(() => { el.textContent = 'Failed to load betting edges.'; });

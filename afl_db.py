@@ -284,6 +284,11 @@ AFL_SCHEMA_STATEMENTS = [
 # Columns added after initial schema deployment — run as migrations on startup.
 AFL_MIGRATIONS = [
     "ALTER TABLE afl_player_stats ADD COLUMN IF NOT EXISTS player_headshot_url TEXT",
+    # Normalise team names stored before _team() mapping was complete.
+    "UPDATE afl_match_markets SET home_team = 'GWS Giants' WHERE home_team = 'Greater Western Sydney Giants'",
+    "UPDATE afl_match_markets SET away_team = 'GWS Giants' WHERE away_team = 'Greater Western Sydney Giants'",
+    "UPDATE afl_match_markets SET home_team = 'West Coast' WHERE home_team = 'West Coast Eagles'",
+    "UPDATE afl_match_markets SET away_team = 'West Coast' WHERE away_team = 'West Coast Eagles'",
 ]
 
 # Stable advisory-lock key derived from a namespace string.
@@ -342,6 +347,7 @@ def _team(value: Any) -> str:
         # Legacy / short-name aliases
         "West Coast Eagles": "West Coast",
         "Greater Western Sydney": "GWS Giants",
+        "Greater Western Sydney Giants": "GWS Giants",
         "GWS": "GWS Giants",
         "Footscray": "Western Bulldogs",
         "Brisbane": "Brisbane Lions",
@@ -360,6 +366,8 @@ def _team(value: Any) -> str:
         "Richmond Tigers": "Richmond",
         "St Kilda Saints": "St Kilda",
         "Sydney Swans": "Sydney",
+        "Western Bulldogs Bulldogs": "Western Bulldogs",
+        "Brisbane Lions Lions": "Brisbane Lions",
     }
     return mapping.get(raw, raw)
 
