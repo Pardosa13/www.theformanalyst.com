@@ -968,9 +968,15 @@
     <div class="afl-card-body">
       <div style="display:flex;gap:8px;margin-bottom:12px;">
         <button class="btn btn-primary btn-sm" onclick="loadMatchPredictions()"><i class="bi bi-arrow-repeat"></i> Refresh Predictions</button>
+        <button class="btn btn-primary btn-sm" onclick="loadMatchMarkets()"><i class="bi bi-list"></i> Load Match Markets</button>
+        <button class="btn btn-primary btn-sm" onclick="loadBettingEdges()"><i class="bi bi-lightning-charge"></i> Load Betting Edges</button>
         <button class="btn btn-secondary btn-sm" onclick="syncMatchMarkets()"><i class="bi bi-cloud-download"></i> Sync H2H + Spreads</button>
       </div>
       <div id="matchPredictionsWrap" style="font-size:12px;color:var(--text-secondary);">Load predictions to view model margins.</div>
+      <hr style="border-color:var(--border-subtle);margin:16px 0;">
+      <div id="matchMarketsWrap" style="font-size:12px;color:var(--text-secondary);">Match markets will appear here.</div>
+      <hr style="border-color:var(--border-subtle);margin:16px 0;">
+      <div id="bettingEdgesWrap" style="font-size:12px;color:var(--text-secondary);">Betting edges will appear here.</div>
     </div>
   </div>
 </div>
@@ -1062,7 +1068,11 @@ function switchTab(name, btn) {
       loadValueFinder();
     }
   }
-  if (name === 'predictions') loadMatchPredictions();
+  if (name === 'predictions') {
+    loadMatchPredictions();
+    loadMatchMarkets();
+    loadBettingEdges();
+  }
 }
 
 function syncMatchMarkets() {
@@ -1089,6 +1099,44 @@ function loadMatchPredictions() {
       }</tbody></table></div>`;
     })
     .catch(() => { el.textContent = 'Failed to load predictions.'; });
+}
+
+function loadMatchMarkets() {
+  const el = document.getElementById('matchMarketsWrap');
+  if (!el) return;
+  el.innerHTML = '<span class="spinner-sm"></span>';
+  fetch('/api/afl/match-markets?year={{ year }}')
+    .then(r => r.json())
+    .then(data => {
+      const rows = data.markets || [];
+      if (!rows.length) {
+        el.textContent = 'No match markets available.';
+        return;
+      }
+      el.innerHTML = `<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Line</th><th>Odds</th></tr></thead><tbody>${
+        rows.slice(0, 120).map(r => `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${esc(r.bookmaker)}</td><td>${esc(r.market)}</td><td>${esc(r.selection_name || '—')}</td><td>${r.line ?? '—'}</td><td>${safeNum(r.odds).toFixed(2)}</td></tr>`).join('')
+      }</tbody></table></div>`;
+    })
+    .catch(() => { el.textContent = 'Failed to load match markets.'; });
+}
+
+function loadBettingEdges() {
+  const el = document.getElementById('bettingEdgesWrap');
+  if (!el) return;
+  el.innerHTML = '<span class="spinner-sm"></span>';
+  fetch('/api/afl/betting-edges?year={{ year }}&min_edge=2')
+    .then(r => r.json())
+    .then(data => {
+      const rows = data.edges || [];
+      if (!rows.length) {
+        el.textContent = 'No betting edges found for current filters.';
+        return;
+      }
+      el.innerHTML = `<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Selection</th><th>Bookmaker</th><th>Best Odds</th><th>Consensus</th><th>Edge %</th></tr></thead><tbody>${
+        rows.slice(0, 120).map(r => `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${esc(r.selection_name || r.market)}</td><td>${esc(r.bookmaker)}</td><td>${safeNum(r.odds).toFixed(2)}</td><td>${safeNum(r.consensus_odds).toFixed(2)}</td><td><strong>${safeNum(r.edge_pct).toFixed(2)}%</strong></td></tr>`).join('')
+      }</tbody></table></div>`;
+    })
+    .catch(() => { el.textContent = 'Failed to load betting edges.'; });
 }
 
 // ── Round navigation ─────────────────────────────────────────────
@@ -2388,5 +2436,13 @@ function refreshAll() {
     if (dx > dy) e.preventDefault();
   }, { passive: false });
 })();
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (document.getElementById('tab-predictions')?.classList.contains('active')) {
+    loadMatchPredictions();
+    loadMatchMarkets();
+    loadBettingEdges();
+  }
+});
 </script>
 {% endblock %}
