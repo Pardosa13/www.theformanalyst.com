@@ -207,6 +207,22 @@ AFL_SCHEMA_STATEMENTS = [
     ON afl_player_props(event_id)
     """,
     """
+    CREATE TABLE IF NOT EXISTS afl_match_markets (
+        id              SERIAL PRIMARY KEY,
+        event_id        TEXT NOT NULL,
+        home_team       TEXT,
+        away_team       TEXT,
+        commence_time   TIMESTAMP,
+        bookmaker       TEXT NOT NULL,
+        market          TEXT NOT NULL,
+        line            FLOAT,
+        odds            FLOAT,
+        selection_name  TEXT,
+        fetched_at      TIMESTAMP DEFAULT NOW(),
+        UNIQUE(event_id, bookmaker, market, selection_name, line)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS afl_sync_log (
         id          SERIAL PRIMARY KEY,
         source      TEXT NOT NULL,
@@ -936,6 +952,47 @@ def upsert_player_props(db, props: list[dict]) -> int:
                 "line_type": _s(prop.get("line_type", prop.get("selection_name"))),
                 "line": prop.get("line", 0),
                 "odds": prop.get("odds", 0),
+            })
+            count += 1
+
+    return count
+
+
+def upsert_match_markets(db, rows: list[dict]) -> int:
+    """Upsert AFL H2H and spread market rows from The Odds API."""
+    if not rows:
+        return 0
+
+    sql = db.text("""
+        INSERT INTO afl_match_markets (
+            event_id, home_team, away_team, commence_time,
+            bookmaker, market, line, odds, selection_name, fetched_at
+        )
+        VALUES (
+            :event_id, :home_team, :away_team, :commence_time,
+            :bookmaker, :market, :line, :odds, :selection_name, NOW()
+        )
+        ON CONFLICT (event_id, bookmaker, market, selection_name, line) DO UPDATE SET
+            home_team     = EXCLUDED.home_team,
+            away_team     = EXCLUDED.away_team,
+            commence_time = EXCLUDED.commence_time,
+            odds          = EXCLUDED.odds,
+            fetched_at    = NOW()
+    """)
+
+    count = 0
+    with db.engine.begin() as conn:
+        for row in rows:
+            conn.execute(sql, {
+                "event_id": _s(row.get("event_id")),
+                "home_team": _team(row.get("home_team")),
+                "away_team": _team(row.get("away_team")),
+                "commence_time": row.get("commence_time"),
+                "bookmaker": _s(row.get("bookmaker")),
+                "market": _s(row.get("market")),
+                "line": row.get("line"),
+                "odds": row.get("odds"),
+                "selection_name": _s(row.get("selection_name")),
             })
             count += 1
 

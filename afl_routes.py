@@ -35,6 +35,7 @@ from afl_data import (
     calculate_disposal_edge,
     calculate_market_edge,
     fetch_afl_player_props,
+    fetch_afl_h2h_spread_odds,
     fetch_fryzigg_player_stats,
     fetch_squiggle_current_round,
     fetch_squiggle_games,
@@ -52,6 +53,7 @@ from afl_db import (
     log_sync,
     upsert_games,
     upsert_player_props,
+    upsert_match_markets,
     upsert_player_stats,
     upsert_standings,
 )
@@ -1333,6 +1335,73 @@ def register_afl_routes(app, db):
         except Exception as exc:
             log_sync(db, "odds_api", status="error", error=str(exc))
             return jsonify({"status": "error", "message": str(exc)}), 500
+
+    @app.route("/api/afl/sync/match-markets", methods=["POST"])
+    @login_required
+    def api_afl_sync_match_markets():
+        api_key = get_odds_api_key()
+        if not api_key:
+            return jsonify({"status": "error", "message": "ODDS_API_KEY not configured"}), 400
+        rows = fetch_afl_h2h_spread_odds(api_key=api_key)
+        count = upsert_match_markets(db, rows)
+        log_sync(db, "odds_api_match_markets", season=CURRENT_YEAR, rows=count)
+        return jsonify({"status": "ok", "rows_synced": count})
+
+    @app.route("/api/afl/match-predictions")
+    @login_required
+    def api_afl_match_predictions():
+        sql = db.text("""
+            WITH team_game_stats AS (
+                SELECT
+                    match_id,
+                    player_team AS team,
+                    SUM(goals) AS goals,
+                    SUM(behinds) AS behinds,
+                    SUM(score_involvements) AS score_involvements,
+                    SUM(inside_fifties) AS inside_fifties,
+                    SUM(clearances) AS clearances,
+                    SUM(contested_possessions) AS contested_possessions,
+                    SUM(metres_gained) AS metres_gained,
+                    SUM(disposals) AS disposals,
+                    SUM(tackles) AS tackles,
+                    SUM(intercepts) AS intercepts,
+                    SUM(turnovers) AS turnovers,
+                    SUM(clangers) AS clangers,
+                    SUM(free_kicks_against) AS free_kicks_against,
+                    AVG(disposal_efficiency_percentage) AS disposal_efficiency_percentage
+                FROM afl_player_stats
+                WHERE COALESCE(player_team, '') <> ''
+                GROUP BY match_id, player_team
+            )
+            SELECT g.id AS match_id, g.date, g.venue, g.hteam, g.ateam, g.hscore, g.ascore,
+                   ht.*, at.*
+            FROM afl_games g
+            JOIN team_game_stats ht ON ht.match_id = g.id AND ht.team = g.hteam
+            JOIN team_game_stats at ON at.match_id = g.id AND at.team = g.ateam
+            WHERE g.hscore IS NOT NULL AND g.ascore IS NOT NULL
+            ORDER BY g.date DESC
+            LIMIT 150
+        """)
+        rows = [dict(r._mapping) for r in db.session.execute(sql)]
+        out = []
+        for r in rows:
+            # simple heuristic weighted diff rating
+            rating = (
+                (r["contested_possessions"] - r["contested_possessions_1"])
+                + (r["clearances"] - r["clearances_1"])
+                + (r["inside_fifties"] - r["inside_fifties_1"])
+                + (r["score_involvements"] - r["score_involvements_1"])
+                + 0.3 * (r["metres_gained"] - r["metres_gained_1"]) / 100
+                + 0.2 * (r["disposals"] - r["disposals_1"])
+                + 0.5 * (r["tackles"] - r["tackles_1"])
+                + 0.5 * (r["intercepts"] - r["intercepts_1"])
+                - 0.7 * (r["turnovers"] - r["turnovers_1"])
+                - 0.7 * (r["clangers"] - r["clangers_1"])
+                - 0.4 * (r["free_kicks_against"] - r["free_kicks_against_1"])
+                + 6.0
+            )
+            out.append({"match_id": r["match_id"], "home_team": r["hteam"], "away_team": r["ateam"], "actual_margin": (r["hscore"] or 0) - (r["ascore"] or 0), "predicted_margin": round(rating, 1), "predicted_winner": r["hteam"] if rating >= 0 else r["ateam"]})
+        return jsonify({"matches": out, "count": len(out)})
 
     @app.route("/api/afl/refresh", methods=["POST"])
     @login_required

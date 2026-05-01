@@ -55,12 +55,14 @@ def sync_afl_all(season: int = None):
         fetch_afl_player_stats_current_season,
         fetch_2026_stats_from_csv,
         fetch_afl_player_props,
+        fetch_afl_h2h_spread_odds,
     )
     from afl_db import (
         upsert_games,
         upsert_standings,
         upsert_player_stats,
         upsert_player_props,
+        upsert_match_markets,
         upsert_team_logos,
     )
 
@@ -187,6 +189,10 @@ def sync_afl_all(season: int = None):
                 count = upsert_player_props(db, props)
                 _safe_log_sync(db, "odds_api", season=season, rows=count)
                 logger.info("  ✓ Props: %s lines synced", count)
+                match_rows = fetch_afl_h2h_spread_odds(api_key)
+                match_count = upsert_match_markets(db, match_rows)
+                _safe_log_sync(db, "odds_api_match_markets", season=season, rows=match_count)
+                logger.info("  ✓ Match markets: %s lines synced", match_count)
             except Exception as exc:
                 logger.error("  ✗ Props sync failed: %s", exc)
                 _safe_log_sync(db, "odds_api", season=season, status="error", error=str(exc))
