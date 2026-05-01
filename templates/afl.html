@@ -974,7 +974,7 @@
     </div>
     <div style="display:flex;gap:0;border-bottom:1px solid var(--border-subtle);background:var(--bg-elevated);padding:4px 16px 0;">
       <button class="atab active" id="ptab-edges" onclick="switchPredTab('edges',this)" style="flex:none;padding:9px 16px;"><i class="bi bi-lightning-charge-fill"></i> Betting Edges</button>
-      <button class="atab" id="ptab-predictions" onclick="switchPredTab('predictions',this)" style="flex:none;padding:9px 16px;"><i class="bi bi-bar-chart-fill"></i> Model Margins</button>
+      <button class="atab" id="ptab-predictions" onclick="switchPredTab('predictions',this)" style="flex:none;padding:9px 16px;"><i class="bi bi-bar-chart-fill"></i> Algorithm Match Predictions</button>
       <button class="atab" id="ptab-markets" onclick="switchPredTab('markets',this)" style="flex:none;padding:9px 16px;"><i class="bi bi-list"></i> Best Odds</button>
     </div>
     <div class="afl-card-body">
@@ -982,7 +982,7 @@
         <div id="bettingEdgesWrap" style="font-size:12px;color:var(--text-secondary);">Click <strong>Load Betting Edges</strong> to begin.</div>
       </div>
       <div id="ppanel-predictions" class="ppanel" style="display:none;">
-        <div id="matchPredictionsWrap" data-role="match-predictions" style="font-size:12px;color:var(--text-secondary);">Click <strong>Refresh Predictions</strong> to begin.</div>
+        <div id="matchPredictionsWrap" data-role="match-predictions" style="font-size:12px;color:var(--text-secondary);">Click <strong>Refresh Algorithm Match Predictions</strong> to begin.</div>
       </div>
       <div id="ppanel-markets" class="ppanel" style="display:none;">
         <div id="matchMarketsWrap" style="font-size:12px;color:var(--text-secondary);">Click <strong>Load Best Odds</strong> to begin.</div>
@@ -1108,7 +1108,7 @@ function loadMatchPredictions() {
         return;
       }
       const roundLabel = data.round ? `Round ${data.round}` : '';
-      el.innerHTML = `${roundLabel ? `<p style="margin-bottom:6px;font-weight:600;">${esc(roundLabel)} — Rolling form ratings (last 5 games)</p>` : ''}<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Pred Margin</th><th>Pred Winner</th><th>Actual Margin</th></tr></thead><tbody>${
+      el.innerHTML = `${roundLabel ? `<p style="margin-bottom:6px;font-weight:600;">${esc(roundLabel)} — Algorithm Selections</p>` : ''}<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Pred Margin</th><th>Pred Winner</th><th>Actual Margin</th></tr></thead><tbody>${
         rows.slice(0, 80).map(r => {
           const actualCell = r.actual_margin != null ? (() => {
             const correct = (r.predicted_winner === r.home_team && r.actual_margin > 0) || (r.predicted_winner === r.away_team && r.actual_margin < 0);
