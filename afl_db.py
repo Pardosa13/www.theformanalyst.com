@@ -226,19 +226,8 @@ AFL_SCHEMA_STATEMENTS = [
     CREATE OR REPLACE VIEW afl_match_predictions AS
     WITH team_match_stats AS (
         SELECT
-            ps.match_id,
-            ps.player_team AS team,
-            SUM(COALESCE(ps.inside_fifties, 0)) AS inside_fifties,
-            SUM(COALESCE(ps.clearances, 0)) AS clearances,
-            SUM(COALESCE(ps.contested_possessions, 0)) AS contested_possessions,
-            SUM(COALESCE(ps.score_involvements, 0)) AS score_involvements,
-            SUM(COALESCE(ps.metres_gained, 0)) AS metres_gained,
-            SUM(COALESCE(ps.tackles, 0)) AS tackles,
-            SUM(COALESCE(ps.intercepts, 0)) AS intercepts,
-            SUM(COALESCE(ps.turnovers, 0)) AS turnovers,
-            SUM(COALESCE(ps.clangers, 0)) AS clangers,
-            SUM(COALESCE(ps.free_kicks_against, 0)) AS free_kicks_against,
-            SUM(COALESCE(ps.disposals, 0)) AS disposals,
+            ps.match_date,
+            LOWER(TRIM(ps.player_team)) AS team_key,
             (
                 0.90 * SUM(COALESCE(ps.inside_fifties, 0)) +
                 1.15 * SUM(COALESCE(ps.clearances, 0)) +
@@ -254,16 +243,20 @@ AFL_SCHEMA_STATEMENTS = [
             ) AS team_rating
         FROM afl_player_stats ps
         WHERE COALESCE(ps.player_team, '') <> ''
-        GROUP BY ps.match_id, ps.player_team
+        GROUP BY ps.match_date, LOWER(TRIM(ps.player_team))
     )
     SELECT
         g.id AS match_id,
         g.hteam AS home_team,
         g.ateam AS away_team,
-        COALESCE(home.team_rating, 0) - COALESCE(away.team_rating, 0) AS predicted_margin
+        home.team_rating - away.team_rating AS predicted_margin
     FROM afl_games g
-    JOIN team_match_stats home ON home.match_id = g.id AND home.team = g.hteam
-    JOIN team_match_stats away ON away.match_id = g.id AND away.team = g.ateam
+    JOIN team_match_stats home
+        ON home.match_date = g.date::DATE
+       AND home.team_key = LOWER(TRIM(g.hteam))
+    JOIN team_match_stats away
+        ON away.match_date = g.date::DATE
+       AND away.team_key = LOWER(TRIM(g.ateam))
     """,
     """
     CREATE TABLE IF NOT EXISTS afl_sync_log (
