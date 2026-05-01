@@ -1403,6 +1403,72 @@ def register_afl_routes(app, db):
             out.append({"match_id": r["match_id"], "home_team": r["hteam"], "away_team": r["ateam"], "actual_margin": (r["hscore"] or 0) - (r["ascore"] or 0), "predicted_margin": round(rating, 1), "predicted_winner": r["hteam"] if rating >= 0 else r["ateam"]})
         return jsonify({"matches": out, "count": len(out)})
 
+    @app.route("/api/afl/match-markets")
+    @login_required
+    def api_afl_match_markets():
+        year = request.args.get("year", CURRENT_YEAR, type=int)
+        sql = db.text("""
+            SELECT
+                event_id, home_team, away_team, commence_time, bookmaker, market,
+                line, odds, selection_name, fetched_at
+            FROM afl_match_markets
+            WHERE EXTRACT(YEAR FROM COALESCE(commence_time, fetched_at)) = :year
+            ORDER BY COALESCE(commence_time, fetched_at) DESC, home_team, away_team, bookmaker
+            LIMIT 1500
+        """)
+        rows = [dict(r._mapping) for r in db.session.execute(sql, {"year": year})]
+        return jsonify({"year": year, "markets": rows, "count": len(rows)})
+
+    @app.route("/api/afl/betting-edges")
+    @login_required
+    def api_afl_betting_edges():
+        year = request.args.get("year", CURRENT_YEAR, type=int)
+        min_edge = request.args.get("min_edge", 2.0, type=float)
+        sql = db.text("""
+            SELECT
+                event_id, home_team, away_team, commence_time, bookmaker, market, line, odds, selection_name
+            FROM afl_match_markets
+            WHERE EXTRACT(YEAR FROM COALESCE(commence_time, fetched_at)) = :year
+              AND odds IS NOT NULL
+              AND odds > 1.0
+            ORDER BY COALESCE(commence_time, NOW()) DESC
+            LIMIT 2000
+        """)
+        rows = [dict(r._mapping) for r in db.session.execute(sql, {"year": year})]
+
+        grouped = defaultdict(list)
+        for row in rows:
+            key = (
+                row.get("event_id"),
+                row.get("market"),
+                row.get("line"),
+                row.get("selection_name"),
+            )
+            grouped[key].append(row)
+
+        edges = []
+        for same_outcome in grouped.values():
+            if len(same_outcome) < 2:
+                continue
+            best = max(same_outcome, key=lambda x: x.get("odds") or 0)
+            mean_odds = sum((r.get("odds") or 0) for r in same_outcome) / len(same_outcome)
+            if mean_odds <= 1:
+                continue
+            implied_prob = 1.0 / mean_odds
+            best_prob = 1.0 / (best.get("odds") or 1.0)
+            edge_pct = (implied_prob - best_prob) * 100.0
+            if edge_pct < min_edge:
+                continue
+            edges.append({
+                **best,
+                "bookmakers_compared": len(same_outcome),
+                "consensus_odds": round(mean_odds, 3),
+                "edge_pct": round(edge_pct, 2),
+            })
+
+        edges.sort(key=lambda x: x.get("edge_pct", 0), reverse=True)
+        return jsonify({"year": year, "min_edge": min_edge, "edges": edges[:200], "count": len(edges)})
+
     @app.route("/api/afl/refresh", methods=["POST"])
     @login_required
     def api_afl_refresh():
