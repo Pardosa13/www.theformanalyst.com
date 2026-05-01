@@ -1286,3 +1286,82 @@ def test_betting_edges_source_coerces_predicted_margin():
     assert "math.isnan(predicted_margin)" in fn_body, (
         "api_afl_betting_edges does not guard against NaN predicted_margin values."
     )
+
+
+# ---------------------------------------------------------------------------
+# Fix – api_afl_betting_edges team name JOIN mismatch (PRED MARGIN / LINE EDGE empty)
+# ---------------------------------------------------------------------------
+
+def test_betting_edges_game_predictions_cte_has_norm_hteam():
+    """game_predictions CTE must expose a norm_hteam column that normalises
+    Squiggle team names (e.g. 'Greater Western Sydney') to canonical form
+    (e.g. 'GWS Giants') so the outer JOIN to afl_match_markets succeeds."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    fn_start = source.find("def api_afl_betting_edges(")
+    assert fn_start != -1, "api_afl_betting_edges not found in afl_routes.py"
+    fn_end = source.find("\n    @app.route(", fn_start + 1)
+    fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
+
+    assert "norm_hteam" in fn_body, (
+        "game_predictions CTE in api_afl_betting_edges does not define norm_hteam. "
+        "Without this, Squiggle team names (e.g. 'Greater Western Sydney') will not "
+        "match the canonical names in afl_match_markets, causing predicted_margin to "
+        "always be NULL."
+    )
+    assert "norm_ateam" in fn_body, (
+        "game_predictions CTE in api_afl_betting_edges does not define norm_ateam. "
+        "Without this, away team name matching fails and predicted_margin stays NULL."
+    )
+
+
+def test_betting_edges_outer_join_uses_norm_columns():
+    """The outer LEFT JOIN between afl_match_markets and game_predictions must use
+    norm_hteam / norm_ateam (not the raw gp.hteam / gp.ateam) so that Squiggle
+    team name variants are mapped to canonical form before comparison."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    fn_start = source.find("def api_afl_betting_edges(")
+    assert fn_start != -1, "api_afl_betting_edges not found in afl_routes.py"
+    fn_end = source.find("\n    @app.route(", fn_start + 1)
+    fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
+
+    assert "gp.norm_hteam" in fn_body, (
+        "Outer LEFT JOIN in api_afl_betting_edges does not use gp.norm_hteam. "
+        "The JOIN must compare normalised team names so Squiggle variants match."
+    )
+    assert "gp.norm_ateam" in fn_body, (
+        "Outer LEFT JOIN in api_afl_betting_edges does not use gp.norm_ateam. "
+        "The JOIN must compare normalised team names so Squiggle variants match."
+    )
+
+
+def test_betting_edges_norm_hteam_maps_greater_western_sydney():
+    """The CASE expression for norm_hteam must map 'Greater Western Sydney' to 'GWS Giants',
+    which is the most likely Squiggle→canonical mismatch causing the JOIN to fail."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    fn_start = source.find("def api_afl_betting_edges(")
+    assert fn_start != -1, "api_afl_betting_edges not found in afl_routes.py"
+    fn_end = source.find("\n    @app.route(", fn_start + 1)
+    fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
+
+    assert "'Greater Western Sydney'" in fn_body, (
+        "norm_hteam CASE expression in api_afl_betting_edges is missing "
+        "'Greater Western Sydney' → 'GWS Giants' mapping."
+    )
