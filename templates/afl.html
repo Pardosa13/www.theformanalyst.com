@@ -1130,26 +1130,35 @@ function loadMatchMarkets() {
       const byMatch = {};
       rows.forEach(r => {
         const key = `${r.home_team} vs ${r.away_team}`;
-        if (!byMatch[key]) byMatch[key] = [];
-        byMatch[key].push(r);
+        if (!byMatch[key]) byMatch[key] = { h2h: null, spreads: null };
+        const slot = byMatch[key];
+        if (r.market === 'h2h') {
+          if (!slot.h2h || (r.odds || 0) > (slot.h2h.odds || 0)) slot.h2h = r;
+        }
+        if (r.market === 'spreads') {
+          if (!slot.spreads || (r.odds || 0) > (slot.spreads.odds || 0)) slot.spreads = r;
+        }
       });
-      const groupsHtml = Object.entries(byMatch).map(([matchName, matchRows]) => `
-        <tr style="background:var(--bg-elevated);">
-          <td colspan="5" style="font-weight:700;font-size:12px;padding:10px 12px;border-top:1px solid var(--border-mid);">
-            🏉 ${esc(matchName)}
-            <span style="font-size:10px;font-weight:400;color:var(--text-muted);margin-left:8px;">${matchRows.length} lines</span>
-          </td>
-        </tr>
-        ${matchRows.map(r => `
-          <tr>
-            <td style="padding-left:24px;">${esc(r.bookmaker)}</td>
-            <td>${esc(r.market)}</td>
-            <td>${esc(r.selection_name || '—')}</td>
-            <td>${r.line ?? '—'}</td>
-            <td>${safeNum(r.odds).toFixed(2)}</td>
+      const groupsHtml = Object.entries(byMatch).map(([matchName, best]) => {
+        const picks = [best.h2h, best.spreads].filter(Boolean);
+        if (!picks.length) return '';
+        return `
+          <tr style="background:var(--bg-elevated);">
+            <td colspan="5" style="font-weight:700;font-size:12px;padding:10px 12px;border-top:1px solid var(--border-mid);">
+              🏉 ${esc(matchName)}
+            </td>
           </tr>
-        `).join('')}
-      `).join('');
+          ${picks.map(r => `
+            <tr>
+              <td style="padding-left:24px;">${esc(r.bookmaker)}</td>
+              <td>${esc(r.market)}</td>
+              <td>${esc(r.selection_name || '—')}</td>
+              <td>${r.line ?? '—'}</td>
+              <td style="font-family:'DM Mono',monospace;font-weight:700;color:var(--accent);">${safeNum(r.odds).toFixed(2)}</td>
+            </tr>
+          `).join('')}
+        `;
+      }).join('');
       el.innerHTML = `<div class="scroll-x"><table class="ladder-table">
         <thead><tr><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Line</th><th>Odds</th></tr></thead>
         <tbody>${groupsHtml}</tbody>
