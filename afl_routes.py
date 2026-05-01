@@ -49,6 +49,7 @@ from afl_data import (
 )
 from afl_db import (
     SQUIGGLE_SITE,
+    _team as _normalise_team,
     get_team_logo_map,
     log_sync,
     upsert_games,
@@ -1417,6 +1418,7 @@ def register_afl_routes(app, db):
                 g.ateam,
                 g.hteamid,
                 g.ateamid,
+                g.complete,
                 g.hscore,
                 g.ascore,
                 home_r.rolling_avg_5 AS home_rating,
@@ -1446,7 +1448,8 @@ def register_afl_routes(app, db):
             predicted_margin = float(predicted_margin_raw) if predicted_margin_raw is not None else None
             hscore = r.get("hscore")
             ascore = r.get("ascore")
-            actual_margin = (hscore - ascore) if (hscore is not None and ascore is not None) else None
+            complete = r.get("complete") or 0
+            actual_margin = (hscore - ascore) if (complete == 100 and hscore is not None and ascore is not None) else None
             out.append({
                 "match_id": r["match_id"],
                 "year": year,
@@ -1480,25 +1483,101 @@ def register_afl_routes(app, db):
     @app.route("/api/afl/betting-edges")
     @login_required
     def api_afl_betting_edges():
+        import math
         year = request.args.get("year", CURRENT_YEAR, type=int)
         min_edge = request.args.get("min_edge", 2.0, type=float)
+
+        # Logistic scale: tuned so a 35-pt model margin ≈ 73% win probability.
+        # This is intentionally conservative given the model ratings aren't
+        # calibrated to actual point margins.
+        LOGISTIC_SCALE = 35.0
+
+        # Rolling team ratings CTE (same logic as match-predictions endpoint),
+        # but restricted to upcoming fixtures that have market data.
+        # home_team / away_team in afl_match_markets are pre-normalised via _team().
         sql = db.text("""
+            WITH team_match_stats AS (
+                SELECT
+                    ps.match_date,
+                    LOWER(TRIM(ps.player_team)) AS team_key,
+                    (
+                        0.90 * SUM(COALESCE(ps.inside_fifties, 0)) +
+                        1.15 * SUM(COALESCE(ps.clearances, 0)) +
+                        1.30 * SUM(COALESCE(ps.contested_possessions, 0)) +
+                        0.75 * SUM(COALESCE(ps.score_involvements, 0)) +
+                        0.04 * SUM(COALESCE(ps.metres_gained, 0)) +
+                        0.50 * SUM(COALESCE(ps.tackles, 0)) +
+                        0.45 * SUM(COALESCE(ps.intercepts, 0)) +
+                        0.18 * SUM(COALESCE(ps.disposals, 0)) -
+                        0.75 * SUM(COALESCE(ps.turnovers, 0)) -
+                        0.65 * SUM(COALESCE(ps.clangers, 0)) -
+                        0.35 * SUM(COALESCE(ps.free_kicks_against, 0))
+                    ) AS team_rating
+                FROM afl_player_stats ps
+                WHERE COALESCE(ps.player_team, '') <> ''
+                GROUP BY ps.match_date, LOWER(TRIM(ps.player_team))
+            ),
+            team_rolling AS (
+                SELECT
+                    match_date,
+                    team_key,
+                    AVG(team_rating) OVER (
+                        PARTITION BY team_key
+                        ORDER BY match_date
+                        ROWS BETWEEN 4 PRECEDING AND CURRENT ROW
+                    ) AS rolling_avg_5
+                FROM team_match_stats
+            ),
+            team_latest_before AS (
+                SELECT DISTINCT ON (g.id, tk.team_key)
+                    g.id   AS game_id,
+                    tk.team_key,
+                    tr.rolling_avg_5
+                FROM afl_games g
+                JOIN (SELECT DISTINCT team_key FROM team_match_stats) tk ON TRUE
+                JOIN team_rolling tr
+                    ON tr.team_key   = tk.team_key
+                   AND tr.match_date < g.date::DATE
+                WHERE EXTRACT(YEAR FROM g.date) = :year
+                  AND g.complete < 100
+                ORDER BY g.id, tk.team_key, tr.match_date DESC
+            ),
+            game_predictions AS (
+                SELECT
+                    g.id  AS game_id,
+                    g.hteam,
+                    g.ateam,
+                    (home_r.rolling_avg_5 - away_r.rolling_avg_5) AS predicted_margin
+                FROM afl_games g
+                LEFT JOIN team_latest_before home_r
+                    ON home_r.game_id  = g.id
+                   AND home_r.team_key = LOWER(TRIM(g.hteam))
+                LEFT JOIN team_latest_before away_r
+                    ON away_r.game_id  = g.id
+                   AND away_r.team_key = LOWER(TRIM(g.ateam))
+                WHERE EXTRACT(YEAR FROM g.date) = :year
+                  AND g.complete < 100
+            )
             SELECT
-                mm.event_id, mm.home_team, mm.away_team, mm.commence_time, mm.bookmaker, mm.market, mm.line, mm.odds, mm.selection_name,
-                mp.predicted_margin,
-                CASE
-                    WHEN mm.market = 'spreads' THEN (mp.predicted_margin - COALESCE(mm.line, 0))
-                    ELSE NULL
-                END AS line_edge
+                mm.event_id,
+                mm.home_team,
+                mm.away_team,
+                mm.commence_time,
+                mm.bookmaker,
+                mm.market,
+                mm.line,
+                mm.odds,
+                mm.selection_name,
+                gp.predicted_margin
             FROM afl_match_markets mm
-            LEFT JOIN afl_match_predictions mp
-              ON mp.home_team = mm.home_team
-             AND mp.away_team = mm.away_team
+            LEFT JOIN game_predictions gp
+                ON LOWER(TRIM(gp.hteam)) = LOWER(TRIM(mm.home_team))
+               AND LOWER(TRIM(gp.ateam)) = LOWER(TRIM(mm.away_team))
             WHERE EXTRACT(YEAR FROM COALESCE(mm.commence_time, mm.fetched_at)) = :year
               AND mm.odds IS NOT NULL
               AND mm.odds > 1.0
             ORDER BY COALESCE(mm.commence_time, NOW()) DESC
-            LIMIT 2000
+            LIMIT 3000
         """)
         rows = [dict(r._mapping) for r in db.session.execute(sql, {"year": year})]
 
@@ -1525,11 +1604,56 @@ def register_afl_routes(app, db):
             edge_pct = (implied_prob - best_prob) * 100.0
             if edge_pct < min_edge:
                 continue
+
+            market = best.get("market", "")
+            predicted_margin = best.get("predicted_margin")
+            line = best.get("line")
+            selection_name = (best.get("selection_name") or "").strip()
+            home_team = (best.get("home_team") or "").strip()
+
+            # Normalise the selection name (Odds API → Squiggle) so we can
+            # reliably detect which side of the market this selection is on.
+            normalised_selection = _normalise_team(selection_name)
+            is_home = normalised_selection.lower() == home_team.lower()
+
+            # ── Spread edge ──────────────────────────────────────────────────
+            # line < 0  → home selection (home gives points)
+            # line > 0  → away selection (away receives points)
+            # Adjusted spread result from the selection's perspective:
+            #   home: predicted_margin + line  (positive → home covers)
+            #   away: -predicted_margin + line (positive → away covers)
+            line_edge = None
+            spread_line = None
+            if market == "spreads" and predicted_margin is not None and line is not None:
+                spread_line = line
+                if line <= 0:  # home team selection (giving points)
+                    line_edge = round(predicted_margin + line, 1)
+                else:          # away team selection (receiving points)
+                    line_edge = round(-predicted_margin + line, 1)
+
+            # ── H2H probability edge ─────────────────────────────────────────
+            # Only for standard back markets (not Betfair lay).
+            model_prob = None
+            market_prob = None
+            prob_edge = None
+            if market == "h2h" and predicted_margin is not None:
+                raw_home_prob = 1.0 / (1.0 + math.exp(-predicted_margin / LOGISTIC_SCALE))
+                raw_model_prob = raw_home_prob if is_home else (1.0 - raw_home_prob)
+                model_prob  = round(raw_model_prob, 3)
+                market_prob = round(1.0 / (best.get("odds") or 1.0), 3)
+                prob_edge   = round((model_prob - market_prob) * 100.0, 2)
+
             edges.append({
                 **best,
                 "bookmakers_compared": len(same_outcome),
                 "consensus_odds": round(mean_odds, 3),
                 "edge_pct": round(edge_pct, 2),
+                "predicted_margin": round(predicted_margin, 1) if predicted_margin is not None else None,
+                "spread_line": spread_line,
+                "line_edge": line_edge,
+                "model_prob": model_prob,
+                "market_prob": market_prob,
+                "prob_edge": prob_edge,
             })
 
         edges.sort(key=lambda x: x.get("edge_pct", 0), reverse=True)
