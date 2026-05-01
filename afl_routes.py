@@ -1540,7 +1540,7 @@ def register_afl_routes(app, db):
     @app.route("/api/afl/betting-edges")
     @login_required
     def api_afl_betting_edges():
-        import math
+        import math, re
         year = request.args.get("year", CURRENT_YEAR, type=int)
         min_edge = request.args.get("min_edge", 2.0, type=float)
 
@@ -1549,6 +1549,7 @@ def register_afl_routes(app, db):
         # 35.0 is the real-point equivalent scale; multiply by 4.44 (rating-to-points
         # scale factor, calibrated from 1,481 games) to get the raw-rating scale.
         LOGISTIC_SCALE = 35.0 * 4.44
+        _RATING_TO_POINTS_SCALE = 4.44
 
         # Normalise raw Squiggle team names to canonical form (mirrors Python _team()).
         # afl_match_markets stores pre-normalised names; afl_games.hteam/ateam may
@@ -1695,6 +1696,11 @@ def register_afl_routes(app, db):
             LIMIT 3000
         """)
         rows = [dict(r._mapping) for r in db.session.execute(sql, {"year": year})]
+        rows = [
+            r for r in rows
+            if not re.search(r'betfair', r.get('bookmaker', ''), re.IGNORECASE)
+            and r.get('market', '') != 'h2h_lay'
+        ]
 
         grouped = defaultdict(list)
         for row in rows:
@@ -1775,7 +1781,7 @@ def register_afl_routes(app, db):
                 "bookmakers_compared": len(same_outcome),
                 "consensus_odds": round(mean_odds, 3),
                 "edge_pct": round(edge_pct, 2),
-                "predicted_margin": round(predicted_margin, 1) if predicted_margin is not None else None,
+                "predicted_margin": round(max(-80.0, min(80.0, predicted_margin / _RATING_TO_POINTS_SCALE)), 1) if predicted_margin is not None else None,
                 "spread_line": spread_line,
                 "line_edge": line_edge,
                 "model_prob": model_prob,
