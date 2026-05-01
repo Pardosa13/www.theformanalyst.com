@@ -1362,6 +1362,7 @@ def register_afl_routes(app, db):
             WITH team_match_stats AS (
                 SELECT
                     ps.match_id,
+                    ps.match_date,
                     LOWER(TRIM(ps.player_team)) AS team_key,
                     (
                         0.90 * SUM(COALESCE(ps.inside_fifties, 0)) +
@@ -1378,7 +1379,7 @@ def register_afl_routes(app, db):
                     ) AS team_rating
                 FROM afl_player_stats ps
                 WHERE COALESCE(ps.player_team, '') <> ''
-                GROUP BY ps.match_id, LOWER(TRIM(ps.player_team))
+                GROUP BY ps.match_id, ps.match_date, LOWER(TRIM(ps.player_team))
             )
             SELECT
                 g.id AS match_id,
@@ -1387,27 +1388,54 @@ def register_afl_routes(app, db):
                 g.venue,
                 g.hteam,
                 g.ateam,
+                g.hteamid,
+                g.ateamid,
                 g.hscore,
                 g.ascore,
-                COALESCE(home.team_rating, 0) - COALESCE(away.team_rating, 0) AS predicted_margin
+                COALESCE(home_by_id.team_rating, home_by_key.team_rating) AS home_rating,
+                COALESCE(away_by_id.team_rating, away_by_key.team_rating) AS away_rating,
+                (COALESCE(home_by_id.team_rating, home_by_key.team_rating) -
+                 COALESCE(away_by_id.team_rating, away_by_key.team_rating)) AS predicted_margin
             FROM afl_games g
-            LEFT JOIN team_match_stats home
-                ON home.match_id = g.id
-               AND home.team_key = LOWER(TRIM(g.hteam))
-            LEFT JOIN team_match_stats away
-                ON away.match_id = g.id
-               AND away.team_key = LOWER(TRIM(g.ateam))
+            LEFT JOIN team_match_stats home_by_id
+                ON home_by_id.match_id = g.id
+               AND home_by_id.team_key = LOWER(TRIM(g.hteam))
+            LEFT JOIN team_match_stats away_by_id
+                ON away_by_id.match_id = g.id
+               AND away_by_id.team_key = LOWER(TRIM(g.ateam))
+            LEFT JOIN team_match_stats home_by_key
+                ON home_by_key.match_date = g.date
+               AND home_by_key.team_key = LOWER(TRIM(g.hteam))
+            LEFT JOIN team_match_stats away_by_key
+                ON away_by_key.match_date = g.date
+               AND away_by_key.team_key = LOWER(TRIM(g.ateam))
             WHERE EXTRACT(YEAR FROM g.date) = :year
               AND g.hscore IS NOT NULL
               AND g.ascore IS NOT NULL
+              AND COALESCE(TRIM(g.hteam), '') <> ''
+              AND COALESCE(TRIM(g.ateam), '') <> ''
+              AND COALESCE(g.hteamid, 0) <> 0
+              AND COALESCE(g.ateamid, 0) <> 0
               {round_filter}
             ORDER BY g.date DESC
             LIMIT :limit
         """)
         rows = [dict(r._mapping) for r in db.session.execute(sql, params)]
+
+        join_diagnostics_sql = db.text("""
+            SELECT
+                COUNT(*) AS total_stats_rows,
+                COUNT(*) FILTER (WHERE ps.match_id IS NOT NULL AND g.id IS NOT NULL) AS stats_rows_with_game_id_match,
+                COUNT(*) FILTER (WHERE ps.match_id IS NOT NULL AND g.id IS NULL) AS stats_rows_without_game_id_match
+            FROM afl_player_stats ps
+            LEFT JOIN afl_games g ON g.id = ps.match_id
+            WHERE EXTRACT(YEAR FROM ps.match_date) = :year
+        """)
+        join_diagnostics = dict(db.session.execute(join_diagnostics_sql, {"year": year}).one()._mapping)
         out = []
         for r in rows:
-            predicted_margin = float(r.get("predicted_margin") or 0.0)
+            predicted_margin_raw = r.get("predicted_margin")
+            predicted_margin = float(predicted_margin_raw) if predicted_margin_raw is not None else None
             out.append({
                 "match_id": r["match_id"],
                 "year": year,
@@ -1415,10 +1443,12 @@ def register_afl_routes(app, db):
                 "home_team": r["hteam"],
                 "away_team": r["ateam"],
                 "actual_margin": (r["hscore"] or 0) - (r["ascore"] or 0),
-                "predicted_margin": round(predicted_margin, 1),
-                "predicted_winner": r["hteam"] if predicted_margin >= 0 else r["ateam"],
+                "home_rating": float(r["home_rating"]) if r.get("home_rating") is not None else None,
+                "away_rating": float(r["away_rating"]) if r.get("away_rating") is not None else None,
+                "predicted_margin": round(predicted_margin, 1) if predicted_margin is not None else None,
+                "predicted_winner": (r["hteam"] if predicted_margin >= 0 else r["ateam"]) if predicted_margin is not None else None,
             })
-        return jsonify({"year": year, "round": round_num, "matches": out, "count": len(out)})
+        return jsonify({"year": year, "round": round_num, "matches": out, "count": len(out), "join_diagnostics": join_diagnostics})
 
     @app.route("/api/afl/match-markets")
     @login_required
