@@ -1417,6 +1417,7 @@ def register_afl_routes(app, db):
                 g.ateam,
                 g.hteamid,
                 g.ateamid,
+                g.complete,
                 g.hscore,
                 g.ascore,
                 home_r.rolling_avg_5 AS home_rating,
@@ -1446,7 +1447,8 @@ def register_afl_routes(app, db):
             predicted_margin = float(predicted_margin_raw) if predicted_margin_raw is not None else None
             hscore = r.get("hscore")
             ascore = r.get("ascore")
-            actual_margin = (hscore - ascore) if (hscore is not None and ascore is not None) else None
+            complete = r.get("complete") or 0
+            actual_margin = (hscore - ascore) if (complete == 100 and hscore is not None and ascore is not None) else None
             out.append({
                 "match_id": r["match_id"],
                 "year": year,
