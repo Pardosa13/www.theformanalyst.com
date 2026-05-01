@@ -248,6 +248,90 @@ AFL_SCHEMA_STATEMENTS = [
 # Columns added after initial schema deployment — run as migrations on startup.
 AFL_MIGRATIONS = [
     "ALTER TABLE afl_player_stats ADD COLUMN IF NOT EXISTS player_headshot_url TEXT",
+    """
+    CREATE OR REPLACE VIEW afl_match_markets_clean AS
+    WITH pivoted AS (
+        SELECT
+            event_id,
+            home_team,
+            away_team,
+            commence_time,
+            bookmaker,
+            MAX(CASE WHEN market = 'h2h' AND selection_name = home_team THEN odds END) AS home_odds,
+            MAX(CASE WHEN market = 'h2h' AND selection_name = away_team THEN odds END) AS away_odds,
+            MAX(CASE WHEN market = 'spreads' AND selection_name = home_team THEN line END) AS spread_line,
+            MAX(CASE WHEN market = 'spreads' AND selection_name = home_team THEN odds END) AS home_spread_odds,
+            MAX(CASE WHEN market = 'spreads' AND selection_name = away_team THEN odds END) AS away_spread_odds
+        FROM afl_match_markets
+        GROUP BY event_id, home_team, away_team, commence_time, bookmaker
+    )
+    SELECT
+        event_id,
+        home_team,
+        away_team,
+        commence_time,
+        bookmaker,
+        home_odds,
+        away_odds,
+        spread_line,
+        home_spread_odds,
+        away_spread_odds
+    FROM pivoted
+    WHERE home_odds IS NOT NULL OR away_odds IS NOT NULL OR spread_line IS NOT NULL
+    """,
+    """
+    CREATE OR REPLACE VIEW afl_betting_edges AS
+    WITH model_margin AS (
+        SELECT
+            t.gameid AS match_id,
+            MAX(t.margin) AS predicted_margin
+        FROM afl_tips t
+        GROUP BY t.gameid
+    ),
+    market_joined AS (
+        SELECT
+            g.id AS match_id,
+            g.hteam AS home_team,
+            g.ateam AS away_team,
+            g.date AS game_time,
+            m.bookmaker,
+            m.home_odds,
+            m.away_odds,
+            m.spread_line,
+            m.home_spread_odds,
+            m.away_spread_odds,
+            ROW_NUMBER() OVER (
+                PARTITION BY g.id, m.bookmaker
+                ORDER BY ABS(EXTRACT(EPOCH FROM (g.date - m.commence_time)))
+            ) AS rn
+        FROM afl_games g
+        JOIN afl_match_markets_clean m
+          ON m.home_team = g.hteam
+         AND m.away_team = g.ateam
+         AND ABS(EXTRACT(EPOCH FROM (g.date - m.commence_time))) <= 21600
+    )
+    SELECT
+        mj.match_id,
+        mj.home_team,
+        mj.away_team,
+        mm.predicted_margin,
+        mj.spread_line,
+        mj.home_odds,
+        mj.away_odds,
+        (mm.predicted_margin - mj.spread_line) AS line_edge,
+        (
+            (CASE
+                WHEN mm.predicted_margin IS NULL OR mj.spread_line IS NULL THEN NULL
+                ELSE 1.0 / (1.0 + EXP(-(mm.predicted_margin / 12.0)))
+             END) -
+            (CASE WHEN mj.home_odds > 0 THEN 1.0 / mj.home_odds END)
+        ) AS prob_edge,
+        mj.bookmaker
+    FROM market_joined mj
+    LEFT JOIN model_margin mm
+      ON mm.match_id = mj.match_id
+    WHERE mj.rn = 1
+    """
 ]
 
 # Stable advisory-lock key derived from a namespace string.
@@ -992,7 +1076,7 @@ def upsert_match_markets(db, rows: list[dict]) -> int:
                 "market": _s(row.get("market")),
                 "line": row.get("line"),
                 "odds": row.get("odds"),
-                "selection_name": _s(row.get("selection_name")),
+                "selection_name": _team(row.get("selection_name")),
             })
             count += 1
 
