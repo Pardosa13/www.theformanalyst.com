@@ -1086,8 +1086,8 @@ function loadMatchPredictions() {
   const el = document.getElementById('matchPredictionsWrap') || document.getElementById('matchPredictions') || document.querySelector('[data-role="match-predictions"]');
   if (!el) return;
   el.innerHTML = '<span class="spinner-sm"></span>';
-  fetch(`/api/afl/match-predictions?year={{ year }}`)
-    .then(r => r.json())
+  fetch(`/api/afl/match-predictions?year={{ year }}&round=${_round}`)
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
     .then(data => {
       const rows = data.matches || [];
       if (!rows.length) {
@@ -1099,15 +1099,15 @@ function loadMatchPredictions() {
         rows.slice(0, 80).map(r => `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${r.predicted_margin != null ? safeNum(r.predicted_margin).toFixed(1) : '—'}</td><td>${esc(r.predicted_winner || '—')}</td><td>${r.actual_margin != null ? safeNum(r.actual_margin) : '—'}</td></tr>`).join('')
       }</tbody></table></div>`;
     })
-    .catch(() => { el.textContent = 'Failed to load predictions.'; });
+    .catch((err) => { el.textContent = `Failed to load predictions (${esc(err.message || 'unknown error')}).`; });
 }
 
 function loadMatchMarkets() {
   const el = document.getElementById('matchMarketsWrap');
   if (!el) return;
   el.innerHTML = '<span class="spinner-sm"></span>';
-  fetch('/api/afl/match-markets?year={{ year }}')
-    .then(r => r.json())
+  fetch(`/api/afl/match-markets?year={{ year }}`)
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
     .then(data => {
       const rows = data.markets || [];
       if (!rows.length) {
@@ -1118,15 +1118,15 @@ function loadMatchMarkets() {
         rows.slice(0, 120).map(r => `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${esc(r.bookmaker)}</td><td>${esc(r.market)}</td><td>${esc(r.selection_name || '—')}</td><td>${r.line ?? '—'}</td><td>${safeNum(r.odds).toFixed(2)}</td></tr>`).join('')
       }</tbody></table></div>`;
     })
-    .catch(() => { el.textContent = 'Failed to load match markets.'; });
+    .catch((err) => { el.textContent = `Failed to load match markets (${esc(err.message || 'unknown error')}).`; });
 }
 
 function loadBettingEdges() {
   const el = document.getElementById('bettingEdgesWrap');
   if (!el) return;
   el.innerHTML = '<span class="spinner-sm"></span>';
-  fetch('/api/afl/betting-edges?year={{ year }}&min_edge=2')
-    .then(r => r.json())
+  fetch(`/api/afl/betting-edges?year={{ year }}&min_edge=2&round=${_round}`)
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
     .then(data => {
       const rows = data.edges || [];
       if (!rows.length) {
@@ -1162,7 +1162,7 @@ function loadBettingEdges() {
         }).join('')
       }</tbody></table></div>`;
     })
-    .catch(() => { el.textContent = 'Failed to load betting edges.'; });
+    .catch((err) => { el.textContent = `Failed to load betting edges (${esc(err.message || 'unknown error')}).`; });
 }
 
 // ── Round navigation ─────────────────────────────────────────────
