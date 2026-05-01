@@ -1351,33 +1351,17 @@ def register_afl_routes(app, db):
     @login_required
     def api_afl_match_predictions():
         sql = db.text("""
-            WITH team_game_stats AS (
-                SELECT
-                    match_id,
-                    player_team AS team,
-                    SUM(goals) AS goals,
-                    SUM(behinds) AS behinds,
-                    SUM(score_involvements) AS score_involvements,
-                    SUM(inside_fifties) AS inside_fifties,
-                    SUM(clearances) AS clearances,
-                    SUM(contested_possessions) AS contested_possessions,
-                    SUM(metres_gained) AS metres_gained,
-                    SUM(disposals) AS disposals,
-                    SUM(tackles) AS tackles,
-                    SUM(intercepts) AS intercepts,
-                    SUM(turnovers) AS turnovers,
-                    SUM(clangers) AS clangers,
-                    SUM(free_kicks_against) AS free_kicks_against,
-                    AVG(disposal_efficiency_percentage) AS disposal_efficiency_percentage
-                FROM afl_player_stats
-                WHERE COALESCE(player_team, '') <> ''
-                GROUP BY match_id, player_team
-            )
-            SELECT g.id AS match_id, g.date, g.venue, g.hteam, g.ateam, g.hscore, g.ascore,
-                   ht.*, at.*
+            SELECT
+                g.id AS match_id,
+                g.date,
+                g.venue,
+                g.hteam,
+                g.ateam,
+                g.hscore,
+                g.ascore,
+                p.predicted_margin
             FROM afl_games g
-            JOIN team_game_stats ht ON ht.match_id = g.id AND ht.team = g.hteam
-            JOIN team_game_stats at ON at.match_id = g.id AND at.team = g.ateam
+            JOIN afl_match_predictions p ON p.match_id = g.id
             WHERE g.hscore IS NOT NULL AND g.ascore IS NOT NULL
             ORDER BY g.date DESC
             LIMIT 150
@@ -1385,22 +1369,8 @@ def register_afl_routes(app, db):
         rows = [dict(r._mapping) for r in db.session.execute(sql)]
         out = []
         for r in rows:
-            # simple heuristic weighted diff rating
-            rating = (
-                (r["contested_possessions"] - r["contested_possessions_1"])
-                + (r["clearances"] - r["clearances_1"])
-                + (r["inside_fifties"] - r["inside_fifties_1"])
-                + (r["score_involvements"] - r["score_involvements_1"])
-                + 0.3 * (r["metres_gained"] - r["metres_gained_1"]) / 100
-                + 0.2 * (r["disposals"] - r["disposals_1"])
-                + 0.5 * (r["tackles"] - r["tackles_1"])
-                + 0.5 * (r["intercepts"] - r["intercepts_1"])
-                - 0.7 * (r["turnovers"] - r["turnovers_1"])
-                - 0.7 * (r["clangers"] - r["clangers_1"])
-                - 0.4 * (r["free_kicks_against"] - r["free_kicks_against_1"])
-                + 6.0
-            )
-            out.append({"match_id": r["match_id"], "home_team": r["hteam"], "away_team": r["ateam"], "actual_margin": (r["hscore"] or 0) - (r["ascore"] or 0), "predicted_margin": round(rating, 1), "predicted_winner": r["hteam"] if rating >= 0 else r["ateam"]})
+            predicted_margin = float(r.get("predicted_margin") or 0.0)
+            out.append({"match_id": r["match_id"], "home_team": r["hteam"], "away_team": r["ateam"], "actual_margin": (r["hscore"] or 0) - (r["ascore"] or 0), "predicted_margin": round(predicted_margin, 1), "predicted_winner": r["hteam"] if predicted_margin >= 0 else r["ateam"]})
         return jsonify({"matches": out, "count": len(out)})
 
     @app.route("/api/afl/match-markets")
@@ -1426,12 +1396,20 @@ def register_afl_routes(app, db):
         min_edge = request.args.get("min_edge", 2.0, type=float)
         sql = db.text("""
             SELECT
-                event_id, home_team, away_team, commence_time, bookmaker, market, line, odds, selection_name
-            FROM afl_match_markets
-            WHERE EXTRACT(YEAR FROM COALESCE(commence_time, fetched_at)) = :year
-              AND odds IS NOT NULL
-              AND odds > 1.0
-            ORDER BY COALESCE(commence_time, NOW()) DESC
+                mm.event_id, mm.home_team, mm.away_team, mm.commence_time, mm.bookmaker, mm.market, mm.line, mm.odds, mm.selection_name,
+                mp.predicted_margin,
+                CASE
+                    WHEN mm.market = 'spreads' THEN (mp.predicted_margin - COALESCE(mm.line, 0))
+                    ELSE NULL
+                END AS line_edge
+            FROM afl_match_markets mm
+            LEFT JOIN afl_match_predictions mp
+              ON mp.home_team = mm.home_team
+             AND mp.away_team = mm.away_team
+            WHERE EXTRACT(YEAR FROM COALESCE(mm.commence_time, mm.fetched_at)) = :year
+              AND mm.odds IS NOT NULL
+              AND mm.odds > 1.0
+            ORDER BY COALESCE(mm.commence_time, NOW()) DESC
             LIMIT 2000
         """)
         rows = [dict(r._mapping) for r in db.session.execute(sql, {"year": year})]
