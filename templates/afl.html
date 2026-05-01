@@ -300,6 +300,7 @@
   }
   .atab:hover { color:var(--text-primary); }
   .atab.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .ppanel { display:block; }
   .analysis-panel { display:none; }
   .analysis-panel.active { display:block; }
   .analysis-body { padding:14px 16px; }
@@ -958,25 +959,34 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════
-     TAB: MARGINS
+     TAB: MATCH PREDICTIONS
      ════════════════════════════════════════════════════════════════ -->
 <div id="tab-predictions" class="tab-panel">
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-bar-chart-fill"></i> Match Predictions</h4>
-    </div>
-    <div class="afl-card-body">
-      <div style="display:flex;gap:8px;margin-bottom:12px;">
-        <button class="btn btn-primary btn-sm" onclick="loadMatchPredictions()"><i class="bi bi-arrow-repeat"></i> Refresh Predictions</button>
-        <button class="btn btn-primary btn-sm" onclick="loadMatchMarkets()"><i class="bi bi-list"></i> Load Match Markets</button>
-        <button class="btn btn-primary btn-sm" onclick="loadBettingEdges()"><i class="bi bi-lightning-charge"></i> Load Betting Edges</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" onclick="loadBettingEdges(); switchPredTab('edges', document.getElementById('ptab-edges'))"><i class="bi bi-lightning-charge"></i> Load Betting Edges</button>
+        <button class="btn btn-primary btn-sm" onclick="loadMatchPredictions(); switchPredTab('predictions', document.getElementById('ptab-predictions'))"><i class="bi bi-arrow-repeat"></i> Refresh Predictions</button>
+        <button class="btn btn-primary btn-sm" onclick="loadMatchMarkets(); switchPredTab('markets', document.getElementById('ptab-markets'))"><i class="bi bi-list"></i> Load Match Markets</button>
         <button class="btn btn-secondary btn-sm" onclick="syncMatchMarkets()"><i class="bi bi-cloud-download"></i> Sync H2H + Spreads</button>
       </div>
-      <div id="matchPredictionsWrap" data-role="match-predictions" style="font-size:12px;color:var(--text-secondary);">Load predictions to view model margins.</div>
-      <hr style="border-color:var(--border-subtle);margin:16px 0;">
-      <div id="matchMarketsWrap" style="font-size:12px;color:var(--text-secondary);">Match markets will appear here.</div>
-      <hr style="border-color:var(--border-subtle);margin:16px 0;">
-      <div id="bettingEdgesWrap" style="font-size:12px;color:var(--text-secondary);">Betting edges will appear here.</div>
+    </div>
+    <div style="display:flex;gap:0;border-bottom:1px solid var(--border-subtle);background:var(--bg-elevated);padding:4px 16px 0;">
+      <button class="atab active" id="ptab-edges" onclick="switchPredTab('edges',this)" style="flex:none;padding:9px 16px;"><i class="bi bi-lightning-charge-fill"></i> Betting Edges</button>
+      <button class="atab" id="ptab-predictions" onclick="switchPredTab('predictions',this)" style="flex:none;padding:9px 16px;"><i class="bi bi-bar-chart-fill"></i> Model Margins</button>
+      <button class="atab" id="ptab-markets" onclick="switchPredTab('markets',this)" style="flex:none;padding:9px 16px;"><i class="bi bi-list"></i> Raw Markets</button>
+    </div>
+    <div class="afl-card-body">
+      <div id="ppanel-edges" class="ppanel">
+        <div id="bettingEdgesWrap" style="font-size:12px;color:var(--text-secondary);">Click <strong>Load Betting Edges</strong> to begin.</div>
+      </div>
+      <div id="ppanel-predictions" class="ppanel" style="display:none;">
+        <div id="matchPredictionsWrap" data-role="match-predictions" style="font-size:12px;color:var(--text-secondary);">Click <strong>Refresh Predictions</strong> to begin.</div>
+      </div>
+      <div id="ppanel-markets" class="ppanel" style="display:none;">
+        <div id="matchMarketsWrap" style="font-size:12px;color:var(--text-secondary);">Click <strong>Load Match Markets</strong> to begin.</div>
+      </div>
     </div>
   </div>
 </div>
@@ -1069,12 +1079,15 @@ function switchTab(name, btn) {
     }
   }
   if (name === 'predictions') {
-    loadMatchPredictions();
-    loadMatchMarkets();
     loadBettingEdges();
   }
 }
-
+function switchPredTab(name, btn) {
+  document.querySelectorAll('.ppanel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('[id^="ptab-"]').forEach(t => t.classList.remove('active'));
+  document.getElementById(`ppanel-${name}`).style.display = 'block';
+  btn?.classList.add('active');
+}
 function syncMatchMarkets() {
   fetch('/api/afl/sync/match-markets', { method: 'POST', headers: { 'Content-Type': 'application/json' }})
     .then(r => r.json())
@@ -1114,9 +1127,33 @@ function loadMatchMarkets() {
         el.textContent = 'No match markets available.';
         return;
       }
-      el.innerHTML = `<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Line</th><th>Odds</th></tr></thead><tbody>${
-        rows.slice(0, 120).map(r => `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${esc(r.bookmaker)}</td><td>${esc(r.market)}</td><td>${esc(r.selection_name || '—')}</td><td>${r.line ?? '—'}</td><td>${safeNum(r.odds).toFixed(2)}</td></tr>`).join('')
-      }</tbody></table></div>`;
+      const byMatch = {};
+      rows.forEach(r => {
+        const key = `${r.home_team} vs ${r.away_team}`;
+        if (!byMatch[key]) byMatch[key] = [];
+        byMatch[key].push(r);
+      });
+      const groupsHtml = Object.entries(byMatch).map(([matchName, matchRows]) => `
+        <tr style="background:var(--bg-elevated);">
+          <td colspan="5" style="font-weight:700;font-size:12px;padding:10px 12px;border-top:1px solid var(--border-mid);">
+            🏉 ${esc(matchName)}
+            <span style="font-size:10px;font-weight:400;color:var(--text-muted);margin-left:8px;">${matchRows.length} lines</span>
+          </td>
+        </tr>
+        ${matchRows.map(r => `
+          <tr>
+            <td style="padding-left:24px;">${esc(r.bookmaker)}</td>
+            <td>${esc(r.market)}</td>
+            <td>${esc(r.selection_name || '—')}</td>
+            <td>${r.line ?? '—'}</td>
+            <td>${safeNum(r.odds).toFixed(2)}</td>
+          </tr>
+        `).join('')}
+      `).join('');
+      el.innerHTML = `<div class="scroll-x"><table class="ladder-table">
+        <thead><tr><th>Bookmaker</th><th>Market</th><th>Selection</th><th>Line</th><th>Odds</th></tr></thead>
+        <tbody>${groupsHtml}</tbody>
+      </table></div>`;
     })
     .catch((err) => { el.textContent = `Failed to load match markets (${esc(err.message || 'unknown error')}).`; });
 }
