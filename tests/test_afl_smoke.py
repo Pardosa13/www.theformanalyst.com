@@ -1197,3 +1197,92 @@ def test_fetch_afl_2026_workflow_uses_afltables_source():
     assert "source = 'fryzigg'" not in source or "afltables" in source, (
         "fetch-afl-2026.yml still uses fryzigg as primary without afltables fallback"
     )
+
+
+# ---------------------------------------------------------------------------
+# Fix – api_afl_betting_edges Decimal/float type error (line ~1682)
+# ---------------------------------------------------------------------------
+
+import decimal
+import math as _math
+
+
+def _betting_edge_predicted_margin(predicted_margin_raw):
+    """Inline mirror of the fixed coercion logic in api_afl_betting_edges."""
+    try:
+        predicted_margin = float(predicted_margin_raw) if predicted_margin_raw is not None else None
+    except (TypeError, ValueError):
+        predicted_margin = None
+    if predicted_margin is not None and _math.isnan(predicted_margin):
+        predicted_margin = None
+    return predicted_margin
+
+
+def _logistic_prob(predicted_margin, logistic_scale=35.0):
+    """Inline mirror of the h2h probability calculation in api_afl_betting_edges."""
+    if predicted_margin is None:
+        return None
+    return 1.0 / (1.0 + _math.exp(-predicted_margin / logistic_scale))
+
+
+def test_betting_edges_decimal_predicted_margin_coercion():
+    """Decimal predicted_margin from the DB must be coerced to float without error."""
+    dec_val = decimal.Decimal("12.345")
+    result = _betting_edge_predicted_margin(dec_val)
+    assert isinstance(result, float)
+    assert abs(result - 12.345) < 1e-6
+
+
+def test_betting_edges_none_predicted_margin():
+    """None predicted_margin must be returned as None (no error)."""
+    assert _betting_edge_predicted_margin(None) is None
+
+
+def test_betting_edges_nan_predicted_margin():
+    """NaN predicted_margin must be normalised to None."""
+    assert _betting_edge_predicted_margin(float("nan")) is None
+
+
+def test_betting_edges_invalid_predicted_margin():
+    """Non-numeric predicted_margin must be normalised to None without raising."""
+    assert _betting_edge_predicted_margin("not-a-number") is None
+    assert _betting_edge_predicted_margin("") is None
+
+
+def test_betting_edges_logistic_prob_with_decimal_input():
+    """Logistic probability calculation must work with Decimal input after coercion."""
+    dec_margin = decimal.Decimal("35")
+    coerced = _betting_edge_predicted_margin(dec_margin)
+    prob = _logistic_prob(coerced)
+    # 35 / 35 = 1.0 → 1/(1+e^-1) ≈ 0.731
+    assert prob is not None
+    assert abs(prob - 1.0 / (1.0 + _math.exp(-1.0))) < 1e-6
+
+
+def test_betting_edges_logistic_prob_none_margin():
+    """_logistic_prob must return None when predicted_margin is None."""
+    assert _logistic_prob(None) is None
+
+
+def test_betting_edges_source_coerces_predicted_margin():
+    """afl_routes.py api_afl_betting_edges must call float() on predicted_margin
+    before using it in math operations."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    fn_start = source.find("def api_afl_betting_edges(")
+    assert fn_start != -1, "api_afl_betting_edges not found in afl_routes.py"
+    fn_end = source.find("\n    @app.route(", fn_start + 1)
+    fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
+
+    assert "float(_pm_raw)" in fn_body, (
+        "api_afl_betting_edges does not convert predicted_margin to float via float(_pm_raw). "
+        "Decimal values from the DB will cause TypeError in math.exp()."
+    )
+    assert "math.isnan(predicted_margin)" in fn_body, (
+        "api_afl_betting_edges does not guard against NaN predicted_margin values."
+    )

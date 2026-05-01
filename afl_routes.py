@@ -1648,8 +1648,20 @@ def register_afl_routes(app, db):
                 continue
 
             market = best.get("market", "")
-            predicted_margin = best.get("predicted_margin")
-            line = best.get("line")
+            _pm_raw = best.get("predicted_margin")
+            try:
+                predicted_margin = float(_pm_raw) if _pm_raw is not None else None
+            except (TypeError, ValueError):
+                predicted_margin = None
+            if predicted_margin is not None and math.isnan(predicted_margin):
+                predicted_margin = None
+            _line_raw = best.get("line")
+            try:
+                line = float(_line_raw) if _line_raw is not None else None
+            except (TypeError, ValueError):
+                line = None
+            if line is not None and math.isnan(line):
+                line = None
             selection_name = (best.get("selection_name") or "").strip()
             home_team = (best.get("home_team") or "").strip()
 
