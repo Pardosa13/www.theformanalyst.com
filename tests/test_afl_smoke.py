@@ -1286,3 +1286,49 @@ def test_betting_edges_source_coerces_predicted_margin():
     assert "math.isnan(predicted_margin)" in fn_body, (
         "api_afl_betting_edges does not guard against NaN predicted_margin values."
     )
+
+
+def test_betting_edges_sql_normalises_team_names():
+    """api_afl_betting_edges SQL JOIN must use normalised team name columns (hteam_norm /
+    ateam_norm) so that raw Squiggle names like 'Greater Western Sydney Giants' correctly
+    match the pre-normalised values in afl_match_markets (e.g. 'GWS Giants')."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    fn_start = source.find("def api_afl_betting_edges(")
+    assert fn_start != -1, "api_afl_betting_edges not found in afl_routes.py"
+    fn_end = source.find("\n    @app.route(", fn_start + 1)
+    fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
+
+    # The CTE must expose normalised team-name columns.
+    assert "hteam_norm" in fn_body, (
+        "api_afl_betting_edges SQL is missing hteam_norm normalisation column. "
+        "The JOIN against afl_match_markets will fail for teams like 'Greater Western Sydney Giants'."
+    )
+    assert "ateam_norm" in fn_body, (
+        "api_afl_betting_edges SQL is missing ateam_norm normalisation column. "
+        "The JOIN against afl_match_markets will fail for teams with mascot-suffix names."
+    )
+    # The final JOIN must use the normalised columns, not raw LOWER(TRIM(gp.hteam)).
+    assert "gp.hteam_norm" in fn_body, (
+        "api_afl_betting_edges final JOIN must use gp.hteam_norm instead of LOWER(TRIM(gp.hteam))."
+    )
+    assert "gp.ateam_norm" in fn_body, (
+        "api_afl_betting_edges final JOIN must use gp.ateam_norm instead of LOWER(TRIM(gp.ateam))."
+    )
+    # Spot-check that key mascot / legacy mappings are present in the CASE expression.
+    for squiggle_raw in (
+        "greater western sydney giants",
+        "greater western sydney",
+        "west coast eagles",
+        "adelaide crows",
+        "carlton blues",
+        "sydney swans",
+    ):
+        assert squiggle_raw in fn_body, (
+            f"api_afl_betting_edges SQL CASE is missing a normalisation entry for {squiggle_raw!r}."
+        )

@@ -1513,10 +1513,41 @@ def register_afl_routes(app, db):
         # calibrated to actual point margins.
         LOGISTIC_SCALE = 35.0
 
+        # Normalise raw Squiggle team names to canonical form (mirrors Python _team()).
+        # afl_match_markets stores pre-normalised names; afl_games.hteam/ateam may
+        # contain mascots or legacy aliases (e.g. "Greater Western Sydney Giants" → "GWS Giants").
+        # Defined once here to avoid duplicating the CASE expression for home and away.
+        def _sql_norm_team(col):
+            return f"""CASE LOWER(TRIM({col}))
+                        WHEN 'west coast eagles'             THEN 'west coast'
+                        WHEN 'greater western sydney'        THEN 'gws giants'
+                        WHEN 'greater western sydney giants' THEN 'gws giants'
+                        WHEN 'gws'                           THEN 'gws giants'
+                        WHEN 'footscray'                     THEN 'western bulldogs'
+                        WHEN 'brisbane'                      THEN 'brisbane lions'
+                        WHEN 'adelaide crows'                THEN 'adelaide'
+                        WHEN 'carlton blues'                 THEN 'carlton'
+                        WHEN 'collingwood magpies'           THEN 'collingwood'
+                        WHEN 'essendon bombers'              THEN 'essendon'
+                        WHEN 'fremantle dockers'             THEN 'fremantle'
+                        WHEN 'geelong cats'                  THEN 'geelong'
+                        WHEN 'gold coast suns'               THEN 'gold coast'
+                        WHEN 'hawthorn hawks'                THEN 'hawthorn'
+                        WHEN 'melbourne demons'              THEN 'melbourne'
+                        WHEN 'north melbourne kangaroos'     THEN 'north melbourne'
+                        WHEN 'port adelaide power'           THEN 'port adelaide'
+                        WHEN 'richmond tigers'               THEN 'richmond'
+                        WHEN 'st kilda saints'               THEN 'st kilda'
+                        WHEN 'sydney swans'                  THEN 'sydney'
+                        WHEN 'western bulldogs bulldogs'     THEN 'western bulldogs'
+                        WHEN 'brisbane lions lions'          THEN 'brisbane lions'
+                        ELSE LOWER(TRIM({col}))
+                    END"""
+
         # Rolling team ratings CTE (same logic as match-predictions endpoint),
         # but restricted to upcoming fixtures that have market data.
         # home_team / away_team in afl_match_markets are pre-normalised via _team().
-        sql = db.text("""
+        sql = db.text(f"""
             WITH team_match_stats AS (
                 SELECT
                     ps.match_date,
@@ -1587,8 +1618,10 @@ def register_afl_routes(app, db):
             game_predictions AS (
                 SELECT
                     g.id  AS game_id,
-                    g.hteam,
-                    g.ateam,
+                    -- Normalise raw Squiggle names to canonical form (mirrors Python _team())
+                    -- so the JOIN against afl_match_markets (which uses pre-normalised names) works.
+                    {_sql_norm_team('g.hteam')} AS hteam_norm,
+                    {_sql_norm_team('g.ateam')} AS ateam_norm,
                     (home_r.rolling_avg_5 - away_r.rolling_avg_5) AS predicted_margin
                 FROM afl_games g
                 LEFT JOIN team_latest_before home_r
@@ -1613,8 +1646,8 @@ def register_afl_routes(app, db):
                 gp.predicted_margin
             FROM afl_match_markets mm
             LEFT JOIN game_predictions gp
-                ON LOWER(TRIM(gp.hteam)) = LOWER(TRIM(mm.home_team))
-               AND LOWER(TRIM(gp.ateam)) = LOWER(TRIM(mm.away_team))
+                ON gp.hteam_norm = LOWER(TRIM(mm.home_team))
+               AND gp.ateam_norm = LOWER(TRIM(mm.away_team))
             WHERE EXTRACT(YEAR FROM COALESCE(mm.commence_time, mm.fetched_at)) = :year
               AND mm.odds IS NOT NULL
               AND mm.odds > 1.0
