@@ -697,8 +697,8 @@
   <button class="afl-tab" data-tab="ladder" onclick="switchTab('ladder',this)">
     <i class="bi bi-list-ol"></i> Ladder
   </button>
-  <button class="afl-tab" data-tab="margins" onclick="switchTab('margins',this)">
-    <i class="bi bi-bar-chart-fill"></i> Margins
+  <button class="afl-tab" data-tab="predictions" onclick="switchTab('predictions',this)">
+    <i class="bi bi-bar-chart-fill"></i> Match Predictions
   </button>
 </div>
 
@@ -960,34 +960,17 @@
 <!-- ════════════════════════════════════════════════════════════════
      TAB: MARGINS
      ════════════════════════════════════════════════════════════════ -->
-<div id="tab-margins" class="tab-panel">
+<div id="tab-predictions" class="tab-panel">
   <div class="afl-card">
     <div class="afl-card-header">
-      <h4><i class="bi bi-bar-chart-fill"></i> 30+ Point Margin Frequency by Favourite Strength</h4>
+      <h4><i class="bi bi-bar-chart-fill"></i> Match Predictions</h4>
     </div>
     <div class="afl-card-body">
-      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:18px;">How often the favourite wins by 30+ points, broken down by market strength.</p>
-      {% set margin_data = [
-        {'label':'≤$1.20 Heavy Fav','rate':74,'avg_margin':45,'games':234,'color':'#10b981'},
-        {'label':'$1.21–$1.40','rate':63,'avg_margin':41,'games':635,'color':'#34d399'},
-        {'label':'$1.41–$1.60','rate':52,'avg_margin':35,'games':407,'color':'#f59e0b'},
-        {'label':'$1.61–$1.80','rate':46,'avg_margin':33,'games':433,'color':'#fb923c'},
-        {'label':'$1.81+ Coinflip','rate':39,'avg_margin':30,'games':391,'color':'#ef4444'},
-      ] %}
-      {% for row in margin_data %}
-      <div class="margin-bar-row">
-        <div class="margin-label">{{ row.label }}</div>
-        <div class="margin-bar-outer">
-          <div class="margin-bar-inner" style="width:{{ row.rate }}%;background:{{ row.color }};"></div>
-          <div class="margin-bar-pct">{{ row.rate }}%</div>
-        </div>
-        <div class="margin-meta">avg {{ row.avg_margin }}pt · n={{ row.games }}</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button class="btn btn-primary btn-sm" onclick="loadMatchPredictions()"><i class="bi bi-arrow-repeat"></i> Refresh Predictions</button>
+        <button class="btn btn-secondary btn-sm" onclick="syncMatchMarkets()"><i class="bi bi-cloud-download"></i> Sync H2H + Spreads</button>
       </div>
-      {% endfor %}
-      <div style="margin-top:20px;padding:14px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:10px;">
-        <div style="font-size:12px;font-weight:700;color:#fbbf24;margin-bottom:5px;">⚠️ Key Finding</div>
-        <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">Backing both teams to win by 30+ usually compounds overround. Use margin angles selectively rather than blindly.</div>
-      </div>
+      <div id="matchPredictionsWrap" style="font-size:12px;color:var(--text-secondary);">Load predictions to view model margins.</div>
     </div>
   </div>
 </div>
@@ -1079,6 +1062,33 @@ function switchTab(name, btn) {
       loadValueFinder();
     }
   }
+  if (name === 'predictions') loadMatchPredictions();
+}
+
+function syncMatchMarkets() {
+  fetch('/api/afl/sync/match-markets', { method: 'POST', headers: { 'Content-Type': 'application/json' }})
+    .then(r => r.json())
+    .then(() => loadMatchPredictions())
+    .catch(() => {});
+}
+
+function loadMatchPredictions() {
+  const el = document.getElementById('matchPredictionsWrap');
+  if (!el) return;
+  el.innerHTML = '<span class="spinner-sm"></span>';
+  fetch('/api/afl/match-predictions')
+    .then(r => r.json())
+    .then(data => {
+      const rows = data.matches || [];
+      if (!rows.length) {
+        el.textContent = 'No prediction rows available.';
+        return;
+      }
+      el.innerHTML = `<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Pred Margin</th><th>Pred Winner</th><th>Actual Margin</th></tr></thead><tbody>${
+        rows.slice(0, 80).map(r => `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${safeNum(r.predicted_margin).toFixed(1)}</td><td>${esc(r.predicted_winner)}</td><td>${safeNum(r.actual_margin)}</td></tr>`).join('')
+      }</tbody></table></div>`;
+    })
+    .catch(() => { el.textContent = 'Failed to load predictions.'; });
 }
 
 // ── Round navigation ─────────────────────────────────────────────

@@ -1726,6 +1726,18 @@ def fetch_afl_match_odds(
     return rows
 
 
+def fetch_afl_h2h_spread_odds(
+    api_key: Optional[str] = None,
+    regions: str = "au",
+) -> list[dict]:
+    """Fetch AFL H2H + spread markets, flattened per outcome."""
+    return fetch_afl_match_odds(
+        api_key=api_key,
+        markets="h2h,spreads",
+        regions=regions,
+    )
+
+
 def _normalise_prop_market(market_key: str) -> str:
     mapping = {
         "player_disposals": "player_disposals",
