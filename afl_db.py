@@ -229,14 +229,35 @@ AFL_SCHEMA_STATEMENTS = [
             ps.match_date,
             LOWER(TRIM(ps.player_team)) AS team_key,
             (
-                0.90 * SUM(COALESCE(ps.inside_fifties, 0)) +
-                1.15 * SUM(COALESCE(ps.clearances, 0)) +
-                1.30 * SUM(COALESCE(ps.contested_possessions, 0)) +
+                -- Scoring
+                6.00 * SUM(COALESCE(ps.goals, 0)) +
+                1.00 * SUM(COALESCE(ps.behinds, 0)) +
                 0.75 * SUM(COALESCE(ps.score_involvements, 0)) +
+                -- Attack
+                0.90 * SUM(COALESCE(ps.inside_fifties, 0)) +
+                1.50 * SUM(COALESCE(ps.marks_inside_fifty, 0)) +
+                -- Clearances
+                1.15 * SUM(COALESCE(ps.clearances, 0)) +
+                1.50 * SUM(COALESCE(ps.centre_clearances, 0)) +
+                1.20 * SUM(COALESCE(ps.stoppage_clearances, 0)) +
+                -- Contested possession
+                1.30 * SUM(COALESCE(ps.contested_possessions, 0)) +
+                0.25 * SUM(COALESCE(ps.uncontested_possessions, 0)) +
+                1.00 * SUM(COALESCE(ps.contested_marks, 0)) +
+                -- Ball use / territory
+                0.18 * SUM(COALESCE(ps.disposals, 0)) +
+                0.40 * SUM(COALESCE(ps.effective_disposals, 0)) +
+                0.10 * SUM(COALESCE(ps.disposal_efficiency_percentage, 0)) +
                 0.04 * SUM(COALESCE(ps.metres_gained, 0)) +
-                0.50 * SUM(COALESCE(ps.tackles, 0)) +
+                0.20 * SUM(COALESCE(ps.hitouts, 0)) +
+                -- Defence
                 0.45 * SUM(COALESCE(ps.intercepts, 0)) +
-                0.18 * SUM(COALESCE(ps.disposals, 0)) -
+                0.40 * SUM(COALESCE(ps.rebounds, 0)) +
+                0.50 * SUM(COALESCE(ps.tackles, 0)) +
+                0.70 * SUM(COALESCE(ps.tackles_inside_fifty, 0)) +
+                0.25 * SUM(COALESCE(ps.one_percenters, 0)) +
+                0.35 * SUM(COALESCE(ps.free_kicks_for, 0)) -
+                -- Negative
                 0.75 * SUM(COALESCE(ps.turnovers, 0)) -
                 0.65 * SUM(COALESCE(ps.clangers, 0)) -
                 0.35 * SUM(COALESCE(ps.free_kicks_against, 0))
