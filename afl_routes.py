@@ -1361,7 +1361,6 @@ def register_afl_routes(app, db):
         sql = db.text(f"""
             WITH team_match_stats AS (
                 SELECT
-                    ps.match_id,
                     ps.match_date,
                     LOWER(TRIM(ps.player_team)) AS team_key,
                     (
@@ -1379,7 +1378,7 @@ def register_afl_routes(app, db):
                     ) AS team_rating
                 FROM afl_player_stats ps
                 WHERE COALESCE(ps.player_team, '') <> ''
-                GROUP BY ps.match_id, ps.match_date, LOWER(TRIM(ps.player_team))
+                GROUP BY ps.match_date, LOWER(TRIM(ps.player_team))
             )
             SELECT
                 g.id AS match_id,
@@ -1392,23 +1391,16 @@ def register_afl_routes(app, db):
                 g.ateamid,
                 g.hscore,
                 g.ascore,
-                COALESCE(home_by_id.team_rating, home_by_key.team_rating) AS home_rating,
-                COALESCE(away_by_id.team_rating, away_by_key.team_rating) AS away_rating,
-                (COALESCE(home_by_id.team_rating, home_by_key.team_rating) -
-                 COALESCE(away_by_id.team_rating, away_by_key.team_rating)) AS predicted_margin
+                home_stats.team_rating AS home_rating,
+                away_stats.team_rating AS away_rating,
+                (home_stats.team_rating - away_stats.team_rating) AS predicted_margin
             FROM afl_games g
-            LEFT JOIN team_match_stats home_by_id
-                ON home_by_id.match_id = g.id
-               AND home_by_id.team_key = LOWER(TRIM(g.hteam))
-            LEFT JOIN team_match_stats away_by_id
-                ON away_by_id.match_id = g.id
-               AND away_by_id.team_key = LOWER(TRIM(g.ateam))
-            LEFT JOIN team_match_stats home_by_key
-                ON home_by_key.match_date = g.date
-               AND home_by_key.team_key = LOWER(TRIM(g.hteam))
-            LEFT JOIN team_match_stats away_by_key
-                ON away_by_key.match_date = g.date
-               AND away_by_key.team_key = LOWER(TRIM(g.ateam))
+            LEFT JOIN team_match_stats home_stats
+                ON home_stats.match_date = g.date::DATE
+               AND home_stats.team_key = LOWER(TRIM(g.hteam))
+            LEFT JOIN team_match_stats away_stats
+                ON away_stats.match_date = g.date::DATE
+               AND away_stats.team_key = LOWER(TRIM(g.ateam))
             WHERE EXTRACT(YEAR FROM g.date) = :year
               AND g.hscore IS NOT NULL
               AND g.ascore IS NOT NULL
@@ -1425,10 +1417,15 @@ def register_afl_routes(app, db):
         join_diagnostics_sql = db.text("""
             SELECT
                 COUNT(*) AS total_stats_rows,
-                COUNT(*) FILTER (WHERE ps.match_id IS NOT NULL AND g.id IS NOT NULL) AS stats_rows_with_game_id_match,
-                COUNT(*) FILTER (WHERE ps.match_id IS NOT NULL AND g.id IS NULL) AS stats_rows_without_game_id_match
+                COUNT(DISTINCT ps.match_date || '|' || LOWER(TRIM(ps.player_team))) AS distinct_team_date_keys,
+                COUNT(*) FILTER (WHERE g.id IS NOT NULL) AS stats_rows_with_game_date_match,
+                COUNT(*) FILTER (WHERE g.id IS NULL) AS stats_rows_without_game_date_match
             FROM afl_player_stats ps
-            LEFT JOIN afl_games g ON g.id = ps.match_id
+            LEFT JOIN afl_games g
+                ON g.date::DATE = ps.match_date
+               AND LOWER(TRIM(g.hteam)) = LOWER(TRIM(ps.player_team))
+                OR g.date::DATE = ps.match_date
+               AND LOWER(TRIM(g.ateam)) = LOWER(TRIM(ps.player_team))
             WHERE EXTRACT(YEAR FROM ps.match_date) = :year
         """)
         join_diagnostics = dict(db.session.execute(join_diagnostics_sql, {"year": year}).one()._mapping)
