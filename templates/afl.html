@@ -1109,7 +1109,14 @@ function loadMatchPredictions() {
       }
       const roundLabel = data.round ? `Round ${data.round}` : '';
       el.innerHTML = `${roundLabel ? `<p style="margin-bottom:6px;font-weight:600;">${esc(roundLabel)} — Rolling form ratings (last 5 games)</p>` : ''}<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Pred Margin</th><th>Pred Winner</th><th>Actual Margin</th></tr></thead><tbody>${
-        rows.slice(0, 80).map(r => `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${r.predicted_margin != null ? Math.abs(safeNum(r.predicted_margin)).toFixed(1) : '—'}</td><td>${esc(r.predicted_winner || '—')}</td><td>${r.actual_margin != null ? safeNum(r.actual_margin) : '—'}</td></tr>`).join('')
+        rows.slice(0, 80).map(r => {
+          const actualCell = r.actual_margin != null ? (() => {
+            const correct = (r.predicted_winner === r.home_team && r.actual_margin > 0) || (r.predicted_winner === r.away_team && r.actual_margin < 0);
+            const col = correct ? '#34d399' : '#f87171';
+            return `<span style="font-family:'DM Mono',monospace;font-weight:700;color:${col};">${Math.abs(safeNum(r.actual_margin))}</span> <span style="font-size:10px;color:${col};">${correct ? '✓' : '✗'}</span>`;
+          })() : '—';
+          return `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${r.predicted_margin != null ? Math.abs(safeNum(r.predicted_margin)).toFixed(1) : '—'}</td><td>${esc(r.predicted_winner || '—')}</td><td>${actualCell}</td></tr>`;
+        }).join('')
       }</tbody></table></div>`;
     })
     .catch((err) => { el.textContent = `Failed to load predictions (${esc(err.message || 'unknown error')}).`; });
