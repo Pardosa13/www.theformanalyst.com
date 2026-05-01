@@ -1172,7 +1172,7 @@ function loadBettingEdges() {
       }
       const fmtPct = v => v == null ? '—' : safeNum(v).toFixed(1) + '%';
       const fmtOdds = v => v == null ? '—' : safeNum(v).toFixed(2);
-      const fmtMargin = v => v == null ? '—' : (v >= 0 ? '+' : '') + safeNum(v).toFixed(1);
+      const fmtMargin = v => v == null ? '—' : Math.abs(safeNum(v)).toFixed(1);
       el.innerHTML = `<div class="scroll-x"><table class="ladder-table"><thead><tr>
         <th>Match</th><th>Market</th><th>Selection</th><th>Bookmaker</th>
         <th>Best Odds</th><th>Consensus</th><th>Edge %</th>
