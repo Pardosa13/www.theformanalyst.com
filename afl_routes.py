@@ -1589,6 +1589,54 @@ def register_afl_routes(app, db):
                     g.id  AS game_id,
                     g.hteam,
                     g.ateam,
+                    -- Normalise Squiggle team names to the canonical form stored in
+                    -- afl_match_markets (mirrors the Python _team() mapping so the
+                    -- outer JOIN can match regardless of which variant Squiggle uses,
+                    -- e.g. "Greater Western Sydney" → "gws giants").
+                    LOWER(TRIM(CASE TRIM(g.hteam)
+                        WHEN 'West Coast Eagles'          THEN 'West Coast'
+                        WHEN 'Greater Western Sydney'     THEN 'GWS Giants'
+                        WHEN 'GWS'                        THEN 'GWS Giants'
+                        WHEN 'Footscray'                  THEN 'Western Bulldogs'
+                        WHEN 'Brisbane'                   THEN 'Brisbane Lions'
+                        WHEN 'Adelaide Crows'             THEN 'Adelaide'
+                        WHEN 'Carlton Blues'              THEN 'Carlton'
+                        WHEN 'Collingwood Magpies'        THEN 'Collingwood'
+                        WHEN 'Essendon Bombers'           THEN 'Essendon'
+                        WHEN 'Fremantle Dockers'          THEN 'Fremantle'
+                        WHEN 'Geelong Cats'               THEN 'Geelong'
+                        WHEN 'Gold Coast Suns'            THEN 'Gold Coast'
+                        WHEN 'Hawthorn Hawks'             THEN 'Hawthorn'
+                        WHEN 'Melbourne Demons'           THEN 'Melbourne'
+                        WHEN 'North Melbourne Kangaroos'  THEN 'North Melbourne'
+                        WHEN 'Port Adelaide Power'        THEN 'Port Adelaide'
+                        WHEN 'Richmond Tigers'            THEN 'Richmond'
+                        WHEN 'St Kilda Saints'            THEN 'St Kilda'
+                        WHEN 'Sydney Swans'               THEN 'Sydney'
+                        ELSE TRIM(g.hteam)
+                    END)) AS norm_hteam,
+                    LOWER(TRIM(CASE TRIM(g.ateam)
+                        WHEN 'West Coast Eagles'          THEN 'West Coast'
+                        WHEN 'Greater Western Sydney'     THEN 'GWS Giants'
+                        WHEN 'GWS'                        THEN 'GWS Giants'
+                        WHEN 'Footscray'                  THEN 'Western Bulldogs'
+                        WHEN 'Brisbane'                   THEN 'Brisbane Lions'
+                        WHEN 'Adelaide Crows'             THEN 'Adelaide'
+                        WHEN 'Carlton Blues'              THEN 'Carlton'
+                        WHEN 'Collingwood Magpies'        THEN 'Collingwood'
+                        WHEN 'Essendon Bombers'           THEN 'Essendon'
+                        WHEN 'Fremantle Dockers'          THEN 'Fremantle'
+                        WHEN 'Geelong Cats'               THEN 'Geelong'
+                        WHEN 'Gold Coast Suns'            THEN 'Gold Coast'
+                        WHEN 'Hawthorn Hawks'             THEN 'Hawthorn'
+                        WHEN 'Melbourne Demons'           THEN 'Melbourne'
+                        WHEN 'North Melbourne Kangaroos'  THEN 'North Melbourne'
+                        WHEN 'Port Adelaide Power'        THEN 'Port Adelaide'
+                        WHEN 'Richmond Tigers'            THEN 'Richmond'
+                        WHEN 'St Kilda Saints'            THEN 'St Kilda'
+                        WHEN 'Sydney Swans'               THEN 'Sydney'
+                        ELSE TRIM(g.ateam)
+                    END)) AS norm_ateam,
                     (home_r.rolling_avg_5 - away_r.rolling_avg_5) AS predicted_margin
                 FROM afl_games g
                 LEFT JOIN team_latest_before home_r
@@ -1613,8 +1661,8 @@ def register_afl_routes(app, db):
                 gp.predicted_margin
             FROM afl_match_markets mm
             LEFT JOIN game_predictions gp
-                ON LOWER(TRIM(gp.hteam)) = LOWER(TRIM(mm.home_team))
-               AND LOWER(TRIM(gp.ateam)) = LOWER(TRIM(mm.away_team))
+                ON gp.norm_hteam = LOWER(TRIM(mm.home_team))
+               AND gp.norm_ateam = LOWER(TRIM(mm.away_team))
             WHERE EXTRACT(YEAR FROM COALESCE(mm.commence_time, mm.fetched_at)) = :year
               AND mm.odds IS NOT NULL
               AND mm.odds > 1.0
