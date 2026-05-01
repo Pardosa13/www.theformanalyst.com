@@ -1360,11 +1360,44 @@ def register_afl_routes(app, db):
 
         params = {"year": year, "round_num": round_num, "limit": 100}
 
-        sql = db.text("""
+        # Normalise raw Squiggle team names (afl_games.hteam/ateam) to the canonical
+        # form used in afl_player_stats.player_team so the team_latest_before JOIN works
+        # for both historical and current-season games (e.g. "Greater Western Sydney" → "gws giants").
+        def _sql_norm_team(col):
+            return f"""CASE LOWER(TRIM({col}))
+                        WHEN 'west coast eagles'             THEN 'west coast'
+                        WHEN 'greater western sydney'        THEN 'gws giants'
+                        WHEN 'greater western sydney giants' THEN 'gws giants'
+                        WHEN 'gws'                           THEN 'gws giants'
+                        WHEN 'footscray'                     THEN 'western bulldogs'
+                        WHEN 'brisbane'                      THEN 'brisbane lions'
+                        WHEN 'adelaide crows'                THEN 'adelaide'
+                        WHEN 'carlton blues'                 THEN 'carlton'
+                        WHEN 'collingwood magpies'           THEN 'collingwood'
+                        WHEN 'essendon bombers'              THEN 'essendon'
+                        WHEN 'fremantle dockers'             THEN 'fremantle'
+                        WHEN 'geelong cats'                  THEN 'geelong'
+                        WHEN 'gold coast suns'               THEN 'gold coast'
+                        WHEN 'hawthorn hawks'                THEN 'hawthorn'
+                        WHEN 'melbourne demons'              THEN 'melbourne'
+                        WHEN 'north melbourne kangaroos'     THEN 'north melbourne'
+                        WHEN 'port adelaide power'           THEN 'port adelaide'
+                        WHEN 'richmond tigers'               THEN 'richmond'
+                        WHEN 'st kilda saints'               THEN 'st kilda'
+                        WHEN 'sydney swans'                  THEN 'sydney'
+                        WHEN 'western bulldogs bulldogs'     THEN 'western bulldogs'
+                        WHEN 'brisbane lions lions'          THEN 'brisbane lions'
+                        ELSE LOWER(TRIM({col}))
+                    END"""
+
+        sql = db.text(f"""
             WITH team_match_stats AS (
+                -- Normalise player_team so 2026 afltables names (e.g. "Greater Western
+                -- Sydney Giants") collapse to the same key as 2019-2025 fryzigg names
+                -- (e.g. "gws giants"), keeping the rolling average continuous across years.
                 SELECT
                     ps.match_date,
-                    LOWER(TRIM(ps.player_team)) AS team_key,
+                    {_sql_norm_team('ps.player_team')} AS team_key,
                     (
                         -- Scoring
                         6.00 * SUM(COALESCE(ps.goals, 0)) +
@@ -1401,7 +1434,7 @@ def register_afl_routes(app, db):
                     ) AS team_rating
                 FROM afl_player_stats ps
                 WHERE COALESCE(ps.player_team, '') <> ''
-                GROUP BY ps.match_date, LOWER(TRIM(ps.player_team))
+                GROUP BY ps.match_date, {_sql_norm_team('ps.player_team')}
             ),
             team_rolling AS (
                 -- Rolling 5-game average rating per team, ordered by match date
@@ -1448,10 +1481,10 @@ def register_afl_routes(app, db):
             FROM afl_games g
             LEFT JOIN team_latest_before home_r
                 ON home_r.game_id  = g.id
-               AND home_r.team_key = LOWER(TRIM(g.hteam))
+               AND home_r.team_key = {_sql_norm_team('g.hteam')}
             LEFT JOIN team_latest_before away_r
                 ON away_r.game_id  = g.id
-               AND away_r.team_key = LOWER(TRIM(g.ateam))
+               AND away_r.team_key = {_sql_norm_team('g.ateam')}
             WHERE EXTRACT(YEAR FROM g.date) = :year
               AND g.round = :round_num
               AND COALESCE(TRIM(g.hteam), '') <> ''
@@ -1462,6 +1495,9 @@ def register_afl_routes(app, db):
             LIMIT :limit
         """)
         rows = [dict(r._mapping) for r in db.session.execute(sql, params)]
+
+        # Scale factor: calibrated from 1,481 historical games (avg raw=137.2 / avg actual=30.9).
+        _RATING_TO_POINTS_SCALE = 4.44
 
         out = []
         for r in rows:
@@ -1480,7 +1516,7 @@ def register_afl_routes(app, db):
                 "actual_margin": actual_margin,
                 "home_rating": float(r["home_rating"]) if r.get("home_rating") is not None else None,
                 "away_rating": float(r["away_rating"]) if r.get("away_rating") is not None else None,
-                "predicted_margin": round(predicted_margin, 1) if predicted_margin is not None else None,
+                "predicted_margin": round(predicted_margin / _RATING_TO_POINTS_SCALE, 1) if predicted_margin is not None else None,
                 "predicted_winner": (r["hteam"] if predicted_margin >= 0 else r["ateam"]) if predicted_margin is not None else None,
             })
         return jsonify({"year": year, "round": round_num, "matches": out, "count": len(out)})
@@ -1490,12 +1526,12 @@ def register_afl_routes(app, db):
     def api_afl_match_markets():
         year = request.args.get("year", CURRENT_YEAR, type=int)
         sql = db.text("""
-            SELECT
+            SELECT DISTINCT ON (home_team, away_team, bookmaker, market, selection_name, line)
                 event_id, home_team, away_team, commence_time, bookmaker, market,
                 line, odds, selection_name, fetched_at
             FROM afl_match_markets
             WHERE EXTRACT(YEAR FROM COALESCE(commence_time, fetched_at)) = :year
-            ORDER BY COALESCE(commence_time, fetched_at) DESC, home_team, away_team, bookmaker
+            ORDER BY home_team, away_team, bookmaker, market, selection_name, line, fetched_at DESC
             LIMIT 1500
         """)
         rows = [dict(r._mapping) for r in db.session.execute(sql, {"year": year})]
@@ -1508,10 +1544,11 @@ def register_afl_routes(app, db):
         year = request.args.get("year", CURRENT_YEAR, type=int)
         min_edge = request.args.get("min_edge", 2.0, type=float)
 
-        # Logistic scale: tuned so a 35-pt model margin ≈ 73% win probability.
-        # This is intentionally conservative given the model ratings aren't
-        # calibrated to actual point margins.
-        LOGISTIC_SCALE = 35.0
+        # Logistic scale: calibrated so raw rating differences (which are 4.44×
+        # larger than real AFL point margins) map to reasonable win probabilities.
+        # 35.0 is the real-point equivalent scale; multiply by 4.44 (rating-to-points
+        # scale factor, calibrated from 1,481 games) to get the raw-rating scale.
+        LOGISTIC_SCALE = 35.0 * 4.44
 
         # Normalise raw Squiggle team names to canonical form (mirrors Python _team()).
         # afl_match_markets stores pre-normalised names; afl_games.hteam/ateam may
@@ -1549,9 +1586,12 @@ def register_afl_routes(app, db):
         # home_team / away_team in afl_match_markets are pre-normalised via _team().
         sql = db.text(f"""
             WITH team_match_stats AS (
+                -- Normalise player_team so 2026 afltables names (e.g. "Greater Western
+                -- Sydney Giants") collapse to the same key as 2019-2025 fryzigg names
+                -- (e.g. "gws giants"), keeping the rolling average continuous across years.
                 SELECT
                     ps.match_date,
-                    LOWER(TRIM(ps.player_team)) AS team_key,
+                    {_sql_norm_team('ps.player_team')} AS team_key,
                     (
                         -- Scoring
                         6.00 * SUM(COALESCE(ps.goals, 0)) +
@@ -1588,7 +1628,7 @@ def register_afl_routes(app, db):
                     ) AS team_rating
                 FROM afl_player_stats ps
                 WHERE COALESCE(ps.player_team, '') <> ''
-                GROUP BY ps.match_date, LOWER(TRIM(ps.player_team))
+                GROUP BY ps.match_date, {_sql_norm_team('ps.player_team')}
             ),
             team_rolling AS (
                 SELECT
