@@ -975,7 +975,7 @@
     <div style="display:flex;gap:0;border-bottom:1px solid var(--border-subtle);background:var(--bg-elevated);padding:4px 16px 0;">
       <button class="atab active" id="ptab-edges" onclick="switchPredTab('edges',this)" style="flex:none;padding:9px 16px;"><i class="bi bi-lightning-charge-fill"></i> Betting Edges</button>
       <button class="atab" id="ptab-predictions" onclick="switchPredTab('predictions',this)" style="flex:none;padding:9px 16px;"><i class="bi bi-bar-chart-fill"></i> Model Margins</button>
-      <button class="atab" id="ptab-markets" onclick="switchPredTab('markets',this)" style="flex:none;padding:9px 16px;"><i class="bi bi-list"></i> Raw Markets</button>
+      <button class="atab" id="ptab-markets" onclick="switchPredTab('markets',this)" style="flex:none;padding:9px 16px;"><i class="bi bi-list"></i> Best Odds</button>
     </div>
     <div class="afl-card-body">
       <div id="ppanel-edges" class="ppanel">
@@ -985,7 +985,7 @@
         <div id="matchPredictionsWrap" data-role="match-predictions" style="font-size:12px;color:var(--text-secondary);">Click <strong>Refresh Predictions</strong> to begin.</div>
       </div>
       <div id="ppanel-markets" class="ppanel" style="display:none;">
-        <div id="matchMarketsWrap" style="font-size:12px;color:var(--text-secondary);">Click <strong>Load Match Markets</strong> to begin.</div>
+        <div id="matchMarketsWrap" style="font-size:12px;color:var(--text-secondary);">Click <strong>Load Best Odds</strong> to begin.</div>
       </div>
     </div>
   </div>
@@ -1130,17 +1130,15 @@ function loadMatchMarkets() {
       const byMatch = {};
       rows.forEach(r => {
         const key = `${r.home_team} vs ${r.away_team}`;
-        if (!byMatch[key]) byMatch[key] = { h2h: null, spreads: null };
+        if (!byMatch[key]) byMatch[key] = {};
         const slot = byMatch[key];
-        if (r.market === 'h2h') {
-          if (!slot.h2h || (r.odds || 0) > (slot.h2h.odds || 0)) slot.h2h = r;
-        }
-        if (r.market === 'spreads') {
-          if (!slot.spreads || (r.odds || 0) > (slot.spreads.odds || 0)) slot.spreads = r;
+        if (r.market === 'h2h' || r.market === 'spreads') {
+          const selKey = `${r.market}|${esc(r.selection_name || '')}`;
+          if (!slot[selKey] || (r.odds || 0) > (slot[selKey].odds || 0)) slot[selKey] = r;
         }
       });
       const groupsHtml = Object.entries(byMatch).map(([matchName, best]) => {
-        const picks = [best.h2h, best.spreads].filter(Boolean);
+        const picks = Object.values(best).filter(Boolean);
         if (!picks.length) return '';
         return `
           <tr style="background:var(--bg-elevated);">
