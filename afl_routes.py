@@ -1493,6 +1493,9 @@ def register_afl_routes(app, db):
         """)
         rows = [dict(r._mapping) for r in db.session.execute(sql, params)]
 
+        # Scale factor: calibrated from 1,481 historical games (avg raw=137.2 / avg actual=30.9).
+        _RATING_TO_POINTS_SCALE = 4.44
+
         out = []
         for r in rows:
             predicted_margin_raw = r.get("predicted_margin")
@@ -1510,7 +1513,7 @@ def register_afl_routes(app, db):
                 "actual_margin": actual_margin,
                 "home_rating": float(r["home_rating"]) if r.get("home_rating") is not None else None,
                 "away_rating": float(r["away_rating"]) if r.get("away_rating") is not None else None,
-                "predicted_margin": round(predicted_margin / 4.44, 1) if predicted_margin is not None else None,
+                "predicted_margin": round(predicted_margin / _RATING_TO_POINTS_SCALE, 1) if predicted_margin is not None else None,
                 "predicted_winner": (r["hteam"] if predicted_margin >= 0 else r["ateam"]) if predicted_margin is not None else None,
             })
         return jsonify({"year": year, "round": round_num, "matches": out, "count": len(out)})
@@ -1540,8 +1543,9 @@ def register_afl_routes(app, db):
 
         # Logistic scale: calibrated so raw rating differences (which are 4.44×
         # larger than real AFL point margins) map to reasonable win probabilities.
-        # 155.4 = 35.0 (real-point scale) × 4.44 (rating-to-points scale factor).
-        LOGISTIC_SCALE = 155.4
+        # 35.0 is the real-point equivalent scale; multiply by 4.44 (rating-to-points
+        # scale factor, calibrated from 1,481 games) to get the raw-rating scale.
+        LOGISTIC_SCALE = 35.0 * 4.44
 
         # Normalise raw Squiggle team names to canonical form (mirrors Python _team()).
         # afl_match_markets stores pre-normalised names; afl_games.hteam/ateam may
