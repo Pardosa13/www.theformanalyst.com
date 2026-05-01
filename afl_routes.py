@@ -1373,7 +1373,8 @@ def register_afl_routes(app, db):
                         -- Attack
                         0.90 * SUM(COALESCE(ps.inside_fifties, 0)) +
                         1.50 * SUM(COALESCE(ps.marks_inside_fifty, 0)) +
-                        -- Clearances (centre and stoppage counted separately)
+                        -- Clearances
+                        1.15 * SUM(COALESCE(ps.clearances, 0)) +
                         1.50 * SUM(COALESCE(ps.centre_clearances, 0)) +
                         1.20 * SUM(COALESCE(ps.stoppage_clearances, 0)) +
                         -- Contested possession
@@ -1381,7 +1382,9 @@ def register_afl_routes(app, db):
                         0.25 * SUM(COALESCE(ps.uncontested_possessions, 0)) +
                         1.00 * SUM(COALESCE(ps.contested_marks, 0)) +
                         -- Ball use / territory
+                        0.18 * SUM(COALESCE(ps.disposals, 0)) +
                         0.40 * SUM(COALESCE(ps.effective_disposals, 0)) +
+                        0.10 * SUM(COALESCE(ps.disposal_efficiency_percentage, 0)) +
                         0.04 * SUM(COALESCE(ps.metres_gained, 0)) +
                         0.20 * SUM(COALESCE(ps.hitouts, 0)) +
                         -- Defence
@@ -1526,7 +1529,8 @@ def register_afl_routes(app, db):
                         -- Attack
                         0.90 * SUM(COALESCE(ps.inside_fifties, 0)) +
                         1.50 * SUM(COALESCE(ps.marks_inside_fifty, 0)) +
-                        -- Clearances (centre and stoppage counted separately)
+                        -- Clearances
+                        1.15 * SUM(COALESCE(ps.clearances, 0)) +
                         1.50 * SUM(COALESCE(ps.centre_clearances, 0)) +
                         1.20 * SUM(COALESCE(ps.stoppage_clearances, 0)) +
                         -- Contested possession
@@ -1534,7 +1538,9 @@ def register_afl_routes(app, db):
                         0.25 * SUM(COALESCE(ps.uncontested_possessions, 0)) +
                         1.00 * SUM(COALESCE(ps.contested_marks, 0)) +
                         -- Ball use / territory
+                        0.18 * SUM(COALESCE(ps.disposals, 0)) +
                         0.40 * SUM(COALESCE(ps.effective_disposals, 0)) +
+                        0.10 * SUM(COALESCE(ps.disposal_efficiency_percentage, 0)) +
                         0.04 * SUM(COALESCE(ps.metres_gained, 0)) +
                         0.20 * SUM(COALESCE(ps.hitouts, 0)) +
                         -- Defence
