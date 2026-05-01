@@ -1132,8 +1132,8 @@ function loadBettingEdges() {
         el.textContent = 'No betting edges found for current filters.';
         return;
       }
-      el.innerHTML = `<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Selection</th><th>Bookmaker</th><th>Best Odds</th><th>Consensus</th><th>Edge %</th></tr></thead><tbody>${
-        rows.slice(0, 120).map(r => `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${esc(r.selection_name || r.market)}</td><td>${esc(r.bookmaker)}</td><td>${safeNum(r.odds).toFixed(2)}</td><td>${safeNum(r.consensus_odds).toFixed(2)}</td><td><strong>${safeNum(r.edge_pct).toFixed(2)}%</strong></td></tr>`).join('')
+      el.innerHTML = `<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Selection</th><th>Bookmaker</th><th>Best Odds</th><th>Consensus</th><th>Edge %</th><th>Line Edge</th></tr></thead><tbody>${
+        rows.slice(0, 120).map(r => `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${esc(r.selection_name || r.market)}</td><td>${esc(r.bookmaker)}</td><td>${safeNum(r.odds).toFixed(2)}</td><td>${safeNum(r.consensus_odds).toFixed(2)}</td><td><strong>${safeNum(r.edge_pct).toFixed(2)}%</strong></td><td>${r.line_edge == null ? '—' : safeNum(r.line_edge).toFixed(1)}</td></tr>`).join('')
       }</tbody></table></div>`;
     })
     .catch(() => { el.textContent = 'Failed to load betting edges.'; });
