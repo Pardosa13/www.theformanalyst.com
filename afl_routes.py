@@ -1392,9 +1392,12 @@ def register_afl_routes(app, db):
 
         sql = db.text(f"""
             WITH team_match_stats AS (
+                -- Normalise player_team so 2026 afltables names (e.g. "Greater Western
+                -- Sydney Giants") collapse to the same key as 2019-2025 fryzigg names
+                -- (e.g. "gws giants"), keeping the rolling average continuous across years.
                 SELECT
                     ps.match_date,
-                    LOWER(TRIM(ps.player_team)) AS team_key,
+                    {_sql_norm_team('ps.player_team')} AS team_key,
                     (
                         -- Scoring
                         6.00 * SUM(COALESCE(ps.goals, 0)) +
@@ -1431,7 +1434,7 @@ def register_afl_routes(app, db):
                     ) AS team_rating
                 FROM afl_player_stats ps
                 WHERE COALESCE(ps.player_team, '') <> ''
-                GROUP BY ps.match_date, LOWER(TRIM(ps.player_team))
+                GROUP BY ps.match_date, {_sql_norm_team('ps.player_team')}
             ),
             team_rolling AS (
                 -- Rolling 5-game average rating per team, ordered by match date
@@ -1583,9 +1586,12 @@ def register_afl_routes(app, db):
         # home_team / away_team in afl_match_markets are pre-normalised via _team().
         sql = db.text(f"""
             WITH team_match_stats AS (
+                -- Normalise player_team so 2026 afltables names (e.g. "Greater Western
+                -- Sydney Giants") collapse to the same key as 2019-2025 fryzigg names
+                -- (e.g. "gws giants"), keeping the rolling average continuous across years.
                 SELECT
                     ps.match_date,
-                    LOWER(TRIM(ps.player_team)) AS team_key,
+                    {_sql_norm_team('ps.player_team')} AS team_key,
                     (
                         -- Scoring
                         6.00 * SUM(COALESCE(ps.goals, 0)) +
@@ -1622,7 +1628,7 @@ def register_afl_routes(app, db):
                     ) AS team_rating
                 FROM afl_player_stats ps
                 WHERE COALESCE(ps.player_team, '') <> ''
-                GROUP BY ps.match_date, LOWER(TRIM(ps.player_team))
+                GROUP BY ps.match_date, {_sql_norm_team('ps.player_team')}
             ),
             team_rolling AS (
                 SELECT
