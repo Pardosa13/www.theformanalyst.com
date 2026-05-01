@@ -1165,7 +1165,7 @@ function loadBettingEdges() {
   fetch(`/api/afl/betting-edges?year={{ year }}&min_edge=2&round=${_round}`)
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
     .then(data => {
-      const rows = data.edges || [];
+      const rows = (data.edges || []).filter(r => !/betfair/i.test(r.bookmaker || ''));
       if (!rows.length) {
         el.textContent = 'No betting edges found for current filters.';
         return;
