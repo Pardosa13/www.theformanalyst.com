@@ -1352,13 +1352,14 @@ def register_afl_routes(app, db):
     def api_afl_match_predictions():
         year = request.args.get("year", CURRENT_YEAR, type=int)
         round_num = request.args.get("round", type=int)
-        params = {"year": year, "limit": 300}
-        round_filter = ""
-        if round_num is not None:
-            round_filter = " AND g.round = :round_num "
-            params["round_num"] = round_num
 
-        sql = db.text(f"""
+        # Default to the current completed round, same pattern as value-finder / player-props
+        if round_num is None:
+            round_num = _db_current_round(db, year)
+
+        params = {"year": year, "round_num": round_num, "limit": 100}
+
+        sql = db.text("""
             WITH team_match_stats AS (
                 SELECT
                     ps.match_date,
@@ -1379,9 +1380,36 @@ def register_afl_routes(app, db):
                 FROM afl_player_stats ps
                 WHERE COALESCE(ps.player_team, '') <> ''
                 GROUP BY ps.match_date, LOWER(TRIM(ps.player_team))
+            ),
+            team_rolling AS (
+                -- Rolling 5-game average rating per team, ordered by match date
+                SELECT
+                    match_date,
+                    team_key,
+                    AVG(team_rating) OVER (
+                        PARTITION BY team_key
+                        ORDER BY match_date
+                        ROWS BETWEEN 4 PRECEDING AND CURRENT ROW
+                    ) AS rolling_avg_5
+                FROM team_match_stats
+            ),
+            team_latest_before AS (
+                -- For each game, pick the most recent rolling rating for each team
+                -- using only matches played BEFORE that game's date
+                SELECT DISTINCT ON (g.id, tk.team_key)
+                    g.id   AS game_id,
+                    tk.team_key,
+                    tr.rolling_avg_5
+                FROM afl_games g
+                JOIN (SELECT DISTINCT team_key FROM team_match_stats) tk ON TRUE
+                JOIN team_rolling tr
+                    ON tr.team_key   = tk.team_key
+                   AND tr.match_date < g.date::DATE
+                WHERE EXTRACT(YEAR FROM g.date) = :year
+                ORDER BY g.id, tk.team_key, tr.match_date DESC
             )
             SELECT
-                g.id AS match_id,
+                g.id       AS match_id,
                 g.date,
                 g.round,
                 g.venue,
@@ -1391,61 +1419,47 @@ def register_afl_routes(app, db):
                 g.ateamid,
                 g.hscore,
                 g.ascore,
-                home_stats.team_rating AS home_rating,
-                away_stats.team_rating AS away_rating,
-                (home_stats.team_rating - away_stats.team_rating) AS predicted_margin
+                home_r.rolling_avg_5 AS home_rating,
+                away_r.rolling_avg_5 AS away_rating,
+                (home_r.rolling_avg_5 - away_r.rolling_avg_5) AS predicted_margin
             FROM afl_games g
-            LEFT JOIN team_match_stats home_stats
-                ON home_stats.match_date = g.date::DATE
-               AND home_stats.team_key = LOWER(TRIM(g.hteam))
-            LEFT JOIN team_match_stats away_stats
-                ON away_stats.match_date = g.date::DATE
-               AND away_stats.team_key = LOWER(TRIM(g.ateam))
+            LEFT JOIN team_latest_before home_r
+                ON home_r.game_id  = g.id
+               AND home_r.team_key = LOWER(TRIM(g.hteam))
+            LEFT JOIN team_latest_before away_r
+                ON away_r.game_id  = g.id
+               AND away_r.team_key = LOWER(TRIM(g.ateam))
             WHERE EXTRACT(YEAR FROM g.date) = :year
-              AND g.hscore IS NOT NULL
-              AND g.ascore IS NOT NULL
+              AND g.round = :round_num
               AND COALESCE(TRIM(g.hteam), '') <> ''
               AND COALESCE(TRIM(g.ateam), '') <> ''
               AND COALESCE(g.hteamid, 0) <> 0
               AND COALESCE(g.ateamid, 0) <> 0
-              {round_filter}
-            ORDER BY g.date DESC
+            ORDER BY g.date ASC
             LIMIT :limit
         """)
         rows = [dict(r._mapping) for r in db.session.execute(sql, params)]
 
-        join_diagnostics_sql = db.text("""
-            SELECT
-                COUNT(*) AS total_stats_rows,
-                COUNT(DISTINCT ps.match_date || '|' || LOWER(TRIM(ps.player_team))) AS distinct_team_date_keys,
-                COUNT(*) FILTER (WHERE g.id IS NOT NULL) AS stats_rows_with_game_date_match,
-                COUNT(*) FILTER (WHERE g.id IS NULL) AS stats_rows_without_game_date_match
-            FROM afl_player_stats ps
-            LEFT JOIN afl_games g
-                ON g.date::DATE = ps.match_date
-               AND LOWER(TRIM(g.hteam)) = LOWER(TRIM(ps.player_team))
-                OR g.date::DATE = ps.match_date
-               AND LOWER(TRIM(g.ateam)) = LOWER(TRIM(ps.player_team))
-            WHERE EXTRACT(YEAR FROM ps.match_date) = :year
-        """)
-        join_diagnostics = dict(db.session.execute(join_diagnostics_sql, {"year": year}).one()._mapping)
         out = []
         for r in rows:
             predicted_margin_raw = r.get("predicted_margin")
             predicted_margin = float(predicted_margin_raw) if predicted_margin_raw is not None else None
+            hscore = r.get("hscore")
+            ascore = r.get("ascore")
+            actual_margin = (hscore - ascore) if (hscore is not None and ascore is not None) else None
             out.append({
                 "match_id": r["match_id"],
                 "year": year,
                 "round": r.get("round"),
                 "home_team": r["hteam"],
                 "away_team": r["ateam"],
-                "actual_margin": (r["hscore"] or 0) - (r["ascore"] or 0),
+                "actual_margin": actual_margin,
                 "home_rating": float(r["home_rating"]) if r.get("home_rating") is not None else None,
                 "away_rating": float(r["away_rating"]) if r.get("away_rating") is not None else None,
                 "predicted_margin": round(predicted_margin, 1) if predicted_margin is not None else None,
                 "predicted_winner": (r["hteam"] if predicted_margin >= 0 else r["ateam"]) if predicted_margin is not None else None,
             })
-        return jsonify({"year": year, "round": round_num, "matches": out, "count": len(out), "join_diagnostics": join_diagnostics})
+        return jsonify({"year": year, "round": round_num, "matches": out, "count": len(out)})
 
     @app.route("/api/afl/match-markets")
     @login_required
