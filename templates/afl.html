@@ -2877,7 +2877,7 @@ function sgmRenderMulti() {
                 oddsCorr *= _sgmCorrelationFactor(_sgmMultiLegs[i], _sgmMultiLegs[j]);
               }
             }
-            const estBookieOdds = (rawParlay * oddsCorr).toFixed(2);
+            const estBookieOdds = rawParlay.toFixed(2);
             const bookieInput = document.getElementById('sgmBookieOdds');
             if (!bookieInput.value) {
               bookieInput.value = estBookieOdds;
