@@ -2643,7 +2643,7 @@ function sgmRenderLegsTable(legs) {
     el.innerHTML = '<div class="prop-empty" style="padding:30px;"><p>No legs found. Try Sync H2H + Spreads then Refresh from API.</p></div>';
     return;
   }
-
+  legs = legs.filter(l => safeNum(l.edge, 0) > 0);
   const rows = legs.map(leg => {
     const edgeVal = safeNum(leg.edge, 0);
     const edgeCls = edgeVal >= 5 ? 'pos' : edgeVal >= 2 ? 'neu' : 'neg';
