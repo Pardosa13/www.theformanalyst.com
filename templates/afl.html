@@ -843,66 +843,147 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════
-     TAB: FIXTURES
+     TAB: SGM CALCULATOR
      ════════════════════════════════════════════════════════════════ -->
 <div id="tab-fixtures" class="tab-panel">
-  <div class="afl-card">
+  <div class="afl-card" style="margin-bottom:14px;">
     <div class="afl-card-header">
-      <h4><i class="bi bi-calendar3"></i> Round {{ current_round or '—' }} Fixtures</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Tips = Squiggle Aggregate model</span>
+      <h4><i class="bi bi-calculator"></i> Same Game Multi Calculator</h4>
+      <span style="font-size:11px;color:var(--text-muted);">Build a multi · model probabilities · correlation-adjusted odds</span>
     </div>
-    <div class="afl-card-body" style="padding:0 18px;">
-      {% if fixtures %}
-        {% for f in fixtures %}
-        <div class="fixture-row">
-          <div class="fixture-time">
-            {% if f.date %}
-              {% if f.date.strftime is defined %}{{ f.date.strftime('%a %-d %b') }}{% else %}{{ f.date|string }}{% endif %}<br>
-              <span style="font-size:9px;">{{ f.localtime or '' }}</span>
-            {% else %}TBC{% endif %}
-          </div>
-          <div class="fixture-teams">
-            <div class="team-logo-wrap">
-              {% if f.hteam_logo_url %}
-                <img class="team-logo" src="{{ f.hteam_logo_url }}" alt="{{ f.hteam }}" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-                <div class="team-logo-placeholder" style="display:none;">{{ (f.hteam or 'H')[:3].upper() }}</div>
-              {% else %}
-                <div class="team-logo-placeholder">{{ (f.hteam or 'H')[:3].upper() }}</div>
-              {% endif %}
-            </div>
-            <div class="team-name">{{ f.hteam or 'Home' }}</div>
-            <div class="vs-divider">VS</div>
-            <div class="team-name away">{{ f.ateam or 'Away' }}</div>
-            <div class="team-logo-wrap">
-              {% if f.ateam_logo_url %}
-                <img class="team-logo" src="{{ f.ateam_logo_url }}" alt="{{ f.ateam }}" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-                <div class="team-logo-placeholder" style="display:none;">{{ (f.ateam or 'A')[:3].upper() }}</div>
-              {% else %}
-                <div class="team-logo-placeholder">{{ (f.ateam or 'A')[:3].upper() }}</div>
-              {% endif %}
-            </div>
-          </div>
-          <div class="fixture-venue"><i class="bi bi-geo-alt" style="font-size:10px;"></i> {{ f.venue or '—' }}</div>
-          {% if f.squiggle_tip %}
-          <span class="tip-badge"><i class="bi bi-lightning-fill"></i> {{ f.squiggle_tip }}{% if f.squiggle_confidence %} · {{ (f.squiggle_confidence|float)|round(0)|int }}%{% endif %}</span>
-          {% endif %}
-          <button class="btn btn-sm btn-secondary" onclick='jumpToTeam({{ (f.hteam or "")|tojson }},{{ (f.ateam or "")|tojson }},{{ (f.venue or "")|tojson }},"home")'>
-            <i class="bi bi-person-lines-fill"></i> {{ f.hteam or 'Home' }}
-          </button>
-          <button class="btn btn-sm btn-secondary" onclick='jumpToTeam({{ (f.hteam or "")|tojson }},{{ (f.ateam or "")|tojson }},{{ (f.venue or "")|tojson }},"away")'>
-            <i class="bi bi-person-lines-fill"></i> {{ f.ateam or 'Away' }}
-          </button>
-        </div>
-        {% endfor %}
-      {% else %}
-        <div class="afl-empty-state">
-          <i class="bi bi-calendar-x" style="color:var(--accent);opacity:.35;"></i>
-          <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:5px;">No upcoming fixtures loaded</div>
-          <div style="font-size:12px;">Click Refresh after syncing Squiggle data.</div>
-        </div>
-      {% endif %}
+
+    <!-- Round + Match selector bar -->
+    <div class="prop-selector-bar">
+      <button class="round-nav-btn" onclick="sgmChangeRound(-1)">&#8249;</button>
+      <span id="sgmRoundLabel">Round {{ current_round or 1 }}</span>
+      <button class="round-nav-btn" onclick="sgmChangeRound(1)">&#8250;</button>
+      <select class="form-select" id="sgmMatchSelector" style="max-width:300px;" onchange="sgmOnMatchSelect()">
+        <option value="">All matches</option>
+      </select>
+      <select class="form-select" id="sgmMarketFilter" style="max-width:160px;" onchange="sgmLoadLegs()">
+        <option value="">All stats</option>
+        <option value="player_disposals">Disposals</option>
+        <option value="player_kicks">Kicks</option>
+        <option value="player_marks">Marks</option>
+        <option value="player_tackles">Tackles</option>
+        <option value="player_goals">Goals</option>
+        <option value="player_handballs">Handballs</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="sgmLoadLegs()">
+        <i class="bi bi-arrow-repeat"></i> Load
+      </button>
+    </div>
+
+    <!-- Suggestions strip -->
+    <div id="sgmSuggestions" style="padding:10px 18px;border-bottom:1px solid var(--border-subtle);display:none;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:8px;">
+        <i class="bi bi-lightning-charge-fill" style="color:#fbbf24;"></i> Top Value Legs — click to add
+      </div>
+      <div id="sgmSuggestionsInner" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
     </div>
   </div>
+
+  <!-- Split: build panel + multi panel -->
+  <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
+
+    <!-- LEFT: Build a leg -->
+    <div style="flex:1;min-width:280px;">
+      <div class="afl-card">
+        <div class="afl-card-header">
+          <h4><i class="bi bi-plus-circle"></i> Build a Leg</h4>
+        </div>
+        <div class="afl-card-body" style="display:flex;flex-direction:column;gap:12px;">
+
+          <div>
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);display:block;margin-bottom:5px;">Player</label>
+            <input type="text" class="form-control" id="sgmPlayerSearch" placeholder="Search player..." oninput="sgmFilterPlayers(this.value)" autocomplete="off">
+            <div id="sgmPlayerDropdown" style="display:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:8px;margin-top:4px;max-height:200px;overflow-y:auto;z-index:100;position:relative;"></div>
+          </div>
+
+          <div>
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);display:block;margin-bottom:5px;">Stat</label>
+            <select class="form-select" id="sgmStatSelect" onchange="sgmOnStatChange()">
+              <option value="">— Select stat —</option>
+              <option value="player_disposals">Disposals</option>
+              <option value="player_kicks">Kicks</option>
+              <option value="player_marks">Marks</option>
+              <option value="player_tackles">Tackles</option>
+              <option value="player_goals">Goals</option>
+              <option value="player_handballs">Handballs</option>
+            </select>
+          </div>
+
+          <div>
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);display:block;margin-bottom:5px;">Line</label>
+            <select class="form-select" id="sgmLineSelect">
+              <option value="">— Select line —</option>
+            </select>
+          </div>
+
+          <button class="btn btn-primary" onclick="sgmAddLeg()" style="width:100%;">
+            <i class="bi bi-plus-circle-fill"></i> Add Leg
+          </button>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Your multi -->
+    <div style="flex:1.4;min-width:300px;">
+      <div class="afl-card">
+        <div class="afl-card-header">
+          <h4><i class="bi bi-collection"></i> Your Multi</h4>
+          <button class="btn btn-sm btn-secondary" onclick="sgmClearAll()">Clear all</button>
+        </div>
+        <div class="afl-card-body">
+
+          <div id="sgmLegsContainer">
+            <div class="prop-empty" style="padding:30px;">
+              <i class="bi bi-collection"></i>
+              <p>No legs added yet — build your multi above</p>
+            </div>
+          </div>
+
+          <div id="sgmResultPanel" style="display:none;margin-top:14px;">
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:12px;padding:18px;text-align:center;margin-bottom:12px;">
+              <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;">
+                <span id="sgmLegCount">0</span>-LEG MULTI — MODEL PROBABILITY
+              </div>
+              <div id="sgmCombinedProb" style="font-size:2.4rem;font-weight:800;font-family:'DM Mono',monospace;color:var(--accent);">—</div>
+              <div style="display:flex;justify-content:center;gap:18px;margin-top:8px;font-size:11px;color:var(--text-muted);">
+                <span>Fair odds: <strong id="sgmFairOdds" style="font-family:'DM Mono',monospace;color:var(--text-primary);">—</strong></span>
+                <span>Independence: <strong id="sgmIndepOdds" style="font-family:'DM Mono',monospace;color:var(--text-secondary);">—</strong></span>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+              <input type="number" class="form-control" id="sgmBookieOdds" placeholder="Bookie SGM odds (e.g. 6.50)" step="0.01" oninput="sgmCalcEdge()" style="flex:1;">
+              <div id="sgmEdgeBadge" style="min-width:90px;text-align:center;"></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Available legs table -->
+  <div class="afl-card" style="margin-top:14px;">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-table"></i> Available Legs</h4>
+      <span id="sgmLegsCount" style="font-size:11px;color:var(--text-muted);"></span>
+    </div>
+    <div class="afl-card-body" style="padding:0;">
+      <div id="sgmLegsTable" class="scroll-x">
+        <div class="prop-empty" style="padding:30px;">
+          <i class="bi bi-table"></i>
+          <p>Select a round and click Load to see available legs</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════
