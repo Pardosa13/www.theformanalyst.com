@@ -696,7 +696,7 @@
     <i class="bi bi-bar-chart-fill"></i> Match Predictions
   </button>
   <button class="afl-tab" data-tab="fixtures" onclick="switchTab('fixtures',this)">
-    <i class="bi bi-calendar3"></i> Fixtures
+    <i class="bi bi-calculator"></i> SGM Calculator
   </button>
   <button class="afl-tab" data-tab="ladder" onclick="switchTab('ladder',this)">
     <i class="bi bi-list-ol"></i> Ladder
@@ -1161,6 +1161,9 @@ function switchTab(name, btn) {
   }
   if (name === 'predictions') {
     loadBettingEdges();
+  }
+  if (name === 'fixtures') {
+    sgmLoadLegs();
   }
 }
 function switchPredTab(name, btn) {
