@@ -2867,9 +2867,25 @@ function sgmRenderMulti() {
     document.getElementById('sgmCombinedProb').textContent = (adjustedProb * 100).toFixed(2) + '%';
     document.getElementById('sgmFairOdds').textContent = fairOdds;
     document.getElementById('sgmIndepOdds').textContent = indepOdds;
-    resultPanel.style.display = 'block';
+    // Auto-calculate estimated bookie SGM odds
+            let rawParlay = 1.0;
+            _sgmMultiLegs.forEach(l => rawParlay *= safeNum(l.odds, 1));
+            // Apply same correlation discount as probability side
+            let oddsCorr = 1.0;
+            for (let i = 0; i < _sgmMultiLegs.length; i++) {
+              for (let j = i + 1; j < _sgmMultiLegs.length; j++) {
+                oddsCorr *= _sgmCorrelationFactor(_sgmMultiLegs[i], _sgmMultiLegs[j]);
+              }
+            }
+            const estBookieOdds = (rawParlay * oddsCorr).toFixed(2);
+            const bookieInput = document.getElementById('sgmBookieOdds');
+            if (!bookieInput.value) {
+              bookieInput.value = estBookieOdds;
+              bookieInput.placeholder = `Est. bookie odds: ${estBookieOdds}`;
+            }
 
-    sgmCalcEdge();
+            resultPanel.style.display = 'block';
+            sgmCalcEdge();
   }
 }
 
