@@ -2560,6 +2560,239 @@ function loadHomeAwayHistory(playerId, playerTeam) {
       _historyAwayGames = [];
     });
 }
+// ── SGM Calculator ───────────────────────────────────────────────
+let _sgmRound = {{ current_round or 1 }};
+let _sgmAllLegs = [];
+let _sgmFilteredLegs = [];
+let _sgmSelectedPlayer = null;
+let _sgmMultiLegs = [];
+
+const _SGM_MARKET_LABELS = {
+  player_disposals: 'Disposals',
+  player_kicks: 'Kicks',
+  player_marks: 'Marks',
+  player_tackles: 'Tackles',
+  player_goals: 'Goals',
+  player_handballs: 'Handballs',
+};
+
+function sgmChangeRound(dir) {
+  _sgmRound = Math.max(1, _sgmRound + dir);
+  document.getElementById('sgmRoundLabel').textContent = `Round ${_sgmRound}`;
+  _sgmAllLegs = [];
+  _sgmSelectedPlayer = null;
+  document.getElementById('sgmMatchSelector').innerHTML = '<option value="">All matches</option>';
+  sgmLoadLegs();
+}
+
+function sgmOnMatchSelect() {
+  sgmLoadLegs();
+}
+
+function sgmLoadLegs() {
+  const matchVal = document.getElementById('sgmMatchSelector').value;
+  const market = document.getElementById('sgmMarketFilter').value;
+  const tableEl = document.getElementById('sgmLegsTable');
+  tableEl.innerHTML = '<div class="prop-empty" style="padding:30px;"><span class="spinner-sm"></span></div>';
+  document.getElementById('sgmSuggestions').style.display = 'none';
+
+  let url = `/api/afl/sgm-legs?year={{ year }}&round=${_sgmRound}`;
+  if (matchVal) {
+    const parts = matchVal.split('||');
+    url += `&home=${encodeURIComponent(parts[0])}&away=${encodeURIComponent(parts[1])}`;
+  }
+  if (market) url += `&market=${encodeURIComponent(market)}`;
+
+  fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      _sgmAllLegs = data.legs || [];
+
+      // Populate match selector if loading all matches
+      if (!matchVal && data.matches?.length) {
+        const sel = document.getElementById('sgmMatchSelector');
+        const prev = sel.value;
+        sel.innerHTML = '<option value="">All matches</option>';
+        data.matches.forEach(m => {
+          const parts = m.split(' vs ');
+          const opt = document.createElement('option');
+          opt.value = `${parts[0]}||${parts[1]}`;
+          opt.textContent = m;
+          if (prev === opt.value) opt.selected = true;
+          sel.appendChild(opt);
+        });
+      }
+
+      sgmRenderLegsTable(_sgmAllLegs);
+      sgmRenderSuggestions(_sgmAllLegs);
+    })
+    .catch(() => {
+      tableEl.innerHTML = '<div class="prop-empty" style="padding:30px;color:var(--danger);">Failed to load legs</div>';
+    });
+}
+
+function sgmRenderLegsTable(legs) {
+  const el = document.getElementById('sgmLegsTable');
+  const countEl = document.getElementById('sgmLegsCount');
+  countEl.textContent = `${legs.length} legs available`;
+
+  if (!legs.length) {
+    el.innerHTML = '<div class="prop-empty" style="padding:30px;"><p>No legs found. Try Sync H2H + Spreads then Refresh from API.</p></div>';
+    return;
+  }
+
+  const rows = legs.map(leg => {
+    const edgeVal = safeNum(leg.edge, 0);
+    const edgeCls = edgeVal >= 5 ? 'pos' : edgeVal >= 2 ? 'neu' : 'neg';
+    const modelProb = leg.model_prob != null ? safeNum(leg.model_prob, 0).toFixed(1) + '%' : '—';
+    const alreadyAdded = _sgmMultiLegs.some(l => l.player_name === leg.player_name && l.market === leg.market && l.line === leg.line);
+
+    return `<tr>
+      <td style="font-weight:600;">${esc(leg.player_name)}</td>
+      <td style="font-size:11px;color:var(--text-muted);">${esc(leg.team)}</td>
+      <td>${esc(_SGM_MARKET_LABELS[leg.market] || leg.market)}</td>
+      <td style="font-family:'DM Mono',monospace;">${leg.line}+</td>
+      <td style="font-family:'DM Mono',monospace;color:var(--accent);">${safeNum(leg.odds, 0).toFixed(2)}</td>
+      <td style="font-family:'DM Mono',monospace;">${modelProb}</td>
+      <td><span class="edge-chip ${edgeCls}">${edgeVal >= 0 ? '+' : ''}${edgeVal.toFixed(1)}%</span></td>
+      <td>
+        ${alreadyAdded
+          ? '<span style="font-size:11px;color:var(--text-muted);">Added</span>'
+          : `<button class="btn btn-sm btn-primary" onclick='sgmAddLegDirect(${JSON.stringify(leg)})'>+ Add</button>`
+        }
+      </td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `<table class="ladder-table">
+    <thead><tr>
+      <th>Player</th><th>Team</th><th>Stat</th><th>Line</th>
+      <th>Odds</th><th>Model%</th><th>Edge</th><th></th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function sgmRenderSuggestions(legs) {
+  const top = legs.filter(l => l.recommendation === 'value').slice(0, 5);
+  const wrap = document.getElementById('sgmSuggestions');
+  const inner = document.getElementById('sgmSuggestionsInner');
+
+  if (!top.length) { wrap.style.display = 'none'; return; }
+
+  inner.innerHTML = top.map(leg => {
+    const edgeVal = safeNum(leg.edge, 0);
+    return `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:8px;padding:7px 10px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:border-color .12s;"
+           onclick='sgmAddLegDirect(${JSON.stringify(leg)})'
+           onmouseover="this.style.borderColor='var(--accent)'"
+           onmouseout="this.style.borderColor='var(--border-mid)'">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${esc(leg.player_name)}</div>
+          <div style="font-size:10px;color:var(--text-muted);">${esc(_SGM_MARKET_LABELS[leg.market] || leg.market)} ${leg.line}+</div>
+        </div>
+        <span class="edge-chip pos" style="margin-left:auto;">+${edgeVal.toFixed(1)}%</span>
+      </div>
+    `;
+  }).join('');
+
+  wrap.style.display = 'block';
+}
+
+function sgmFilterPlayers(query) {
+  const dd = document.getElementById('sgmPlayerDropdown');
+  if (!query || query.length < 2) { dd.style.display = 'none'; return; }
+
+  const q = query.toLowerCase();
+  const matches = _sgmAllLegs.filter(l =>
+    l.player_name.toLowerCase().includes(q)
+  );
+
+  const seen = new Set();
+  const unique = matches.filter(l => {
+    if (seen.has(l.player_name)) return false;
+    seen.add(l.player_name);
+    return true;
+  });
+
+  if (!unique.length) { dd.style.display = 'none'; return; }
+
+  dd.innerHTML = unique.slice(0, 10).map(l => `
+    <div style="padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--border-subtle);font-size:12px;"
+         onmouseover="this.style.background='var(--bg-hover)'"
+         onmouseout="this.style.background=''"
+         onclick="sgmSelectPlayer(${JSON.stringify(l).replace(/"/g, '&quot;')})">
+      <strong>${esc(l.player_name)}</strong>
+      <span style="color:var(--text-muted);margin-left:6px;">${esc(l.team)}</span>
+    </div>
+  `).join('');
+
+  dd.style.display = 'block';
+}
+
+function sgmSelectPlayer(leg) {
+  _sgmSelectedPlayer = leg;
+  document.getElementById('sgmPlayerSearch').value = leg.player_name;
+  document.getElementById('sgmPlayerDropdown').style.display = 'none';
+  document.getElementById('sgmStatSelect').value = leg.market;
+  sgmOnStatChange();
+}
+
+function sgmOnStatChange() {
+  const stat = document.getElementById('sgmStatSelect').value;
+  const lineEl = document.getElementById('sgmLineSelect');
+  lineEl.innerHTML = '<option value="">— Select line —</option>';
+
+  if (!_sgmSelectedPlayer) return;
+
+  const playerName = _sgmSelectedPlayer.player_name;
+  const matching = _sgmAllLegs.filter(l =>
+    l.player_name === playerName && l.market === stat
+  ).sort((a, b) => a.line - b.line);
+
+  matching.forEach(l => {
+    const opt = document.createElement('option');
+    opt.value = JSON.stringify(l);
+    const prob = l.model_prob != null ? ` (${safeNum(l.model_prob, 0).toFixed(1)}%)` : '';
+    opt.textContent = `${l.line}+${prob} @ ${safeNum(l.odds, 0).toFixed(2)}`;
+    lineEl.appendChild(opt);
+  });
+}
+
+function sgmAddLeg() {
+  const lineVal = document.getElementById('sgmLineSelect').value;
+  if (!lineVal) { alert('Select a line first'); return; }
+  try {
+    const leg = JSON.parse(lineVal);
+    sgmAddLegDirect(leg);
+  } catch(e) {}
+}
+
+function sgmAddLegDirect(leg) {
+  const already = _sgmMultiLegs.some(l =>
+    l.player_name === leg.player_name && l.market === leg.market && l.line === leg.line
+  );
+  if (already) return;
+
+  _sgmMultiLegs.push(leg);
+  sgmRenderMulti();
+  sgmRenderLegsTable(_sgmAllLegs);
+}
+
+function sgmRemoveLeg(idx) {
+  _sgmMultiLegs.splice(idx, 1);
+  sgmRenderMulti();
+  sgmRenderLegsTable(_sgmAllLegs);
+}
+
+function sgmClearAll() {
+  _sgmMultiLegs = [];
+  sgmRenderMulti();
+  sgmRenderLegsTable(_sgmAllLegs);
+}
+
+function _sgmCorrelationFactor(legA, legB) {
+  const sameTeam =
 // ── Global refresh ───────────────────────────────────────────────
 function refreshAll() {
   const btn = document.getElementById('refreshBtn');
