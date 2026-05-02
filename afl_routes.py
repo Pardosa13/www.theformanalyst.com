@@ -1083,6 +1083,198 @@ def register_afl_routes(app, db):
                 "away_games": [_format_game_log_row(g, player_team) for g in away_games],
             }
         )
+
+    @app.route("/api/afl/sgm-legs")
+    @login_required
+    def api_afl_sgm_legs():
+        home_team = request.args.get("home", "").strip()
+        away_team = request.args.get("away", "").strip()
+        market = request.args.get("market", "").strip()
+        year = request.args.get("year", CURRENT_YEAR, type=int)
+        round_number = request.args.get("round", type=int)
+
+        effective_season = _resolve_stats_season(db, year)
+        effective_seasons = _resolve_stats_seasons(db, year)
+
+        # Build props filter
+        conditions = ["fetched_at > NOW() - INTERVAL '7 days'"]
+        params: dict = {}
+
+        if home_team and away_team:
+            conditions.append(
+                "(LOWER(home_team) = LOWER(:home) AND LOWER(away_team) = LOWER(:away)) OR "
+                "(LOWER(home_team) = LOWER(:away) AND LOWER(away_team) = LOWER(:home))"
+            )
+            params["home"] = home_team
+            params["away"] = away_team
+        elif round_number:
+            fixtures = _db_get_fixtures(db, year=year, round_number=round_number)
+            if not fixtures:
+                return jsonify({"legs": [], "round": round_number})
+            match_conditions = []
+            for i, f in enumerate(fixtures):
+                match_conditions.append(
+                    f"(LOWER(home_team) = LOWER(:ht{i}) AND LOWER(away_team) = LOWER(:at{i}))"
+                )
+                params[f"ht{i}"] = f.get("hteam", "")
+                params[f"at{i}"] = f.get("ateam", "")
+            if match_conditions:
+                conditions.append("(" + " OR ".join(match_conditions) + ")")
+
+        MARKET_STAT = {
+            "player_disposals": "disposals",
+            "player_kicks": "kicks",
+            "player_handballs": "handballs",
+            "player_marks": "marks",
+            "player_tackles": "tackles",
+            "player_goals": "goals",
+        }
+
+        markets_to_fetch = [market] if market else list(MARKET_STAT.keys())
+        conditions.append("market = ANY(:markets)")
+        params["markets"] = markets_to_fetch
+
+        where = " AND ".join(conditions)
+        sql = db.text(f"""
+            SELECT DISTINCT ON (player_name, market, line_type, line)
+                player_name, home_team, away_team, market,
+                line_type, line, odds, bookmaker, commence_time
+            FROM afl_player_props
+            WHERE {where}
+              AND line_type = 'Over'
+              AND odds IS NOT NULL AND odds > 1.0
+            ORDER BY player_name, market, line_type, line, fetched_at DESC
+        """)
+
+        with db.engine.connect() as conn:
+            rows = conn.execute(sql, params).mappings().fetchall()
+
+        props = [dict(r) for r in rows]
+        if not props:
+            return jsonify({"legs": [], "round": round_number})
+
+        # Bulk fetch player stats for all players in props
+        all_last_names = list({
+            p["player_name"].replace(".", " ").split()[-1].lower()
+            for p in props if p.get("player_name")
+        })
+
+        all_stats_rows = []
+        if all_last_names:
+            bulk_sql = db.text("""
+                SELECT *
+                FROM afl_player_stats
+                WHERE LOWER(player_last_name) = ANY(:last_names)
+                  AND season = ANY(:seasons)
+                ORDER BY season DESC, match_date DESC
+            """)
+            with db.engine.connect() as conn:
+                bulk_rows = conn.execute(
+                    bulk_sql,
+                    {"last_names": all_last_names, "seasons": effective_seasons}
+                ).mappings().fetchall()
+            all_stats_rows = [dict(r) for r in bulk_rows]
+
+        from collections import defaultdict
+        stats_by_key = defaultdict(list)
+        for row in all_stats_rows:
+            ln = (row.get("player_last_name") or "").lower()
+            fn = (row.get("player_first_name") or "").lower()
+            if ln and fn:
+                stats_by_key[(fn[0], ln)].append(row)
+
+        legs = []
+        for prop in props:
+            pname = prop.get("player_name", "")
+            parts = pname.replace(".", " ").split()
+            if len(parts) < 2:
+                continue
+            first_initial = parts[0][0].lower()
+            last_name = parts[-1].lower()
+
+            player_rows = stats_by_key.get((first_initial, last_name), [])
+            if not player_rows:
+                continue
+
+            grouped = _group_players(player_rows)
+            if len(grouped) != 1:
+                continue
+
+            player = next(iter(grouped.values()))
+            games = sorted(player["games"], key=_sort_date_key, reverse=True)
+            season_games = [g for g in games if g.get("season") == effective_season] or games
+
+            stat_name = MARKET_STAT.get(prop["market"], "disposals")
+            season_avg = _safe_avg(season_games, stat_name)
+            last5_avg = _safe_avg(season_games[:5], stat_name)
+
+            prop_home = prop.get("home_team", "")
+            prop_away = prop.get("away_team", "")
+            player_team = player.get("team", "")
+            opponent = prop_away if prop_home == player_team else prop_home
+
+            opp_games = [
+                g for g in games
+                if (g.get("match_home_team") or "").lower() == opponent.lower()
+                or (g.get("match_away_team") or "").lower() == opponent.lower()
+            ]
+            vs_opp_avg = _safe_avg(opp_games, stat_name) if opp_games else None
+
+            book_line = prop.get("line", 0)
+            odds = prop.get("odds", 0)
+
+            edge_data = calculate_market_edge(
+                player_avg=season_avg,
+                book_line=book_line,
+                odds=odds,
+                line_type="Over",
+                market=prop["market"],
+                vs_opp_avg=vs_opp_avg,
+                last5_avg=last5_avg,
+            )
+
+            total = len(games)
+            hits = sum(1 for g in games if (g.get(stat_name, 0) or 0) >= book_line)
+            hist_pct = round(hits / total * 100, 1) if total else 0.0
+
+            legs.append({
+                "player_name": pname,
+                "player_id": player.get("player_id"),
+                "team": player_team,
+                "home_team": prop_home,
+                "away_team": prop_away,
+                "match": f"{prop_home} vs {prop_away}",
+                "market": prop["market"],
+                "stat": stat_name,
+                "line": book_line,
+                "odds": odds,
+                "bookmaker": prop.get("bookmaker", ""),
+                "season_avg": season_avg,
+                "last5_avg": last5_avg,
+                "vs_opp_avg": vs_opp_avg,
+                "hist_pct": hist_pct,
+                "model_prob": edge_data.get("model_prob"),
+                "implied_prob": edge_data.get("implied_prob"),
+                "edge": edge_data.get("edge"),
+                "recommendation": edge_data.get("recommendation"),
+                "headshot_url": afl_player_headshot_url(
+                    player.get("player_id"),
+                    player.get("first_name", ""),
+                    player.get("last_name", ""),
+                ),
+            })
+
+        legs.sort(key=lambda x: x.get("edge", 0), reverse=True)
+
+        matches = sorted({f"{l['home_team']} vs {l['away_team']}" for l in legs})
+
+        return jsonify({
+            "legs": legs,
+            "count": len(legs),
+            "round": round_number,
+            "matches": matches,
+        })
+  
     @app.route("/api/afl/match-props")
     @login_required
     def api_afl_match_props():
