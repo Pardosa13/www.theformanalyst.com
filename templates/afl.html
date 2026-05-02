@@ -2792,7 +2792,109 @@ function sgmClearAll() {
 }
 
 function _sgmCorrelationFactor(legA, legB) {
-  const sameTeam =
+  const sameTeam = legA.team === legB.team;
+  const sameStat = legA.market === legB.market;
+  if (!sameTeam) return 0.98;
+  if (sameStat) return 0.85;
+  return 0.92;
+}
+
+function sgmCalcCombinedProb() {
+  if (_sgmMultiLegs.length < 2) return null;
+
+  // Start with independence assumption
+  let indepProb = 1.0;
+  _sgmMultiLegs.forEach(l => {
+    indepProb *= (safeNum(l.model_prob, 50) / 100);
+  });
+
+  // Apply pairwise correlation adjustment
+  let corrFactor = 1.0;
+  for (let i = 0; i < _sgmMultiLegs.length; i++) {
+    for (let j = i + 1; j < _sgmMultiLegs.length; j++) {
+      corrFactor *= _sgmCorrelationFactor(_sgmMultiLegs[i], _sgmMultiLegs[j]);
+    }
+  }
+
+  const adjustedProb = Math.min(indepProb / corrFactor, 0.999);
+  return { adjustedProb, indepProb };
+}
+
+function sgmRenderMulti() {
+  const container = document.getElementById('sgmLegsContainer');
+  const resultPanel = document.getElementById('sgmResultPanel');
+
+  if (!_sgmMultiLegs.length) {
+    container.innerHTML = `<div class="prop-empty" style="padding:30px;">
+      <i class="bi bi-collection"></i>
+      <p>No legs added yet — build your multi above</p>
+    </div>`;
+    resultPanel.style.display = 'none';
+    return;
+  }
+
+  container.innerHTML = _sgmMultiLegs.map((leg, idx) => {
+    const prob = leg.model_prob != null ? safeNum(leg.model_prob, 0).toFixed(1) + '%' : '—';
+    const edgeVal = safeNum(leg.edge, 0);
+    const edgeCls = edgeVal >= 5 ? '#34d399' : edgeVal >= 2 ? '#fbbf24' : '#f87171';
+    return `
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-subtle);">
+        <div style="width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:white;flex-shrink:0;">${idx + 1}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:700;color:var(--text-primary);">${esc(leg.player_name)}</div>
+          <div style="font-size:11px;color:var(--text-muted);">${esc(_SGM_MARKET_LABELS[leg.market] || leg.market)} ${leg.line}+ · ${esc(leg.team)}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0;">
+          <div style="font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--accent);">${prob}</div>
+          <div style="font-size:10px;font-weight:700;color:${edgeCls};">${edgeVal >= 0 ? '+' : ''}${edgeVal.toFixed(1)}%</div>
+        </div>
+        <button onclick="sgmRemoveLeg(${idx})" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:6px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;flex-shrink:0;">×</button>
+      </div>
+    `;
+  }).join('');
+
+  // Calculate combined probability
+  const calc = sgmCalcCombinedProb();
+  if (calc) {
+    const { adjustedProb, indepProb } = calc;
+    const fairOdds = (1 / adjustedProb).toFixed(2);
+    const indepOdds = (1 / indepProb).toFixed(2);
+
+    document.getElementById('sgmLegCount').textContent = _sgmMultiLegs.length;
+    document.getElementById('sgmCombinedProb').textContent = (adjustedProb * 100).toFixed(2) + '%';
+    document.getElementById('sgmFairOdds').textContent = fairOdds;
+    document.getElementById('sgmIndepOdds').textContent = indepOdds;
+    resultPanel.style.display = 'block';
+
+    sgmCalcEdge();
+  }
+}
+
+function sgmCalcEdge() {
+  const bookieOdds = parseFloat(document.getElementById('sgmBookieOdds').value);
+  const badge = document.getElementById('sgmEdgeBadge');
+  const calc = sgmCalcCombinedProb();
+
+  if (!calc || !bookieOdds || bookieOdds <= 1) {
+    badge.innerHTML = '';
+    return;
+  }
+
+  const { adjustedProb } = calc;
+  const impliedProb = 1 / bookieOdds;
+  const edge = ((adjustedProb - impliedProb) * 100).toFixed(1);
+  const isValue = parseFloat(edge) > 0;
+
+  badge.innerHTML = `
+    <div style="padding:6px 12px;border-radius:8px;font-family:'DM Mono',monospace;font-size:13px;font-weight:800;
+      background:${isValue ? 'rgba(16,185,129,.15)' : 'rgba(239,68,68,.12)'};
+      border:1px solid ${isValue ? 'rgba(16,185,129,.4)' : 'rgba(239,68,68,.3)'};
+      color:${isValue ? '#34d399' : '#f87171'};">
+      ${isValue ? '+' : ''}${edge}%
+      <div style="font-size:9px;font-weight:700;text-align:center;opacity:.8;">${isValue ? 'VALUE' : 'SKIP'}</div>
+    </div>
+  `;
+}
 // ── Global refresh ───────────────────────────────────────────────
 function refreshAll() {
   const btn = document.getElementById('refreshBtn');
