@@ -60,7 +60,7 @@ class PuntingFormService:
         date_str = date_obj.strftime('%d-%b-%Y')
 
         if race_number:
-            url = f"{self.base_url}/GetFormText/{track}/{race_number}/{date_str}?apikey={self.api_key}"
+            url = f"{self.base_url}/GetFormText/{track.strip()}/{race_number}/{date_str}?apikey={self.api_key}"
             response = self._make_request(url)
             return response.text
         else:
@@ -79,7 +79,7 @@ class PuntingFormService:
 
             all_csv = []
             for race_num in target_meeting['RaceNumbers']:
-                race_url = f"{self.base_url}/GetFormText/{track}/{race_num}/{date_str}?apikey={self.api_key}"
+                race_url = f"{self.base_url}/GetFormText/{track.strip()}/{race_num}/{date_str}?apikey={self.api_key}"
                 race_response = self._make_request(race_url)
                 all_csv.append(race_response.text)
 
