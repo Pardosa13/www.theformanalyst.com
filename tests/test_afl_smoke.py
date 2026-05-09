@@ -1332,3 +1332,64 @@ def test_betting_edges_sql_normalises_team_names():
         assert squiggle_raw in fn_body, (
             f"api_afl_betting_edges SQL CASE is missing a normalisation entry for {squiggle_raw!r}."
         )
+
+# ---------------------------------------------------------------------------
+# Josh Rachele vs Richmond – opponent average consistency
+# ---------------------------------------------------------------------------
+
+def _games_vs_opponent(games: list[dict], opponent: str) -> list[dict]:
+    opponent_name = _team(opponent)
+    return [
+        game
+        for game in games
+        if _team(game.get("match_home_team", "")) == opponent_name
+        or _team(game.get("match_away_team", "")) == opponent_name
+    ]
+
+
+def _filter_meaningful_tog_games(games: list[dict], min_tog: float = 50) -> list[dict]:
+    return [
+        game
+        for game in games
+        if (game.get("time_on_ground_percentage") or 0) >= min_tog
+    ]
+
+
+def test_games_vs_opponent_normalises_team_aliases():
+    games = [
+        {"match_home_team": "Adelaide", "match_away_team": "Richmond Tigers"},
+        {"match_home_team": "Carlton", "match_away_team": "Adelaide"},
+        {"match_home_team": "Richmond", "match_away_team": "Sydney Swans"},
+    ]
+
+    matches = _games_vs_opponent(games, "Richmond")
+
+    assert len(matches) == 2
+    assert matches[0]["match_away_team"] == "Richmond Tigers"
+    assert matches[1]["match_home_team"] == "Richmond"
+
+
+def test_filter_meaningful_tog_games_excludes_low_tog():
+    games = [
+        {"disposals": 6, "time_on_ground_percentage": 72},
+        {"disposals": 1, "time_on_ground_percentage": 18},
+        {"disposals": 19, "time_on_ground_percentage": 83},
+    ]
+
+    filtered = _filter_meaningful_tog_games(games)
+
+    assert [game["disposals"] for game in filtered] == [6, 19]
+
+
+def test_value_finder_source_uses_filtered_opponent_rows_for_average():
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    assert "vs_opp_avg = _safe_avg(opp_rows, stat_name)" not in source
+    assert "vs_opp_avg = _safe_avg(opp_games, stat_name)" not in source
+    assert "vs_opp_avg = _safe_avg(opp_rows_filtered, stat_name)" in source
+    assert "vs_opp_avg = _safe_avg(opp_games_filtered, stat_name)" in source

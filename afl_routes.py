@@ -789,7 +789,7 @@ def register_afl_routes(app, db):
             player = next(iter(grouped.values()))
             games = sorted(player["games"], key=_sort_date_key, reverse=True)
             season_games = [g for g in games if g.get("season") == effective_season] or games
-            team_name = player.get("team", "")
+            team_name = _normalise_team_name(player.get("team", ""))
 
             season_avg = _safe_avg(season_games, stat_name)
 
@@ -819,17 +819,9 @@ def register_afl_routes(app, db):
                     else (prop_away_team or prop_home_team)
                 )
 
-                opp_lower = opponent.lower()
-
-                opp_rows = [
-                    r
-                    for r in games
-                    if (r.get("match_home_team") or "").lower() == opp_lower
-                    or (r.get("match_away_team") or "").lower() == opp_lower
-                ]
-
-                opp_rows_filtered = [g for g in opp_rows if (g.get("time_on_ground_percentage") or 0) >= 50]
-                vs_opp_avg = _safe_avg(opp_rows, stat_name) if opp_rows else None
+                opp_rows = _games_vs_opponent(games, opponent)
+                opp_rows_filtered = _filter_meaningful_tog_games(opp_rows)
+                vs_opp_avg = _safe_avg(opp_rows_filtered, stat_name) if opp_rows_filtered else None
                 last5_avg = _safe_avg(season_games[:5], stat_name) if season_games else None
 
                 edge_data = calculate_market_edge(
@@ -1210,18 +1202,14 @@ def register_afl_routes(app, db):
             season_avg = _safe_avg(season_games, stat_name)
             last5_avg = _safe_avg(season_games[:5], stat_name)
 
-            prop_home = prop.get("home_team", "")
-            prop_away = prop.get("away_team", "")
-            player_team = player.get("team", "")
+            prop_home = _normalise_team_name(prop.get("home_team", ""))
+            prop_away = _normalise_team_name(prop.get("away_team", ""))
+            player_team = _normalise_team_name(player.get("team", ""))
             opponent = prop_away if prop_home == player_team else prop_home
 
-            opp_games = [
-                g for g in games
-                if (g.get("match_home_team") or "").lower() == opponent.lower()
-                or (g.get("match_away_team") or "").lower() == opponent.lower()
-            ]
-            opp_games_filtered = [g for g in opp_games if (g.get("time_on_ground_percentage") or 0) >= 50]
-            vs_opp_avg = _safe_avg(opp_games, stat_name) if opp_games else None
+            opp_games = _games_vs_opponent(games, opponent)
+            opp_games_filtered = _filter_meaningful_tog_games(opp_games)
+            vs_opp_avg = _safe_avg(opp_games_filtered, stat_name) if opp_games_filtered else None
 
             book_line = prop.get("line", 0)
             odds = prop.get("odds", 0)
@@ -2704,9 +2692,28 @@ def _sort_date_key(row: dict):
 
 
 def _get_opponent(game: dict, player_team: str) -> str:
-    home = game.get("match_home_team", "")
-    away = game.get("match_away_team", "")
-    return away if home == player_team else home
+    home = _normalise_team_name(game.get("match_home_team", ""))
+    away = _normalise_team_name(game.get("match_away_team", ""))
+    team = _normalise_team_name(player_team)
+    return away if home == team else home
+
+
+def _games_vs_opponent(games: list[dict], opponent: str) -> list[dict]:
+    opponent_name = _normalise_team_name(opponent)
+    return [
+        game
+        for game in games
+        if _normalise_team_name(game.get("match_home_team", "")) == opponent_name
+        or _normalise_team_name(game.get("match_away_team", "")) == opponent_name
+    ]
+
+
+def _filter_meaningful_tog_games(games: list[dict], min_tog: float = 50) -> list[dict]:
+    return [
+        game
+        for game in games
+        if (game.get("time_on_ground_percentage") or 0) >= min_tog
+    ]
 
 
 def _safe_avg(rows: list[dict], stat: str) -> float:
