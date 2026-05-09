@@ -828,6 +828,7 @@ def register_afl_routes(app, db):
                     or (r.get("match_away_team") or "").lower() == opp_lower
                 ]
 
+                opp_rows_filtered = [g for g in opp_rows if (g.get("time_on_ground_percentage") or 0) >= 50]
                 vs_opp_avg = _safe_avg(opp_rows, stat_name) if opp_rows else None
                 last5_avg = _safe_avg(season_games[:5], stat_name) if season_games else None
 
@@ -1219,6 +1220,7 @@ def register_afl_routes(app, db):
                 if (g.get("match_home_team") or "").lower() == opponent.lower()
                 or (g.get("match_away_team") or "").lower() == opponent.lower()
             ]
+            opp_games_filtered = [g for g in opp_games if (g.get("time_on_ground_percentage") or 0) >= 50]
             vs_opp_avg = _safe_avg(opp_games, stat_name) if opp_games else None
 
             book_line = prop.get("line", 0)
