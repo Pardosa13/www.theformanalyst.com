@@ -461,6 +461,7 @@ def _build_historical_id_map(db) -> tuple[dict, set, dict, dict]:
             for r in rows:
                 first = _normalise_name(r[0])
                 last = _normalise_name(r[1])
+                last_clean = re.sub(r"[^A-Za-z0-9]", "", last)  # Strip apostrophes, hyphens, etc.
                 team = _normalise_name(_team(r[2]))
                 pid = r[3]
                 if pid:
