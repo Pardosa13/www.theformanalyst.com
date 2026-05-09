@@ -839,6 +839,7 @@ def register_afl_routes(app, db):
                     market=market,
                     vs_opp_avg=vs_opp_avg,
                     last5_avg=last5_avg,
+                    player_stats=games,
                 )
 
                 edge = edge_data["edge"]
@@ -1231,6 +1232,7 @@ def register_afl_routes(app, db):
                 market=prop["market"],
                 vs_opp_avg=vs_opp_avg,
                 last5_avg=last5_avg,
+                player_stats=games,
             )
 
             total = len(games)
