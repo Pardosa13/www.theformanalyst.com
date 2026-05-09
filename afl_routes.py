@@ -294,6 +294,16 @@ def register_afl_routes(app, db):
 
         opponent_splits = []
         for opponent, opponent_games in opponents.items():
+            # DEBUG: Opponent splits
+            if opponent.lower() == "richmond":
+                print(f"[DEBUG] Detail page {player['name']} vs {opponent}")
+                print(f"[DEBUG] opponent_games count: {len(opponent_games)}")
+                for i, g in enumerate(opponent_games):
+                    print(
+                        f"[DEBUG]   Game {i+1}: {g.get('disposals')} disp, "
+                        f"TOG {g.get('time_on_ground_percentage')}%, "
+                        f"date {g.get('match_date')}, season {g.get('season')}"
+                    )
             opponent_splits.append(
                 {
                     "opponent": opponent,
@@ -821,6 +831,12 @@ def register_afl_routes(app, db):
 
                 opp_lower = opponent.lower()
 
+                # DEBUG: Opponent name normalization
+                opponent_raw = prop.get("away_team") if prop_home_team == team_name else prop.get("home_team")
+                if opp_lower == "richmond":
+                    print(f"[DEBUG] Opponent: {opponent_raw!r} → {opponent!r} → {opp_lower!r}")
+                    print(f"[DEBUG] team_name={team_name!r}, prop_home={prop_home_team!r}, prop_away={prop_away_team!r}")
+
                 opp_rows = [
                     r
                     for r in games
@@ -828,8 +844,26 @@ def register_afl_routes(app, db):
                     or (r.get("match_away_team") or "").lower() == opp_lower
                 ]
 
+                # DEBUG: Capture Richmond games in value-finder
+                if opp_lower == "richmond":
+                    print(f"[DEBUG] Value Finder {pname} vs {opponent} (opp_lower={opp_lower!r})")
+                    print(f"[DEBUG] opp_rows count: {len(opp_rows)}")
+                    for i, g in enumerate(opp_rows):
+                        print(
+                            f"[DEBUG]   Game {i+1}: {g.get('disposals')} disp, "
+                            f"TOG {g.get('time_on_ground_percentage')}%, "
+                            f"date {g.get('match_date')}, season {g.get('season')}"
+                        )
+
                 opp_rows_filtered = [g for g in opp_rows if (g.get("time_on_ground_percentage") or 0) >= 50]
-                vs_opp_avg = _safe_avg(opp_rows, stat_name) if opp_rows else None
+
+                if opp_lower == "richmond":
+                    print(f"[DEBUG] opp_rows_filtered count: {len(opp_rows_filtered)}")
+
+                vs_opp_avg = _safe_avg(opp_rows_filtered, stat_name) if opp_rows_filtered else None
+
+                if opp_lower == "richmond":
+                    print(f"[DEBUG] vs_opp_avg (after TOG filter): {vs_opp_avg}")
                 last5_avg = _safe_avg(season_games[:5], stat_name) if season_games else None
 
                 edge_data = calculate_market_edge(
