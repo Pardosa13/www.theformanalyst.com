@@ -2056,6 +2056,7 @@ def calculate_market_edge(
     market: str = "player_disposals",
     vs_opp_avg: float = None,
     last5_avg: float = None,
+    player_stats: list[dict] = None,
 ) -> dict:
     """
     Probability-based edge calculation.
@@ -2065,6 +2066,26 @@ def calculate_market_edge(
 
     Returns edge in percentage points: positive = model says bet has value.
     """
+    # Filter out games with TOG < 50% if player_stats provided
+    if player_stats:
+        filtered_games = [g for g in player_stats if (g.get("time_on_ground_percentage") or 0) >= 50]
+        if filtered_games:
+            # Recalculate averages using only full-participation games
+            stats_to_avg = [
+                "disposals", "effective_disposals", "disposal_efficiency_percentage",
+                "kicks", "marks", "handballs", "goals", "behinds", "tackles", "hitouts",
+                "rebounds", "inside_fifties", "clearances", "contested_possessions",
+                "uncontested_possessions", "marks_inside_fifty", "score_involvements",
+                "metres_gained", "afl_fantasy_score", "supercoach_score",
+                "time_on_ground_percentage",
+            ]
+            totals = {stat: 0 for stat in stats_to_avg}
+            for game in filtered_games:
+                for stat in stats_to_avg:
+                    totals[stat] += game.get(stat, 0) or 0
+            filtered_avg = {stat: round(totals[stat] / len(filtered_games), 1) for stat in stats_to_avg}
+            player_avg = filtered_avg.get("disposals", player_avg)
+
     from math import sqrt, erfc
 
     # Build blended model prediction (same weighting as calculate_disposal_edge)
