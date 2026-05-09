@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from collections import defaultdict
 from typing import Any
 
@@ -464,6 +465,7 @@ def _build_historical_id_map(db) -> tuple[dict, set, dict, dict]:
                 pid = r[3]
                 if pid:
                     key_to_ids[(first, last, team)].add(pid)
+                    key_to_ids[(first, last_clean, team)].add(pid)
     except Exception as exc:
         logger.warning("Could not build historical player_id map: %s", exc)
         return {}, set(), {}, {}
@@ -521,10 +523,19 @@ def _resolve_2026_player_id(
     last  = _normalise_name(row.get("player_last_name"))
     team  = _normalise_name(_team(row.get("player_team")))
 
+    # Strip special characters (apostrophes, hyphens, etc.) for fuzzy matching
+    last_clean = re.sub(r"[^A-Za-z0-9]", "", last)
+
     name_key      = (first, last)
     name_team_key = (first, last, team)
+    name_team_key_clean = (first, last_clean, team)
 
+    # Try exact match first
     candidate_ids = name_to_ids.get(name_key, set())
+
+    # If no exact match, try cleaned version (strips apostrophes, hyphens)
+    if not candidate_ids:
+        candidate_ids = name_to_ids.get((first, last_clean), set())
 
     if len(candidate_ids) == 1:
         # Unique name match — reuse historical Fryzigg id regardless of club.
