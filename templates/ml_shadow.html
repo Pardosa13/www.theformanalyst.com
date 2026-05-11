@@ -1,0 +1,602 @@
+{% extends "base.html" %}
+
+{% block title %}ML Shadow — The Form Analyst{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* ML Shadow — teal accent to distinguish from main analyzer purple */
+    :root {
+        --ml-accent:  #00e5b0;
+        --ml-accent2: #ff6b35;
+        --ml-win:     #00e5b0;
+        --ml-lose:    #ff4560;
+        --ml-draw:    #ffa800;
+        --ml-blue:    #4e9eff;
+    }
+
+    .ml-page-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+    }
+
+    .ml-page-header h1 {
+        font-size: 1.6rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0;
+        color: var(--ml-accent);
+    }
+
+    .ml-badge {
+        background: rgba(0,229,176,0.1);
+        border: 1px solid rgba(0,229,176,0.3);
+        color: var(--ml-accent);
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        letter-spacing: 1px;
+        font-family: 'DM Mono', monospace;
+    }
+
+    /* Stats bar */
+    .ml-stats-bar {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 12px;
+        margin-bottom: 28px;
+    }
+
+    @media (max-width: 900px) {
+        .ml-stats-bar { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    @media (max-width: 500px) {
+        .ml-stats-bar { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .ml-stat-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        padding: 16px;
+    }
+
+    .ml-stat-card .label {
+        color: var(--text-muted);
+        font-size: 10px;
+        letter-spacing: 1px;
+        margin-bottom: 6px;
+        font-family: 'DM Mono', monospace;
+    }
+
+    .ml-stat-card .value {
+        font-size: 24px;
+        font-weight: 700;
+        font-family: 'Outfit', sans-serif;
+    }
+
+    .ml-stat-card .value.green { color: var(--ml-win); }
+    .ml-stat-card .value.red   { color: var(--ml-lose); }
+
+    /* Meeting selector row */
+    .ml-meeting-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+
+    .ml-meeting-bar select {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-mid);
+        color: var(--text-primary);
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-family: 'DM Mono', monospace;
+        font-size: 13px;
+        flex: 1;
+        min-width: 220px;
+        max-width: 420px;
+    }
+
+    .ml-meeting-bar select:focus {
+        outline: none;
+        border-color: var(--ml-accent);
+        box-shadow: 0 0 0 2px rgba(0,229,176,0.15);
+    }
+
+    .ml-btn {
+        background: var(--ml-accent);
+        color: #09090f;
+        border: none;
+        padding: 8px 18px;
+        border-radius: 6px;
+        font-family: 'DM Mono', monospace;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        letter-spacing: 0.5px;
+        transition: opacity 0.15s;
+    }
+
+    .ml-btn:hover:not(:disabled) { opacity: 0.85; }
+    .ml-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .ml-btn.secondary {
+        background: transparent;
+        border: 1px solid var(--border-mid);
+        color: var(--text-muted);
+    }
+
+    .ml-btn.secondary:hover { border-color: var(--ml-accent); color: var(--ml-accent); }
+
+    /* Legend */
+    .ml-legend {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-bottom: 20px;
+        padding: 10px 16px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        font-size: 11px;
+        color: var(--text-muted);
+        font-family: 'DM Mono', monospace;
+    }
+
+    .ml-legend-item { display: flex; align-items: center; gap: 6px; }
+
+    .pick-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .pick-dot.analyzer { background: var(--ml-blue); }
+    .pick-dot.ml       { background: var(--ml-accent); }
+    .pick-dot.both     { background: var(--ml-draw); }
+
+    /* Per-meeting ROI cards */
+    .ml-roi-summary {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 24px;
+    }
+
+    @media (max-width: 600px) {
+        .ml-roi-summary { grid-template-columns: 1fr; }
+    }
+
+    .ml-roi-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        padding: 16px 20px;
+    }
+
+    .ml-roi-card.analyzer { border-left: 3px solid var(--ml-blue); }
+    .ml-roi-card.ml-model { border-left: 3px solid var(--ml-accent); }
+
+    .ml-roi-card .roi-title {
+        font-size: 11px;
+        color: var(--text-muted);
+        letter-spacing: 1px;
+        margin-bottom: 10px;
+        font-family: 'DM Mono', monospace;
+    }
+
+    .ml-roi-stats { display: flex; gap: 24px; flex-wrap: wrap; }
+
+    .ml-roi-stat .num {
+        font-size: 22px;
+        font-weight: 700;
+        font-family: 'Outfit', sans-serif;
+    }
+
+    .ml-roi-stat .lbl {
+        font-size: 10px;
+        color: var(--text-muted);
+        font-family: 'DM Mono', monospace;
+    }
+
+    /* Race sections */
+    .ml-race-section { margin-bottom: 28px; }
+
+    .ml-race-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border-subtle);
+        flex-wrap: wrap;
+    }
+
+    .ml-race-number {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--ml-accent);
+        font-family: 'Outfit', sans-serif;
+    }
+
+    .ml-race-info {
+        color: var(--text-muted);
+        font-size: 11px;
+        font-family: 'DM Mono', monospace;
+    }
+
+    .ml-agree-badge {
+        margin-left: auto;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        letter-spacing: 0.5px;
+        font-family: 'DM Mono', monospace;
+    }
+
+    .ml-agree-badge.agree    { background: rgba(0,229,176,0.12); color: var(--ml-win); border: 1px solid rgba(0,229,176,0.2); }
+    .ml-agree-badge.disagree { background: rgba(255,107,53,0.12); color: var(--ml-accent2); border: 1px solid rgba(255,107,53,0.2); }
+
+    /* Horse table */
+    .ml-table { width: 100%; border-collapse: collapse; }
+
+    .ml-table th {
+        text-align: left;
+        color: var(--text-muted);
+        font-size: 10px;
+        letter-spacing: 1px;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border-subtle);
+        font-family: 'DM Mono', monospace;
+    }
+
+    .ml-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+        vertical-align: middle;
+        font-size: 13px;
+    }
+
+    .ml-table tr:last-child td { border-bottom: none; }
+    .ml-table tr:hover td { background: var(--bg-hover); }
+
+    /* Score bars */
+    .score-bar-wrap { display: flex; align-items: center; gap: 8px; }
+
+    .score-bar {
+        height: 4px;
+        border-radius: 2px;
+        flex-shrink: 0;
+    }
+
+    .score-bar.analyzer-bar { background: var(--ml-blue); }
+    .score-bar.ml-bar       { background: var(--ml-accent); }
+
+    /* Result badges */
+    .result-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 11px;
+        font-weight: 500;
+        font-family: 'DM Mono', monospace;
+    }
+
+    .result-badge.win     { background: rgba(0,229,176,0.15); color: var(--ml-win); }
+    .result-badge.lose    { background: rgba(255,69,96,0.12); color: var(--ml-lose); }
+    .result-badge.pending { color: var(--text-muted); }
+
+    /* Empty / loading state */
+    .ml-no-data {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--text-muted);
+    }
+
+    .ml-no-data h3 {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 8px;
+    }
+
+    /* Spinner */
+    .ml-spinner {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--border-mid);
+        border-top-color: var(--ml-accent);
+        border-radius: 50%;
+        animation: ml-spin 0.8s linear infinite;
+        vertical-align: middle;
+        margin-right: 6px;
+    }
+
+    @keyframes ml-spin { to { transform: rotate(360deg); } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="main-container">
+
+  <!-- Page header -->
+  <div class="ml-page-header">
+    <h1>ML Shadow</h1>
+    <span class="ml-badge">EXPERIMENTAL</span>
+  </div>
+
+  <!-- Global stats bar -->
+  <div class="ml-stats-bar">
+    <div class="ml-stat-card">
+      <div class="label">RACES TRACKED</div>
+      <div class="value" id="g-races">—</div>
+    </div>
+    <div class="ml-stat-card">
+      <div class="label">ANALYZER WINS</div>
+      <div class="value" id="g-awins">—</div>
+    </div>
+    <div class="ml-stat-card">
+      <div class="label">ANALYZER ROI</div>
+      <div class="value" id="g-aroi">—</div>
+    </div>
+    <div class="ml-stat-card">
+      <div class="label">ML WINS</div>
+      <div class="value" id="g-mwins">—</div>
+    </div>
+    <div class="ml-stat-card">
+      <div class="label">ML ROI</div>
+      <div class="value" id="g-mroi">—</div>
+    </div>
+    <div class="ml-stat-card">
+      <div class="label">AGREEMENT RATE</div>
+      <div class="value" id="g-agree">—</div>
+    </div>
+  </div>
+
+  <!-- Meeting selector -->
+  <div class="ml-meeting-bar">
+    <select id="meeting-select" onchange="loadMeeting(this.value)">
+      <option value="">— select a meeting —</option>
+      {% for m in meetings %}
+      <option value="{{ m.id }}" {% if selected_id == m.id %}selected{% endif %}>
+        {{ m.meeting_name }}{% if m.has_ml %} ✓{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+    <button class="ml-btn" onclick="scoreMeeting()" id="score-btn">Generate ML Scores</button>
+    <button class="ml-btn secondary" onclick="location.reload()">Refresh</button>
+  </div>
+
+  <!-- Legend -->
+  <div class="ml-legend">
+    <div class="ml-legend-item"><span class="pick-dot analyzer"></span> Analyzer top pick</div>
+    <div class="ml-legend-item"><span class="pick-dot ml"></span> ML top pick</div>
+    <div class="ml-legend-item"><span class="pick-dot both"></span> Both agree</div>
+  </div>
+
+  <!-- Per-meeting ROI (shown when a meeting with results is loaded) -->
+  <div id="meeting-roi" class="ml-roi-summary" style="display:none">
+    <div class="ml-roi-card analyzer">
+      <div class="roi-title">ANALYZER — THIS MEETING</div>
+      <div class="ml-roi-stats">
+        <div class="ml-roi-stat"><div class="num" id="m-awins">—</div><div class="lbl">WINS</div></div>
+        <div class="ml-roi-stat"><div class="num" id="m-araces">—</div><div class="lbl">RACES</div></div>
+        <div class="ml-roi-stat"><div class="num" id="m-aroi">—</div><div class="lbl">ROI</div></div>
+      </div>
+    </div>
+    <div class="ml-roi-card ml-model">
+      <div class="roi-title">ML MODEL — THIS MEETING</div>
+      <div class="ml-roi-stats">
+        <div class="ml-roi-stat"><div class="num" id="m-mwins">—</div><div class="lbl">WINS</div></div>
+        <div class="ml-roi-stat"><div class="num" id="m-mraces">—</div><div class="lbl">RACES</div></div>
+        <div class="ml-roi-stat"><div class="num" id="m-mroi">—</div><div class="lbl">ROI</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Race cards injected here by JS -->
+  <div id="race-container">
+    <div class="ml-no-data">
+      <h3>Select a meeting above</h3>
+      <p>Meetings marked ✓ already have ML scores generated.</p>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const STAKE = 10;
+
+function getMeetingId() {
+  return document.getElementById('meeting-select').value;
+}
+
+async function loadGlobalStats() {
+  try {
+    const r = await fetch('/api/ml-shadow/global-stats');
+    const d = await r.json();
+    document.getElementById('g-races').textContent  = d.races  ?? '—';
+    document.getElementById('g-awins').textContent  = d.a_wins ?? '—';
+    document.getElementById('g-mwins').textContent  = d.m_wins ?? '—';
+
+    const aroi = d.a_roi;
+    const mroi = d.m_roi;
+    const aEl  = document.getElementById('g-aroi');
+    const mEl  = document.getElementById('g-mroi');
+    aEl.textContent = aroi != null ? aroi.toFixed(1) + '%' : '—';
+    aEl.className   = 'value ' + (aroi >= 0 ? 'green' : 'red');
+    mEl.textContent = mroi != null ? mroi.toFixed(1) + '%' : '—';
+    mEl.className   = 'value ' + (mroi >= 0 ? 'green' : 'red');
+
+    const ag = d.agree_rate;
+    document.getElementById('g-agree').textContent = ag != null ? ag.toFixed(1) + '%' : '—';
+  } catch(e) { console.error(e); }
+}
+
+async function scoreMeeting() {
+  const mid = getMeetingId();
+  if (!mid) return alert('Please select a meeting first.');
+  const btn = document.getElementById('score-btn');
+  btn.innerHTML = '<span class="ml-spinner"></span>Scoring...';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/ml-shadow/score/' + mid, { method: 'POST' });
+    const d = await r.json();
+    if (d.success) {
+      await loadMeeting(mid);
+    } else {
+      alert('Error: ' + (d.error || 'Unknown'));
+    }
+  } catch(e) {
+    alert('Request failed: ' + e);
+  } finally {
+    btn.innerHTML = 'Generate ML Scores';
+    btn.disabled = false;
+  }
+}
+
+async function loadMeeting(mid) {
+  if (!mid) return;
+  const container = document.getElementById('race-container');
+  container.innerHTML = '<div class="ml-no-data"><span class="ml-spinner"></span> Loading...</div>';
+
+  try {
+    const r = await fetch('/api/ml-shadow/results/' + mid);
+    const d = await r.json();
+
+    if (!d.races || d.races.length === 0) {
+      container.innerHTML = '<div class="ml-no-data"><h3>No ML scores yet</h3><p>Click "Generate ML Scores" to score this meeting.</p></div>';
+      return;
+    }
+
+    let aWins=0, mWins=0, aRaces=0, mRaces=0, aProfit=0, mProfit=0;
+    let html = '';
+
+    for (const race of d.races) {
+      const validA = race.horses.filter(h => h.analyzer_score != null);
+      const validM = race.horses.filter(h => h.ml_score != null);
+      if (!validA.length || !validM.length) continue;
+
+      const topA = validA.reduce((a,b) => a.analyzer_score > b.analyzer_score ? a : b);
+      const topM = validM.reduce((a,b) => a.ml_score > b.ml_score ? a : b);
+      const agree = topA.horse_id === topM.horse_id;
+
+      const hasResults = race.horses.some(h => h.finish_position > 0);
+      if (hasResults) {
+        aRaces++;
+        const aRes = race.horses.find(h => h.horse_id === topA.horse_id);
+        if (aRes && aRes.finish_position === 1 && aRes.sp) { aWins++; aProfit += aRes.sp * STAKE - STAKE; }
+        else { aProfit -= STAKE; }
+
+        mRaces++;
+        const mRes = race.horses.find(h => h.horse_id === topM.horse_id);
+        if (mRes && mRes.finish_position === 1 && mRes.sp) { mWins++; mProfit += mRes.sp * STAKE - STAKE; }
+        else { mProfit -= STAKE; }
+      }
+
+      html += `
+        <div class="ml-race-section">
+          <div class="ml-race-header">
+            <span class="ml-race-number">R${race.race_number}</span>
+            <span class="ml-race-info">${race.distance || ''}m · ${race.track_condition || ''}</span>
+            <span class="ml-agree-badge ${agree ? 'agree' : 'disagree'}">
+              ${agree ? '✓ AGREE' : '✗ DISAGREE'}
+            </span>
+          </div>
+          <table class="ml-table">
+            <thead>
+              <tr>
+                <th>HORSE</th>
+                <th>BARRIER</th>
+                <th>ANALYZER</th>
+                <th>ML SCORE</th>
+                <th>RESULT</th>
+                <th>SP</th>
+              </tr>
+            </thead>
+            <tbody>`;
+
+      const sorted = [...race.horses].sort((a,b) => (b.analyzer_score ?? 0) - (a.analyzer_score ?? 0));
+      const maxA = Math.max(...sorted.map(h => h.analyzer_score ?? 0));
+      const maxM = Math.max(...sorted.map(h => h.ml_score ?? 0));
+
+      for (const h of sorted) {
+        const isTopA = h.horse_id === topA.horse_id;
+        const isTopM = h.horse_id === topM.horse_id;
+        const isBoth = isTopA && isTopM;
+
+        let dot = isBoth
+          ? '<span class="pick-dot both"></span>'
+          : isTopA
+            ? '<span class="pick-dot analyzer"></span>'
+            : isTopM
+              ? '<span class="pick-dot ml"></span>'
+              : '<span style="display:inline-block;width:14px"></span>';
+
+        const aBarW = maxA > 0 ? Math.round((h.analyzer_score ?? 0) / maxA * 80) : 0;
+        const mBarW = maxM > 0 ? Math.round((h.ml_score ?? 0) / maxM * 80) : 0;
+
+        let resultHtml = '<span class="result-badge pending">pending</span>';
+        if (h.finish_position > 0) {
+          resultHtml = h.finish_position === 1
+            ? '<span class="result-badge win">1st ✓</span>'
+            : `<span class="result-badge lose">${h.finish_position}th</span>`;
+        }
+
+        html += `
+              <tr>
+                <td>${dot}${h.horse_name}</td>
+                <td style="color:var(--text-muted)">${h.barrier ?? '—'}</td>
+                <td>
+                  <div class="score-bar-wrap">
+                    <span style="min-width:36px;font-family:'DM Mono',monospace">${h.analyzer_score?.toFixed(1) ?? '—'}</span>
+                    <div class="score-bar analyzer-bar" style="width:${aBarW}px"></div>
+                  </div>
+                </td>
+                <td>
+                  <div class="score-bar-wrap">
+                    <span style="min-width:36px;font-family:'DM Mono',monospace">${h.ml_score?.toFixed(1) ?? '—'}</span>
+                    <div class="score-bar ml-bar" style="width:${mBarW}px"></div>
+                  </div>
+                </td>
+                <td>${resultHtml}</td>
+                <td style="color:var(--text-muted);font-family:'DM Mono',monospace">${h.sp ? '$' + h.sp : '—'}</td>
+              </tr>`;
+      }
+
+      html += '</tbody></table></div>';
+    }
+
+    container.innerHTML = html || '<div class="ml-no-data"><h3>No scoreable races found</h3></div>';
+
+    if (aRaces > 0 || mRaces > 0) {
+      document.getElementById('meeting-roi').style.display = 'grid';
+      document.getElementById('m-awins').textContent  = aWins;
+      document.getElementById('m-araces').textContent = aRaces;
+      document.getElementById('m-aroi').textContent   = aRaces > 0 ? ((aProfit / (aRaces * STAKE)) * 100).toFixed(1) + '%' : '—';
+      document.getElementById('m-mwins').textContent  = mWins;
+      document.getElementById('m-mraces').textContent = mRaces;
+      document.getElementById('m-mroi').textContent   = mRaces > 0 ? ((mProfit / (mRaces * STAKE)) * 100).toFixed(1) + '%' : '—';
+    }
+
+  } catch(e) {
+    container.innerHTML = '<div class="ml-no-data"><h3>Error loading data</h3><p>' + e + '</p></div>';
+  }
+}
+
+loadGlobalStats();
+const initMid = document.getElementById('meeting-select').value;
+if (initMid) loadMeeting(initMid);
+</script>
+{% endblock %}
