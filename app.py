@@ -19,6 +19,7 @@ from puntingform_service import PuntingFormService
 from ladbrokes import match_race_uuid, fetch_race_odds
 from afl_routes import register_afl_routes, afl_nightly_sync
 from mma_routes import register_mma_routes
+from ml_shadow_routes import register_ml_shadow_routes
 
 import logging
 import sys
@@ -129,6 +130,7 @@ login_manager.init_app(app)
 register_afl_routes(app, db)
 print([r.rule for r in app.url_map.iter_rules() if 'headshot' in r.rule])
 register_mma_routes(app, db)
+register_ml_shadow_routes(app, db)
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
