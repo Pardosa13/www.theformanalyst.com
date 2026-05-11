@@ -10423,16 +10423,18 @@ def export_all_data():
                      as_attachment=True, download_name='database_export.zip')
 
 @app.route('/form_analyst_best.pkl')
+@login_required
 def download_best_model():
     """Download the best RF model from latest backtest."""
     import os
+    from flask import send_file, abort
+    
     models_dir = os.path.join(os.path.dirname(__file__), 'models')
     pkl_file = os.path.join(models_dir, 'form_analyst_best.pkl')
     
     if not os.path.exists(pkl_file):
         abort(404)
     
-    from flask import send_file
     return send_file(pkl_file, as_attachment=True, download_name='form_analyst_best.pkl')
 
 @app.route("/api/data/race-tempo-analysis")
