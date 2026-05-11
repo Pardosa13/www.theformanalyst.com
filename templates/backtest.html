@@ -670,6 +670,10 @@
         <i class="bi bi-graph-up-arrow"></i> Score Momentum
         <span class="tab-count">3</span>
     </button>
+    <button class="bt-tab" onclick="switchTab('gridsearch', this)">
+    <i class="bi bi-lightning-charge"></i> Grid Search
+    <span class="tab-count">{{ grid_search_models | length }}</span>
+</button>
 </div>
 
 <!-- ══════════════════════════════════════════════
@@ -996,6 +1000,92 @@
     </div>
     {{ momentum_table(momentum_results_tp) }}
 
+</div>
+
+<!-- ══════════════════════════════════════════════
+     PANEL E: GRID SEARCH MODELS
+═══════════════════════════════════════════════ -->
+<div id="panel-gridsearch" class="bt-panel">
+ 
+    <div class="section-desc">
+        <i class="bi bi-info-circle" style="color: var(--accent);"></i>
+        <strong>1000+ Random Forest models</strong> trained with time-series CV across hyperparameter grids.
+        Top 10 ranked by combined score (60% ROI regression + 40% win classification).
+        These .pkl files are production-ready alternatives to analyzer.js.
+    </div>
+ 
+    {% if latest_run.grid_search_best_roi %}
+    <div class="roi-grid">
+        <div class="roi-card">
+            <div class="roi-label">Best Model ROI</div>
+            <div class="roi-value {{ 'positive' if latest_run.grid_search_best_roi > 0 else 'negative' }}">
+                {{ '%+.1f' % latest_run.grid_search_best_roi }}%
+            </div>
+            <div class="roi-sub">vs {{ '%+.1f' % latest_run.baseline_roi }}% baseline</div>
+        </div>
+        <div class="roi-card">
+            <div class="roi-label">Best Model SR</div>
+            <div class="roi-value neutral">{{ '%.1f' % latest_run.grid_search_best_sr }}%</div>
+            <div class="roi-sub">vs {{ '%.1f' % latest_run.baseline_strike_rate }}% baseline</div>
+        </div>
+        <div class="roi-card">
+            <div class="roi-label">Improvement</div>
+            <div class="roi-value {{ 'positive' if latest_run.grid_search_improvement > 0 else 'negative' }}">
+                {{ '%+.1f' % latest_run.grid_search_improvement }}%
+            </div>
+            <div class="roi-sub">ROI gain</div>
+        </div>
+    </div>
+    {% endif %}
+ 
+    {% if grid_search_models %}
+    <div class="table-scroll">
+        <table class="table" style="background: var(--bg-surface) !important;">
+            <thead>
+                <tr style="background: var(--bg-elevated) !important;">
+                    <th style="min-width: 50px;">Rank</th>
+                    <th style="min-width: 100px;">Combined Score</th>
+                    <th style="min-width: 100px;">ROI Score</th>
+                    <th style="min-width: 100px;">Win Score</th>
+                    <th style="min-width: 70px;">Features</th>
+                    <th style="min-width: 90px;">Subset</th>
+                    <th style="min-width: 80px;">n_estimators</th>
+                    <th style="min-width: 80px;">max_depth</th>
+                    <th style="min-width: 100px;">min_samples_leaf</th>
+                    <th style="min-width: 90px;">max_features</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for model in grid_search_models %}
+                <tr style="background: transparent !important;">
+                    <td class="mono" style="font-weight: 600; color: var(--accent);">{{ '#%d' % model.model_rank }}</td>
+                    <td class="mono">{{ '%.4f' % model.combined_score }}</td>
+                    <td class="mono {{ 'roi-cell-pos' if model.cv_roi_score > 0 else 'roi-cell-neg' }}">
+                        {{ '%+.4f' % model.cv_roi_score }}
+                    </td>
+                    <td class="mono">{{ '%.4f' % model.cv_win_score }}</td>
+                    <td class="mono">{{ model.n_features }}</td>
+                    <td>
+                        <span style="font-size: 11px; background: var(--bg-hover); padding: 3px 8px; border-radius: 4px; display: inline-block;">
+                            {{ model.subset_name }}
+                        </span>
+                    </td>
+                    <td class="mono">{{ model.hyperparams.n_estimators if model.hyperparams else '—' }}</td>
+                    <td class="mono">{{ model.hyperparams.max_depth if model.hyperparams else '—' }}</td>
+                    <td class="mono">{{ model.hyperparams.min_samples_leaf if model.hyperparams else '—' }}</td>
+                    <td class="mono">{{ model.hyperparams.max_features if model.hyperparams else '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon"><i class="bi bi-lightning-charge"></i></div>
+        <h4>No grid search data yet</h4>
+        <p>Grid search analysis requires a completed backtest run with the updated backtest.py.</p>
+    </div>
+    {% endif %}
 </div>
 
 {% endif %} {# end if latest_run #}
