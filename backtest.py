@@ -617,6 +617,67 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None):
     trainer_name = str(cd.get('horse trainer', '') or '').strip()
     features['trainer_sr'] = get_sr_win_pct(trainer_name, trainer_sr_lookup or {})
 
+    # ── Barrier (gate draw) ──
+    try:
+        features['horse_barrier'] = float(cd.get('horse barrier', 0) or 0)
+    except Exception:
+        features['horse_barrier'] = 0.0
+
+    try:
+        features['form_barrier'] = float(cd.get('form barrier', 0) or 0)
+    except Exception:
+        features['form_barrier'] = 0.0
+
+    try:
+        b_curr = features['horse_barrier']
+        b_last = features['form_barrier']
+        features['barrier_change'] = (b_curr - b_last) if (b_curr > 0 and b_last > 0) else 0.0
+    except Exception:
+        features['barrier_change'] = 0.0
+
+    # ── Career prize money ──
+    try:
+        prize = float(str(cd.get('horse prize money', 0) or 0).replace(',', '').replace('$', ''))
+        features['horse_career_prize'] = float(np.log1p(prize))
+    except Exception:
+        features['horse_career_prize'] = 0.0
+
+    try:
+        pwon = float(str(cd.get('prizemoney won', 0) or 0).replace(',', '').replace('$', ''))
+        features['prizemoney_won'] = float(np.log1p(pwon))
+    except Exception:
+        features['prizemoney_won'] = 0.0
+
+    # ── Last start track condition ──
+    form_cond = str(cd.get('form track condition', '') or '').lower().strip()
+    for k, v in condition_map.items():
+        if k in form_cond:
+            features['form_track_condition'] = float(v)
+            break
+    else:
+        features['form_track_condition'] = features['track_condition']  # assume same if unknown
+
+    features['track_condition_change'] = features['track_condition'] - features['form_track_condition']
+
+    # ── Field size last start ──
+    try:
+        features['form_field_size'] = float(cd.get('form other runners', 0) or 0)
+    except Exception:
+        features['form_field_size'] = 0.0
+
+    # ── Jockey continuity (same rider as last start) ──
+    form_jockey = str(cd.get('form jockey', '') or '').strip().lower()
+    features['same_jockey'] = 1.0 if (form_jockey and form_jockey == jockey_name.lower()) else 0.0
+
+    # ── Same track as last start ──
+    today_track = str(cd.get('track', '') or '').strip().lower()
+    form_track  = str(cd.get('form track', '') or '').strip().lower()
+    features['same_track'] = 1.0 if (today_track and today_track == form_track) else 0.0
+
+    # ── Apprentice/claim allowed ──
+    can_claim_raw = str(cd.get('jockeys can claim', '') or '').strip().lower()
+    features['jockeys_can_claim'] = 1.0 if can_claim_raw in ('yes', 'true', '1', 'y') else 0.0
+
     return features
 
 
