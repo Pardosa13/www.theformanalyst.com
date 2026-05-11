@@ -158,6 +158,18 @@ def ensure_tables():
             )
         """))
 
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS backtest_best_model (
+                id SERIAL PRIMARY KEY,
+                run_date DATE NOT NULL UNIQUE,
+                combined_score FLOAT NOT NULL,
+                pkl_data BYTEA NOT NULL,
+                run_id INTEGER REFERENCES backtest_runs(id),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+
         conn.commit()
     log.info("Backtest tables verified.")
 
@@ -1447,6 +1459,50 @@ def generate_feature_recommendations(importance_sorted):
 
 
 # ─────────────────────────────────────────────
+# SAVE BEST MODEL TO DB (persists across container restarts)
+# ─────────────────────────────────────────────
+def save_best_model_to_db(pkl_file, combined_score, run_id):
+    """
+    Store rank-#1 .pkl in the database for the current date.
+    Only replaces the existing entry if the new score is strictly better.
+    One row per calendar day (UTC) — keyed by run_date UNIQUE constraint.
+    """
+    today = datetime.utcnow().date()
+    with open(pkl_file, 'rb') as f:
+        pkl_bytes = f.read()
+
+    with engine.connect() as conn:
+        existing = conn.execute(text(
+            "SELECT combined_score FROM backtest_best_model WHERE run_date = :d"
+        ), {'d': today}).fetchone()
+
+        if existing is None:
+            conn.execute(text("""
+                INSERT INTO backtest_best_model (run_date, combined_score, pkl_data, run_id)
+                VALUES (:d, :score, :data, :run_id)
+            """), {'d': today, 'score': combined_score, 'data': pkl_bytes, 'run_id': run_id})
+            log.info(f"Best model saved to DB for {today} (score={combined_score:.4f})")
+        elif combined_score > existing[0]:
+            conn.execute(text("""
+                UPDATE backtest_best_model
+                SET combined_score = :score, pkl_data = :data, run_id = :run_id,
+                    updated_at = NOW()
+                WHERE run_date = :d
+            """), {'d': today, 'score': combined_score, 'data': pkl_bytes, 'run_id': run_id})
+            log.info(
+                f"Best model updated in DB for {today} "
+                f"(old={existing[0]:.4f} → new={combined_score:.4f})"
+            )
+        else:
+            log.info(
+                f"Existing DB model for {today} is better "
+                f"({existing[0]:.4f} >= {combined_score:.4f}), skipping."
+            )
+
+        conn.commit()
+
+
+# ─────────────────────────────────────────────
 # STEP 6: WRITE RESULTS TO DB
 # ─────────────────────────────────────────────
 def write_results(run_id, feature_recommendations, component_results,
@@ -1550,6 +1606,14 @@ def write_results(run_id, feature_recommendations, component_results,
         })
 
         conn.commit()
+
+    # Persist rank-#1 model to database (survives container restarts without git)
+    if top_10_models:
+        best = top_10_models[0]
+        try:
+            save_best_model_to_db(best['pkl_file'], best['score'], run_id)
+        except Exception as e:
+            log.warning(f"Could not save best model to DB: {e}")
 
     # Auto-commit .pkl files to git so they persist beyond Railway's ephemeral filesystem
     try:

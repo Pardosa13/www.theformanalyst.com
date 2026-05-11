@@ -10425,16 +10425,34 @@ def export_all_data():
 @app.route('/form_analyst_best.pkl')
 @login_required
 def download_best_model():
-    """Download the best RF model from latest backtest."""
-    import os
+    """Download the best RF model — loaded from DB, filesystem fallback."""
+    import io
     from flask import send_file, abort
-    
+    from sqlalchemy import text as sa_text
+
+    # Try DB first (most recent day that has a saved model)
+    try:
+        with db.engine.connect() as conn:
+            row = conn.execute(sa_text("""
+                SELECT pkl_data, run_date, combined_score
+                FROM backtest_best_model
+                ORDER BY run_date DESC
+                LIMIT 1
+            """)).fetchone()
+        if row and row[0]:
+            buf = io.BytesIO(bytes(row[0]))
+            buf.seek(0)
+            return send_file(buf, as_attachment=True,
+                             download_name='form_analyst_best.pkl',
+                             mimetype='application/octet-stream')
+    except Exception:
+        pass  # fall through to filesystem
+
+    # Filesystem fallback (local dev or first-run before any DB entry)
     models_dir = os.path.join(os.path.dirname(__file__), 'models')
     pkl_file = os.path.join(models_dir, 'form_analyst_best.pkl')
-    
     if not os.path.exists(pkl_file):
         abort(404)
-    
     return send_file(pkl_file, as_attachment=True, download_name='form_analyst_best.pkl')
 
 @app.route("/api/data/race-tempo-analysis")
