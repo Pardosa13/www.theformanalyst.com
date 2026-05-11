@@ -3322,20 +3322,33 @@ function calculateTrueOdds(results, priorStrength = 0.01, troubleshooting = fals
         // k=15 is aggressive, k=20 is moderate, k=25 is conservative
         const k = 15;  // Steepness factor - lower = more aggressive odds spread
         
+        const ANALYZER_WEIGHT = 0.25;
+        const PFAI_WEIGHT = 0.75;
+        const MIN_PFAI_THRESHOLD = 40;
+
         const blendedScores = normalizedScores.map((analyzerScore, index) => {
             const pfaiScore = raceHorses[index].pfaiScore || 0;
-            return pfaiScore > 0 ? (analyzerScore * 0.7) + (pfaiScore * 0.3) : analyzerScore;
+            return (pfaiScore >= MIN_PFAI_THRESHOLD)
+                ? (analyzerScore * ANALYZER_WEIGHT) + (pfaiScore * PFAI_WEIGHT)
+                : analyzerScore;
         });
         const expScores = blendedScores.map(score => Math.exp(score / k));
         const totalExp = expScores.reduce((sum, e) => sum + e, 0);
-        
+
         // Convert to probabilities
         const probabilities = expScores.map(e => e / totalExp);
-        
+
         // Add overround (bookmaker margin of 10%)
         const totalProb = probabilities.reduce((sum, p) => sum + p, 0);
         const overround = 1.10;
-        
+
+        // Signal agreement: top analyzer pick matches top PFAI pick
+        const pfaiScoresArr = raceHorses.map(h => h.pfaiScore || 0);
+        const topAnalyzerIdx = normalizedScores.indexOf(Math.max(...normalizedScores));
+        const maxPfai = Math.max(...pfaiScoresArr);
+        const topPfaiIdx = pfaiScoresArr.indexOf(maxPfai);
+        const signalsAgree = (maxPfai >= MIN_PFAI_THRESHOLD) && (topAnalyzerIdx === topPfaiIdx);
+
         raceHorses.forEach((horse, index) => {
             const winProbability = probabilities[index];
             const trueOdds = 1 / (winProbability * overround);
@@ -3347,19 +3360,27 @@ function calculateTrueOdds(results, priorStrength = 0.01, troubleshooting = fals
             horse.performanceComponent = ((normalizedScores[index] / 100) * 100).toFixed(1) + '%';
             horse.score = blendedScores[index];
             horse.rawScore = scores[index];  // Keep original
+            horse.signalAgreement = (index === topAnalyzerIdx) && signalsAgree;
 
-            // ✨ ADD THIS BLOCK HERE ↓
-const pfaiScore = horse.pfaiScore || 0;
-if (pfaiScore > 0) {
-    const analyzerNormalized = normalizedScores[index];
-    const blendedFinal = blendedScores[index];
-    let blendNote = '\n=== PFAI BLEND ===\n';
-    blendNote += `Analyzer Score (normalized): ${analyzerNormalized.toFixed(1)} (70% weight)\n`;
-    blendNote += `PFAI Score: ${pfaiScore.toFixed(1)} (30% weight)\n`;
-    blendNote += `Final Blended Score: ${blendedFinal.toFixed(1)}\n`;
-    blendNote += `Calculation: (${analyzerNormalized.toFixed(1)} × 0.7) + (${pfaiScore.toFixed(1)} × 0.3) = ${blendedFinal.toFixed(1)}\n`;
-    horse.notes = (horse.notes || '') + blendNote;
-}
+            const pfaiScore = horse.pfaiScore || 0;
+            if (pfaiScore > 0) {
+                const analyzerNormalized = normalizedScores[index];
+                const blendedFinal = blendedScores[index];
+                let blendNote = '\n=== PFAI BLEND ===\n';
+                if (pfaiScore >= MIN_PFAI_THRESHOLD) {
+                    blendNote += `Analyzer Score (normalized): ${analyzerNormalized.toFixed(1)} (${Math.round(ANALYZER_WEIGHT * 100)}% weight)\n`;
+                    blendNote += `PFAI Score: ${pfaiScore.toFixed(1)} (${Math.round(PFAI_WEIGHT * 100)}% weight)\n`;
+                    blendNote += `Final Blended Score: ${blendedFinal.toFixed(1)}\n`;
+                    blendNote += `Calculation: (${analyzerNormalized.toFixed(1)} × ${ANALYZER_WEIGHT}) + (${pfaiScore.toFixed(1)} × ${PFAI_WEIGHT}) = ${blendedFinal.toFixed(1)}\n`;
+                    if (horse.signalAgreement) {
+                        blendNote += `** SIGNALS AGREE — both Analyzer and PFAI rank this horse #1 **\n`;
+                    }
+                } else {
+                    blendNote += `PFAI Score: ${pfaiScore.toFixed(1)} — below threshold (${MIN_PFAI_THRESHOLD}), using pure Analyzer\n`;
+                    blendNote += `Pure Analyzer Score: ${blendedFinal.toFixed(1)}\n`;
+                }
+                horse.notes = (horse.notes || '') + blendNote;
+            }
         });
 
         const totalCheck = raceHorses.reduce((s, h) => s + (h.rawWinProbability || 0), 0);

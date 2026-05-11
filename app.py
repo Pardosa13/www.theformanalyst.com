@@ -290,6 +290,7 @@ with app.app_context():
     {'component_name': 'Running Position - Backmarker Middle',                  'appearances': 37,   'wins': 6,   'strike_rate': 16.2, 'roi_percentage': 31.6,  'is_active': True},
     {'component_name': 'Specialist - Undefeated Track+Distance',                'appearances': 146,  'wins': 43,  'strike_rate': 29.5, 'roi_percentage': 31.4,  'is_active': True},
     {'component_name': 'First Up - Specialist Undefeated',                      'appearances': 62,   'wins': 21,  'strike_rate': 33.9, 'roi_percentage': 27.7,  'is_active': True},
+    {'component_name': 'Signal Agreement - Both Signals Agree',                 'appearances': 814,  'wins': 270, 'strike_rate': 33.2, 'roi_percentage': -15.1, 'is_active': True},
 ]
 
         added = 0
@@ -1301,6 +1302,7 @@ def parse_notes_components(notes):
         (r'PFAI Score:\s*(7[0-9])[\. ]', 'PFAI Score - 70-79'),
         (r'PFAI Score:\s*(6[0-9])[\. ]', 'PFAI Score - 60-69'),
         (r'PFAI Score:\s*([0-5][0-9])[\. ]', 'PFAI Score - <60'),
+        (r'\*\* SIGNALS AGREE', 'Signal Agreement - Both Signals Agree'),
 
         # ====== MARKET EXPECTATION ======
         (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(best market performer', 'Market Expectation - Best in Field'),
@@ -4690,6 +4692,7 @@ SCORING_PREFIXES = (
     'Weight Change', 'Career Win Rate', 'Age/Sex', 'Colt', 'Sire',
     'Specialist', 'Sectional History', 'Sectional Consistency',
     'API Sectional', 'Running Position', 'Hidden Edge', 'PFAI Score',
+    'Signal Agreement',
     'Market Expectation', 'Pace Angle', 'Ran Places', 'Track Score',
     'Track Condition Score',
 )
