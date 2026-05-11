@@ -9175,61 +9175,89 @@ def api_betting_filters():
 
 # ─────────────────────────────────────────────────────────────
 # BACKTEST DASHBOARD ROUTES
-# Add these routes to app.py alongside your other routes
+# Replace the existing backtest routes in app.py with these
 # ─────────────────────────────────────────────────────────────
 
 @app.route('/backtest')
 @login_required
 def backtest():
-    """Backtest dashboard - shows latest RF + component analysis results."""
+    """Backtest dashboard - shows latest RF + component analysis + grid search results."""
     if not current_user.is_admin:
         flash('Admin access required.', 'danger')
         return redirect(url_for('dashboard'))
     
     from sqlalchemy import text
+    import json
+    
     # Get latest completed run
     latest_run = db.session.execute(text("""
         SELECT * FROM backtest_runs
         ORDER BY id DESC LIMIT 1
     """)).fetchone()
-
+    
     run_count = db.session.execute(text(
         "SELECT COUNT(*) FROM backtest_runs"
     )).scalar() or 0
-
+    
     all_runs = db.session.execute(text("""
         SELECT * FROM backtest_runs ORDER BY id DESC LIMIT 20
     """)).fetchall()
-
+    
     feature_results = []
     component_results = []
-    momentum_results = []
-
+    momentum_results_all = []
+    momentum_results_tp = []
+    grid_search_models = []
+    
     if latest_run and latest_run.status == 'complete':
         feature_results = db.session.execute(text("""
             SELECT * FROM backtest_feature_importance
             WHERE run_id = :run_id
             ORDER BY importance_rank ASC
         """), {'run_id': latest_run.id}).fetchall()
-
+        
         component_results = db.session.execute(text("""
             SELECT * FROM backtest_component_analysis
             WHERE run_id = :run_id
             ORDER BY ABS(roi) DESC
         """), {'run_id': latest_run.id}).fetchall()
-
+        
         momentum_results_all = db.session.execute(text("""
             SELECT * FROM backtest_momentum_analysis
             WHERE run_id = :run_id AND scope = 'all_horses'
             ORDER BY roi DESC
         """), {'run_id': latest_run.id}).fetchall()
-
+        
         momentum_results_tp = db.session.execute(text("""
             SELECT * FROM backtest_momentum_analysis
             WHERE run_id = :run_id AND scope = 'top_pick'
             ORDER BY roi DESC
         """), {'run_id': latest_run.id}).fetchall()
-
+        
+        # Get grid search models (Track D) and parse hyperparams JSON
+        grid_search_rows = db.session.execute(text("""
+            SELECT * FROM backtest_rf_models
+            WHERE run_id = :run_id
+            ORDER BY model_rank ASC
+        """), {'run_id': latest_run.id}).fetchall()
+        
+        for row in grid_search_rows:
+            model_dict = {
+                'model_rank': row.model_rank,
+                'combined_score': row.combined_score,
+                'cv_roi_score': row.cv_roi_score,
+                'cv_win_score': row.cv_win_score,
+                'n_features': row.n_features,
+                'subset_name': row.subset_name,
+            }
+            # Parse hyperparams JSON string
+            try:
+                hyperparams = json.loads(row.hyperparams)
+                model_dict['hyperparams'] = hyperparams
+            except:
+                model_dict['hyperparams'] = {}
+            grid_search_models.append(model_dict)
+    
     return render_template(
         'backtest.html',
         latest_run=latest_run,
@@ -9238,8 +9266,10 @@ def backtest():
         feature_results=feature_results,
         component_results=component_results,
         momentum_results_all=momentum_results_all,
-        momentum_results_tp=momentum_results_tp
+        momentum_results_tp=momentum_results_tp,
+        grid_search_models=grid_search_models
     )
+
 
 @app.route('/backtest/run-now')
 @login_required
@@ -9247,20 +9277,20 @@ def backtest_run_now():
     """Trigger a manual backtest run (admin only)."""
     import subprocess
     import threading
-
+    
     if not current_user.is_admin:
         flash('Admin access required.', 'danger')
         return redirect(url_for('backtest'))
-
+    
     def run_backtest():
         try:
             subprocess.run(['python', 'backtest.py'], timeout=3600, check=True)
         except Exception as e:
             app.logger.error(f"Manual backtest failed: {e}")
-
+    
     thread = threading.Thread(target=run_backtest, daemon=True)
     thread.start()
-
+    
     flash('Backtest started in the background. Results will appear here when complete (may take several minutes).', 'info')
     return redirect(url_for('backtest'))
 
