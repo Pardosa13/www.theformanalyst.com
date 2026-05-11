@@ -1482,6 +1482,35 @@ def write_results(run_id, feature_recommendations, component_results,
 
         conn.commit()
 
+    # Auto-commit .pkl files to git so they persist beyond Railway's ephemeral filesystem
+    try:
+        import subprocess
+        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
+        repo_dir = os.path.dirname(os.path.abspath(__file__))
+
+        subprocess.run(['git', 'add', f'{output_dir}/*.pkl'],
+                       cwd=repo_dir, timeout=30, check=False)
+
+        commit_result = subprocess.run(
+            ['git', 'commit', '-m', f'[AUTO] Grid search models from run {run_id}'],
+            cwd=repo_dir, timeout=30, check=False,
+            capture_output=True, text=True
+        )
+        if commit_result.returncode == 0:
+            push_result = subprocess.run(
+                ['git', 'push', '-u', 'origin', 'HEAD'],
+                cwd=repo_dir, timeout=60, check=False,
+                capture_output=True, text=True
+            )
+            if push_result.returncode == 0:
+                log.info("Models committed and pushed to git successfully.")
+            else:
+                log.warning(f"Git push failed: {push_result.stderr.strip()}")
+        else:
+            log.warning(f"Git commit failed (nothing to commit?): {commit_result.stderr.strip()}")
+    except Exception as e:
+        log.warning(f"Could not auto-commit models to git: {e}")
+
     log.info("Results written successfully.")
 
 
