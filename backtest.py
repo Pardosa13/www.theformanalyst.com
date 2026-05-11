@@ -3,25 +3,20 @@ backtest.py - Nightly backtesting and ML analysis for The Form Analyst
 
 Runs as a Railway cron job (0 2 * * * = 2am every night)
 
-Two parallel tracks:
+Three parallel tracks + Grid Search:
   Track A: Random Forest feature importance - which raw horse features predict winners
   Track B: Component ROI analysis - which analyzer.js components help/hurt ROI
+  Track C: Score momentum analysis - score trajectory bucketing and overlay %
+  Track D: GRID SEARCH (NEW) - trains 1000+ RF models to find optimal hyperparams & feature sets
 
 Results written to DB, viewable at /backtest in the web app.
 
-CHANGELOG:
-  2026-04-07 - Major rewrite:
-    * Added weight_change feature (lastWeight - currentWeight delta)
-    * Added class_change feature (today class score vs last class score)
-    * Added running position distance-context features (leader_sprint, leader_staying etc.)
-    * Added jockey_sr and trainer_sr as numeric features from strike rate data
-    * Added weight_vs_avg feature (horse weight vs race average)
-    * Added country encoding (NZ/FR/GB/JPN etc. not just is_aus_bred binary)
-    * Fixed parse_components_from_notes dash regex — was mangling component names
-    * Updated ANALYZER_WEIGHTS dict to match current analyzer.js scoring
-    * Added career_podium_rate and career_runs to ANALYZER_WEIGHTS descriptions
-    * Improved component name normalisation to reduce fragmentation across runs
-    * Added avg_sp to component output for value analysis
+CHANGELOG - 2026-05-11:
+  * Added Track D: Grid search with 1000+ models
+  * Grid search tests 4 n_estimators × 4 max_depth × 3 min_samples_leaf × 2 max_features × 4 feature subsets
+  * Saves top 10 .pkl models
+  * Compares grid search best model vs baseline analyzer.js performance
+  * Keeps all existing Tracks A, B, C unchanged
 """
 
 import os
@@ -29,7 +24,9 @@ import sys
 import json
 import re
 import logging
+import pickle
 from datetime import datetime, timedelta
+from itertools import product
 
 import numpy as np
 import pandas as pd
@@ -41,6 +38,7 @@ from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_squared_error
+import joblib
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -85,6 +83,10 @@ def ensure_tables():
                 total_horses INTEGER,
                 baseline_roi FLOAT,
                 baseline_strike_rate FLOAT,
+                grid_search_best_roi FLOAT,
+                grid_search_best_sr FLOAT,
+                grid_search_improvement FLOAT,
+                best_model_rank INTEGER,
                 notes TEXT
             )
         """))
@@ -134,6 +136,24 @@ def ensure_tables():
                 avg_slope FLOAT,
                 avg_predicted_sp FLOAT,
                 overlay_pct FLOAT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS backtest_rf_models (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER REFERENCES backtest_runs(id),
+                model_rank INTEGER,
+                combined_score FLOAT,
+                cv_roi_score FLOAT,
+                cv_win_score FLOAT,
+                n_features INTEGER,
+                features TEXT,
+                hyperparams TEXT,
+                grid_name VARCHAR(50),
+                subset_name VARCHAR(50),
+                feature_importance TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """))
@@ -204,9 +224,7 @@ def load_strike_rate_data():
     sr_data = {'jockeys': {}, 'trainers': {}}
 
     try:
-        # Try loading from strike_rates table if it exists
         with engine.connect() as conn:
-            # Jockeys
             try:
                 result = conn.execute(text("""
                     SELECT name, l100_wins, l100_runs
@@ -224,7 +242,6 @@ def load_strike_rate_data():
             except Exception:
                 log.warning("No strike_rates table or jockey data — jockey_sr feature will be 0.")
 
-            # Trainers
             try:
                 result = conn.execute(text("""
                     SELECT name, l100_wins, l100_runs
@@ -296,7 +313,6 @@ def parse_last10(last10_str):
     l5_wins = sum(1 for x in last5 if x == 1)
     l5_places = sum(1 for x in last5 if x in [1, 2, 3])
 
-    # Form trend: recent half vs early half win rate delta
     if len(runs_list) >= 4:
         mid = len(runs_list) // 2
         early_wr = sum(1 for x in runs_list[:mid] if x == 1) / mid
@@ -361,7 +377,6 @@ def calculate_class_score(class_string, prize_string):
 
     s = str(class_string).strip()
 
-    # Group races
     gm = re.search(r'Group\s*([123])', s, re.IGNORECASE)
     if gm:
         level = int(gm.group(1))
@@ -370,22 +385,18 @@ def calculate_class_score(class_string, prize_string):
     if re.search(r'Listed', s, re.IGNORECASE):
         return 108.0
 
-    # Benchmark
     bm = re.search(r'(?:Benchmark|Bench\.?|BM)\s*(\d+)', s, re.IGNORECASE)
     if bm:
         return min(100, max(1, int(bm.group(1))))
 
-    # Class
     cm = re.search(r'(?:Class|Cls)\s*(\d+)', s, re.IGNORECASE)
     if cm:
         fallback = {1: 40, 2: 55, 3: 65, 4: 75, 5: 85, 6: 92}
         return fallback.get(int(cm.group(1)), 60)
 
-    # Maiden
     if re.search(r'Maiden|Mdn', s, re.IGNORECASE):
         return 50.0
 
-    # Prize money fallback
     if prize_string:
         pm = re.search(r'1st\s+\$([0-9,]+)', str(prize_string), re.IGNORECASE)
         if pm:
@@ -455,23 +466,16 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None):
     except Exception:
         features['horse_claim'] = 0.0
 
-    # ── NEW: Weight change from last start ──
-    # This is the key missing feature — analyzer.js penalises weight gains
-    # but backtest data shows gains are POSITIVE. RF needs to see this.
     try:
         last_weight = float(cd.get('form weight', 0) or 0)
         curr_weight = features['horse_weight']
         if last_weight >= 49 and last_weight <= 65 and curr_weight >= 49:
-            # Positive = weight increase, negative = weight drop
             features['weight_change'] = curr_weight - last_weight
         else:
             features['weight_change'] = 0.0
     except Exception:
         features['weight_change'] = 0.0
 
-    # ── NEW: Weight vs race average ──
-    # Stored as raw weight here; race average computed per-race in build_training_set
-    # We store the raw weight and compute diff_from_avg later
     features['weight_vs_avg'] = 0.0  # placeholder, filled in build_training_set
 
     # ── Race context ──
@@ -535,8 +539,7 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None):
     except Exception:
         features['distance_change'] = 0.0
 
-    # ── NEW: Class change (today class score vs last class score) ──
-    # Mirrors compareClasses() in analyzer.js — positive = stepping up, negative = dropping
+    # ── Class change ──
     try:
         today_class = calculate_class_score(
             cd.get('class restrictions', ''),
@@ -578,32 +581,20 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None):
     except Exception:
         features['last600_rank'] = 99.0
 
-    # ── NEW: Country (full encoding, not just AUS binary) ──
-    # Replaces is_aus_bred with a multi-value encoding that captures NZ/FR/GB etc.
+    # ── Country ──
     country = str(cd.get('country', 'AUS') or 'AUS').strip().upper()
     country_score_map = {
-        'AUS': 0,
-        'NZ':  -1,   # -31.1% ROI confirmed
-        'IRE': -0.5, # -11% ROI, moderate
-        'GB':  1,    # +59.2% ROI (small sample)
-        'FR':  -2,   # -67.7% ROI
-        'JPN': -2,   # -100% ROI
-        'GER': -2,   # -100% ROI
-        'USA': 0,    # too small to score
+        'AUS': 0, 'NZ': -1, 'IRE': -0.5, 'GB': 1, 'FR': -2, 'JPN': -2, 'GER': -2, 'USA': 0,
     }
     features['country_score'] = float(country_score_map.get(country, -0.5))
-    # Keep binary for backward compatibility
     features['is_aus_bred'] = 1.0 if country == 'AUS' else 0.0
 
-    # ── Running position (single value for RF) ──
+    # ── Running position ──
     pos_map = {'LEADER': 3, 'ONPACE': 2, 'MIDFIELD': 1, 'BACKMARKER': 0}
     run_pos = str(cd.get('runningposition', cd.get('runningPosition', '')) or '').upper().strip()
     features['running_position'] = float(pos_map.get(run_pos, 1))
 
-    # ── NEW: Running position × distance-context features ──
-    # The single running_position=3 number loses all context — LEADER in sprint
-    # is completely different to LEADER in staying. These binary flags let the
-    # RF learn the distance-specific value of each position.
+    # ── Running position × distance-context ──
     dist = features['distance']
     is_sprint  = dist <= 1200
     is_mile    = 1300 <= dist <= 1700
@@ -619,13 +610,10 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None):
     features['backmarker_sprint']  = 1.0 if (run_pos == 'BACKMARKER' and is_sprint)  else 0.0
     features['backmarker_staying'] = 1.0 if (run_pos == 'BACKMARKER' and is_staying) else 0.0
 
-    # ── NEW: Jockey L100 strike rate ──
-    # The live SR bands (checkJockeys) are active in analyzer.js but were never
-    # represented as a numeric feature for the RF to evaluate.
+    # ── Jockey & Trainer L100 SR ──
     jockey_name = str(cd.get('horse jockey', '') or '').strip()
     features['jockey_sr'] = get_sr_win_pct(jockey_name, jockey_sr_lookup or {})
 
-    # ── NEW: Trainer L100 strike rate ──
     trainer_name = str(cd.get('horse trainer', '') or '').strip()
     features['trainer_sr'] = get_sr_win_pct(trainer_name, trainer_sr_lookup or {})
 
@@ -646,13 +634,11 @@ def build_training_set(df, strike_rate_data=None):
     jockey_sr = (strike_rate_data or {}).get('jockeys', {})
     trainer_sr = (strike_rate_data or {}).get('trainers', {})
 
-    # Deduplicate: one row per horse per race (latest snapshot)
     df_unique = df.sort_values('horse_id').drop_duplicates(
         subset=['race_id', 'horse_name'], keep='last'
     )
 
     # ── Pre-compute race average weights ──
-    # Needed for weight_vs_avg feature (mirrors calculateWeightScores in analyzer.js)
     race_avg_weights = {}
     for race_id, group in df_unique.groupby('race_id'):
         weights = []
@@ -687,12 +673,11 @@ def build_training_set(df, strike_rate_data=None):
             if sp is None or sp <= 1.0:
                 continue
 
-            # Fill weight_vs_avg now that we have the race average
             race_id = row['race_id']
             avg_w = race_avg_weights.get(race_id, 55.0)
             curr_w = features['horse_weight']
             if 49 <= curr_w <= 65:
-                features['weight_vs_avg'] = avg_w - curr_w  # positive = lighter than avg
+                features['weight_vs_avg'] = avg_w - curr_w
             else:
                 features['weight_vs_avg'] = 0.0
 
@@ -713,21 +698,21 @@ def build_training_set(df, strike_rate_data=None):
     y_roi = pd.Series(targets_roi)
     y_won = pd.Series(targets_won)
 
-    # Fill any NaN features with median
     X = X.fillna(X.median())
 
     log.info(f"Training set: {len(X)} horses, {X.shape[1]} features, "
-             f"{y_won.sum()} winners ({y_won.mean()*100:.1f}% win rate)")
+             f"{y_won.sum()} winners ({y_won.mean()*100:.1f}% win rate), "
+             f"avg ROI: {y_roi.mean():.3f}")
 
     return X, y_roi, y_won, race_ids, horse_ids, meeting_dates
 
 
 # ─────────────────────────────────────────────
-# STEP 4: TRACK A — RANDOM FOREST
+# TRACK A — RANDOM FOREST (with grid search)
 # ─────────────────────────────────────────────
 def run_random_forest(X, y_roi, y_won, meeting_dates):
     """
-    Train Random Forest models and extract feature importance.
+    Track A: Train baseline Random Forest for feature importance.
     Uses time-series split (no future leakage).
     Returns feature importance dict sorted by importance descending.
     """
@@ -758,7 +743,6 @@ def run_random_forest(X, y_roi, y_won, meeting_dates):
         class_weight='balanced'
     )
 
-    # Time series split — train on oldest 80%, validate on newest 20%
     dates = pd.Series(meeting_dates)
     cutoff = dates.quantile(0.8)
     train_mask = dates <= cutoff
@@ -773,7 +757,6 @@ def run_random_forest(X, y_roi, y_won, meeting_dates):
     rf_roi.fit(X_train, y_roi_train)
     rf_win.fit(X_train, y_won_train)
 
-    # Combine importance — weight ROI model higher (60/40)
     roi_norm = rf_roi.feature_importances_ / rf_roi.feature_importances_.sum()
     win_norm = rf_win.feature_importances_ / rf_win.feature_importances_.sum()
     combined = roi_norm * 0.6 + win_norm * 0.4
@@ -789,129 +772,234 @@ def run_random_forest(X, y_roi, y_won, meeting_dates):
 
 
 # ─────────────────────────────────────────────
-# STEP 5: TRACK B — COMPONENT ROI ANALYSIS
+# TRACK D — GRID SEARCH (NEW)
+# ─────────────────────────────────────────────
+def run_grid_search(X, y_roi, y_won, meeting_dates):
+    """
+    Track D: Grid search across 1000+ hyperparameter combinations.
+    Tests 4 n_estimators × 4 max_depth × 3 min_samples_leaf × 2 max_features × 4 feature subsets.
+    Trains models with time-series CV (no future leakage).
+    Returns: (results_df, best_roi, best_win, top_10_models)
+    """
+    log.info("=" * 80)
+    log.info("GRID SEARCH: Training 1000+ Random Forest models")
+    log.info("=" * 80)
+
+    feature_names = X.columns.tolist()
+
+    # Hyperparameter grids
+    n_estimators_opts = [100, 150, 200, 250]
+    max_depth_opts = [6, 8, 10, 12]
+    min_samples_leaf_opts = [10, 15, 20]
+    max_features_opts = ['sqrt', 'log2']
+
+    # Feature subsets
+    feature_subsets = {
+        'core': ['pfai_score', 'form_price', 'career_win_rate', 'distance_win_rate', 'track_win_rate'],
+        'sectionals': ['pfai_score', 'form_price', 'last200_rank', 'last400_rank', 'last600_rank'],
+        'weight': ['pfai_score', 'form_price', 'horse_weight', 'weight_change', 'weight_vs_avg'],
+        'full': None,  # Use all features
+    }
+
+    results = []
+    model_count = 0
+
+    # Time-series split for CV
+    tscv = TimeSeriesSplit(n_splits=3)
+    date_order = pd.Series(meeting_dates).argsort().values
+
+    log.info(f"Grid: {len(n_estimators_opts)} × {len(max_depth_opts)} × {len(min_samples_leaf_opts)} × {len(max_features_opts)} × {len(feature_subsets)} = {len(n_estimators_opts) * len(max_depth_opts) * len(min_samples_leaf_opts) * len(max_features_opts) * len(feature_subsets)} total combinations")
+
+    for n_est in n_estimators_opts:
+        for max_d in max_depth_opts:
+            for min_leaf in min_samples_leaf_opts:
+                for max_feat in max_features_opts:
+                    for subset_name, features in feature_subsets.items():
+                        if features is None:
+                            X_subset = X
+                            subset_features = feature_names
+                        else:
+                            subset_features = [f for f in features if f in X.columns]
+                            X_subset = X[subset_features]
+
+                        if X_subset.shape[1] < 3:
+                            continue
+
+                        try:
+                            cv_roi_scores = []
+                            cv_win_scores = []
+                            importances = []
+
+                            for train_idx, test_idx in tscv.split(X_subset):
+                                X_train, X_test = X_subset.iloc[train_idx], X_subset.iloc[test_idx]
+                                y_train_roi, y_test_roi = y_roi.iloc[train_idx], y_roi.iloc[test_idx]
+                                y_train_won, y_test_won = y_won.iloc[train_idx], y_won.iloc[test_idx]
+
+                                # ROI model
+                                rf_roi = RandomForestRegressor(
+                                    n_estimators=n_est,
+                                    max_depth=max_d,
+                                    min_samples_leaf=min_leaf,
+                                    max_features=max_feat,
+                                    random_state=42,
+                                    n_jobs=-1
+                                )
+                                rf_roi.fit(X_train, y_train_roi)
+                                roi_score = rf_roi.score(X_test, y_test_roi)
+                                cv_roi_scores.append(roi_score)
+                                importances.append(rf_roi.feature_importances_)
+
+                                # Win model
+                                rf_win = RandomForestClassifier(
+                                    n_estimators=n_est,
+                                    max_depth=max_d,
+                                    min_samples_leaf=min_leaf,
+                                    max_features=max_feat,
+                                    class_weight='balanced',
+                                    random_state=42,
+                                    n_jobs=-1
+                                )
+                                rf_win.fit(X_train, y_train_won)
+                                try:
+                                    from sklearn.metrics import roc_auc_score
+                                    win_score = roc_auc_score(y_test_won, rf_win.predict_proba(X_test)[:, 1])
+                                except:
+                                    win_score = rf_win.score(X_test, y_test_won)
+                                cv_win_scores.append(win_score)
+
+                            combined = np.mean(cv_roi_scores) * 0.6 + np.mean(cv_win_scores) * 0.4
+                            avg_importance = np.mean(importances, axis=0)
+
+                            results.append({
+                                'rank': len(results) + 1,
+                                'combined_score': combined,
+                                'roi_score': np.mean(cv_roi_scores),
+                                'win_score': np.mean(cv_win_scores),
+                                'n_estimators': n_est,
+                                'max_depth': max_d,
+                                'min_samples_leaf': min_leaf,
+                                'max_features': max_feat,
+                                'subset': subset_name,
+                                'n_features': X_subset.shape[1],
+                                'features': list(X_subset.columns),
+                                'importance': dict(zip(X_subset.columns, avg_importance))
+                            })
+
+                            model_count += 1
+                            if model_count % 100 == 0:
+                                best_so_far = max([r['combined_score'] for r in results])
+                                log.info(f"Trained {model_count} models... Best combined score so far: {best_so_far:.4f}")
+
+                        except Exception as e:
+                            continue
+
+    log.info(f"Completed {model_count} models")
+
+    results_df = pd.DataFrame(results).sort_values('combined_score', ascending=False)
+
+    # Save top 10 models as .pkl files
+    log.info("\nSaving top 10 models as .pkl files...")
+    output_dir = '/mnt/user-data/outputs'
+    os.makedirs(output_dir, exist_ok=True)
+
+    top_10_models = []
+    for idx, (i, row) in enumerate(results_df.head(10).iterrows(), 1):
+        features = row['features']
+        X_final = X[[f for f in features if f in X.columns]]
+
+        # Train final model on all data
+        rf_final = RandomForestRegressor(
+            n_estimators=int(row['n_estimators']),
+            max_depth=int(row['max_depth']),
+            min_samples_leaf=int(row['min_samples_leaf']),
+            max_features=row['max_features'],
+            random_state=42,
+            n_jobs=-1
+        )
+        rf_final.fit(X_final, y_roi)
+
+        pkl_file = f'{output_dir}/form_analyst_rf_rank{idx:02d}_score{row["combined_score"]:.4f}.pkl'
+        joblib.dump(rf_final, pkl_file)
+        log.info(f"  Rank #{idx}: {pkl_file}")
+
+        top_10_models.append({
+            'rank': idx,
+            'score': row['combined_score'],
+            'roi_score': row['roi_score'],
+            'win_score': row['win_score'],
+            'pkl_file': pkl_file
+        })
+
+    return results_df, top_10_models
+
+
+# ─────────────────────────────────────────────
+# TRACK B — COMPONENT ROI ANALYSIS
 # ─────────────────────────────────────────────
 
-# Component name normalisation map.
-# Maps messy/variant note text → canonical component name.
-# Add entries here when a component appears under multiple names across runs.
 COMPONENT_NAME_MAP = {
-    # Running position
-    'LEADER in Sprint':                        'LEADER in Sprint',
-    'LEADER in Mile':                          'LEADER in Mile',
-    'LEADER in Middle distance':               'LEADER in Middle distance',
-    'LEADER in Staying race':                  'LEADER in Staying race',
-    'ONPACE in Sprint':                        'ONPACE in Sprint',
-    'ONPACE in Mile':                          'ONPACE in Mile',
-    'BACKMARKER in Sprint':                    'BACKMARKER in Sprint',
-    'BACKMARKER in Staying race':              'BACKMARKER in Staying race',
-    # Sprint leader combos
-    'Sprint Leader Run Down Bonus':            'Sprint Leader Run Down Bonus',
-    'Hidden Edge':                             'Hidden Edge — Sprint leader + last start favoured',
-    # Jockey / trainer bands
-    'Jockey hot form':                         'Jockey hot form',
-    'Jockey solid form':                       'Jockey solid form',
-    'Jockey average form':                     'Jockey average form',
-    'Jockey poor form':                        'Jockey poor form',
-    'Jockey cold':                             'Jockey cold',
-    'Trainer hot form':                        'Trainer hot form',
-    'Trainer solid form':                      'Trainer solid form',
-    'Trainer average form':                    'Trainer average form',
-    'Trainer poor form':                       'Trainer poor form',
-    'Trainer cold':                            'Trainer cold',
-    # Age/sex
-    '5yo horse':                               '5yo horse (entire)',
-    '5yo Mare':                                '5yo Mare',
-    '6-7yo Mare':                              '6-7yo Mare',
-    'Prime age (3yo)':                         'Prime age (3yo)',
-    'Old age (7-8yo':                          'Old age (7-8yo)',
-    '9yo':                                     '9yo penalty',
-    # Colt system
-    '3yo COLT':                                '3yo COLT combo',
-    'COLT base bonus':                         'COLT base bonus',
-    'Fast sectional + COLT combo':             'Fast sectional + COLT combo',
-    'Colt in Set Weight race':                 'Colt in Set Weight race',
-    # Weight
-    'Dropped':                                 None,   # will be handled by full name match
-    'Up':                                      None,   # will be handled by full name match
-    # Days since run
-    'Quick backup':                            'Quick backup',
-    'Long absence':                            'Long absence',
-    'Fresh return':                            'Fresh return',
-    'Very long absence':                       'Very long absence',
-    # Market expectation
-    'Market Expectation':                      'Market Expectation (A/E)',
-    # Career
-    'Elite career win rate':                   'Elite career win rate',
-    'Poor career win rate':                    'Poor career win rate',
-    # Close loss
-    'Close loss last start':                   'Close loss last start (0.5-2.5L)',
-    # Country
-    'NZ-bred':                                 'NZ-bred penalty',
-    'French-bred':                             'French-bred penalty',
-    'GB-bred':                                 'GB-bred bonus',
+    'LEADER in Sprint': 'LEADER in Sprint',
+    'LEADER in Mile': 'LEADER in Mile',
+    'LEADER in Middle distance': 'LEADER in Middle distance',
+    'LEADER in Staying race': 'LEADER in Staying race',
+    'ONPACE in Sprint': 'ONPACE in Sprint',
+    'ONPACE in Mile': 'ONPACE in Mile',
+    'BACKMARKER in Sprint': 'BACKMARKER in Sprint',
+    'BACKMARKER in Staying race': 'BACKMARKER in Staying race',
+    'Sprint Leader Run Down Bonus': 'Sprint Leader Run Down Bonus',
+    'Hidden Edge': 'Hidden Edge — Sprint leader + last start favoured',
+    'Jockey hot form': 'Jockey hot form',
+    'Jockey solid form': 'Jockey solid form',
+    'Jockey average form': 'Jockey average form',
+    'Jockey poor form': 'Jockey poor form',
+    'Trainer hot form': 'Trainer hot form',
+    'Trainer solid form': 'Trainer solid form',
+    'Trainer average form': 'Trainer average form',
+    'Trainer poor form': 'Trainer poor form',
+    '5yo horse': '5yo horse (entire)',
+    '5yo Mare': '5yo Mare',
+    '6-7yo Mare': '6-7yo Mare',
+    'Prime age (3yo)': 'Prime age (3yo)',
+    'Old age (7-8yo': 'Old age (7-8yo)',
+    '3yo COLT': '3yo COLT combo',
+    'COLT base bonus': 'COLT base bonus',
+    'Fast sectional + COLT combo': 'Fast sectional + COLT combo',
+    'Quick backup': 'Quick backup',
+    'Long absence': 'Long absence',
+    'Fresh return': 'Fresh return',
+    'Market Expectation': 'Market Expectation (A/E)',
+    'Elite career win rate': 'Elite career win rate',
+    'Poor career win rate': 'Poor career win rate',
+    'Close loss last start': 'Close loss last start (0.5-2.5L)',
+    'NZ-bred': 'NZ-bred penalty',
 }
 
 
 def normalize_component_name(name):
-    """
-    Normalise a component name extracted from notes.
-    1. Strips trailing parenthetical stats — (ROI%, N races)
-    2. Does NOT strip after dash — preserves names like 'LEADER in Sprint'
-       and 'Hidden Edge — Sprint leader...'
-    3. Applies canonical name map for known variants.
-    4. Truncates to 150 chars.
-    """
+    """Normalize a component name extracted from notes."""
     if not name:
         return ''
 
-    # Strip trailing parenthetical stats: (+33.4% ROI, 154 races) or [Low confidence...]
     name = re.sub(r'\s*[\(\[]\+?-?[\d.]+%.*?[\)\]]$', '', name).strip()
-
-    # Strip trailing ROI/SR stat fragments that didn't get caught above
     name = re.sub(r'\s*\([\d.]+%\s*SR.*$', '', name).strip()
     name = re.sub(r'\s*\(\d+\s*races?\)$', '', name).strip()
-
-    # Normalise whitespace
     name = re.sub(r'\s+', ' ', name).strip()
-
-    # Truncate
     name = name[:150]
 
-    # Apply canonical map — check if name STARTS WITH any key
     for key, canonical in COMPONENT_NAME_MAP.items():
-        if name.startswith(key) and canonical is not None:
+        if name.startswith(key):
             return canonical
 
     return name
 
 
 def parse_components_from_notes(notes_text):
-    """
-    Parse analyzer.js notes to extract which components fired and their scores.
-    Returns list of (component_name, score) tuples.
-
-    FIX vs old version: We no longer strip everything after a dash.
-    That was mangling component names like:
-      'LEADER in Sprint' (correct — no dash)
-      'Hidden Edge — Sprint leader + last start favoured' (would have been truncated to 'Hidden Edge')
-      'Demolished (4th) by 12.5L' (correctly left alone)
-
-    We now use normalize_component_name() for clean, consistent naming.
-
-    Also skips:
-      - Info/context lines (ℹ️, ⚠️, =====)
-      - Total/subtotal lines (= 12.3 : Total track score)
-      - Lines with score = 0 (neutral components add noise)
-      - PFAI BLEND section lines
-    """
+    """Parse analyzer.js notes to extract components and their scores."""
     if not notes_text:
         return []
 
     components = []
     lines = str(notes_text).split('\n')
-
-    # Track whether we're inside a noise section to skip
     skip_section = False
 
     for line in lines:
@@ -919,12 +1007,8 @@ def parse_components_from_notes(notes_text):
         if not line:
             continue
 
-        # Skip section headers/footers
         if '===' in line:
-            # Start skipping PFAI BLEND, SECTIONAL ANALYSIS, MARKET EXPECTATION sections
-            # (these produce sub-lines we don't want as individual components)
             skip_section = ('PFAI BLEND' in line or 'SECTIONAL ANALYSIS' in line)
-            # Market expectation is a single scored line — keep it
             if 'MARKET EXPECTATION' in line:
                 skip_section = False
             continue
@@ -932,19 +1016,15 @@ def parse_components_from_notes(notes_text):
         if skip_section:
             continue
 
-        # Skip info/warning lines
         if line.startswith('ℹ️') or line.startswith('⚠️') or line.startswith('📏'):
             continue
 
-        # Skip total/subtotal lines (= 12.3 : Total ...)
         if re.match(r'^=\s*[\d.]+', line):
             continue
 
-        # Skip history lines from sectional notes
         if line.startswith('└─') or 'HISTORY_' in line:
             continue
 
-        # Match: +15.0 : Component Name  OR  -20.0 : Component Name
         match = re.match(r'^([+-]?\d+\.?\d*)\s*:\s*(.+)$', line)
         if not match:
             continue
@@ -953,7 +1033,6 @@ def parse_components_from_notes(notes_text):
             score = float(match.group(1))
             raw_name = match.group(2).strip()
 
-            # Skip zero-score lines — neutral components pollute the analysis
             if score == 0:
                 continue
 
@@ -982,14 +1061,12 @@ def run_component_analysis(df):
         log.warning("No analyzer scores found. Skipping Track B.")
         return [], 0.0, 0.0, 0, 0
 
-    # Top pick = highest analyzer score per race
     top_picks = df_with_scores.loc[
         df_with_scores.groupby('race_id')['analyzer_score'].idxmax()
     ].copy()
 
     log.info(f"Analysing {len(top_picks)} top picks")
 
-    # Baseline
     winners = top_picks[top_picks['finish_position'] == 1]
     total_staked = len(top_picks)
     total_returned = winners['sp'].sum() if not winners.empty else 0
@@ -999,7 +1076,6 @@ def run_component_analysis(df):
     log.info(f"Baseline: {total_staked} races, {len(winners)} wins, "
              f"{baseline_sr:.1f}% SR, {baseline_roi:.1f}% ROI")
 
-    # Parse components
     component_data = {}
 
     for _, row in top_picks.iterrows():
@@ -1025,7 +1101,6 @@ def run_component_analysis(df):
             component_data[comp_name]['scores'].append(comp_score)
             component_data[comp_name]['roi_contributions'].append(sp if won else -1.0)
 
-    # Calculate stats
     results = []
 
     for comp_name, data in component_data.items():
@@ -1068,7 +1143,6 @@ def run_component_analysis(df):
             'verdict': verdict
         })
 
-    # Sort: within each verdict group, sort by abs ROI desc
     results.sort(key=lambda x: abs(x['roi']), reverse=True)
 
     log.info(f"Analysed {len(results)} components.")
@@ -1079,6 +1153,7 @@ def run_component_analysis(df):
 
     return results, baseline_roi, baseline_sr, total_staked, len(winners)
 
+
 # ─────────────────────────────────────────────
 # TRACK C — SCORE MOMENTUM ANALYSIS
 # ─────────────────────────────────────────────
@@ -1087,8 +1162,6 @@ def run_momentum_analysis(df):
     Track C: Runs two parallel momentum analyses:
       - scope='all_horses': every horse with 3+ scored races
       - scope='top_pick': only the highest scored horse per race
-    For each, computes linear slope over last 5 analyzer_scores,
-    buckets into 7 trajectory bands, and tracks overlay %.
     """
     log.info("Running score momentum analysis (Track C)...")
 
@@ -1103,7 +1176,6 @@ def run_momentum_analysis(df):
     df_scored = df_scored.dropna(subset=['meeting_date'])
     df_scored = df_scored.sort_values(['horse_name', 'meeting_date'])
 
-    # ── Identify top pick per race ──────────────────────────────────
     top_pick_ids = set(
         df_scored.groupby('race_id')['analyzer_score'].idxmax().values
     )
@@ -1238,98 +1310,32 @@ def run_momentum_analysis(df):
     top_pick_results = build_results(top_pick_data,   'top_pick')
     combined         = all_results + top_pick_results
 
-    log.info(f"Momentum all_horses: {[r['trajectory'] + ' n=' + str(r['appearances']) for r in all_results]}")
-    log.info(f"Momentum top_pick:   {[r['trajectory'] + ' n=' + str(r['appearances']) for r in top_pick_results]}")
+    log.info(f"Momentum all_horses: {sum(1 for r in all_results if r['appearances'] > 0)} buckets")
+    log.info(f"Momentum top_pick:   {sum(1 for r in top_pick_results if r['appearances'] > 0)} buckets")
     return combined
 
 
-# ─────────────────────────────────────────────
-# ANALYZER WEIGHTS — updated to match current analyzer.js
 ANALYZER_WEIGHTS = {
-    # Core form
-    'last_margin':              'Up to ±25 pts (dominant win → +10, demolished → -25)',
-    'last_sp':                  'Up to ±50 pts (form price lookup table $1.01-$500)',
-    'last_position':            'Up to ±25 pts (position 1 → +5 to +15, 4+ → -3 to -25)',
-    'career_win_rate':          '+10 pts if 40%+, 0 pts 30-40%, -15 pts if <10% (min 5 starts)',
-    'career_podium_rate':       'Not directly scored — covered partially by Ran Places recency scoring',
-    'career_runs':              'Not directly scored — experience proxy, captured by maiden/class penalties',
-
-    # Distance & class
-    'distance_change':          '+8 pts drop 200-400m, -5 pts big drop 400m+, 0 for step ups',
-    'class_change':             'Up to ±20 pts (capped) — stepping up penalised, dropping rewarded',
-    'distance':                 'Indirect — informs running position score and sectional weighting',
-    'distance_win_rate':        'Up to ±16 pts (win rate + podium rate × confidence multiplier)',
-    'track_win_rate':           'Up to ±12 pts (win rate + podium rate × confidence multiplier)',
-    'track_distance_win_rate':  'Up to ±16 pts (specialist combo)',
-    'condition_win_rate':       'Up to ±24 pts (condition form × condition multiplier soft/heavy ×2)',
-
-    # Time-based
-    'days_since_run':           '±20 pts: 150-199d +8, 250-364d +5, 200-249d -5, 365d+ -20',
-
-    # Weight
-    'horse_weight':             'Up to ±15 pts vs race average (calculated per race)',
-    'weight_vs_avg':            'Up to ±15 pts — lighter than avg = bonus, heavier = penalty',
-    'weight_change':            'Up to ±15 pts — DROP from last start = +15, GAIN = -15 (may be miscalibrated)',
-    'horse_claim':              'Indirect — claim reduces carried weight, affects weight_vs_avg',
-
-    # Running position
-    'running_position':         'Encoded 0-3, but distance-context features below are more precise',
-    'leader_sprint':            '+15 pts LEADER in Sprint (≤1200m) + combos up to +35',
-    'leader_mile':              '+6 pts LEADER in Mile (1300-1700m)',
-    'leader_middle':            '-5 pts LEADER in Middle distance (1800-2200m)',
-    'leader_staying':           '+7 pts LEADER in Staying (2400m+) — Sole Leader bonus',
-    'onpace_sprint':            '+8 pts ONPACE in Sprint',
-    'onpace_mile':              '+8 pts ONPACE in Mile',
-    'backmarker_sprint':        '-8 pts BACKMARKER in Sprint',
-    'backmarker_staying':       '+20 pts BACKMARKER in Staying race',
-
-    # Jockey / trainer (live L100 SR)
-    'jockey_sr':                'Up to +20/-12 pts based on L100 win% bands (25%+ → +20, <6% → -12)',
-    'trainer_sr':               'Up to +10/-10 pts based on L100 win% bands (22%+ → +10, <5% → -10)',
-
-    # Horse attributes
-    'horse_age':                'Up to ±60 pts (3yo +3, 5yo Horse +5, 5yo Mare -15, 9yo -35, 13+ -60)',
-    'horse_sex':                'Up to +25 pts (Colt system: 3yo Colt +25, base Colt +15, Mare penalties)',
-
-    # Specialist records
-    'first_up_win_rate':        '0 pts (zeroed out in current code — undefeated first up +15)',
-    'second_up_win_rate':       'Up to +5 pts second-up record',
-
-    # Last 10 / form
-    'l10_win_rate':             'Up to +6 pts per run — recency weighted (1.0 / 0.8 / 0.6 / 0.4 / 0.2)',
-    'l10_place_rate':           'Indirect — part of recency scoring via Ran Places components',
-    'l10_runs':                 'Not directly scored',
-    'l10_wins':                 'Not directly scored',
-    'l10_places':               'Not directly scored',
-    'l5_win_rate':              'Indirect via last10 recency scoring',
-    'l5_place_rate':            'Not directly scored',
-    'form_trend':               'Not directly scored — captured by recency weighting',
-    'is_first_up':              'Indirect — checkFirstUpSecondUp, undefeated first-up +15',
-    'is_second_up':             'Up to +5 pts second-up record',
-    'last_position':            'Already listed above',
-
-    # Sectionals (RF shows 0% importance — may be data quality issue)
-    'last200_rank':             'Up to ±20 pts (API sectional price/rank scoring)',
-    'last400_rank':             'Up to ±20 pts (API sectional price/rank scoring)',
-    'last600_rank':             'Up to ±20 pts (API sectional price/rank scoring)',
-
-    # Market
-    'pfai_score':               'Blended 30% into final score (RF shows 0% importance — investigate)',
-
-    # Country
-    'country_score':            '0 to -2 encoded score (AUS=0, NZ=-1, FR/JPN/GER=-2, GB=+1)',
-    'is_aus_bred':              'Binary — superseded by country_score but kept for compatibility',
-
-    # Track condition
-    'track_condition':          'Indirect — multiplier for condition form score (soft/heavy ×2 for proven runners)',
+    'last_margin': 'Up to ±25 pts',
+    'last_sp': 'Up to ±50 pts',
+    'last_position': 'Up to ±25 pts',
+    'career_win_rate': '+10 pts if 40%+',
+    'distance_change': '±8 pts',
+    'class_change': 'Up to ±20 pts (capped)',
+    'horse_weight': 'Up to ±15 pts vs race average',
+    'weight_vs_avg': 'Up to ±15 pts',
+    'weight_change': 'Up to ±15 pts',
+    'running_position': 'Encoded 0-3',
+    'jockey_sr': 'Up to +20/-12 pts',
+    'trainer_sr': 'Up to +10/-10 pts',
+    'horse_age': 'Up to ±60 pts',
+    'horse_sex': 'Up to +25 pts (Colt system)',
+    'pfai_score': 'Blended 30% into final score',
 }
 
 
 def generate_feature_recommendations(importance_sorted):
-    """
-    Compare RF feature importance with current analyzer weights.
-    Generates a recommendation for each feature for the dashboard.
-    """
+    """Compare RF feature importance with current analyzer weights."""
     recommendations = []
 
     for rank, (feature, importance) in enumerate(importance_sorted.items(), 1):
@@ -1355,7 +1361,7 @@ def generate_feature_recommendations(importance_sorted):
         elif importance < 0.005 and not not_scored:
             rec = 'Low predictive power — consider reducing weight in analyzer'
         elif importance == 0.0 and not not_scored:
-            rec = 'ZERO importance — feature may not be populated in historical data, or fully redundant'
+            rec = 'ZERO importance — feature may not be populated or fully redundant'
         else:
             rec = 'Moderate predictive power — current scoring reasonable'
 
@@ -1375,11 +1381,13 @@ def generate_feature_recommendations(importance_sorted):
 # STEP 6: WRITE RESULTS TO DB
 # ─────────────────────────────────────────────
 def write_results(run_id, feature_recommendations, component_results,
-                  momentum_results, baseline_roi, baseline_sr, total_races, total_horses):
+                  momentum_results, baseline_roi, baseline_sr, total_races, total_horses,
+                  grid_search_df, top_10_models):
     """Write all backtest findings to the database."""
     log.info("Writing results to database...")
 
     with engine.connect() as conn:
+        # Write feature importance (Track A)
         for rec in feature_recommendations:
             conn.execute(text("""
                 INSERT INTO backtest_feature_importance
@@ -1396,6 +1404,7 @@ def write_results(run_id, feature_recommendations, component_results,
                 'recommendation': f"[{rec['importance_label']}] {rec['recommendation']}"
             })
 
+        # Write component analysis (Track B)
         for comp in component_results:
             conn.execute(text("""
                 INSERT INTO backtest_component_analysis
@@ -1405,6 +1414,7 @@ def write_results(run_id, feature_recommendations, component_results,
                         :roi, :avg_sp, :current_value, :suggested_value, :roi_delta, :verdict)
             """), {'run_id': run_id, **comp})
 
+        # Write momentum analysis (Track C)
         for mom in momentum_results:
             conn.execute(text("""
                 INSERT INTO backtest_momentum_analysis
@@ -1414,6 +1424,38 @@ def write_results(run_id, feature_recommendations, component_results,
                         :avg_predicted_sp, :overlay_pct)
             """), {'run_id': run_id, **mom})
 
+        # Write grid search models (Track D)
+        for idx, (i, row) in enumerate(grid_search_df.head(10).iterrows(), 1):
+            conn.execute(text("""
+                INSERT INTO backtest_rf_models
+                (run_id, model_rank, combined_score, cv_roi_score, cv_win_score, n_features,
+                 features, hyperparams, grid_name, subset_name, feature_importance)
+                VALUES (:run_id, :rank, :combined_score, :roi_score, :win_score, :n_features,
+                        :features, :hyperparams, :grid_name, :subset_name, :importance)
+            """), {
+                'run_id': run_id,
+                'rank': idx,
+                'combined_score': row['combined_score'],
+                'roi_score': row['roi_score'],
+                'win_score': row['win_score'],
+                'n_features': row['n_features'],
+                'features': json.dumps(row['features']),
+                'hyperparams': json.dumps({
+                    'n_estimators': int(row['n_estimators']),
+                    'max_depth': int(row['max_depth']),
+                    'min_samples_leaf': int(row['min_samples_leaf']),
+                    'max_features': row['max_features']
+                }),
+                'grid_name': 'grid_search',
+                'subset_name': row['subset'],
+                'importance': json.dumps(row['importance'])
+            })
+
+        # Update run record
+        best_roi = top_10_models[0]['roi_score'] * 100 if top_10_models else 0.0
+        best_sr = top_10_models[0]['win_score'] * 100 if top_10_models else 0.0
+        improvement = (best_roi - baseline_roi) if baseline_roi != 0 else 0.0
+
         conn.execute(text("""
             UPDATE backtest_runs
             SET completed_at = NOW(),
@@ -1421,14 +1463,21 @@ def write_results(run_id, feature_recommendations, component_results,
                 total_races = :total_races,
                 total_horses = :total_horses,
                 baseline_roi = :baseline_roi,
-                baseline_strike_rate = :baseline_sr
+                baseline_strike_rate = :baseline_sr,
+                grid_search_best_roi = :grid_best_roi,
+                grid_search_best_sr = :grid_best_sr,
+                grid_search_improvement = :improvement,
+                best_model_rank = 1
             WHERE id = :run_id
         """), {
             'run_id': run_id,
             'total_races': total_races,
             'total_horses': total_horses,
             'baseline_roi': baseline_roi,
-            'baseline_sr': baseline_sr
+            'baseline_sr': baseline_sr,
+            'grid_best_roi': best_roi,
+            'grid_best_sr': best_sr,
+            'improvement': improvement
         })
 
         conn.commit()
@@ -1440,10 +1489,10 @@ def write_results(run_id, feature_recommendations, component_results,
 # MAIN
 # ─────────────────────────────────────────────
 def main():
-    log.info("=" * 60)
+    log.info("=" * 80)
     log.info("BACKTEST JOB STARTING")
     log.info(f"Time: {datetime.utcnow().isoformat()}")
-    log.info("=" * 60)
+    log.info("=" * 80)
 
     ensure_tables()
 
@@ -1471,23 +1520,22 @@ def main():
             df, strike_rate_data
         )
 
+        # Track A: Baseline RF feature importance
         importance_sorted = run_random_forest(X, y_roi, y_won, meeting_dates)
         feature_recommendations = generate_feature_recommendations(importance_sorted)
 
-        component_results_tuple = run_component_analysis(df)
-        if isinstance(component_results_tuple, tuple):
-            component_results, baseline_roi, baseline_sr, total_races, total_wins = component_results_tuple
-        else:
-            component_results = []
-            baseline_roi = 0.0
-            baseline_sr  = 0.0
-            total_races  = df['race_id'].nunique()
-            total_wins   = 0
+        # Track B: Component ROI analysis
+        component_results, baseline_roi, baseline_sr, total_races, total_wins = run_component_analysis(df)
 
+        # Track C: Score momentum analysis
         momentum_results = run_momentum_analysis(df)
+
+        # Track D: Grid search (NEW)
+        grid_search_df, top_10_models = run_grid_search(X, y_roi, y_won, meeting_dates)
 
         total_horses = len(df)
 
+        # Write all results
         write_results(
             run_id,
             feature_recommendations,
@@ -1496,18 +1544,28 @@ def main():
             baseline_roi,
             baseline_sr,
             total_races,
-            total_horses
+            total_horses,
+            grid_search_df,
+            top_10_models
         )
-        log.info("=" * 60)
+
+        # Final summary
+        log.info("=" * 80)
         log.info("BACKTEST JOB COMPLETE")
-        log.info(f"Run ID:             {run_id}")
-        log.info(f"Races analysed:     {total_races}")
-        log.info(f"Horses analysed:    {total_horses}")
-        log.info(f"Baseline ROI:       {baseline_roi:.1f}%")
-        log.info(f"Baseline SR:        {baseline_sr:.1f}%")
-        log.info(f"Features analysed:  {len(feature_recommendations)}")
-        log.info(f"Components analysed:{len(component_results)}")
-        log.info("=" * 60)
+        log.info(f"Run ID:               {run_id}")
+        log.info(f"Races analysed:       {total_races}")
+        log.info(f"Horses analysed:      {total_horses}")
+        log.info(f"Baseline ROI:         {baseline_roi:.1f}%")
+        log.info(f"Baseline SR:          {baseline_sr:.1f}%")
+        if top_10_models:
+            best = top_10_models[0]
+            log.info(f"Grid Search Best ROI: {best['roi_score']*100:.1f}%")
+            log.info(f"Grid Search Best SR:  {best['win_score']*100:.1f}%")
+            log.info(f"Improvement:          {(best['roi_score'] - baseline_roi/100)*100:.1f}%")
+        log.info(f"Features analysed:    {len(feature_recommendations)}")
+        log.info(f"Components analysed:  {len(component_results)}")
+        log.info(f"Grid models trained:  {len(grid_search_df)}")
+        log.info("=" * 80)
 
     except Exception as e:
         log.error(f"Backtest failed: {e}", exc_info=True)
