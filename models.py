@@ -116,7 +116,8 @@ class Prediction(db.Model):
     notes = db.Column(db.Text)
     calculated_at = db.Column(db.DateTime, default=datetime.utcnow)
     best_bet_flagged_at = db.Column(db.DateTime, nullable=True)  # NEW: Track when this appeared on Best Bets
-    
+    ml_score = db.Column(db.Float, nullable=True)
+
     def __repr__(self):
         return f'<Prediction {self.horse_id}: {self.score}>'
         
