@@ -930,6 +930,14 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
             'pkl_file': pkl_file
         })
 
+    # Save rank #1 model with a stable filename for easy loading
+    if top_10_models:
+        best_pkl = top_10_models[0]['pkl_file']
+        stable_path = os.path.join(output_dir, 'form_analyst_best.pkl')
+        import shutil
+        shutil.copy2(best_pkl, stable_path)
+        log.info(f"  Best model also saved as: {stable_path}")
+
     return results_df, top_10_models
 
 
@@ -1105,7 +1113,7 @@ def run_component_analysis(df):
 
     for comp_name, data in component_data.items():
         appearances = data['appearances']
-        if appearances < 5:
+        if appearances < 50:  # Minimum 50 appearances for statistical significance
             continue
 
         wins = data['wins']
