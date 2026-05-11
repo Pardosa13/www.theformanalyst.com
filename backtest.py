@@ -899,7 +899,7 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
 
     # Save top 10 models as .pkl files
     log.info("\nSaving top 10 models as .pkl files...")
-    output_dir = '/mnt/user-data/outputs'
+    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
     os.makedirs(output_dir, exist_ok=True)
 
     top_10_models = []
