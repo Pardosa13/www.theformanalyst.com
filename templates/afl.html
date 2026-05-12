@@ -813,6 +813,39 @@
     </div>
   </div>
 
+  <div class="afl-card" style="margin-top:16px;">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-activity"></i> Model Tracker &amp; Results</h4>
+      <span style="font-size:11px;color:var(--text-muted);">Forward-tracked official selections · settled automatically from player stats</span>
+    </div>
+    <div class="afl-card-body">
+      <div id="vfPerfSummary" class="vf-results-meta">Loading tracked performance…</div>
+      <div class="scroll-x">
+        <table class="value-table">
+          <thead>
+            <tr>
+              <th>Date</th><th>Player</th><th>Market</th><th>Pick</th><th>Odds</th><th>Edge</th><th>Result</th><th>P/L (u)</th>
+            </tr>
+          </thead>
+          <tbody id="vfTrackerRows">
+            <tr><td colspan="8" style="padding:14px;color:var(--text-muted);">Loading selection history…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="afl-card" style="margin-top:16px;">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-cpu"></i> Command Centre</h4>
+      <span style="font-size:11px;color:var(--text-muted);">Data readiness and matchup intelligence</span>
+    </div>
+    <div class="afl-card-body">
+      <div id="commandCentreSummary" class="vf-results-meta">Loading command centre…</div>
+      <div id="matchupIntelWrap" class="scroll-x"></div>
+    </div>
+  </div>
+
   <!-- ── Disposal Lines Analysis (no odds needed) ─────────────── -->
   <div class="afl-card" style="margin-top:16px;display:none;">
     <div class="afl-card-header">
@@ -1158,6 +1191,8 @@ function switchTab(name, btn) {
     } else {
       loadValueFinder();
     }
+    loadModelTracker();
+    loadCommandCentre();
   }
   if (name === 'predictions') {
     loadBettingEdges();
@@ -1192,14 +1227,22 @@ function loadMatchPredictions() {
         return;
       }
       const roundLabel = data.round ? `Round ${data.round}` : '';
-      el.innerHTML = `${roundLabel ? `<p style="margin-bottom:6px;font-weight:600;">${esc(roundLabel)} — Algorithm Selections</p>` : ''}<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Pred Margin</th><th>Pred Winner</th><th>Actual Margin</th></tr></thead><tbody>${
+      const perf = data.model_performance || {};
+      const perfHtml = perf.sample
+        ? `<div class="vf-results-meta" style="margin-bottom:8px;">
+             Model context: <strong>${safeNum(perf.winner_accuracy, 0).toFixed(1)}%</strong> winner accuracy ·
+             MAE <strong>${safeNum(perf.mae_margin, 0).toFixed(1)}</strong> points (${perf.sample} graded games)
+           </div>`
+        : '';
+      el.innerHTML = `${roundLabel ? `<p style="margin-bottom:6px;font-weight:600;">${esc(roundLabel)} — Algorithm Selections</p>` : ''}${perfHtml}<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Pred Margin</th><th>Pred Winner</th><th>Home Win %</th><th>Fair Odds (H/A)</th><th>Confidence</th><th>Actual Margin</th></tr></thead><tbody>${
         rows.slice(0, 80).map(r => {
           const actualCell = r.actual_margin != null ? (() => {
             const correct = (r.predicted_winner === r.home_team && r.actual_margin > 0) || (r.predicted_winner === r.away_team && r.actual_margin < 0);
             const col = correct ? '#34d399' : '#f87171';
             return `<span style="font-family:'DM Mono',monospace;font-weight:700;color:${col};">${Math.abs(safeNum(r.actual_margin))}</span> <span style="font-size:10px;color:${col};">${correct ? '✓' : '✗'}</span>`;
           })() : '—';
-          return `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${r.predicted_margin != null ? Math.abs(safeNum(r.predicted_margin)).toFixed(1) : '—'}</td><td>${esc(r.predicted_winner || '—')}</td><td>${actualCell}</td></tr>`;
+          const confCls = r.confidence_tier === 'high' ? 'pos' : r.confidence_tier === 'medium' ? 'neu' : 'neg';
+          return `<tr><td>${esc(r.home_team)} vs ${esc(r.away_team)}</td><td>${r.predicted_margin != null ? Math.abs(safeNum(r.predicted_margin)).toFixed(1) : '—'}</td><td>${esc(r.predicted_winner || '—')}</td><td>${r.home_win_prob != null ? safeNum(r.home_win_prob).toFixed(1) + '%' : '—'}</td><td>${r.fair_home_odds != null ? safeNum(r.fair_home_odds).toFixed(2) : '—'} / ${r.fair_away_odds != null ? safeNum(r.fair_away_odds).toFixed(2) : '—'}</td><td><span class="edge-chip ${confCls}">${esc(r.confidence_tier || 'low')}</span></td><td>${actualCell}</td></tr>`;
         }).join('')
       }</tbody></table></div>`;
     })
@@ -2302,9 +2345,13 @@ function _vfRenderTable(rows, data) {
     `;
   }).join('');
 
+  const perf = data?.model_performance || {};
+  const perfLine = perf.total_bets
+    ? ` · tracked: ${esc(String(perf.total_bets))} · SR ${safeNum(perf.strike_rate, 0).toFixed(1)}% · ROI ${safeNum(perf.roi, 0).toFixed(1)}%`
+    : '';
   return `
     <div class="vf-results-meta">
-      ${esc(String(rows.length))} result(s) · <strong>${esc(mktLabel)}</strong> · min edge: ${esc(String(minEdge))}% · season: ${esc(String(season))}
+      ${esc(String(rows.length))} result(s) · <strong>${esc(mktLabel)}</strong> · min edge: ${esc(String(minEdge))}% · season: ${esc(String(season))}${perfLine}
     </div>
     <div class="vf-cards-grid">${cards}</div>
   `;
@@ -2421,12 +2468,107 @@ function loadValueFinder() {
             count: _vfGetBets(data).length,
           });
           _vfApplyFilters(data);
+          loadModelTracker();
+          loadCommandCentre();
         });
     })
     .catch(() => {
       el.innerHTML = '<div class="prop-empty">Error loading value finder</div>';
     });
 }
+
+function loadModelTracker() {
+  const summaryEl = document.getElementById('vfPerfSummary');
+  const rowsEl = document.getElementById('vfTrackerRows');
+  if (!summaryEl || !rowsEl) return;
+
+  fetch(`/api/afl/model-performance?year={{ year }}`)
+    .then(r => r.json())
+    .then(data => {
+      const s = data.summary || {};
+      const sr = s.total_bets ? `${safeNum(s.strike_rate, 0).toFixed(1)}%` : '—';
+      const roi = s.total_bets ? `${safeNum(s.roi, 0).toFixed(1)}%` : '—';
+      summaryEl.innerHTML = `
+        Tracked performance: <strong>${s.total_bets || 0}</strong> settled picks ·
+        W-L-P <strong>${s.wins || 0}-${s.losses || 0}-${s.pushes || 0}</strong> ·
+        Strike <strong>${sr}</strong> ·
+        Profit <strong>${safeNum(s.total_profit, 0).toFixed(2)}u</strong> ·
+        ROI <strong>${roi}</strong>
+      `;
+    })
+    .catch(() => { summaryEl.textContent = 'Performance unavailable.'; });
+
+  fetch(`/api/afl/model-selections?year={{ year }}&status=all&limit=120`)
+    .then(r => r.json())
+    .then(data => {
+      const rows = data.rows || [];
+      if (!rows.length) {
+        rowsEl.innerHTML = '<tr><td colspan="8" style="padding:14px;color:var(--text-muted);">No tracked selections yet.</td></tr>';
+        return;
+      }
+      rowsEl.innerHTML = rows.slice(0, 80).map(r => {
+        const res = (r.result || 'pending').toLowerCase();
+        const resCls = res === 'win' ? 'pos' : res === 'loss' ? 'neg' : 'neu';
+        const dt = r.commence_time ? String(r.commence_time).slice(0, 16).replace('T', ' ') : '—';
+        return `<tr>
+          <td>${esc(dt)}</td>
+          <td>${esc(r.player_name || '—')}</td>
+          <td>${esc((r.market || '').replace('player_', '').replace(/_/g, ' '))}</td>
+          <td>${esc(r.line_type || '—')} ${safeNum(r.line, 0)}</td>
+          <td>${r.odds != null ? safeNum(r.odds, 0).toFixed(2) : '—'}</td>
+          <td>${r.edge != null ? safeNum(r.edge, 0).toFixed(1) + '%' : '—'}</td>
+          <td><span class="edge-chip ${resCls}">${esc(res)}</span></td>
+          <td>${r.profit_units != null ? safeNum(r.profit_units, 0).toFixed(2) : '—'}</td>
+        </tr>`;
+      }).join('');
+    })
+    .catch(() => {
+      rowsEl.innerHTML = '<tr><td colspan="8" style="padding:14px;color:var(--danger);">Failed to load tracked selections.</td></tr>';
+    });
+}
+
+function loadCommandCentre() {
+  const summaryEl = document.getElementById('commandCentreSummary');
+  const matchupEl = document.getElementById('matchupIntelWrap');
+  if (!summaryEl || !matchupEl) return;
+
+  fetch(`/api/afl/command-centre?year={{ year }}`)
+    .then(r => r.json())
+    .then(data => {
+      const r = data.readiness || {};
+      summaryEl.innerHTML = `
+        Readiness · Stats rows (2022+): <strong>${safeNum(r.stats, 0).toLocaleString()}</strong> ·
+        Props 24h: <strong>${safeNum(r.props_24h, 0).toLocaleString()}</strong> ·
+        Pending tracked picks: <strong>${safeNum(r.pending_selections, 0).toLocaleString()}</strong>
+      `;
+    })
+    .catch(() => { summaryEl.textContent = 'Command centre unavailable.'; });
+
+  fetch(`/api/afl/matchup-intel?year={{ year }}`)
+    .then(r => r.json())
+    .then(data => {
+      const rows = data.rows || [];
+      if (!rows.length) {
+        matchupEl.innerHTML = '<div class="vf-results-meta">No matchup intelligence available yet.</div>';
+        return;
+      }
+      matchupEl.innerHTML = `<table class="value-table"><thead>
+        <tr><th>Matchup</th><th>Tracked Picks</th><th>Avg Edge</th><th>Avg Confidence</th><th>Top Edge</th></tr>
+      </thead><tbody>
+      ${rows.map(r => `<tr>
+        <td>${esc(r.home_team || '—')} vs ${esc(r.away_team || '—')}</td>
+        <td>${safeNum(r.picks, 0)}</td>
+        <td>${safeNum(r.avg_edge, 0).toFixed(2)}%</td>
+        <td>${safeNum(r.avg_confidence, 0).toFixed(1)}</td>
+        <td>${safeNum(r.top_edge, 0).toFixed(2)}%</td>
+      </tr>`).join('')}
+      </tbody></table>`;
+    })
+    .catch(() => {
+      matchupEl.innerHTML = '<div class="vf-results-meta" style="color:var(--danger);">Failed to load matchup intelligence.</div>';
+    });
+}
+
 function loadDisposalLines() {
   const el = document.getElementById('disposalLinesResults');
   if (!el) return;

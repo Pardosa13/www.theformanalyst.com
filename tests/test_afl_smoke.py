@@ -1333,6 +1333,80 @@ def test_betting_edges_sql_normalises_team_names():
             f"api_afl_betting_edges SQL CASE is missing a normalisation entry for {squiggle_raw!r}."
         )
 
+
+def test_model_selections_table_exists_in_schema():
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+    assert "CREATE TABLE IF NOT EXISTS afl_model_selections" in source
+    assert "snapshot_key" in source
+    assert "profit_units" in source
+
+
+def test_sync_runs_model_snapshot_and_settlement():
+    sync_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_sync.py",
+    )
+    with open(sync_path, encoding="utf-8") as f:
+        source = f.read()
+    assert "snapshot_model_selections_from_props" in source
+    assert "settle_model_selections" in source
+
+
+def test_routes_expose_model_tracker_endpoints():
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+    for route in (
+        "/api/afl/model-selections",
+        "/api/afl/model-performance",
+        "/api/afl/command-centre",
+        "/api/afl/matchup-intel",
+    ):
+        assert route in source
+
+
+def test_match_predictions_include_probability_context():
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+    fn_start = source.find("def api_afl_match_predictions(")
+    assert fn_start != -1
+    fn_end = source.find("\n    @app.route(", fn_start + 1)
+    fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
+    assert "home_win_prob" in fn_body
+    assert "fair_home_odds" in fn_body
+    assert "confidence_tier" in fn_body
+
+
+def test_template_has_model_tracker_and_command_centre_panels():
+    template_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "templates",
+        "afl.html",
+    )
+    with open(template_path, encoding="utf-8") as f:
+        source = f.read()
+    for marker in (
+        "id=\"vfPerfSummary\"",
+        "id=\"vfTrackerRows\"",
+        "id=\"commandCentreSummary\"",
+        "id=\"matchupIntelWrap\"",
+        "function loadModelTracker(",
+        "function loadCommandCentre(",
+    ):
+        assert marker in source
+
 # ---------------------------------------------------------------------------
 # Josh Rachele vs Richmond – opponent average consistency
 # ---------------------------------------------------------------------------
