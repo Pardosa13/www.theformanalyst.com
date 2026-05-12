@@ -896,6 +896,7 @@ def register_afl_routes(app, db):
             reverse=True,
         )
 
+        # Keep "watch" recommendations in UI transparency; track only "value" picks.
         official = [
             b for b in value_bets
             if b.get("recommendation") == "value"
@@ -949,8 +950,6 @@ def register_afl_routes(app, db):
                 }
             )
         tracked_count = upsert_model_selections(db, selection_rows) if selection_rows else 0
-        settled_count = settle_model_selections(db)
-
         return jsonify(
             {
                 "market": market,
@@ -963,7 +962,7 @@ def register_afl_routes(app, db):
                 "count": len(value_bets),
                 "official_count": len(official),
                 "tracked_count": tracked_count,
-                "settled_count": settled_count,
+                "settled_count": 0,
                 "model_performance": _db_model_performance_summary(db, season=effective_season),
             }
         )
@@ -1865,6 +1864,7 @@ def register_afl_routes(app, db):
 
         # Scale factor: calibrated from 1,481 historical games (avg raw=137.2 / avg actual=30.9).
         _RATING_TO_POINTS_SCALE = 4.44
+        # 35-point logistic scale gives calibrated AFL win probabilities from predicted margins.
         _LOGISTIC_SCALE_POINTS = 35.0
 
         out = []

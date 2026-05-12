@@ -2486,12 +2486,14 @@ function loadModelTracker() {
     .then(r => r.json())
     .then(data => {
       const s = data.summary || {};
+      const sr = s.total_bets ? `${safeNum(s.strike_rate, 0).toFixed(1)}%` : '—';
+      const roi = s.total_bets ? `${safeNum(s.roi, 0).toFixed(1)}%` : '—';
       summaryEl.innerHTML = `
         Tracked performance: <strong>${s.total_bets || 0}</strong> settled picks ·
         W-L-P <strong>${s.wins || 0}-${s.losses || 0}-${s.pushes || 0}</strong> ·
-        Strike <strong>${safeNum(s.strike_rate, 0).toFixed(1)}%</strong> ·
+        Strike <strong>${sr}</strong> ·
         Profit <strong>${safeNum(s.total_profit, 0).toFixed(2)}u</strong> ·
-        ROI <strong>${safeNum(s.roi, 0).toFixed(1)}%</strong>
+        ROI <strong>${roi}</strong>
       `;
     })
     .catch(() => { summaryEl.textContent = 'Performance unavailable.'; });

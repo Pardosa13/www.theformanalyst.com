@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import math
 import re
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
@@ -1278,6 +1277,10 @@ def snapshot_model_selections_from_props(
 ) -> int:
     """Create official, deduped model selections from recent prop lines."""
     from afl_data import calculate_market_edge, _normalise_prop_market, _normalise_team_name
+    BASE_CONFIDENCE = 40.0
+    SEASON_GAME_WEIGHT = 1.6
+    EDGE_WEIGHT = 2.2
+    OPPONENT_SAMPLE_BONUS = 6.0
 
     market_to_stat = {
         "player_disposals": "disposals",
@@ -1388,7 +1391,10 @@ def snapshot_model_selections_from_props(
         implied_prob = edge_data.get("implied_prob")
         confidence = max(0.0, min(
             100.0,
-            40.0 + min(len(season_rows), 25) * 1.6 + min(abs(edge), 12.0) * 2.2 + (6.0 if len(opp_rows) >= 3 else 0.0),
+            BASE_CONFIDENCE
+            + min(len(season_rows), 25) * SEASON_GAME_WEIGHT
+            + min(abs(edge), 12.0) * EDGE_WEIGHT
+            + (OPPONENT_SAMPLE_BONUS if len(opp_rows) >= 3 else 0.0),
         ))
         if abs(edge) < min_edge or confidence < min_confidence:
             continue
@@ -1469,7 +1475,7 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
         FROM afl_model_selections
         WHERE COALESCE(result, 'pending') = 'pending'
           AND commence_time IS NOT NULL
-          AND commence_time <= NOW() - (:hours || ' hours')::INTERVAL
+          AND commence_time <= NOW() - make_interval(hours => :hours)
         ORDER BY commence_time ASC
         LIMIT 1000
     """)
@@ -1536,7 +1542,7 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
             odds = float(row.get("odds") or 0)
             line_type = _s(row.get("line_type"))
 
-            if math.isclose(actual_stat, line, abs_tol=1e-9):
+            if actual_stat == line:
                 result, profit = "push", 0.0
             elif line_type == "Over":
                 result, profit = ("win", round(max(odds - 1.0, 0.0), 3)) if actual_stat > line else ("loss", -1.0)
