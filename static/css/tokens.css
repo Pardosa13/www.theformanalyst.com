@@ -1,0 +1,95 @@
+:root {
+  /* Brand */
+  --brand-primary: #667eea;
+  --brand-secondary: #764ba2;
+  --brand-glow: rgba(102, 126, 234, 0.25);
+
+  /* Surfaces */
+  --surface-page: #09090f;
+  --surface-card: #111118;
+  --surface-card-raised: #18181f;
+  --surface-control: #1e1e28;
+  --surface-critical: rgba(239, 68, 68, 0.12);
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Text */
+  --text-primary: #f0f0f5;
+  --text-secondary: #9090a8;
+  --text-tertiary: #55556a;
+  --text-inverse: #ffffff;
+
+  /* Intent */
+  --intent-positive: #10b981;
+  --intent-negative: #ef4444;
+  --intent-warning: #f59e0b;
+  --intent-info: #3b82f6;
+  --intent-model: #8b5cf6;
+  --intent-market: #06b6d4;
+  --intent-edge: #22c55e;
+  --intent-action: #667eea;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
+
+  /* Shadows / elevation */
+  --shadow-1: 0 2px 12px rgba(0, 0, 0, 0.28);
+  --shadow-2: 0 6px 24px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 12px 36px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 4px 20px var(--brand-glow);
+
+  /* Motion */
+  --motion-fast: 0.15s;
+  --motion-base: 0.25s;
+
+  /* Z-index */
+  --z-shell: 100;
+  --z-chat-toggle: 1000;
+  --z-chat-panel: 1001;
+  --z-modal: 1100;
+
+  /* Backward-compatible aliases used across existing templates */
+  --accent: var(--brand-primary);
+  --accent-2: var(--brand-secondary);
+  --accent-glow: var(--brand-glow);
+
+  --bg-base: var(--surface-page);
+  --bg-surface: var(--surface-card);
+  --bg-elevated: var(--surface-card-raised);
+  --bg-hover: var(--surface-control);
+
+  --border-mid: rgba(255, 255, 255, 0.10);
+  --border-accent: rgba(102, 126, 234, 0.35);
+
+  --text-muted: var(--text-tertiary);
+
+  --success: var(--intent-positive);
+  --warning: var(--intent-warning);
+  --danger: var(--intent-negative);
+  --info: var(--intent-info);
+
+  --primary-color: var(--brand-primary);
+  --secondary-color: var(--brand-secondary);
+  --accent-color: var(--brand-primary);
+  --success-color: var(--intent-positive);
+  --warning-color: var(--intent-warning);
+  --danger-color: var(--intent-negative);
+  --light-bg: var(--surface-card-raised);
+  --card-shadow: var(--shadow-1);
+}

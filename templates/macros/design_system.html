@@ -1,0 +1,105 @@
+{% macro page_header(title, description='', eyebrow='', primary_action=None, secondary_actions=None, status_chips=None) -%}
+<div class="ds-page-header">
+  <div class="ds-page-header__content">
+    {% if eyebrow %}<p class="ds-page-header__eyebrow">{{ eyebrow }}</p>{% endif %}
+    <h1 class="ds-page-header__title">{{ title }}</h1>
+    {% if description %}<p class="ds-page-header__description">{{ description }}</p>{% endif %}
+  </div>
+
+  <div class="d-flex flex-column align-items-lg-end gap-2">
+    {% if primary_action or (secondary_actions and secondary_actions|length) %}
+    <div class="ds-page-header__actions">
+      {% if primary_action %}
+      <a href="{{ primary_action.href }}" class="btn btn-primary">
+        {% if primary_action.icon %}<i class="{{ primary_action.icon }}"></i>{% endif %}
+        {{ primary_action.label }}
+      </a>
+      {% endif %}
+      {% if secondary_actions %}
+        {% for action in secondary_actions %}
+        <a href="{{ action.href }}" class="btn btn-secondary btn-sm">
+          {% if action.icon %}<i class="{{ action.icon }}"></i>{% endif %}
+          {{ action.label }}
+        </a>
+        {% endfor %}
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if status_chips %}
+    <div class="ds-page-header__status">
+      {% for chip in status_chips %}
+      <span class="ds-chip ds-chip--{{ chip.intent|default('info') }}">
+        {% if chip.dot %}<span class="ds-chip__dot"></span>{% endif %}
+        {{ chip.label }}
+      </span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{%- endmacro %}
+
+{% macro betting_decision_card(selection, context, confidence='', model_price='', market_price='', edge='', risk_flags=None, evidence=None, action=None, badge=None) -%}
+<div class="ds-decision-card">
+  <div class="ds-decision-card__header">
+    <div>
+      <h3 class="ds-decision-card__title">{{ selection }}</h3>
+      <p class="ds-decision-card__meta">{{ context }}</p>
+    </div>
+    {% if badge %}
+    <span class="ds-chip ds-chip--{{ badge.intent|default('info') }}">{{ badge.label }}</span>
+    {% endif %}
+  </div>
+
+  <div class="ds-decision-card__body">
+    <div class="ds-decision-metrics">
+      <div class="ds-decision-metric">
+        <p class="ds-decision-metric__label">Confidence</p>
+        <p class="ds-decision-metric__value">{{ confidence if confidence else '—' }}</p>
+      </div>
+      <div class="ds-decision-metric">
+        <p class="ds-decision-metric__label">Model Price</p>
+        <p class="ds-decision-metric__value">{{ model_price if model_price else '—' }}</p>
+      </div>
+      <div class="ds-decision-metric">
+        <p class="ds-decision-metric__label">Market Price</p>
+        <p class="ds-decision-metric__value">{{ market_price if market_price else '—' }}</p>
+      </div>
+      <div class="ds-decision-metric">
+        <p class="ds-decision-metric__label">Edge</p>
+        <p class="ds-decision-metric__value">{{ edge if edge else '—' }}</p>
+      </div>
+    </div>
+
+    <div class="ds-decision-card__row">
+      {% if risk_flags %}
+      <div class="ds-list-panel">
+        <p class="ds-list-panel__title">Risk Flags</p>
+        <ul>
+          {% for risk in risk_flags %}<li>{{ risk }}</li>{% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      {% if evidence %}
+      <div class="ds-list-panel">
+        <p class="ds-list-panel__title">Evidence Summary</p>
+        <ul>
+          {% for item in evidence %}<li>{{ item }}</li>{% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if action %}
+    <div class="mt-3">
+      <a href="{{ action.href }}" class="btn btn-primary btn-sm">
+        {% if action.icon %}<i class="{{ action.icon }}"></i>{% endif %}
+        {{ action.label }}
+      </a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{%- endmacro %}

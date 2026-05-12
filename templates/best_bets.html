@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}Best Bets - The Form Analyst{% endblock %}
 
@@ -501,10 +502,11 @@
 </style>
 
 <!-- Page header -->
-<div class="bets-header">
-  <h2>🔥 Today's Best Bets</h2>
-  <p>Horses matching active positive ROI components — including non-top-pick component signals</p>
-</div>
+{{ ui.page_header(
+  eyebrow='Racing Intelligence',
+  title="🔥 Today's Best Bets",
+  description='Horses matching active positive ROI components — including non-top-pick component signals'
+) }}
 
 <!-- Stat tiles -->
 <div class="stat-row">
@@ -618,6 +620,49 @@
     {% endfor %}
   </div>
 </div>
+
+{% if total_bets > 0 %}
+{% set preview = namespace(bet=None, meeting_name='', race_number='') %}
+{% set decision_card_defaults = {
+  'gap_confidence_threshold': 30,
+  'risk_non_top_pick': 'Non-top pick signal',
+  'risk_market_drift': 'Monitor market drift',
+  'risk_small_gap': 'Small gap risk',
+  'risk_gap_confirmed': 'Gap strength confirmed'
+} %}
+{% for meeting_name, meeting_data in meetings_with_bets.items() if preview.bet is none %}
+  {% for race_num, race_data in meeting_data.races.items()|sort %}
+    {% if preview.bet is none %}
+    {% set race_bets = race_data.horses|sort(attribute='rank_in_race') %}
+    {% if race_bets %}
+      {% set preview.bet = race_bets[0] %}
+      {% set preview.meeting_name = meeting_data.meeting_name %}
+      {% set preview.race_number = race_data.race_number %}
+    {% endif %}
+    {% endif %}
+  {% endfor %}
+{% endfor %}
+
+{% if preview.bet %}
+{% set primary_risk_flag = decision_card_defaults.risk_non_top_pick if not preview.bet.is_top_pick else decision_card_defaults.risk_market_drift %}
+{% set gap_risk_flag = decision_card_defaults.risk_small_gap if preview.bet.score_gap < decision_card_defaults.gap_confidence_threshold else decision_card_defaults.risk_gap_confirmed %}
+{{ ui.betting_decision_card(
+  selection=preview.bet.horse_name,
+  context=preview.meeting_name ~ ' · Race ' ~ preview.race_number,
+  confidence=('High' if preview.bet.high_confidence else 'Standard'),
+  model_price=preview.bet.predicted_odds,
+  market_price='—',
+  edge=((preview.bet.score_gap|round(1)) ~ ' pts'),
+  risk_flags=[primary_risk_flag, gap_risk_flag],
+  evidence=[
+    ('Score ' ~ (preview.bet.score|round(1))),
+    ('Win probability ' ~ preview.bet.win_probability),
+    ('Components matched: ' ~ preview.bet.component_count)
+  ],
+  badge={'label': ('TOP PICK' if preview.bet.is_top_pick else 'SIGNAL'), 'intent': ('positive' if preview.bet.is_top_pick else 'warning')}
+) }}
+{% endif %}
+{% endif %}
 
 <!-- Best bets / empty state -->
 {% if total_bets == 0 %}

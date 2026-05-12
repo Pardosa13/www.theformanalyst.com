@@ -1,5 +1,6 @@
 
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}Dashboard - The Form Analyst{% endblock %}
 
@@ -333,16 +334,12 @@
 </style>
 
 <!-- Page header -->
-<div class="dash-header">
-  <div>
-    <h1>Racing Analysis Dashboard</h1>
-    <p>THE FORM ANALYST · PARTINGTON PROBABILITY ENGINE</p>
-  </div>
-  <div class="live-badge">
-    <div class="live-dot"></div>
-    PPE v2 Active
-  </div>
-</div>
+{{ ui.page_header(
+  eyebrow='Racing Module',
+  title='Racing Analysis Dashboard',
+  description='THE FORM ANALYST · PARTINGTON PROBABILITY ENGINE',
+  status_chips=[{'label': 'PPE v2 Active', 'intent': 'live', 'dot': true}]
+) }}
 
 <!-- Stat strip -->
 <div class="stat-strip">
