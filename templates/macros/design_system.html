@@ -1,8 +1,8 @@
-{% macro page_header(title, description='', eyebrow='', primary_action=None, secondary_actions=None, status_chips=None) -%}
-<div class="ds-page-header">
+{% macro page_header(title, description='', eyebrow='', primary_action=None, secondary_actions=None, status_chips=None, heading_level='h1', id_prefix='page-header') -%}
+<header class="ds-page-header" role="banner" aria-labelledby="{{ id_prefix }}-title">
   <div class="ds-page-header__content">
     {% if eyebrow %}<p class="ds-page-header__eyebrow">{{ eyebrow }}</p>{% endif %}
-    <h1 class="ds-page-header__title">{{ title }}</h1>
+    <{{ heading_level }} class="ds-page-header__title" id="{{ id_prefix }}-title">{{ title }}</{{ heading_level }}>
     {% if description %}<p class="ds-page-header__description">{{ description }}</p>{% endif %}
   </div>
 
@@ -37,14 +37,14 @@
     </div>
     {% endif %}
   </div>
-</div>
+</header>
 {%- endmacro %}
 
-{% macro betting_decision_card(selection, context, confidence='', model_price='', market_price='', edge='', risk_flags=None, evidence=None, action=None, badge=None) -%}
-<div class="ds-decision-card">
+{% macro betting_decision_card(selection, context, confidence='', model_price='', market_price='', edge='', risk_flags=None, evidence=None, action=None, badge=None, aria_label='Betting decision card') -%}
+<section class="ds-decision-card" role="region" aria-label="{{ aria_label }}">
   <div class="ds-decision-card__header">
     <div>
-      <h3 class="ds-decision-card__title">{{ selection }}</h3>
+      <h2 class="ds-decision-card__title">{{ selection }}</h2>
       <p class="ds-decision-card__meta">{{ context }}</p>
     </div>
     {% if badge %}
@@ -101,5 +101,23 @@
     </div>
     {% endif %}
   </div>
-</div>
+</section>
+{%- endmacro %}
+
+{% macro state_panel(state='empty', title='No data available', description='', action=None, aria_live='polite') -%}
+<section class="ds-state ds-state--{{ state }}" role="status" aria-live="{{ aria_live }}">
+  <div class="ds-state__icon" aria-hidden="true">
+    {% if state == 'loading' %}⏳{% elif state == 'error' %}⚠️{% else %}📭{% endif %}
+  </div>
+  <div class="ds-state__content">
+    <h3 class="ds-state__title">{{ title }}</h3>
+    {% if description %}<p class="ds-state__description">{{ description }}</p>{% endif %}
+    {% if action %}
+    <a href="{{ action.href }}" class="btn btn-secondary btn-sm">
+      {% if action.icon %}<i class="{{ action.icon }}"></i>{% endif %}
+      {{ action.label }}
+    </a>
+    {% endif %}
+  </div>
+</section>
 {%- endmacro %}

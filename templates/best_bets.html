@@ -666,18 +666,14 @@
 
 <!-- Best bets / empty state -->
 {% if total_bets == 0 %}
-<div class="no-bets-alert">
-  <h4>No Signals Found</h4>
-  <p>No horses in the last {{ hours_back }} hours match your active positive ROI components{% if mode == 'top_pick' %} as top pick{% elif mode == 'non_top_pick' %} as non-top-pick signals{% endif %}.</p>
-  <p style="margin-bottom:4px;">Try:</p>
-  <ul>
-    <li>Uploading a new meeting</li>
-    <li>Increasing the time window</li>
-    <li>Switching mode to "All Signals"</li>
-    <li>Activating more components in the Admin panel</li>
-    <li>Lowering the minimum score filter</li>
-  </ul>
-</div>
+{% set mode_suffix = ' as top pick' if mode == 'top_pick' else (' as non-top-pick signals' if mode == 'non_top_pick' else '') %}
+{% set no_signal_description = 'No horses in the last ' ~ hours_back ~ ' hours match your active positive ROI components' ~ mode_suffix ~ '. Try increasing the time window, lowering score filters, or importing a new meeting.' %}
+{{ ui.state_panel(
+  state='empty',
+  title='No Signals Found',
+  description=no_signal_description,
+  action={'href': url_for('import_from_api'), 'icon': 'bi bi-arrow-down-circle', 'label': 'Import New Meetings'}
+) }}
 
 {% else %}
 
