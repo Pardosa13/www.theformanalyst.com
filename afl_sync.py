@@ -63,6 +63,8 @@ def sync_afl_all(season: int = None):
         upsert_player_stats,
         upsert_player_props,
         upsert_match_markets,
+        snapshot_model_selections_from_props,
+        settle_model_selections,
         upsert_team_logos,
     )
 
@@ -193,11 +195,22 @@ def sync_afl_all(season: int = None):
                 match_count = upsert_match_markets(db, match_rows)
                 _safe_log_sync(db, "odds_api_match_markets", season=season, rows=match_count)
                 logger.info("  ✓ Match markets: %s lines synced", match_count)
+                selection_count = snapshot_model_selections_from_props(db, season=season)
+                _safe_log_sync(db, "afl_model_selections_snapshot", season=season, rows=selection_count)
+                logger.info("  ✓ Model selections snapshotted: %s", selection_count)
             except Exception as exc:
                 logger.error("  ✗ Props sync failed: %s", exc)
                 _safe_log_sync(db, "odds_api", season=season, status="error", error=str(exc))
         else:
             logger.info("  - Props: skipped (ODDS_API_KEY not configured)")
+
+        try:
+            settled = settle_model_selections(db)
+            _safe_log_sync(db, "afl_model_selections_settle", season=season, rows=settled)
+            logger.info("  ✓ Model selections settled: %s", settled)
+        except Exception as exc:
+            logger.error("  ✗ Model selection settlement failed: %s", exc)
+            _safe_log_sync(db, "afl_model_selections_settle", season=season, status="error", error=str(exc))
 
         logger.info("=== AFL sync complete ===")
 

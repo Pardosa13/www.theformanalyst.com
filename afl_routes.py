@@ -52,9 +52,12 @@ from afl_db import (
     _team as _normalise_team,
     get_team_logo_map,
     log_sync,
+    snapshot_model_selections_from_props,
+    settle_model_selections,
+    upsert_model_selections,
     upsert_games,
-    upsert_player_props,
     upsert_match_markets,
+    upsert_player_props,
     upsert_player_stats,
     upsert_standings,
 )
@@ -643,19 +646,10 @@ def register_afl_routes(app, db):
     @app.route("/api/afl/value-finder")
     @login_required
     def api_afl_value_finder():
-        market = request.args.get("market", "player_disposals")
-        min_edge = request.args.get("min_edge", 2.0, type=float)
-        requested_season = request.args.get("year", type=int)
-        round_number = request.args.get("round", type=int)
-        home_team = request.args.get("home", "").strip()
-        away_team = request.args.get("away", "").strip()
-        min_line = request.args.get("min_line", type=float)
-        max_line = request.args.get("max_line", type=float)
-
         market = _normalise_prop_market(market)
-
         effective_season = _resolve_stats_season(db, requested_season)
         effective_seasons = _resolve_stats_seasons(db, requested_season)
+        min_games = request.args.get("min_games", 8, type=int)
 
         if round_number and not home_team and not away_team:
             fixtures = _db_get_fixtures(
@@ -663,19 +657,18 @@ def register_afl_routes(app, db):
                 year=requested_season or CURRENT_YEAR,
                 round_number=round_number,
             )
-
             props = []
-
             for fixture in fixtures:
-                fixture_props = _db_get_props(
-                    db,
-                    market=market,
-                    home_team=fixture.get("hteam"),
-                    away_team=fixture.get("ateam"),
-                    min_line=min_line,
-                    max_line=max_line,
+                props.extend(
+                    _db_get_props(
+                        db,
+                        market=market,
+                        home_team=fixture.get("hteam"),
+                        away_team=fixture.get("ateam"),
+                        min_line=min_line,
+                        max_line=max_line,
+                    )
                 )
-                props.extend(fixture_props)
         else:
             props = _db_get_props(
                 db,
@@ -709,39 +702,40 @@ def register_afl_routes(app, db):
             "player_goals": "goals",
             "player_afl_fantasy_points": "afl_fantasy_score",
         }
-
         stat_name = _MARKET_STAT.get(market, "disposals")
 
-        seen: dict[tuple, dict] = {}
-
+        deduped_props: dict[tuple, dict] = {}
         for prop in props:
             key = (
-                prop.get("player_name", ""),
+                _normalize_whitespace(prop.get("player_name", "")).lower(),
+                market,
                 prop.get("line_type", ""),
-                prop.get("line", 0),
             )
-
-            existing = seen.get(key)
-
+            existing = deduped_props.get(key)
             if existing is None or (prop.get("odds") or 0) > (existing.get("odds") or 0):
-                seen[key] = prop
+                deduped_props[key] = prop
 
-        deduped_props = list(seen.values())
-
-        prop_name_keys: list[tuple[str, str, str]] = []
-
-        for prop in deduped_props:
-            pname = prop.get("player_name", "")
+        prop_name_meta = []
+        all_last_names = set()
+        for prop in deduped_props.values():
+            pname = _normalize_whitespace(prop.get("player_name", ""))
             parts = pname.replace(".", " ").split()
-            parts = [p for p in parts if p]
-
-            if len(parts) >= 2:
-                prop_name_keys.append((pname, parts[0][0].lower(), parts[-1].lower()))
-
-        all_last_names = list({k[2] for k in prop_name_keys})
+            if len(parts) < 2:
+                continue
+            first_name = parts[0].lower()
+            last_name = parts[-1].lower()
+            prop_name_meta.append(
+                {
+                    "prop": prop,
+                    "player_name": pname,
+                    "first_initial": first_name[0],
+                    "last_name": last_name,
+                    "full_name": _normalize_whitespace(f"{first_name} {last_name}"),
+                }
+            )
+            all_last_names.add(last_name)
 
         all_stats_rows: list[dict] = []
-
         if all_last_names:
             bulk_sql = db.text(
                 """
@@ -752,164 +746,344 @@ def register_afl_routes(app, db):
                 ORDER BY season DESC, match_date DESC
                 """
             )
-
             with db.engine.connect() as conn:
                 bulk_rows = conn.execute(
                     bulk_sql,
-                    {
-                        "last_names": all_last_names,
-                        "seasons": effective_seasons,
-                    },
+                    {"last_names": list(all_last_names), "seasons": effective_seasons},
                 ).mappings().fetchall()
-
             all_stats_rows = [dict(r) for r in bulk_rows]
 
         stats_by_key: dict[tuple[str, str], list[dict]] = defaultdict(list)
-
+        stats_by_name: dict[str, list[dict]] = defaultdict(list)
         for row in all_stats_rows:
             ln = (row.get("player_last_name") or "").lower()
             fn = (row.get("player_first_name") or "").lower()
-
-            if ln and fn:
-                stats_by_key[(fn[0], ln)].append(row)
+            if not (ln and fn):
+                continue
+            stats_by_key[(fn[0], ln)].append(row)
+            stats_by_name[_normalize_whitespace(f"{fn} {ln}")].append(row)
 
         value_bets = []
-
-        for pname, first_initial, last_name in prop_name_keys:
-            player_rows = stats_by_key.get((first_initial, last_name), [])
-
+        for meta in prop_name_meta:
+            prop = meta["prop"]
+            player_rows = stats_by_name.get(meta["full_name"]) or stats_by_key.get((meta["first_initial"], meta["last_name"]), [])
             if not player_rows:
                 continue
-
             grouped = _group_players(player_rows)
-
-            if len(grouped) != 1:
+            if not grouped:
+                continue
+            player = max(grouped.values(), key=lambda p: len(p.get("games", [])))
+            games = sorted(player["games"], key=_sort_date_key, reverse=True)
+            if len(games) < max(min_games, 3):
                 continue
 
-            player = next(iter(grouped.values()))
-            games = sorted(player["games"], key=_sort_date_key, reverse=True)
             season_games = [g for g in games if g.get("season") == effective_season] or games
+            if len(season_games) < max(min_games // 2, 3):
+                continue
+
+            line_type = prop.get("line_type", "")
+            book_line = prop.get("line")
+            odds = prop.get("odds", 0) or 0
+            if line_type not in ("Over", "Under") or book_line is None or odds <= 1.01:
+                continue
+
             team_name = _normalise_team_name(player.get("team", ""))
+            prop_home_team = _normalise_team_name(prop.get("home_team", ""))
+            prop_away_team = _normalise_team_name(prop.get("away_team", ""))
+            opponent = (
+                prop_away_team
+                if prop_home_team == team_name
+                else prop_home_team
+                if prop_away_team == team_name
+                else (prop_away_team or prop_home_team)
+            )
 
             season_avg = _safe_avg(season_games, stat_name)
+            opp_rows_filtered = _filter_meaningful_tog_games(_games_vs_opponent(games, opponent))
+            vs_opp_avg = _safe_avg(opp_rows_filtered, stat_name) if opp_rows_filtered else None
+            last5_avg = _safe_avg(season_games[:5], stat_name) if season_games else None
 
-            for prop in deduped_props:
-                if prop.get("player_name", "") != pname:
-                    continue
+            edge_data = calculate_market_edge(
+                player_avg=season_avg,
+                book_line=book_line,
+                odds=odds,
+                line_type=line_type,
+                market=market,
+                vs_opp_avg=vs_opp_avg,
+                last5_avg=last5_avg,
+                player_stats=games,
+            )
+            edge = edge_data["edge"]
+            if abs(edge) < min_edge:
+                continue
 
-                line_type = prop.get("line_type", "")
+            if line_type == "Over":
+                hits = sum(1 for r in games if (r.get(stat_name, 0) or 0) > book_line)
+                pushes = sum(1 for r in games if (r.get(stat_name, 0) or 0) == book_line)
+            else:
+                hits = sum(1 for r in games if (r.get(stat_name, 0) or 0) < book_line)
+                pushes = sum(1 for r in games if (r.get(stat_name, 0) or 0) == book_line)
+            hist_pct = round(hits / max(len(games) - pushes, 1) * 100, 1)
+            confidence_score = round(
+                max(
+                    0.0,
+                    min(
+                        100.0,
+                        35
+                        + min(len(season_games), 25) * 1.7
+                        + min(abs(edge), 12.0) * 2.5
+                        + (8 if len(opp_rows_filtered) >= 3 else 0),
+                    ),
+                ),
+                1,
+            )
+            recommendation = edge_data["recommendation"]
+            if confidence_score < 48 or hist_pct < 42:
+                recommendation = "watch"
 
-                if line_type not in ("Over", "Under"):
-                    continue
-
-                book_line = prop.get("line", 0)
-
-                if book_line is None:
-                    continue
-
-                odds = prop.get("odds", 0) or 0
-                prop_home_team = _normalise_team_name(prop.get("home_team", ""))
-                prop_away_team = _normalise_team_name(prop.get("away_team", ""))
-
-                opponent = (
-                    prop_away_team
-                    if prop_home_team == team_name
-                    else prop_home_team
-                    if prop_away_team == team_name
-                    else (prop_away_team or prop_home_team)
-                )
-
-                opp_rows = _games_vs_opponent(games, opponent)
-                opp_rows_filtered = _filter_meaningful_tog_games(opp_rows)
-                vs_opp_avg = _safe_avg(opp_rows_filtered, stat_name) if opp_rows_filtered else None
-                last5_avg = _safe_avg(season_games[:5], stat_name) if season_games else None
-
-                edge_data = calculate_market_edge(
-                    player_avg=season_avg,
-                    book_line=book_line,
-                    odds=odds,
-                    line_type=line_type,
-                    market=market,
-                    vs_opp_avg=vs_opp_avg,
-                    last5_avg=last5_avg,
-                    player_stats=games,
-                )
-
-                edge = edge_data["edge"]
-
-                if abs(edge) >= min_edge:
-                    total = len(games)
-
-                    if line_type == "Over":
-                        hits = sum(
-                            1
-                            for r in games
-                            if (r.get(stat_name, 0) or 0) >= book_line
-                        )
-                    else:
-                        hits = sum(
-                            1
-                            for r in games
-                            if (r.get(stat_name, 0) or 0) < book_line
-                        )
-
-                    hist_pct = round(hits / total * 100, 1) if total else 0.0
-
-                    value_bets.append(
-                        {
-                            "player": pname,
-                            "player_id": player.get("player_id"),
-                            "team": team_name,
-                            "opponent": opponent,
-                            "home_team": prop_home_team,
-                            "away_team": prop_away_team,
-                            "commence_time": str(prop.get("commence_time", "")),
-                            "bookmaker": prop.get("bookmaker", ""),
-                            "market": market,
-                            "line_type": line_type,
-                            "book_line": book_line,
-                            "odds": odds,
-                            "season_avg": season_avg,
-                            "vs_opp_avg": vs_opp_avg,
-                            "last5_avg": last5_avg,
-                            "hist_pct": hist_pct,
-                            "model_prediction": edge_data["model_prediction"],
-                            "model_prob": edge_data.get("model_prob"),
-                            "implied_prob": edge_data.get("implied_prob"),
-                            "edge": round(edge, 1),
-                            "edge_pct": edge_data["edge_pct"],
-                            "recommendation": edge_data["recommendation"],
-                            "headshot_url": afl_player_headshot_url(
-                                player.get("player_id"),
-                                player.get("first_name", ""),
-                                player.get("last_name", ""),
-                            ),
-                        }
-                    )
+            value_bets.append(
+                {
+                    "player": meta["player_name"],
+                    "player_id": player.get("player_id"),
+                    "team": team_name,
+                    "opponent": opponent,
+                    "home_team": prop_home_team,
+                    "away_team": prop_away_team,
+                    "event_id": prop.get("event_id"),
+                    "match_id": prop.get("match_id"),
+                    "commence_time": str(prop.get("commence_time", "")),
+                    "commence_time_raw": prop.get("commence_time"),
+                    "bookmaker": prop.get("bookmaker", ""),
+                    "market": market,
+                    "line_type": line_type,
+                    "book_line": book_line,
+                    "odds": odds,
+                    "season_avg": season_avg,
+                    "vs_opp_avg": vs_opp_avg,
+                    "last5_avg": last5_avg,
+                    "hist_pct": hist_pct,
+                    "sample_size": len(games),
+                    "confidence_score": confidence_score,
+                    "model_prediction": edge_data["model_prediction"],
+                    "model_prob": edge_data.get("model_prob"),
+                    "implied_prob": edge_data.get("implied_prob"),
+                    "edge": round(edge, 1),
+                    "edge_pct": edge_data["edge_pct"],
+                    "recommendation": recommendation,
+                    "headshot_url": afl_player_headshot_url(
+                        player.get("player_id"),
+                        player.get("first_name", ""),
+                        player.get("last_name", ""),
+                    ),
+                }
+            )
 
         best_per_player: dict[tuple, dict] = {}
-
         for bet in value_bets:
-            key = (bet["player"], bet["line_type"])
-
-            if key not in best_per_player or abs(bet["edge"]) > abs(best_per_player[key]["edge"]):
+            key = (bet["player"], bet["market"], bet["line_type"])
+            existing = best_per_player.get(key)
+            if existing is None or abs(bet["edge"]) > abs(existing["edge"]) or (
+                abs(bet["edge"]) == abs(existing["edge"]) and (bet.get("odds") or 0) > (existing.get("odds") or 0)
+            ):
                 best_per_player[key] = bet
 
-        value_bets = list(best_per_player.values())
-        value_bets.sort(key=lambda x: abs(x.get("edge", 0)), reverse=True)
+        value_bets = [
+            b for b in best_per_player.values()
+            if b.get("sample_size", 0) >= min_games and b.get("recommendation") in {"value", "watch"}
+        ]
+        value_bets.sort(
+            key=lambda x: (x.get("recommendation") == "value", abs(x.get("edge", 0)), x.get("confidence_score", 0)),
+            reverse=True,
+        )
+
+        official = [
+            b for b in value_bets
+            if b.get("recommendation") == "value"
+            and abs(float(b.get("edge") or 0)) >= max(min_edge, 2.5)
+            and float(b.get("confidence_score") or 0) >= 55
+        ]
+        selection_rows = []
+        for b in official:
+            snapshot_key = "|".join(
+                [
+                    str(b.get("event_id") or ""),
+                    _normalize_whitespace(b.get("player", "")).lower(),
+                    str(b.get("market") or ""),
+                    str(b.get("line_type") or ""),
+                    f"{float(b.get('book_line') or 0):.2f}",
+                ]
+            )
+            selection_rows.append(
+                {
+                    "source": "value_finder",
+                    "selection_source": "official",
+                    "snapshot_key": snapshot_key,
+                    "season": effective_season,
+                    "round": round_number,
+                    "event_id": b.get("event_id"),
+                    "match_id": b.get("match_id"),
+                    "commence_time": b.get("commence_time_raw") or None,
+                    "home_team": b.get("home_team"),
+                    "away_team": b.get("away_team"),
+                    "player_id": b.get("player_id"),
+                    "player_name": b.get("player"),
+                    "team": b.get("team"),
+                    "opponent": b.get("opponent"),
+                    "market": b.get("market"),
+                    "line_type": b.get("line_type"),
+                    "line": b.get("book_line"),
+                    "odds": b.get("odds"),
+                    "bookmaker": b.get("bookmaker"),
+                    "model_prediction": b.get("model_prediction"),
+                    "model_prob": b.get("model_prob"),
+                    "implied_prob": b.get("implied_prob"),
+                    "edge": b.get("edge"),
+                    "edge_pct": b.get("edge_pct"),
+                    "season_avg": b.get("season_avg"),
+                    "last5_avg": b.get("last5_avg"),
+                    "vs_opp_avg": b.get("vs_opp_avg"),
+                    "hist_pct": b.get("hist_pct"),
+                    "confidence_score": b.get("confidence_score"),
+                    "recommendation": b.get("recommendation"),
+                    "result": "pending",
+                }
+            )
+        tracked_count = upsert_model_selections(db, selection_rows) if selection_rows else 0
+        settled_count = settle_model_selections(db)
 
         return jsonify(
             {
                 "market": market,
                 "stat": stat_name,
                 "min_edge": min_edge,
+                "min_games": min_games,
                 "season": effective_season,
                 "seasons_used": effective_seasons,
                 "bets": value_bets,
                 "count": len(value_bets),
+                "official_count": len(official),
+                "tracked_count": tracked_count,
+                "settled_count": settled_count,
+                "model_performance": _db_model_performance_summary(db, season=effective_season),
             }
         )
        
+    @app.route("/api/afl/model-selections")
+    @login_required
+    def api_afl_model_selections():
+        season = request.args.get("year", CURRENT_YEAR, type=int)
+        status = request.args.get("status", "all").strip().lower()
+        market = request.args.get("market", "").strip()
+        limit = min(request.args.get("limit", 200, type=int), 500)
+
+        conditions = ["season = :season"]
+        params: dict = {"season": season, "limit": limit}
+        if status in {"pending", "win", "loss", "push"}:
+            conditions.append("result = :status")
+            params["status"] = status
+        if market:
+            conditions.append("market = :market")
+            params["market"] = _normalise_prop_market(market)
+
+        sql = db.text(
+            f"""
+            SELECT *
+            FROM afl_model_selections
+            WHERE {' AND '.join(conditions)}
+            ORDER BY COALESCE(commence_time, created_at) DESC, id DESC
+            LIMIT :limit
+            """
+        )
+        with db.engine.connect() as conn:
+            rows = [dict(r) for r in conn.execute(sql, params).mappings().fetchall()]
+        return jsonify(
+            {
+                "season": season,
+                "status": status,
+                "count": len(rows),
+                "rows": rows,
+            }
+        )
+
+    @app.route("/api/afl/model-performance")
+    @login_required
+    def api_afl_model_performance():
+        season = request.args.get("year", CURRENT_YEAR, type=int)
+        rows = _db_model_selections(db, season=season, settled_only=True)
+        return jsonify(
+            {
+                "season": season,
+                "summary": _calc_model_metrics(rows),
+                "breakdowns": {
+                    "market": _calc_model_breakdown(rows, "market"),
+                    "line_type": _calc_model_breakdown(rows, "line_type"),
+                    "bookmaker": _calc_model_breakdown(rows, "bookmaker"),
+                    "edge_band": _calc_model_breakdown(rows, "edge_band"),
+                    "odds_band": _calc_model_breakdown(rows, "odds_band"),
+                },
+            }
+        )
+
+    @app.route("/api/afl/command-centre")
+    @login_required
+    def api_afl_command_centre():
+        season = request.args.get("year", CURRENT_YEAR, type=int)
+        summary = _db_model_performance_summary(db, season=season)
+        sql = db.text(
+            """
+            SELECT source, season, round, rows_synced, status, error_msg, synced_at
+            FROM afl_sync_log
+            WHERE synced_at > NOW() - INTERVAL '48 hours'
+            ORDER BY synced_at DESC
+            LIMIT 20
+            """
+        )
+        with db.engine.connect() as conn:
+            sync_rows = [dict(r) for r in conn.execute(sql).mappings().fetchall()]
+        return jsonify(
+            {
+                "season": season,
+                "model_performance": summary,
+                "sync_recent": sync_rows,
+                "readiness": {
+                    "stats": _db_count(db, "SELECT COUNT(*) FROM afl_player_stats WHERE season >= 2022"),
+                    "props_24h": _db_count(
+                        db,
+                        "SELECT COUNT(*) FROM afl_player_props WHERE fetched_at > NOW() - INTERVAL '24 hours'",
+                    ),
+                    "pending_selections": _db_count(
+                        db,
+                        "SELECT COUNT(*) FROM afl_model_selections WHERE result = 'pending'",
+                    ),
+                },
+            }
+        )
+
+    @app.route("/api/afl/matchup-intel")
+    @login_required
+    def api_afl_matchup_intel():
+        season = request.args.get("year", CURRENT_YEAR, type=int)
+        sql = db.text(
+            """
+            SELECT
+                home_team,
+                away_team,
+                COUNT(*) AS picks,
+                AVG(edge) AS avg_edge,
+                AVG(confidence_score) AS avg_confidence,
+                MAX(edge) AS top_edge
+            FROM afl_model_selections
+            WHERE season = :season
+              AND COALESCE(result, 'pending') = 'pending'
+            GROUP BY home_team, away_team
+            ORDER BY AVG(edge) DESC
+            LIMIT 10
+            """
+        )
+        with db.engine.connect() as conn:
+            rows = [dict(r) for r in conn.execute(sql, {"season": season}).mappings().fetchall()]
+        return jsonify({"season": season, "rows": rows, "count": len(rows)})
+
     @app.route("/api/afl/props")
     @app.route("/api/afl/props/all")
     @login_required
@@ -1512,9 +1686,16 @@ def register_afl_routes(app, db):
             props = fetch_afl_player_props(api_key=api_key, markets=markets_arg)
             count = upsert_player_props(db, props)
             log_sync(db, "odds_api", rows=count)
+            season = request.args.get("year", CURRENT_YEAR, type=int)
+            snapshotted = snapshot_model_selections_from_props(db, season=season)
+            settled = settle_model_selections(db)
+            log_sync(db, "afl_model_selections_snapshot", season=season, rows=snapshotted)
+            log_sync(db, "afl_model_selections_settle", season=season, rows=settled)
             return jsonify({
                 "status": "ok",
                 "rows_synced": count,
+                "selections_snapshotted": snapshotted,
+                "selections_settled": settled,
                 "markets": "all" if markets_arg is None else markets_arg,
             })
         except Exception as exc:
@@ -1535,6 +1716,8 @@ def register_afl_routes(app, db):
     @app.route("/api/afl/match-predictions")
     @login_required
     def api_afl_match_predictions():
+        import math
+
         year = request.args.get("year", CURRENT_YEAR, type=int)
         round_num = request.args.get("round", type=int)
 
@@ -1682,15 +1865,37 @@ def register_afl_routes(app, db):
 
         # Scale factor: calibrated from 1,481 historical games (avg raw=137.2 / avg actual=30.9).
         _RATING_TO_POINTS_SCALE = 4.44
+        _LOGISTIC_SCALE_POINTS = 35.0
 
         out = []
+        graded_rows = []
         for r in rows:
             predicted_margin_raw = r.get("predicted_margin")
             predicted_margin = float(predicted_margin_raw) if predicted_margin_raw is not None else None
+            predicted_margin_points = (predicted_margin / _RATING_TO_POINTS_SCALE) if predicted_margin is not None else None
             hscore = r.get("hscore")
             ascore = r.get("ascore")
             complete = r.get("complete") or 0
             actual_margin = (hscore - ascore) if (complete == 100 and hscore is not None and ascore is not None) else None
+            home_win_prob = (
+                1.0 / (1.0 + math.exp(-(predicted_margin_points / _LOGISTIC_SCALE_POINTS)))
+                if predicted_margin_points is not None
+                else None
+            )
+            away_win_prob = (1.0 - home_win_prob) if home_win_prob is not None else None
+            confidence = abs(predicted_margin_points or 0.0)
+            confidence_tier = "high" if confidence >= 24 else "medium" if confidence >= 12 else "low"
+            predicted_winner = (r["hteam"] if predicted_margin >= 0 else r["ateam"]) if predicted_margin is not None else None
+            if actual_margin is not None and predicted_winner:
+                winner_correct = (predicted_winner == r["hteam"] and actual_margin > 0) or (
+                    predicted_winner == r["ateam"] and actual_margin < 0
+                )
+                graded_rows.append(
+                    {
+                        "winner_correct": winner_correct,
+                        "abs_error": abs((predicted_margin_points or 0) - actual_margin),
+                    }
+                )
             out.append({
                 "match_id": r["match_id"],
                 "year": year,
@@ -1700,10 +1905,26 @@ def register_afl_routes(app, db):
                 "actual_margin": actual_margin,
                 "home_rating": float(r["home_rating"]) if r.get("home_rating") is not None else None,
                 "away_rating": float(r["away_rating"]) if r.get("away_rating") is not None else None,
-                "predicted_margin": round(predicted_margin / _RATING_TO_POINTS_SCALE, 1) if predicted_margin is not None else None,
-                "predicted_winner": (r["hteam"] if predicted_margin >= 0 else r["ateam"]) if predicted_margin is not None else None,
+                "predicted_margin": round(predicted_margin_points, 1) if predicted_margin_points is not None else None,
+                "predicted_winner": predicted_winner,
+                "home_win_prob": round(home_win_prob * 100, 1) if home_win_prob is not None else None,
+                "away_win_prob": round(away_win_prob * 100, 1) if away_win_prob is not None else None,
+                "fair_home_odds": round(1.0 / home_win_prob, 2) if home_win_prob else None,
+                "fair_away_odds": round(1.0 / away_win_prob, 2) if away_win_prob else None,
+                "confidence_tier": confidence_tier,
             })
-        return jsonify({"year": year, "round": round_num, "matches": out, "count": len(out)})
+        model_perf = {
+            "sample": len(graded_rows),
+            "winner_accuracy": round(
+                (sum(1 for g in graded_rows if g["winner_correct"]) / len(graded_rows)) * 100,
+                1,
+            ) if graded_rows else None,
+            "mae_margin": round(
+                sum(g["abs_error"] for g in graded_rows) / len(graded_rows),
+                2,
+            ) if graded_rows else None,
+        }
+        return jsonify({"year": year, "round": round_num, "matches": out, "count": len(out), "model_performance": model_perf})
 
     @app.route("/api/afl/match-markets")
     @login_required
@@ -2572,6 +2793,87 @@ def _check_data_sources(db) -> dict:
     }
 
 
+def _db_model_selections(db, season: int, settled_only: bool = False) -> list[dict]:
+    where = ["season = :season"]
+    if settled_only:
+        where.append("result IN ('win', 'loss', 'push')")
+    sql = db.text(
+        f"""
+        SELECT *
+        FROM afl_model_selections
+        WHERE {' AND '.join(where)}
+        ORDER BY COALESCE(settled_at, commence_time, created_at) DESC
+        """
+    )
+    with db.engine.connect() as conn:
+        rows = conn.execute(sql, {"season": season}).mappings().fetchall()
+    return [dict(r) for r in rows]
+
+
+def _calc_model_metrics(rows: list[dict]) -> dict:
+    if not rows:
+        return {
+            "total_bets": 0,
+            "wins": 0,
+            "losses": 0,
+            "pushes": 0,
+            "strike_rate": 0.0,
+            "total_profit": 0.0,
+            "roi": 0.0,
+            "avg_odds": 0.0,
+            "avg_edge": 0.0,
+        }
+    wins = sum(1 for r in rows if r.get("result") == "win")
+    losses = sum(1 for r in rows if r.get("result") == "loss")
+    pushes = sum(1 for r in rows if r.get("result") == "push")
+    decisions = wins + losses
+    total_profit = round(sum(float(r.get("profit_units") or 0) for r in rows), 3)
+    avg_odds = round(
+        sum(float(r.get("odds") or 0) for r in rows if r.get("odds")) / max(sum(1 for r in rows if r.get("odds")), 1),
+        3,
+    )
+    avg_edge = round(
+        sum(float(r.get("edge") or 0) for r in rows if r.get("edge") is not None) / max(sum(1 for r in rows if r.get("edge") is not None), 1),
+        3,
+    )
+    return {
+        "total_bets": len(rows),
+        "wins": wins,
+        "losses": losses,
+        "pushes": pushes,
+        "strike_rate": round((wins / decisions) * 100, 2) if decisions else 0.0,
+        "total_profit": total_profit,
+        "roi": round((total_profit / max(decisions, 1)) * 100, 2),
+        "avg_odds": avg_odds,
+        "avg_edge": avg_edge,
+    }
+
+
+def _calc_model_breakdown(rows: list[dict], key: str) -> list[dict]:
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        if key == "edge_band":
+            edge = abs(float(row.get("edge") or 0))
+            bucket = "2-4%" if edge < 4 else "4-7%" if edge < 7 else "7%+"
+        elif key == "odds_band":
+            odds = float(row.get("odds") or 0)
+            bucket = "<1.8" if odds < 1.8 else "1.8-2.2" if odds <= 2.2 else ">2.2"
+        else:
+            bucket = str(row.get(key) or "unknown")
+        grouped[bucket].append(row)
+
+    out = []
+    for bucket, bucket_rows in grouped.items():
+        metrics = _calc_model_metrics(bucket_rows)
+        out.append({"bucket": bucket, **metrics})
+    out.sort(key=lambda r: r.get("total_bets", 0), reverse=True)
+    return out
+
+
+def _db_model_performance_summary(db, season: int) -> dict:
+    return _calc_model_metrics(_db_model_selections(db, season=season, settled_only=True))
+
+
 def afl_nightly_sync(app_context, db):
     logger.info("=== AFL nightly sync for season %s ===", CURRENT_YEAR)
 
@@ -2647,8 +2949,21 @@ def afl_nightly_sync(app_context, db):
             except Exception as exc:
                 logger.error("  ✗ Props sync failed for %s: %s", market, exc)
         logger.info("  ✓ Props total: %s rows synced", total_props)
+        try:
+            snapshot_count = snapshot_model_selections_from_props(db, season=CURRENT_YEAR)
+            log_sync(db, "afl_model_selections_snapshot", season=CURRENT_YEAR, rows=snapshot_count)
+            logger.info("  ✓ Model selections snapshotted: %s", snapshot_count)
+        except Exception as exc:
+            logger.error("  ✗ Model selection snapshot failed: %s", exc)
     else:
         logger.info("  - Props: skipped (ODDS_API_KEY not configured)")
+
+    try:
+        settled = settle_model_selections(db)
+        log_sync(db, "afl_model_selections_settle", season=CURRENT_YEAR, rows=settled)
+        logger.info("  ✓ Model selections settled: %s", settled)
+    except Exception as exc:
+        logger.error("  ✗ Model selection settlement failed: %s", exc)
 
     logger.info("=== AFL sync complete ===")
 

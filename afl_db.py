@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import re
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from typing import Any
 
@@ -224,6 +226,58 @@ AFL_SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS afl_model_selections (
+        id                  SERIAL PRIMARY KEY,
+        created_at          TIMESTAMP DEFAULT NOW(),
+        settled_at          TIMESTAMP,
+        source              TEXT DEFAULT 'value_finder',
+        selection_source    TEXT DEFAULT 'official',
+        snapshot_key        TEXT UNIQUE,
+        season              INTEGER,
+        round               INTEGER,
+        event_id            TEXT,
+        match_id            BIGINT,
+        commence_time       TIMESTAMP,
+        home_team           TEXT,
+        away_team           TEXT,
+        player_id           BIGINT,
+        player_name         TEXT,
+        team                TEXT,
+        opponent            TEXT,
+        market              TEXT,
+        line_type           TEXT,
+        line                FLOAT,
+        odds                FLOAT,
+        bookmaker           TEXT,
+        model_prediction    FLOAT,
+        model_prob          FLOAT,
+        implied_prob        FLOAT,
+        edge                FLOAT,
+        edge_pct            FLOAT,
+        season_avg          FLOAT,
+        last5_avg           FLOAT,
+        vs_opp_avg          FLOAT,
+        hist_pct            FLOAT,
+        confidence_score    FLOAT,
+        recommendation      TEXT,
+        actual_stat         FLOAT,
+        result              TEXT DEFAULT 'pending',
+        profit_units        FLOAT DEFAULT 0
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_afl_ms_pending
+    ON afl_model_selections(result, commence_time)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_afl_ms_market
+    ON afl_model_selections(market, line_type, bookmaker)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_afl_ms_event_player
+    ON afl_model_selections(event_id, player_id)
+    """,
+    """
     CREATE OR REPLACE VIEW afl_match_predictions AS
     WITH team_match_stats AS (
         SELECT
@@ -311,6 +365,15 @@ AFL_MIGRATIONS = [
     "UPDATE afl_match_markets SET away_team = 'GWS Giants' WHERE away_team = 'Greater Western Sydney Giants'",
     "UPDATE afl_match_markets SET home_team = 'West Coast' WHERE home_team = 'West Coast Eagles'",
     "UPDATE afl_match_markets SET away_team = 'West Coast' WHERE away_team = 'West Coast Eagles'",
+    "ALTER TABLE afl_model_selections ADD COLUMN IF NOT EXISTS confidence_score FLOAT",
+    "ALTER TABLE afl_model_selections ADD COLUMN IF NOT EXISTS snapshot_key TEXT",
+    "ALTER TABLE afl_model_selections ADD COLUMN IF NOT EXISTS selection_source TEXT DEFAULT 'official'",
+    "ALTER TABLE afl_model_selections ADD COLUMN IF NOT EXISTS match_id BIGINT",
+    "ALTER TABLE afl_model_selections ADD COLUMN IF NOT EXISTS profit_units FLOAT DEFAULT 0",
+    "ALTER TABLE afl_model_selections ADD COLUMN IF NOT EXISTS result TEXT DEFAULT 'pending'",
+    "ALTER TABLE afl_model_selections ADD COLUMN IF NOT EXISTS actual_stat FLOAT",
+    "ALTER TABLE afl_model_selections ADD COLUMN IF NOT EXISTS settled_at TIMESTAMP",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_afl_ms_snapshot_key ON afl_model_selections(snapshot_key)",
 ]
 
 # Stable advisory-lock key derived from a namespace string.
@@ -1158,3 +1221,333 @@ def get_team_logo_map(db) -> dict:
     except Exception as exc:
         logger.warning("Could not load team logo map: %s", exc)
     return result
+
+
+def upsert_model_selections(db, selections: list[dict]) -> int:
+    """Insert/update tracked AFL model selections idempotently."""
+    if not selections:
+        return 0
+
+    sql = db.text("""
+        INSERT INTO afl_model_selections (
+            source, selection_source, snapshot_key, season, round, event_id, match_id,
+            commence_time, home_team, away_team, player_id, player_name, team, opponent,
+            market, line_type, line, odds, bookmaker, model_prediction, model_prob,
+            implied_prob, edge, edge_pct, season_avg, last5_avg, vs_opp_avg, hist_pct,
+            confidence_score, recommendation, result
+        )
+        VALUES (
+            :source, :selection_source, :snapshot_key, :season, :round, :event_id, :match_id,
+            :commence_time, :home_team, :away_team, :player_id, :player_name, :team, :opponent,
+            :market, :line_type, :line, :odds, :bookmaker, :model_prediction, :model_prob,
+            :implied_prob, :edge, :edge_pct, :season_avg, :last5_avg, :vs_opp_avg, :hist_pct,
+            :confidence_score, :recommendation, :result
+        )
+        ON CONFLICT (snapshot_key) DO UPDATE SET
+            odds = EXCLUDED.odds,
+            bookmaker = EXCLUDED.bookmaker,
+            edge = EXCLUDED.edge,
+            edge_pct = EXCLUDED.edge_pct,
+            model_prediction = EXCLUDED.model_prediction,
+            model_prob = EXCLUDED.model_prob,
+            implied_prob = EXCLUDED.implied_prob,
+            season_avg = EXCLUDED.season_avg,
+            last5_avg = EXCLUDED.last5_avg,
+            vs_opp_avg = EXCLUDED.vs_opp_avg,
+            hist_pct = EXCLUDED.hist_pct,
+            confidence_score = EXCLUDED.confidence_score,
+            recommendation = EXCLUDED.recommendation,
+            commence_time = EXCLUDED.commence_time
+    """)
+
+    count = 0
+    with db.engine.begin() as conn:
+        for row in selections:
+            conn.execute(sql, row)
+            count += 1
+    return count
+
+
+def snapshot_model_selections_from_props(
+    db,
+    season: int,
+    round_num: int | None = None,
+    min_edge: float = 2.5,
+    min_games: int = 8,
+    min_confidence: float = 55.0,
+) -> int:
+    """Create official, deduped model selections from recent prop lines."""
+    from afl_data import calculate_market_edge, _normalise_prop_market, _normalise_team_name
+
+    market_to_stat = {
+        "player_disposals": "disposals",
+        "player_kicks": "kicks",
+        "player_handballs": "handballs",
+        "player_marks": "marks",
+        "player_tackles": "tackles",
+        "player_goals": "goals",
+        "player_afl_fantasy_points": "afl_fantasy_score",
+    }
+    window_start = datetime.now(timezone.utc) - timedelta(days=1)
+    window_end = datetime.now(timezone.utc) + timedelta(days=8)
+    params = {"season": season, "window_start": window_start, "window_end": window_end}
+
+    round_filter = ""
+    if round_num is not None:
+        round_filter = "AND g.round = :round_num"
+        params["round_num"] = round_num
+
+    props_sql = db.text(f"""
+        SELECT DISTINCT ON (p.event_id, p.market, p.player_name, p.line_type)
+            p.event_id, p.home_team, p.away_team, p.commence_time, p.bookmaker,
+            p.market, p.player_name, p.line_type, p.line, p.odds,
+            g.id AS match_id, g.round
+        FROM afl_player_props p
+        LEFT JOIN afl_games g
+          ON LOWER(TRIM(g.hteam)) = LOWER(TRIM(p.home_team))
+         AND LOWER(TRIM(g.ateam)) = LOWER(TRIM(p.away_team))
+         AND EXTRACT(YEAR FROM g.date) = :season
+         {round_filter}
+        WHERE EXTRACT(YEAR FROM COALESCE(p.commence_time, p.fetched_at)) = :season
+          AND COALESCE(p.commence_time, p.fetched_at) BETWEEN :window_start AND :window_end
+          AND p.line_type IN ('Over', 'Under')
+          AND p.odds BETWEEN 1.20 AND 5.00
+        ORDER BY p.event_id, p.market, p.player_name, p.line_type, p.odds DESC, p.fetched_at DESC
+    """)
+    with db.engine.connect() as conn:
+        prop_rows = [dict(r) for r in conn.execute(props_sql, params).mappings().fetchall()]
+
+    if not prop_rows:
+        return 0
+
+    player_names = list({str(r.get("player_name") or "").strip().lower() for r in prop_rows if r.get("player_name")})
+    if not player_names:
+        return 0
+
+    stats_sql = db.text("""
+        SELECT *
+        FROM afl_player_stats
+        WHERE season BETWEEN :season_from AND :season
+          AND LOWER(TRIM(player_first_name || ' ' || player_last_name)) = ANY(:player_names)
+        ORDER BY season DESC, match_date DESC
+    """)
+    with db.engine.connect() as conn:
+        stats_rows = [dict(r) for r in conn.execute(
+            stats_sql,
+            {"season_from": max(2019, season - 2), "season": season, "player_names": player_names},
+        ).mappings().fetchall()]
+
+    stats_by_name: dict[str, list[dict]] = defaultdict(list)
+    for row in stats_rows:
+        full_name = _normalise_name(f"{row.get('player_first_name','')} {row.get('player_last_name','')}")
+        if full_name:
+            stats_by_name[full_name].append(row)
+
+    def _avg(rows: list[dict], key: str) -> float | None:
+        vals = [float(r.get(key, 0) or 0) for r in rows]
+        return round(sum(vals) / len(vals), 2) if vals else None
+
+    official_by_key: dict[tuple, dict] = {}
+    for prop in prop_rows:
+        pname = _normalise_name(prop.get("player_name"))
+        market = _normalise_prop_market(str(prop.get("market") or "").strip())
+        stat_name = market_to_stat.get(market)
+        if not stat_name:
+            continue
+        rows = stats_by_name.get(pname, [])
+        if len(rows) < min_games:
+            continue
+
+        rows = sorted(rows, key=lambda x: x.get("match_date") or datetime.min.date(), reverse=True)
+        season_rows = [r for r in rows if _i(r.get("season")) == season] or rows
+        season_avg = _avg(season_rows, stat_name)
+        last5_avg = _avg(season_rows[:5], stat_name)
+        prop_team = _normalise_team_name(prop.get("home_team"))
+        prop_away = _normalise_team_name(prop.get("away_team"))
+        player_team = _normalise_team_name(rows[0].get("player_team"))
+        opponent = prop_away if prop_team == player_team else prop_team if prop_away == player_team else (prop_away or prop_team)
+        opp_rows = [
+            r for r in rows
+            if _normalise_team_name(r.get("match_home_team")) == opponent
+            or _normalise_team_name(r.get("match_away_team")) == opponent
+        ]
+        vs_opp_avg = _avg(opp_rows, stat_name) if opp_rows else None
+
+        edge_data = calculate_market_edge(
+            player_avg=season_avg or 0.0,
+            book_line=prop.get("line"),
+            odds=prop.get("odds"),
+            line_type=prop.get("line_type"),
+            market=market,
+            vs_opp_avg=vs_opp_avg,
+            last5_avg=last5_avg,
+            player_stats=rows,
+        )
+        edge = float(edge_data.get("edge") or 0.0)
+        model_prob = edge_data.get("model_prob")
+        implied_prob = edge_data.get("implied_prob")
+        confidence = max(0.0, min(
+            100.0,
+            40.0 + min(len(season_rows), 25) * 1.6 + min(abs(edge), 12.0) * 2.2 + (6.0 if len(opp_rows) >= 3 else 0.0),
+        ))
+        if abs(edge) < min_edge or confidence < min_confidence:
+            continue
+
+        line = float(prop.get("line") or 0.0)
+        if prop.get("line_type") == "Over":
+            hits = sum(1 for r in rows if float(r.get(stat_name, 0) or 0) > line)
+            pushes = sum(1 for r in rows if float(r.get(stat_name, 0) or 0) == line)
+        else:
+            hits = sum(1 for r in rows if float(r.get(stat_name, 0) or 0) < line)
+            pushes = sum(1 for r in rows if float(r.get(stat_name, 0) or 0) == line)
+        hist_pct = round(hits / max(len(rows) - pushes, 1) * 100.0, 1)
+
+        snapshot_key = "|".join(
+            [
+                str(prop.get("event_id") or ""),
+                pname,
+                market,
+                str(prop.get("line_type") or ""),
+                f"{line:.2f}",
+            ]
+        )
+        candidate = {
+            "source": "value_finder",
+            "selection_source": "official",
+            "snapshot_key": snapshot_key,
+            "season": season,
+            "round": _i(prop.get("round"), round_num or 0) or None,
+            "event_id": _s(prop.get("event_id")),
+            "match_id": _i(prop.get("match_id"), 0) or None,
+            "commence_time": prop.get("commence_time"),
+            "home_team": _team(prop.get("home_team")),
+            "away_team": _team(prop.get("away_team")),
+            "player_id": _i(rows[0].get("player_id"), 0) or None,
+            "player_name": _s(prop.get("player_name")),
+            "team": player_team,
+            "opponent": opponent,
+            "market": market,
+            "line_type": _s(prop.get("line_type")),
+            "line": line,
+            "odds": float(prop.get("odds") or 0),
+            "bookmaker": _s(prop.get("bookmaker")),
+            "model_prediction": float(edge_data.get("model_prediction") or 0),
+            "model_prob": float(model_prob) if model_prob is not None else None,
+            "implied_prob": float(implied_prob) if implied_prob is not None else None,
+            "edge": round(edge, 2),
+            "edge_pct": float(edge_data.get("edge_pct") or 0),
+            "season_avg": season_avg,
+            "last5_avg": last5_avg,
+            "vs_opp_avg": vs_opp_avg,
+            "hist_pct": hist_pct,
+            "confidence_score": round(confidence, 1),
+            "recommendation": "value",
+            "result": "pending",
+        }
+
+        dedupe_key = (pname, market, candidate["line_type"], candidate["event_id"] or f"{candidate['home_team']}|{candidate['away_team']}")
+        existing = official_by_key.get(dedupe_key)
+        if existing is None or abs(candidate["edge"]) > abs(existing["edge"]):
+            official_by_key[dedupe_key] = candidate
+
+    return upsert_model_selections(db, list(official_by_key.values()))
+
+
+def settle_model_selections(db, settle_after_hours: int = 2) -> int:
+    """Settle pending tracked selections using afl_player_stats (idempotent)."""
+    market_map = {
+        "player_disposals": "disposals",
+        "player_kicks": "kicks",
+        "player_handballs": "handballs",
+        "player_marks": "marks",
+        "player_tackles": "tackles",
+        "player_goals": "goals",
+        "player_afl_fantasy_points": "afl_fantasy_score",
+    }
+    pending_sql = db.text("""
+        SELECT *
+        FROM afl_model_selections
+        WHERE COALESCE(result, 'pending') = 'pending'
+          AND commence_time IS NOT NULL
+          AND commence_time <= NOW() - (:hours || ' hours')::INTERVAL
+        ORDER BY commence_time ASC
+        LIMIT 1000
+    """)
+    with db.engine.connect() as conn:
+        pending = [dict(r) for r in conn.execute(pending_sql, {"hours": settle_after_hours}).mappings().fetchall()]
+    if not pending:
+        return 0
+
+    stat_sql = db.text("""
+        SELECT *
+        FROM afl_player_stats
+        WHERE (
+            (:player_id IS NOT NULL AND player_id = :player_id)
+            OR (
+                :player_id IS NULL
+                AND LOWER(TRIM(player_first_name || ' ' || player_last_name)) = :player_name
+            )
+        )
+          AND match_date BETWEEN :date_from AND :date_to
+          AND (
+            (LOWER(match_home_team) = :home_team AND LOWER(match_away_team) = :away_team)
+            OR (LOWER(match_home_team) = :away_team AND LOWER(match_away_team) = :home_team)
+          )
+        ORDER BY ABS(EXTRACT(EPOCH FROM ((match_date)::timestamp - :match_time)))
+        LIMIT 1
+    """)
+    update_sql = db.text("""
+        UPDATE afl_model_selections
+        SET settled_at = NOW(),
+            actual_stat = :actual_stat,
+            result = :result,
+            profit_units = :profit_units
+        WHERE id = :id
+          AND COALESCE(result, 'pending') = 'pending'
+    """)
+
+    settled = 0
+    with db.engine.begin() as conn:
+        for row in pending:
+            stat_col = market_map.get(_normalise_name(row.get("market")))
+            if not stat_col:
+                continue
+            match_time = row.get("commence_time")
+            if not match_time:
+                continue
+            if hasattr(match_time, "tzinfo") and match_time.tzinfo is None:
+                match_time = match_time.replace(tzinfo=timezone.utc)
+            stat_row = conn.execute(
+                stat_sql,
+                {
+                    "player_id": row.get("player_id"),
+                    "player_name": _normalise_name(row.get("player_name")),
+                    "home_team": _team(row.get("home_team")).lower(),
+                    "away_team": _team(row.get("away_team")).lower(),
+                    "date_from": (match_time - timedelta(days=2)).date(),
+                    "date_to": (match_time + timedelta(days=2)).date(),
+                    "match_time": match_time,
+                },
+            ).mappings().fetchone()
+            if not stat_row:
+                continue
+            actual_stat = float(stat_row.get(stat_col, 0) or 0)
+            line = float(row.get("line") or 0)
+            odds = float(row.get("odds") or 0)
+            line_type = _s(row.get("line_type"))
+
+            if math.isclose(actual_stat, line, abs_tol=1e-9):
+                result, profit = "push", 0.0
+            elif line_type == "Over":
+                result, profit = ("win", round(max(odds - 1.0, 0.0), 3)) if actual_stat > line else ("loss", -1.0)
+            elif line_type == "Under":
+                result, profit = ("win", round(max(odds - 1.0, 0.0), 3)) if actual_stat < line else ("loss", -1.0)
+            else:
+                continue
+
+            updated = conn.execute(
+                update_sql,
+                {"id": row["id"], "actual_stat": actual_stat, "result": result, "profit_units": profit},
+            ).rowcount
+            settled += int(updated or 0)
+    return settled
