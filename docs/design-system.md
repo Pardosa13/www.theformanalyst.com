@@ -136,5 +136,7 @@ Pages consume macros and pass data only. Page-local CSS remains temporarily for 
 
 ## Current adoption
 - `templates/base.html` loads `tokens.css` and `components.css`.
-- `dashboard.html` uses `page_header(...)`.
+- `dashboard.html`, `data.html`, `history.html`, `results.html`, `results_entry.html`, `admin.html`, `meeting.html`, and `view_meeting.html` use `page_header(...)`.
 - `best_bets.html` uses `page_header(...)`, `betting_decision_card(...)`, and `state_panel(...)`.
+- `afl.html`, `mma.html`, `backtest.html`, `import_from_api.html`, `ml_shadow.html`, and `login.html` now use the shared page-header styling alongside page-specific controls.
+- Standalone `404.html`, `500.html`, and `admin/templates/admin/betfair_mapping.html` load the shared token/component styles and use the same `ds-*` presentation classes directly.
