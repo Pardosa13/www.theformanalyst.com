@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}AFL Hub - The Form Analyst{% endblock %}
 
@@ -634,17 +635,18 @@
 <div class="afl-wrap">
 
 <!-- ── Header ──────────────────────────────────────────────────── -->
-<div class="afl-header">
-  <div>
-    <h2>🏉 AFL Hub <span class="afl-badge">{{ year }} SEASON</span></h2>
-    <p>Player props · fixtures · ladder · value finder</p>
-  </div>
-  <div class="afl-header-right">
-    <span class="round-pill">Round {{ current_round or '—' }}</span>
-    <button class="btn btn-secondary btn-sm" id="refreshBtn" onclick="refreshAll()">
-      <i class="bi bi-arrow-clockwise"></i> Refresh
-    </button>
-  </div>
+{{ ui.page_header(
+  eyebrow='Footy Intelligence',
+  title='🏉 AFL Hub',
+  description='Player props · fixtures · ladder · value finder',
+  status_chips=[{'label': year ~ ' season', 'intent': 'model'}],
+  id_prefix='afl-hub'
+) }}
+<div class="afl-header-right mb-3">
+  <span class="round-pill">Round {{ current_round or '—' }}</span>
+  <button class="btn btn-secondary btn-sm" id="refreshBtn" onclick="refreshAll()">
+    <i class="bi bi-arrow-clockwise"></i> Refresh
+  </button>
 </div>
 
 <!-- ── Data sources ─────────────────────────────────────────────── -->

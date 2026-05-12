@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}ML Shadow — The Form Analyst{% endblock %}
 
@@ -329,10 +330,13 @@
 <div class="main-container">
 
   <!-- Page header -->
-  <div class="ml-page-header">
-    <h1>ML Shadow</h1>
-    <span class="ml-badge">EXPERIMENTAL</span>
-  </div>
+  {{ ui.page_header(
+    eyebrow='Experimental Modelling',
+    title='ML Shadow',
+    description='Shadow-test model picks against production selections before promoting changes',
+    status_chips=[{'label': 'Experimental', 'intent': 'warning'}],
+    id_prefix='ml-shadow'
+  ) }}
 
   <!-- Global stats bar -->
   <div class="ml-stats-bar">

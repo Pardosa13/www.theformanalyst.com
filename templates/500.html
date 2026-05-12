@@ -4,17 +4,80 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>500 | Server Error</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}">
     <style>
-        body { text-align: center; font-family: sans-serif; padding-top: 50px; }
-        h1 { color: #ff9900; }
-        a { color: #007bff; text-decoration: none; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background: var(--surface-page);
+            color: var(--text-primary);
+            font-family: 'Outfit', system-ui, sans-serif;
+        }
+
+        .error-card {
+            width: min(100%, 720px);
+            background: var(--surface-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-xl);
+            padding: 32px;
+            box-shadow: var(--shadow-2);
+        }
+
+        .error-code {
+            margin: 0 0 12px;
+            font-family: 'DM Mono', monospace;
+            font-size: 12px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: #fbbf24;
+        }
+
+        .error-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 24px;
+        }
+
+        .error-actions a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 16px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .error-actions .primary {
+            background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+            color: var(--text-inverse);
+        }
+
+        .error-actions .secondary {
+            background: var(--surface-card-raised);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+        }
     </style>
 </head>
 <body>
-    <h1>500</h1>
-    <h2>Server Malfunction</h2>
-    <p>Oops! Something went wrong on our end. It's not you, it's the code.</p>
-    <p>Try refreshing the page or click below to go back to safety.</p>
-    <a href="/">Return to the Homepage</a>
+    <main class="error-card">
+        <p class="error-code">500 · Server Error</p>
+        <header class="ds-page-header" aria-labelledby="error-500-title">
+            <div class="ds-page-header__content">
+                <h1 class="ds-page-header__title" id="error-500-title">Server malfunction</h1>
+                <p class="ds-page-header__description">Something went wrong on our side. Refresh the page or head back home while we recover the request.</p>
+            </div>
+        </header>
+        <div class="error-actions">
+            <a class="primary" href="/">Return home</a>
+            <a class="secondary" href="javascript:location.reload()">Refresh</a>
+        </div>
+    </main>
 </body>
 </html>

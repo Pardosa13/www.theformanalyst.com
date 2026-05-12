@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}Data Analytics{% endblock %}
 
@@ -380,9 +381,12 @@
 </style>
 
 <!-- Page header -->
-<div class="analytics-header">
-  <h1>📊 Data Analytics</h1>
-</div>
+{{ ui.page_header(
+  eyebrow='Analytics',
+  title='📊 Data Analytics',
+  description='Performance breakdowns by component, track, distance, and market context',
+  id_prefix='data-analytics'
+) }}
 
 <!-- Filters — all name attrs, method, url_for UNCHANGED -->
 <div class="filter-card">

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 {% block title %}Login - The Form Analyst{% endblock %}
 
 {% block content %}
@@ -132,7 +133,14 @@
   }
 
   /* ─── Form heading ─── */
-  .login-heading {
+  .login-card .ds-page-header {
+    display: block;
+    margin-bottom: 28px;
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+
+  .login-card .ds-page-header__title {
     font-family: 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
     font-size: 13px;
     font-weight: 600;
@@ -140,7 +148,14 @@
     text-transform: uppercase;
     color: rgba(255, 255, 255, 0.35);
     text-align: center;
-    margin: 0 0 28px 0;
+    margin: 0;
+  }
+
+  .login-card .ds-page-header__description {
+    margin-top: 8px;
+    text-align: center;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
   }
 
   /* ─── Flash messages ─── */
@@ -335,7 +350,13 @@
     <div class="login-divider"></div>
 
     <!-- Heading -->
-    <p class="login-heading">Sign in to your account</p>
+    {{ ui.page_header(
+      eyebrow='Secure Access',
+      title='Sign in to your account',
+      description='Access the premium form analysis workspace',
+      heading_level='h1',
+      id_prefix='login'
+    ) }}
 
     <!-- Flash messages (errors from Flask) -->
     {% with messages = get_flashed_messages(with_categories=true) %}

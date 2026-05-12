@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}Backtest — The Form Analyst{% endblock %}
 
@@ -12,6 +13,13 @@
         gap: 1rem;
         margin-bottom: 2rem;
         flex-wrap: wrap;
+    }
+
+    .bt-header .ds-page-header {
+        flex: 1 1 560px;
+        margin-bottom: 0;
+        padding-bottom: 0;
+        border-bottom: none;
     }
 
     .bt-title {
@@ -545,13 +553,12 @@
 
 <!-- ── Page header ── -->
 <div class="bt-header">
-    <div>
-        <h1 class="bt-title">
-            <i class="bi bi-cpu" style="color: var(--accent);"></i>
-            Backtest Engine
-        </h1>
-        <p class="bt-subtitle">Random Forest + Component ROI Analysis · Runs nightly at 2am</p>
-    </div>
+    {{ ui.page_header(
+      eyebrow='Model Validation',
+      title='Backtest Engine',
+      description='Random Forest + Component ROI Analysis · Runs nightly at 2am',
+      id_prefix='backtest-engine'
+    ) }}
     {% if current_user.is_admin %}
     <a href="{{ url_for('backtest_run_now') }}" class="btn btn-primary"
        onclick="return confirm('Trigger a manual backtest run now? This may take several minutes.')">

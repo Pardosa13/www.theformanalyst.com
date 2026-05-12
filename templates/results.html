@@ -1,5 +1,6 @@
 
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}Results - The Form Analyst{% endblock %}
 
@@ -185,10 +186,13 @@
 </style>
 
 <!-- Page header -->
-<div class="results-header">
-  <h1>Results</h1>
-  <a href="{{ url_for('dashboard') }}" class="back-link">← Back to Dashboard</a>
-</div>
+{{ ui.page_header(
+  eyebrow='Results Workflow',
+  title='Results',
+  description='Review meetings that still need official placings and revisit completed result cards',
+  secondary_actions=[{'href': url_for('dashboard'), 'label': 'Back to Dashboard', 'icon': 'bi bi-arrow-left'}],
+  id_prefix='results'
+) }}
 
 <!-- Section 1: Results Needed -->
 <div class="results-section">

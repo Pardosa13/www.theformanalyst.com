@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 {% block content %}
 
 <style>
@@ -289,10 +290,12 @@
 <div class="history-container">
 
   <!-- Page header -->
-  <div class="page-header">
-    <h1>Race Analysis Lists</h1>
-    <p>All raceday analyses — click a meeting to view.</p>
-  </div>
+  {{ ui.page_header(
+    eyebrow='Archive',
+    title='Race Analysis Lists',
+    description='All raceday analyses — click a meeting to view.',
+    id_prefix='race-analysis-lists'
+  ) }}
 
   {% if meetings %}
 

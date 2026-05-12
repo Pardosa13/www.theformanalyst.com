@@ -1,13 +1,16 @@
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}{{ meeting.meeting_name }} - The Form Analyst{% endblock %}
 
 {% block content %}
-<h1>{{ meeting.meeting_name }}</h1>
-
-<div style="margin-bottom: 20px;">
-    <a href="{{ url_for('history') }}" style="color: #667eea; text-decoration: none;">← Back to History</a>
-</div>
+{{ ui.page_header(
+  eyebrow='Race Meeting',
+  title=meeting.meeting_name,
+  description='Detailed race-by-race analysis with a print-friendly summary',
+  secondary_actions=[{'href': url_for('history'), 'label': 'Back to History', 'icon': 'bi bi-arrow-left'}],
+  id_prefix='meeting-summary'
+) }}
 
 <div class="card">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">

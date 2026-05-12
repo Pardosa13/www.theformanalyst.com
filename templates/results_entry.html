@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}{{ meeting.meeting_name }} - Enter Results{% endblock %}
 
@@ -391,10 +392,13 @@
 </style>
 
 <!-- Page header -->
-<div class="entry-header">
-  <h1>{{ meeting.meeting_name }}</h1>
-  <a href="{{ url_for('results') }}" class="back-link">← Back to Results</a>
-</div>
+{{ ui.page_header(
+  eyebrow='Results Entry',
+  title=meeting.meeting_name,
+  description='Enter official placings and dividends for each race in the meeting',
+  secondary_actions=[{'href': url_for('results'), 'label': 'Back to Results', 'icon': 'bi bi-arrow-left'}],
+  id_prefix='results-entry'
+) }}
 
 <!-- Auto-fetch banner — forms/actions/onsubmit UNCHANGED -->
 {% if meeting.puntingform_id %}

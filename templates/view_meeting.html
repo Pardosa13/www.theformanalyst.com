@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}{{ meeting.meeting_name }} - Analysis Results{% endblock %}
 
@@ -843,8 +844,13 @@ details pre {
 </style>
 
 <!-- Page header -->
-<h1 class="vm-page-title">{{ meeting.meeting_name }}</h1>
-<a href="{{ url_for('history') }}" class="vm-back-link">← Back To Race Meetings</a>
+{{ ui.page_header(
+  eyebrow='Race Meeting',
+  title=meeting.meeting_name,
+  description='Race analysis, pace maps, sectional views, and printable review tools',
+  secondary_actions=[{'href': url_for('history'), 'label': 'Back to Race Meetings', 'icon': 'bi bi-arrow-left'}],
+  id_prefix='view-meeting'
+) }}
 
 <!-- Meta card -->
 <div class="vm-meta-card">

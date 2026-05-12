@@ -1,31 +1,144 @@
 <!doctype html>
-<html>
-<head><title>Betfair mapping</title></head>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Betfair mapping</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}">
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px;
+      background: var(--surface-page);
+      color: var(--text-primary);
+      font-family: 'Outfit', system-ui, sans-serif;
+    }
+
+    .mapping-shell {
+      max-width: 1120px;
+      margin: 0 auto;
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xl);
+      padding: 28px;
+      box-shadow: var(--shadow-2);
+    }
+
+    .mapping-table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      background: var(--surface-card-raised);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+    }
+
+    th, td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    th {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-tertiary);
+      background: var(--surface-card);
+    }
+
+    td {
+      color: var(--text-secondary);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .mapping-form {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .mapping-form input[type="text"] {
+      flex: 1 1 220px;
+      min-width: 180px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border-subtle);
+      background: var(--surface-card);
+      color: var(--text-primary);
+    }
+
+    .mapping-form input[type="text"]:focus {
+      outline: none;
+      border-color: var(--brand-primary);
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.18);
+    }
+
+    .mapping-form button {
+      padding: 10px 14px;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+      color: var(--text-inverse);
+      font-weight: 600;
+      cursor: pointer;
+    }
+  </style>
+</head>
 <body>
-<h1>Unmapped Races</h1>
-{% if races %}
-  <table>
-    <thead><tr><th>ID</th><th>Date/Time</th><th>Track</th><th>Race #</th><th>Action</th></tr></thead>
-    <tbody>
-      {% for r in races %}
-      <tr>
-        <td>{{ r.id }}</td>
-        <td>{{ r.date }}</td>
-        <td>{{ r.track }}</td>
-        <td>{{ r.race_number }}</td>
-        <td>
-          <form method="post" action="{{ url_for('betfair_admin.mapping_index') }}">
-            <input type="hidden" name="race_id" value="{{ r.id }}">
-            <input type="text" name="market_id" placeholder="Enter Betfair marketId">
-            <button type="submit">Map</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-{% else %}
-  <p>No unmapped races.</p>
-{% endif %}
+  <main class="mapping-shell">
+    <header class="ds-page-header" aria-labelledby="betfair-mapping-title">
+      <div class="ds-page-header__content">
+        <p class="ds-page-header__eyebrow">Betfair Admin</p>
+        <h1 class="ds-page-header__title" id="betfair-mapping-title">Unmapped races</h1>
+        <p class="ds-page-header__description">Match local race records to Betfair market IDs so odds automation can reconcile events cleanly.</p>
+      </div>
+    </header>
+
+    {% if races %}
+    <div class="mapping-table-wrap">
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Date/Time</th><th>Track</th><th>Race #</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          {% for r in races %}
+          <tr>
+            <td>{{ r.id }}</td>
+            <td>{{ r.date }}</td>
+            <td>{{ r.track }}</td>
+            <td>{{ r.race_number }}</td>
+            <td>
+              <form class="mapping-form" method="post" action="{{ url_for('betfair_admin.mapping_index') }}">
+                <input type="hidden" name="race_id" value="{{ r.id }}">
+                <input type="text" name="market_id" placeholder="Enter Betfair marketId">
+                <button type="submit">Map race</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <section class="ds-state ds-state--empty" role="status" aria-live="polite">
+      <div class="ds-state__icon" aria-hidden="true">📭</div>
+      <div class="ds-state__content">
+        <h2 class="ds-state__title">No unmapped races</h2>
+        <p class="ds-state__description">Everything currently in the queue is already linked to a Betfair market.</p>
+      </div>
+    </section>
+    {% endif %}
+  </main>
 </body>
 </html>

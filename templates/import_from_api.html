@@ -1,5 +1,6 @@
 
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}Import from PuntingForm API{% endblock %}
 
@@ -404,16 +405,13 @@
 
 <div class="import-page">
 
-  <!-- Back link -->
-  <a href="{{ url_for('dashboard') }}" class="back-link">
-    <span>←</span> Back to Dashboard
-  </a>
-
-  <!-- Hero -->
-  <div class="import-hero">
-    <h1>🌐 Import Race Meetings</h1>
-    <p>Connect to PuntingForm API and analyse any race meeting in seconds</p>
-  </div>
+  {{ ui.page_header(
+    eyebrow='Data Operations',
+    title='🌐 Import Race Meetings',
+    description='Connect to PuntingForm API and analyse any race meeting in seconds',
+    secondary_actions=[{'href': url_for('dashboard'), 'label': 'Back to Dashboard', 'icon': 'bi bi-arrow-left'}],
+    id_prefix='import-race-meetings'
+  ) }}
 
   <!-- Date picker -->
   <div class="date-picker-card">

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}UFC Hub — The Form Analyst{% endblock %}
 
@@ -507,17 +508,15 @@
 <div class="container-fluid mma-wrap">
 
   <!-- Header -->
-  <div class="mma-header">
-    <div>
-      <h2>
-        🥊 UFC Hub
-        <span class="mma-badge">AI PREDICTIONS</span>
-      </h2>
-      <p>Upcoming UFC events · CatBoost + Glicko-2 model · Updated weekly</p>
-    </div>
-    <div class="d-flex align-items-center gap-2">
-      <span class="round-pill" id="last-updated">Loading...</span>
-    </div>
+  {{ ui.page_header(
+    eyebrow='Fight Intelligence',
+    title='🥊 UFC Hub',
+    description='Upcoming UFC events · CatBoost + Glicko-2 model · Updated weekly',
+    status_chips=[{'label': 'AI Predictions', 'intent': 'negative'}],
+    id_prefix='mma-hub'
+  ) }}
+  <div class="d-flex align-items-center gap-2 mb-4">
+    <span class="round-pill" id="last-updated">Loading...</span>
   </div>
 
   <!-- Main navigation tabs -->

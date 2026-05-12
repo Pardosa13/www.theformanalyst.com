@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros/design_system.html" as ui %}
 
 {% block title %}Admin Panel{% endblock %}
 
@@ -286,9 +287,12 @@
 </style>
 
 <!-- Page header -->
-<div class="admin-header">
-  <h1>🔐 Admin Panel</h1>
-</div>
+{{ ui.page_header(
+  eyebrow='Operations',
+  title='🔐 Admin Panel',
+  description='Monitor users, data quality, and ingestion activity from one control surface',
+  id_prefix='admin-panel'
+) }}
 
 <!-- Overview Stats -->
 <div class="admin-overview">
