@@ -2390,9 +2390,9 @@ function _vfApplyFilters(data) {
   }
   if (minLine !== null) bets = bets.filter(b => (b.book_line || 0) >= minLine);
   if (maxLine !== null) bets = bets.filter(b => (b.book_line || 0) <= maxLine);
-  bets = bets.filter(b => Math.abs(safeNum(b.edge, 0)) >= minEdge);
+  bets = bets.filter(b => safeNum(b.edge, 0) >= minEdge);
   bets = bets.filter(b => (b.recommendation || '') === 'value');
-  bets.sort((a, b) => Math.abs(safeNum(b.edge, 0)) - Math.abs(safeNum(a.edge, 0)));
+  bets.sort((a, b) => safeNum(b.edge, 0) - safeNum(a.edge, 0));
 
   console.debug('[ValueFinder] applying filters', {
     market,
@@ -2779,13 +2779,13 @@ function sgmLoadLegs() {
 function sgmRenderLegsTable(legs) {
   const el = document.getElementById('sgmLegsTable');
   const countEl = document.getElementById('sgmLegsCount');
-  countEl.textContent = `${legs.length} legs available`;
+  legs = legs.filter(l => safeNum(l.edge, 0) > 0);
+  countEl.textContent = `${legs.length} value legs available`;
 
   if (!legs.length) {
-    el.innerHTML = '<div class="prop-empty" style="padding:30px;"><p>No legs found. Try Sync H2H + Spreads then Refresh from API.</p></div>';
+    el.innerHTML = '<div class="prop-empty" style="padding:30px;"><p>No positive-edge legs found. Try Sync H2H + Spreads then Refresh from API.</p></div>';
     return;
   }
-  legs = legs.filter(l => safeNum(l.edge, 0) > 0);
   const rows = legs.map(leg => {
     const edgeVal = safeNum(leg.edge, 0);
     const edgeCls = edgeVal >= 5 ? 'pos' : edgeVal >= 2 ? 'neu' : 'neg';
@@ -2937,11 +2937,14 @@ function sgmClearAll() {
 }
 
 function _sgmCorrelationFactor(legA, legB) {
+  const sameMatch = legA.match && legA.match === legB.match;
   const sameTeam = legA.team === legB.team;
   const sameStat = legA.market === legB.market;
-  if (!sameTeam) return 0.98;
-  if (sameStat) return 0.85;
-  return 0.92;
+  if (!sameMatch) return 1.00;
+  if (sameTeam && sameStat) return 0.88;
+  if (sameTeam) return 0.94;
+  if (sameStat) return 0.96;
+  return 0.98;
 }
 
 function sgmCalcCombinedProb() {
@@ -2953,16 +2956,20 @@ function sgmCalcCombinedProb() {
     indepProb *= (safeNum(l.model_prob, 50) / 100);
   });
 
-  // Apply pairwise correlation adjustment
+  // Positive same-game correlation shortens fair odds versus a purely
+  // independent parlay, but a multi can never be more likely than its
+  // least-likely leg.
   let corrFactor = 1.0;
+  let minLegProb = 0.999;
+  _sgmMultiLegs.forEach(l => { minLegProb = Math.min(minLegProb, safeNum(l.model_prob, 50) / 100); });
   for (let i = 0; i < _sgmMultiLegs.length; i++) {
     for (let j = i + 1; j < _sgmMultiLegs.length; j++) {
       corrFactor *= _sgmCorrelationFactor(_sgmMultiLegs[i], _sgmMultiLegs[j]);
     }
   }
 
-  const adjustedProb = Math.min(indepProb / corrFactor, 0.999);
-  return { adjustedProb, indepProb };
+  const adjustedProb = Math.min(indepProb / Math.max(corrFactor, 0.01), minLegProb, 0.999);
+  return { adjustedProb, indepProb, corrFactor };
 }
 
 function sgmRenderMulti() {
@@ -3001,7 +3008,7 @@ function sgmRenderMulti() {
   // Calculate combined probability
   const calc = sgmCalcCombinedProb();
   if (calc) {
-    const { adjustedProb, indepProb } = calc;
+    const { adjustedProb, indepProb, corrFactor } = calc;
     const fairOdds = (1 / adjustedProb).toFixed(2);
     const indepOdds = (1 / indepProb).toFixed(2);
 
@@ -3012,14 +3019,8 @@ function sgmRenderMulti() {
     // Auto-calculate estimated bookie SGM odds
             let rawParlay = 1.0;
             _sgmMultiLegs.forEach(l => rawParlay *= safeNum(l.odds, 1));
-            // Apply same correlation discount as probability side
-            let oddsCorr = 1.0;
-            for (let i = 0; i < _sgmMultiLegs.length; i++) {
-              for (let j = i + 1; j < _sgmMultiLegs.length; j++) {
-                oddsCorr *= _sgmCorrelationFactor(_sgmMultiLegs[i], _sgmMultiLegs[j]);
-              }
-            }
-            const estBookieOdds = rawParlay.toFixed(2);
+            // Apply the same correlation discount as the fair-odds side.
+            const estBookieOdds = Math.max(rawParlay * Math.max(corrFactor || 1, 0.01), 1.01).toFixed(2);
             const bookieInput = document.getElementById('sgmBookieOdds');
             if (!bookieInput.value) {
               bookieInput.value = estBookieOdds;
