@@ -498,6 +498,16 @@
   </div>
 </div>
 
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#jurisdictionStrength" aria-expanded="false">
+    <h5>🗺️ Jurisdiction Strength</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="jurisdictionStrength" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load jurisdiction strength...</p></div>
+  </div>
+</div>
+
 <div class="section-card">
   <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#priceAnalysis" aria-expanded="false">
     <h5>💰 Price Analysis</h5><i class="bi bi-chevron-down"></i>
@@ -722,6 +732,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (externalFactors) { externalFactors.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('external-factors')) { loadExternalFactors(); } }); }
     const priceAnalysis = document.getElementById('priceAnalysis');
     if (priceAnalysis) { priceAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('price-analysis')) { loadPriceAnalysis(); } }); }
+    const jurisdictionStrength = document.getElementById('jurisdictionStrength');
+    if (jurisdictionStrength) { jurisdictionStrength.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('jurisdiction-strength')) { loadJurisdictionStrength(); } }); }
     const probabilityCalibration = document.getElementById('probabilityCalibration');
     if (probabilityCalibration) {
         probabilityCalibration.addEventListener('show.bs.collapse', function() {
@@ -785,6 +797,103 @@ function loadExternalFactors() {
         .then(data => { renderExternalFactors(data); loadedSections.add('external-factors'); })
         .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>'; console.error('Error:', error); });
 }
+function loadJurisdictionStrength() {
+    const container = document.getElementById('jurisdictionStrength');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Testing interstate jurisdiction strength...</p></div>';
+    fetch('/api/data/jurisdiction-strength')
+        .then(response => response.json())
+        .then(data => { renderJurisdictionStrength(data); loadedSections.add('jurisdiction-strength'); })
+        .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading jurisdiction strength. Please try again.</div>'; console.error('Error:', error); });
+}
+
+function renderJurisdictionStrength(data) {
+    const container = document.getElementById('jurisdictionStrength');
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[char]));
+
+    if (data.error) {
+        container.innerHTML = `<div class="card-body"><div class="analytics-empty"><h5>Jurisdiction Strength Error</h5><p>${escapeHtml(data.error)}</p>${data.details ? `<p class="text-muted">${escapeHtml(data.details)}</p>` : ''}</div></div>`;
+        return;
+    }
+
+    const rows = data.jurisdictions || [];
+    const unmappedTracks = data.unmapped_tracks || [];
+    const meta = data.meta || {};
+
+    if (rows.length === 0) {
+        const headerNote = (meta.sample_headers_without_previous_track || []).length > 0
+            ? '<p class="text-muted">No interstate previous-run rows were found. Check the detected previous-run column and unmapped tracks below.</p>'
+            : '<p class="text-muted">No interstate jurisdiction rows found yet.</p>';
+        container.innerHTML = `<div class="card-body"><div class="analytics-empty"><h5>No Jurisdiction Strength Data Yet</h5>${headerNote}</div>${renderJurisdictionUnmapped(unmappedTracks, escapeHtml)}${renderJurisdictionMeta(meta, escapeHtml)}</div>`;
+        return;
+    }
+
+    let html = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px;margin-bottom:16px">
+            Version 1 groups horses by the state of their previous-run track, then measures how they performed today when racing in a different state.
+            Current track is read from the CSV <code>track</code> column; the meeting <code>meetings.track</code> field is not used.
+        </p>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th class="text-center">Rank</th>
+                        <th>Origin State</th>
+                        <th class="text-center">Interstate Runs</th>
+                        <th class="text-center">Unique Horses</th>
+                        <th class="text-center">Wins</th>
+                        <th class="text-center">Win %</th>
+                        <th class="text-center">Places</th>
+                        <th class="text-center">Place %</th>
+                        <th>Top Destination State</th>
+                    </tr>
+                </thead><tbody>`;
+
+    rows.forEach((row, index) => {
+        const destinations = row.destination_state_breakdown || {};
+        const topDestination = row.top_destination_state || '—';
+        const topCount = topDestination !== '—' ? destinations[topDestination] : null;
+        html += `<tr>
+            <td class="text-center">${index + 1}</td>
+            <td><strong>${escapeHtml(row.origin_state)}</strong></td>
+            <td class="text-center">${row.interstate_runs}</td>
+            <td class="text-center">${row.unique_horses}</td>
+            <td class="text-center">${row.wins}</td>
+            <td class="text-center ${row.win_percentage >= 20 ? 'text-success fw-bold' : row.win_percentage < 8 ? 'text-danger' : ''}">${row.win_percentage}%</td>
+            <td class="text-center">${row.places}</td>
+            <td class="text-center ${row.place_percentage >= 50 ? 'text-success fw-bold' : row.place_percentage < 25 ? 'text-danger' : ''}">${row.place_percentage}%</td>
+            <td>${escapeHtml(topDestination)}${topCount ? ` <span class="badge bg-primary">${topCount}</span>` : ''}</td>
+        </tr>`;
+    });
+
+    html += `</tbody></table></div>
+        ${renderJurisdictionUnmapped(unmappedTracks, escapeHtml)}
+        ${renderJurisdictionMeta(meta, escapeHtml)}
+    </div>`;
+
+    container.innerHTML = html;
+}
+
+function renderJurisdictionUnmapped(unmappedTracks, escapeHtml) {
+    if (!unmappedTracks || unmappedTracks.length === 0) return '';
+    const topTracks = unmappedTracks.slice(0, 25).map(item => `<li><strong>${escapeHtml(item.track)}</strong> <span class="badge bg-warning text-dark">${item.count}</span></li>`).join('');
+    return `<div class="alert alert-warning mt-3">
+        <strong>⚠️ Unmapped tracks found:</strong>
+        <p style="font-size:12px;margin:6px 0 8px">Add these to the backend track mapping to improve coverage.</p>
+        <ul style="columns:2;margin-bottom:0;font-size:12px">${topTracks}</ul>
+    </div>`;
+}
+
+function renderJurisdictionMeta(meta, escapeHtml) {
+    const previousColumn = meta.previous_track_column_detected || 'not detected';
+    const finishColumn = meta.finish_position_column_detected || 'not detected';
+    return `<div class="alert alert-info mt-3">
+        <strong>Debug:</strong>
+        ${meta.meetings_processed || 0} meetings, ${meta.rows_processed || 0} horse rows, ${meta.interstate_rows || 0} interstate rows.
+        Previous-run track column: <code>${escapeHtml(previousColumn)}</code>.
+        Finish column: <code>${escapeHtml(finishColumn)}</code>.
+    </div>`;
+}
+
 function loadPriceAnalysis() {
     const container = document.getElementById('priceAnalysis');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading price analysis...</p></div>';
