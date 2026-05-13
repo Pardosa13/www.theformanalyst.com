@@ -808,6 +808,10 @@ function loadJurisdictionStrength() {
 
 function renderJurisdictionStrength(data) {
     const container = document.getElementById('jurisdictionStrength');
+    const JURISDICTION_WIN_GOOD_THRESHOLD = 20;
+    const JURISDICTION_WIN_WEAK_THRESHOLD = 8;
+    const JURISDICTION_PLACE_GOOD_THRESHOLD = 50;
+    const JURISDICTION_PLACE_WEAK_THRESHOLD = 25;
     const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[char]));
     const formatMetric = (value) => value == null ? 'N/A' : escapeHtml(value);
     const formatPercentage = (value) => value == null ? 'N/A' : `${escapeHtml(value)}%`;
@@ -861,10 +865,10 @@ function renderJurisdictionStrength(data) {
         const topDestination = row.top_destination_state || '—';
         const topCount = topDestination !== '—' ? destinations[topDestination] : null;
         const winPctClass = typeof row.win_percentage === 'number'
-            ? (row.win_percentage >= 20 ? 'text-success fw-bold' : row.win_percentage < 8 ? 'text-danger' : '')
+            ? (row.win_percentage >= JURISDICTION_WIN_GOOD_THRESHOLD ? 'text-success fw-bold' : row.win_percentage < JURISDICTION_WIN_WEAK_THRESHOLD ? 'text-danger' : '')
             : '';
         const placePctClass = typeof row.place_percentage === 'number'
-            ? (row.place_percentage >= 50 ? 'text-success fw-bold' : row.place_percentage < 25 ? 'text-danger' : '')
+            ? (row.place_percentage >= JURISDICTION_PLACE_GOOD_THRESHOLD ? 'text-success fw-bold' : row.place_percentage < JURISDICTION_PLACE_WEAK_THRESHOLD ? 'text-danger' : '')
             : '';
         html += `<tr>
             <td class="text-center">${index + 1}</td>

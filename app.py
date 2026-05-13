@@ -4746,6 +4746,7 @@ def api_jurisdiction_strength():
             if _is_repeated_csv_header_row(row, current_track_column, meeting_previous_track_column):
                 continue
             if recorded_finish_position == 0:
+                # Result.finish_position=0 means the horse was scratched, so it is not an interstate run.
                 continue
 
             rows_processed += 1
