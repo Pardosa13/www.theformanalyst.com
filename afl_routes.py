@@ -718,6 +718,9 @@ def register_afl_routes(app, db):
                 _normalize_whitespace(prop.get("player_name", "")).lower(),
                 market,
                 prop.get("line_type", ""),
+                float(prop.get("line") or 0),
+                _normalise_team_name(prop.get("home_team", "")),
+                _normalise_team_name(prop.get("away_team", "")),
             )
             existing = deduped_props.get(key)
             if existing is None or (prop.get("odds") or 0) > (existing.get("odds") or 0):
@@ -822,7 +825,7 @@ def register_afl_routes(app, db):
                 player_stats=games,
             )
             edge = edge_data["edge"]
-            if abs(edge) < min_edge:
+            if edge < min_edge:
                 continue
 
             if line_type == "Over":
@@ -839,7 +842,7 @@ def register_afl_routes(app, db):
                         100.0,
                         35
                         + min(len(season_games), 25) * 1.7
-                        + min(abs(edge), 12.0) * 2.5
+                        + min(max(edge, 0.0), 12.0) * 2.5
                         + (8 if len(opp_rows_filtered) >= 3 else 0),
                     ),
                 ),
@@ -890,17 +893,19 @@ def register_afl_routes(app, db):
         for bet in value_bets:
             key = (bet["player"], bet["market"], bet["line_type"])
             existing = best_per_player.get(key)
-            if existing is None or abs(bet["edge"]) > abs(existing["edge"]) or (
-                abs(bet["edge"]) == abs(existing["edge"]) and (bet.get("odds") or 0) > (existing.get("odds") or 0)
+            if existing is None or bet["edge"] > existing["edge"] or (
+                bet["edge"] == existing["edge"] and (bet.get("odds") or 0) > (existing.get("odds") or 0)
             ):
                 best_per_player[key] = bet
 
         value_bets = [
             b for b in best_per_player.values()
-            if b.get("sample_size", 0) >= min_games and b.get("recommendation") in {"value", "watch"}
+            if b.get("sample_size", 0) >= min_games
+            and b.get("recommendation") == "value"
+            and float(b.get("edge") or 0) >= min_edge
         ]
         value_bets.sort(
-            key=lambda x: (x.get("recommendation") == "value", abs(x.get("edge", 0)), x.get("confidence_score", 0)),
+            key=lambda x: (x.get("edge", 0), x.get("confidence_score", 0)),
             reverse=True,
         )
 
@@ -908,7 +913,7 @@ def register_afl_routes(app, db):
         official = [
             b for b in value_bets
             if b.get("recommendation") == "value"
-            and abs(float(b.get("edge") or 0)) >= max(min_edge, 2.5)
+            and float(b.get("edge") or 0) >= max(min_edge, 2.5)
             and float(b.get("confidence_score") or 0) >= 55
         ]
         selection_rows = []
@@ -1277,8 +1282,8 @@ def register_afl_routes(app, db):
 
         if home_team and away_team:
             conditions.append(
-                "(LOWER(home_team) = LOWER(:home) AND LOWER(away_team) = LOWER(:away)) OR "
-                "(LOWER(home_team) = LOWER(:away) AND LOWER(away_team) = LOWER(:home))"
+                "((LOWER(home_team) = LOWER(:home) AND LOWER(away_team) = LOWER(:away)) OR "
+                "(LOWER(home_team) = LOWER(:away) AND LOWER(away_team) = LOWER(:home)))"
             )
             params["home"] = home_team
             params["away"] = away_team
@@ -1407,7 +1412,7 @@ def register_afl_routes(app, db):
             )
 
             total = len(games)
-            hits = sum(1 for g in games if (g.get(stat_name, 0) or 0) >= book_line)
+            hits = sum(1 for g in games if (g.get(stat_name, 0) or 0) > book_line)
             hist_pct = round(hits / total * 100, 1) if total else 0.0
 
             legs.append({

@@ -710,9 +710,8 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
         current_round = round_number or 1
 
     # current_round is the first round with any incomplete game (from Squiggle complete!=100).
-    # Include it so mid-round syncs (e.g. Monday after a weekend round) capture the games
-    # already played. Unplayed matches return empty stats and are skipped gracefully.
-    completed_rounds = list(range(1, current_round + 1))
+    # Only rounds before it are considered fully completed.
+    completed_rounds = list(range(1, current_round))
     if not completed_rounds:
         logger.warning(
             "AFL current-season stats: no completed rounds yet for season %s "
@@ -2059,65 +2058,95 @@ def calculate_market_edge(
     player_stats: list[dict] = None,
 ) -> dict:
     """
-    Probability-based edge calculation.
+    Probability-based edge calculation for AFL player props.
 
-    - Disposals (high-volume): normal distribution approximation.
-    - Goals, marks, tackles, kicks (rare events): Poisson distribution.
-
-    Returns edge in percentage points: positive = model says bet has value.
+    The model returns edge in percentage points where positive means the model's
+    probability is higher than the bookmaker's implied probability. It uses the
+    stat that matches the requested market, filters out very low-TOG games, and
+    blends historical hit rate with a distribution estimate so non-disposal
+    markets are not accidentally priced from disposal averages.
     """
-    # Filter out games with TOG < 50% if player_stats provided
+    from math import erf, exp, floor, sqrt
+
+    market = _normalise_prop_market(market)
+    market_stat = {
+        "player_disposals": "disposals",
+        "player_kicks": "kicks",
+        "player_handballs": "handballs",
+        "player_marks": "marks",
+        "player_tackles": "tackles",
+        "player_goals": "goals",
+        "player_afl_fantasy_points": "afl_fantasy_score",
+    }.get(market, "disposals")
+
+    usable_games: list[dict] = []
     if player_stats:
-        filtered_games = [g for g in player_stats if (g.get("time_on_ground_percentage") or 0) >= 50]
-        if filtered_games:
-            # Recalculate averages using only full-participation games
-            stats_to_avg = [
-                "disposals", "effective_disposals", "disposal_efficiency_percentage",
-                "kicks", "marks", "handballs", "goals", "behinds", "tackles", "hitouts",
-                "rebounds", "inside_fifties", "clearances", "contested_possessions",
-                "uncontested_possessions", "marks_inside_fifty", "score_involvements",
-                "metres_gained", "afl_fantasy_score", "supercoach_score",
-                "time_on_ground_percentage",
-            ]
-            totals = {stat: 0 for stat in stats_to_avg}
-            for game in filtered_games:
-                for stat in stats_to_avg:
-                    totals[stat] += game.get(stat, 0) or 0
-            filtered_avg = {stat: round(totals[stat] / len(filtered_games), 1) for stat in stats_to_avg}
-            player_avg = filtered_avg.get("disposals", player_avg)
+        # Keep games where TOG is meaningful. Historical imports sometimes have
+        # missing TOG; keep those rows rather than dropping an entire sample.
+        usable_games = [
+            g for g in player_stats
+            if (g.get("time_on_ground_percentage") is None)
+            or float(g.get("time_on_ground_percentage") or 0) >= 50
+        ]
+        if not usable_games:
+            usable_games = list(player_stats)
 
-    from math import sqrt, erfc
+    if usable_games:
+        stat_values = [float(g.get(market_stat) or 0) for g in usable_games]
+        if stat_values:
+            player_avg = sum(stat_values) / len(stat_values)
+    else:
+        stat_values = []
 
-    # Build blended model prediction (same weighting as calculate_disposal_edge)
-    base_pred = float(player_avg) if player_avg else 0.0
+    # Build blended model prediction from the correct market stat.
+    base_pred = max(float(player_avg) if player_avg is not None else 0.0, 0.0)
     model_pred = base_pred
 
-    if vs_opp_avg and vs_opp_avg > 0:
-        model_pred = base_pred * 0.50 + vs_opp_avg * 0.30 + base_pred * 0.20
+    if vs_opp_avg is not None and vs_opp_avg > 0:
+        model_pred = base_pred * 0.70 + float(vs_opp_avg) * 0.30
 
-    if last5_avg and last5_avg > 0:
-        model_pred = model_pred * 0.80 + last5_avg * 0.20
+    if last5_avg is not None and last5_avg > 0:
+        model_pred = model_pred * 0.80 + float(last5_avg) * 0.20
 
     mu = max(model_pred, 0.01)
 
-    # Compute P(X > book_line) using the appropriate distribution
-    try:
-        from scipy.stats import norm as scipy_norm, poisson as scipy_poisson
+    def _normal_sf(x: float, mean: float, stdev: float) -> float:
+        stdev = max(stdev, 0.1)
+        z = (x - mean) / (stdev * sqrt(2))
+        return 0.5 * (1 - erf(z))
 
-        if market == "player_disposals":
-            # High-volume: normal approximation (mean=mu, std=sqrt(mu))
-            sigma = max(sqrt(mu), 0.1)
-            model_prob_over = float(scipy_norm.sf(book_line, loc=mu, scale=sigma))
+    def _poisson_sf(k: int, mean: float) -> float:
+        # P(X > k) = 1 - cumulative P(0..k). Used only for low-count goals.
+        cumulative = 0.0
+        term = exp(-mean)
+        cumulative += term
+        for n in range(1, max(k, 0) + 1):
+            term *= mean / n
+            cumulative += term
+        return 1.0 - cumulative
+
+    # Distribution estimate for the requested market. Goals are genuinely
+    # low-count; the other AFL props are better represented by a normal model
+    # using each player's observed variance rather than sqrt(mean).
+    if market == "player_goals":
+        model_prob_over = _poisson_sf(int(floor(float(book_line))), mu)
+    else:
+        if len(stat_values) >= 2:
+            mean_hist = sum(stat_values) / len(stat_values)
+            variance = sum((v - mean_hist) ** 2 for v in stat_values) / (len(stat_values) - 1)
+            hist_sigma = sqrt(max(variance, 0.0))
         else:
-            # Rare events: Poisson.  sf(k, mu) = P(X > k) = 1 - CDF(k),
-            # with better numerical accuracy than explicit subtraction.
-            k = int(book_line)
-            model_prob_over = float(scipy_poisson.sf(k, mu=mu))
-    except ImportError:
-        # Fallback using math.erfc (normal approximation) when scipy unavailable
-        sigma = max(sqrt(mu), 0.1)
-        z = (book_line - mu) / (sigma * sqrt(2))
-        model_prob_over = max(0.001, min(0.999, 0.5 * erfc(z)))
+            hist_sigma = sqrt(mu)
+        sigma_floor = 12.0 if market == "player_afl_fantasy_points" else 2.0
+        model_prob_over = _normal_sf(float(book_line), mu, max(hist_sigma, sigma_floor))
+
+    # Historical hit-rate with light Bayesian smoothing. This anchors the model
+    # to how often a player has actually cleared the exact posted line.
+    if stat_values:
+        over_hits = sum(1 for value in stat_values if value > float(book_line))
+        empirical_over = (over_hits + 1.0) / (len(stat_values) + 2.0)
+        empirical_weight = 0.60 if len(stat_values) >= 8 else 0.35
+        model_prob_over = empirical_weight * empirical_over + (1 - empirical_weight) * model_prob_over
 
     model_prob_over = max(0.001, min(0.999, model_prob_over))
 
@@ -2126,12 +2155,8 @@ def calculate_market_edge(
     else:
         model_prob = model_prob_over
 
-    # Implied probability from decimal odds (remove vig is not applied here;
-    # raw implied prob is sufficient for edge signal)
     implied_prob = 1.0 / max(float(odds), 1.01) if odds and odds > 1 else 0.5
     implied_prob = max(0.001, min(0.999, implied_prob))
-
-    # Edge: positive means our model gives higher probability than bookie implies
     edge_pct = (model_prob - implied_prob) * 100.0
 
     return {
@@ -2141,6 +2166,6 @@ def calculate_market_edge(
         "book_line": book_line,
         "edge": round(edge_pct, 1),
         "edge_positive": edge_pct > 0,
-        "edge_pct": round(abs(edge_pct), 1),
+        "edge_pct": round(edge_pct, 1),
         "recommendation": "value" if edge_pct >= 2.0 else "skip",
     }

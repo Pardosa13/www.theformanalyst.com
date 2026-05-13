@@ -11,7 +11,21 @@ import hashlib
 import os
 import re
 import sys
+import types
+from pathlib import Path
 from typing import Any
+
+
+
+def _import_afl_calculate_market_edge():
+    repo_root = str(Path(__file__).resolve().parents[1])
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    sys.modules.setdefault("pandas", types.SimpleNamespace(DataFrame=object, read_csv=lambda *a, **k: None))
+    sys.modules.setdefault("pyreadr", types.SimpleNamespace(read_r=lambda *a, **k: {}))
+    sys.modules.setdefault("requests", types.SimpleNamespace(RequestException=Exception, get=lambda *a, **k: None))
+    from afl_data import calculate_market_edge
+    return calculate_market_edge
 
 # ---------------------------------------------------------------------------
 # Inline implementations of pure-Python helpers under test
@@ -1467,3 +1481,68 @@ def test_value_finder_source_uses_filtered_opponent_rows_for_average():
     assert "vs_opp_avg = _safe_avg(opp_games, stat_name)" not in source
     assert "vs_opp_avg = _safe_avg(opp_rows_filtered, stat_name)" in source
     assert "vs_opp_avg = _safe_avg(opp_games_filtered, stat_name)" in source
+
+
+# Model sanity checks for AFL value finder / SGM calculations
+
+def test_calculate_market_edge_uses_requested_market_stat_not_disposals():
+    """Marks markets must be priced from marks history, not disposal history."""
+    calculate_market_edge = _import_afl_calculate_market_edge()
+
+    games = [
+        {
+            "disposals": 30,
+            "marks": 2,
+            "time_on_ground_percentage": 90,
+        }
+        for _ in range(12)
+    ]
+    result = calculate_market_edge(
+        player_avg=2,
+        book_line=7.5,
+        odds=1.9,
+        line_type="Over",
+        market="player_marks",
+        last5_avg=2,
+        player_stats=games,
+    )
+
+    assert result["model_prediction"] < 4
+    assert result["model_prob"] < 15
+    assert result["edge"] < 0
+    assert result["recommendation"] == "skip"
+
+
+def test_calculate_market_edge_reports_signed_edge_pct():
+    """edge_pct should retain sign so negative edges cannot look like value."""
+    calculate_market_edge = _import_afl_calculate_market_edge()
+
+    result = calculate_market_edge(
+        player_avg=3,
+        book_line=20.5,
+        odds=1.9,
+        line_type="Over",
+        market="player_disposals",
+        player_stats=[{"disposals": 3, "time_on_ground_percentage": 80} for _ in range(10)],
+    )
+
+    assert result["edge"] < 0
+    assert result["edge_pct"] < 0
+
+
+def test_value_finder_filters_positive_edge_not_absolute_edge():
+    """Value Finder must not include negative-edge selections via abs(edge)."""
+    source = Path("templates/afl.html").read_text(encoding="utf-8")
+    routes = Path("afl_routes.py").read_text(encoding="utf-8")
+
+    assert "bets = bets.filter(b => safeNum(b.edge, 0) >= minEdge);" in source
+    assert "Math.abs(safeNum(b.edge, 0)) >= minEdge" not in source
+    assert "if edge < min_edge:" in routes
+    assert "if abs(edge) < min_edge:" not in routes
+
+
+def test_sgm_home_away_sql_condition_is_parenthesised():
+    """The SGM route must not let OR escape the fetched_at/market filters."""
+    routes = Path("afl_routes.py").read_text(encoding="utf-8")
+    assert "((LOWER(home_team) = LOWER(:home) AND LOWER(away_team) = LOWER(:away)) OR " in routes
+    assert "(LOWER(home_team) = LOWER(:away) AND LOWER(away_team) = LOWER(:home)))" in routes
