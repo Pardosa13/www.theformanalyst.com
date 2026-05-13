@@ -4493,6 +4493,7 @@ JURISDICTION_TRACKS = {
 
 AUSTRALIAN_JURISDICTION_STATES = {'NSW_ACT', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT'}
 JURISDICTION_RESULT_DEBUG_TERMS = ['finish', 'position', 'result', 'place', 'margin', 'settle', 'sp', 'price', 'official']
+SCRATCHED_FINISH_POSITION = 0
 
 
 def _normalise_track_name(track_name):
@@ -4745,7 +4746,7 @@ def api_jurisdiction_strength():
 
             if _is_repeated_csv_header_row(row, current_track_column, meeting_previous_track_column):
                 continue
-            if recorded_finish_position == 0:
+            if recorded_finish_position == SCRATCHED_FINISH_POSITION:
                 # Some scratches are only recorded in Result, so keep this separate from Horse.is_scratched.
                 continue
 
@@ -4809,16 +4810,16 @@ def api_jurisdiction_strength():
                 'unique_horses': len(values['horses']),
                 'result_runs': result_runs if has_results else None,
                 'wins': values['wins'] if result_runs else None,
-                'win_percentage': round((values['wins'] / result_runs * 100), 1) if result_runs else None,
+                'win_percentage': round((values['wins'] / result_runs * 100), 1) if result_runs > 0 else None,
                 'places': values['places'] if result_runs else None,
-                'place_percentage': round((values['places'] / result_runs * 100), 1) if result_runs else None,
+                'place_percentage': round((values['places'] / result_runs * 100), 1) if result_runs > 0 else None,
                 'destination_state_breakdown': destinations,
                 'top_destination_state': top_destination_state,
                 'has_results': bool(result_runs)
             })
 
         if has_results:
-            result_rows.sort(key=lambda item: ((item['win_percentage'] or 0), item['interstate_runs']), reverse=True)
+            result_rows.sort(key=lambda item: (item['win_percentage'] or 0, item['interstate_runs']), reverse=True)
         else:
             result_rows.sort(key=lambda item: item['interstate_runs'], reverse=True)
 
