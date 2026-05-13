@@ -4746,7 +4746,7 @@ def api_jurisdiction_strength():
             if _is_repeated_csv_header_row(row, current_track_column, meeting_previous_track_column):
                 continue
             if recorded_finish_position == 0:
-                # Result.finish_position=0 means the horse was scratched, so it is not an interstate run.
+                # Some scratches are only recorded in Result, so keep this separate from Horse.is_scratched.
                 continue
 
             rows_processed += 1
@@ -4837,7 +4837,6 @@ def api_jurisdiction_strength():
                 'interstate_rows': interstate_rows,
                 'previous_track_column_detected': previous_track_column,
                 'finish_position_column_detected': finish_position_column,
-                'finish_column': finish_position_column,
                 'has_results': has_results,
                 'results_source': results_source,
                 'result_related_headers': result_related_headers,
