@@ -4459,14 +4459,16 @@ JURISDICTION_TRACKS = {
         'Dubbo', 'Wagga', 'Grafton', 'Coffs Harbour', 'Port Macquarie', 'Tamworth', 'Armidale', 'Bathurst',
         'Albury', 'Orange', 'Mudgee', 'Nowra', 'Queanbeyan', 'Taree', 'Canberra', 'Goulburn', 'Moruya',
         'Ballina', 'Sapphire Coast', 'Quirindi', 'Tuncurry', 'Gunnedah', 'Corowa', 'Cowra', 'Wellington',
-        'Moree', 'Narromine'
+        'Moree', 'Narromine', 'Gundagai', 'Murwillumbah', 'Canberra Acton', 'Lismore', 'Kempsey', 'Inverell',
+        'Wagga Riverside', 'Warren', 'Gilgandra', 'Parkes', 'Coonamble', 'Walcha'
     ],
     'VIC': [
         'Flemington', 'Caulfield', 'Caulfield Heath', 'Sandown', 'Sandown-Lakeside', 'Sandown-Hillside',
         'Moonee Valley', 'Pakenham', 'Cranbourne', 'Geelong', 'Ballarat', 'Bendigo', 'Sale', 'Warrnambool',
         'Mornington', 'Seymour', 'Kilmore', 'Donald', 'Ararat', 'Stawell', 'Hamilton', 'Wangaratta',
         'Echuca', 'Moe', 'Colac', 'Terang', 'Werribee', 'Kyneton', 'Yarra Glen', 'Wodonga', 'Swan Hill',
-        'Stony Creek', 'Horsham', 'Towong', 'Bairnsdale', 'Avoca'
+        'Stony Creek', 'Horsham', 'Towong', 'Bairnsdale', 'Avoca', 'Ballarat Synthetic', 'Pakenham Synthetic',
+        'Tatura', 'Benalla', 'Mildura', 'Warracknabeal', 'Casterton'
     ],
     'QLD': [
         'Eagle Farm', 'Doomben', 'Ipswich', 'Gold Coast', 'Gold Coast Poly', 'Sunshine Coast',
@@ -4477,15 +4479,20 @@ JURISDICTION_TRACKS = {
     'SA': [
         'Morphettville', 'Morphettville Parks', 'Murray Bridge', 'Murray Bridge GH', 'Gawler', 'Balaklava',
         'Port Lincoln', 'Clare', 'Mount Gambier', 'Mt Gambier', 'Strathalbyn', 'Naracoorte', 'Oakbank',
-        'Port Augusta', 'Bordertown', 'Penola'
+        'Port Augusta', 'Bordertown', 'Penola', 'Kingscote'
     ],
     'WA': [
         'Ascot', 'Belmont', 'Belmont Park', 'Pinjarra', 'Pinjarra Scarpside', 'Bunbury', 'Albany',
-        'Kalgoorlie', 'Geraldton', 'Northam', 'Esperance', 'York', 'Rockingham', 'Narrogin', 'Port Hedland'
+        'Kalgoorlie', 'Geraldton', 'Northam', 'Esperance', 'York', 'Rockingham', 'Narrogin', 'Port Hedland',
+        'Mt Barker', 'Carnarvon'
     ],
     'TAS': ['Hobart', 'Launceston', 'Devonport', 'Devonport Synthetic'],
-    'NT': ['Darwin', 'Fannie Bay', 'Alice Springs', 'Pioneer Park']
+    'NT': ['Darwin', 'Fannie Bay', 'Alice Springs', 'Pioneer Park'],
+    'HK_INTL': ['Sha Tin']
 }
+
+AUSTRALIAN_JURISDICTION_STATES = {'NSW_ACT', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT'}
+JURISDICTION_RESULT_DEBUG_TERMS = ['finish', 'position', 'result', 'place', 'margin', 'settle', 'sp', 'price', 'official']
 
 
 def _normalise_track_name(track_name):
@@ -4534,6 +4541,79 @@ def _find_csv_column(fieldnames, candidates=None, required_terms=None, excluded_
     return None
 
 
+def _find_current_race_finish_column(fieldnames):
+    """Find a current-race finish/result column while avoiding historical form fields."""
+    exact_candidates = [
+        'finish position', 'finishing position', 'today finish position', 'official finish',
+        'official position', 'official result', 'result finish', 'result_finish', 'result position',
+        'today result', 'result', 'finish', 'position', 'place', 'placing'
+    ]
+    detected = _find_csv_column(
+        fieldnames,
+        candidates=exact_candidates,
+        excluded_terms=['form', 'last', 'previous', 'prev', 'margin', 'settle', 'sp', 'price']
+    )
+    if detected:
+        return detected
+
+    for field in fieldnames or []:
+        if not field:
+            continue
+        lowered = field.lower().strip()
+        if any(term in lowered for term in ['form', 'last', 'previous', 'prev', 'margin', 'settle', 'sp', 'price']):
+            continue
+        if (
+            'finish' in lowered
+            or lowered in {'position', 'result', 'place', 'placing'}
+            or 'official result' in lowered
+            or 'official finish' in lowered
+            or 'official position' in lowered
+            or 'result position' in lowered
+            or 'result finish' in lowered
+        ):
+            return field
+    return None
+
+
+def _collect_csv_headers_with_terms(fieldnames, terms):
+    matches = []
+    seen = set()
+    for field in fieldnames or []:
+        if not field:
+            continue
+        lowered = field.lower()
+        if any(term in lowered for term in terms) and field not in seen:
+            matches.append(field)
+            seen.add(field)
+    return matches
+
+
+def _is_repeated_csv_header_row(row, current_track_column=None, previous_track_column=None):
+    def _value(column_name):
+        if not column_name:
+            return ''
+        return str(row.get(column_name, '') or '').strip().lower()
+
+    horse_name_value = row.get('horse name')
+    if horse_name_value is None:
+        horse_name_value = row.get('Horse Name')
+
+    if _value('track') == 'track':
+        return True
+    if _value('form track') == 'form track':
+        return True
+    if str(horse_name_value or '').strip().lower() == 'horse name':
+        return True
+
+    current_track = _value(current_track_column)
+    previous_track = _value(previous_track_column)
+    if current_track in {'track', 'form track'}:
+        return True
+    if previous_track in {'track', 'form track'}:
+        return True
+    return False
+
+
 def _parse_finish_position(value):
     """Return today's finish position as an int when the CSV has it, else None."""
     if value is None:
@@ -4565,6 +4645,7 @@ def api_jurisdiction_strength():
         stats = defaultdict(lambda: {
             'interstate_runs': 0,
             'horses': set(),
+            'result_runs': 0,
             'wins': 0,
             'places': 0,
             'destination_state_breakdown': Counter()
@@ -4575,7 +4656,11 @@ def api_jurisdiction_strength():
         interstate_rows = 0
         previous_track_column = None
         finish_position_column = None
+        results_source = None
+        result_related_headers = []
+        result_related_header_set = set()
         sample_headers_without_previous_track = []
+        meeting_column_map = {}
 
         meetings = db.session.query(Meeting.id, Meeting.csv_data).filter(Meeting.csv_data.isnot(None)).all()
 
@@ -4602,16 +4687,11 @@ def api_jurisdiction_strength():
                 required_terms=['track'],
                 excluded_terms=['condition']
             )
-            meeting_finish_column = _find_csv_column(
-                headers,
-                candidates=[
-                    'finish position', 'finishing position', 'result finish', 'result_finish',
-                    'today finish position', 'official finish', 'official position', 'position',
-                    'place', 'finish'
-                ],
-                required_terms=['finish'],
-                excluded_terms=['margin', 'form', 'last', 'previous', 'prev']
-            )
+            meeting_finish_column = _find_current_race_finish_column(headers)
+            for header in _collect_csv_headers_with_terms(headers, JURISDICTION_RESULT_DEBUG_TERMS):
+                if header not in result_related_header_set:
+                    result_related_headers.append(header)
+                    result_related_header_set.add(header)
 
             if meeting_previous_track_column == current_track_column:
                 meeting_previous_track_column = _find_csv_column(headers, candidates=['form track'])
@@ -4632,39 +4712,91 @@ def api_jurisdiction_strength():
             if not current_track_column or not meeting_previous_track_column or meeting_previous_track_column == current_track_column:
                 continue
 
-            for row in reader:
-                rows_processed += 1
-                current_track = _normalise_track_name(row.get(current_track_column, ''))
-                previous_track = _normalise_track_name(row.get(meeting_previous_track_column, ''))
-                horse_name = (row.get('horse name') or row.get('Horse Name') or row.get('horse') or '').strip()
+            meeting_column_map[meeting_id] = {
+                'current_track_column': current_track_column,
+                'previous_track_column': meeting_previous_track_column,
+                'finish_column': meeting_finish_column
+            }
 
-                current_state = track_to_state.get(_track_lookup_key(current_track))
-                previous_state = track_to_state.get(_track_lookup_key(previous_track))
+        horse_rows = db.session.query(
+            Meeting.id,
+            Horse.horse_name,
+            Horse.csv_data,
+            Horse.is_scratched,
+            Result.finish_position,
+            Result.sp
+        ).join(
+            Race, Race.meeting_id == Meeting.id
+        ).join(
+            Horse, Horse.race_id == Race.id
+        ).outerjoin(
+            Result, Result.horse_id == Horse.id
+        ).all()
 
-                if current_track and not current_state:
-                    unmapped_tracks[current_track] += 1
-                if previous_track and not previous_state:
-                    unmapped_tracks[previous_track] += 1
+        for meeting_id, horse_name, horse_csv_data, is_scratched, recorded_finish_position, sp in horse_rows:
+            column_map = meeting_column_map.get(meeting_id)
+            if not column_map or is_scratched:
+                continue
 
-                if not current_state or not previous_state or current_state == previous_state:
-                    continue
+            row = horse_csv_data or {}
+            current_track_column = column_map['current_track_column']
+            meeting_previous_track_column = column_map['previous_track_column']
+            meeting_finish_column = column_map['finish_column']
 
-                interstate_rows += 1
-                bucket = stats[previous_state]
-                bucket['interstate_runs'] += 1
-                if horse_name:
-                    bucket['horses'].add(horse_name.upper())
-                bucket['destination_state_breakdown'][current_state] += 1
+            if _is_repeated_csv_header_row(row, current_track_column, meeting_previous_track_column):
+                continue
+            if recorded_finish_position == 0:
+                continue
 
-                finish_position = _parse_finish_position(row.get(meeting_finish_column)) if meeting_finish_column else None
-                if finish_position == 1:
-                    bucket['wins'] += 1
-                if finish_position in {1, 2, 3}:
-                    bucket['places'] += 1
+            rows_processed += 1
+            current_track = _normalise_track_name(row.get(current_track_column, ''))
+            previous_track = _normalise_track_name(row.get(meeting_previous_track_column, ''))
+            horse_name = (horse_name or row.get('horse name') or row.get('Horse Name') or row.get('horse') or '').strip()
 
+            raw_current_state = track_to_state.get(_track_lookup_key(current_track))
+            raw_previous_state = track_to_state.get(_track_lookup_key(previous_track))
+
+            if current_track and not raw_current_state:
+                unmapped_tracks[current_track] += 1
+            if previous_track and not raw_previous_state:
+                unmapped_tracks[previous_track] += 1
+
+            current_state = raw_current_state if raw_current_state in AUSTRALIAN_JURISDICTION_STATES else None
+            previous_state = raw_previous_state if raw_previous_state in AUSTRALIAN_JURISDICTION_STATES else None
+
+            if not current_state or not previous_state or current_state == previous_state:
+                continue
+
+            interstate_rows += 1
+            bucket = stats[previous_state]
+            bucket['interstate_runs'] += 1
+            if horse_name:
+                bucket['horses'].add(horse_name.upper())
+            bucket['destination_state_breakdown'][current_state] += 1
+
+            finish_position = None
+            if recorded_finish_position is not None:
+                finish_position = recorded_finish_position
+                results_source = results_source or 'results_table'
+            elif meeting_finish_column:
+                finish_position = _parse_finish_position(row.get(meeting_finish_column))
+                if finish_position is not None:
+                    results_source = results_source or 'csv'
+
+            if finish_position is None:
+                continue
+
+            bucket['result_runs'] += 1
+            if finish_position == 1:
+                bucket['wins'] += 1
+            if finish_position in {1, 2, 3}:
+                bucket['places'] += 1
+
+        has_results = any(values['result_runs'] > 0 for values in stats.values())
         result_rows = []
         for origin_state, values in stats.items():
             interstate_runs = values['interstate_runs']
+            result_runs = values['result_runs']
             destinations = dict(values['destination_state_breakdown'])
             top_destination_state = None
             if values['destination_state_breakdown']:
@@ -4674,18 +4806,26 @@ def api_jurisdiction_strength():
                 'origin_state': origin_state,
                 'interstate_runs': interstate_runs,
                 'unique_horses': len(values['horses']),
-                'wins': values['wins'],
-                'win_percentage': round((values['wins'] / interstate_runs * 100), 1) if interstate_runs else 0,
-                'places': values['places'],
-                'place_percentage': round((values['places'] / interstate_runs * 100), 1) if interstate_runs else 0,
+                'result_runs': result_runs if has_results else None,
+                'wins': values['wins'] if result_runs else None,
+                'win_percentage': round((values['wins'] / result_runs * 100), 1) if result_runs else None,
+                'places': values['places'] if result_runs else None,
+                'place_percentage': round((values['places'] / result_runs * 100), 1) if result_runs else None,
                 'destination_state_breakdown': destinations,
-                'top_destination_state': top_destination_state
+                'top_destination_state': top_destination_state,
+                'has_results': bool(result_runs)
             })
 
-        result_rows.sort(key=lambda item: (item['win_percentage'], item['interstate_runs']), reverse=True)
+        if has_results:
+            result_rows.sort(key=lambda item: ((item['win_percentage'] or 0), item['interstate_runs']), reverse=True)
+        else:
+            result_rows.sort(key=lambda item: item['interstate_runs'], reverse=True)
 
         return jsonify({
             'jurisdictions': result_rows,
+            'finish_column': finish_position_column,
+            'has_results': has_results,
+            'results_source': results_source,
             'unmapped_tracks': [
                 {'track': track, 'count': count}
                 for track, count in unmapped_tracks.most_common()
@@ -4696,6 +4836,10 @@ def api_jurisdiction_strength():
                 'interstate_rows': interstate_rows,
                 'previous_track_column_detected': previous_track_column,
                 'finish_position_column_detected': finish_position_column,
+                'finish_column': finish_position_column,
+                'has_results': has_results,
+                'results_source': results_source,
+                'result_related_headers': result_related_headers,
                 'sample_headers_without_previous_track': sample_headers_without_previous_track
             }
         })

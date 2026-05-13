@@ -809,6 +809,8 @@ function loadJurisdictionStrength() {
 function renderJurisdictionStrength(data) {
     const container = document.getElementById('jurisdictionStrength');
     const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[char]));
+    const formatMetric = (value) => value == null ? 'N/A' : escapeHtml(value);
+    const formatPercentage = (value) => value == null ? 'N/A' : `${escapeHtml(value)}%`;
 
     if (data.error) {
         container.innerHTML = `<div class="card-body"><div class="analytics-empty"><h5>Jurisdiction Strength Error</h5><p>${escapeHtml(data.error)}</p>${data.details ? `<p class="text-muted">${escapeHtml(data.details)}</p>` : ''}</div></div>`;
@@ -818,6 +820,8 @@ function renderJurisdictionStrength(data) {
     const rows = data.jurisdictions || [];
     const unmappedTracks = data.unmapped_tracks || [];
     const meta = data.meta || {};
+    const hasResults = Boolean(data.has_results ?? meta.has_results);
+    const resultsSource = data.results_source || meta.results_source || null;
 
     if (rows.length === 0) {
         const headerNote = (meta.sample_headers_without_previous_track || []).length > 0
@@ -829,7 +833,11 @@ function renderJurisdictionStrength(data) {
 
     let html = `<div class="card-body">
         <p class="text-muted" style="font-size:12px;margin-bottom:16px">
-            Version 1 groups horses by the state of their previous-run track, then measures how they performed today when racing in a different state.
+            ${hasResults
+                ? (resultsSource === 'results_table'
+                    ? 'Version 1 groups horses by the state of their previous-run track, then measures how they performed using recorded race results.'
+                    : 'Version 1 groups horses by the state of their previous-run track, then measures how they performed today when racing in a different state.')
+                : 'Current version measures interstate movement volume only, not performance results yet.'}
             Current track is read from the CSV <code>track</code> column; the meeting <code>meetings.track</code> field is not used.
         </p>
         <div class="table-responsive">
@@ -852,15 +860,21 @@ function renderJurisdictionStrength(data) {
         const destinations = row.destination_state_breakdown || {};
         const topDestination = row.top_destination_state || '—';
         const topCount = topDestination !== '—' ? destinations[topDestination] : null;
+        const winPctClass = typeof row.win_percentage === 'number'
+            ? (row.win_percentage >= 20 ? 'text-success fw-bold' : row.win_percentage < 8 ? 'text-danger' : '')
+            : '';
+        const placePctClass = typeof row.place_percentage === 'number'
+            ? (row.place_percentage >= 50 ? 'text-success fw-bold' : row.place_percentage < 25 ? 'text-danger' : '')
+            : '';
         html += `<tr>
             <td class="text-center">${index + 1}</td>
             <td><strong>${escapeHtml(row.origin_state)}</strong></td>
             <td class="text-center">${row.interstate_runs}</td>
             <td class="text-center">${row.unique_horses}</td>
-            <td class="text-center">${row.wins}</td>
-            <td class="text-center ${row.win_percentage >= 20 ? 'text-success fw-bold' : row.win_percentage < 8 ? 'text-danger' : ''}">${row.win_percentage}%</td>
-            <td class="text-center">${row.places}</td>
-            <td class="text-center ${row.place_percentage >= 50 ? 'text-success fw-bold' : row.place_percentage < 25 ? 'text-danger' : ''}">${row.place_percentage}%</td>
+            <td class="text-center">${formatMetric(row.wins)}</td>
+            <td class="text-center ${winPctClass}">${formatPercentage(row.win_percentage)}</td>
+            <td class="text-center">${formatMetric(row.places)}</td>
+            <td class="text-center ${placePctClass}">${formatPercentage(row.place_percentage)}</td>
             <td>${escapeHtml(topDestination)}${topCount ? ` <span class="badge bg-primary">${topCount}</span>` : ''}</td>
         </tr>`;
     });
@@ -886,11 +900,15 @@ function renderJurisdictionUnmapped(unmappedTracks, escapeHtml) {
 function renderJurisdictionMeta(meta, escapeHtml) {
     const previousColumn = meta.previous_track_column_detected || 'not detected';
     const finishColumn = meta.finish_position_column_detected || 'not detected';
+    const resultsSource = meta.results_source || 'not detected';
+    const resultHeaders = (meta.result_related_headers || []).map(header => `<code>${escapeHtml(header)}</code>`).join(', ');
     return `<div class="alert alert-info mt-3">
         <strong>Debug:</strong>
         ${meta.meetings_processed || 0} meetings, ${meta.rows_processed || 0} horse rows, ${meta.interstate_rows || 0} interstate rows.
         Previous-run track column: <code>${escapeHtml(previousColumn)}</code>.
         Finish column: <code>${escapeHtml(finishColumn)}</code>.
+        Results source: <code>${escapeHtml(resultsSource)}</code>.
+        ${resultHeaders ? `<div class="mt-2">Result-like headers: ${resultHeaders}</div>` : ''}
     </div>`;
 }
 
