@@ -3,6 +3,8 @@ import os
 import json
 import re
 import subprocess
+import csv
+import io
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, session
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
@@ -4448,6 +4450,262 @@ def data_analytics():
             'limit': int(limit_param) if limit_param != 'all' else 'all'
         }
     )
+
+
+JURISDICTION_TRACKS = {
+    'NSW_ACT': [
+        'Randwick', 'Randwick-Kensington', 'Rosehill', 'Warwick Farm', 'Canterbury', 'Newcastle', 'Beaumont',
+        'Gosford', 'Wyong', 'Kembla Grange', 'Illawarra Grange', 'Hawkesbury', 'Scone', 'Muswellbrook',
+        'Dubbo', 'Wagga', 'Grafton', 'Coffs Harbour', 'Port Macquarie', 'Tamworth', 'Armidale', 'Bathurst',
+        'Albury', 'Orange', 'Mudgee', 'Nowra', 'Queanbeyan', 'Taree', 'Canberra', 'Goulburn', 'Moruya',
+        'Ballina', 'Sapphire Coast', 'Quirindi', 'Tuncurry', 'Gunnedah', 'Corowa', 'Cowra', 'Wellington',
+        'Moree', 'Narromine'
+    ],
+    'VIC': [
+        'Flemington', 'Caulfield', 'Caulfield Heath', 'Sandown', 'Sandown-Lakeside', 'Sandown-Hillside',
+        'Moonee Valley', 'Pakenham', 'Cranbourne', 'Geelong', 'Ballarat', 'Bendigo', 'Sale', 'Warrnambool',
+        'Mornington', 'Seymour', 'Kilmore', 'Donald', 'Ararat', 'Stawell', 'Hamilton', 'Wangaratta',
+        'Echuca', 'Moe', 'Colac', 'Terang', 'Werribee', 'Kyneton', 'Yarra Glen', 'Wodonga', 'Swan Hill',
+        'Stony Creek', 'Horsham', 'Towong', 'Bairnsdale', 'Avoca'
+    ],
+    'QLD': [
+        'Eagle Farm', 'Doomben', 'Ipswich', 'Gold Coast', 'Gold Coast Poly', 'Sunshine Coast',
+        'Sunshine Coast Poly', 'Toowoomba', 'Rockhampton', 'Mackay', 'Townsville', 'Cairns', 'Bundaberg',
+        'Roma', 'Dalby', 'Emerald', 'Warwick', 'Gatton', 'Kilcoy', 'Thangool', 'Beaudesert', 'Longreach',
+        'Mt Isa'
+    ],
+    'SA': [
+        'Morphettville', 'Morphettville Parks', 'Murray Bridge', 'Murray Bridge GH', 'Gawler', 'Balaklava',
+        'Port Lincoln', 'Clare', 'Mount Gambier', 'Mt Gambier', 'Strathalbyn', 'Naracoorte', 'Oakbank',
+        'Port Augusta', 'Bordertown', 'Penola'
+    ],
+    'WA': [
+        'Ascot', 'Belmont', 'Belmont Park', 'Pinjarra', 'Pinjarra Scarpside', 'Bunbury', 'Albany',
+        'Kalgoorlie', 'Geraldton', 'Northam', 'Esperance', 'York', 'Rockingham', 'Narrogin', 'Port Hedland'
+    ],
+    'TAS': ['Hobart', 'Launceston', 'Devonport', 'Devonport Synthetic'],
+    'NT': ['Darwin', 'Fannie Bay', 'Alice Springs', 'Pioneer Park']
+}
+
+
+def _normalise_track_name(track_name):
+    """Normalise track labels from the raw meeting CSV without relying on meetings.track."""
+    if track_name is None:
+        return ''
+    text = str(track_name).strip()
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'\s*[-–—]\s*', '-', text)
+    text = re.sub(r'\s*\([^)]*\)\s*$', '', text).strip()
+    return text
+
+
+def _track_lookup_key(track_name):
+    return re.sub(r'[^a-z0-9]+', '', _normalise_track_name(track_name).lower())
+
+
+def _build_track_to_state():
+    track_to_state = {}
+    for state, tracks in JURISDICTION_TRACKS.items():
+        for track in tracks:
+            track_to_state[_track_lookup_key(track)] = state
+    return track_to_state
+
+
+def _find_csv_column(fieldnames, candidates=None, required_terms=None, excluded_terms=None):
+    """Find a column defensively by exact candidate names first, then term matching."""
+    if not fieldnames:
+        return None
+
+    fields = [field for field in fieldnames if field]
+    normalised = {re.sub(r'[^a-z0-9]+', '', field.lower()): field for field in fields}
+
+    if candidates:
+        for candidate in candidates:
+            key = re.sub(r'[^a-z0-9]+', '', candidate.lower())
+            if key in normalised:
+                return normalised[key]
+
+    required_terms = [term.lower() for term in (required_terms or [])]
+    excluded_terms = [term.lower() for term in (excluded_terms or [])]
+    for field in fields:
+        lowered = field.lower()
+        if all(term in lowered for term in required_terms) and not any(term in lowered for term in excluded_terms):
+            return field
+    return None
+
+
+def _parse_finish_position(value):
+    """Return today's finish position as an int when the CSV has it, else None."""
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text in {'scr', 'scratched', 'late scratching', 'late scratched'}:
+        return 0
+    match = re.search(r'\d+', text)
+    if not match:
+        return None
+    try:
+        return int(match.group(0))
+    except ValueError:
+        return None
+
+
+@app.route("/api/data/jurisdiction-strength")
+@login_required
+def api_jurisdiction_strength():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    try:
+        from collections import Counter, defaultdict
+
+        track_to_state = _build_track_to_state()
+        stats = defaultdict(lambda: {
+            'interstate_runs': 0,
+            'horses': set(),
+            'wins': 0,
+            'places': 0,
+            'destination_state_breakdown': Counter()
+        })
+        unmapped_tracks = Counter()
+        meetings_processed = 0
+        rows_processed = 0
+        interstate_rows = 0
+        previous_track_column = None
+        finish_position_column = None
+        sample_headers_without_previous_track = []
+
+        meetings = db.session.query(Meeting.id, Meeting.csv_data).filter(Meeting.csv_data.isnot(None)).all()
+
+        for meeting_id, csv_data in meetings:
+            if not csv_data or not str(csv_data).strip():
+                continue
+
+            meetings_processed += 1
+            try:
+                reader = csv.DictReader(io.StringIO(csv_data))
+            except Exception as exc:
+                logger.warning(f"Jurisdiction strength CSV reader failed for meeting {meeting_id}: {exc}")
+                continue
+
+            headers = reader.fieldnames or []
+            current_track_column = _find_csv_column(headers, candidates=['track'])
+            meeting_previous_track_column = _find_csv_column(
+                headers,
+                candidates=[
+                    'previous-run track', 'previous run track', 'previous track', 'prev track',
+                    'last-start track', 'last start track', 'last run track', 'last race track',
+                    'form track'
+                ],
+                required_terms=['track'],
+                excluded_terms=['condition']
+            )
+            meeting_finish_column = _find_csv_column(
+                headers,
+                candidates=[
+                    'finish position', 'finishing position', 'result finish', 'result_finish',
+                    'today finish position', 'official finish', 'official position', 'position',
+                    'place', 'finish'
+                ],
+                required_terms=['finish'],
+                excluded_terms=['margin', 'form', 'last', 'previous', 'prev']
+            )
+
+            if meeting_previous_track_column == current_track_column:
+                meeting_previous_track_column = _find_csv_column(headers, candidates=['form track'])
+
+            if meeting_previous_track_column and meeting_previous_track_column != current_track_column:
+                previous_track_column = previous_track_column or meeting_previous_track_column
+            elif len(sample_headers_without_previous_track) < 5:
+                sample_headers_without_previous_track.append({'meeting_id': meeting_id, 'headers': headers})
+                logger.debug(
+                    "Jurisdiction strength could not find previous-run track column for meeting %s. Headers: %s",
+                    meeting_id,
+                    headers
+                )
+
+            if meeting_finish_column:
+                finish_position_column = finish_position_column or meeting_finish_column
+
+            if not current_track_column or not meeting_previous_track_column or meeting_previous_track_column == current_track_column:
+                continue
+
+            for row in reader:
+                rows_processed += 1
+                current_track = _normalise_track_name(row.get(current_track_column, ''))
+                previous_track = _normalise_track_name(row.get(meeting_previous_track_column, ''))
+                horse_name = (row.get('horse name') or row.get('Horse Name') or row.get('horse') or '').strip()
+
+                current_state = track_to_state.get(_track_lookup_key(current_track))
+                previous_state = track_to_state.get(_track_lookup_key(previous_track))
+
+                if current_track and not current_state:
+                    unmapped_tracks[current_track] += 1
+                if previous_track and not previous_state:
+                    unmapped_tracks[previous_track] += 1
+
+                if not current_state or not previous_state or current_state == previous_state:
+                    continue
+
+                interstate_rows += 1
+                bucket = stats[previous_state]
+                bucket['interstate_runs'] += 1
+                if horse_name:
+                    bucket['horses'].add(horse_name.upper())
+                bucket['destination_state_breakdown'][current_state] += 1
+
+                finish_position = _parse_finish_position(row.get(meeting_finish_column)) if meeting_finish_column else None
+                if finish_position == 1:
+                    bucket['wins'] += 1
+                if finish_position in {1, 2, 3}:
+                    bucket['places'] += 1
+
+        result_rows = []
+        for origin_state, values in stats.items():
+            interstate_runs = values['interstate_runs']
+            destinations = dict(values['destination_state_breakdown'])
+            top_destination_state = None
+            if values['destination_state_breakdown']:
+                top_destination_state = values['destination_state_breakdown'].most_common(1)[0][0]
+
+            result_rows.append({
+                'origin_state': origin_state,
+                'interstate_runs': interstate_runs,
+                'unique_horses': len(values['horses']),
+                'wins': values['wins'],
+                'win_percentage': round((values['wins'] / interstate_runs * 100), 1) if interstate_runs else 0,
+                'places': values['places'],
+                'place_percentage': round((values['places'] / interstate_runs * 100), 1) if interstate_runs else 0,
+                'destination_state_breakdown': destinations,
+                'top_destination_state': top_destination_state
+            })
+
+        result_rows.sort(key=lambda item: (item['win_percentage'], item['interstate_runs']), reverse=True)
+
+        return jsonify({
+            'jurisdictions': result_rows,
+            'unmapped_tracks': [
+                {'track': track, 'count': count}
+                for track, count in unmapped_tracks.most_common()
+            ],
+            'meta': {
+                'meetings_processed': meetings_processed,
+                'rows_processed': rows_processed,
+                'interstate_rows': interstate_rows,
+                'previous_track_column_detected': previous_track_column,
+                'finish_position_column_detected': finish_position_column,
+                'sample_headers_without_previous_track': sample_headers_without_previous_track
+            }
+        })
+    except Exception as exc:
+        logger.exception("Jurisdiction strength API failed")
+        return jsonify({
+            'error': 'Failed to calculate jurisdiction strength',
+            'details': str(exc)
+        }), 500
+
 
 @app.route("/api/data/score-analysis")
 @login_required
