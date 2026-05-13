@@ -4496,6 +4496,87 @@ JURISDICTION_RESULT_DEBUG_TERMS = ['finish', 'position', 'result', 'place', 'mar
 SCRATCHED_FINISH_POSITION = 0
 
 
+JURISDICTION_PRICE_DEBUG_TERMS = ['sp', 'price', 'starting price', 'fixed odds', 'official price', 'win price']
+
+
+def _find_jurisdiction_price_column(fieldnames):
+    """Find the most likely current-race decimal SP/price column for ROI calculations."""
+    preferred_candidates = [
+        'official sp', 'official starting price', 'starting price', 'start price',
+        'sp', 'official price', 'win price', 'fixed odds', 'fixed odds price', 'price'
+    ]
+    detected = _find_csv_column(
+        fieldnames,
+        candidates=preferred_candidates,
+        excluded_terms=['form', 'last', 'previous', 'prev', 'place', 'show', 'lay']
+    )
+    if detected:
+        return detected
+
+    # Prefer official/current SP-like columns before broader price columns.
+    priority_groups = [
+        ['official', 'sp'],
+        ['official', 'starting price'],
+        ['starting price'],
+        ['sp'],
+        ['official price'],
+        ['win price'],
+        ['fixed odds'],
+        ['price'],
+    ]
+    for terms in priority_groups:
+        for field in fieldnames or []:
+            if not field:
+                continue
+            lowered = field.lower().strip()
+            if any(term in lowered for term in ['form', 'last', 'previous', 'prev', 'place', 'show', 'lay']):
+                continue
+            if all(term in lowered for term in terms):
+                return field
+    return None
+
+
+def _parse_decimal_price(value):
+    """Return a valid decimal win price, excluding blanks, scratches, zeroes and non-decimal prices."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            price = float(value)
+        except (TypeError, ValueError):
+            return None
+        return price if price > 0 else None
+
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text in {'scr', 'scratched', 'late scratching', 'late scratched', 'n/a', 'na', 'null', 'none', '-', '--'}:
+        return None
+    if '/' in text:
+        # Fractional prices are not decimal SPs for this ROI calculation.
+        return None
+
+    cleaned = text.replace('$', '').replace(',', '')
+    match = re.search(r'(?<![a-z])\d+(?:\.\d+)?(?![a-z])', cleaned)
+    if not match:
+        return None
+    try:
+        price = float(match.group(0))
+    except ValueError:
+        return None
+    return price if price > 0 else None
+
+
+def _add_jurisdiction_roi(bucket, price, finish_position):
+    """Apply a flat $1 win stake ROI update when a valid decimal price exists."""
+    if price is None:
+        return
+    bucket['sp_total'] += price
+    bucket['total_staked'] += 1
+    if finish_position == 1:
+        bucket['total_return'] += price
+
+
 def _normalise_track_name(track_name):
     """Normalise track labels from the raw meeting CSV without relying on meetings.track."""
     if track_name is None:
@@ -4643,20 +4724,28 @@ def api_jurisdiction_strength():
         from collections import Counter, defaultdict
 
         track_to_state = _build_track_to_state()
-        stats = defaultdict(lambda: {
-            'interstate_runs': 0,
-            'horses': set(),
-            'result_runs': 0,
-            'wins': 0,
-            'places': 0,
-            'destination_state_breakdown': Counter()
-        })
+        def _jurisdiction_bucket():
+            return {
+                'interstate_runs': 0,
+                'horses': set(),
+                'result_runs': 0,
+                'wins': 0,
+                'places': 0,
+                'destination_state_breakdown': Counter(),
+                'sp_total': 0.0,
+                'total_staked': 0,
+                'total_return': 0.0
+            }
+
+        stats = defaultdict(_jurisdiction_bucket)
+        matrix_stats = defaultdict(_jurisdiction_bucket)
         unmapped_tracks = Counter()
         meetings_processed = 0
         rows_processed = 0
         interstate_rows = 0
         previous_track_column = None
         finish_position_column = None
+        price_column = None
         results_source = None
         result_related_headers = []
         result_related_header_set = set()
@@ -4689,6 +4778,7 @@ def api_jurisdiction_strength():
                 excluded_terms=['condition']
             )
             meeting_finish_column = _find_current_race_finish_column(headers)
+            meeting_price_column = _find_jurisdiction_price_column(headers)
             for header in _collect_csv_headers_with_terms(headers, JURISDICTION_RESULT_DEBUG_TERMS):
                 if header not in result_related_header_set:
                     result_related_headers.append(header)
@@ -4709,6 +4799,8 @@ def api_jurisdiction_strength():
 
             if meeting_finish_column:
                 finish_position_column = finish_position_column or meeting_finish_column
+            if meeting_price_column:
+                price_column = price_column or meeting_price_column
 
             if not current_track_column or not meeting_previous_track_column or meeting_previous_track_column == current_track_column:
                 continue
@@ -4716,7 +4808,8 @@ def api_jurisdiction_strength():
             meeting_column_map[meeting_id] = {
                 'current_track_column': current_track_column,
                 'previous_track_column': meeting_previous_track_column,
-                'finish_column': meeting_finish_column
+                'finish_column': meeting_finish_column,
+                'price_column': meeting_price_column
             }
 
         horse_rows = db.session.query(
@@ -4743,6 +4836,7 @@ def api_jurisdiction_strength():
             current_track_column = column_map['current_track_column']
             meeting_previous_track_column = column_map['previous_track_column']
             meeting_finish_column = column_map['finish_column']
+            meeting_price_column = column_map.get('price_column')
 
             if _is_repeated_csv_header_row(row, current_track_column, meeting_previous_track_column):
                 continue
@@ -4771,9 +4865,12 @@ def api_jurisdiction_strength():
 
             interstate_rows += 1
             bucket = stats[previous_state]
+            matrix_bucket = matrix_stats[(previous_state, current_state)]
             bucket['interstate_runs'] += 1
+            matrix_bucket['interstate_runs'] += 1
             if horse_name:
                 bucket['horses'].add(horse_name.upper())
+                matrix_bucket['horses'].add(horse_name.upper())
             bucket['destination_state_breakdown'][current_state] += 1
 
             finish_position = None
@@ -4785,14 +4882,36 @@ def api_jurisdiction_strength():
                 if finish_position is not None:
                     results_source = results_source or 'csv'
 
+            price = _parse_decimal_price(sp)
+            if price is None and meeting_price_column:
+                price = _parse_decimal_price(row.get(meeting_price_column))
+
             if finish_position is None:
                 continue
 
             bucket['result_runs'] += 1
+            matrix_bucket['result_runs'] += 1
             if finish_position == 1:
                 bucket['wins'] += 1
+                matrix_bucket['wins'] += 1
             if finish_position in {1, 2, 3}:
                 bucket['places'] += 1
+                matrix_bucket['places'] += 1
+
+            _add_jurisdiction_roi(bucket, price, finish_position)
+            _add_jurisdiction_roi(matrix_bucket, price, finish_position)
+
+        def _roi_fields(values):
+            total_staked = values['total_staked']
+            total_return = values['total_return']
+            profit_loss = total_return - total_staked
+            return {
+                'avg_sp': round((values['sp_total'] / total_staked), 2) if total_staked > 0 else None,
+                'total_staked': total_staked,
+                'total_return': round(total_return, 2),
+                'profit_loss': round(profit_loss, 2),
+                'roi_percentage': round((profit_loss / total_staked * 100), 1) if total_staked > 0 else None
+            }
 
         has_results = any(values['result_runs'] > 0 for values in stats.values())
         result_rows = []
@@ -4815,34 +4934,57 @@ def api_jurisdiction_strength():
                 'place_percentage': round((values['places'] / result_runs * 100), 1) if result_runs > 0 else None,
                 'destination_state_breakdown': destinations,
                 'top_destination_state': top_destination_state,
-                'has_results': bool(result_runs)
+                'has_results': bool(result_runs),
+                **_roi_fields(values)
             })
 
-        if has_results:
-            result_rows.sort(key=lambda item: (item['win_percentage'] or 0, item['interstate_runs']), reverse=True)
-        else:
-            result_rows.sort(key=lambda item: item['interstate_runs'], reverse=True)
+        result_rows.sort(key=lambda item: item['interstate_runs'], reverse=True)
+
+        matrix_rows = []
+        for (origin_state, destination_state), values in matrix_stats.items():
+            result_runs = values['result_runs']
+            matrix_rows.append({
+                'origin_state': origin_state,
+                'destination_state': destination_state,
+                'interstate_runs': values['interstate_runs'],
+                'unique_horses': len(values['horses']),
+                'wins': values['wins'] if result_runs else None,
+                'win_percentage': round((values['wins'] / result_runs * 100), 1) if result_runs > 0 else None,
+                'places': values['places'] if result_runs else None,
+                'place_percentage': round((values['places'] / result_runs * 100), 1) if result_runs > 0 else None,
+                'result_runs': result_runs if has_results else None,
+                'has_results': bool(result_runs),
+                **_roi_fields(values)
+            })
+        matrix_rows.sort(key=lambda item: (item['interstate_runs'], item['win_percentage'] or 0), reverse=True)
+
+        debug = {
+            'meetings_processed': meetings_processed,
+            'rows_processed': rows_processed,
+            'interstate_rows': interstate_rows,
+            'previous_track_column_detected': previous_track_column,
+            'finish_position_column_detected': finish_position_column,
+            'price_column_detected': price_column,
+            'has_results': has_results,
+            'results_source': results_source,
+            'result_related_headers': result_related_headers,
+            'sample_headers_without_previous_track': sample_headers_without_previous_track
+        }
 
         return jsonify({
+            'summary': result_rows,
             'jurisdictions': result_rows,
+            'matrix': matrix_rows,
             'finish_column': finish_position_column,
+            'price_column': price_column,
             'has_results': has_results,
             'results_source': results_source,
             'unmapped_tracks': [
                 {'track': track, 'count': count}
                 for track, count in unmapped_tracks.most_common()
             ],
-            'meta': {
-                'meetings_processed': meetings_processed,
-                'rows_processed': rows_processed,
-                'interstate_rows': interstate_rows,
-                'previous_track_column_detected': previous_track_column,
-                'finish_position_column_detected': finish_position_column,
-                'has_results': has_results,
-                'results_source': results_source,
-                'result_related_headers': result_related_headers,
-                'sample_headers_without_previous_track': sample_headers_without_previous_track
-            }
+            'debug': debug,
+            'meta': debug
         })
     except Exception as exc:
         logger.exception("Jurisdiction strength API failed")

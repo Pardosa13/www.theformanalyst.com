@@ -814,6 +814,9 @@ function renderJurisdictionStrength(data) {
     const JURISDICTION_PLACE_WEAK_THRESHOLD = 25;
     const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[char]));
     const formatMetric = (value) => value == null ? 'N/A' : escapeHtml(value);
+    const formatFixed = (value, digits = 2) => typeof value === 'number' ? value.toFixed(digits) : 'N/A';
+    const formatProfitLoss = (value) => typeof value === 'number' ? `${value > 0 ? '+' : ''}${value.toFixed(2)}` : 'N/A';
+    const formatRoi = (value) => typeof value === 'number' ? `${value > 0 ? '+' : ''}${value.toFixed(1)}%` : 'N/A';
     const formatPercentage = (value) => value == null ? 'N/A' : `${escapeHtml(value)}%`;
 
     if (data.error) {
@@ -821,9 +824,10 @@ function renderJurisdictionStrength(data) {
         return;
     }
 
-    const rows = data.jurisdictions || [];
+    const rows = data.summary || data.jurisdictions || [];
+    const matrixRows = data.matrix || [];
     const unmappedTracks = data.unmapped_tracks || [];
-    const meta = data.meta || {};
+    const meta = data.meta || data.debug || {};
     const hasResults = Boolean(data.has_results ?? meta.has_results);
     const resultsSource = data.results_source || meta.results_source || null;
 
@@ -856,6 +860,9 @@ function renderJurisdictionStrength(data) {
                         <th class="text-center">Win %</th>
                         <th class="text-center">Places</th>
                         <th class="text-center">Place %</th>
+                        <th class="text-center">Avg SP</th>
+                        <th class="text-center">P/L</th>
+                        <th class="text-center">ROI %</th>
                         <th>Top Destination State</th>
                     </tr>
                 </thead><tbody>`;
@@ -879,16 +886,99 @@ function renderJurisdictionStrength(data) {
             <td class="text-center ${winPctClass}">${formatPercentage(row.win_percentage)}</td>
             <td class="text-center">${formatMetric(row.places)}</td>
             <td class="text-center ${placePctClass}">${formatPercentage(row.place_percentage)}</td>
+            <td class="text-center">${formatFixed(row.avg_sp, 2)}</td>
+            <td class="text-center ${typeof row.profit_loss === 'number' && row.profit_loss > 0 ? 'text-success fw-bold' : typeof row.profit_loss === 'number' && row.profit_loss < 0 ? 'text-danger' : ''}">${formatProfitLoss(row.profit_loss)}</td>
+            <td class="text-center ${typeof row.roi_percentage === 'number' && row.roi_percentage > 0 ? 'text-success fw-bold' : typeof row.roi_percentage === 'number' && row.roi_percentage < 0 ? 'text-danger' : ''}">${formatRoi(row.roi_percentage)}</td>
             <td>${escapeHtml(topDestination)}${topCount ? ` <span class="badge bg-primary">${topCount}</span>` : ''}</td>
         </tr>`;
     });
 
     html += `</tbody></table></div>
+        <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mt-4 mb-2">
+            <h6 class="mb-0">State-to-State Interstate Matrix</h6>
+            <div class="d-flex flex-wrap gap-2">
+                <label class="small text-muted">Origin
+                    <select id="jurisdictionMatrixOrigin" class="form-select form-select-sm">
+                        <option value="ALL">All origins</option>
+                        <option value="NSW_ACT">NSW_ACT</option>
+                        <option value="VIC">VIC</option>
+                        <option value="QLD">QLD</option>
+                        <option value="SA">SA</option>
+                        <option value="WA">WA</option>
+                        <option value="TAS">TAS</option>
+                        <option value="NT">NT</option>
+                    </select>
+                </label>
+                <label class="small text-muted">Minimum sample
+                    <select id="jurisdictionMatrixMinimum" class="form-select form-select-sm">
+                        <option value="0">0+</option>
+                        <option value="25" selected>25+</option>
+                        <option value="50">50+</option>
+                        <option value="100">100+</option>
+                    </select>
+                </label>
+            </div>
+        </div>
+        <div id="jurisdictionMatrixTable"></div>
         ${renderJurisdictionUnmapped(unmappedTracks, escapeHtml)}
         ${renderJurisdictionMeta(meta, escapeHtml)}
     </div>`;
 
     container.innerHTML = html;
+    const originFilter = document.getElementById('jurisdictionMatrixOrigin');
+    const minimumFilter = document.getElementById('jurisdictionMatrixMinimum');
+    const renderMatrix = () => renderJurisdictionMatrix(matrixRows, escapeHtml, formatMetric, formatPercentage, formatFixed, formatProfitLoss, formatRoi);
+    if (originFilter) originFilter.addEventListener('change', renderMatrix);
+    if (minimumFilter) minimumFilter.addEventListener('change', renderMatrix);
+    renderMatrix();
+}
+
+function renderJurisdictionMatrix(matrixRows, escapeHtml, formatMetric, formatPercentage, formatFixed, formatProfitLoss, formatRoi) {
+    const container = document.getElementById('jurisdictionMatrixTable');
+    if (!container) return;
+    const origin = document.getElementById('jurisdictionMatrixOrigin')?.value || 'ALL';
+    const minimum = parseInt(document.getElementById('jurisdictionMatrixMinimum')?.value || '25', 10);
+    const filtered = (matrixRows || []).filter(row => (origin === 'ALL' || row.origin_state === origin) && (row.interstate_runs || 0) >= minimum);
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="analytics-empty"><p class="text-muted mb-0">No state-to-state rows match the selected filters.</p></div>';
+        return;
+    }
+
+    const body = filtered.map(row => {
+        const plClass = typeof row.profit_loss === 'number' && row.profit_loss > 0 ? 'text-success fw-bold' : typeof row.profit_loss === 'number' && row.profit_loss < 0 ? 'text-danger' : '';
+        const roiClass = typeof row.roi_percentage === 'number' && row.roi_percentage > 0 ? 'text-success fw-bold' : typeof row.roi_percentage === 'number' && row.roi_percentage < 0 ? 'text-danger' : '';
+        return `<tr>
+            <td><strong>${escapeHtml(row.origin_state)}</strong></td>
+            <td>${escapeHtml(row.destination_state)}</td>
+            <td class="text-center">${row.interstate_runs}</td>
+            <td class="text-center">${row.unique_horses}</td>
+            <td class="text-center">${formatMetric(row.wins)}</td>
+            <td class="text-center">${formatPercentage(row.win_percentage)}</td>
+            <td class="text-center">${formatMetric(row.places)}</td>
+            <td class="text-center">${formatPercentage(row.place_percentage)}</td>
+            <td class="text-center">${formatFixed(row.avg_sp, 2)}</td>
+            <td class="text-center ${plClass}">${formatProfitLoss(row.profit_loss)}</td>
+            <td class="text-center ${roiClass}">${formatRoi(row.roi_percentage)}</td>
+        </tr>`;
+    }).join('');
+
+    container.innerHTML = `<div class="table-responsive">
+        <table class="table table-sm table-hover">
+            <thead class="table-dark"><tr>
+                <th>Origin</th>
+                <th>Destination</th>
+                <th class="text-center">Runs</th>
+                <th class="text-center">Unique Horses</th>
+                <th class="text-center">Wins</th>
+                <th class="text-center">Win %</th>
+                <th class="text-center">Places</th>
+                <th class="text-center">Place %</th>
+                <th class="text-center">Avg SP</th>
+                <th class="text-center">P/L</th>
+                <th class="text-center">ROI %</th>
+            </tr></thead><tbody>${body}</tbody>
+        </table>
+    </div>`;
 }
 
 function renderJurisdictionUnmapped(unmappedTracks, escapeHtml) {
@@ -904,6 +994,7 @@ function renderJurisdictionUnmapped(unmappedTracks, escapeHtml) {
 function renderJurisdictionMeta(meta, escapeHtml) {
     const previousColumn = meta.previous_track_column_detected || 'not detected';
     const finishColumn = meta.finish_position_column_detected || 'not detected';
+    const priceColumn = meta.price_column_detected || 'not detected';
     const resultsSource = meta.results_source || 'not detected';
     const resultHeaders = (meta.result_related_headers || []).map(header => `<code>${escapeHtml(header)}</code>`).join(', ');
     return `<div class="alert alert-info mt-3">
@@ -911,6 +1002,7 @@ function renderJurisdictionMeta(meta, escapeHtml) {
         ${meta.meetings_processed || 0} meetings, ${meta.rows_processed || 0} horse rows, ${meta.interstate_rows || 0} interstate rows.
         Previous-run track column: <code>${escapeHtml(previousColumn)}</code>.
         Finish column: <code>${escapeHtml(finishColumn)}</code>.
+        Price column: <code>${escapeHtml(priceColumn)}</code>.
         Results source: <code>${escapeHtml(resultsSource)}</code>.
         ${resultHeaders ? `<div class="mt-2">Result-like headers: ${resultHeaders}</div>` : ''}
     </div>`;
