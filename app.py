@@ -16,7 +16,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import uuid
 
-from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage
+from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component
 from puntingform_service import PuntingFormService
 from ladbrokes import match_race_uuid, fetch_race_odds
 from afl_routes import register_afl_routes, afl_nightly_sync
@@ -939,6 +939,16 @@ def get_meeting_results(meeting_id):
         'races': []
     }
     
+    active_components = Component.query.filter_by(is_active=True).all()
+    components_by_name = {c.component_name: c for c in active_components}
+    component_names = set(components_by_name)
+    jockey_ride_counts = {}
+    meeting_horses = Horse.query.join(Race).filter(Race.meeting_id == meeting_id).all()
+    for horse in meeting_horses:
+        jockey = horse.jockey or ''
+        if jockey:
+            jockey_ride_counts[jockey] = jockey_ride_counts.get(jockey, 0) + 1
+
     for race in races:
         horses = Horse.query.filter_by(race_id=race.id).distinct(Horse.horse_name).all()
         
@@ -952,8 +962,44 @@ def get_meeting_results(meeting_id):
             'horses': []
         }
         
+        ranked_horses = [horse for horse in horses if horse.prediction]
+        ranked_horses.sort(key=lambda h: h.prediction.score, reverse=True)
+        rank_by_horse_id = {horse.id: idx + 1 for idx, horse in enumerate(ranked_horses)}
+
         for horse in horses:
             pred = horse.prediction
+            best_bet_reasons = []
+            if pred:
+                try:
+                    win_probability_value = float(str(pred.win_probability or '0').replace('%', '').strip())
+                except (ValueError, TypeError):
+                    win_probability_value = 0.0
+
+                components = parse_notes_components(pred.notes)
+                matched_components = [
+                    {
+                        'name': component_name,
+                        'roi': components_by_name[component_name].roi_percentage,
+                        'sr': components_by_name[component_name].strike_rate,
+                        'appearances': components_by_name[component_name].appearances,
+                    }
+                    for component_name in components.keys()
+                    if component_name in component_names
+                ]
+                matched_components.sort(key=lambda x: x['roi'], reverse=True)
+
+                if matched_components:
+                    best_bet_reasons.append(
+                        'Component: ' + ', '.join(component['name'] for component in matched_components[:2])
+                    )
+                    if len(matched_components) > 2:
+                        best_bet_reasons[-1] += f" +{len(matched_components) - 2} more"
+                if win_probability_value >= 80:
+                    best_bet_reasons.append(f"High confidence: {win_probability_value:.0f}% win probability")
+                if jockey_ride_counts.get(horse.jockey or '', 0) == 1:
+                    best_bet_reasons.append('Jockey sole ride at meeting')
+
+            is_best_bet = bool(best_bet_reasons) and rank_by_horse_id.get(horse.id) == 1
             horse_data = {
                 'horse_id': horse.id,
                 'horse_name': horse.horse_name,
@@ -969,6 +1015,8 @@ def get_meeting_results(meeting_id):
                 'base_probability': pred.base_probability if pred else '',
                 'notes': pred.notes if pred else '',
                 'is_scratched': horse.is_scratched,
+                'is_best_bet': is_best_bet,
+                'best_bet_reasons': best_bet_reasons if is_best_bet else [],
                 'prediction': type('P', (), {
                     'score': pred.score if pred else 0,
                     'predicted_odds': pred.predicted_odds if pred else '',

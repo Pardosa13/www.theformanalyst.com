@@ -238,6 +238,41 @@
   background: rgba(234,136,13,0.10) !important;
   border-left: 3px solid #f59e0b !important;
 }
+
+/* Best Bets highlight — gold rows matching /best-bets selections */
+.vm-race-card tbody tr.best-bet-highlight {
+  background: linear-gradient(135deg, rgba(251,191,36,0.34) 0%, rgba(180,83,9,0.22) 100%) !important;
+  border-left: 5px solid #fbbf24 !important;
+  box-shadow: inset 0 0 0 1px rgba(251,191,36,0.35), 0 0 18px rgba(251,191,36,0.18);
+}
+.vm-race-card tbody tr.best-bet-highlight:hover {
+  filter: brightness(1.16);
+}
+.vm-race-card tbody tr.best-bet-highlight td:nth-child(2) > div:first-child,
+.vm-race-card tbody tr.best-bet-highlight td:nth-child(3) {
+  color: #fde68a !important;
+}
+.vm-best-bet-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
+  color: #111827;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 2px 8px rgba(251,191,36,0.35);
+}
+.vm-best-bet-reasons {
+  margin-top: 5px;
+  color: #fde68a !important;
+  font-size: 11px !important;
+  font-weight: 700;
+}
+
 /* Scratched */
 .vm-race-card tbody tr[style*="#e9ecef"] {
   background: rgba(107,114,128,0.10) !important;
@@ -1046,7 +1081,7 @@ function updateScratchings(meetingId) {
         {% for horse in race.horses|selectattr('prediction')|sort(attribute='prediction.score', reverse=true) %}
         <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
             data-horse-id="{{ horse.horse_id }}"
-            class="{% if horse.is_scratched %}horse-scratched{% endif %}">
+            class="{% if horse.is_scratched %}horse-scratched{% endif %}{% if horse.is_best_bet %} best-bet-highlight{% endif %}">
 
           <td style="padding:12px; text-align:center; font-weight:bold; border-bottom:1px solid #e2e8f0;">
             {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
@@ -1060,6 +1095,9 @@ function updateScratchings(meetingId) {
                      data-race-number="{{ race.race_number }}"
                      style="background:#764ba2; color:white; padding:3px 10px; border-radius:4px; font-size:11px; font-weight:700; display:none;">
                </span>
+              {% if horse.is_best_bet %}
+              <span class="vm-best-bet-badge" title="This horse matches the Best Bets criteria">⭐ Best Bet</span>
+              {% endif %}
               {% if horse.is_scratched %}
               <span style="background:#6c757d; color:white; padding:2px 8px; border-radius:4px; font-size:11px;">SCRATCHED</span>
               {% endif %}
@@ -1068,6 +1106,9 @@ function updateScratchings(meetingId) {
               {% if horse.jockey %}J: {{ horse.jockey }}{% endif %}
               {% if horse.trainer %} | T: {{ horse.trainer }}{% endif %}
             </div>
+            {% if horse.is_best_bet and horse.best_bet_reasons %}
+            <div class="vm-best-bet-reasons">{{ horse.best_bet_reasons|join(' • ') }}</div>
+            {% endif %}
           </td>
 
           <td style="padding:12px; text-align:center; font-weight:bold; font-size:18px; border-bottom:1px solid #e2e8f0;">
