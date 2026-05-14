@@ -9850,8 +9850,9 @@ def best_bets():
     if not current_user.is_admin:
         flash("Access denied. Admin privileges required.", "danger")
         return redirect(url_for("history"))
-    from models import Component, Prediction
+    from models import Component
     from datetime import datetime, timedelta
+    from sqlalchemy.orm import load_only, selectinload
 
     hours_back = request.args.get('hours', default=80, type=int)
     min_score = request.args.get('min_score', type=float)
@@ -9859,10 +9860,48 @@ def best_bets():
     mode = request.args.get('mode', default='top_pick')
 
     active_components = Component.query.filter_by(is_active=True).all()
-    component_names = {c.component_name for c in active_components}
+    components_by_name = {c.component_name: c for c in active_components}
+    component_names = set(components_by_name)
 
     cutoff = datetime.utcnow() - timedelta(hours=hours_back)
-    recent_meetings = Meeting.query.filter(Meeting.uploaded_at >= cutoff).order_by(Meeting.meeting_name.asc()).all()
+    recent_meetings = (
+        Meeting.query
+        .options(
+            load_only(Meeting.id, Meeting.meeting_name, Meeting.uploaded_at),
+            selectinload(Meeting.races)
+            .load_only(
+                Race.id,
+                Race.meeting_id,
+                Race.race_number,
+                Race.distance,
+                Race.race_class,
+                Race.track_condition,
+            )
+            .selectinload(Race.horses)
+            .load_only(
+                Horse.id,
+                Horse.race_id,
+                Horse.horse_name,
+                Horse.barrier,
+                Horse.weight,
+                Horse.jockey,
+                Horse.trainer,
+                Horse.form,
+            )
+            .selectinload(Horse.prediction)
+            .load_only(
+                Prediction.id,
+                Prediction.horse_id,
+                Prediction.score,
+                Prediction.predicted_odds,
+                Prediction.win_probability,
+                Prediction.notes,
+            ),
+        )
+        .filter(Meeting.uploaded_at >= cutoff)
+        .order_by(Meeting.meeting_name.asc())
+        .all()
+    )
 
     best_bets = []
     total_horses_scanned = 0
@@ -9921,14 +9960,13 @@ def best_bets():
                 matched_components = []
                 for comp_name in components.keys():
                     if comp_name in component_names:
-                        comp_obj = next((c for c in active_components if c.component_name == comp_name), None)
-                        if comp_obj:
-                            matched_components.append({
-                                'name': comp_name,
-                                'roi': comp_obj.roi_percentage,
-                                'sr': comp_obj.strike_rate,
-                                'appearances': comp_obj.appearances
-                            })
+                        comp_obj = components_by_name[comp_name]
+                        matched_components.append({
+                            'name': comp_name,
+                            'roi': comp_obj.roi_percentage,
+                            'sr': comp_obj.strike_rate,
+                            'appearances': comp_obj.appearances
+                        })
 
                 horse_score_gap = score_gap if is_top_pick else (
                     horses_in_race[rank_idx - 1]['score'] - horse.prediction.score
