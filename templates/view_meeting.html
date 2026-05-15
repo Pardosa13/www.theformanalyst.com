@@ -1389,7 +1389,7 @@ function animateSectionalPanel(panel) {
     panel.classList.remove('sectional-animated-panel-visible');
     panel.classList.add('sectional-animated-panel');
     // Force a reflow so the entrance animation restarts on repeated toggles.
-    void panel.offsetWidth;
+    panel.getBoundingClientRect();
     window.requestAnimationFrame(function() {
         panel.classList.add('sectional-animated-panel-visible');
     });
@@ -1399,8 +1399,18 @@ function animateHeatmapRows(container) {
     if (!container) return;
     container.classList.remove('pfai-heatmap-animate');
     // Force a reflow so staggered row animations replay when the heatmap reopens.
-    void container.offsetWidth;
+    container.getBoundingClientRect();
     container.classList.add('pfai-heatmap-animate');
+}
+
+function normalizeHorseName(name) {
+  return (name || '')
+    .toLowerCase()
+    .trim()
+    .replace(/\([^)]*\)/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function getValidPfaiRanks(pfaiSectionals) {
@@ -2006,16 +2016,6 @@ function injectPFAIScores() {
 }
 </script>
 <script>
-function normalizeHorseName(name) {
-  return (name || '')
-    .toLowerCase()
-    .trim()
-    .replace(/\([^)]*\)/g, '')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function logSpeedmapMissingRunners() {
   document.querySelectorAll('.vm-race-card[id^="race-"]').forEach(raceCard => {
     const raceNo = raceCard.id.replace('race-', '');
