@@ -716,7 +716,14 @@ details pre {
   font-size: 13px;
 }
 
-/* PFAI heatmap title/legend defaults (overridden by pilot skin below) */
+/* PFAI heatmap legend box */
+[id^="pfaiHeatmap_"] > div:last-child {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  color: var(--text-muted) !important;
+}
 [id^="pfaiHeatmap_"] h4 {
   color: var(--accent) !important;
   font-size: 14px !important;
@@ -871,511 +878,6 @@ details pre {
 .vm-back-top a:hover {
   border-color: var(--accent);
   color: var(--accent) !important;
-}
-
-
-/* ══════════════════════════════════════════
-   PILOT VISUAL REDESIGN OVERRIDES
-   Premium data-viz betting intelligence terminal skin.
-   Logic, IDs, endpoints and Jinja data bindings are intentionally unchanged.
-══════════════════════════════════════════ */
-:root {
-  --bg-base: #070b13;
-  --bg-surface: #0d1420;
-  --bg-elevated: #111c2b;
-  --bg-hover: #172844;
-
-  --text-primary: #ffffff;
-  --text-secondary: #e6edf8;
-  --text-muted: #b0bfd2;
-
-  --accent: #1f6fff;
-  --accent-2: #4da3ff;
-  --accent-3: #00b7ff;
-  --accent-soft: rgba(31,111,255,.22);
-  --accent-border: rgba(77,163,255,.58);
-  --border-accent: rgba(77,163,255,.52);
-
-  --success: #22c55e;
-  --success-soft: rgba(34,197,94,.14);
-  --warning: #f59e0b;
-  --warning-soft: rgba(245,158,11,.14);
-  --danger: #ef4444;
-  --danger-soft: rgba(239,68,68,.14);
-
-  --border-subtle: rgba(255,255,255,.16);
-  --border-mid: rgba(255,255,255,.26);
-}
-
-body {
-  background-color: var(--bg-base);
-  background-image: radial-gradient(circle at 1px 1px, rgba(79,140,255,.055) 1px, transparent 0);
-  background-size: 30px 30px;
-}
-
-.vm-page-title { letter-spacing: -0.02em; }
-.vm-back-link { color: var(--text-secondary) !important; }
-.vm-back-link:hover { color: var(--accent) !important; }
-
-.vm-meta-card,
-.vm-overview-card,
-.vm-nav-card,
-.vm-race-card,
-.vm-speedmap-outer,
-.sectional-section,
-.filter-bar-container {
-  background: linear-gradient(180deg, rgba(13,20,32,.98), rgba(8,13,23,.98)) !important;
-  border: 1px solid var(--border-mid) !important;
-  box-shadow: 0 18px 46px rgba(0,0,0,.46), inset 0 1px 0 rgba(255,255,255,.05) !important;
-}
-.vm-meta-card,
-.vm-overview-card,
-.vm-nav-card,
-.vm-race-card { border-radius: 16px; }
-
-.vm-overview-card h3,
-.vm-speedmap-outer h3,
-.sectional-section h3 {
-  color: var(--text-primary) !important;
-  letter-spacing: .01em;
-}
-.vm-overview-tiles { justify-content: flex-start; }
-.vm-overview-tile {
-  background: var(--bg-elevated) !important;
-  border: 1px solid var(--border-subtle) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
-  flex: 1 1 160px;
-}
-.vm-overview-tile .tile-label {
-  color: var(--text-muted) !important;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  font-weight: 700;
-}
-.vm-overview-tile .tile-value { color: var(--text-primary) !important; }
-.vm-overview-tile .tile-sub { color: var(--text-secondary) !important; }
-
-.vm-nav-pill {
-  min-height: 38px;
-  display: inline-flex;
-  align-items: center;
-  background: linear-gradient(135deg, rgba(17,28,43,.96), rgba(10,18,32,.96)) !important;
-  border: 1px solid var(--border-mid);
-  color: var(--text-secondary) !important;
-  border-radius: 999px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.05) !important;
-  transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease, box-shadow .16s ease;
-}
-.vm-nav-pill:hover,
-.vm-nav-pill:focus,
-.vm-nav-pill.active {
-  opacity: 1;
-  color: #ffffff !important;
-  border-color: rgba(77,163,255,.82);
-  background: linear-gradient(135deg, #115dff 0%, #00a3ff 100%) !important;
-  box-shadow: 0 0 0 1px rgba(77,163,255,.30), 0 0 22px rgba(31,111,255,.42) !important;
-  transform: translateY(-1px);
-}
-
-.vm-meta-card .btn,
-.vm-race-card .btn,
-.chart-toggle-btn,
-.clear-filters-btn,
-.filter-dropdown,
-button[onclick*="setTrackBias"] {
-  min-height: 40px;
-}
-button[onclick*="setTrackBias"]:hover {
-  border-color: var(--accent-border) !important;
-  color: var(--accent) !important;
-  background: var(--accent-soft) !important;
-}
-#updateScratchingsBtn.btn-warning {
-  background: var(--warning-soft) !important;
-  border-color: rgba(245,158,11,.35) !important;
-  color: #f8c56b !important;
-  font-weight: 800;
-}
-.btn-primary,
-.vm-meta-card .btn-primary {
-  background: var(--accent-soft) !important;
-  border-color: var(--accent-border) !important;
-  color: var(--text-primary) !important;
-  font-weight: 800;
-}
-.btn-primary:hover,
-.vm-meta-card .btn-primary:hover {
-  background: rgba(79,140,255,.22) !important;
-  border-color: rgba(79,140,255,.48) !important;
-}
-
-.vm-race-header { align-items: flex-start; }
-.vm-race-header h2 { letter-spacing: .01em; }
-.vm-race-meta {
-  color: var(--text-secondary);
-  row-gap: 6px;
-}
-.vm-race-meta span {
-  background: rgba(255,255,255,.035);
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  padding: 4px 9px;
-}
-.vm-maiden-warning {
-  background: var(--warning-soft) !important;
-  border-left-color: var(--warning) !important;
-  color: var(--text-secondary);
-}
-
-.vm-race-card > div[style*="overflow-x"] {
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  background: rgba(0,0,0,.08);
-}
-.vm-race-card table { margin-top: 0 !important; }
-.vm-race-card thead tr,
-.pfai-heatmap-table thead {
-  background: var(--bg-elevated) !important;
-  border-bottom: 1px solid var(--border-mid) !important;
-}
-.vm-race-card thead th,
-.pfai-heatmap-table th {
-  color: var(--text-muted) !important;
-  background: transparent !important;
-  border: none !important;
-}
-.vm-race-card tbody tr { transition: background .14s ease, filter .14s ease; }
-.vm-race-card tbody tr:hover { filter: none; background-color: rgba(79,140,255,.055) !important; }
-.vm-race-card tbody td { border-bottom-color: var(--border-subtle) !important; }
-.vm-race-card tbody td:nth-child(2) > div:last-child { color: var(--text-muted) !important; }
-.vm-race-card tbody td:nth-child(4) { color: #7ee0a3 !important; }
-.vm-race-card tbody td:nth-child(5),
-.lb-odds-span { color: #f8c56b !important; }
-.vm-race-card tbody tr[style*="#d4edda"] {
-  background: var(--success-soft) !important;
-  border-left: 3px solid rgba(34,197,94,.72) !important;
-}
-.vm-race-card tbody tr[style*="#fff3cd"],
-.vm-race-card tbody tr[style*="#ffe4b3"] {
-  background: var(--warning-soft) !important;
-  border-left: 3px solid rgba(245,158,11,.66) !important;
-}
-.vm-race-card tbody tr.best-bet-highlight {
-  background: linear-gradient(90deg, rgba(255,214,89,.34), rgba(255,171,0,.18) 46%, rgba(83,55,8,.22)) !important;
-  border-left: 5px solid #ffd700 !important;
-  box-shadow: inset 0 0 0 1px rgba(255,215,0,.50), 0 0 28px rgba(255,199,44,.22) !important;
-}
-.vm-best-bet-badge {
-  background: linear-gradient(135deg, #fff4b8 0%, #ffd700 38%, #ff9f0a 100%) !important;
-  border: 1px solid rgba(255,244,184,.85);
-  color: #1f1300 !important;
-  box-shadow: 0 0 14px rgba(255,215,0,.48), inset 0 1px 0 rgba(255,255,255,.60) !important;
-}
-.vm-best-bet-reasons { color: #fff1a8 !important; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
-.horse-scratched,
-.vm-race-card tbody tr[style*="#e9ecef"] {
-  background: rgba(135,147,163,.08) !important;
-  border-left-color: var(--danger) !important;
-}
-.scratched-badge,
-.scratched-label {
-  background: var(--danger-soft) !important;
-  border: 1px solid rgba(239,68,68,.35);
-  color: #ffb4b4 !important;
-}
-.vm-race-card details summary { color: var(--accent) !important; }
-.vm-race-card details pre,
-details pre {
-  max-width: min(920px, 82vw);
-  overflow-x: auto;
-  color: var(--text-secondary) !important;
-  background: #111821 !important;
-  border-color: var(--border-mid) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
-}
-.pfai-badge,
-.vm-race-card [style*="764ba2"] {
-  background: var(--accent-soft) !important;
-  border: 1px solid var(--accent-border) !important;
-  color: #bcd5ff !important;
-}
-.vm-quick-analysis {
-  background: rgba(79,140,255,.09) !important;
-  border-left-color: var(--accent) !important;
-  color: var(--text-secondary);
-}
-
-.speedmap-container { padding: 14px 0; scroll-snap-type: x proximity; }
-.speedmap-grid { gap: 12px; min-width: 740px; }
-.speedmap-column {
-  background: linear-gradient(180deg, rgba(17,28,43,.94), rgba(8,14,24,.98)) !important;
-  border-color: var(--border-mid) !important;
-  scroll-snap-align: start;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.045), 0 10px 24px rgba(0,0,0,.24);
-}
-.speedmap-column--leader { border-color: rgba(255,82,82,.48) !important; background: linear-gradient(180deg, rgba(62,18,24,.72), rgba(8,14,24,.98)) !important; }
-.speedmap-column--onpace { border-color: rgba(255,179,71,.48) !important; background: linear-gradient(180deg, rgba(61,41,14,.70), rgba(8,14,24,.98)) !important; }
-.speedmap-column--midfield { border-color: rgba(77,163,255,.50) !important; background: linear-gradient(180deg, rgba(14,36,68,.76), rgba(8,14,24,.98)) !important; }
-.speedmap-column--backmarker { border-color: rgba(168,85,247,.48) !important; background: linear-gradient(180deg, rgba(43,22,72,.72), rgba(8,14,24,.98)) !important; }
-.speedmap-column-header {
-  background: rgba(255,255,255,.045) !important;
-  border-bottom: 2px solid var(--accent-border) !important;
-  color: #ffffff !important;
-  border-radius: 8px 8px 0 0;
-  padding-bottom: 10px;
-  text-shadow: 0 1px 8px rgba(0,0,0,.45);
-}
-.speedmap-horse-card {
-  background: #0b1320 !important;
-  border-color: var(--border-mid) !important;
-  padding: 9px 10px;
-}
-.speedmap-horse-card:hover {
-  border-color: var(--accent-border) !important;
-  box-shadow: 0 8px 18px rgba(0,0,0,.2) !important;
-}
-.speedmap-tab-number {
-  background: var(--bg-hover) !important;
-  border: 1px solid var(--accent-border);
-  color: #bcd5ff !important;
-  border-radius: 8px;
-}
-.speedmap-pfai,
-.speedmap-badge-speed {
-  background: var(--accent-soft) !important;
-  border-color: var(--accent-border) !important;
-  color: #bcd5ff !important;
-}
-.speedmap-badge-settle {
-  background: rgba(135,147,163,.12) !important;
-  border-color: rgba(135,147,163,.24) !important;
-  color: var(--text-secondary) !important;
-}
-.speedmap-map {
-  animation: vmMapPulse 2.8s ease-in-out infinite;
-}
-.speedmap-map-positive {
-  background: rgba(34,197,94,.24) !important;
-  border-color: rgba(74,222,128,.66) !important;
-  color: #b7ffd0 !important;
-  box-shadow: 0 0 0 1px rgba(34,197,94,.14), 0 0 18px rgba(34,197,94,.22);
-}
-.speedmap-map-neutral {
-  background: rgba(135,147,163,.12) !important;
-  border-color: rgba(135,147,163,.24) !important;
-  color: var(--text-secondary) !important;
-}
-.speedmap-map-negative {
-  background: rgba(239,68,68,.22) !important;
-  border-color: rgba(248,113,113,.55) !important;
-  color: #ffd0d0 !important;
-}
-@keyframes vmMapPulse {
-  0%, 100% { transform: scale(1); filter: brightness(1); }
-  50% { transform: scale(1.025); filter: brightness(1.16); }
-}
-.speedmap-container.is-open .speedmap-column {
-  animation: vmFadeSlide .42s ease both;
-}
-.speedmap-container.is-open .speedmap-column:nth-child(2) { animation-delay: .05s; }
-.speedmap-container.is-open .speedmap-column:nth-child(3) { animation-delay: .10s; }
-.speedmap-container.is-open .speedmap-column:nth-child(4) { animation-delay: .15s; }
-.speedmap-container.is-open .speedmap-horse-card {
-  animation: vmFadeSlide .38s ease both;
-  animation-delay: calc(var(--horse-index, 0) * 45ms + .12s);
-}
-@keyframes vmFadeSlide {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.sectional-section {
-  border-left-color: var(--accent) !important;
-}
-.chart-toggle-btn {
-  background: transparent !important;
-  border: 1px solid var(--border-mid) !important;
-  color: var(--text-secondary) !important;
-  border-radius: 999px;
-}
-.chart-toggle-btn:hover {
-  color: var(--accent) !important;
-  background: var(--accent-soft) !important;
-  border-color: var(--accent-border) !important;
-}
-.chart-toggle-btn.active {
-  background: linear-gradient(135deg, #115dff 0%, #00a3ff 100%) !important;
-  color: #ffffff !important;
-  border-color: rgba(117,183,255,.88) !important;
-  box-shadow: 0 0 0 1px rgba(77,163,255,.32), 0 0 20px rgba(31,111,255,.38) !important;
-}
-[id^="chartContainer_race"].is-switching,
-[id^="pfaiHeatmap_race"].is-switching {
-  animation: vmPanelSwitch .28s ease both;
-}
-@keyframes vmPanelSwitch {
-  from { opacity: .38; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-#chartContainer_race,
-[id^="chartContainer_race"],
-[id^="pfaiHeatmap_race"] {
-  background: #121821 !important;
-  border-color: var(--border-subtle) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
-}
-.chart-insights {
-  background: rgba(79,140,255,.06) !important;
-  border-color: var(--border-subtle) !important;
-  border-left-color: var(--accent) !important;
-}
-.chart-insights h4 { color: #bcd5ff !important; }
-
-.pfai-heatmap-wrap {
-  overflow: hidden;
-}
-.pfai-heatmap-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 14px !important;
-  color: #ffffff !important;
-  font-size: 15px !important;
-  font-weight: 900;
-  letter-spacing: .01em;
-  text-shadow: 0 0 16px rgba(77,163,255,.35);
-}
-.pfai-heatmap-scroll {
-  overflow-x: auto;
-  border: 1px solid var(--border-mid);
-  border-radius: 10px;
-  -webkit-overflow-scrolling: touch;
-}
-.pfai-heatmap-table {
-  background: #080f1a !important;
-  min-width: 640px;
-}
-.pfai-heatmap-table tbody tr { filter: saturate(1.05) brightness(.98); }
-.pfai-heatmap-table tbody tr:hover { filter: saturate(1.16) brightness(1.08); }
-.pfai-heatmap-table tbody td {
-  color: var(--text-primary) !important;
-  text-shadow: 0 1px 1px rgba(0,0,0,.35);
-}
-.pfai-rank-chip {
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 14px rgba(0,0,0,.22);
-}
-.pfai-heatmap-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 14px;
-  align-items: center;
-  margin-top: 14px;
-  padding: 12px;
-  background: rgba(77,163,255,.08);
-  border: 1px solid rgba(77,163,255,.22);
-  border-radius: 8px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-[id^="pfaiHeatmap_"] h4 { color: #ffffff !important; }
-
-.filter-bar-container { background: var(--bg-surface) !important; }
-.filter-bar-title { color: var(--text-secondary) !important; }
-.filter-dropdown,
-.clear-filters-btn,
-.filter-tag,
-.filter-match-counter {
-  background: var(--bg-elevated) !important;
-  border-color: var(--border-mid) !important;
-  color: var(--text-secondary) !important;
-}
-.filter-dropdown:focus { border-color: var(--accent-border) !important; }
-.filter-dropdown option { background: var(--bg-elevated); color: var(--text-primary); }
-.horse-row-match {
-  background: linear-gradient(90deg, rgba(34,197,94,.14), rgba(34,197,94,.055)) !important;
-  border-left-color: var(--success) !important;
-  box-shadow: inset 0 0 0 1px rgba(34,197,94,.12) !important;
-}
-.confidence-banner {
-  color: var(--text-primary) !important;
-  background: var(--bg-elevated) !important;
-  border: 1px solid var(--border-subtle) !important;
-}
-
-/* Pilot-only chat reskin: keep all chat IDs/endpoints/JS unchanged. */
-#chat-toggle,
-#chat-header,
-.user-message .message-content,
-#send-btn {
-  background: var(--accent-soft) !important;
-  border: 1px solid var(--accent-border) !important;
-  color: var(--text-primary) !important;
-  box-shadow: 0 10px 28px rgba(0,0,0,.28) !important;
-}
-#chat-toggle {
-  width: 54px !important;
-  height: 54px !important;
-}
-#chatbot-container {
-  background: var(--bg-surface) !important;
-  border-color: var(--border-mid) !important;
-}
-.bot-message .message-content,
-.welcome-message {
-  background: var(--bg-elevated) !important;
-  border-color: var(--border-subtle) !important;
-  color: var(--text-secondary) !important;
-}
-#chat-input-area,
-#chat-input {
-  background: #121821 !important;
-  color: var(--text-primary) !important;
-}
-
-@media (max-width: 768px) {
-  .vm-meta-card { align-items: stretch; }
-  .vm-meta-card > div { width: 100%; }
-  .vm-meta-card > div:last-child { gap: 10px !important; }
-  .vm-meta-card > div:last-child > div:first-child { width: 100%; overflow-x: auto; }
-  .vm-meta-card .btn { width: 100%; min-height: 44px; }
-  .vm-nav-card { overflow-x: auto; flex-wrap: nowrap; padding: 12px; }
-  .vm-nav-label { flex: 0 0 auto; }
-  .vm-nav-pill { flex: 0 0 auto; min-height: 44px; }
-  .vm-race-card { padding: 14px; border-radius: 14px; }
-  .vm-race-header { display: block; }
-  .vm-race-header h2 { margin-bottom: 8px; }
-  .vm-race-meta { display: grid; grid-template-columns: 1fr; gap: 6px; }
-  .vm-race-meta span { width: 100%; border-radius: 10px; }
-  .vm-speedmap-outer > div:first-child { align-items: flex-start !important; gap: 10px; flex-wrap: wrap; }
-  .vm-speedmap-outer button { min-height: 44px; }
-  .speedmap-grid { min-width: 620px; grid-template-columns: repeat(4, 150px); }
-  .sectional-section { margin: 14px -2px; }
-  [id^="chartContainer_race"] { height: 300px !important; padding: 10px !important; }
-  .pfai-heatmap-scroll { margin: 0 -4px; }
-  .pfai-heatmap-table { min-width: 620px; }
-  .chart-controls { gap: 7px; }
-  .chart-toggle-btn { min-height: 44px; padding: 8px 12px; }
-  .vm-race-card details pre,
-  details pre { max-width: 78vw; }
-  .filter-bar-header { align-items: stretch; }
-  .filter-dropdown,
-  .clear-filters-btn { width: 100%; min-height: 44px; }
-}
-
-@media (max-width: 430px) {
-  .vm-page-title { font-size: 1.32rem; }
-  .vm-overview-tile { flex-basis: 100%; }
-  .vm-race-card tbody td { padding: 10px 9px; }
-  .vm-race-card tbody td:nth-child(2) { min-width: 190px; }
-  .vm-race-card tbody td:nth-child(7) { min-width: 190px; }
-  #chatbot-container { width: calc(100vw - 24px) !important; right: 12px !important; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation: none !important;
-    transition: none !important;
-  }
 }
 
 /* ── Print styles (unchanged logic) ── */
@@ -1773,7 +1275,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const horses = [];
         rows.forEach(function(row) {
             const scoreCell = row.cells[2];
-            const winProbCell = row.cells[5];
+            const winProbCell = row.cells[4];
             if (scoreCell && winProbCell) {
                 const score = scoreCell.textContent.trim();
                 const winProb = winProbCell.textContent.trim().replace('%', '');
@@ -1792,54 +1294,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     injectPFAIScores();
-    initializeRaceNavState();
 });
-
-function getHorseDedupeKey(horse) {
-    return normalizeHorseName((horse && (horse.horse_name || horse.runnerName || horse.name)) || '');
-}
-
-function dedupeHorsesByName(horses) {
-    const seen = new Map();
-    (horses || []).forEach(function(horse) {
-        const key = getHorseDedupeKey(horse);
-        if (!key) return;
-        const existing = seen.get(key);
-        if (!existing) { seen.set(key, horse); return; }
-        const currentDataPoints = (horse.history_adjusted || []).length + (horse.history_raw || []).length;
-        const existingDataPoints = (existing.history_adjusted || []).length + (existing.history_raw || []).length;
-        if (currentDataPoints > existingDataPoints) seen.set(key, horse);
-    });
-    return Array.from(seen.values());
-}
-
-function initializeRaceNavState() {
-    const pills = Array.from(document.querySelectorAll('.vm-nav-pill'));
-    const cards = Array.from(document.querySelectorAll('.vm-race-card[id^="race-"]'));
-    if (pills.length === 0 || cards.length === 0) return;
-    function setActive(id) {
-        pills.forEach(function(pill) { pill.classList.toggle('active', pill.getAttribute('href') === '#' + id); });
-    }
-    if ('IntersectionObserver' in window) {
-        const observer = new IntersectionObserver(function(entries) {
-            const visible = entries.filter(function(entry) { return entry.isIntersecting; })
-                .sort(function(a, b) { return b.intersectionRatio - a.intersectionRatio; })[0];
-            if (visible) setActive(visible.target.id);
-        }, { rootMargin: '-15% 0px -65% 0px', threshold: [0.1, 0.35, 0.6] });
-        cards.forEach(function(card) { observer.observe(card); });
-    }
-    pills.forEach(function(pill) {
-        pill.addEventListener('click', function() {
-            const targetId = pill.getAttribute('href').slice(1);
-            setActive(targetId);
-        });
-    });
-    setActive(cards[0].id);
-}
 
 function renderSectionalChart(raceNum, horsesData) {
     const container = document.getElementById('sectional_container_race' + raceNum);
-    horsesData = dedupeHorsesByName(horsesData);
     if (!horsesData || horsesData.length === 0) {
         container.innerHTML = '<div class="no-sectionals">No sectional data available for this race</div>';
         return;
@@ -1864,7 +1322,7 @@ function renderSectionalChart(raceNum, horsesData) {
 }
 
 function prepareChartData(horses) {
-    const colors = ['#4f8cff', '#22c55e', '#f59e0b', '#c2cad6', '#60a5fa', '#94a3b8', '#ef4444', '#38bdf8'];
+    const colors = ['#FFD700', '#C0C0C0', '#CD7F32', '#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b'];
     const datasets = { adjusted: [], raw: [], zscore: [], pfai: [] };
     horses.forEach(function(horse, index) {
         const color = colors[index % colors.length];
@@ -1909,16 +1367,6 @@ function getChartOptions(viewType) {
         responsive: true,
         maintainAspectRatio: false,
         interaction: { mode: 'nearest', axis: 'x', intersect: false },
-        animation: { duration: 1200, easing: 'easeOutQuart' },
-        transitions: {
-            active: { animation: { duration: 650, easing: 'easeOutCubic' } },
-            show: { animations: { x: { from: 0 }, y: { from: 0 } } },
-            hide: { animations: { x: { to: 0 }, y: { to: 0 } } }
-        },
-        elements: {
-            line: { borderCapStyle: 'round', borderJoinStyle: 'round' },
-            point: { hitRadius: 10 }
-        },
         plugins: {
             legend: {
                 position: 'bottom',
@@ -1926,16 +1374,16 @@ function getChartOptions(viewType) {
                     boxWidth: 12, padding: 8,
                     font: { size: 11 },
                     usePointStyle: true,
-                    color: '#c2cad6'
+                    color: '#c8c8d8'   /* ← dark-friendly legend text */
                 }
             },
             tooltip: {
-                backgroundColor: 'rgba(15,17,23,0.96)',
-                borderColor: 'rgba(79,140,255,0.30)',
+                backgroundColor: 'rgba(9,9,15,0.92)',
+                borderColor: 'rgba(102,126,234,0.4)',
                 borderWidth: 1,
                 padding: 12,
-                titleColor: '#f4f7fb',
-                bodyColor: '#c2cad6',
+                titleColor: '#f0f0f8',
+                bodyColor: '#c8c8d8',
                 callbacks: {
                     label: function(context) {
                         const value = context.parsed.y.toFixed(2);
@@ -1967,13 +1415,13 @@ function getChartOptions(viewType) {
                           viewType === 'pfai'   ? 'PFAI Rank (#1 = best)' :
                                                   'Sectional Time (seconds)',
                     font: { size: 12, weight: 'bold' },
-                    color: '#8793a3'
+                    color: '#9090a8'   /* ← dark-friendly axis title */
                 },
-                ticks: { color: '#8793a3' },
-                grid:  { color: 'rgba(255,255,255,0.055)' }
+                ticks: { color: '#9090a8' },                  /* ← dark tick labels */
+                grid:  { color: 'rgba(255,255,255,0.06)' }    /* ← subtle dark grid lines */
             },
             x: {
-                ticks: { color: '#8793a3' },
+                ticks: { color: '#9090a8' },
                 grid:  { display: false }
             }
         }
@@ -1983,18 +1431,11 @@ function getChartOptions(viewType) {
 function switchView(raceId, viewType) {
     const instance = chartInstances[raceId];
     if (!instance) return;
-    const trigger = window.event ? window.event.target : null;
-    const buttons = trigger && trigger.parentElement ? trigger.parentElement.querySelectorAll('.chart-toggle-btn') : [];
+    const buttons = event.target.parentElement.querySelectorAll('.chart-toggle-btn');
     buttons.forEach(function(btn) { btn.classList.remove('active'); });
-    if (trigger) trigger.classList.add('active');
+    event.target.classList.add('active');
     const chartContainer = document.getElementById('chartContainer_' + raceId);
     const heatmapContainer = document.getElementById('pfaiHeatmap_' + raceId);
-    [chartContainer, heatmapContainer].forEach(function(panel) {
-        if (!panel) return;
-        panel.classList.remove('is-switching');
-        void panel.offsetWidth;
-        panel.classList.add('is-switching');
-    });
     if (viewType === 'pfai') {
         chartContainer.style.display = 'none';
         heatmapContainer.style.display = 'block';
@@ -2007,14 +1448,14 @@ function switchView(raceId, viewType) {
         heatmapContainer.style.display = 'none';
         instance.chart.data = instance.data[viewType];
         instance.chart.options = getChartOptions(viewType);
-        instance.chart.update('active');
+        instance.chart.update();
     }
 }
 
 function renderPFAIHeatmap(raceNum, horses) {
     const container = document.getElementById('pfaiHeatmap_' + raceNum);
     if (!container) return;
-    const horsesWithPFAI = dedupeHorsesByName(horses).filter(function(horse) {
+    const horsesWithPFAI = horses.filter(function(horse) {
         return horse.pfai_sectionals && (
             (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < 25) ||
             (horse.pfai_sectionals.last400_rank && horse.pfai_sectionals.last400_rank < 25) ||
@@ -2033,9 +1474,9 @@ function renderPFAIHeatmap(raceNum, horses) {
         horse.avgRank = ranks.length > 0 ? ranks.reduce(function(a, b) { return a + b; }, 0) / ranks.length : 999;
     });
     horsesWithPFAI.sort(function(a, b) { return a.avgRank - b.avgRank; });
-    let html = '<div class="pfai-heatmap-wrap">';
-    html += '<h4 class="pfai-heatmap-title">🎯 PFAI Sectional Rankings <span style="color:var(--text-muted); font-size:12px; font-weight:700;">Last Start Performance</span></h4>';
-    html += '<div class="pfai-heatmap-scroll"><table class="pfai-heatmap-table"><thead><tr>';
+    let html = '<div style="overflow-x:auto;">';
+    html += '<h4 style="margin:0 0 14px; color:#a78bfa; font-size:15px;">🎯 PFAI Sectional Rankings - Last Start Performance</h4>';
+    html += '<table class="pfai-heatmap-table"><thead><tr>';
     html += '<th style="text-align:left; padding:12px;">Horse</th>';
     html += '<th style="text-align:center; padding:12px;">600m</th>';
     html += '<th style="text-align:center; padding:12px;">400m</th>';
@@ -2046,11 +1487,11 @@ function renderPFAIHeatmap(raceNum, horses) {
         const pfai = horse.pfai_sectionals;
         let rowColor;
         const position = index + 1;
-        if (position === 1) rowColor = 'rgba(34,197,94,.30)';
-        else if (position <= 3) rowColor = 'rgba(34,197,94,.20)';
-        else if (position <= 5) rowColor = 'rgba(245,158,11,.22)';
-        else if (position <= 7) rowColor = 'rgba(245,158,11,.14)';
-        else rowColor = 'rgba(239,68,68,.16)';
+        if (position === 1) rowColor = '#15803d';
+        else if (position <= 3) rowColor = '#84cc16';
+        else if (position <= 5) rowColor = '#eab308';
+        else if (position <= 7) rowColor = '#f97316';
+        else rowColor = '#dc2626';
         html += '<tr style="background:' + rowColor + ';">';
         html += '<td style="padding:12px; font-weight:600;">' + horse.horse_name + '</td>';
         html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last600_rank) + '</td>';
@@ -2059,14 +1500,14 @@ function renderPFAIHeatmap(raceNum, horses) {
         html += '<td style="padding:12px; text-align:center; font-weight:700; color:#ffffff;">' + horse.avgRank.toFixed(1) + '</td>';
         html += '</tr>';
     });
-    html += '</tbody></table></div>';
-    html += '<div class="pfai-heatmap-legend">';
-    html += '<strong style="color:#ffffff;">Legend:</strong> ';
-    html += '<span style="display:inline-block; width:18px; height:18px; background:rgba(34,197,94,.35); border:1px solid rgba(34,197,94,.45); border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Elite (1st) ';
-    html += '<span style="display:inline-block; width:18px; height:18px; background:rgba(34,197,94,.22); border:1px solid rgba(34,197,94,.32); border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Good (2nd-3rd) ';
-    html += '<span style="display:inline-block; width:18px; height:18px; background:rgba(245,158,11,.28); border:1px solid rgba(245,158,11,.40); border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Average (4th-5th) ';
-    html += '<span style="display:inline-block; width:18px; height:18px; background:rgba(245,158,11,.16); border:1px solid rgba(245,158,11,.28); border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Below Avg (6th-7th) ';
-    html += '<span style="display:inline-block; width:18px; height:18px; background:rgba(239,68,68,.18); border:1px solid rgba(239,68,68,.30); border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Poor (8th+)';
+    html += '</tbody></table>';
+    html += '<div style="margin-top:14px; padding:11px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; font-size:12px; color:#9090a8;">';
+    html += '<strong style="color:#c8c8d8;">Legend:</strong> ';
+    html += '<span style="display:inline-block; width:18px; height:18px; background:#22c55e; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Elite (1st) ';
+    html += '<span style="display:inline-block; width:18px; height:18px; background:#84cc16; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Good (2nd-3rd) ';
+    html += '<span style="display:inline-block; width:18px; height:18px; background:#eab308; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Average (4th-5th) ';
+    html += '<span style="display:inline-block; width:18px; height:18px; background:#f97316; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Below Avg (6th-7th) ';
+    html += '<span style="display:inline-block; width:18px; height:18px; background:#e5e7eb; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Poor (8th+)';
     html += '</div></div>';
     container.innerHTML = html;
 }
@@ -2074,12 +1515,12 @@ function renderPFAIHeatmap(raceNum, horses) {
 function getRankCell(rank) {
     if (!rank || rank >= 25) { return '<span style="color:#6b7280;">-</span>'; }
     let color, bgColor, label;
-    if (rank <= 5)       { color = '#bbf7d0'; bgColor = 'rgba(34,197,94,.22)'; label = 'Elite'; }
-    else if (rank <= 10) { color = '#c4f1d2'; bgColor = 'rgba(34,197,94,.14)'; label = 'Good'; }
-    else if (rank <= 15) { color = '#fde68a'; bgColor = 'rgba(245,158,11,.20)'; label = 'Avg'; }
-    else if (rank <= 20) { color = '#f8c56b'; bgColor = 'rgba(245,158,11,.12)'; label = 'Below'; }
-    else                 { color = '#c2cad6'; bgColor = 'rgba(135,147,163,.14)'; label = 'Poor'; }
-    return '<span class="pfai-rank-chip" style="display:inline-block; padding:5px 11px; background:' + bgColor + '; color:' + color + '; font-weight:800; border-radius:6px; min-width:48px; border:1px solid rgba(255,255,255,.12);">#' + rank + '</span>';
+    if (rank <= 5)       { color = '#166534'; bgColor = '#22c55e'; label = 'Elite'; }
+    else if (rank <= 10) { color = '#365314'; bgColor = '#84cc16'; label = 'Good'; }
+    else if (rank <= 15) { color = '#713f12'; bgColor = '#eab308'; label = 'Avg'; }
+    else if (rank <= 20) { color = '#7c2d12'; bgColor = '#f97316'; label = 'Below'; }
+    else                 { color = '#6b7280'; bgColor = '#e5e7eb'; label = 'Poor'; }
+    return '<span style="display:inline-block; padding:5px 11px; background:' + bgColor + '; color:' + color + '; font-weight:700; border-radius:6px; min-width:48px;">#' + rank + '</span>';
 }
 
 function generateInsights(raceNum, horses) {
@@ -2131,12 +1572,8 @@ function toggleSpeedMap(raceNumber) {
     const toggle = document.getElementById('speedmap-toggle-' + raceNumber);
     if (container.style.display === 'none' || container.style.display === '') {
         container.style.display = 'block'; toggle.textContent = '▲ Hide'; renderSpeedMap(raceNumber);
-        const speedmapScroller = container.querySelector('.speedmap-container');
-        if (speedmapScroller) { speedmapScroller.classList.remove('is-open'); void speedmapScroller.offsetWidth; speedmapScroller.classList.add('is-open'); }
     } else {
         container.style.display = 'none'; toggle.textContent = '▼ Show';
-        const speedmapScroller = container.querySelector('.speedmap-container');
-        if (speedmapScroller) { speedmapScroller.classList.remove('is-open'); }
     }
 }
 const top3Active = {};
@@ -2186,17 +1623,10 @@ function renderSpeedMap(raceNumber) {
         });
     }
 
-    // Filter out scratched horses and duplicate feed rows.
-    const uniqueSpeedMapHorses = new Map();
-    data.payLoad[0].items.forEach(function(horse) {
-        const key = normalizeHorseName(horse.runnerName) || String(horse.tabNo || '');
-        if (!key || scratchedNames.has(key)) return;
-        const existing = uniqueSpeedMapHorses.get(key);
-        if (!existing || Number(horse.pfaiScore || 0) > Number(existing.pfaiScore || 0)) {
-            uniqueSpeedMapHorses.set(key, horse);
-        }
+    // Filter out scratched horses
+    const allHorses = data.payLoad[0].items.filter(function(horse) {
+        return !scratchedNames.has(normalizeHorseName(horse.runnerName));
     });
-    const allHorses = Array.from(uniqueSpeedMapHorses.values());
 
     const categories = { leader: [], onpace: [], midfield: [], backmarker: [] };
     allHorses.forEach(function(horse) {
@@ -2210,24 +1640,21 @@ function renderSpeedMap(raceNumber) {
         categories[key].sort(function(a, b) { return a.settle - b.settle; });
     });
 
-    speedmapHorseAnimationIndex = 0;
     const html = '<div class="speedmap-grid">' +
-        '<div class="speedmap-column speedmap-column--leader"><div class="speedmap-column-header">Leader</div>' + categories.leader.map(createHorseCard).join('') + '</div>' +
-        '<div class="speedmap-column speedmap-column--onpace"><div class="speedmap-column-header">On Pace</div>' + categories.onpace.map(createHorseCard).join('') + '</div>' +
-        '<div class="speedmap-column speedmap-column--midfield"><div class="speedmap-column-header">Midfield</div>' + categories.midfield.map(createHorseCard).join('') + '</div>' +
-        '<div class="speedmap-column speedmap-column--backmarker"><div class="speedmap-column-header">Backmarker</div>' + categories.backmarker.map(createHorseCard).join('') + '</div>' +
+        '<div class="speedmap-column"><div class="speedmap-column-header">Leader</div>' + categories.leader.map(createHorseCard).join('') + '</div>' +
+        '<div class="speedmap-column"><div class="speedmap-column-header">OnPace</div>' + categories.onpace.map(createHorseCard).join('') + '</div>' +
+        '<div class="speedmap-column"><div class="speedmap-column-header">Midfield</div>' + categories.midfield.map(createHorseCard).join('') + '</div>' +
+        '<div class="speedmap-column"><div class="speedmap-column-header">Backmarker</div>' + categories.backmarker.map(createHorseCard).join('') + '</div>' +
         '</div>';
 
     document.querySelector('#speedmap-' + raceNumber + ' .speedmap-container').innerHTML = html;
 }
-let speedmapHorseAnimationIndex = 0;
 function createHorseCard(horse) {
     const mapValue = horse.mapA2E || 0;
     let mapClass = 'speedmap-map-neutral';
     if (mapValue > 0) mapClass = 'speedmap-map-positive';
     if (mapValue < 0) mapClass = 'speedmap-map-negative';
-    const animationIndex = speedmapHorseAnimationIndex++;
-    return '<div class="speedmap-horse-card" style="--horse-index:' + animationIndex + '">' +
+    return '<div class="speedmap-horse-card">' +
         '<div class="speedmap-tab-number">' + horse.tabNo + '</div>' +
         '<div class="speedmap-horse-name">' + horse.runnerName + '</div>' +
         '<div class="speedmap-pfai">PFAI: ' + horse.pfaiScore + '</div>' +
@@ -2375,7 +1802,7 @@ function injectPFAIScores() {
                 const existingBadge = horseNameCell.querySelector('.pfai-badge'); if (existingBadge) return;
                 const pfaiBadge = document.createElement('span');
                 pfaiBadge.className = 'pfai-badge';
-                pfaiBadge.style.cssText = 'background:var(--accent-soft); color:#bcd5ff; border:1px solid var(--accent-border); padding:3px 10px; border-radius:4px; font-size:11px; font-weight:700; margin-left:8px;';
+                pfaiBadge.style.cssText = 'background:var(--accent); color:white; padding:3px 10px; border-radius:4px; font-size:11px; font-weight:700; margin-left:8px;';
                 const pfaiPrice = matchingHorse.pfaiPrice;
                 const priceText = (pfaiPrice && pfaiPrice > 0 && pfaiPrice !== 900) ? ' · $' + pfaiPrice.toFixed(2) : '';
                 pfaiBadge.textContent = 'PFAI: ' + matchingHorse.pfaiScore + priceText;
@@ -2428,10 +1855,10 @@ function highlightBiasButton(bias) {
         const btn = document.getElementById('bias-btn-' + b);
         if (!btn) return;
         if (b === bias) {
-            btn.style.background = 'var(--accent-soft)';
-            btn.style.color = '#d7e6ff';
-            btn.style.borderColor = 'var(--accent-border)';
-            btn.style.boxShadow = 'inset 0 0 0 1px rgba(79,140,255,.12)';
+            btn.style.background = 'linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%)';
+            btn.style.color = 'white';
+            btn.style.borderColor = 'var(--accent-2)';
+            btn.style.boxShadow = '0 2px 10px rgba(102,126,234,0.35)';
         } else {
             btn.style.background = 'var(--bg-surface)';
             btn.style.color = 'var(--text-primary)';
