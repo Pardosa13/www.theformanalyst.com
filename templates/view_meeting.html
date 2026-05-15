@@ -498,7 +498,6 @@ details pre {
 .speedmap-horse-card:hover {
   border-color: var(--accent);
   box-shadow: 0 3px 12px rgba(102,126,234,0.2);
-  transform: translateY(-1px);
 }
 
 .speedmap-card-header {
@@ -524,9 +523,6 @@ details pre {
 
 .speedmap-tab-number--silk {
   position: relative;
-  width: 36px !important;
-  height: 36px !important;
-  border-radius: 10px !important;
   overflow: hidden;
   border: 1px solid rgba(255,255,255,0.2);
   box-shadow: 0 5px 14px rgba(0,0,0,0.24);
@@ -1333,6 +1329,9 @@ function updateScratchings(meetingId) {
 <script>
 const chartInstances = {};
 const meetingId = {{ meeting.id }};
+const PFAI_RANK_THRESHOLD = 25;
+const SPEEDMAP_COLUMN_DELAY_MS = 55;
+const SPEEDMAP_CARD_DELAY_MS = 45;
 
 function initializeSectionalCharts() {
     if (typeof Chart === 'undefined') { setTimeout(initializeSectionalCharts, 100); return; }
@@ -1389,6 +1388,7 @@ function animateSectionalPanel(panel) {
     if (!panel) return;
     panel.classList.remove('sectional-animated-panel-visible');
     panel.classList.add('sectional-animated-panel');
+    // Force a reflow so the entrance animation restarts on repeated toggles.
     void panel.offsetWidth;
     window.requestAnimationFrame(function() {
         panel.classList.add('sectional-animated-panel-visible');
@@ -1398,6 +1398,7 @@ function animateSectionalPanel(panel) {
 function animateHeatmapRows(container) {
     if (!container) return;
     container.classList.remove('pfai-heatmap-animate');
+    // Force a reflow so staggered row animations replay when the heatmap reopens.
     void container.offsetWidth;
     container.classList.add('pfai-heatmap-animate');
 }
@@ -1405,9 +1406,9 @@ function animateHeatmapRows(container) {
 function getValidPfaiRanks(pfaiSectionals) {
     const ranks = [];
     if (!pfaiSectionals) return ranks;
-    if (pfaiSectionals.last600_rank && pfaiSectionals.last600_rank < 25) ranks.push(pfaiSectionals.last600_rank);
-    if (pfaiSectionals.last400_rank && pfaiSectionals.last400_rank < 25) ranks.push(pfaiSectionals.last400_rank);
-    if (pfaiSectionals.last200_rank && pfaiSectionals.last200_rank < 25) ranks.push(pfaiSectionals.last200_rank);
+    if (pfaiSectionals.last600_rank && pfaiSectionals.last600_rank < PFAI_RANK_THRESHOLD) ranks.push(pfaiSectionals.last600_rank);
+    if (pfaiSectionals.last400_rank && pfaiSectionals.last400_rank < PFAI_RANK_THRESHOLD) ranks.push(pfaiSectionals.last400_rank);
+    if (pfaiSectionals.last200_rank && pfaiSectionals.last200_rank < PFAI_RANK_THRESHOLD) ranks.push(pfaiSectionals.last200_rank);
     return ranks;
 }
 
@@ -1480,9 +1481,9 @@ function prepareChartData(horses) {
         if (horse.pfai_sectionals) {
             const pfai = horse.pfai_sectionals;
             const pfaiData = [];
-            if (pfai.last600_rank && pfai.last600_rank < 25) pfaiData.push(pfai.last600_rank);
-            if (pfai.last400_rank && pfai.last400_rank < 25) pfaiData.push(pfai.last400_rank);
-            if (pfai.last200_rank && pfai.last200_rank < 25) pfaiData.push(pfai.last200_rank);
+            if (pfai.last600_rank && pfai.last600_rank < PFAI_RANK_THRESHOLD) pfaiData.push(pfai.last600_rank);
+            if (pfai.last400_rank && pfai.last400_rank < PFAI_RANK_THRESHOLD) pfaiData.push(pfai.last400_rank);
+            if (pfai.last200_rank && pfai.last200_rank < PFAI_RANK_THRESHOLD) pfaiData.push(pfai.last200_rank);
             if (pfaiData.length > 0) {
                 const avgRank = (pfaiData.reduce(function(a, b) { return a + b; }, 0) / pfaiData.length).toFixed(1);
                 datasets.pfai.push({ label: horse.horse_name + ' (Avg: #' + avgRank + ')', data: pfaiData, borderColor: color, backgroundColor: color + '33', tension: 0, pointRadius: 8, pointHoverRadius: 12, borderWidth: index < 3 ? 4 : 3 });
@@ -1535,9 +1536,9 @@ function getChartOptions(viewType) {
                             if (horse && horse.pfai_sectionals) {
                                 const pfai = horse.pfai_sectionals;
                                 label += '\nPFAI Ranks: ';
-                                if (pfai.last200_rank && pfai.last200_rank < 25) label += '200m: #' + pfai.last200_rank + ' ';
-                                if (pfai.last400_rank && pfai.last400_rank < 25) label += '400m: #' + pfai.last400_rank + ' ';
-                                if (pfai.last600_rank && pfai.last600_rank < 25) label += '600m: #' + pfai.last600_rank;
+                                if (pfai.last200_rank && pfai.last200_rank < PFAI_RANK_THRESHOLD) label += '200m: #' + pfai.last200_rank + ' ';
+                                if (pfai.last400_rank && pfai.last400_rank < PFAI_RANK_THRESHOLD) label += '400m: #' + pfai.last400_rank + ' ';
+                                if (pfai.last600_rank && pfai.last600_rank < PFAI_RANK_THRESHOLD) label += '600m: #' + pfai.last600_rank;
                             }
                         }
                         return label;
@@ -1644,7 +1645,7 @@ function renderPFAIHeatmap(raceNum, horses) {
 }
 
 function getRankCell(rank) {
-    if (!rank || rank >= 25) { return '<span style="color:#6b7280;">-</span>'; }
+    if (!rank || rank >= PFAI_RANK_THRESHOLD) { return '<span style="color:#6b7280;">-</span>'; }
     let color, bgColor, label;
     if (rank <= 5)       { color = '#166534'; bgColor = '#22c55e'; label = 'Elite'; }
     else if (rank <= 10) { color = '#365314'; bgColor = '#84cc16'; label = 'Good'; }
@@ -1678,9 +1679,9 @@ function generateInsights(raceNum, horses) {
         if (horse.pfai_sectionals) {
             pfaiCount++;
             const ranks = [];
-            if (horse.pfai_sectionals.last200_rank && horse.pfai_sectionals.last200_rank < 25) ranks.push(horse.pfai_sectionals.last200_rank);
-            if (horse.pfai_sectionals.last400_rank && horse.pfai_sectionals.last400_rank < 25) ranks.push(horse.pfai_sectionals.last400_rank);
-            if (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < 25) ranks.push(horse.pfai_sectionals.last600_rank);
+            if (horse.pfai_sectionals.last200_rank && horse.pfai_sectionals.last200_rank < PFAI_RANK_THRESHOLD) ranks.push(horse.pfai_sectionals.last200_rank);
+            if (horse.pfai_sectionals.last400_rank && horse.pfai_sectionals.last400_rank < PFAI_RANK_THRESHOLD) ranks.push(horse.pfai_sectionals.last400_rank);
+            if (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < PFAI_RANK_THRESHOLD) ranks.push(horse.pfai_sectionals.last600_rank);
             if (ranks.length > 0) {
                 const avgRank = ranks.reduce(function(a, b) { return a + b; }, 0) / ranks.length;
                 if (avgRank < bestPfaiScore) { bestPfaiScore = avgRank; bestPfaiHorse = horse.horse_name; }
@@ -1781,10 +1782,11 @@ function renderSpeedMap(raceNumber) {
     ];
     const html = '<div class="speedmap-grid">' +
         columns.map(function(column, columnIndex) {
-            return '<div class="speedmap-column" style="--speedmap-column-delay:' + (columnIndex * 55) + 'ms;">' +
+            return '<div class="speedmap-column" style="--speedmap-column-delay:' + (columnIndex * SPEEDMAP_COLUMN_DELAY_MS) + 'ms;">' +
                 '<div class="speedmap-column-header">' + column.label + '</div>' +
                 categories[column.key].map(function(horse, horseIndex) {
-                    return createHorseCard(horse, silkStyles[normalizeHorseName(horse.runnerName)], columnIndex, horseIndex);
+                    const runnerKey = normalizeHorseName(horse.runnerName);
+                    return createHorseCard(horse, runnerKey, silkStyles[runnerKey], columnIndex, horseIndex);
                 }).join('') +
                 '</div>';
         }).join('') +
@@ -1811,6 +1813,9 @@ function collectRaceSilkStyles(raceNumber) {
     });
     return silkLookup;
 }
+function decorateSpeedMapSilkStyle(silkStyle) {
+    return silkStyle + ';width:36px;height:36px;border-radius:10px;';
+}
 function syncVisibleSpeedMapSilks(raceNumber) {
     const speedMap = document.getElementById('speedmap-' + raceNumber);
     if (!speedMap || speedMap.style.display === 'none') return;
@@ -1823,7 +1828,7 @@ function syncVisibleSpeedMapSilks(raceNumber) {
         const silkStyle = silkStyles[runnerKey];
         if (silkStyle) {
             numberEl.className = 'speedmap-tab-number speedmap-tab-number--silk';
-            numberEl.style.cssText = silkStyle;
+            numberEl.style.cssText = decorateSpeedMapSilkStyle(silkStyle);
             numberEl.innerHTML = '<span class="speedmap-tab-number-label">' + tabNo + '</span>';
         } else {
             numberEl.className = 'speedmap-tab-number speedmap-tab-number-fallback';
@@ -1832,15 +1837,15 @@ function syncVisibleSpeedMapSilks(raceNumber) {
         }
     });
 }
-function createHorseCard(horse, silkStyle, columnIndex, horseIndex) {
+function createHorseCard(horse, runnerKey, silkStyle, columnIndex, horseIndex) {
     const mapValue = horse.mapA2E || 0;
     let mapClass = 'speedmap-map-neutral';
     if (mapValue > 0) mapClass = 'speedmap-map-positive';
     if (mapValue < 0) mapClass = 'speedmap-map-negative';
     const tabMarkup = silkStyle
-        ? '<span class="speedmap-tab-number speedmap-tab-number--silk" style="' + silkStyle + '"><span class="speedmap-tab-number-label">' + horse.tabNo + '</span></span>'
+        ? '<span class="speedmap-tab-number speedmap-tab-number--silk" style="' + decorateSpeedMapSilkStyle(silkStyle) + '"><span class="speedmap-tab-number-label">' + horse.tabNo + '</span></span>'
         : '<span class="speedmap-tab-number speedmap-tab-number-fallback">' + horse.tabNo + '</span>';
-    return '<div class="speedmap-horse-card" data-runner-name="' + normalizeHorseName(horse.runnerName) + '" data-tab-no="' + horse.tabNo + '" style="--speedmap-card-delay:' + ((columnIndex * 55) + (horseIndex * 45)) + 'ms;">' +
+    return '<div class="speedmap-horse-card" data-runner-name="' + runnerKey + '" data-tab-no="' + horse.tabNo + '" style="--speedmap-card-delay:' + ((columnIndex * SPEEDMAP_COLUMN_DELAY_MS) + (horseIndex * SPEEDMAP_CARD_DELAY_MS)) + 'ms;">' +
         '<div class="speedmap-card-header">' +
         tabMarkup +
         '<div class="speedmap-horse-name">' + horse.runnerName + '</div>' +
