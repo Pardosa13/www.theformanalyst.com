@@ -164,6 +164,7 @@ class Component(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     component_name = db.Column(db.String(200), unique=True, nullable=False)
+    component_key = db.Column(db.String(120), index=True)  # Stable matching key for Best Bets
     is_active = db.Column(db.Boolean, default=True)  # Show on Best Bets page
     min_roi = db.Column(db.Float, default=10.0)  # Minimum ROI threshold
     min_appearances = db.Column(db.Integer, default=10)  # Minimum sample size
