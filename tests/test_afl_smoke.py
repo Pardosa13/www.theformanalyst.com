@@ -1483,6 +1483,109 @@ def test_value_finder_source_uses_filtered_opponent_rows_for_average():
     assert "vs_opp_avg = _safe_avg(opp_games_filtered, stat_name)" in source
 
 
+def _normalize_whitespace_inline(value: Any) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _sort_date_key_inline(row: dict):
+    return row.get("match_date") or ""
+
+
+def _normalise_team_name_inline(value: Any) -> str:
+    return _team(value)
+
+
+def _select_value_finder_player_inline(
+    grouped_players: dict,
+    *,
+    full_name: str,
+    prop_home_team: str,
+    prop_away_team: str,
+    effective_season: int,
+):
+    candidates = list(grouped_players.values())
+    if not candidates:
+        return None
+
+    normalized_full_name = _normalize_whitespace_inline(full_name).lower()
+    prop_teams = {
+        _normalise_team_name_inline(prop_home_team),
+        _normalise_team_name_inline(prop_away_team),
+    }
+    prop_teams.discard("")
+
+    exact_name_matches = [
+        p
+        for p in candidates
+        if _normalize_whitespace_inline(p.get("name", "")).lower() == normalized_full_name
+    ]
+    if exact_name_matches:
+        candidates = exact_name_matches
+
+    team_matches = [
+        p for p in candidates if _normalise_team_name_inline(p.get("team", "")) in prop_teams
+    ]
+    if team_matches:
+        candidates = team_matches
+
+    season_matches = [
+        p for p in candidates if any(g.get("season") == effective_season for g in p.get("games", []))
+    ]
+    if season_matches:
+        candidates = season_matches
+
+    def _candidate_key(player: dict) -> tuple[int, str, int]:
+        games = player.get("games", [])
+        season_count = sum(1 for g in games if g.get("season") == effective_season)
+        latest_game_date = max((_sort_date_key_inline(g) for g in games), default="")
+        return (season_count, latest_game_date, len(games))
+
+    return max(candidates, key=_candidate_key)
+
+
+def test_value_finder_player_resolution_prefers_event_team_and_current_season():
+    grouped_players = {
+        11: {
+            "name": "Finn O'Sullivan",
+            "team": "North Melbourne",
+            "games": [
+                {"season": 2025, "match_date": "2025-07-01", "disposals": 14},
+                {"season": 2025, "match_date": "2025-06-01", "disposals": 15},
+                {"season": 2025, "match_date": "2025-05-01", "disposals": 14},
+                {"season": 2025, "match_date": "2025-04-01", "disposals": 14},
+            ],
+        },
+        22: {
+            "name": "Finn O'Sullivan",
+            "team": "Carlton Blues",
+            "games": [
+                {"season": 2026, "match_date": "2026-04-20", "disposals": 20},
+                {"season": 2026, "match_date": "2026-04-10", "disposals": 21},
+                {"season": 2026, "match_date": "2026-03-30", "disposals": 21},
+            ],
+        },
+    }
+
+    player = _select_value_finder_player_inline(
+        grouped_players,
+        full_name="Finn O'Sullivan",
+        prop_home_team="Carlton",
+        prop_away_team="Collingwood",
+        effective_season=2026,
+    )
+
+    assert player["team"] == "Carlton Blues"
+    season_games = [g for g in player["games"] if g.get("season") == 2026]
+    season_avg = round(sum(g["disposals"] for g in season_games) / len(season_games), 1)
+    assert season_avg == 20.7
+
+
+def test_value_finder_source_uses_player_selector_not_sample_size_heuristic():
+    routes = Path("afl_routes.py").read_text(encoding="utf-8")
+    assert "player = _select_value_finder_player(" in routes
+    assert "player = max(grouped.values(), key=lambda p: len(p.get(\"games\", [])))" not in routes
+
+
 # Model sanity checks for AFL value finder / SGM calculations
 
 def test_calculate_market_edge_uses_requested_market_stat_not_disposals():
