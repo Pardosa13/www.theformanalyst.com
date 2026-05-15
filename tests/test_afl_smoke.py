@@ -1487,6 +1487,10 @@ def _normalize_ws(value: Any) -> str:
     return " ".join(str(value or "").strip().split())
 
 
+def _sort_date_key_inline(row: dict):
+    return row.get("match_date") or ""
+
+
 def _select_value_finder_player_inline(
     grouped_players: dict,
     *,
@@ -1522,7 +1526,7 @@ def _select_value_finder_player_inline(
     def _candidate_key(player: dict) -> tuple[int, str, int]:
         games = player.get("games", [])
         season_count = sum(1 for g in games if g.get("season") == effective_season)
-        latest_game_date = max((str(g.get("match_date") or "") for g in games), default="")
+        latest_game_date = max((_sort_date_key_inline(g) for g in games), default="")
         return (season_count, latest_game_date, len(games))
 
     return max(candidates, key=_candidate_key)
