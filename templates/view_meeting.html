@@ -716,14 +716,7 @@ details pre {
   font-size: 13px;
 }
 
-/* PFAI heatmap legend box */
-[id^="pfaiHeatmap_"] > div:last-child {
-  background: var(--bg-elevated) !important;
-  border: 1px solid var(--border-subtle) !important;
-  border-radius: 6px !important;
-  font-size: 12px !important;
-  color: var(--text-muted) !important;
-}
+/* PFAI heatmap title/legend defaults (overridden by pilot skin below) */
 [id^="pfaiHeatmap_"] h4 {
   color: var(--accent) !important;
   font-size: 14px !important;
@@ -887,20 +880,21 @@ details pre {
    Logic, IDs, endpoints and Jinja data bindings are intentionally unchanged.
 ══════════════════════════════════════════ */
 :root {
-  --bg-base: #0f1117;
-  --bg-surface: #171b22;
-  --bg-elevated: #1f2630;
-  --bg-hover: #283241;
+  --bg-base: #070b13;
+  --bg-surface: #0d1420;
+  --bg-elevated: #111c2b;
+  --bg-hover: #172844;
 
-  --text-primary: #f4f7fb;
-  --text-secondary: #c2cad6;
-  --text-muted: #8793a3;
+  --text-primary: #ffffff;
+  --text-secondary: #e6edf8;
+  --text-muted: #b0bfd2;
 
-  --accent: #4f8cff;
-  --accent-2: #75a7ff;
-  --accent-soft: rgba(79,140,255,.14);
-  --accent-border: rgba(79,140,255,.30);
-  --border-accent: rgba(79,140,255,.30);
+  --accent: #1f6fff;
+  --accent-2: #4da3ff;
+  --accent-3: #00b7ff;
+  --accent-soft: rgba(31,111,255,.22);
+  --accent-border: rgba(77,163,255,.58);
+  --border-accent: rgba(77,163,255,.52);
 
   --success: #22c55e;
   --success-soft: rgba(34,197,94,.14);
@@ -909,8 +903,8 @@ details pre {
   --danger: #ef4444;
   --danger-soft: rgba(239,68,68,.14);
 
-  --border-subtle: rgba(255,255,255,.07);
-  --border-mid: rgba(255,255,255,.13);
+  --border-subtle: rgba(255,255,255,.16);
+  --border-mid: rgba(255,255,255,.26);
 }
 
 body {
@@ -930,9 +924,9 @@ body {
 .vm-speedmap-outer,
 .sectional-section,
 .filter-bar-container {
-  background: var(--bg-surface) !important;
-  border: 1px solid var(--border-subtle) !important;
-  box-shadow: 0 12px 36px rgba(0,0,0,.22) !important;
+  background: linear-gradient(180deg, rgba(13,20,32,.98), rgba(8,13,23,.98)) !important;
+  border: 1px solid var(--border-mid) !important;
+  box-shadow: 0 18px 46px rgba(0,0,0,.46), inset 0 1px 0 rgba(255,255,255,.05) !important;
 }
 .vm-meta-card,
 .vm-overview-card,
@@ -965,19 +959,22 @@ body {
   min-height: 38px;
   display: inline-flex;
   align-items: center;
-  background: var(--bg-elevated) !important;
+  background: linear-gradient(135deg, rgba(17,28,43,.96), rgba(10,18,32,.96)) !important;
   border: 1px solid var(--border-mid);
   color: var(--text-secondary) !important;
   border-radius: 999px;
-  box-shadow: none !important;
-  transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05) !important;
+  transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease, box-shadow .16s ease;
 }
 .vm-nav-pill:hover,
-.vm-nav-pill:focus {
+.vm-nav-pill:focus,
+.vm-nav-pill.active {
   opacity: 1;
-  color: var(--accent) !important;
-  border-color: var(--accent-border);
-  background: var(--accent-soft) !important;
+  color: #ffffff !important;
+  border-color: rgba(77,163,255,.82);
+  background: linear-gradient(135deg, #115dff 0%, #00a3ff 100%) !important;
+  box-shadow: 0 0 0 1px rgba(77,163,255,.30), 0 0 22px rgba(31,111,255,.42) !important;
+  transform: translateY(-1px);
 }
 
 .vm-meta-card .btn,
@@ -1064,17 +1061,17 @@ button[onclick*="setTrackBias"]:hover {
   border-left: 3px solid rgba(245,158,11,.66) !important;
 }
 .vm-race-card tbody tr.best-bet-highlight {
-  background: linear-gradient(90deg, rgba(245,158,11,.18), rgba(245,158,11,.075)) !important;
-  border-left: 4px solid var(--warning) !important;
-  box-shadow: inset 0 0 0 1px rgba(245,158,11,.24) !important;
+  background: linear-gradient(90deg, rgba(255,214,89,.34), rgba(255,171,0,.18) 46%, rgba(83,55,8,.22)) !important;
+  border-left: 5px solid #ffd700 !important;
+  box-shadow: inset 0 0 0 1px rgba(255,215,0,.50), 0 0 28px rgba(255,199,44,.22) !important;
 }
 .vm-best-bet-badge {
-  background: var(--warning-soft) !important;
-  border: 1px solid rgba(245,158,11,.45);
-  color: #ffd27a !important;
-  box-shadow: none !important;
+  background: linear-gradient(135deg, #fff4b8 0%, #ffd700 38%, #ff9f0a 100%) !important;
+  border: 1px solid rgba(255,244,184,.85);
+  color: #1f1300 !important;
+  box-shadow: 0 0 14px rgba(255,215,0,.48), inset 0 1px 0 rgba(255,255,255,.60) !important;
 }
-.vm-best-bet-reasons { color: #f8c56b !important; }
+.vm-best-bet-reasons { color: #fff1a8 !important; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
 .horse-scratched,
 .vm-race-card tbody tr[style*="#e9ecef"] {
   background: rgba(135,147,163,.08) !important;
@@ -1111,20 +1108,26 @@ details pre {
 .speedmap-container { padding: 14px 0; scroll-snap-type: x proximity; }
 .speedmap-grid { gap: 12px; min-width: 740px; }
 .speedmap-column {
-  background: rgba(31,38,48,.72) !important;
-  border-color: var(--border-subtle) !important;
+  background: linear-gradient(180deg, rgba(17,28,43,.94), rgba(8,14,24,.98)) !important;
+  border-color: var(--border-mid) !important;
   scroll-snap-align: start;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.045), 0 10px 24px rgba(0,0,0,.24);
 }
+.speedmap-column--leader { border-color: rgba(255,82,82,.48) !important; background: linear-gradient(180deg, rgba(62,18,24,.72), rgba(8,14,24,.98)) !important; }
+.speedmap-column--onpace { border-color: rgba(255,179,71,.48) !important; background: linear-gradient(180deg, rgba(61,41,14,.70), rgba(8,14,24,.98)) !important; }
+.speedmap-column--midfield { border-color: rgba(77,163,255,.50) !important; background: linear-gradient(180deg, rgba(14,36,68,.76), rgba(8,14,24,.98)) !important; }
+.speedmap-column--backmarker { border-color: rgba(168,85,247,.48) !important; background: linear-gradient(180deg, rgba(43,22,72,.72), rgba(8,14,24,.98)) !important; }
 .speedmap-column-header {
-  background: transparent !important;
+  background: rgba(255,255,255,.045) !important;
   border-bottom: 2px solid var(--accent-border) !important;
-  color: var(--text-secondary) !important;
-  border-radius: 0;
+  color: #ffffff !important;
+  border-radius: 8px 8px 0 0;
   padding-bottom: 10px;
+  text-shadow: 0 1px 8px rgba(0,0,0,.45);
 }
 .speedmap-horse-card {
-  background: #151b24 !important;
-  border-color: var(--border-subtle) !important;
+  background: #0b1320 !important;
+  border-color: var(--border-mid) !important;
   padding: 9px 10px;
 }
 .speedmap-horse-card:hover {
@@ -1148,11 +1151,14 @@ details pre {
   border-color: rgba(135,147,163,.24) !important;
   color: var(--text-secondary) !important;
 }
+.speedmap-map {
+  animation: vmMapPulse 2.8s ease-in-out infinite;
+}
 .speedmap-map-positive {
-  background: var(--success-soft) !important;
-  border-color: rgba(34,197,94,.42) !important;
-  color: #7ee0a3 !important;
-  box-shadow: 0 0 0 1px rgba(34,197,94,.08), 0 0 14px rgba(34,197,94,.10);
+  background: rgba(34,197,94,.24) !important;
+  border-color: rgba(74,222,128,.66) !important;
+  color: #b7ffd0 !important;
+  box-shadow: 0 0 0 1px rgba(34,197,94,.14), 0 0 18px rgba(34,197,94,.22);
 }
 .speedmap-map-neutral {
   background: rgba(135,147,163,.12) !important;
@@ -1160,9 +1166,13 @@ details pre {
   color: var(--text-secondary) !important;
 }
 .speedmap-map-negative {
-  background: var(--danger-soft) !important;
-  border-color: rgba(239,68,68,.35) !important;
-  color: #ffb4b4 !important;
+  background: rgba(239,68,68,.22) !important;
+  border-color: rgba(248,113,113,.55) !important;
+  color: #ffd0d0 !important;
+}
+@keyframes vmMapPulse {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.025); filter: brightness(1.16); }
 }
 .speedmap-container.is-open .speedmap-column {
   animation: vmFadeSlide .42s ease both;
@@ -1194,10 +1204,18 @@ details pre {
   border-color: var(--accent-border) !important;
 }
 .chart-toggle-btn.active {
-  background: var(--accent-soft) !important;
-  color: #d7e6ff !important;
-  border-color: var(--accent-border) !important;
-  box-shadow: inset 0 0 0 1px rgba(79,140,255,.12) !important;
+  background: linear-gradient(135deg, #115dff 0%, #00a3ff 100%) !important;
+  color: #ffffff !important;
+  border-color: rgba(117,183,255,.88) !important;
+  box-shadow: 0 0 0 1px rgba(77,163,255,.32), 0 0 20px rgba(31,111,255,.38) !important;
+}
+[id^="chartContainer_race"].is-switching,
+[id^="pfaiHeatmap_race"].is-switching {
+  animation: vmPanelSwitch .28s ease both;
+}
+@keyframes vmPanelSwitch {
+  from { opacity: .38; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 #chartContainer_race,
 [id^="chartContainer_race"],
@@ -1213,18 +1231,53 @@ details pre {
 }
 .chart-insights h4 { color: #bcd5ff !important; }
 
-.pfai-heatmap-table {
-  background: #121821 !important;
-  min-width: 560px;
+.pfai-heatmap-wrap {
+  overflow: hidden;
 }
-.pfai-heatmap-table tbody tr { filter: saturate(.72) brightness(.76); }
-.pfai-heatmap-table tbody tr:hover { filter: saturate(.85) brightness(.9); }
+.pfai-heatmap-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px !important;
+  color: #ffffff !important;
+  font-size: 15px !important;
+  font-weight: 900;
+  letter-spacing: .01em;
+  text-shadow: 0 0 16px rgba(77,163,255,.35);
+}
+.pfai-heatmap-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border-mid);
+  border-radius: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.pfai-heatmap-table {
+  background: #080f1a !important;
+  min-width: 640px;
+}
+.pfai-heatmap-table tbody tr { filter: saturate(1.05) brightness(.98); }
+.pfai-heatmap-table tbody tr:hover { filter: saturate(1.16) brightness(1.08); }
 .pfai-heatmap-table tbody td {
   color: var(--text-primary) !important;
   text-shadow: 0 1px 1px rgba(0,0,0,.35);
 }
-[id^="pfaiHeatmap_"] > div:first-child { overflow-x: auto !important; }
-[id^="pfaiHeatmap_"] h4 { color: #bcd5ff !important; }
+.pfai-rank-chip {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 14px rgba(0,0,0,.22);
+}
+.pfai-heatmap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 12px;
+  background: rgba(77,163,255,.08);
+  border: 1px solid rgba(77,163,255,.22);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+[id^="pfaiHeatmap_"] h4 { color: #ffffff !important; }
 
 .filter-bar-container { background: var(--bg-surface) !important; }
 .filter-bar-title { color: var(--text-secondary) !important; }
@@ -1298,6 +1351,8 @@ details pre {
   .speedmap-grid { min-width: 620px; grid-template-columns: repeat(4, 150px); }
   .sectional-section { margin: 14px -2px; }
   [id^="chartContainer_race"] { height: 300px !important; padding: 10px !important; }
+  .pfai-heatmap-scroll { margin: 0 -4px; }
+  .pfai-heatmap-table { min-width: 620px; }
   .chart-controls { gap: 7px; }
   .chart-toggle-btn { min-height: 44px; padding: 8px 12px; }
   .vm-race-card details pre,
@@ -1737,10 +1792,54 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     injectPFAIScores();
+    initializeRaceNavState();
 });
+
+function getHorseDedupeKey(horse) {
+    return normalizeHorseName((horse && (horse.horse_name || horse.runnerName || horse.name)) || '');
+}
+
+function dedupeHorsesByName(horses) {
+    const seen = new Map();
+    (horses || []).forEach(function(horse) {
+        const key = getHorseDedupeKey(horse);
+        if (!key) return;
+        const existing = seen.get(key);
+        if (!existing) { seen.set(key, horse); return; }
+        const currentDataPoints = (horse.history_adjusted || []).length + (horse.history_raw || []).length;
+        const existingDataPoints = (existing.history_adjusted || []).length + (existing.history_raw || []).length;
+        if (currentDataPoints > existingDataPoints) seen.set(key, horse);
+    });
+    return Array.from(seen.values());
+}
+
+function initializeRaceNavState() {
+    const pills = Array.from(document.querySelectorAll('.vm-nav-pill'));
+    const cards = Array.from(document.querySelectorAll('.vm-race-card[id^="race-"]'));
+    if (pills.length === 0 || cards.length === 0) return;
+    function setActive(id) {
+        pills.forEach(function(pill) { pill.classList.toggle('active', pill.getAttribute('href') === '#' + id); });
+    }
+    if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver(function(entries) {
+            const visible = entries.filter(function(entry) { return entry.isIntersecting; })
+                .sort(function(a, b) { return b.intersectionRatio - a.intersectionRatio; })[0];
+            if (visible) setActive(visible.target.id);
+        }, { rootMargin: '-15% 0px -65% 0px', threshold: [0.1, 0.35, 0.6] });
+        cards.forEach(function(card) { observer.observe(card); });
+    }
+    pills.forEach(function(pill) {
+        pill.addEventListener('click', function() {
+            const targetId = pill.getAttribute('href').slice(1);
+            setActive(targetId);
+        });
+    });
+    setActive(cards[0].id);
+}
 
 function renderSectionalChart(raceNum, horsesData) {
     const container = document.getElementById('sectional_container_race' + raceNum);
+    horsesData = dedupeHorsesByName(horsesData);
     if (!horsesData || horsesData.length === 0) {
         container.innerHTML = '<div class="no-sectionals">No sectional data available for this race</div>';
         return;
@@ -1810,7 +1909,16 @@ function getChartOptions(viewType) {
         responsive: true,
         maintainAspectRatio: false,
         interaction: { mode: 'nearest', axis: 'x', intersect: false },
-        animation: { duration: 900, easing: 'easeOutQuart' },
+        animation: { duration: 1200, easing: 'easeOutQuart' },
+        transitions: {
+            active: { animation: { duration: 650, easing: 'easeOutCubic' } },
+            show: { animations: { x: { from: 0 }, y: { from: 0 } } },
+            hide: { animations: { x: { to: 0 }, y: { to: 0 } } }
+        },
+        elements: {
+            line: { borderCapStyle: 'round', borderJoinStyle: 'round' },
+            point: { hitRadius: 10 }
+        },
         plugins: {
             legend: {
                 position: 'bottom',
@@ -1875,11 +1983,18 @@ function getChartOptions(viewType) {
 function switchView(raceId, viewType) {
     const instance = chartInstances[raceId];
     if (!instance) return;
-    const buttons = event.target.parentElement.querySelectorAll('.chart-toggle-btn');
+    const trigger = window.event ? window.event.target : null;
+    const buttons = trigger && trigger.parentElement ? trigger.parentElement.querySelectorAll('.chart-toggle-btn') : [];
     buttons.forEach(function(btn) { btn.classList.remove('active'); });
-    event.target.classList.add('active');
+    if (trigger) trigger.classList.add('active');
     const chartContainer = document.getElementById('chartContainer_' + raceId);
     const heatmapContainer = document.getElementById('pfaiHeatmap_' + raceId);
+    [chartContainer, heatmapContainer].forEach(function(panel) {
+        if (!panel) return;
+        panel.classList.remove('is-switching');
+        void panel.offsetWidth;
+        panel.classList.add('is-switching');
+    });
     if (viewType === 'pfai') {
         chartContainer.style.display = 'none';
         heatmapContainer.style.display = 'block';
@@ -1892,14 +2007,14 @@ function switchView(raceId, viewType) {
         heatmapContainer.style.display = 'none';
         instance.chart.data = instance.data[viewType];
         instance.chart.options = getChartOptions(viewType);
-        instance.chart.update();
+        instance.chart.update('active');
     }
 }
 
 function renderPFAIHeatmap(raceNum, horses) {
     const container = document.getElementById('pfaiHeatmap_' + raceNum);
     if (!container) return;
-    const horsesWithPFAI = horses.filter(function(horse) {
+    const horsesWithPFAI = dedupeHorsesByName(horses).filter(function(horse) {
         return horse.pfai_sectionals && (
             (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < 25) ||
             (horse.pfai_sectionals.last400_rank && horse.pfai_sectionals.last400_rank < 25) ||
@@ -1918,9 +2033,9 @@ function renderPFAIHeatmap(raceNum, horses) {
         horse.avgRank = ranks.length > 0 ? ranks.reduce(function(a, b) { return a + b; }, 0) / ranks.length : 999;
     });
     horsesWithPFAI.sort(function(a, b) { return a.avgRank - b.avgRank; });
-    let html = '<div style="overflow-x:auto;">';
-    html += '<h4 style="margin:0 0 14px; color:#a78bfa; font-size:15px;">🎯 PFAI Sectional Rankings - Last Start Performance</h4>';
-    html += '<table class="pfai-heatmap-table"><thead><tr>';
+    let html = '<div class="pfai-heatmap-wrap">';
+    html += '<h4 class="pfai-heatmap-title">🎯 PFAI Sectional Rankings <span style="color:var(--text-muted); font-size:12px; font-weight:700;">Last Start Performance</span></h4>';
+    html += '<div class="pfai-heatmap-scroll"><table class="pfai-heatmap-table"><thead><tr>';
     html += '<th style="text-align:left; padding:12px;">Horse</th>';
     html += '<th style="text-align:center; padding:12px;">600m</th>';
     html += '<th style="text-align:center; padding:12px;">400m</th>';
@@ -1944,9 +2059,9 @@ function renderPFAIHeatmap(raceNum, horses) {
         html += '<td style="padding:12px; text-align:center; font-weight:700; color:#ffffff;">' + horse.avgRank.toFixed(1) + '</td>';
         html += '</tr>';
     });
-    html += '</tbody></table>';
-    html += '<div style="margin-top:14px; padding:11px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; font-size:12px; color:#9090a8;">';
-    html += '<strong style="color:#c8c8d8;">Legend:</strong> ';
+    html += '</tbody></table></div>';
+    html += '<div class="pfai-heatmap-legend">';
+    html += '<strong style="color:#ffffff;">Legend:</strong> ';
     html += '<span style="display:inline-block; width:18px; height:18px; background:rgba(34,197,94,.35); border:1px solid rgba(34,197,94,.45); border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Elite (1st) ';
     html += '<span style="display:inline-block; width:18px; height:18px; background:rgba(34,197,94,.22); border:1px solid rgba(34,197,94,.32); border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Good (2nd-3rd) ';
     html += '<span style="display:inline-block; width:18px; height:18px; background:rgba(245,158,11,.28); border:1px solid rgba(245,158,11,.40); border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Average (4th-5th) ';
@@ -1964,7 +2079,7 @@ function getRankCell(rank) {
     else if (rank <= 15) { color = '#fde68a'; bgColor = 'rgba(245,158,11,.20)'; label = 'Avg'; }
     else if (rank <= 20) { color = '#f8c56b'; bgColor = 'rgba(245,158,11,.12)'; label = 'Below'; }
     else                 { color = '#c2cad6'; bgColor = 'rgba(135,147,163,.14)'; label = 'Poor'; }
-    return '<span style="display:inline-block; padding:5px 11px; background:' + bgColor + '; color:' + color + '; font-weight:700; border-radius:6px; min-width:48px;">#' + rank + '</span>';
+    return '<span class="pfai-rank-chip" style="display:inline-block; padding:5px 11px; background:' + bgColor + '; color:' + color + '; font-weight:800; border-radius:6px; min-width:48px; border:1px solid rgba(255,255,255,.12);">#' + rank + '</span>';
 }
 
 function generateInsights(raceNum, horses) {
@@ -2071,10 +2186,17 @@ function renderSpeedMap(raceNumber) {
         });
     }
 
-    // Filter out scratched horses
-    const allHorses = data.payLoad[0].items.filter(function(horse) {
-        return !scratchedNames.has(normalizeHorseName(horse.runnerName));
+    // Filter out scratched horses and duplicate feed rows.
+    const uniqueSpeedMapHorses = new Map();
+    data.payLoad[0].items.forEach(function(horse) {
+        const key = normalizeHorseName(horse.runnerName) || String(horse.tabNo || '');
+        if (!key || scratchedNames.has(key)) return;
+        const existing = uniqueSpeedMapHorses.get(key);
+        if (!existing || Number(horse.pfaiScore || 0) > Number(existing.pfaiScore || 0)) {
+            uniqueSpeedMapHorses.set(key, horse);
+        }
     });
+    const allHorses = Array.from(uniqueSpeedMapHorses.values());
 
     const categories = { leader: [], onpace: [], midfield: [], backmarker: [] };
     allHorses.forEach(function(horse) {
@@ -2090,10 +2212,10 @@ function renderSpeedMap(raceNumber) {
 
     speedmapHorseAnimationIndex = 0;
     const html = '<div class="speedmap-grid">' +
-        '<div class="speedmap-column"><div class="speedmap-column-header">Leader</div>' + categories.leader.map(createHorseCard).join('') + '</div>' +
-        '<div class="speedmap-column"><div class="speedmap-column-header">On Pace</div>' + categories.onpace.map(createHorseCard).join('') + '</div>' +
-        '<div class="speedmap-column"><div class="speedmap-column-header">Midfield</div>' + categories.midfield.map(createHorseCard).join('') + '</div>' +
-        '<div class="speedmap-column"><div class="speedmap-column-header">Backmarker</div>' + categories.backmarker.map(createHorseCard).join('') + '</div>' +
+        '<div class="speedmap-column speedmap-column--leader"><div class="speedmap-column-header">Leader</div>' + categories.leader.map(createHorseCard).join('') + '</div>' +
+        '<div class="speedmap-column speedmap-column--onpace"><div class="speedmap-column-header">On Pace</div>' + categories.onpace.map(createHorseCard).join('') + '</div>' +
+        '<div class="speedmap-column speedmap-column--midfield"><div class="speedmap-column-header">Midfield</div>' + categories.midfield.map(createHorseCard).join('') + '</div>' +
+        '<div class="speedmap-column speedmap-column--backmarker"><div class="speedmap-column-header">Backmarker</div>' + categories.backmarker.map(createHorseCard).join('') + '</div>' +
         '</div>';
 
     document.querySelector('#speedmap-' + raceNumber + ' .speedmap-container').innerHTML = html;
