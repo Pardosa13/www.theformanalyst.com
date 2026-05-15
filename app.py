@@ -83,6 +83,34 @@ app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-product
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///formanalyst.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+
+COMPONENT_KEY_OVERRIDES = {
+    'Distance Change - Drop Back Moderate (200-400m)': 'drop_back_distance_200_400',
+    'Drop back in distance (200-400m)': 'drop_back_distance_200_400',
+}
+
+COMPONENT_DISPLAY_BY_KEY = {
+    'drop_back_distance_200_400': 'Drop back in distance (200-400m)',
+}
+
+def normalize_component_key(name):
+    """Return a stable Best Bets component key for a display name or legacy component name."""
+    if not name:
+        return ''
+
+    clean_name = str(name).strip()
+    if clean_name in COMPONENT_KEY_OVERRIDES:
+        return COMPONENT_KEY_OVERRIDES[clean_name]
+
+    key = clean_name.lower()
+    key = key.replace('≤', 'lte').replace('>=', 'gte').replace('>', 'gt').replace('<', 'lt')
+    key = re.sub(r'[^a-z0-9]+', '_', key)
+    return key.strip('_')
+
+def component_display_name_for_key(component_key, fallback_name=None):
+    """Return the preferred display name for a stable component key."""
+    return COMPONENT_DISPLAY_BY_KEY.get(component_key) or fallback_name or component_key
+
 # Database connection pooling to reduce memory
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_size': int(os.environ.get('SQLALCHEMY_POOL_SIZE', 5)),
@@ -242,6 +270,24 @@ with app.app_context():
     try:
         from models import Component
         db.create_all()
+
+        inspector = inspect(db.engine)
+        component_columns = [col['name'] for col in inspector.get_columns('components')]
+        if 'component_key' not in component_columns:
+            with db.engine.connect() as conn:
+                conn.execute(text('ALTER TABLE components ADD COLUMN component_key VARCHAR(120)'))
+                conn.commit()
+            print("✓ Added component_key column to components table")
+        existing_components = Component.query.all()
+        keyed = 0
+        for component in existing_components:
+            desired_key = normalize_component_key(component.component_name)
+            if not component.component_key or component.component_key != desired_key:
+                component.component_key = desired_key
+                keyed += 1
+        if keyed:
+            db.session.commit()
+            print(f"✓ Backfilled stable keys for {keyed} components")
         
         component_count = Component.query.count()
         if component_count == 0:
@@ -260,6 +306,7 @@ with app.app_context():
             ]
             
             for comp_data in starter_components:
+                comp_data.setdefault('component_key', normalize_component_key(comp_data['component_name']))
                 component = Component(**comp_data)
                 db.session.add(component)
             
@@ -288,7 +335,7 @@ with app.app_context():
     {'component_name': 'Running Position - Backmarker Staying',                 'appearances': 6,    'wins': 1,   'strike_rate': 16.7, 'roi_percentage': 333.3, 'is_active': True},
     {'component_name': 'Last Start - Photo Win (<0.5L)',                        'appearances': 212,  'wins': 48,  'strike_rate': 22.6, 'roi_percentage': 48.0,  'is_active': True},
     {'component_name': 'Specialist - Undefeated Distance',                      'appearances': 220,  'wins': 54,  'strike_rate': 24.5, 'roi_percentage': 43.3,  'is_active': True},
-    {'component_name': 'Distance Change - Drop Back Moderate (200-400m)',       'appearances': 45,   'wins': 11,  'strike_rate': 24.4, 'roi_percentage': 37.9,  'is_active': True},
+    {'component_name': 'Drop back in distance (200-400m)',                          'component_key': 'drop_back_distance_200_400', 'appearances': 45,   'wins': 11,  'strike_rate': 24.4, 'roi_percentage': 37.9,  'is_active': True},
     {'component_name': 'Running Position - Backmarker Middle',                  'appearances': 37,   'wins': 6,   'strike_rate': 16.2, 'roi_percentage': 31.6,  'is_active': True},
     {'component_name': 'Specialist - Undefeated Track+Distance',                'appearances': 146,  'wins': 43,  'strike_rate': 29.5, 'roi_percentage': 31.4,  'is_active': True},
     {'component_name': 'First Up - Specialist Undefeated',                      'appearances': 62,   'wins': 21,  'strike_rate': 33.9, 'roi_percentage': 27.7,  'is_active': True},
@@ -297,12 +344,18 @@ with app.app_context():
 
         added = 0
         for comp_data in profitable_components:
-            existing = Component.query.filter_by(component_name=comp_data['component_name']).first()
+            comp_key = comp_data.get('component_key') or normalize_component_key(comp_data['component_name'])
+            existing = Component.query.filter_by(component_key=comp_key).first()
+            if not existing:
+                existing = Component.query.filter_by(component_name=comp_data['component_name']).first()
             if not existing:
                 component = Component(**comp_data)
+                component.component_key = comp_key
                 db.session.add(component)
                 added += 1
             else:
+                existing.component_key   = comp_key
+                existing.component_name  = comp_data['component_name']
                 existing.appearances    = comp_data['appearances']
                 existing.wins           = comp_data['wins']
                 existing.strike_rate    = comp_data['strike_rate']
@@ -940,8 +993,8 @@ def get_meeting_results(meeting_id):
     }
     
     active_components = Component.query.filter_by(is_active=True).all()
-    components_by_name = {c.component_name: c for c in active_components}
-    component_names = set(components_by_name)
+    components_by_key = build_active_component_lookup(active_components)
+    component_keys = set(components_by_key)
     jockey_ride_counts = {}
     meeting_horses = Horse.query.join(Race).filter(Race.meeting_id == meeting_id).all()
     for horse in meeting_horses:
@@ -975,16 +1028,17 @@ def get_meeting_results(meeting_id):
                 except (ValueError, TypeError):
                     win_probability_value = 0.0
 
-                components = parse_notes_components(pred.notes)
+                components = parse_notes_component_matches(pred.notes)
                 matched_components = [
                     {
-                        'name': component_name,
-                        'roi': components_by_name[component_name].roi_percentage,
-                        'sr': components_by_name[component_name].strike_rate,
-                        'appearances': components_by_name[component_name].appearances,
+                        'name': component_display_name_for_key(component_key, components_by_key[component_key].component_name),
+                        'key': component_key,
+                        'roi': components_by_key[component_key].roi_percentage,
+                        'sr': components_by_key[component_key].strike_rate,
+                        'appearances': components_by_key[component_key].appearances,
                     }
-                    for component_name in components.keys()
-                    if component_name in component_names
+                    for component_key in (match['key'] for match in components.values())
+                    if component_key in component_keys
                 ]
                 matched_components.sort(key=lambda x: x['roi'], reverse=True)
 
@@ -1181,7 +1235,7 @@ def parse_notes_components(notes):
         (r'[~+\-]\s*[\d.]+\s*:\s*Step(?:ping)? up.*\(400m\+\)', 'Distance Change - Step Up Large (400m+)'),
         (r'[~+\-]\s*[\d.]+\s*:\s*Step(?:ping)? up.*\(200-400m\)', 'Distance Change - Step Up Moderate (200-400m)'),
         (r'[~+\-]\s*[\d.]+\s*:\s*Drop(?:ping)? back.*\(400m\+\)', 'Distance Change - Drop Back Large (400m+)'),
-        (r'\+\s*8\.0\s*:\s*Drop back in distance \(200-400m\)', 'Distance Change - Drop Back Moderate (200-400m)'),
+        (r'([~+\-]\s*[\d.]+)\s*:\s*Drop(?:ping)? back in distance \(200-400m\)', 'Drop back in distance (200-400m)'),
 
         # ====== CLASS CHANGE ======
         (r'\+\s*([\d.]+):\s*Stepping DOWN', '_class_drop_dynamic'),
@@ -1519,6 +1573,37 @@ def parse_notes_components(notes):
             components[name] = score
 
     return components
+
+
+def parse_notes_component_matches(notes):
+    """Parse notes into structured component matches with stable keys.
+
+    Existing predictions only persist analyzer notes, so this function still parses
+    the saved notes text. Best Bets should consume the stable `key` values emitted
+    here rather than comparing fragile display names.
+    """
+    parsed_components = parse_notes_components(notes)
+    return {
+        component_display_name_for_key(normalize_component_key(name), name): {
+            'name': component_display_name_for_key(normalize_component_key(name), name),
+            'legacy_name': name,
+            'key': normalize_component_key(name),
+            'score': score,
+        }
+        for name, score in parsed_components.items()
+    }
+
+
+def build_active_component_lookup(active_components):
+    """Index active admin strategies by stable component key."""
+    components_by_key = {}
+    for component in active_components:
+        component_key = component.component_key or normalize_component_key(component.component_name)
+        # Keep the strongest configured component if duplicate aliases exist.
+        existing = components_by_key.get(component_key)
+        if not existing or (component.roi_percentage or 0) > (existing.roi_percentage or 0):
+            components_by_key[component_key] = component
+    return components_by_key
 
 
 def aggregate_component_stats(all_results_data, stake=10.0):
@@ -4213,6 +4298,7 @@ def admin_panel():
         # NEW COMPONENT ACTIONS START HERE
         elif action == "create_component":
             comp_name = request.form.get("component_name")
+            comp_key = request.form.get("component_key") or normalize_component_key(comp_name)
             appearances = request.form.get("appearances", type=int, default=0)
             wins = request.form.get("wins", type=int, default=0)
             roi = request.form.get("roi", type=float, default=0.0)
@@ -4228,6 +4314,7 @@ def admin_panel():
                 
                 new_component = Component(
                     component_name=comp_name,
+                    component_key=comp_key,
                     appearances=appearances,
                     wins=wins,
                     strike_rate=strike_rate,
@@ -4247,6 +4334,7 @@ def admin_panel():
                 flash("Component not found", "danger")
             else:
                 component.component_name = request.form.get("component_name", component.component_name)
+                component.component_key = request.form.get("component_key") or normalize_component_key(component.component_name)
                 component.appearances = request.form.get("appearances", type=int, default=component.appearances)
                 component.wins = request.form.get("wins", type=int, default=component.wins)
                 component.roi_percentage = request.form.get("roi", type=float, default=component.roi_percentage)
@@ -4322,6 +4410,7 @@ def admin_panel():
         components_data.append({
             'id': comp.id,
             'name': comp.component_name,
+            'key': comp.component_key or normalize_component_key(comp.component_name),
             'is_active': comp.is_active,
             'appearances': comp.appearances,
             'wins': comp.wins,
@@ -9360,7 +9449,7 @@ def export_ml_data():
             'dist_change_step_up_large':          components.get('Distance Change - Step Up Large (400m+)', 0),
             'dist_change_step_up_moderate':       components.get('Distance Change - Step Up Moderate (200-400m)', 0),
             'dist_change_drop_large':             components.get('Distance Change - Drop Back Large (400m+)', 0),
-            'dist_change_drop_moderate':          components.get('Distance Change - Drop Back Moderate (200-400m)', 0),
+            'dist_change_drop_moderate':          components.get('Drop back in distance (200-400m)', components.get('Distance Change - Drop Back Moderate (200-400m)', 0)),
             'class_drop':                         components.get('Class Drop', 0),
             'class_rise':                         components.get('Class Rise', 0),
             'ls_dominant_win':                    components.get('Last Start - Dominant Win (5L+)', 0),
@@ -9908,8 +9997,8 @@ def best_bets():
     mode = request.args.get('mode', default='top_pick')
 
     active_components = Component.query.filter_by(is_active=True).all()
-    components_by_name = {c.component_name: c for c in active_components}
-    component_names = set(components_by_name)
+    components_by_key = build_active_component_lookup(active_components)
+    component_keys = set(components_by_key)
 
     cutoff = datetime.utcnow() - timedelta(hours=hours_back)
     recent_meetings = (
@@ -10004,17 +10093,31 @@ def best_bets():
                 except (ValueError, TypeError):
                     wp = 0.0
 
-                components = parse_notes_components(horse.prediction.notes)
+                components = parse_notes_component_matches(horse.prediction.notes)
                 matched_components = []
-                for comp_name in components.keys():
-                    if comp_name in component_names:
-                        comp_obj = components_by_name[comp_name]
+                for match in components.values():
+                    comp_key = match['key']
+                    if comp_key in component_keys:
+                        comp_obj = components_by_key[comp_key]
                         matched_components.append({
-                            'name': comp_name,
+                            'name': component_display_name_for_key(comp_key, comp_obj.component_name),
+                            'key': comp_key,
                             'roi': comp_obj.roi_percentage,
                             'sr': comp_obj.strike_rate,
                             'appearances': comp_obj.appearances
                         })
+
+                if (horse.horse_name or '').strip().lower() == 'gold decree':
+                    logger.info(
+                        "Best Bets debug Gold Decree: horse=%s notes=%r structured_component_keys=%s "
+                        "active_strategy_names=%s active_strategy_keys=%s final_matched_components=%s",
+                        horse.horse_name,
+                        horse.prediction.notes,
+                        [match['key'] for match in components.values()],
+                        [component.component_name for component in active_components],
+                        [component.component_key or normalize_component_key(component.component_name) for component in active_components],
+                        matched_components,
+                    )
 
                 horse_score_gap = score_gap if is_top_pick else (
                     horses_in_race[rank_idx - 1]['score'] - horse.prediction.score

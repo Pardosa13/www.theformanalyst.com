@@ -580,6 +580,7 @@
             <tr>
               <td>
                 <strong>{{ comp.name }}</strong>
+                <br><small class="text-muted">Key: {{ comp.key }}</small>
                 {% if comp.notes %}
                 <br><small>{{ comp.notes }}</small>
                 {% endif %}
@@ -619,6 +620,7 @@
                 <button class="btn btn-sm btn-primary" onclick="openEditComponent(
                   {{ comp.id }},
                   {{ comp.name | tojson }},
+                  {{ comp.key | tojson }},
                   {{ comp.appearances }},
                   {{ comp.wins }},
                   {{ comp.roi }},
@@ -666,7 +668,12 @@
           <div class="mb-3">
             <label class="form-label">Component Name *</label>
             <input type="text" name="component_name" class="form-control" required>
-            <small class="form-text">Must match exactly as it appears in analyzer notes</small>
+            <small class="form-text">Display label shown in Best Bets.</small>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Stable Component Key</label>
+            <input type="text" name="component_key" class="form-control" placeholder="Auto-generated if blank">
+            <small class="form-text">Best Bets matches this key, not visible note text.</small>
           </div>
           <div class="mb-3">
             <label class="form-label">Appearances</label>
@@ -713,6 +720,11 @@
           <div class="mb-3">
             <label class="form-label">Component Name</label>
             <input type="text" name="component_name" id="editComponentName" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Stable Component Key</label>
+            <input type="text" name="component_key" id="editComponentKey" class="form-control">
+            <small class="form-text">Best Bets matches this key, not visible note text.</small>
           </div>
           <div class="mb-3">
             <label class="form-label">Appearances</label>
@@ -810,9 +822,10 @@ function openCreateComponent() {
     new bootstrap.Modal(document.getElementById('createComponentModal')).show();
 }
 
-function openEditComponent(id, name, appearances, wins, roi, notes, strikeRate, status, lastUpdated) {
+function openEditComponent(id, name, key, appearances, wins, roi, notes, strikeRate, status, lastUpdated) {
     document.getElementById('editComponentId').value = id;
     document.getElementById('editComponentName').value = name;
+    document.getElementById('editComponentKey').value = key;
     document.getElementById('editAppearances').value = appearances;
     document.getElementById('editWins').value = wins;
     document.getElementById('editRoi').value = roi;
