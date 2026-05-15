@@ -3554,50 +3554,10 @@ def api_import_meeting(meeting_id):
         db.session.commit()
         
         logger.info(f"✓ Imported {meeting_name} with V2 API data (speed maps, ratings, sectionals)")
-        # ==========================================
-        # ZERO OUT HORSES ALREADY SCRATCHED AT IMPORT
-        # ==========================================
-        try:
-            scratch_url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
-            scratch_response = requests.get(scratch_url, headers={'accept': 'application/json'}, timeout=30)
-            if scratch_response.ok:
-                scratch_data = scratch_response.json()
-                items = scratch_data.get('payLoad') or []
-                tab_name_lookup = {}
-                fresh_races = Race.query.filter_by(meeting_id=meeting.id).all()
-                for race in fresh_races:
-                    if race.speed_maps_json:
-                        sm = race.speed_maps_json if isinstance(race.speed_maps_json, dict) else json.loads(race.speed_maps_json)
-                        for it in sm.get('payLoad', [{}])[0].get('items', []):
-                            try:
-                                tab_no = int(it.get('tabNo', 0))
-                            except Exception:
-                                tab_no = 0
-                            tab_name_lookup[(race.race_number, tab_no)] = it.get('runnerName', '') or ''
-                scratched_names, scratch_debug_rows = _extract_v2_scratched_names(items, track_name, tab_name_lookup)
-                for race in fresh_races:
-                    for horse in race.horses:
-                        norm = normalize_runner_name(horse.horse_name)
-                        if norm not in scratched_names:
-                            continue
-                        horse.is_scratched = True
-                        pred = Prediction.query.filter_by(horse_id=horse.id).first()
-                        if pred:
-                            pred.score = 0.0
-                            pred.predicted_odds = ''
-                            pred.win_probability = ''
-                            pred.performance_component = ''
-                            pred.base_probability = ''
-                            pred.notes = 'Scratched'
-
-                db.session.commit()
-                logger.info(
-                    "✅ Zeroed %s explicit scratched-at-import horses; sample=%s",
-                    len(scratched_names),
-                    scratch_debug_rows[:20],
-                )
-        except Exception as e:
-            logger.warning(f"Could not zero import-time scratchings: {e}")
+        # Scratch state has already been resolved and saved inside
+        # process_and_store_results using the final V1-over-V2 official set.
+        # Do not run a second V2-only zeroing pass here, because it can
+        # re-introduce stale scratched state for runners cleared by V1.
         return jsonify({
             'success': True,
             'meeting_id': meeting.id,
@@ -3799,9 +3759,21 @@ def update_scratchings(meeting_id):
         # ── 9. Parse CSV and remove scratched horses for analysis ──
         parsed_csv = parseCSV(csv_data)
         active_csv = []
+        fresh_csv_lookup = {}
         for row in parsed_csv:
             norm = normalize_runner_name(row.get('horse name', ''))
-            row_is_scratched = norm in all_scratched_names or compute_is_scratched_final(row)
+            race_num = str(row.get('race number', '')).strip()
+            if race_num and norm:
+                fresh_csv_lookup[(race_num, norm)] = row
+
+            if scratchings_snapshot_loaded:
+                # The official snapshot is authoritative. Do not let stale
+                # scratch-like fields in the CSV keep a runner scratched after
+                # the final official set has removed them.
+                row_is_scratched = norm in all_scratched_names
+            else:
+                row_is_scratched = norm in all_scratched_names or compute_is_scratched_final(row)
+
             if not row_is_scratched:
                 active_csv.append(row)
 
@@ -3920,8 +3892,15 @@ def update_scratchings(meeting_id):
 
             for horse in race.horses:
                 horse_norm = normalize_runner_name(horse.horse_name)
-                
-                if horse.is_scratched:
+                final_is_scratched = horse_norm in all_scratched_names
+
+                # Actively persist the authoritative final scratch state for
+                # every runner. This clears stale DB rows (is_scratched=True,
+                # zero score, notes='Scratched') as soon as the final official
+                # set says the runner is active again.
+                horse.is_scratched = final_is_scratched
+
+                if final_is_scratched:
                     # Create zero prediction for scratched horses
                     pred = Prediction(
                         horse_id=horse.id,
@@ -3938,10 +3917,31 @@ def update_scratchings(meeting_id):
                     # Create normal prediction for active horses
                     r = result_lookup.get(horse_norm)
                     if not r:
+                        logger.warning(
+                            "No analyzer result for active runner %s R%s while refreshing scratchings",
+                            horse.horse_name,
+                            race.race_number,
+                        )
                         continue
 
+                    horse_data = r.get('horse', {})
+                    fresh_row = fresh_csv_lookup.get((race_num_str, horse_norm)) or horse_data
+                    horse.csv_data = fresh_row
+                    barrier_value = fresh_row.get('barrier') or fresh_row.get('horse barrier')
+                    try:
+                        horse.barrier = int(barrier_value) if barrier_value else None
+                    except (TypeError, ValueError):
+                        horse.barrier = None
+                    try:
+                        horse.weight = float(fresh_row.get('horse weight', 0)) if fresh_row.get('horse weight') else None
+                    except (TypeError, ValueError):
+                        horse.weight = None
+                    horse.jockey = fresh_row.get('horse jockey', horse.jockey)
+                    horse.trainer = fresh_row.get('horse trainer', horse.trainer)
+                    horse.form = fresh_row.get('horse last10', horse.form)
+
                     base_score = r.get('adjustedScore', r.get('score', 0))
-                    running_position = r['horse'].get('runningposition', '')
+                    running_position = horse_data.get('runningposition', '')
 
                     # Apply rail bias
                     if running_position and rail_pos:
@@ -3971,15 +3971,12 @@ def update_scratchings(meeting_id):
         import gc
         gc.collect()
 
-        bird_whistle_debug = _build_meeting_scratch_debug(meeting, target_horse_name='Bird Whistle')
-
         return jsonify({
             'success': True,
             'scratched_count': scratched_count,
             'unscratched_count': unscratched_count,
             'races_updated': races_updated,
             'total_scratched': len(all_scratched_names),
-            'bird_whistle_scratch_debug': bird_whistle_debug,
             'message': f'Updated {scratched_count} new scratching(s), {unscratched_count} unscratched, repriced {races_updated} race(s). Total scratched: {len(all_scratched_names)}'
         })
 
@@ -4195,12 +4192,10 @@ def view_meeting(meeting_id):
     
     # All logged-in users can view all meetings
     results = get_meeting_results(meeting_id)
-    bird_whistle_scratch_debug = _build_meeting_scratch_debug(meeting, target_horse_name='Bird Whistle')
     return render_template(
         "view_meeting.html",
         meeting=meeting,
         results=results,
-        bird_whistle_scratch_debug=bird_whistle_scratch_debug,
     )
     
 @app.route("/api/horse/<int:horse_id>/toggle-scratch", methods=["POST"])

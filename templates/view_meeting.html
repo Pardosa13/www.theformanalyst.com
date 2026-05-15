@@ -1138,12 +1138,6 @@ function updateScratchings(meetingId) {
             {% if horse.is_best_bet and horse.best_bet_reasons %}
             <div class="vm-best-bet-reasons">{{ horse.best_bet_reasons|join(' • ') }}</div>
             {% endif %}
-            {% if horse.horse_name|lower == 'bird whistle' and bird_whistle_scratch_debug %}
-            <details style="margin-top:8px; font-size:11px; color:#374151; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:8px;">
-              <summary style="cursor:pointer; font-weight:700; color:#7c3aed;">Temporary Bird Whistle scratch debug</summary>
-              <pre style="white-space:pre-wrap; margin:8px 0 0 0; font-size:11px; line-height:1.35;">{{ bird_whistle_scratch_debug|tojson(indent=2) }}</pre>
-            </details>
-            {% endif %}
           </td>
 
           <td style="padding:12px; text-align:center; font-weight:bold; font-size:18px; border-bottom:1px solid #e2e8f0;">
