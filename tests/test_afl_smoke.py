@@ -1483,12 +1483,16 @@ def test_value_finder_source_uses_filtered_opponent_rows_for_average():
     assert "vs_opp_avg = _safe_avg(opp_games_filtered, stat_name)" in source
 
 
-def _normalize_ws(value: Any) -> str:
+def _normalize_whitespace_inline(value: Any) -> str:
     return " ".join(str(value or "").strip().split())
 
 
 def _sort_date_key_inline(row: dict):
     return row.get("match_date") or ""
+
+
+def _normalise_team_name_inline(value: Any) -> str:
+    return _team(value)
 
 
 def _select_value_finder_player_inline(
@@ -1503,17 +1507,24 @@ def _select_value_finder_player_inline(
     if not candidates:
         return None
 
-    normalized_full_name = _normalize_ws(full_name).lower()
-    prop_teams = {_team(prop_home_team), _team(prop_away_team)}
+    normalized_full_name = _normalize_whitespace_inline(full_name).lower()
+    prop_teams = {
+        _normalise_team_name_inline(prop_home_team),
+        _normalise_team_name_inline(prop_away_team),
+    }
     prop_teams.discard("")
 
     exact_name_matches = [
-        p for p in candidates if _normalize_ws(p.get("name", "")).lower() == normalized_full_name
+        p
+        for p in candidates
+        if _normalize_whitespace_inline(p.get("name", "")).lower() == normalized_full_name
     ]
     if exact_name_matches:
         candidates = exact_name_matches
 
-    team_matches = [p for p in candidates if _team(p.get("team", "")) in prop_teams]
+    team_matches = [
+        p for p in candidates if _normalise_team_name_inline(p.get("team", "")) in prop_teams
+    ]
     if team_matches:
         candidates = team_matches
 
