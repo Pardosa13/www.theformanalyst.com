@@ -783,7 +783,15 @@ def register_afl_routes(app, db):
             grouped = _group_players(player_rows)
             if not grouped:
                 continue
-            player = max(grouped.values(), key=lambda p: len(p.get("games", [])))
+            player = _select_value_finder_player(
+                grouped,
+                full_name=meta["player_name"],
+                prop_home_team=prop.get("home_team", ""),
+                prop_away_team=prop.get("away_team", ""),
+                effective_season=effective_season,
+            )
+            if not player:
+                continue
             games = sorted(player["games"], key=_sort_date_key, reverse=True)
             if len(games) < max(min_games, 3):
                 continue
@@ -3047,6 +3055,58 @@ def _filter_meaningful_tog_games(games: list[dict], min_tog: float = 50) -> list
 def _safe_avg(rows: list[dict], stat: str) -> float:
     values = [row.get(stat, 0) or 0 for row in rows]
     return round(sum(values) / len(values), 1) if values else 0.0
+
+
+def _select_value_finder_player(
+    grouped_players: dict,
+    *,
+    full_name: str,
+    prop_home_team: str,
+    prop_away_team: str,
+    effective_season: int,
+) -> dict | None:
+    candidates = list(grouped_players.values())
+    if not candidates:
+        return None
+
+    normalized_full_name = _normalize_whitespace(full_name).lower()
+    prop_teams = {
+        _normalise_team_name(prop_home_team),
+        _normalise_team_name(prop_away_team),
+    }
+    prop_teams.discard("")
+
+    exact_name_matches = [
+        p
+        for p in candidates
+        if _normalize_whitespace(p.get("name", "")).lower() == normalized_full_name
+    ]
+    if exact_name_matches:
+        candidates = exact_name_matches
+
+    team_matches = [
+        p
+        for p in candidates
+        if _normalise_team_name(p.get("team", "")) in prop_teams
+    ]
+    if team_matches:
+        candidates = team_matches
+
+    season_matches = [
+        p
+        for p in candidates
+        if any(g.get("season") == effective_season for g in p.get("games", []))
+    ]
+    if season_matches:
+        candidates = season_matches
+
+    def _candidate_key(player: dict) -> tuple[int, str, int]:
+        games = player.get("games", [])
+        season_count = sum(1 for g in games if g.get("season") == effective_season)
+        latest_game_date = max((_sort_date_key(g) for g in games), default="")
+        return (season_count, latest_game_date, len(games))
+
+    return max(candidates, key=_candidate_key)
 
 
 def _hit_rate(rows: list[dict], stat: str, line: float) -> float:
