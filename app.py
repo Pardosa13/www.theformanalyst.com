@@ -728,6 +728,194 @@ def _extract_v2_scratched_names(items, track_name, tab_name_lookup):
             scratched_names.add(normalize_runner_name(horse_name))
     return scratched_names, debug_rows
 
+
+
+def _current_deploy_debug_info():
+    """Return lightweight build metadata to verify the deployed revision."""
+    env_commit = (
+        os.environ.get('RENDER_GIT_COMMIT')
+        or os.environ.get('RAILWAY_GIT_COMMIT_SHA')
+        or os.environ.get('HEROKU_SLUG_COMMIT')
+        or os.environ.get('GIT_COMMIT')
+        or os.environ.get('SOURCE_VERSION')
+    )
+    git_commit = None
+    try:
+        git_commit = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        ).strip()
+    except Exception:
+        git_commit = None
+
+    return {
+        'env_commit': env_commit,
+        'git_commit': git_commit,
+        'effective_commit': env_commit or git_commit,
+    }
+
+
+def _extract_tab_number_from_csv_data(csv_data):
+    if not isinstance(csv_data, dict):
+        return None
+    for key in ('horse number', 'tab number', 'tabNo', 'TabNo', 'horse_number'):
+        value = csv_data.get(key)
+        if value in (None, ''):
+            continue
+        try:
+            return int(str(value).strip())
+        except Exception:
+            return str(value).strip()
+    return None
+
+
+def _speedmap_tab_lookup_for_meeting(meeting):
+    lookup = {}
+    for race in meeting.races:
+        if not race.speed_maps_json:
+            continue
+        try:
+            sm = race.speed_maps_json if isinstance(race.speed_maps_json, dict) else json.loads(race.speed_maps_json)
+        except Exception:
+            continue
+        for payload_entry in sm.get('payLoad', []) or []:
+            for it in payload_entry.get('items', []) or []:
+                runner_name = normalize_runner_name(it.get('runnerName') or '')
+                if not runner_name:
+                    continue
+                try:
+                    tab_no = int(it.get('tabNo', 0))
+                except Exception:
+                    tab_no = it.get('tabNo')
+                lookup[(race.race_number, runner_name)] = tab_no
+    return lookup
+
+
+def _build_meeting_scratch_debug(meeting, target_horse_name=None):
+    """Build runner scratch diagnostics used by both the page and API."""
+    date_str = meeting.date.strftime('%Y-%m-%d') if meeting.date else None
+    if not date_str and meeting.meeting_name and '_' in meeting.meeting_name:
+        date_part = meeting.meeting_name.split('_')[0]
+        date_str = f"20{date_part[:2]}-{date_part[2:4]}-{date_part[4:6]}"
+    track_name = meeting.puntingform_id or (meeting.meeting_name.split('_', 1)[1] if meeting.meeting_name and '_' in meeting.meeting_name else '')
+    target_norm = normalize_runner_name(target_horse_name or '')
+
+    csv_lookup = {}
+    official_by_race_tab = {}
+    official_by_race_name = {}
+    tab_name_lookup = {}
+    speedmap_tab_lookup = _speedmap_tab_lookup_for_meeting(meeting)
+
+    if date_str and track_name:
+        try:
+            csv_data = pf_service.get_fields_csv(track_name, date_str)
+            for row in parseCSV(csv_data):
+                horse_norm = normalize_runner_name(row.get('horse name', ''))
+                race_no = str(row.get('race number', '')).strip()
+                csv_lookup[(race_no, horse_norm)] = {
+                    'tab_number': _extract_tab_number_from_csv_data(row),
+                    'csv_data_scratch_status_fields': extract_debug_scratch_fields(row),
+                    'csv_data_is_scratched_final': compute_is_scratched_final(row),
+                }
+        except Exception as e:
+            logger.warning(f"Could not fetch scratch-debug CSV for {meeting.id}: {e}")
+
+        for race in meeting.races:
+            for horse in race.horses:
+                key = (race.race_number, normalize_runner_name(horse.horse_name))
+                tab_no = speedmap_tab_lookup.get(key) or _extract_tab_number_from_csv_data(horse.csv_data if isinstance(horse.csv_data, dict) else {})
+                if tab_no is not None:
+                    tab_name_lookup[(race.race_number, tab_no)] = horse.horse_name
+
+        try:
+            scratch_data = pf_service.get_scratchings()
+            _, v1_debug_rows = _extract_v1_scratched_set(scratch_data, track_name)
+            for scratch_row in v1_debug_rows:
+                race_no = scratch_row.get('raceNo')
+                tab_no = scratch_row.get('tabNo')
+                horse_name = tab_name_lookup.get((race_no, tab_no), '')
+                scratch_row = {**scratch_row, 'horseName': horse_name}
+                official_by_race_tab[(race_no, tab_no)] = scratch_row
+                horse_norm = normalize_runner_name(horse_name)
+                if horse_norm:
+                    official_by_race_name[(race_no, horse_norm)] = scratch_row
+        except Exception as e:
+            logger.warning(f"Could not fetch scratch-debug V1 official scratch feed for {meeting.id}: {e}")
+
+        try:
+            response = requests.get(
+                f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}",
+                headers={'accept': 'application/json'},
+                timeout=30,
+            )
+            if response.ok:
+                data = response.json()
+                items = data.get('payLoad') if isinstance(data, dict) else data
+                _, official_debug_rows = _extract_v2_scratched_names(items or [], track_name, tab_name_lookup)
+                for scratch_row in official_debug_rows:
+                    race_no = scratch_row.get('raceNo')
+                    tab_no = scratch_row.get('tabNo')
+                    horse_norm = normalize_runner_name(scratch_row.get('horseName', ''))
+                    official_by_race_tab.setdefault((race_no, tab_no), scratch_row)
+                    if horse_norm:
+                        official_by_race_name.setdefault((race_no, horse_norm), scratch_row)
+        except Exception as e:
+            logger.warning(f"Could not fetch scratch-debug V2 official scratch feed for {meeting.id}: {e}")
+
+    rows = []
+    for race in meeting.races:
+        for horse in race.horses:
+            horse_norm = normalize_runner_name(horse.horse_name)
+            if target_norm and horse_norm != target_norm:
+                continue
+
+            csv_data = horse.csv_data if isinstance(horse.csv_data, dict) else {}
+            csv_debug = csv_lookup.get((str(race.race_number), horse_norm), {})
+            tab_number = (
+                speedmap_tab_lookup.get((race.race_number, horse_norm))
+                or csv_debug.get('tab_number')
+                or _extract_tab_number_from_csv_data(csv_data)
+            )
+            official_match = official_by_race_tab.get((race.race_number, tab_number)) or official_by_race_name.get((race.race_number, horse_norm))
+            db_is_scratched = bool(horse.is_scratched)
+            csv_fields = extract_debug_scratch_fields(csv_data)
+            final_render_decision = {
+                'uses_horse_is_scratched_only': True,
+                'row_class': 'horse-scratched' if db_is_scratched else '',
+                'shows_scratched_badge': db_is_scratched,
+                'shows_grey_scratched_style': db_is_scratched,
+                'reason': 'template renders grey SCRATCHED only when horse.is_scratched is true',
+            }
+            rows.append({
+                'horse_name': horse.horse_name,
+                'race_number': race.race_number,
+                'tab_number': tab_number,
+                'horse_is_scratched': db_is_scratched,
+                'score': horse.prediction.score if horse.prediction else None,
+                'notes': horse.prediction.notes if horse.prediction else None,
+                'csv_data_scratch_status_fields': csv_fields,
+                'csv_data_is_scratched_final': compute_is_scratched_final(csv_data),
+                'raw_puntingform_csv_scratch_status_fields': csv_debug.get('csv_data_scratch_status_fields', {}),
+                'raw_puntingform_csv_is_scratched_final': csv_debug.get('csv_data_is_scratched_final', False),
+                'official_scratch_match': official_match,
+                'official_scratch_match_is_scratched_final': bool(official_match and official_match.get('is_scratched_final')),
+                'final_render_decision': final_render_decision,
+                'stale_db_scratch_suspected': db_is_scratched and not bool(official_match and official_match.get('is_scratched_final')),
+                'refresh_hint': 'Run Update Scratchings on this meeting, or re-import the meeting, after deploying this commit.' if db_is_scratched and not bool(official_match and official_match.get('is_scratched_final')) else '',
+            })
+
+    return {
+        'success': True,
+        'meeting_id': meeting.id,
+        'track': track_name,
+        'date': date_str,
+        'deploy': _current_deploy_debug_info(),
+        'runners': rows,
+    }
+
 def apply_track_bias(speed_map_score, running_position, rail_position, pace_bias):
     """
     Adds rail and pace bias ON TOP of the existing speed map score
@@ -3325,73 +3513,10 @@ def meeting_scratch_debug(meeting_id):
     """Show raw scratch/status fields and final canonical scratch decisions."""
     try:
         meeting = Meeting.query.get_or_404(meeting_id)
-        date_str = meeting.date.strftime('%Y-%m-%d') if meeting.date else None
-        if not date_str and meeting.meeting_name and '_' in meeting.meeting_name:
-            date_part = meeting.meeting_name.split('_')[0]
-            date_str = f"20{date_part[:2]}-{date_part[2:4]}-{date_part[4:6]}"
-        track_name = meeting.puntingform_id or (meeting.meeting_name.split('_', 1)[1] if meeting.meeting_name and '_' in meeting.meeting_name else '')
-
-        rows = []
-        csv_lookup = {}
-        official_scratch_lookup = {}
-        if date_str and track_name:
-            try:
-                csv_data = pf_service.get_fields_csv(track_name, date_str)
-                for row in parseCSV(csv_data):
-                    key = (str(row.get('race number', '')).strip(), normalize_runner_name(row.get('horse name', '')))
-                    csv_lookup[key] = {
-                        'raw_scratch_fields': extract_debug_scratch_fields(row),
-                        'is_scratched_from_raw_fields': compute_is_scratched_final(row),
-                    }
-            except Exception as e:
-                logger.warning(f"Could not fetch scratch-debug CSV for {meeting_id}: {e}")
-
-            try:
-                tab_name_lookup = {}
-                for race in meeting.races:
-                    if race.speed_maps_json:
-                        sm = race.speed_maps_json if isinstance(race.speed_maps_json, dict) else json.loads(race.speed_maps_json)
-                        for it in sm.get('payLoad', [{}])[0].get('items', []):
-                            try:
-                                tab_no = int(it.get('tabNo', 0))
-                            except Exception:
-                                tab_no = 0
-                            tab_name_lookup[(race.race_number, tab_no)] = it.get('runnerName', '') or ''
-
-                response = requests.get(
-                    f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}",
-                    headers={'accept': 'application/json'},
-                    timeout=30,
-                )
-                if response.ok:
-                    data = response.json()
-                    items = data.get('payLoad') if isinstance(data, dict) else data
-                    _, official_debug_rows = _extract_v2_scratched_names(items or [], track_name, tab_name_lookup)
-                    for scratch_row in official_debug_rows:
-                        key = (str(scratch_row.get('raceNo')), normalize_runner_name(scratch_row.get('horseName', '')))
-                        official_scratch_lookup[key] = scratch_row
-            except Exception as e:
-                logger.warning(f"Could not fetch scratch-debug official scratch feed for {meeting_id}: {e}")
-
-        for race in meeting.races:
-            for horse in race.horses:
-                key = (str(race.race_number), normalize_runner_name(horse.horse_name))
-                csv_debug = csv_lookup.get(key, {})
-                rows.append({
-                    'raceNo': race.race_number,
-                    'horseName': horse.horse_name,
-                    'db_is_scratched': bool(horse.is_scratched),
-                    'db_score': horse.prediction.score if horse.prediction else None,
-                    'db_odds': horse.prediction.predicted_odds if horse.prediction else None,
-                    'csv_data_scratch_fields': extract_debug_scratch_fields(horse.csv_data if isinstance(horse.csv_data, dict) else {}),
-                    'raw_puntingform_scratch_fields': csv_debug.get('raw_scratch_fields', {}),
-                    'raw_fields_is_scratched_final': csv_debug.get('is_scratched_from_raw_fields', False),
-                    'official_scratch_feed': official_scratch_lookup.get(key),
-                    'is_scratched_final': bool(horse.is_scratched),
-                })
-
-        logger.info("Scratch debug for meeting %s: %s", meeting_id, rows)
-        return jsonify({'success': True, 'meeting_id': meeting_id, 'track': track_name, 'date': date_str, 'runners': rows})
+        target_horse = request.args.get('horse')
+        payload = _build_meeting_scratch_debug(meeting, target_horse_name=target_horse)
+        logger.info("Scratch debug for meeting %s%s: %s", meeting_id, f" horse={target_horse}" if target_horse else "", payload.get('runners'))
+        return jsonify(payload)
     except Exception as e:
         logger.error(f"Scratch debug failed: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3468,15 +3593,40 @@ def update_scratchings(meeting_id):
 
         # ── 4. Build effective scratched set ──
         all_races = Race.query.filter_by(meeting_id=meeting_id).all()
+
+        # Prefer the official V1 scratchings snapshot when available because it
+        # carries the explicit race/tab scratch list seen in production logs.
+        # This makes the snapshot authoritative and clears stale DB scratches
+        # for runners missing from the current official list.
+        try:
+            scratch_data = pf_service.get_scratchings()
+            v1_scratched_set, v1_scratch_debug_rows = _extract_v1_scratched_set(scratch_data, track_name)
+            v1_scratched_names = set()
+            for race in all_races:
+                for horse in race.horses:
+                    tab_number = _extract_tab_number_from_csv_data(horse.csv_data if isinstance(horse.csv_data, dict) else {})
+                    if (race.race_number, tab_number) in v1_scratched_set:
+                        v1_scratched_names.add(normalize_runner_name(horse.horse_name))
+            scratched_names = v1_scratched_names
+            scratchings_snapshot_loaded = True
+            logger.info(
+                "✅ Loaded %s explicit V1 scratchings for %s during update; sample=%s",
+                len(v1_scratched_set),
+                track_name,
+                v1_scratch_debug_rows[:20],
+            )
+        except Exception as e:
+            logger.warning(f"Could not fetch authoritative V1 scratchings during update: {e}")
+
         existing_scratched_names = set()
         for race in all_races:
             for horse in race.horses:
                 if horse.is_scratched:
                     existing_scratched_names.add(normalize_runner_name(horse.horse_name))
 
-        # Important: when API snapshot is available, treat it as source of truth
-        # so previously-scratched horses can become active again.
-        # If snapshot fetch failed, preserve current DB scratch state.
+        # Important: when an API snapshot is available, treat it as source of
+        # truth so previously-scratched horses can become active again. If all
+        # snapshot fetches failed, preserve current DB scratch state.
         all_scratched_names = scratched_names.copy() if scratchings_snapshot_loaded else existing_scratched_names
 
         # ── 5. Mark ALL scratched horses in DB ──
@@ -3711,12 +3861,15 @@ def update_scratchings(meeting_id):
         import gc
         gc.collect()
 
+        bird_whistle_debug = _build_meeting_scratch_debug(meeting, target_horse_name='Bird Whistle')
+
         return jsonify({
             'success': True,
             'scratched_count': scratched_count,
             'unscratched_count': unscratched_count,
             'races_updated': races_updated,
             'total_scratched': len(all_scratched_names),
+            'bird_whistle_scratch_debug': bird_whistle_debug,
             'message': f'Updated {scratched_count} new scratching(s), {unscratched_count} unscratched, repriced {races_updated} race(s). Total scratched: {len(all_scratched_names)}'
         })
 
@@ -3932,7 +4085,13 @@ def view_meeting(meeting_id):
     
     # All logged-in users can view all meetings
     results = get_meeting_results(meeting_id)
-    return render_template("view_meeting.html", meeting=meeting, results=results)
+    bird_whistle_scratch_debug = _build_meeting_scratch_debug(meeting, target_horse_name='Bird Whistle')
+    return render_template(
+        "view_meeting.html",
+        meeting=meeting,
+        results=results,
+        bird_whistle_scratch_debug=bird_whistle_scratch_debug,
+    )
     
 @app.route("/api/horse/<int:horse_id>/toggle-scratch", methods=["POST"])
 @login_required
