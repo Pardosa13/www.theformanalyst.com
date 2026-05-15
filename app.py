@@ -3287,11 +3287,13 @@ def update_scratchings(meeting_id):
 
         # ── 3. Fetch scratchings ──
         scratched_names = set()
+        scratchings_snapshot_loaded = False
         try:
             url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
             response = requests.get(url, headers={'accept': 'application/json'}, timeout=30)
 
             if response.ok:
+                scratchings_snapshot_loaded = True
                 data = response.json()
                 items = data.get('payLoad') if isinstance(data, dict) else data
                 items = items or []
@@ -3337,18 +3339,22 @@ def update_scratchings(meeting_id):
         except Exception as e:
             logger.warning(f"Could not fetch scratchings: {e}")
 
-        # ── 4. Get ALL scratched horses (existing + new) ──
-        all_scratched_names = set(scratched_names)  # Start with new scratchings
+        # ── 4. Build effective scratched set ──
         all_races = Race.query.filter_by(meeting_id=meeting_id).all()
-        
-        # Add existing scratched horses to the set
+        existing_scratched_names = set()
         for race in all_races:
             for horse in race.horses:
                 if horse.is_scratched:
-                    all_scratched_names.add(normalize_runner_name(horse.horse_name))
+                    existing_scratched_names.add(normalize_runner_name(horse.horse_name))
+
+        # Important: when API snapshot is available, treat it as source of truth
+        # so previously-scratched horses can become active again.
+        # If snapshot fetch failed, preserve current DB scratch state.
+        all_scratched_names = set(scratched_names) if scratchings_snapshot_loaded else existing_scratched_names
 
         # ── 5. Mark ALL scratched horses in DB ──
         scratched_count = 0
+        unscratched_count = 0
         for race in all_races:
             for horse in race.horses:
                 norm = normalize_runner_name(horse.horse_name)
@@ -3356,6 +3362,8 @@ def update_scratchings(meeting_id):
                 horse.is_scratched = norm in all_scratched_names
                 if horse.is_scratched and not was_scratched:
                     scratched_count += 1
+                elif was_scratched and not horse.is_scratched:
+                    unscratched_count += 1
         db.session.flush()
 
         # ── 6. Fetch fresh CSV from PuntingForm ──
@@ -3577,9 +3585,10 @@ def update_scratchings(meeting_id):
         return jsonify({
             'success': True,
             'scratched_count': scratched_count,
+            'unscratched_count': unscratched_count,
             'races_updated': races_updated,
             'total_scratched': len(all_scratched_names),
-            'message': f'Updated {scratched_count} new scratching(s), repriced {races_updated} race(s). Total scratched: {len(all_scratched_names)}'
+            'message': f'Updated {scratched_count} new scratching(s), {unscratched_count} unscratched, repriced {races_updated} race(s). Total scratched: {len(all_scratched_names)}'
         })
 
     except Exception as e:
