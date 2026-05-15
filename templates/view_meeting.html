@@ -1202,7 +1202,7 @@ function updateScratchings(meetingId) {
 
           <td style="padding:12px; border-bottom:1px solid #e2e8f0;">
             <div style="font-weight:600; display:flex; align-items:center; gap:8px;">
-               <span>{{ horse.horse_name }}</span>
+               <span class="horse-name-label">{{ horse.horse_name }}</span>
                <span class="pfai-badge-placeholder" 
                      data-horse-name="{{ horse.horse_name }}" 
                      data-race-number="{{ race.race_number }}"
@@ -1332,6 +1332,8 @@ const meetingId = {{ meeting.id }};
 const PFAI_RANK_THRESHOLD = 25;
 const SPEEDMAP_COLUMN_DELAY_MS = 55;
 const SPEEDMAP_CARD_DELAY_MS = 45;
+const SPEEDMAP_SILK_BADGE_SIZE = 36;
+const SPEEDMAP_SILK_BADGE_RADIUS = 10;
 
 function initializeSectionalCharts() {
     if (typeof Chart === 'undefined') { setTimeout(initializeSectionalCharts, 100); return; }
@@ -1391,6 +1393,7 @@ function animateSectionalPanel(panel) {
     // Force a reflow so the entrance animation restarts on repeated toggles.
     panel.getBoundingClientRect();
     window.requestAnimationFrame(function() {
+        if (!panel.isConnected) return;
         panel.classList.add('sectional-animated-panel-visible');
     });
 }
@@ -1404,6 +1407,7 @@ function animateHeatmapRows(container) {
 }
 
 function normalizeHorseName(name) {
+  // Strip punctuation so names from API payloads, table rows, and odds feeds match consistently.
   return (name || '')
     .toLowerCase()
     .trim()
@@ -1411,6 +1415,15 @@ function normalizeHorseName(name) {
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function escapeHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 }
 
 function getValidPfaiRanks(pfaiSectionals) {
@@ -1760,7 +1773,7 @@ function renderSpeedMap(raceNumber) {
         raceCard.querySelectorAll('tbody tr').forEach(function(row) {
             const isScratchedRow = row.classList.contains('horse-scratched');
             if (isScratchedRow) {
-                const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
+                const nameSpan = row.querySelector('.horse-name-label');
                 if (nameSpan) scratchedNames.add(normalizeHorseName(nameSpan.textContent));
             }
         });
@@ -1816,7 +1829,7 @@ function collectRaceSilkStyles(raceNumber) {
     const raceCard = document.getElementById('race-' + raceNumber);
     if (!raceCard) return silkLookup;
     raceCard.querySelectorAll('tbody tr').forEach(function(row) {
-        const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
+        const nameSpan = row.querySelector('.horse-name-label');
         const silkEl = row.querySelector('.lb-silk');
         if (!nameSpan || !silkEl || !silkEl.style || !silkEl.style.cssText) return;
         silkLookup[normalizeHorseName(nameSpan.textContent)] = silkEl.style.cssText;
@@ -1824,7 +1837,7 @@ function collectRaceSilkStyles(raceNumber) {
     return silkLookup;
 }
 function decorateSpeedMapSilkStyle(silkStyle) {
-    return silkStyle + ';width:36px;height:36px;border-radius:10px;';
+    return silkStyle + ';width:' + SPEEDMAP_SILK_BADGE_SIZE + 'px;height:' + SPEEDMAP_SILK_BADGE_SIZE + 'px;border-radius:' + SPEEDMAP_SILK_BADGE_RADIUS + 'px;';
 }
 function syncVisibleSpeedMapSilks(raceNumber) {
     const speedMap = document.getElementById('speedmap-' + raceNumber);
@@ -1855,10 +1868,10 @@ function createHorseCard(horse, runnerKey, silkStyle, columnIndex, horseIndex) {
     const tabMarkup = silkStyle
         ? '<span class="speedmap-tab-number speedmap-tab-number--silk" style="' + decorateSpeedMapSilkStyle(silkStyle) + '"><span class="speedmap-tab-number-label">' + horse.tabNo + '</span></span>'
         : '<span class="speedmap-tab-number speedmap-tab-number-fallback">' + horse.tabNo + '</span>';
-    return '<div class="speedmap-horse-card" data-runner-name="' + runnerKey + '" data-tab-no="' + horse.tabNo + '" style="--speedmap-card-delay:' + ((columnIndex * SPEEDMAP_COLUMN_DELAY_MS) + (horseIndex * SPEEDMAP_CARD_DELAY_MS)) + 'ms;">' +
+    return '<div class="speedmap-horse-card" data-runner-name="' + escapeHtml(runnerKey) + '" data-tab-no="' + escapeHtml(horse.tabNo) + '" style="--speedmap-card-delay:' + ((columnIndex * SPEEDMAP_COLUMN_DELAY_MS) + (horseIndex * SPEEDMAP_CARD_DELAY_MS)) + 'ms;">' +
         '<div class="speedmap-card-header">' +
         tabMarkup +
-        '<div class="speedmap-horse-name">' + horse.runnerName + '</div>' +
+        '<div class="speedmap-horse-name">' + escapeHtml(horse.runnerName) + '</div>' +
         '</div>' +
         '<div class="speedmap-pfai">PFAI: ' + horse.pfaiScore + '</div>' +
         '<div class="speedmap-badges">' +
@@ -1998,7 +2011,7 @@ function injectPFAIScores() {
         const horseRows = raceCard.querySelectorAll('tbody tr');
         horseRows.forEach(function(row) {
             const horseNameCell = row.querySelector('td:nth-child(2)'); if (!horseNameCell) return;
-            const horseNameSpan = horseNameCell.querySelector('span'); if (!horseNameSpan) return;
+            const horseNameSpan = horseNameCell.querySelector('.horse-name-label'); if (!horseNameSpan) return;
             const horseName = horseNameSpan.textContent.trim();
             const matchingHorse = horses.find(function(h) { return h.runnerName === horseName; });
             if (matchingHorse && matchingHorse.pfaiScore) {
@@ -2027,7 +2040,7 @@ function logSpeedmapMissingRunners() {
     );
 
     raceCard.querySelectorAll('tbody tr').forEach(row => {
-      const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
+      const nameSpan = row.querySelector('.horse-name-label');
       if (!nameSpan) return;
       const rowNameNorm = normalizeHorseName(nameSpan.textContent);
       if (rowNameNorm && !speedmapNames.has(rowNameNorm) && !row.classList.contains('horse-scratched')) {
@@ -2163,7 +2176,7 @@ document.addEventListener('DOMContentLoaded', function() {
             var oddsCell = row.cells[4]; // td:nth-child(5) — dedicated Ladbrokes Price column
             if (!nameCell || !oddsCell) return;
 
-            var nameSpan = nameCell.querySelector('div > span:first-child');
+            var nameSpan = nameCell.querySelector('.horse-name-label');
             if (!nameSpan) return;
             var normName = lbNorm(nameSpan.textContent);
             if (!normName) return;
