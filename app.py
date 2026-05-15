@@ -3350,7 +3350,7 @@ def update_scratchings(meeting_id):
         # Important: when API snapshot is available, treat it as source of truth
         # so previously-scratched horses can become active again.
         # If snapshot fetch failed, preserve current DB scratch state.
-        all_scratched_names = set(scratched_names) if scratchings_snapshot_loaded else existing_scratched_names
+        all_scratched_names = scratched_names.copy() if scratchings_snapshot_loaded else existing_scratched_names
 
         # ── 5. Mark ALL scratched horses in DB ──
         scratched_count = 0
