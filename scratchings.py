@@ -93,3 +93,26 @@ def extract_debug_scratch_fields(raw_runner: Mapping[str, Any] | None) -> dict[s
         if "scratch" in key_lower or "status" in key_lower:
             debug_fields[str(key)] = value
     return debug_fields
+
+
+def resolve_official_scratched_set(
+    v1_scratched_set: set[tuple[int, int]] | None = None,
+    v2_scratched_set: set[tuple[int, int]] | None = None,
+    *,
+    v1_available: bool = False,
+    v2_available: bool = False,
+) -> tuple[set[tuple[int, int]], str, int]:
+    """Resolve official scratched runners using the V1-over-V2 precedence rule.
+
+    If a V1 scratchings snapshot is available for the meeting, it is treated as
+    authoritative: runners that appear in V2 but not V1 are considered conflicts
+    and ignored. V2 is only used when V1 is unavailable.
+    """
+    v1_set = set(v1_scratched_set or set())
+    v2_set = set(v2_scratched_set or set())
+
+    if v1_available:
+        return v1_set, "v1_scratchings", len(v2_set - v1_set)
+    if v2_available:
+        return v2_set, "v2_updates_scratchings", 0
+    return set(), "csv_status_fields", 0

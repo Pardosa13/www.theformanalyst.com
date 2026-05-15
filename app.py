@@ -18,7 +18,7 @@ import uuid
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component
 from puntingform_service import PuntingFormService
-from scratchings import compute_is_scratched_final, extract_debug_scratch_fields
+from scratchings import compute_is_scratched_final, extract_debug_scratch_fields, resolve_official_scratched_set
 from ladbrokes import match_race_uuid, fetch_race_odds
 from afl_routes import register_afl_routes, afl_nightly_sync
 from mma_routes import register_mma_routes
@@ -654,9 +654,10 @@ def _normalised_track_matches(item_track, track_name):
     return str(item_track or '').strip().lower() == str(track_name or '').strip().lower()
 
 
-def _extract_v1_scratched_set(scratch_data, track_name):
+def _extract_v1_scratchings_for_track(scratch_data, track_name):
     scratched_set = set()
     debug_rows = []
+    v1_available = False
     if isinstance(scratch_data, list):
         scratch_items = scratch_data
     else:
@@ -671,6 +672,7 @@ def _extract_v1_scratched_set(scratch_data, track_name):
         item_track = str(item.get('TrackName') or item.get('trackName') or '').strip()
         if not _normalised_track_matches(item_track, track_name):
             continue
+        v1_available = True
         for entry in item.get('Scratchings', []):
             try:
                 parts = str(entry).split(',', 2)
@@ -689,6 +691,46 @@ def _extract_v1_scratched_set(scratch_data, track_name):
             except (ValueError, TypeError):
                 continue
         break
+    return scratched_set, debug_rows, v1_available
+
+
+def _extract_v1_scratched_set(scratch_data, track_name):
+    scratched_set, debug_rows, _ = _extract_v1_scratchings_for_track(scratch_data, track_name)
+    return scratched_set, debug_rows
+
+
+def _extract_v2_scratched_set(items, track_name):
+    scratched_set = set()
+    debug_rows = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        track = item.get('track') or item.get('Track') or item.get('trackName') or item.get('TrackName')
+        race_no = item.get('raceNo') or item.get('RaceNo') or item.get('raceNumber') or item.get('RaceNumber')
+        tab_no = item.get('tabNo') or item.get('TabNo') or item.get('tabNumber') or item.get('TabNumber')
+
+        if track is None or race_no is None or tab_no is None:
+            continue
+        if not _normalised_track_matches(track, track_name):
+            continue
+
+        try:
+            rn = int(race_no)
+            tn = int(tab_no)
+        except Exception:
+            continue
+
+        is_scratched_final = _scratch_update_item_is_scratched(item)
+        debug_rows.append({
+            'source': 'v2_updates_scratchings',
+            'track': str(track).strip(),
+            'raceNo': rn,
+            'tabNo': tn,
+            'raw_scratch_fields': extract_debug_scratch_fields(item),
+            'is_scratched_final': is_scratched_final,
+        })
+        if is_scratched_final:
+            scratched_set.add((rn, tn))
     return scratched_set, debug_rows
 
 
@@ -804,8 +846,11 @@ def _build_meeting_scratch_debug(meeting, target_horse_name=None):
     target_norm = normalize_runner_name(target_horse_name or '')
 
     csv_lookup = {}
-    official_by_race_tab = {}
-    official_by_race_name = {}
+    v1_by_race_tab = {}
+    v1_by_race_name = {}
+    v2_by_race_tab = {}
+    v2_by_race_name = {}
+    v1_scratchings_available = False
     tab_name_lookup = {}
     speedmap_tab_lookup = _speedmap_tab_lookup_for_meeting(meeting)
 
@@ -832,16 +877,16 @@ def _build_meeting_scratch_debug(meeting, target_horse_name=None):
 
         try:
             scratch_data = pf_service.get_scratchings()
-            _, v1_debug_rows = _extract_v1_scratched_set(scratch_data, track_name)
+            _, v1_debug_rows, v1_scratchings_available = _extract_v1_scratchings_for_track(scratch_data, track_name)
             for scratch_row in v1_debug_rows:
                 race_no = scratch_row.get('raceNo')
                 tab_no = scratch_row.get('tabNo')
                 horse_name = tab_name_lookup.get((race_no, tab_no), '')
                 scratch_row = {**scratch_row, 'horseName': horse_name}
-                official_by_race_tab[(race_no, tab_no)] = scratch_row
+                v1_by_race_tab[(race_no, tab_no)] = scratch_row
                 horse_norm = normalize_runner_name(horse_name)
                 if horse_norm:
-                    official_by_race_name[(race_no, horse_norm)] = scratch_row
+                    v1_by_race_name[(race_no, horse_norm)] = scratch_row
         except Exception as e:
             logger.warning(f"Could not fetch scratch-debug V1 official scratch feed for {meeting.id}: {e}")
 
@@ -859,9 +904,9 @@ def _build_meeting_scratch_debug(meeting, target_horse_name=None):
                     race_no = scratch_row.get('raceNo')
                     tab_no = scratch_row.get('tabNo')
                     horse_norm = normalize_runner_name(scratch_row.get('horseName', ''))
-                    official_by_race_tab.setdefault((race_no, tab_no), scratch_row)
+                    v2_by_race_tab[(race_no, tab_no)] = scratch_row
                     if horse_norm:
-                        official_by_race_name.setdefault((race_no, horse_norm), scratch_row)
+                        v2_by_race_name[(race_no, horse_norm)] = scratch_row
         except Exception as e:
             logger.warning(f"Could not fetch scratch-debug V2 official scratch feed for {meeting.id}: {e}")
 
@@ -879,7 +924,9 @@ def _build_meeting_scratch_debug(meeting, target_horse_name=None):
                 or csv_debug.get('tab_number')
                 or _extract_tab_number_from_csv_data(csv_data)
             )
-            official_match = official_by_race_tab.get((race.race_number, tab_number)) or official_by_race_name.get((race.race_number, horse_norm))
+            v1_match = v1_by_race_tab.get((race.race_number, tab_number)) or v1_by_race_name.get((race.race_number, horse_norm))
+            v2_match = v2_by_race_tab.get((race.race_number, tab_number)) or v2_by_race_name.get((race.race_number, horse_norm))
+            official_match = v1_match if v1_scratchings_available else v2_match
             db_is_scratched = bool(horse.is_scratched)
             csv_fields = extract_debug_scratch_fields(csv_data)
             final_render_decision = {
@@ -900,8 +947,14 @@ def _build_meeting_scratch_debug(meeting, target_horse_name=None):
                 'csv_data_is_scratched_final': compute_is_scratched_final(csv_data),
                 'raw_puntingform_csv_scratch_status_fields': csv_debug.get('csv_data_scratch_status_fields', {}),
                 'raw_puntingform_csv_is_scratched_final': csv_debug.get('csv_data_is_scratched_final', False),
+                'v1_scratchings_available': v1_scratchings_available,
+                'v1_scratch_match': v1_match,
+                'v1_scratch_match_is_scratched_final': bool(v1_match and v1_match.get('is_scratched_final')),
+                'v2_scratch_match': v2_match,
+                'v2_scratch_match_is_scratched_final': bool(v2_match and v2_match.get('is_scratched_final')),
                 'official_scratch_match': official_match,
                 'official_scratch_match_is_scratched_final': bool(official_match and official_match.get('is_scratched_final')),
+                'final_scratch_source': 'v1_scratchings' if v1_scratchings_available else 'v2_updates_scratchings',
                 'final_render_decision': final_render_decision,
                 'stale_db_scratch_suspected': db_is_scratched and not bool(official_match and official_match.get('is_scratched_final')),
                 'refresh_hint': 'Run Update Scratchings on this meeting, or re-import the meeting, after deploying this commit.' if db_is_scratched and not bool(official_match and official_match.get('is_scratched_final')) else '',
@@ -994,7 +1047,8 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                               is_advanced=False, puntingform_id=None,
                               speed_maps_data=None, ratings_data=None, 
                               sectionals_data=None, rail_position=0,
-                              scratched_set=None, strike_rate_data=None, **kwargs):
+                              scratched_set=None, strike_rate_data=None, v1_scratchings_available=False,
+                              v2_scratched_set=None, v2_scratchings_available=False, **kwargs):
     kwargs['rail_position'] = rail_position
 
     # ===== INJECT API SECTIONAL DATA INTO CSV =====
@@ -1094,23 +1148,42 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
     # SPLIT OUT SCRATCHED HORSES BEFORE ANALYSIS
     # ==========================================
     scratched_rows = []
-    if scratched_set:
-        active_rows = []
-        for row in parsed_csv:
-            try:
-                horse_num = int(str(row.get('horse number', '')).strip())
-                race_num = int(str(row.get('race number', '')).strip())
-            except (ValueError, TypeError):
-                active_rows.append(row)
-                continue
-            row_is_scratched = (race_num, horse_num) in scratched_set or compute_is_scratched_final(row)
-            if row_is_scratched:
-                scratched_rows.append(row)
-                logger.info(f"✂️  Scratched: {row.get('horse name')} R{race_num} #{horse_num}")
-            else:
-                active_rows.append(row)
-        parsed_csv = active_rows
-        logger.info(f"✅ {len(scratched_rows)} scratched horses removed before analysis")
+    official_scratched_set, scratch_source, conflicts_ignored_count = resolve_official_scratched_set(
+        scratched_set,
+        v2_scratched_set,
+        v1_available=v1_scratchings_available,
+        v2_available=v2_scratchings_available,
+    )
+    logger.info(
+        "scratch_import_precedence explicit_v1_scratch_count=%s v2_scratch_count=%s conflicts_ignored_count=%s source=%s",
+        len(scratched_set or set()),
+        len(v2_scratched_set or set()),
+        conflicts_ignored_count,
+        scratch_source,
+    )
+
+    active_rows = []
+    for row in parsed_csv:
+        try:
+            horse_num = int(str(row.get('horse number', '')).strip())
+            race_num = int(str(row.get('race number', '')).strip())
+        except (ValueError, TypeError):
+            active_rows.append(row)
+            continue
+
+        row_key = (race_num, horse_num)
+        if scratch_source in {'v1_scratchings', 'v2_updates_scratchings'}:
+            row_is_scratched = row_key in official_scratched_set
+        else:
+            row_is_scratched = compute_is_scratched_final(row)
+
+        if row_is_scratched:
+            scratched_rows.append(row)
+            logger.info(f"✂️  Scratched: {row.get('horse name')} R{race_num} #{horse_num} source={scratch_source}")
+        else:
+            active_rows.append(row)
+    parsed_csv = active_rows
+    logger.info(f"✅ {len(scratched_rows)} scratched horses removed before analysis")
 
     # Rebuild CSV with active horses only
     csv_data = rebuildCSV(parsed_csv)
@@ -1252,6 +1325,14 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
             db.session.add(s_prediction)
 
         logger.info(f"✅ Saved {len(scratched_rows)} scratched horses with zero scores")
+
+    logger.info(
+        "scratch_import_save_counts explicit_v1_scratch_count=%s v2_scratch_count=%s conflicts_ignored_count=%s final_saved_scratched_count=%s",
+        len(scratched_set or set()),
+        len(v2_scratched_set or set()),
+        conflicts_ignored_count,
+        len(scratched_rows),
+    )
 
     db.session.commit()
 
@@ -3319,18 +3400,44 @@ def api_import_meeting(meeting_id):
         # FETCH SCRATCHINGS BEFORE ANALYSIS
         # ==========================================
         scratched_set = set()
+        v1_scratchings_available = False
+        v2_scratched_set = set()
+        v2_scratchings_available = False
         try:
             scratch_data = pf_service.get_scratchings()
-            scratched_set, scratch_debug_rows = _extract_v1_scratched_set(scratch_data, track_name)
+            scratched_set, scratch_debug_rows, v1_scratchings_available = _extract_v1_scratchings_for_track(scratch_data, track_name)
             logger.info(
-                "✅ Found %s explicit scratchings for %s: %s",
+                "✅ Found %s explicit V1 scratchings for %s (available=%s): %s",
                 len(scratched_set),
                 track_name,
+                v1_scratchings_available,
                 scratch_debug_rows[:20],
             )
         except Exception as e:
-            logger.warning(f"Could not fetch scratchings: {e}")
+            logger.warning(f"Could not fetch V1 scratchings: {e}")
             scratched_set = set()
+            v1_scratchings_available = False
+
+        try:
+            v2_url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
+            v2_response = requests.get(v2_url, headers={'accept': 'application/json'}, timeout=30)
+            if v2_response.ok:
+                v2_scratchings_available = True
+                v2_data = v2_response.json()
+                v2_items = v2_data.get('payLoad') if isinstance(v2_data, dict) else v2_data
+                v2_scratched_set, v2_debug_rows = _extract_v2_scratched_set(v2_items or [], track_name)
+                logger.info(
+                    "✅ Found %s explicit V2 update scratchings for %s: %s",
+                    len(v2_scratched_set),
+                    track_name,
+                    v2_debug_rows[:20],
+                )
+            else:
+                logger.warning(f"Could not fetch V2 scratchings: HTTP {v2_response.status_code}")
+        except Exception as e:
+            logger.warning(f"Could not fetch V2 scratchings: {e}")
+            v2_scratched_set = set()
+            v2_scratchings_available = False
     
         # ==========================================
         # PRE-FETCH SPEED MAPS (needed before analysis for running position injection)
@@ -3382,7 +3489,10 @@ def api_import_meeting(meeting_id):
             sectionals_data=sectionals_data,
             rail_position=rail_position,
             scratched_set=scratched_set,
-            strike_rate_data=strike_rate_data
+            strike_rate_data=strike_rate_data,
+            v1_scratchings_available=v1_scratchings_available,
+            v2_scratched_set=v2_scratched_set,
+            v2_scratchings_available=v2_scratchings_available
         )
 
         meeting.date = date_obj.date()
