@@ -109,6 +109,34 @@
   margin-top: 4px;
 }
 
+
+.horse-scratched {
+  opacity: 0.45;
+  color: #9ca3af !important;
+  text-decoration: line-through;
+}
+.horse-scratched td {
+  color: #9ca3af !important;
+}
+.scratched-badge {
+  background: #dc3545;
+  color: white;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  font-weight: bold;
+  text-decoration: none;
+}
+.scratched-label {
+  background: #6c757d;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  text-decoration: none;
+}
+
 /* ── Race navigation pills ── */
 .vm-nav-card {
   background: var(--bg-surface);
@@ -1099,7 +1127,8 @@ function updateScratchings(meetingId) {
               <span class="vm-best-bet-badge" title="This horse matches the Best Bets criteria">⭐ Best Bet</span>
               {% endif %}
               {% if horse.is_scratched %}
-              <span style="background:#6c757d; color:white; padding:2px 8px; border-radius:4px; font-size:11px;">SCRATCHED</span>
+              <span class="scratched-badge">SCR</span>
+              <span class="scratched-label">SCRATCHED</span>
               {% endif %}
             </div>
             <div style="font-size:12px; color:#6c757d;">
@@ -1586,9 +1615,7 @@ function renderSpeedMap(raceNumber) {
     const scratchedNames = new Set();
     if (raceCard) {
         raceCard.querySelectorAll('tbody tr').forEach(function(row) {
-            const isScratchedRow = row.style.textDecoration === 'line-through' ||
-                                   row.querySelector('.scratched-badge') ||
-                                   row.querySelector('span[style*="#6c757d"]');
+            const isScratchedRow = row.classList.contains('horse-scratched');
             if (isScratchedRow) {
                 const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
                 if (nameSpan) scratchedNames.add(normalizeHorseName(nameSpan.textContent));
@@ -1796,11 +1823,10 @@ function normalizeHorseName(name) {
     .trim();
 }
 
-function applySpeedmapScratchings() {
+function logSpeedmapMissingRunners() {
   document.querySelectorAll('.vm-race-card[id^="race-"]').forEach(raceCard => {
     const raceNo = raceCard.id.replace('race-', '');
     const speedMapData = window['speedMapData_' + raceNo];
-
     if (!speedMapData?.payLoad?.[0]?.items) return;
 
     const speedmapNames = new Set(
@@ -1810,26 +1836,15 @@ function applySpeedmapScratchings() {
     raceCard.querySelectorAll('tbody tr').forEach(row => {
       const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
       if (!nameSpan) return;
-
       const rowNameNorm = normalizeHorseName(nameSpan.textContent);
-      if (!rowNameNorm) return;
-
-      if (!speedmapNames.has(rowNameNorm) && !row.querySelector('.scratched-badge')) {
-        row.style.opacity = '0.4';
-        row.style.textDecoration = 'line-through';
-        row.style.color = '#888';
-
-        const badge = document.createElement('span');
-        badge.className = 'scratched-badge';
-        badge.textContent = 'SCR';
-        badge.style.cssText = 'background:#dc3545;color:white;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:6px;font-weight:bold;';
-        nameSpan.insertAdjacentElement('afterend', badge);
+      if (rowNameNorm && !speedmapNames.has(rowNameNorm) && !row.classList.contains('horse-scratched')) {
+        console.debug('Runner missing from speedmap but not marked scratched by canonical backend flag', { raceNo, runner: nameSpan.textContent.trim() });
       }
     });
   });
 }
 
-document.addEventListener('DOMContentLoaded', applySpeedmapScratchings);
+document.addEventListener('DOMContentLoaded', logSpeedmapMissingRunners);
 
 // ── Track Bias ──
 const MEETING_ID = {{ meeting.id }};
