@@ -1338,6 +1338,7 @@ const SPEEDMAP_CARD_DELAY_MS = 45;
 const SPEEDMAP_SILK_BADGE_SIZE = 36;
 const SPEEDMAP_SILK_BADGE_RADIUS = 10;
 const HORSE_NAME_SELECTOR = '.horse-name-label';
+var _lbSilkCache = {}; // { raceNumber: { runnerNumber: cssText } } — populated by Ladbrokes polling
 
 function initializeSectionalCharts() {
     if (typeof Chart === 'undefined') { setTimeout(initializeSectionalCharts, 100); return; }
@@ -1801,6 +1802,7 @@ function renderSpeedMap(raceNumber) {
     });
 
     const silkStyles = collectRaceSilkStyles(raceNumber);
+    const cachedSilks = _lbSilkCache[raceNumber] || {};
     const columns = [
         { key: 'leader', label: 'Leader' },
         { key: 'onpace', label: 'OnPace' },
@@ -1813,7 +1815,8 @@ function renderSpeedMap(raceNumber) {
                 '<div class="speedmap-column-header">' + column.label + '</div>' +
                 categories[column.key].map(function(horse, horseIndex) {
                     const runnerKey = normalizeHorseName(horse.runnerName);
-                    return createHorseCard(horse, runnerKey, silkStyles[runnerKey], columnIndex, horseIndex);
+                    const silkStyle = cachedSilks[String(horse.tabNo)] || silkStyles[runnerKey];
+                    return createHorseCard(horse, runnerKey, silkStyle, columnIndex, horseIndex);
                 }).join('') +
                 '</div>';
         }).join('') +
@@ -1847,12 +1850,13 @@ function syncVisibleSpeedMapSilks(raceNumber) {
     const speedMap = document.getElementById('speedmap-' + raceNumber);
     if (!speedMap || speedMap.style.display === 'none') return;
     const silkStyles = collectRaceSilkStyles(raceNumber);
+    const cachedSilks = _lbSilkCache[raceNumber] || {};
     speedMap.querySelectorAll('.speedmap-horse-card').forEach(function(card) {
         const runnerKey = card.getAttribute('data-runner-name');
         const tabNo = card.getAttribute('data-tab-no') || '';
         const numberEl = card.querySelector('.speedmap-tab-number');
         if (!numberEl) return;
-        const silkStyle = silkStyles[runnerKey];
+        const silkStyle = cachedSilks[tabNo] || silkStyles[runnerKey];
         if (silkStyle) {
             numberEl.className = 'speedmap-tab-number speedmap-tab-number--silk';
             numberEl.style.cssText = decorateSpeedMapSilkStyle(silkStyle);
@@ -2190,10 +2194,14 @@ document.addEventListener('DOMContentLoaded', function() {
             // ── 1. SILK ───────────────────────────────────────────────
             var existingSilk = nameCell.querySelector('.lb-silk');
             if (silkUrl && horseOdds && horseOdds.runner_number) {
+                var cssText = buildSilkStyle(silkUrl, horseOdds.runner_number);
+                // Cache silk style for speed map lookup by tabNo/runner_number
+                if (!_lbSilkCache[raceNumber]) _lbSilkCache[raceNumber] = {};
+                _lbSilkCache[raceNumber][String(horseOdds.runner_number)] = cssText;
                 if (!existingSilk) {
                     var silkEl = document.createElement('span');
                     silkEl.className = 'lb-silk';
-                    silkEl.style.cssText = buildSilkStyle(silkUrl, horseOdds.runner_number);
+                    silkEl.style.cssText = cssText;
                     silkEl.title = 'Silk — runner ' + horseOdds.runner_number;
                     // Insert before the horse name inside the flex div
                     var nameDiv = nameSpan.parentNode;
@@ -2202,7 +2210,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     nameDiv.style.gap = '8px';
                     nameDiv.insertBefore(silkEl, nameSpan);
                 } else {
-                    existingSilk.style.cssText = buildSilkStyle(silkUrl, horseOdds.runner_number);
+                    existingSilk.style.cssText = cssText;
                 }
             } else if (!silkUrl && existingSilk) {
                 existingSilk.remove();
