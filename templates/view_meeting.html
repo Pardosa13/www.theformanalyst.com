@@ -444,6 +444,7 @@ details pre {
   grid-template-columns: repeat(4, 1fr);
   gap: 14px;
   min-width: 800px;
+  align-items: start;
 }
 
 .speedmap-column {
@@ -451,6 +452,14 @@ details pre {
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
   padding: 14px;
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.28s ease, transform 0.28s ease;
+  transition-delay: var(--speedmap-column-delay, 0ms);
+}
+.speedmap-grid.speedmap-grid-visible .speedmap-column {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .speedmap-column-header {
@@ -473,12 +482,30 @@ details pre {
   border-radius: 8px;
   padding: 11px;
   margin-bottom: 9px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  opacity: 0;
+  transform: translate3d(0, 18px, 0) scale(0.985);
+  transition:
+    opacity 0.34s ease,
+    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.2s,
+    box-shadow 0.2s;
+  transition-delay: var(--speedmap-card-delay, 0ms);
+}
+.speedmap-grid.speedmap-grid-visible .speedmap-horse-card {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
 }
 .speedmap-horse-card:hover {
   border-color: var(--accent);
   box-shadow: 0 3px 12px rgba(102,126,234,0.2);
   transform: translateY(-1px);
+}
+
+.speedmap-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 7px;
 }
 
 .speedmap-tab-number {
@@ -492,14 +519,48 @@ details pre {
   border-radius: 50%;
   font-weight: 800;
   font-size: 14px;
-  margin-bottom: 7px;
+  flex-shrink: 0;
+}
+
+.speedmap-tab-number--silk {
+  position: relative;
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 10px !important;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.2);
+  box-shadow: 0 5px 14px rgba(0,0,0,0.24);
+}
+
+.speedmap-tab-number-label {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(7,10,19,0.82);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.28);
+}
+
+.speedmap-tab-number-fallback {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
 }
 
 .speedmap-horse-name {
   font-weight: 700;
   font-size: 14px;
   color: var(--text-primary);
-  margin-bottom: 6px;
+  margin: 0;
+  line-height: 1.3;
 }
 
 .speedmap-pfai {
@@ -666,6 +727,15 @@ details pre {
 }
 .insight-item strong { color: var(--text-primary); }
 
+.sectional-animated-panel {
+  opacity: 0;
+  transform: translateY(14px);
+}
+
+.sectional-animated-panel.sectional-animated-panel-visible {
+  animation: sectionalFadeUp 0.34s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
 /* Loading / no data */
 .loading-spinner {
   text-align: center;
@@ -709,6 +779,14 @@ details pre {
   transition: filter 0.1s;
 }
 .pfai-heatmap-table tbody tr:hover { filter: brightness(1.15); }
+.pfai-heatmap-row {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.pfai-heatmap-animate .pfai-heatmap-row {
+  animation: sectionalFadeUp 0.32s ease forwards;
+  animation-delay: calc(var(--row-index, 0) * 55ms);
+}
 .pfai-heatmap-table tbody td {
   padding: 10px 12px;
   font-weight: 600;
@@ -728,6 +806,17 @@ details pre {
   color: var(--accent) !important;
   font-size: 14px !important;
   margin-bottom: 12px !important;
+}
+
+@keyframes sectionalFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ══════════════════════════════════════════
@@ -1296,6 +1385,54 @@ document.addEventListener('DOMContentLoaded', function() {
     injectPFAIScores();
 });
 
+function animateSectionalPanel(panel) {
+    if (!panel) return;
+    panel.classList.remove('sectional-animated-panel-visible');
+    panel.classList.add('sectional-animated-panel');
+    void panel.offsetWidth;
+    window.requestAnimationFrame(function() {
+        panel.classList.add('sectional-animated-panel-visible');
+    });
+}
+
+function animateHeatmapRows(container) {
+    if (!container) return;
+    container.classList.remove('pfai-heatmap-animate');
+    void container.offsetWidth;
+    container.classList.add('pfai-heatmap-animate');
+}
+
+function getValidPfaiRanks(pfaiSectionals) {
+    const ranks = [];
+    if (!pfaiSectionals) return ranks;
+    if (pfaiSectionals.last600_rank && pfaiSectionals.last600_rank < 25) ranks.push(pfaiSectionals.last600_rank);
+    if (pfaiSectionals.last400_rank && pfaiSectionals.last400_rank < 25) ranks.push(pfaiSectionals.last400_rank);
+    if (pfaiSectionals.last200_rank && pfaiSectionals.last200_rank < 25) ranks.push(pfaiSectionals.last200_rank);
+    return ranks;
+}
+
+function buildDedupedPFAIEntries(horses) {
+    const deduped = new Map();
+    horses.forEach(function(horse, index) {
+        const ranks = getValidPfaiRanks(horse.pfai_sectionals);
+        if (ranks.length === 0) return;
+        const horseKey = normalizeHorseName(horse.horse_name || horse.runnerName || '');
+        if (!horseKey) return;
+        const avgRank = ranks.reduce(function(a, b) { return a + b; }, 0) / ranks.length;
+        const candidate = { horse: horse, avgRank: avgRank, originalIndex: index };
+        const existing = deduped.get(horseKey);
+        if (!existing ||
+            candidate.avgRank < existing.avgRank ||
+            (candidate.avgRank === existing.avgRank && candidate.originalIndex < existing.originalIndex)) {
+            deduped.set(horseKey, candidate);
+        }
+    });
+    return Array.from(deduped.values()).sort(function(a, b) {
+        if (a.avgRank !== b.avgRank) return a.avgRank - b.avgRank;
+        return a.originalIndex - b.originalIndex;
+    });
+}
+
 function renderSectionalChart(raceNum, horsesData) {
     const container = document.getElementById('sectional_container_race' + raceNum);
     if (!horsesData || horsesData.length === 0) {
@@ -1319,6 +1456,8 @@ function renderSectionalChart(raceNum, horsesData) {
     const chart = new Chart(ctx, { type: 'line', data: chartData.adjusted, options: getChartOptions('adjusted') });
     chartInstances['race' + raceNum] = { chart: chart, data: chartData, horsesData: horsesData };
     generateInsights(raceNum, horsesData);
+    animateSectionalPanel(document.getElementById('chartContainer_race' + raceNum));
+    animateSectionalPanel(document.getElementById('insights_race' + raceNum));
 }
 
 function prepareChartData(horses) {
@@ -1443,37 +1582,26 @@ function switchView(raceId, viewType) {
             renderPFAIHeatmap(raceId, instance.horsesData);
             heatmapContainer.setAttribute('data-rendered', 'true');
         }
+        animateSectionalPanel(heatmapContainer);
+        animateHeatmapRows(heatmapContainer);
     } else {
         chartContainer.style.display = 'block';
         heatmapContainer.style.display = 'none';
         instance.chart.data = instance.data[viewType];
         instance.chart.options = getChartOptions(viewType);
         instance.chart.update();
+        animateSectionalPanel(chartContainer);
     }
 }
 
 function renderPFAIHeatmap(raceNum, horses) {
     const container = document.getElementById('pfaiHeatmap_' + raceNum);
     if (!container) return;
-    const horsesWithPFAI = horses.filter(function(horse) {
-        return horse.pfai_sectionals && (
-            (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < 25) ||
-            (horse.pfai_sectionals.last400_rank && horse.pfai_sectionals.last400_rank < 25) ||
-            (horse.pfai_sectionals.last200_rank && horse.pfai_sectionals.last200_rank < 25)
-        );
-    });
-    if (horsesWithPFAI.length === 0) {
+    const pfaiEntries = buildDedupedPFAIEntries(horses);
+    if (pfaiEntries.length === 0) {
         container.innerHTML = '<div class="no-sectionals">No PFAI sectional data available for this race</div>';
         return;
     }
-    horsesWithPFAI.forEach(function(horse) {
-        const ranks = [];
-        if (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < 25) ranks.push(horse.pfai_sectionals.last600_rank);
-        if (horse.pfai_sectionals.last400_rank && horse.pfai_sectionals.last400_rank < 25) ranks.push(horse.pfai_sectionals.last400_rank);
-        if (horse.pfai_sectionals.last200_rank && horse.pfai_sectionals.last200_rank < 25) ranks.push(horse.pfai_sectionals.last200_rank);
-        horse.avgRank = ranks.length > 0 ? ranks.reduce(function(a, b) { return a + b; }, 0) / ranks.length : 999;
-    });
-    horsesWithPFAI.sort(function(a, b) { return a.avgRank - b.avgRank; });
     let html = '<div style="overflow-x:auto;">';
     html += '<h4 style="margin:0 0 14px; color:#a78bfa; font-size:15px;">🎯 PFAI Sectional Rankings - Last Start Performance</h4>';
     html += '<table class="pfai-heatmap-table"><thead><tr>';
@@ -1483,7 +1611,8 @@ function renderPFAIHeatmap(raceNum, horses) {
     html += '<th style="text-align:center; padding:12px;">200m</th>';
     html += '<th style="text-align:center; padding:12px;">Avg Rank</th>';
     html += '</tr></thead><tbody>';
-    horsesWithPFAI.forEach(function(horse, index) {
+    pfaiEntries.forEach(function(entry, index) {
+        const horse = entry.horse;
         const pfai = horse.pfai_sectionals;
         let rowColor;
         const position = index + 1;
@@ -1492,12 +1621,12 @@ function renderPFAIHeatmap(raceNum, horses) {
         else if (position <= 5) rowColor = '#eab308';
         else if (position <= 7) rowColor = '#f97316';
         else rowColor = '#dc2626';
-        html += '<tr style="background:' + rowColor + ';">';
+        html += '<tr class="pfai-heatmap-row" style="background:' + rowColor + '; --row-index:' + index + ';">';
         html += '<td style="padding:12px; font-weight:600;">' + horse.horse_name + '</td>';
         html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last600_rank) + '</td>';
         html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last400_rank) + '</td>';
         html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last200_rank) + '</td>';
-        html += '<td style="padding:12px; text-align:center; font-weight:700; color:#ffffff;">' + horse.avgRank.toFixed(1) + '</td>';
+        html += '<td style="padding:12px; text-align:center; font-weight:700; color:#ffffff;">' + entry.avgRank.toFixed(1) + '</td>';
         html += '</tr>';
     });
     html += '</tbody></table>';
@@ -1510,6 +1639,8 @@ function renderPFAIHeatmap(raceNum, horses) {
     html += '<span style="display:inline-block; width:18px; height:18px; background:#e5e7eb; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Poor (8th+)';
     html += '</div></div>';
     container.innerHTML = html;
+    animateSectionalPanel(container);
+    animateHeatmapRows(container);
 }
 
 function getRankCell(rank) {
@@ -1602,6 +1733,7 @@ function toggleTop3(raceId) {
     }
     instance.chart.options = getChartOptions('adjusted');
     instance.chart.update();
+    animateSectionalPanel(chartContainer);
 }
 function renderSpeedMap(raceNumber) {
     const data = window['speedMapData_' + raceNumber];
@@ -1640,23 +1772,79 @@ function renderSpeedMap(raceNumber) {
         categories[key].sort(function(a, b) { return a.settle - b.settle; });
     });
 
+    const silkStyles = collectRaceSilkStyles(raceNumber);
+    const columns = [
+        { key: 'leader', label: 'Leader' },
+        { key: 'onpace', label: 'OnPace' },
+        { key: 'midfield', label: 'Midfield' },
+        { key: 'backmarker', label: 'Backmarker' }
+    ];
     const html = '<div class="speedmap-grid">' +
-        '<div class="speedmap-column"><div class="speedmap-column-header">Leader</div>' + categories.leader.map(createHorseCard).join('') + '</div>' +
-        '<div class="speedmap-column"><div class="speedmap-column-header">OnPace</div>' + categories.onpace.map(createHorseCard).join('') + '</div>' +
-        '<div class="speedmap-column"><div class="speedmap-column-header">Midfield</div>' + categories.midfield.map(createHorseCard).join('') + '</div>' +
-        '<div class="speedmap-column"><div class="speedmap-column-header">Backmarker</div>' + categories.backmarker.map(createHorseCard).join('') + '</div>' +
+        columns.map(function(column, columnIndex) {
+            return '<div class="speedmap-column" style="--speedmap-column-delay:' + (columnIndex * 55) + 'ms;">' +
+                '<div class="speedmap-column-header">' + column.label + '</div>' +
+                categories[column.key].map(function(horse, horseIndex) {
+                    return createHorseCard(horse, silkStyles[normalizeHorseName(horse.runnerName)], columnIndex, horseIndex);
+                }).join('') +
+                '</div>';
+        }).join('') +
         '</div>';
 
-    document.querySelector('#speedmap-' + raceNumber + ' .speedmap-container').innerHTML = html;
+    const speedMapContainer = document.querySelector('#speedmap-' + raceNumber + ' .speedmap-container');
+    speedMapContainer.innerHTML = html;
+    const grid = speedMapContainer.querySelector('.speedmap-grid');
+    if (grid) {
+        window.requestAnimationFrame(function() {
+            grid.classList.add('speedmap-grid-visible');
+        });
+    }
 }
-function createHorseCard(horse) {
+function collectRaceSilkStyles(raceNumber) {
+    const silkLookup = {};
+    const raceCard = document.getElementById('race-' + raceNumber);
+    if (!raceCard) return silkLookup;
+    raceCard.querySelectorAll('tbody tr').forEach(function(row) {
+        const nameSpan = row.querySelector('td:nth-child(2) > div > span:first-child');
+        const silkEl = row.querySelector('.lb-silk');
+        if (!nameSpan || !silkEl || !silkEl.style || !silkEl.style.cssText) return;
+        silkLookup[normalizeHorseName(nameSpan.textContent)] = silkEl.style.cssText;
+    });
+    return silkLookup;
+}
+function syncVisibleSpeedMapSilks(raceNumber) {
+    const speedMap = document.getElementById('speedmap-' + raceNumber);
+    if (!speedMap || speedMap.style.display === 'none') return;
+    const silkStyles = collectRaceSilkStyles(raceNumber);
+    speedMap.querySelectorAll('.speedmap-horse-card').forEach(function(card) {
+        const runnerKey = card.getAttribute('data-runner-name');
+        const tabNo = card.getAttribute('data-tab-no') || '';
+        const numberEl = card.querySelector('.speedmap-tab-number');
+        if (!numberEl) return;
+        const silkStyle = silkStyles[runnerKey];
+        if (silkStyle) {
+            numberEl.className = 'speedmap-tab-number speedmap-tab-number--silk';
+            numberEl.style.cssText = silkStyle;
+            numberEl.innerHTML = '<span class="speedmap-tab-number-label">' + tabNo + '</span>';
+        } else {
+            numberEl.className = 'speedmap-tab-number speedmap-tab-number-fallback';
+            numberEl.removeAttribute('style');
+            numberEl.textContent = tabNo;
+        }
+    });
+}
+function createHorseCard(horse, silkStyle, columnIndex, horseIndex) {
     const mapValue = horse.mapA2E || 0;
     let mapClass = 'speedmap-map-neutral';
     if (mapValue > 0) mapClass = 'speedmap-map-positive';
     if (mapValue < 0) mapClass = 'speedmap-map-negative';
-    return '<div class="speedmap-horse-card">' +
-        '<div class="speedmap-tab-number">' + horse.tabNo + '</div>' +
+    const tabMarkup = silkStyle
+        ? '<span class="speedmap-tab-number speedmap-tab-number--silk" style="' + silkStyle + '"><span class="speedmap-tab-number-label">' + horse.tabNo + '</span></span>'
+        : '<span class="speedmap-tab-number speedmap-tab-number-fallback">' + horse.tabNo + '</span>';
+    return '<div class="speedmap-horse-card" data-runner-name="' + normalizeHorseName(horse.runnerName) + '" data-tab-no="' + horse.tabNo + '" style="--speedmap-card-delay:' + ((columnIndex * 55) + (horseIndex * 45)) + 'ms;">' +
+        '<div class="speedmap-card-header">' +
+        tabMarkup +
         '<div class="speedmap-horse-name">' + horse.runnerName + '</div>' +
+        '</div>' +
         '<div class="speedmap-pfai">PFAI: ' + horse.pfaiScore + '</div>' +
         '<div class="speedmap-badges">' +
         '<span class="speedmap-badge speedmap-badge-speed">Speed ' + horse.speed + '</span>' +
@@ -2051,6 +2239,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 oddsCell.appendChild(span);
             }
         });
+
+        syncVisibleSpeedMapSilks(raceNumber);
 
         // Stop polling once race is settled
         if (['Closed','Final','Abandoned','Interim'].indexOf(status) !== -1) {
