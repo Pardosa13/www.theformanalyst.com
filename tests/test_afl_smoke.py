@@ -1586,6 +1586,45 @@ def test_value_finder_source_uses_player_selector_not_sample_size_heuristic():
     assert "player = max(grouped.values(), key=lambda p: len(p.get(\"games\", [])))" not in routes
 
 
+def test_value_finder_uses_canonical_full_name_matching_for_osullivan_collision():
+    routes = Path("afl_routes.py").read_text(encoding="utf-8")
+    fn_start = routes.find('def api_afl_value_finder():')
+    assert fn_start != -1, "api_afl_value_finder not found"
+    fn_end = routes.find('\n    @app.route', fn_start + 1)
+    fn_body = routes[fn_start:] if fn_end == -1 else routes[fn_start:fn_end]
+
+    assert "_canonical_player_name" in routes
+    assert "canonical_full_name" in fn_body
+    assert "stats_by_canonical_name" in fn_body
+    assert "regexp_replace(LOWER(player_last_name), '[^a-z0-9]', '', 'g')" in fn_body
+    assert "LOWER(player_last_name) = ANY(:last_names)" not in fn_body
+
+
+def test_value_finder_current_season_metrics_use_current_season_rows():
+    routes = Path("afl_routes.py").read_text(encoding="utf-8")
+    fn_start = routes.find('def api_afl_value_finder():')
+    assert fn_start != -1, "api_afl_value_finder not found"
+    fn_end = routes.find('\n    @app.route', fn_start + 1)
+    fn_body = routes[fn_start:] if fn_end == -1 else routes[fn_start:fn_end]
+
+    assert 'season_games = [g for g in games if g.get("season") == effective_season]' in fn_body
+    assert 'season_games = [g for g in games if g.get("season") == effective_season] or games' not in fn_body
+    assert 'player_stats=season_games' in fn_body
+    assert 'for r in season_games if (r.get(stat_name, 0) or 0) > book_line' in fn_body
+    assert '"sample_size": len(season_games)' in fn_body
+
+
+def test_value_finder_diagnostic_script_proves_finn_osullivan_average():
+    script = Path("scripts/afl_value_finder_diagnostics.py")
+    assert script.exists()
+    output = os.popen(f"{sys.executable} {script}").read()
+    assert "Finn O’Sullivan" in output
+    assert "canonical=finnosullivan" in output
+    assert "disposals=[22, 21, 24, 21, 24, 18, 15]" in output
+    assert "season_avg=20.7" in output
+    assert "Finn Callaghan" in output
+
+
 # Model sanity checks for AFL value finder / SGM calculations
 
 def test_calculate_market_edge_uses_requested_market_stat_not_disposals():

@@ -15,7 +15,9 @@ Key fixes in this rewrite:
 from __future__ import annotations
 
 import logging
+import re
 import time
+import unicodedata
 from collections import defaultdict
 
 import requests as _requests
@@ -735,49 +737,66 @@ def register_afl_routes(app, db):
                 continue
             first_name = parts[0].lower()
             last_name = parts[-1].lower()
+            canonical_last_name = _canonical_player_name(last_name)
+            canonical_full_name = _canonical_player_name(pname)
+            if not (canonical_last_name and canonical_full_name):
+                continue
             prop_name_meta.append(
                 {
                     "prop": prop,
                     "player_name": pname,
-                    "first_initial": first_name[0],
-                    "last_name": last_name,
+                    "first_initial": _canonical_player_name(first_name)[:1],
+                    "last_name": canonical_last_name,
                     "full_name": _normalize_whitespace(f"{first_name} {last_name}"),
+                    "canonical_full_name": canonical_full_name,
                 }
             )
-            all_last_names.add(last_name)
+            all_last_names.add(canonical_last_name)
 
         all_stats_rows: list[dict] = []
-        if all_last_names:
-            bulk_sql = db.text(
-                """
+        bulk_sql_text = """
                 SELECT *
                 FROM afl_player_stats
-                WHERE LOWER(player_last_name) = ANY(:last_names)
+                WHERE regexp_replace(LOWER(player_last_name), '[^a-z0-9]', '', 'g') = ANY(:last_names)
                   AND season = ANY(:seasons)
                 ORDER BY season DESC, match_date DESC
                 """
-            )
+        if all_last_names:
+            bulk_sql = db.text(bulk_sql_text)
+            bulk_params = {"last_names": sorted(all_last_names), "seasons": effective_seasons}
+            if "finnosullivan" in {m.get("canonical_full_name") for m in prop_name_meta}:
+                logger.info(
+                    "AFL Value Finder Finn O'Sullivan stats SQL: %s params=%s",
+                    " ".join(bulk_sql_text.split()),
+                    bulk_params,
+                )
             with db.engine.connect() as conn:
-                bulk_rows = conn.execute(
-                    bulk_sql,
-                    {"last_names": list(all_last_names), "seasons": effective_seasons},
-                ).mappings().fetchall()
+                bulk_rows = conn.execute(bulk_sql, bulk_params).mappings().fetchall()
             all_stats_rows = [dict(r) for r in bulk_rows]
 
         stats_by_key: dict[tuple[str, str], list[dict]] = defaultdict(list)
         stats_by_name: dict[str, list[dict]] = defaultdict(list)
+        stats_by_canonical_name: dict[str, list[dict]] = defaultdict(list)
         for row in all_stats_rows:
             ln = (row.get("player_last_name") or "").lower()
             fn = (row.get("player_first_name") or "").lower()
-            if not (ln and fn):
+            canonical_last = _canonical_player_name(ln)
+            canonical_first = _canonical_player_name(fn)
+            canonical_full = _canonical_player_full_name(fn, ln)
+            if not (canonical_last and canonical_first):
                 continue
-            stats_by_key[(fn[0], ln)].append(row)
+            stats_by_key[(canonical_first[0], canonical_last)].append(row)
             stats_by_name[_normalize_whitespace(f"{fn} {ln}")].append(row)
+            stats_by_canonical_name[canonical_full].append(row)
 
         value_bets = []
         for meta in prop_name_meta:
             prop = meta["prop"]
-            player_rows = stats_by_name.get(meta["full_name"]) or stats_by_key.get((meta["first_initial"], meta["last_name"]), [])
+            player_rows = (
+                stats_by_canonical_name.get(meta["canonical_full_name"])
+                or stats_by_name.get(meta["full_name"])
+                or stats_by_key.get((meta["first_initial"], meta["last_name"]), [])
+            )
             if not player_rows:
                 continue
             grouped = _group_players(player_rows)
@@ -793,11 +812,12 @@ def register_afl_routes(app, db):
             if not player:
                 continue
             games = sorted(player["games"], key=_sort_date_key, reverse=True)
-            if len(games) < max(min_games, 3):
+            if len(games) < 3:
                 continue
 
-            season_games = [g for g in games if g.get("season") == effective_season] or games
-            if len(season_games) < max(min_games // 2, 3):
+            season_games = [g for g in games if g.get("season") == effective_season]
+            season_min_games = max(min_games // 2, 3)
+            if len(season_games) < season_min_games:
                 continue
 
             line_type = prop.get("line_type", "")
@@ -822,6 +842,45 @@ def register_afl_routes(app, db):
             vs_opp_avg = _safe_avg(opp_rows_filtered, stat_name) if opp_rows_filtered else None
             last5_avg = _safe_avg(season_games[:5], stat_name) if season_games else None
 
+            if meta.get("canonical_full_name") == "finnosullivan":
+                logger.info(
+                    "AFL Value Finder Finn O'Sullivan match: player_id=%s name=%s team=%s "
+                    "season=%s row_count=%s rounds=%s %s_values=%s season_avg=%s last5_avg=%s vs_opp_avg=%s",
+                    player.get("player_id"),
+                    player.get("name"),
+                    team_name,
+                    effective_season,
+                    len(season_games),
+                    [g.get("match_round") for g in season_games],
+                    stat_name,
+                    [g.get(stat_name) for g in season_games],
+                    season_avg,
+                    last5_avg,
+                    vs_opp_avg,
+                )
+                detail_rows = _resolve_player_rows(
+                    db=db,
+                    player_id=player.get("player_id"),
+                    name=player.get("name", meta["player_name"]),
+                    team=team_name,
+                    seasons=effective_seasons,
+                    limit=300,
+                )
+                detail_grouped = _group_players(detail_rows)
+                detail_player = detail_grouped.get(player.get("player_id")) if detail_grouped else None
+                detail_games = sorted((detail_player or {}).get("games", []), key=_sort_date_key, reverse=True)
+                detail_season_games = [g for g in detail_games if g.get("season") == effective_season]
+                logger.info(
+                    "AFL Player Detail comparison Finn O'Sullivan: player_id=%s row_count=%s rounds=%s "
+                    "%s_values=%s season_avg=%s",
+                    player.get("player_id"),
+                    len(detail_season_games),
+                    [g.get("match_round") for g in detail_season_games],
+                    stat_name,
+                    [g.get(stat_name) for g in detail_season_games],
+                    _safe_avg(detail_season_games, stat_name),
+                )
+
             edge_data = calculate_market_edge(
                 player_avg=season_avg,
                 book_line=book_line,
@@ -830,19 +889,19 @@ def register_afl_routes(app, db):
                 market=market,
                 vs_opp_avg=vs_opp_avg,
                 last5_avg=last5_avg,
-                player_stats=games,
+                player_stats=season_games,
             )
             edge = edge_data["edge"]
             if edge < min_edge:
                 continue
 
             if line_type == "Over":
-                hits = sum(1 for r in games if (r.get(stat_name, 0) or 0) > book_line)
-                pushes = sum(1 for r in games if (r.get(stat_name, 0) or 0) == book_line)
+                hits = sum(1 for r in season_games if (r.get(stat_name, 0) or 0) > book_line)
+                pushes = sum(1 for r in season_games if (r.get(stat_name, 0) or 0) == book_line)
             else:
-                hits = sum(1 for r in games if (r.get(stat_name, 0) or 0) < book_line)
-                pushes = sum(1 for r in games if (r.get(stat_name, 0) or 0) == book_line)
-            hist_pct = round(hits / max(len(games) - pushes, 1) * 100, 1)
+                hits = sum(1 for r in season_games if (r.get(stat_name, 0) or 0) < book_line)
+                pushes = sum(1 for r in season_games if (r.get(stat_name, 0) or 0) == book_line)
+            hist_pct = round(hits / max(len(season_games) - pushes, 1) * 100, 1)
             confidence_score = round(
                 max(
                     0.0,
@@ -881,7 +940,7 @@ def register_afl_routes(app, db):
                     "vs_opp_avg": vs_opp_avg,
                     "last5_avg": last5_avg,
                     "hist_pct": hist_pct,
-                    "sample_size": len(games),
+                    "sample_size": len(season_games),
                     "confidence_score": confidence_score,
                     "model_prediction": edge_data["model_prediction"],
                     "model_prob": edge_data.get("model_prob"),
@@ -908,7 +967,7 @@ def register_afl_routes(app, db):
 
         value_bets = [
             b for b in best_per_player.values()
-            if b.get("sample_size", 0) >= min_games
+            if b.get("sample_size", 0) >= max(min_games // 2, 3)
             and b.get("recommendation") == "value"
             and float(b.get("edge") or 0) >= min_edge
         ]
@@ -2466,6 +2525,17 @@ def _normalize_whitespace(value: str) -> str:
     return " ".join((value or "").strip().split())
 
 
+def _canonical_player_name(value: str) -> str:
+    """Return a punctuation-insensitive player-name key for prop/stat matching."""
+    normalized = unicodedata.normalize("NFKD", _normalize_whitespace(value).lower())
+    normalized = normalized.replace("’", "'").replace("`", "'")
+    return re.sub(r"[^a-z0-9]", "", normalized)
+
+
+def _canonical_player_full_name(first_name: str, last_name: str) -> str:
+    return _canonical_player_name(f"{first_name} {last_name}")
+
+
 def _db_player_search(
     db,
     name: str = "",
@@ -3070,6 +3140,7 @@ def _select_value_finder_player(
         return None
 
     normalized_full_name = _normalize_whitespace(full_name).lower()
+    canonical_full_name = _canonical_player_name(full_name)
     prop_teams = {
         _normalise_team_name(prop_home_team),
         _normalise_team_name(prop_away_team),
@@ -3080,6 +3151,7 @@ def _select_value_finder_player(
         p
         for p in candidates
         if _normalize_whitespace(p.get("name", "")).lower() == normalized_full_name
+        or _canonical_player_name(p.get("name", "")) == canonical_full_name
     ]
     if exact_name_matches:
         candidates = exact_name_matches
