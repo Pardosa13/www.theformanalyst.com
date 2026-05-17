@@ -1211,6 +1211,13 @@ function norm(v) {
   return String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+function fmtDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16).replace('T', ' ');
+  return date.toISOString().slice(0, 16).replace('T', ' ');
+}
+
 function mono(v) {
   return `<span style="font-family:'DM Mono',monospace;">${esc(v)}</span>`;
 }
@@ -2637,13 +2644,12 @@ function loadAflResultsAnalysis() {
       settledRowsEl.innerHTML = settledRows.length ? settledRows.slice(0, 80).map(r => {
         const res = (r.result || 'pending').toLowerCase();
         const resCls = res === 'win' ? 'pos' : res === 'loss' ? 'neg' : 'neu';
-        const dt = r.settled_at || r.commence_time || '';
-        const dtText = dt ? String(dt).slice(0, 16).replace('T', ' ') : '—';
+        const dtText = fmtDateTime(r.settled_at || r.commence_time);
         return `<tr>
           <td>${esc(dtText)}</td>
           <td>${esc(r.player_name || '—')}</td>
           <td>${esc((r.market || '').replace('player_', '').replace(/_/g, ' '))}</td>
-          <td>${esc(r.line_type || '—')} ${safeNum(r.line, 0)}</td>
+          <td>${esc(r.line_type || '—')} ${safeNum(r.line, 0).toFixed(1)}</td>
           <td><span class="edge-chip ${resCls}">${esc(res)}</span></td>
           <td>${r.actual_stat != null ? safeNum(r.actual_stat, 0).toFixed(1) : '—'}</td>
           <td>${r.profit_units != null ? safeNum(r.profit_units, 0).toFixed(2) : '—'}</td>
