@@ -168,6 +168,7 @@
   transition: opacity 0.15s, transform 0.15s;
 }
 .vm-nav-pill:hover { opacity: 0.85; transform: translateY(-1px); }
+.vm-nav-pill:active { transform: scale(0.97); }
 
 /* ── Per-race cards ── */
 .vm-race-card {
@@ -438,6 +439,8 @@ details pre {
    SPEED MAP — dark columns, vivid colours
 ══════════════════════════════════════════ */
 .speedmap-container { overflow-x: auto; padding: 20px 0; }
+.speedmap-collapse { overflow: hidden; max-height: 0; opacity: 0; transform: translateY(-6px); transition: max-height 0.36s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.24s ease, transform 0.24s ease; }
+.speedmap-collapse.is-open { opacity: 1; transform: translateY(0); }
 
 .speedmap-grid {
   display: grid;
@@ -483,7 +486,7 @@ details pre {
   padding: 11px;
   margin-bottom: 9px;
   opacity: 0;
-  transform: translate3d(0, 18px, 0) scale(0.985);
+  transform: translate3d(var(--speedmap-enter-x, 0), 16px, 0) scale(0.96);
   transition:
     opacity 0.34s ease,
     transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
@@ -599,6 +602,19 @@ details pre {
 .speedmap-map-positive { background: rgba(16,185,129,0.25); color: #34d399; border: 1px solid rgba(16,185,129,0.4); }
 .speedmap-map-neutral  { background: rgba(107,114,128,0.2);  color: #9ca3af; border: 1px solid rgba(107,114,128,0.3); }
 .speedmap-map-negative { background: rgba(239,68,68,0.2);    color: #f87171; border: 1px solid rgba(239,68,68,0.35); }
+.speedmap-map-standout {
+  box-shadow: 0 0 0 1px rgba(52,211,153,0.18), 0 0 14px rgba(52,211,153,0.22);
+  animation: mapGlowPulse 3.8s ease-in-out infinite;
+}
+.speedmap-map-elite {
+  box-shadow: 0 0 0 1px rgba(52,211,153,0.28), 0 0 22px rgba(52,211,153,0.32);
+  animation-duration: 3.2s;
+}
+.speedmap-metric { font-variant-numeric: tabular-nums; }
+@keyframes mapGlowPulse {
+  0%, 100% { filter: brightness(1); box-shadow: 0 0 0 1px rgba(52,211,153,0.18), 0 0 12px rgba(52,211,153,0.18); }
+  50% { filter: brightness(1.08); box-shadow: 0 0 0 1px rgba(52,211,153,0.34), 0 0 24px rgba(52,211,153,0.34); }
+}
 
 .speedmap-jockey {
   font-size: 11px;
@@ -614,12 +630,15 @@ details pre {
   color: var(--text-primary) !important;
   border-radius: 8px !important;
   font-weight: 600 !important;
-  transition: border-color 0.15s, color 0.15s;
+  transition: transform 0.14s ease, border-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
 .vm-race-card .btn-secondary:hover {
   border-color: var(--accent) !important;
   color: var(--accent) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 0 14px rgba(102,126,234,0.18);
 }
+.vm-race-card .btn-secondary:active { transform: scale(0.97); }
 
 /* Speed map outer card */
 .vm-speedmap-outer {
@@ -675,20 +694,26 @@ details pre {
   cursor: pointer;
   font-weight: 700;
   font-size: 12px;
-  transition: all 0.15s;
+  transition: transform 0.14s ease, border-color 0.15s ease, color 0.15s ease, background 0.15s ease, box-shadow 0.2s ease;
   font-family: inherit;
+  touch-action: manipulation;
 }
 .chart-toggle-btn:hover {
+  transform: translateY(-1px);
   border-color: var(--accent);
   color: var(--accent);
   background: rgba(102,126,234,0.08);
 }
+.chart-toggle-btn:active { transform: scale(0.97); box-shadow: 0 0 18px rgba(102,126,234,0.28); }
 .chart-toggle-btn.active {
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 50%, var(--accent) 100%);
+  background-size: 180% 180%;
   color: white;
   border-color: var(--accent-2);
   box-shadow: 0 2px 10px rgba(102,126,234,0.35);
+  animation: activeTabSheen 6s ease-in-out infinite;
 }
+@keyframes activeTabSheen { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
 
 /* Chart canvas wrapper */
 #chartContainer_race,
@@ -721,6 +746,8 @@ details pre {
   line-height: 1.5;
   font-size: 12px;
 }
+.chart-insights.insights-visible .insight-item { animation: insightFadeUp 0.42s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: calc(var(--insight-index, 0) * 130ms); }
+@keyframes insightFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .insight-item strong { color: var(--text-primary); }
 
 .sectional-animated-panel {
@@ -807,6 +834,43 @@ details pre {
   margin-bottom: 12px !important;
 }
 
+
+.top3-podium {
+  display: none;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.top3-podium.is-visible { display: grid; }
+.top3-podium-card {
+  background: rgba(255,255,255,0.045);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 10px;
+  opacity: 0;
+  transform: translateY(12px) scale(0.98);
+  animation: podiumReveal 0.42s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: calc(var(--podium-index, 0) * 120ms);
+}
+.top3-podium-card:first-child { border-color: rgba(251,191,36,0.55); box-shadow: 0 0 22px rgba(251,191,36,0.16); }
+.top3-podium-card:nth-child(2) { border-color: rgba(192,192,192,0.36); }
+.top3-podium-card:nth-child(3) { border-color: rgba(205,127,50,0.32); }
+.top3-rank { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.top3-name { margin-top: 3px; color: var(--text-primary); font-weight: 800; font-size: 13px; }
+.top3-time { margin-top: 3px; color: #c084fc; font-family: 'DM Mono', monospace; font-size: 12px; }
+@keyframes podiumReveal { to { opacity: 1; transform: translateY(0) scale(1); } }
+.tfa-skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+  background-size: 220% 100%;
+  animation: tfaSkeletonShimmer 1.35s ease-in-out infinite;
+  border: 1px solid var(--border-subtle);
+}
+.tfa-skeleton-chart { min-height: 350px; }
+.tfa-skeleton-speedmap { min-height: 180px; }
+@keyframes tfaSkeletonShimmer { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
 @keyframes sectionalFadeUp {
   from {
     opacity: 0;
@@ -961,7 +1025,7 @@ details pre {
   text-decoration: none !important;
   font-weight: 700;
   font-size: 13px;
-  transition: border-color 0.15s, color 0.15s;
+  transition: transform 0.14s ease, border-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
 .vm-back-top a:hover {
   border-color: var(--accent);
@@ -984,6 +1048,12 @@ details pre {
 }
 
 /* ── Responsive ── */
+
+@media (prefers-reduced-motion: reduce) {
+  .speedmap-collapse, .speedmap-column, .speedmap-horse-card, .sectional-animated-panel, .insight-item, .chart-toggle-btn, .top3-podium-card, .tfa-skeleton { animation: none !important; transition: none !important; }
+  .speedmap-column, .speedmap-horse-card, .sectional-animated-panel, .insight-item, .top3-podium-card { opacity: 1 !important; transform: none !important; }
+  .speedmap-map-standout, .speedmap-map-elite { animation: none !important; }
+}
 @media (max-width: 768px) {
   .sectional-section { padding: 14px; }
   .chart-toggle-btn  { font-size: 11px; padding: 6px 11px; }
@@ -1154,7 +1224,7 @@ function updateScratchings(meetingId) {
         <span id="speedmap-toggle-{{ race.race_number }}">▼ Show</span>
       </button>
     </div>
-    <div id="speedmap-{{ race.race_number }}" style="display:none;">
+    <div id="speedmap-{{ race.race_number }}" class="speedmap-collapse" style="display:none;">
       <div class="speedmap-container"></div>
     </div>
   </div>
@@ -1165,7 +1235,7 @@ function updateScratchings(meetingId) {
   <div class="sectional-section">
     <h3><span>📊</span><span>Sectional Analysis - Last 5 Runs</span></h3>
     <div id="sectional_container_race{{ race.race_number }}">
-      <div class="loading-spinner"><div>Loading sectional data...</div></div>
+      <div class="tfa-skeleton tfa-skeleton-chart" aria-label="Loading sectional data"></div>
     </div>
   </div>
 
@@ -1339,9 +1409,13 @@ const SPEEDMAP_SILK_BADGE_SIZE = 36;
 const SPEEDMAP_SILK_BADGE_RADIUS = 10;
 const HORSE_NAME_SELECTOR = '.horse-name-label';
 var _lbSilkCache = {}; // { raceNumber: { runnerNumber: cssText } } — populated by Ladbrokes polling
+const TFA_REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const TFA_ANIMATED_ONCE = new WeakSet();
+const TFA_COUNTED_METRICS = new Set();
 
 function initializeSectionalCharts() {
     if (typeof Chart === 'undefined') { setTimeout(initializeSectionalCharts, 100); return; }
+    if (Chart.register && !window.tfaLineGlowRegistered) { Chart.register(tfaLineGlowPlugin); window.tfaLineGlowRegistered = true; }
     fetch('/api/meeting/' + meetingId + '/sectionals')
         .then(function(response) { return response.json(); })
         .then(function(data) {
@@ -1411,6 +1485,125 @@ function animateHeatmapRows(container) {
     container.classList.add('pfai-heatmap-animate');
 }
 
+function runWhenVisibleOnce(element, callback, options) {
+    if (!element || TFA_ANIMATED_ONCE.has(element)) return;
+    if (TFA_REDUCED_MOTION || !('IntersectionObserver' in window)) {
+        TFA_ANIMATED_ONCE.add(element);
+        callback(element);
+        return;
+    }
+    const observer = new IntersectionObserver(function(entries, obs) {
+        entries.forEach(function(entry) {
+            if (!entry.isIntersecting) return;
+            TFA_ANIMATED_ONCE.add(element);
+            callback(element);
+            obs.unobserve(element);
+        });
+    }, options || { threshold: 0.2, rootMargin: '0px 0px -8% 0px' });
+    observer.observe(element);
+}
+
+function animateCountUpElement(element) {
+    if (!element || element.dataset.counted === 'true') return;
+    const countKey = element.dataset.countKey || '';
+    const finalValue = parseFloat(element.dataset.countTo || '0');
+    const decimals = parseInt(element.dataset.countDecimals || '0', 10);
+    const prefix = element.dataset.countPrefix || '';
+    const duration = TFA_REDUCED_MOTION ? 0 : parseInt(element.dataset.countDuration || '720', 10);
+    element.dataset.counted = 'true';
+    if (countKey && TFA_COUNTED_METRICS.has(countKey)) {
+        element.textContent = prefix + finalValue.toFixed(decimals);
+        return;
+    }
+    if (countKey) TFA_COUNTED_METRICS.add(countKey);
+    if (!duration) {
+        element.textContent = prefix + finalValue.toFixed(decimals);
+        return;
+    }
+    const start = performance.now();
+    function tick(now) {
+        const progress = Math.min(1, (now - start) / duration);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        element.textContent = prefix + (finalValue * eased).toFixed(decimals);
+        if (progress < 1) window.requestAnimationFrame(tick);
+    }
+    window.requestAnimationFrame(tick);
+}
+
+function animateVisibleCountUps(scope) {
+    (scope || document).querySelectorAll('[data-count-to]').forEach(function(element) {
+        runWhenVisibleOnce(element, animateCountUpElement, { threshold: 0.45 });
+    });
+}
+
+function setCollapsibleOpen(element, isOpen, afterOpen) {
+    if (!element) return;
+    if (TFA_REDUCED_MOTION) {
+        element.style.display = isOpen ? 'block' : 'none';
+        element.classList.toggle('is-open', isOpen);
+        if (isOpen && afterOpen) afterOpen();
+        return;
+    }
+    if (isOpen) {
+        element.style.display = 'block';
+        element.style.maxHeight = '0px';
+        element.classList.remove('is-open');
+        if (afterOpen) afterOpen();
+        window.requestAnimationFrame(function() {
+            element.classList.add('is-open');
+            element.style.maxHeight = element.scrollHeight + 'px';
+        });
+    } else {
+        element.style.maxHeight = element.scrollHeight + 'px';
+        element.getBoundingClientRect();
+        element.classList.remove('is-open');
+        element.style.maxHeight = '0px';
+        window.setTimeout(function() {
+            if (!element.classList.contains('is-open')) element.style.display = 'none';
+        }, 380);
+    }
+}
+
+function hexToRgba(color, alpha) {
+    if (!color || color.indexOf('#') !== 0) return color;
+    const hex = color.replace('#', '');
+    const full = hex.length === 3 ? hex.split('').map(function(c) { return c + c; }).join('') : hex;
+    const num = parseInt(full, 16);
+    return 'rgba(' + ((num >> 16) & 255) + ',' + ((num >> 8) & 255) + ',' + (num & 255) + ',' + alpha + ')';
+}
+
+function applyDatasetHighlight(chart, activeIndex) {
+    chart.data.datasets.forEach(function(dataset, index) {
+        const baseColor = dataset._baseBorderColor || dataset.borderColor;
+        const baseWidth = dataset._baseBorderWidth || dataset.borderWidth || 2;
+        dataset.borderColor = activeIndex == null || index === activeIndex ? baseColor : hexToRgba(baseColor, 0.24);
+        dataset.backgroundColor = activeIndex == null || index === activeIndex ? hexToRgba(baseColor, 0.2) : hexToRgba(baseColor, 0.08);
+        dataset.borderWidth = activeIndex == null ? baseWidth : (index === activeIndex ? baseWidth + 2 : Math.max(1, baseWidth - 1));
+        dataset.pointRadius = activeIndex == null ? (dataset._basePointRadius || 5) : (index === activeIndex ? (dataset._basePointRadius || 5) + 2 : 3);
+        dataset.tfaGlow = activeIndex == null ? 0.35 : (index === activeIndex ? 0.9 : 0.12);
+    });
+    chart.update();
+}
+
+const tfaLineGlowPlugin = {
+    id: 'tfaLineGlow',
+    beforeDatasetDraw: function(chart, args) {
+        if (TFA_REDUCED_MOTION) return;
+        const meta = chart.getDatasetMeta(args.index);
+        const dataset = chart.data.datasets[args.index];
+        if (!meta || !meta.dataset || meta.hidden) return;
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.shadowColor = dataset._baseBorderColor || dataset.borderColor;
+        ctx.shadowBlur = 10 + Math.round((dataset.tfaGlow || 0.35) * 12);
+        ctx.globalAlpha = 0.34 + (dataset.tfaGlow || 0.35) * 0.18;
+        meta.dataset.draw(ctx);
+        meta.data.forEach(function(point) { point.draw(ctx); });
+        ctx.restore();
+    }
+};
+if (typeof Chart !== 'undefined' && Chart.register && !window.tfaLineGlowRegistered) { Chart.register(tfaLineGlowPlugin); window.tfaLineGlowRegistered = true; }
+
 function normalizeHorseName(name) {
   // Strip punctuation and bracketed suffixes so names like "Horse Name (IRE)" match the base table/API name.
   return (name || '')
@@ -1476,6 +1669,7 @@ function renderSectionalChart(raceNum, horsesData) {
         '<button class="chart-toggle-btn" id="top3-btn-race' + raceNum + '" onclick="toggleTop3(\'race' + raceNum + '\')">🏆 Top 3 Adjusted Times</button>' +
         '</div>' +
         '<div id="chartContainer_race' + raceNum + '" style="position:relative; height:350px; background:var(--bg-surface); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);">' +
+        '<div class="top3-podium" id="top3-podium-race' + raceNum + '"></div>' +
         '<canvas id="sectionalChart_race' + raceNum + '"></canvas>' +
         '</div>' +
         '<div id="pfaiHeatmap_race' + raceNum + '" style="display:none; background:var(--bg-surface); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);"></div>' +
@@ -1487,6 +1681,17 @@ function renderSectionalChart(raceNum, horsesData) {
     generateInsights(raceNum, horsesData);
     animateSectionalPanel(document.getElementById('chartContainer_race' + raceNum));
     animateSectionalPanel(document.getElementById('insights_race' + raceNum));
+}
+
+function decorateChartDataset(dataset, index, color) {
+    dataset._baseBorderColor = color;
+    dataset._baseBorderWidth = dataset.borderWidth || 2;
+    dataset._basePointRadius = dataset.pointRadius || 5;
+    dataset.pointBackgroundColor = color;
+    dataset.pointBorderColor = '#0b0b12';
+    dataset.pointBorderWidth = 1.5;
+    dataset.tfaGlow = index < 3 ? 0.52 : 0.34;
+    return dataset;
 }
 
 function prepareChartData(horses) {
@@ -1503,9 +1708,9 @@ function prepareChartData(horses) {
         const zscores = historyAdj.map(function(time) { if (stdDev === 0) return 0; return -1 * (time - mean) / stdDev; });
         const bestTime = horse.best_recent ? horse.best_recent.adjusted_time.toFixed(2) + 's' : 'N/A';
         const bestRawTime = horse.best_recent ? horse.best_recent.raw_time.toFixed(2) + 's' : 'N/A';
-        datasets.adjusted.push({ label: horse.horse_name + ' (' + bestTime + ')', data: historyAdj, borderColor: color, backgroundColor: color + '33', tension: 0.3, pointRadius: 5, pointHoverRadius: 8, borderWidth: index < 3 ? 3 : 2 });
-        datasets.raw.push({ label: horse.horse_name + ' (' + bestRawTime + ')', data: historyRaw, borderColor: color, backgroundColor: color + '33', tension: 0.3, pointRadius: 5, pointHoverRadius: 8, borderWidth: index < 3 ? 3 : 2 });
-        datasets.zscore.push({ label: horse.horse_name + ' (z=' + (horse.best_recent ? horse.best_recent.zscore.toFixed(2) : 'N/A') + ')', data: zscores, borderColor: color, backgroundColor: color + '33', tension: 0.3, pointRadius: 5, pointHoverRadius: 8, borderWidth: index < 3 ? 3 : 2 });
+        datasets.adjusted.push(decorateChartDataset({ label: horse.horse_name + ' (' + bestTime + ')', data: historyAdj, borderColor: color, backgroundColor: color + '33', tension: 0.3, pointRadius: 5, pointHoverRadius: 8, borderWidth: index < 3 ? 3 : 2 }, index, color));
+        datasets.raw.push(decorateChartDataset({ label: horse.horse_name + ' (' + bestRawTime + ')', data: historyRaw, borderColor: color, backgroundColor: color + '33', tension: 0.3, pointRadius: 5, pointHoverRadius: 8, borderWidth: index < 3 ? 3 : 2 }, index, color));
+        datasets.zscore.push(decorateChartDataset({ label: horse.horse_name + ' (z=' + (horse.best_recent ? horse.best_recent.zscore.toFixed(2) : 'N/A') + ')', data: zscores, borderColor: color, backgroundColor: color + '33', tension: 0.3, pointRadius: 5, pointHoverRadius: 8, borderWidth: index < 3 ? 3 : 2 }, index, color));
         if (horse.pfai_sectionals) {
             const pfai = horse.pfai_sectionals;
             const pfaiData = [];
@@ -1514,7 +1719,7 @@ function prepareChartData(horses) {
             if (pfai.last200_rank && pfai.last200_rank < PFAI_RANK_THRESHOLD) pfaiData.push(pfai.last200_rank);
             if (pfaiData.length > 0) {
                 const avgRank = (pfaiData.reduce(function(a, b) { return a + b; }, 0) / pfaiData.length).toFixed(1);
-                datasets.pfai.push({ label: horse.horse_name + ' (Avg: #' + avgRank + ')', data: pfaiData, borderColor: color, backgroundColor: color + '33', tension: 0, pointRadius: 8, pointHoverRadius: 12, borderWidth: index < 3 ? 4 : 3 });
+                datasets.pfai.push(decorateChartDataset({ label: horse.horse_name + ' (Avg: #' + avgRank + ')', data: pfaiData, borderColor: color, backgroundColor: color + '33', tension: 0, pointRadius: 8, pointHoverRadius: 12, borderWidth: index < 3 ? 4 : 3 }, index, color));
             }
         }
     });
@@ -1534,6 +1739,7 @@ function getChartOptions(viewType) {
     return {
         responsive: true,
         maintainAspectRatio: false,
+        animation: { duration: TFA_REDUCED_MOTION ? 0 : 1150, easing: 'easeOutQuart', delay: function(context) { return context.type === 'dataset' ? context.datasetIndex * 110 : 0; } },
         interaction: { mode: 'nearest', axis: 'x', intersect: false },
         plugins: {
             legend: {
@@ -1543,6 +1749,14 @@ function getChartOptions(viewType) {
                     font: { size: 11 },
                     usePointStyle: true,
                     color: '#c8c8d8'   /* ← dark-friendly legend text */
+                },
+                onClick: function(e, legendItem, legend) {
+                    const chart = legend.chart;
+                    const raceId = chart.canvas.id.replace('sectionalChart_', '');
+                    const instance = chartInstances[raceId];
+                    if (!instance) return;
+                    instance.activeDatasetIndex = instance.activeDatasetIndex === legendItem.datasetIndex ? null : legendItem.datasetIndex;
+                    applyDatasetHighlight(chart, instance.activeDatasetIndex);
                 }
             },
             tooltip: {
@@ -1597,11 +1811,12 @@ function getChartOptions(viewType) {
 }
 
 function switchView(raceId, viewType) {
+    const trigger = window.event && window.event.target ? window.event.target : null;
     const instance = chartInstances[raceId];
     if (!instance) return;
-    const buttons = event.target.parentElement.querySelectorAll('.chart-toggle-btn');
+    const buttons = trigger ? trigger.parentElement.querySelectorAll('.chart-toggle-btn') : [];
     buttons.forEach(function(btn) { btn.classList.remove('active'); });
-    event.target.classList.add('active');
+    if (trigger) trigger.classList.add('active');
     const chartContainer = document.getElementById('chartContainer_' + raceId);
     const heatmapContainer = document.getElementById('pfaiHeatmap_' + raceId);
     if (viewType === 'pfai') {
@@ -1616,6 +1831,7 @@ function switchView(raceId, viewType) {
     } else {
         chartContainer.style.display = 'block';
         heatmapContainer.style.display = 'none';
+        instance.activeDatasetIndex = null;
         instance.chart.data = instance.data[viewType];
         instance.chart.options = getChartOptions(viewType);
         instance.chart.update();
@@ -1724,16 +1940,20 @@ function generateInsights(raceNum, horses) {
         if (spread < 0.5) insights.push('⚠️ <strong>Tight Race:</strong> Top ' + times.length + ' within 0.5s - highly competitive');
         else if (spread > 1.5) insights.push('📈 <strong>Standout:</strong> ' + spread.toFixed(2) + 's gap suggests clear leader on sectionals');
     }
-    container.innerHTML = '<h4>Key Insights</h4>' + insights.map(function(i) { return '<div class="insight-item">' + i + '</div>'; }).join('');
+    container.innerHTML = '<h4>Key Insights</h4>' + insights.map(function(i, index) { return '<div class="insight-item" style="--insight-index:' + index + ';">' + i + '</div>'; }).join('');
+    runWhenVisibleOnce(container, function(el) { el.classList.add('insights-visible'); }, { threshold: 0.35 });
 }
 
 function toggleSpeedMap(raceNumber) {
     const container = document.getElementById('speedmap-' + raceNumber);
     const toggle = document.getElementById('speedmap-toggle-' + raceNumber);
-    if (container.style.display === 'none' || container.style.display === '') {
-        container.style.display = 'block'; toggle.textContent = '▲ Hide'; renderSpeedMap(raceNumber);
+    const isClosed = container.style.display === 'none' || container.style.display === '' || !container.classList.contains('is-open');
+    if (isClosed) {
+        toggle.textContent = '▲ Hide';
+        setCollapsibleOpen(container, true, function() { renderSpeedMap(raceNumber); });
     } else {
-        container.style.display = 'none'; toggle.textContent = '▼ Show';
+        toggle.textContent = '▼ Show';
+        setCollapsibleOpen(container, false);
     }
 }
 const top3Active = {};
@@ -1745,6 +1965,7 @@ function toggleTop3(raceId) {
 
     const chartContainer = document.getElementById('chartContainer_' + raceId);
     const heatmapContainer = document.getElementById('pfaiHeatmap_' + raceId);
+    const podium = document.getElementById('top3-podium-' + raceId);
     chartContainer.style.display = 'block';
     heatmapContainer.style.display = 'none';
 
@@ -1756,9 +1977,19 @@ function toggleTop3(raceId) {
             return aMin - bMin;
         });
         instance.chart.data = { labels: instance.data.adjusted.labels, datasets: sorted.slice(0, 3) };
+        if (podium) {
+            podium.innerHTML = sorted.slice(0, 3).map(function(dataset, index) {
+                const values = dataset.data.filter(function(v) { return v != null; });
+                const best = values.length ? Math.min.apply(null, values).toFixed(2) + 's' : 'N/A';
+                const medal = index === 0 ? '🏆 1st' : index === 1 ? '🥈 2nd' : '🥉 3rd';
+                return '<div class="top3-podium-card" style="--podium-index:' + index + ';"><div class="top3-rank">' + medal + '</div><div class="top3-name">' + escapeHtml(dataset.label.split('(')[0].trim()) + '</div><div class="top3-time">' + best + '</div></div>';
+            }).join('');
+            podium.classList.add('is-visible');
+        }
     } else {
         btn.classList.remove('active');
         instance.chart.data = instance.data.adjusted;
+        if (podium) { podium.classList.remove('is-visible'); podium.innerHTML = ''; }
     }
     instance.chart.options = getChartOptions('adjusted');
     instance.chart.update();
@@ -1811,12 +2042,12 @@ function renderSpeedMap(raceNumber) {
     ];
     const html = '<div class="speedmap-grid">' +
         columns.map(function(column, columnIndex) {
-            return '<div class="speedmap-column" style="--speedmap-column-delay:' + (columnIndex * SPEEDMAP_COLUMN_DELAY_MS) + 'ms;">' +
+            return '<div class="speedmap-column" style="--speedmap-column-delay:' + (columnIndex * SPEEDMAP_COLUMN_DELAY_MS) + 'ms; --speedmap-enter-x:' + (columnIndex === 0 ? '-14px' : columnIndex === 1 ? '10px' : '0px') + ';">' +
                 '<div class="speedmap-column-header">' + column.label + '</div>' +
                 categories[column.key].map(function(horse, horseIndex) {
                     const runnerKey = normalizeHorseName(horse.runnerName);
                     const silkStyle = cachedSilks[String(horse.tabNo)] || silkStyles[runnerKey];
-                    return createHorseCard(horse, runnerKey, silkStyle, columnIndex, horseIndex);
+                    return createHorseCard(horse, runnerKey, silkStyle, columnIndex, horseIndex, raceNumber);
                 }).join('') +
                 '</div>';
         }).join('') +
@@ -1828,6 +2059,9 @@ function renderSpeedMap(raceNumber) {
     if (grid) {
         window.requestAnimationFrame(function() {
             grid.classList.add('speedmap-grid-visible');
+            animateVisibleCountUps(grid);
+            const wrapper = document.getElementById('speedmap-' + raceNumber);
+            if (wrapper && wrapper.classList.contains('is-open')) wrapper.style.maxHeight = wrapper.scrollHeight + 'px';
         });
     }
 }
@@ -1868,10 +2102,12 @@ function syncVisibleSpeedMapSilks(raceNumber) {
         }
     });
 }
-function createHorseCard(horse, runnerKey, silkStyle, columnIndex, horseIndex) {
+function createHorseCard(horse, runnerKey, silkStyle, columnIndex, horseIndex, raceNumber) {
     const mapValue = horse.mapA2E || 0;
     let mapClass = 'speedmap-map-neutral';
     if (mapValue > 0) mapClass = 'speedmap-map-positive';
+    if (mapValue >= 1.00) mapClass += ' speedmap-map-standout';
+    if (mapValue >= 1.05) mapClass += ' speedmap-map-elite';
     if (mapValue < 0) mapClass = 'speedmap-map-negative';
     const tabMarkup = silkStyle
         ? '<span class="speedmap-tab-number speedmap-tab-number--silk" style="' + decorateSpeedMapSilkStyle(silkStyle) + '"><span class="speedmap-tab-number-label">' + escapeHtml(horse.tabNo) + '</span></span>'
@@ -1881,12 +2117,12 @@ function createHorseCard(horse, runnerKey, silkStyle, columnIndex, horseIndex) {
         tabMarkup +
         '<div class="speedmap-horse-name">' + escapeHtml(horse.runnerName) + '</div>' +
         '</div>' +
-        '<div class="speedmap-pfai">PFAI: ' + escapeHtml(horse.pfaiScore) + '</div>' +
+        '<div class="speedmap-pfai">PFAI: <span class="speedmap-metric" data-count-key="speedmap-' + raceNumber + '-' + escapeHtml(runnerKey) + '-pfai" data-count-to="' + escapeHtml(parseFloat(horse.pfaiScore) || 0) + '" data-count-decimals="0" data-count-prefix="">0</span></div>' +
         '<div class="speedmap-badges">' +
-        '<span class="speedmap-badge speedmap-badge-speed">Speed ' + escapeHtml(horse.speed) + '</span>' +
-        '<span class="speedmap-badge speedmap-badge-settle">Settle ' + escapeHtml(horse.settle) + '</span>' +
+        '<span class="speedmap-badge speedmap-badge-speed">Speed <span class="speedmap-metric" data-count-key="speedmap-' + raceNumber + '-' + escapeHtml(runnerKey) + '-speed" data-count-to="' + escapeHtml(parseFloat(horse.speed) || 0) + '" data-count-decimals="0">0</span></span>' +
+        '<span class="speedmap-badge speedmap-badge-settle">Settle <span class="speedmap-metric" data-count-key="speedmap-' + raceNumber + '-' + escapeHtml(runnerKey) + '-settle" data-count-to="' + escapeHtml(parseFloat(horse.settle) || 0) + '" data-count-decimals="0">0</span></span>' +
         '</div>' +
-        '<div class="speedmap-map ' + mapClass + '">MAP: ' + mapValue.toFixed(2) + '</div>' +
+        '<div class="speedmap-map ' + mapClass + '">MAP: <span class="speedmap-metric" data-count-key="speedmap-' + raceNumber + '-' + escapeHtml(runnerKey) + '-map" data-count-to="' + mapValue.toFixed(2) + '" data-count-decimals="2">0.00</span></div>' +
         '<div class="speedmap-jockey">Jockey A2E: ' + (horse.jockeyA2E > 0 ? '+' : '') + horse.jockeyA2E.toFixed(2) + '</div>' +
         '</div>';
 }
