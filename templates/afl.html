@@ -1191,8 +1191,9 @@ let _historyHomeGames = [];
 let _historyAwayGames = [];
 let _chartWin = 'all';
 let _chartFilter = 'season';
-const DATE_TIME_SLICE_LEN = 16;
+const ISO_DATETIME_DISPLAY_LENGTH = 16;
 const RESULTS_MAX_MARKET_ROWS = 12;
+const RESULTS_MAX_SETTLED_ROWS = 80;
 
 // ── Shared utils ─────────────────────────────────────────────────
 function safeNum(v, fb = 0) {
@@ -1216,8 +1217,8 @@ function norm(v) {
 function fmtDateTime(value) {
   if (!value) return '—';
   const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return String(value).slice(0, DATE_TIME_SLICE_LEN).replace('T', ' ');
-  return date.toISOString().slice(0, DATE_TIME_SLICE_LEN).replace('T', ' ');
+  if (!Number.isFinite(date.getTime())) return String(value).slice(0, ISO_DATETIME_DISPLAY_LENGTH).replace('T', ' ');
+  return date.toISOString().slice(0, ISO_DATETIME_DISPLAY_LENGTH).replace('T', ' ');
 }
 
 function mono(v) {
@@ -2643,7 +2644,7 @@ function loadAflResultsAnalysis() {
         </tr>
       `).join('') : '<tr><td colspan="6" style="padding:14px;color:var(--text-muted);">No settled market rows yet.</td></tr>';
 
-      settledRowsEl.innerHTML = settledRows.length ? settledRows.slice(0, 80).map(r => {
+      settledRowsEl.innerHTML = settledRows.length ? settledRows.slice(0, RESULTS_MAX_SETTLED_ROWS).map(r => {
         const res = (r.result || 'pending').toLowerCase();
         const resCls = res === 'win' ? 'pos' : res === 'loss' ? 'neg' : 'neu';
         const dtText = fmtDateTime(r.settled_at || r.commence_time);
