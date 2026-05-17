@@ -1216,7 +1216,7 @@ function norm(v) {
 function fmtDateTime(value) {
   if (!value) return '—';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value).slice(0, DATE_TIME_SLICE_LEN).replace('T', ' ');
+  if (!Number.isFinite(date.getTime())) return String(value).slice(0, DATE_TIME_SLICE_LEN).replace('T', ' ');
   return date.toISOString().slice(0, DATE_TIME_SLICE_LEN).replace('T', ' ');
 }
 

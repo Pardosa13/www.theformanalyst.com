@@ -1121,6 +1121,7 @@ def register_afl_routes(app, db):
         team_breakdown.sort(key=lambda x: x.get("total_bets", 0), reverse=True)
 
         def _row_sort_key(row: dict) -> str:
+            # Prefer settlement timestamp, then scheduled start, then insert order timestamp.
             value = row.get("settled_at") or row.get("commence_time") or row.get("created_at")
             return value.isoformat() if hasattr(value, "isoformat") else str(value or "")
 
