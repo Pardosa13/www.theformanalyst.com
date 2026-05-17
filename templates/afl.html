@@ -2610,7 +2610,7 @@ function loadAflResultsAnalysis() {
   const settledRowsEl = document.getElementById('resultsSettledRows');
   if (!summaryEl || !kpiEl || !marketRowsEl || !settledRowsEl) return;
 
-  fetch(`/api/afl/results-analysis?year={{ year }}&limit=80`)
+  fetch(`/api/afl/results-analysis?year={{ year }}&limit=${RESULTS_MAX_SETTLED_ROWS}`)
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
     .then(data => {
       const summary = data.summary || {};

@@ -1124,7 +1124,9 @@ def register_afl_routes(app, db):
         def _row_sort_key(row: dict) -> str:
             # Prefer settlement timestamp, then scheduled start, then insert order timestamp.
             value = row.get("settled_at") or row.get("commence_time") or row.get("created_at")
-            return value.isoformat() if isinstance(value, (datetime, date)) else str(value or "")
+            if value is None:
+                return ""
+            return value.isoformat() if isinstance(value, (datetime, date)) else str(value)
 
         recent_settled = sorted(settled_rows, key=_row_sort_key, reverse=True)[:limit]
         recent_pending = sorted(pending_rows, key=_row_sort_key, reverse=True)[:limit]
