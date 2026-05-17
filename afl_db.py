@@ -1489,17 +1489,19 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
         FROM afl_player_stats
         WHERE (
             (:player_id IS NOT NULL AND player_id = :player_id)
-            OR (
-                :player_id IS NULL
-                AND LOWER(TRIM(player_first_name || ' ' || player_last_name)) = :player_name
-            )
+            OR (:player_name <> '' AND LOWER(TRIM(player_first_name || ' ' || player_last_name)) = :player_name)
         )
           AND match_date BETWEEN :date_from AND :date_to
           AND (
             (LOWER(match_home_team) = :home_team AND LOWER(match_away_team) = :away_team)
             OR (LOWER(match_home_team) = :away_team AND LOWER(match_away_team) = :home_team)
           )
-        ORDER BY ABS(EXTRACT(EPOCH FROM ((match_date)::timestamp - :match_time)))
+        ORDER BY
+          CASE
+            WHEN :player_id IS NOT NULL AND player_id = :player_id THEN 0
+            ELSE 1
+          END,
+          ABS(EXTRACT(EPOCH FROM ((match_date)::timestamp - :match_time)))
         LIMIT 1
     """)
     update_sql = db.text("""

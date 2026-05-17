@@ -1371,6 +1371,18 @@ def test_sync_runs_model_snapshot_and_settlement():
     assert "settle_model_selections" in source
 
 
+def test_settlement_sql_falls_back_to_player_name_when_player_id_mismatch():
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+
+    assert "OR (:player_name <> '' AND LOWER(TRIM(player_first_name || ' ' || player_last_name)) = :player_name)" in source
+    assert "WHEN :player_id IS NOT NULL AND player_id = :player_id THEN 0" in source
+
+
 def test_routes_expose_model_tracker_endpoints():
     routes_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
