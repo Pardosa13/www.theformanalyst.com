@@ -723,6 +723,11 @@ details pre {
   border-radius: 8px !important;
   padding: 14px !important;
 }
+.sectional-chart-glow {
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 28px rgba(102,126,234,0.08);
+}
+.sectional-chart-glow canvas { filter: saturate(1.08); }
 
 /* Chart insights */
 .chart-insights {
@@ -820,19 +825,209 @@ details pre {
   font-size: 13px;
 }
 
-/* PFAI heatmap legend box */
-[id^="pfaiHeatmap_"] > div:last-child {
-  background: var(--bg-elevated) !important;
-  border: 1px solid var(--border-subtle) !important;
-  border-radius: 6px !important;
-  font-size: 12px !important;
-  color: var(--text-muted) !important;
+/* Premium PFAI heatmap shell + interactions */
+[id^="pfaiHeatmap_"].pfai-heatmap-wrap {
+  --heat-excellent: 16, 185, 129;
+  --heat-strong: 245, 158, 11;
+  --heat-average: 234, 88, 12;
+  --heat-poor: 153, 27, 27;
+  position: relative;
+  background:
+    radial-gradient(circle at top left, rgba(102,126,234,0.18), transparent 34%),
+    linear-gradient(180deg, rgba(15,15,27,0.98), rgba(9,9,15,0.96)) !important;
+  border: 1px solid rgba(167,139,250,0.26) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 42px rgba(0,0,0,0.28);
 }
-[id^="pfaiHeatmap_"] h4 {
-  color: var(--accent) !important;
-  font-size: 14px !important;
-  margin-bottom: 12px !important;
+.pfai-heatmap-head { margin-bottom: 12px; }
+[id^="pfaiHeatmap_"] h4.pfai-heatmap-title {
+  color: #ddd6fe !important;
+  font-size: 15px !important;
+  margin: 0 0 4px !important;
+  letter-spacing: -0.01em;
 }
+.pfai-heatmap-helper {
+  margin: 0;
+  color: #a5a5c3;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.pfai-heatmap-scroller {
+  position: relative;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 13px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(5,5,12,0.45);
+}
+.pfai-heatmap-table {
+  min-width: 620px;
+  border-collapse: separate;
+  border-spacing: 0 7px;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0;
+  overflow: visible;
+  margin: 0;
+  padding: 4px;
+}
+.pfai-heatmap-table thead { background: transparent; }
+.pfai-heatmap-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(17,17,31,0.96);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(167,139,250,0.18);
+  color: #d8d7ff !important;
+  white-space: nowrap;
+}
+.pfai-heatmap-table th:first-child,
+.pfai-heatmap-table td.pfai-horse-cell {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  min-width: 172px;
+  box-shadow: 10px 0 18px rgba(0,0,0,0.28);
+}
+.pfai-heatmap-table th[data-sort-key] { cursor: pointer; user-select: none; }
+.pfai-heatmap-table th[data-sort-key]::after {
+  content: '↕';
+  margin-left: 5px;
+  color: rgba(221,214,254,0.45);
+  font-size: 10px;
+}
+.pfai-heatmap-table th.pfai-sort-active {
+  color: #fff !important;
+  text-shadow: 0 0 12px rgba(167,139,250,0.55);
+}
+.pfai-heatmap-table th.pfai-sort-active::after { content: '↑'; color: #a78bfa; }
+.pfai-heatmap-table tbody tr { border: 0; transition: opacity 0.22s ease, filter 0.22s ease, transform 0.22s ease; }
+.pfai-heatmap-table tbody tr:hover { filter: brightness(1.08); }
+.pfai-heatmap-row {
+  --heat-rgb: var(--heat-poor);
+  --row-tint: 0.18;
+  position: relative;
+  opacity: 0;
+  transform: translateY(12px);
+  background: linear-gradient(90deg, rgba(var(--heat-rgb), var(--row-tint)), rgba(18,18,32,0.76)) !important;
+  isolation: isolate;
+}
+.pfai-heatmap-row::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(var(--heat-rgb),0.30), rgba(var(--heat-rgb),0.07) 58%, transparent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  opacity: 0;
+  z-index: 0;
+}
+.pfai-heatmap-row.is-visible { animation: pfaiRowReveal 0.46s cubic-bezier(0.22,1,0.36,1) both; animation-delay: calc(var(--row-index, 0) * 85ms); }
+.pfai-heatmap-row.is-visible::before { animation: pfaiRowFill 0.72s cubic-bezier(0.22,1,0.36,1) both; animation-delay: calc((var(--row-index, 0) * 85ms) + 80ms); }
+.pfai-heatmap-row.heat-rank-excellent { --heat-rgb: var(--heat-excellent); --row-tint: 0.22; }
+.pfai-heatmap-row.heat-rank-strong { --heat-rgb: var(--heat-strong); --row-tint: 0.18; }
+.pfai-heatmap-row.heat-rank-average { --heat-rgb: var(--heat-average); --row-tint: 0.17; }
+.pfai-heatmap-row.heat-rank-poor { --heat-rgb: var(--heat-poor); --row-tint: 0.20; }
+.pfai-heatmap-row.pfai-row-best-profile { box-shadow: 0 0 0 1px rgba(16,185,129,0.18), 0 0 26px rgba(16,185,129,0.10); }
+.pfai-heatmap-table tbody td {
+  position: relative;
+  padding: 12px !important;
+  font-weight: 650;
+  color: #f8fafc;
+  font-size: 13px;
+  background: transparent;
+  z-index: 1;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid rgba(0,0,0,0.18);
+}
+.pfai-heatmap-table tbody td:first-child { border-radius: 12px 0 0 12px; }
+.pfai-heatmap-table tbody td:last-child { border-radius: 0 12px 12px 0; }
+.pfai-horse-cell {
+  background: linear-gradient(90deg, rgba(12,12,22,0.98), rgba(12,12,22,0.92)) !important;
+  color: #fff !important;
+}
+.pfai-rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #fff;
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  font-weight: 800;
+  background: rgba(148,163,184,0.18);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+  cursor: help;
+  touch-action: manipulation;
+  opacity: 0;
+  transform: scale(0.85);
+}
+.pfai-heatmap-row.is-visible .pfai-rank-badge { animation: pfaiBadgePop 0.34s cubic-bezier(0.22,1,0.36,1) forwards; animation-delay: calc((var(--row-index, 0) * 85ms) + 190ms); }
+.pfai-rank-badge.rank-1 { background: linear-gradient(135deg, #065f46, #10b981); box-shadow: 0 0 18px rgba(16,185,129,0.45), inset 0 1px 0 rgba(255,255,255,0.18); }
+.pfai-rank-badge.rank-2, .pfai-rank-badge.rank-3 { background: linear-gradient(135deg, #166534, #34d399); box-shadow: 0 0 13px rgba(52,211,153,0.28); }
+.pfai-rank-badge.rank-4, .pfai-rank-badge.rank-5 { background: linear-gradient(135deg, #78350f, #d97706); box-shadow: 0 0 12px rgba(245,158,11,0.24); }
+.pfai-rank-badge.rank-6, .pfai-rank-badge.rank-7 { background: linear-gradient(135deg, #7c2d12, #c2410c); }
+.pfai-rank-badge.rank-poor { background: linear-gradient(135deg, #7f1d1d, #991b1b); }
+.pfai-rank-missing { color: #73738b; }
+.pfai-heatmap-table.has-selection .pfai-heatmap-row:not(.is-selected) { opacity: 0.42; filter: saturate(0.62); }
+.pfai-heatmap-row.is-selected {
+  opacity: 1 !important;
+  transform: translateY(0) scale(1.006);
+  outline: 1px solid rgba(96,165,250,0.78);
+  box-shadow: 0 0 0 3px rgba(124,58,237,0.18), 0 0 30px rgba(96,165,250,0.22);
+  filter: brightness(1.18) saturate(1.14);
+}
+.pfai-scroll-hint {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 76px;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 9px;
+  color: #ddd6fe;
+  font-size: 11px;
+  font-weight: 800;
+  text-shadow: 0 0 10px rgba(167,139,250,0.7);
+  background: linear-gradient(90deg, transparent, rgba(9,9,15,0.92));
+  transition: opacity 0.24s ease;
+}
+.pfai-scroll-hint::after { content: 'more ›'; }
+.pfai-scroll-hint.is-hidden { opacity: 0; }
+.pfai-rank-tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: min(280px, calc(100vw - 28px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(13,13,24,0.96);
+  border: 1px solid rgba(167,139,250,0.42);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.38), 0 0 22px rgba(102,126,234,0.16);
+  color: #f7f7ff;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.pfai-heatmap-legend {
+  margin-top: 12px;
+  padding: 11px 12px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  font-size: 12px;
+  color: #a5a5c3;
+}
+.pfai-legend-swatch { display:inline-block; width:18px; height:18px; border-radius:6px; margin:0 4px; vertical-align:middle; border:1px solid rgba(255,255,255,0.1); }
+@keyframes pfaiRowReveal { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pfaiRowFill { 0% { opacity: 0; transform: scaleX(0); } 35% { opacity: 1; } 100% { opacity: 0.5; transform: scaleX(1); } }
+@keyframes pfaiBadgePop { to { opacity: 1; transform: scale(1); } }
 
 
 .top3-podium {
@@ -1050,8 +1245,8 @@ details pre {
 /* ── Responsive ── */
 
 @media (prefers-reduced-motion: reduce) {
-  .speedmap-collapse, .speedmap-column, .speedmap-horse-card, .sectional-animated-panel, .insight-item, .chart-toggle-btn, .top3-podium-card, .tfa-skeleton { animation: none !important; transition: none !important; }
-  .speedmap-column, .speedmap-horse-card, .sectional-animated-panel, .insight-item, .top3-podium-card { opacity: 1 !important; transform: none !important; }
+  .speedmap-collapse, .speedmap-column, .speedmap-horse-card, .sectional-animated-panel, .insight-item, .chart-toggle-btn, .top3-podium-card, .tfa-skeleton, .pfai-heatmap-row, .pfai-heatmap-row::before, .pfai-rank-badge { animation: none !important; transition: none !important; }
+  .speedmap-column, .speedmap-horse-card, .sectional-animated-panel, .insight-item, .top3-podium-card, .pfai-heatmap-row, .pfai-rank-badge { opacity: 1 !important; transform: none !important; }
   .speedmap-map-standout, .speedmap-map-elite { animation: none !important; }
 }
 @media (max-width: 768px) {
@@ -1434,7 +1629,9 @@ function initializeSectionalCharts() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+    initSectionalChartPremium();
     initializeSectionalCharts();
+    initPfaiHeatmapPremium();
     const placeholder = document.getElementById('filter-bar-placeholder');
     if (placeholder) { placeholder.appendChild(createFilterBar()); }
     const races = document.querySelectorAll('.card[id^="race-"]');
@@ -1479,10 +1676,147 @@ function animateSectionalPanel(panel) {
 
 function animateHeatmapRows(container) {
     if (!container) return;
-    container.classList.remove('pfai-heatmap-animate');
-    // Force a reflow so staggered row animations replay when the heatmap reopens.
-    container.getBoundingClientRect();
-    container.classList.add('pfai-heatmap-animate');
+    const revealRows = function() {
+        container.querySelectorAll('.pfai-heatmap-row').forEach(function(row, index) {
+            row.style.setProperty('--row-index', row.dataset.rowIndex || index);
+            row.classList.add('is-visible');
+        });
+    };
+    runWhenVisibleOnce(container, revealRows, { threshold: 0.18, rootMargin: '0px 0px -8% 0px' });
+}
+
+function initPfaiHeatmapPremium(scope) {
+    const root = scope || document;
+    const containers = [];
+    if (root.matches && root.matches('[id^="pfaiHeatmap_"]')) containers.push(root);
+    root.querySelectorAll('[id^="pfaiHeatmap_"]').forEach(function(container) { containers.push(container); });
+    containers.forEach(function(container) {
+        container.classList.add('pfai-heatmap-wrap');
+        initPfaiHeatmapAnimations(container);
+        initPfaiHeatmapRowSpotlight(container);
+        initPfaiHeatmapTooltips(container);
+        initPfaiHeatmapScrollHint(container);
+        initPfaiHeatmapSorting(container);
+    });
+}
+
+function initPfaiHeatmapAnimations(container) { animateHeatmapRows(container); }
+
+function initPfaiHeatmapRowSpotlight(container) {
+    if (!container || container.dataset.rowSpotlightBound === 'true') return;
+    container.dataset.rowSpotlightBound = 'true';
+    container.addEventListener('click', function(event) {
+        if (event.target.closest('.pfai-rank-badge') || event.target.closest('th')) return;
+        const row = event.target.closest('.pfai-heatmap-row');
+        if (!row || !container.contains(row)) return;
+        const table = row.closest('.pfai-heatmap-table');
+        const wasSelected = row.classList.contains('is-selected');
+        table.querySelectorAll('.pfai-heatmap-row.is-selected').forEach(function(item) { item.classList.remove('is-selected'); });
+        if (wasSelected) {
+            table.classList.remove('has-selection');
+        } else {
+            row.classList.add('is-selected');
+            table.classList.add('has-selection');
+        }
+    });
+}
+
+function removePfaiRankTooltip() {
+    const tooltip = document.querySelector('.pfai-rank-tooltip');
+    if (tooltip) tooltip.remove();
+}
+
+function initPfaiHeatmapTooltips(container) {
+    if (!container || container.dataset.tooltipBound === 'true') return;
+    container.dataset.tooltipBound = 'true';
+    container.addEventListener('click', function(event) {
+        const badge = event.target.closest('.pfai-rank-badge');
+        if (!badge || !container.contains(badge)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        removePfaiRankTooltip();
+        const rank = badge.dataset.rank;
+        const distance = badge.dataset.distance || 'this split';
+        const tooltip = document.createElement('div');
+        tooltip.className = 'pfai-rank-tooltip';
+        tooltip.textContent = '#' + rank + ' at ' + distance + ' = best adjusted ' + distance + ' sectional rank in this field.';
+        document.body.appendChild(tooltip);
+        const rect = badge.getBoundingClientRect();
+        const tipRect = tooltip.getBoundingClientRect();
+        const left = Math.min(Math.max(14, rect.left + (rect.width / 2) - (tipRect.width / 2)), window.innerWidth - tipRect.width - 14);
+        const top = rect.top > tipRect.height + 18 ? rect.top - tipRect.height - 10 : rect.bottom + 10;
+        tooltip.style.left = left + 'px';
+        tooltip.style.top = Math.min(top, window.innerHeight - tipRect.height - 12) + 'px';
+    });
+    document.addEventListener('click', removePfaiRankTooltip);
+    document.addEventListener('keydown', function(event) { if (event.key === 'Escape') removePfaiRankTooltip(); });
+}
+
+function initPfaiHeatmapScrollHint(container) {
+    if (!container || container.dataset.scrollHintBound === 'true') return;
+    const scroller = container.querySelector('.pfai-heatmap-scroller');
+    if (!scroller) return;
+    container.dataset.scrollHintBound = 'true';
+    const hint = container.querySelector('.pfai-scroll-hint');
+    const update = function() {
+        if (!hint) return;
+        const hasOverflow = scroller.scrollWidth > scroller.clientWidth + 6;
+        const hasScrolled = scroller.scrollLeft > 8;
+        hint.classList.toggle('is-hidden', !hasOverflow || hasScrolled);
+    };
+    scroller.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    window.requestAnimationFrame(update);
+}
+
+function initPfaiHeatmapSorting(container) {
+    if (!container || container.dataset.sortBound === 'true') return;
+    const table = container.querySelector('.pfai-heatmap-table');
+    if (!table) return;
+    container.dataset.sortBound = 'true';
+    table.querySelectorAll('th[data-sort-key]').forEach(function(header) {
+        header.addEventListener('click', function() {
+            const key = header.dataset.sortKey;
+            const tbody = table.tBodies[0];
+            if (!tbody) return;
+            const rows = Array.from(tbody.querySelectorAll('.pfai-heatmap-row'));
+            const firstPositions = new Map();
+            rows.forEach(function(row) { firstPositions.set(row, row.getBoundingClientRect()); });
+            rows.sort(function(a, b) {
+                const av = parseFloat(a.dataset[key] || '999');
+                const bv = parseFloat(b.dataset[key] || '999');
+                if (av !== bv) return av - bv;
+                return parseFloat(a.dataset.avgRank || '999') - parseFloat(b.dataset.avgRank || '999');
+            });
+            rows.forEach(function(row, index) {
+                row.dataset.rowIndex = index;
+                row.style.setProperty('--row-index', index);
+                tbody.appendChild(row);
+            });
+            table.querySelectorAll('th').forEach(function(th) { th.classList.remove('pfai-sort-active'); });
+            header.classList.add('pfai-sort-active');
+            if (!TFA_REDUCED_MOTION) {
+                rows.forEach(function(row) {
+                    const first = firstPositions.get(row);
+                    const last = row.getBoundingClientRect();
+                    if (!first) return;
+                    const deltaY = first.top - last.top;
+                    row.style.transform = 'translateY(' + deltaY + 'px)';
+                    row.getBoundingClientRect();
+                    row.style.transition = 'transform 320ms cubic-bezier(0.22,1,0.36,1), opacity 0.22s ease, filter 0.22s ease';
+                    row.style.transform = '';
+                    window.setTimeout(function() { row.style.transition = ''; }, 360);
+                });
+            }
+        });
+    });
+}
+
+function initSectionalChartPremium() {
+    if (typeof Chart !== 'undefined' && Chart.register && !window.tfaLineGlowRegistered) {
+        Chart.register(tfaLineGlowPlugin);
+        window.tfaLineGlowRegistered = true;
+    }
 }
 
 function runWhenVisibleOnce(element, callback, options) {
@@ -1668,7 +2002,7 @@ function renderSectionalChart(raceNum, horsesData) {
         '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'pfai\')">🎯 PFAI Sectional Heatmap</button>' +
         '<button class="chart-toggle-btn" id="top3-btn-race' + raceNum + '" onclick="toggleTop3(\'race' + raceNum + '\')">🏆 Top 3 Adjusted Times</button>' +
         '</div>' +
-        '<div id="chartContainer_race' + raceNum + '" style="position:relative; height:350px; background:var(--bg-surface); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);">' +
+        '<div id="chartContainer_race' + raceNum + '" class="sectional-chart-glow" style="position:relative; height:350px; background:var(--bg-surface); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);">' +
         '<div class="top3-podium" id="top3-podium-race' + raceNum + '"></div>' +
         '<canvas id="sectionalChart_race' + raceNum + '"></canvas>' +
         '</div>' +
@@ -1839,64 +2173,67 @@ function switchView(raceId, viewType) {
     }
 }
 
+function getHeatRankClass(avgRank) {
+    if (avgRank <= 3) return 'heat-rank-excellent';
+    if (avgRank <= 5) return 'heat-rank-strong';
+    if (avgRank <= 7) return 'heat-rank-average';
+    return 'heat-rank-poor';
+}
+
 function renderPFAIHeatmap(raceNum, horses) {
     const container = document.getElementById('pfaiHeatmap_' + raceNum);
     if (!container) return;
+    container.classList.add('pfai-heatmap-wrap');
     const pfaiEntries = buildDedupedPFAIEntries(horses);
     if (pfaiEntries.length === 0) {
         container.innerHTML = '<div class="no-sectionals">No PFAI sectional data available for this race</div>';
         return;
     }
-    let html = '<div style="overflow-x:auto;">';
-    html += '<h4 style="margin:0 0 14px; color:#a78bfa; font-size:15px;">🎯 PFAI Sectional Rankings - Last Start Performance</h4>';
+    let html = '<div class="pfai-heatmap-head">';
+    html += '<h4 class="pfai-heatmap-title">🎯 PFAI Sectional Rankings - Last Start Performance</h4>';
+    html += '<p class="pfai-heatmap-helper">Lower rank is better. Tap a row to spotlight a horse, tap a badge for the split explanation, or tap 600m / 400m / 200m to sort.</p>';
+    html += '</div>';
+    html += '<div class="pfai-heatmap-scroller">';
     html += '<table class="pfai-heatmap-table"><thead><tr>';
     html += '<th style="text-align:left; padding:12px;">Horse</th>';
-    html += '<th style="text-align:center; padding:12px;">600m</th>';
-    html += '<th style="text-align:center; padding:12px;">400m</th>';
-    html += '<th style="text-align:center; padding:12px;">200m</th>';
-    html += '<th style="text-align:center; padding:12px;">Avg Rank</th>';
+    html += '<th style="text-align:center; padding:12px;" data-sort-key="rank600">600m</th>';
+    html += '<th style="text-align:center; padding:12px;" data-sort-key="rank400">400m</th>';
+    html += '<th style="text-align:center; padding:12px;" data-sort-key="rank200">200m</th>';
+    html += '<th style="text-align:center; padding:12px;" data-sort-key="avgRank">Avg Rank</th>';
     html += '</tr></thead><tbody>';
     pfaiEntries.forEach(function(entry, index) {
         const horse = entry.horse;
         const pfai = horse.pfai_sectionals;
-        let rowColor;
-        const position = index + 1;
-        if (position === 1) rowColor = '#15803d';
-        else if (position <= 3) rowColor = '#84cc16';
-        else if (position <= 5) rowColor = '#eab308';
-        else if (position <= 7) rowColor = '#f97316';
-        else rowColor = '#dc2626';
-        html += '<tr class="pfai-heatmap-row" style="background:' + rowColor + '; --row-index:' + index + ';">';
-        html += '<td style="padding:12px; font-weight:600;">' + horse.horse_name + '</td>';
-        html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last600_rank) + '</td>';
-        html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last400_rank) + '</td>';
-        html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last200_rank) + '</td>';
-        html += '<td style="padding:12px; text-align:center; font-weight:700; color:#ffffff;">' + entry.avgRank.toFixed(1) + '</td>';
+        const validRanks = getValidPfaiRanks(pfai);
+        const rankOnes = validRanks.filter(function(rank) { return rank === 1; }).length;
+        const rowClass = getHeatRankClass(entry.avgRank) + (rankOnes > 0 ? ' pfai-row-best-profile' : '');
+        html += '<tr class="pfai-heatmap-row ' + rowClass + '" data-row-index="' + index + '" style="--row-index:' + index + ';" data-rank600="' + (pfai.last600_rank || 999) + '" data-rank400="' + (pfai.last400_rank || 999) + '" data-rank200="' + (pfai.last200_rank || 999) + '" data-avg-rank="' + entry.avgRank.toFixed(3) + '">';
+        html += '<td class="pfai-horse-cell" style="padding:12px; font-weight:700;">' + escapeHtml(horse.horse_name) + '</td>';
+        html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last600_rank, '600m') + '</td>';
+        html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last400_rank, '400m') + '</td>';
+        html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last200_rank, '200m') + '</td>';
+        html += '<td style="padding:12px; text-align:center; font-weight:800; color:#ffffff; font-family:DM Mono, monospace;">#' + entry.avgRank.toFixed(1) + '</td>';
         html += '</tr>';
     });
-    html += '</tbody></table>';
-    html += '<div style="margin-top:14px; padding:11px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; font-size:12px; color:#9090a8;">';
-    html += '<strong style="color:#c8c8d8;">Legend:</strong> ';
-    html += '<span style="display:inline-block; width:18px; height:18px; background:#22c55e; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Elite (1st) ';
-    html += '<span style="display:inline-block; width:18px; height:18px; background:#84cc16; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Good (2nd-3rd) ';
-    html += '<span style="display:inline-block; width:18px; height:18px; background:#eab308; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Average (4th-5th) ';
-    html += '<span style="display:inline-block; width:18px; height:18px; background:#f97316; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Below Avg (6th-7th) ';
-    html += '<span style="display:inline-block; width:18px; height:18px; background:#e5e7eb; border-radius:3px; margin:0 4px; vertical-align:middle;"></span> Poor (8th+)';
-    html += '</div></div>';
+    html += '</tbody></table><div class="pfai-scroll-hint" aria-hidden="true"></div></div>';
+    html += '<div class="pfai-heatmap-legend">';
+    html += '<strong style="color:#ddd6fe;">Legend:</strong> Lower rank is better. ';
+    html += '<span class="pfai-legend-swatch" style="background:#065f46;"></span>#1–#3 Excellent ';
+    html += '<span class="pfai-legend-swatch" style="background:#92400e;"></span>#4–#5 Strong ';
+    html += '<span class="pfai-legend-swatch" style="background:#9a3412;"></span>#6–#7 Average ';
+    html += '<span class="pfai-legend-swatch" style="background:#7f1d1d;"></span>#8+ Needs more.';
+    html += '</div>';
     container.innerHTML = html;
+    initPfaiHeatmapPremium(container);
     animateSectionalPanel(container);
-    animateHeatmapRows(container);
 }
 
-function getRankCell(rank) {
-    if (!rank || rank >= PFAI_RANK_THRESHOLD) { return '<span style="color:#6b7280;">-</span>'; }
-    let color, bgColor, label;
-    if (rank <= 5)       { color = '#166534'; bgColor = '#22c55e'; label = 'Elite'; }
-    else if (rank <= 10) { color = '#365314'; bgColor = '#84cc16'; label = 'Good'; }
-    else if (rank <= 15) { color = '#713f12'; bgColor = '#eab308'; label = 'Avg'; }
-    else if (rank <= 20) { color = '#7c2d12'; bgColor = '#f97316'; label = 'Below'; }
-    else                 { color = '#6b7280'; bgColor = '#e5e7eb'; label = 'Poor'; }
-    return '<span style="display:inline-block; padding:5px 11px; background:' + bgColor + '; color:' + color + '; font-weight:700; border-radius:6px; min-width:48px;">#' + rank + '</span>';
+function getRankCell(rank, distance) {
+    if (!rank || rank >= PFAI_RANK_THRESHOLD) { return '<span class="pfai-rank-missing">-</span>'; }
+    let rankClass;
+    if (rank <= 7) rankClass = 'rank-' + rank;
+    else rankClass = 'rank-poor';
+    return '<button type="button" class="pfai-rank-badge ' + rankClass + '" data-rank="' + rank + '" data-distance="' + escapeHtml(distance || '') + '" aria-label="Rank ' + rank + ' at ' + escapeHtml(distance || 'this split') + '">#' + rank + '</button>';
 }
 
 function generateInsights(raceNum, horses) {
