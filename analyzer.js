@@ -1,4 +1,190 @@
 let strikeRateData = { jockeys: {}, trainers: {} };
+
+const STATE_MOVE_MATRIX = {
+    'NSW_ACT->QLD': { runs: 746, winPercentage: 10.9, placePercentage: 28.6, roiPercentage: -0.3, adjustment: 8 },
+    'VIC->NSW_ACT': { runs: 674, winPercentage: 12.2, placePercentage: 32.0, roiPercentage: -3.8, adjustment: 5 },
+    'NSW_ACT->VIC': { runs: 521, winPercentage: 7.1, placePercentage: 25.1, roiPercentage: -23.6, adjustment: -4 },
+    'VIC->SA': { runs: 442, winPercentage: 12.0, placePercentage: 29.9, roiPercentage: -6.9, adjustment: 0 },
+    'QLD->NSW_ACT': { runs: 413, winPercentage: 12.1, placePercentage: 34.6, roiPercentage: -17.5, adjustment: -2 },
+    'SA->VIC': { runs: 383, winPercentage: 6.3, placePercentage: 24.5, roiPercentage: -62.6, adjustment: -8 },
+    'VIC->QLD': { runs: 140, winPercentage: 16.4, placePercentage: 37.1, roiPercentage: 31.2, adjustment: 10 },
+    'NSW_ACT->SA': { runs: 50, winPercentage: 12.0, placePercentage: 24.0, roiPercentage: -31.9, adjustment: -3 },
+    'QLD->VIC': { runs: 43, winPercentage: 7.0, placePercentage: 30.2, roiPercentage: -7.6, adjustment: -1 },
+    'VIC->TAS': { runs: 38, winPercentage: 18.4, placePercentage: 50.0, roiPercentage: -22.0, adjustment: 0 },
+    'TAS->VIC': { runs: 30, winPercentage: 10.0, placePercentage: 26.7, roiPercentage: 160.7, adjustment: 5 },
+    'VIC->WA': { runs: 29, winPercentage: 13.8, placePercentage: 34.5, roiPercentage: 33.6, adjustment: 5 }
+};
+
+const JURISDICTION_TRACKS = {
+    'NSW_ACT': [
+        'Randwick', 'Randwick-Kensington', 'Rosehill', 'Warwick Farm', 'Canterbury', 'Newcastle', 'Beaumont',
+        'Gosford', 'Wyong', 'Kembla Grange', 'Illawarra Grange', 'Hawkesbury', 'Scone', 'Muswellbrook',
+        'Dubbo', 'Wagga', 'Grafton', 'Coffs Harbour', 'Port Macquarie', 'Tamworth', 'Armidale', 'Bathurst',
+        'Albury', 'Orange', 'Mudgee', 'Nowra', 'Queanbeyan', 'Taree', 'Canberra', 'Goulburn', 'Moruya',
+        'Ballina', 'Sapphire Coast', 'Quirindi', 'Tuncurry', 'Gunnedah', 'Corowa', 'Cowra', 'Wellington',
+        'Moree', 'Narromine', 'Gundagai', 'Murwillumbah', 'Canberra Acton', 'Lismore', 'Kempsey', 'Inverell',
+        'Wagga Riverside', 'Warren', 'Gilgandra', 'Parkes', 'Coonamble', 'Walcha'
+    ],
+    'VIC': [
+        'Flemington', 'Caulfield', 'Caulfield Heath', 'Sandown', 'Sandown-Lakeside', 'Sandown-Hillside',
+        'Moonee Valley', 'Pakenham', 'Cranbourne', 'Geelong', 'Ballarat', 'Bendigo', 'Sale', 'Warrnambool',
+        'Mornington', 'Seymour', 'Kilmore', 'Donald', 'Ararat', 'Stawell', 'Hamilton', 'Wangaratta',
+        'Echuca', 'Moe', 'Colac', 'Terang', 'Werribee', 'Kyneton', 'Yarra Glen', 'Wodonga', 'Swan Hill',
+        'Stony Creek', 'Horsham', 'Towong', 'Bairnsdale', 'Avoca', 'Ballarat Synthetic', 'Pakenham Synthetic',
+        'Tatura', 'Benalla', 'Mildura', 'Warracknabeal', 'Casterton'
+    ],
+    'QLD': [
+        'Eagle Farm', 'Doomben', 'Ipswich', 'Gold Coast', 'Gold Coast Poly', 'Sunshine Coast',
+        'Sunshine Coast Poly', 'Toowoomba', 'Rockhampton', 'Mackay', 'Townsville', 'Cairns', 'Bundaberg',
+        'Roma', 'Dalby', 'Emerald', 'Warwick', 'Gatton', 'Kilcoy', 'Thangool', 'Beaudesert', 'Longreach',
+        'Mt Isa'
+    ],
+    'SA': [
+        'Morphettville', 'Morphettville Parks', 'Murray Bridge', 'Murray Bridge GH', 'Gawler', 'Balaklava',
+        'Port Lincoln', 'Clare', 'Mount Gambier', 'Mt Gambier', 'Strathalbyn', 'Naracoorte', 'Oakbank',
+        'Port Augusta', 'Bordertown', 'Penola', 'Kingscote'
+    ],
+    'WA': [
+        'Ascot', 'Belmont', 'Belmont Park', 'Pinjarra', 'Pinjarra Scarpside', 'Bunbury', 'Albany',
+        'Kalgoorlie', 'Geraldton', 'Northam', 'Esperance', 'York', 'Rockingham', 'Narrogin', 'Port Hedland',
+        'Mt Barker', 'Carnarvon'
+    ],
+    'TAS': ['Hobart', 'Launceston', 'Devonport', 'Devonport Synthetic'],
+    'NT': ['Darwin', 'Fannie Bay', 'Alice Springs', 'Pioneer Park'],
+    'HK_INTL': ['Sha Tin']
+};
+
+const AUSTRALIAN_JURISDICTION_STATES = new Set(['NSW_ACT', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT']);
+const TRACK_TO_STATE = buildTrackToStateLookup();
+
+function clampStateMoveAdjustment(adjustment, runs) {
+    const boundedAdjustment = Math.max(-10, Math.min(10, Number(adjustment) || 0));
+    if (runs < 50) return Math.max(-1, Math.min(1, boundedAdjustment));
+    if (runs < 150) return Math.max(-5, Math.min(5, boundedAdjustment));
+    return boundedAdjustment;
+}
+
+function normalizeStateCode(state) {
+    if (!state) return '';
+    const normalized = String(state).trim().toUpperCase().replace(/[\s-]+/g, '_');
+    if (normalized === 'NSW' || normalized === 'ACT') return 'NSW_ACT';
+    if (normalized === 'NSW/ACT' || normalized === 'NSW_ACT') return 'NSW_ACT';
+    return AUSTRALIAN_JURISDICTION_STATES.has(normalized) ? normalized : '';
+}
+
+function normalizeTrackName(trackName) {
+    if (trackName === null || trackName === undefined) return '';
+    return String(trackName)
+        .trim()
+        .replace(/\s+/g, ' ')
+        .replace(/\s*[-–—]\s*/g, '-')
+        .replace(/\s*\([^)]*\)\s*$/, '')
+        .trim();
+}
+
+function trackLookupKey(trackName) {
+    return normalizeTrackName(trackName).toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function buildTrackToStateLookup() {
+    const lookup = {};
+    Object.entries(JURISDICTION_TRACKS).forEach(([state, tracks]) => {
+        tracks.forEach(track => { lookup[trackLookupKey(track)] = state; });
+    });
+    return lookup;
+}
+
+function findHorseRowValue(horseRow, candidateFields) {
+    for (const field of candidateFields) {
+        const normalizedField = String(field).trim().toLowerCase();
+        if (horseRow[normalizedField] !== undefined && String(horseRow[normalizedField] || '').trim()) {
+            return horseRow[normalizedField];
+        }
+    }
+    return '';
+}
+
+function getStateFromTrack(trackName) {
+    const key = trackLookupKey(trackName);
+    return key ? (TRACK_TO_STATE[key] || '') : '';
+}
+
+function getHorseStateMoveStates(horseRow) {
+    const explicitOrigin = normalizeStateCode(findHorseRowValue(horseRow, [
+        'origin_state', 'origin state', 'last_start_state', 'last start state',
+        'previous_state', 'previous state', 'lastRaceState', 'last race state',
+        'last race jurisdiction', 'previous jurisdiction', 'form state', 'form jurisdiction'
+    ]));
+    const explicitDestination = normalizeStateCode(findHorseRowValue(horseRow, [
+        'destination_state', 'destination state', 'race_state', 'race state',
+        'track_state', 'track state', 'meeting_state', 'meeting state',
+        'jurisdiction', 'state'
+    ]));
+
+    const originState = explicitOrigin || getStateFromTrack(findHorseRowValue(horseRow, [
+        'previous-run track', 'previous run track', 'previous track', 'prev track',
+        'last-start track', 'last start track', 'last run track', 'last race track',
+        'form track'
+    ]));
+    const destinationState = explicitDestination || getStateFromTrack(findHorseRowValue(horseRow, [
+        'track', 'race track', 'meeting track', 'track name'
+    ]));
+
+    return { originState, destinationState };
+}
+
+function formatSignedScore(value) {
+    const numericValue = Number(value) || 0;
+    return `${numericValue >= 0 ? '+' : ''}${numericValue.toFixed(1)}`;
+}
+
+function getStateMoveAdjustment(originState, destinationState) {
+    const origin = normalizeStateCode(originState);
+    const destination = normalizeStateCode(destinationState);
+    const key = origin && destination ? `${origin}->${destination}` : '';
+
+    if (!origin || !destination) {
+        return {
+            adjustment: 0,
+            note: '',
+            key,
+            data: null
+        };
+    }
+
+    if (origin === destination) {
+        return {
+            adjustment: 0,
+            note: '',
+            key,
+            data: null
+        };
+    }
+
+    const data = STATE_MOVE_MATRIX[key];
+    if (!data) {
+        return {
+            adjustment: -1,
+            note: `- 1.0 : Interstate state move — ${origin} → ${destination}; no matrix sample, applying unknown-interstate caution penalty\n`,
+            key,
+            data: null
+        };
+    }
+
+    const adjustment = clampStateMoveAdjustment(data.adjustment, data.runs);
+    const capNote = adjustment !== data.adjustment
+        ? `; listed ${formatSignedScore(data.adjustment)} capped for ${data.runs < 50 ? 'tiny' : 'moderate'} sample`
+        : '';
+
+    return {
+        adjustment,
+        note: `${formatSignedScore(adjustment)} : Interstate state move — ${origin} → ${destination}; runs ${data.runs}, win ${data.winPercentage.toFixed(1)}%, place ${data.placePercentage.toFixed(1)}%, ROI ${formatSignedScore(data.roiPercentage)}%${capNote}\n`,
+        key,
+        data
+    };
+}
+
+
 let jockeyLookup = {};
 let trainerLookup = {};
 let parTimesLookup = {};
@@ -3485,6 +3671,12 @@ function analyzeCSV(csvData, trackCondition = 'good', isAdvanced = false) {
     } : null;
     
     let [score, notes] = calculateScore(horse, trackCondition, false, avgFormPrice, sectionalDetailsForContext);
+    const { originState, destinationState } = getHorseStateMoveStates(horse);
+    const stateMoveResult = getStateMoveAdjustment(originState, destinationState);
+    if (stateMoveResult.note) {
+        score += stateMoveResult.adjustment;
+        notes += stateMoveResult.note;
+    }
         
         // ==========================================
         // SECTIONAL SCORING - API PRIMARY, CSV FALLBACK

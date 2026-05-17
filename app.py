@@ -1766,6 +1766,9 @@ def parse_notes_components(notes):
         (r'\+\s*[\d.]+\s*:\s*Hidden Edge.*Sprint leader.*last start favoured', 'Hidden Edge - Sprint Leader + Last Start Favoured'),
         (r'\+\s*[\d.]+\s*:\s*Hidden Edge.*Strong condition podium.*last start favourite', 'Hidden Edge - Condition Podium + Last Start Favourite'),
         
+        # ====== INTERSTATE STATE MOVE ======
+        (r'([+-]?\s*[\d.]+)\s*:\s*Interstate state move\s*[—-]\s*([A-Z_]+)\s*→\s*([A-Z_]+)([^\n]*)', '_interstate_state_move_dynamic'),
+
         # ====== PFAI BLEND ======
         (r'PFAI Score:\s*(9[0-9]|100)[\. ]', 'PFAI Score - 90+'),
         (r'PFAI Score:\s*(8[0-9])[\. ]', 'PFAI Score - 80-89'),
@@ -1844,6 +1847,21 @@ def parse_notes_components(notes):
                 except (ValueError, IndexError):
                     pass
                 continue
+            if name == '_interstate_state_move_dynamic':
+                try:
+                    score = float(match.group(1).replace(' ', '').replace('+', ''))
+                    origin = match.group(2).strip().upper()
+                    destination = match.group(3).strip().upper()
+                    details = match.group(4) or ''
+                    components[f'Interstate State Move - {origin} → {destination}'] = score
+                    if 'no matrix sample' in details.lower():
+                        components['Interstate State Move - Unknown Interstate'] = score
+                    elif origin == destination:
+                        components['Interstate State Move - Same State'] = score
+                except (ValueError, IndexError):
+                    pass
+                continue
+
             if name == '_track_score_dynamic':
                 try:
                     val = float(match.group(1))
@@ -5776,7 +5794,7 @@ SCORING_PREFIXES = (
     'Weight Change', 'Career Win Rate', 'Age/Sex', 'Colt', 'Sire',
     'Specialist', 'Sectional History', 'Sectional Consistency',
     'API Sectional', 'Running Position', 'Hidden Edge', 'PFAI Score',
-    'Signal Agreement',
+    'Signal Agreement', 'Interstate State Move',
     'Market Expectation', 'Pace Angle', 'Ran Places', 'Track Score',
     'Track Condition Score',
 )
@@ -5806,6 +5824,12 @@ NEGATIVE_COMPONENTS = {
     'Market Expectation - Mild Underperformer',
     'Market Expectation - Below Average',
     'Sire - Negative ROI',
+    'Interstate State Move - NSW_ACT → VIC',
+    'Interstate State Move - QLD → NSW_ACT',
+    'Interstate State Move - SA → VIC',
+    'Interstate State Move - NSW_ACT → SA',
+    'Interstate State Move - QLD → VIC',
+    'Interstate State Move - Unknown Interstate',
 }
 
 def is_scoring_component(name):
@@ -9734,6 +9758,12 @@ def export_ml_data():
         'pos_leader_staying', 'pos_onpace_staying', 'pos_midfield_staying', 'pos_backmarker_staying',
         # Pace angle
         'pace_sprint_leader_rundown',
+        # Interstate state move
+        'interstate_nsw_act_qld', 'interstate_vic_nsw_act', 'interstate_nsw_act_vic',
+        'interstate_vic_sa', 'interstate_qld_nsw_act', 'interstate_sa_vic',
+        'interstate_vic_qld', 'interstate_nsw_act_sa', 'interstate_qld_vic',
+        'interstate_vic_tas', 'interstate_tas_vic', 'interstate_vic_wa',
+        'interstate_unknown', 'interstate_same_state',
         # Hidden edges
         'hidden_short_price_competitive', 'hidden_600m_elite_marginally_below',
         'hidden_400m_elite_competitive', 'hidden_400m_elite_marginally_below',
@@ -9968,6 +9998,20 @@ def export_ml_data():
             'pos_midfield_staying':               components.get('Running Position - Midfield Staying', 0),
             'pos_backmarker_staying':             components.get('Running Position - Backmarker Staying', 0),
             'pace_sprint_leader_rundown':         components.get('Pace Angle - Sprint Leader Run Down', 0),
+            'interstate_nsw_act_qld':             components.get('Interstate State Move - NSW_ACT → QLD', 0),
+            'interstate_vic_nsw_act':             components.get('Interstate State Move - VIC → NSW_ACT', 0),
+            'interstate_nsw_act_vic':             components.get('Interstate State Move - NSW_ACT → VIC', 0),
+            'interstate_vic_sa':                  components.get('Interstate State Move - VIC → SA', 0),
+            'interstate_qld_nsw_act':             components.get('Interstate State Move - QLD → NSW_ACT', 0),
+            'interstate_sa_vic':                  components.get('Interstate State Move - SA → VIC', 0),
+            'interstate_vic_qld':                 components.get('Interstate State Move - VIC → QLD', 0),
+            'interstate_nsw_act_sa':              components.get('Interstate State Move - NSW_ACT → SA', 0),
+            'interstate_qld_vic':                 components.get('Interstate State Move - QLD → VIC', 0),
+            'interstate_vic_tas':                 components.get('Interstate State Move - VIC → TAS', 0),
+            'interstate_tas_vic':                 components.get('Interstate State Move - TAS → VIC', 0),
+            'interstate_vic_wa':                  components.get('Interstate State Move - VIC → WA', 0),
+            'interstate_unknown':                 components.get('Interstate State Move - Unknown Interstate', 0),
+            'interstate_same_state':              components.get('Interstate State Move - Same State', 0),
             'hidden_short_price_competitive':     components.get('Hidden Edge - Short Price + Competitive Effort', 0),
             'hidden_600m_elite_marginally_below': components.get('Hidden Edge - Elite 600m + Marginally Below Weight', 0),
             'hidden_400m_elite_competitive':      components.get('Hidden Edge - Elite 400m + Competitive Effort', 0),
