@@ -1191,6 +1191,8 @@ let _historyHomeGames = [];
 let _historyAwayGames = [];
 let _chartWin = 'all';
 let _chartFilter = 'season';
+const DATE_TIME_SLICE_LEN = 16;
+const RESULTS_MAX_MARKET_ROWS = 12;
 
 // ── Shared utils ─────────────────────────────────────────────────
 function safeNum(v, fb = 0) {
@@ -1214,8 +1216,8 @@ function norm(v) {
 function fmtDateTime(value) {
   if (!value) return '—';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16).replace('T', ' ');
-  return date.toISOString().slice(0, 16).replace('T', ' ');
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, DATE_TIME_SLICE_LEN).replace('T', ' ');
+  return date.toISOString().slice(0, DATE_TIME_SLICE_LEN).replace('T', ' ');
 }
 
 function mono(v) {
@@ -2630,7 +2632,7 @@ function loadAflResultsAnalysis() {
         <div class="results-kpi"><div class="results-kpi-label">Avg Edge</div><div class="results-kpi-val">${safeNum(perf.avg_edge, 0).toFixed(2)}%</div></div>
       `;
 
-      marketRowsEl.innerHTML = marketRows.length ? marketRows.slice(0, 12).map(r => `
+      marketRowsEl.innerHTML = marketRows.length ? marketRows.slice(0, RESULTS_MAX_MARKET_ROWS).map(r => `
         <tr>
           <td>${esc((r.bucket || 'unknown').replace('player_', '').replace(/_/g, ' '))}</td>
           <td>${safeNum(r.total_bets, 0)}</td>
