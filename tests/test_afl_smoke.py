@@ -1700,3 +1700,17 @@ def test_sgm_home_away_sql_condition_is_parenthesised():
     routes = Path("afl_routes.py").read_text(encoding="utf-8")
     assert "((LOWER(home_team) = LOWER(:home) AND LOWER(away_team) = LOWER(:away)) OR " in routes
     assert "(LOWER(home_team) = LOWER(:away) AND LOWER(away_team) = LOWER(:home)))" in routes
+
+
+def test_afl_results_analysis_route_exists():
+    routes = Path("afl_routes.py").read_text(encoding="utf-8")
+    assert '@app.route("/api/afl/results-analysis")' in routes
+    assert "def api_afl_results_analysis():" in routes
+
+
+def test_afl_template_has_results_tab_and_loader():
+    template = Path("templates/afl.html").read_text(encoding="utf-8")
+    assert 'data-tab="results"' in template
+    assert 'id="tab-results"' in template
+    assert "function loadAflResultsAnalysis()" in template
+    assert "if (name === 'results') {" in template

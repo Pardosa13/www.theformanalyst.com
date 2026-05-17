@@ -496,6 +496,18 @@
   .vf-results-meta {
     font-size:11px; color:var(--text-muted); margin-bottom:12px; padding:0 2px;
   }
+  .results-kpis {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-bottom:14px;
+  }
+  .results-kpi {
+    border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-elevated); padding:10px 12px;
+  }
+  .results-kpi-label {
+    font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:700;
+  }
+  .results-kpi-val {
+    margin-top:4px; font-size:1.1rem; font-family:'DM Mono',monospace; font-weight:700; color:var(--text-primary);
+  }
   .vf-cards-grid {
     display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:12px;
   }
@@ -692,6 +704,9 @@
   <button class="afl-tab" data-tab="value" onclick="switchTab('value',this)">
     <i class="bi bi-lightning-charge-fill"></i> Value Finder
   </button>
+  <button class="afl-tab" data-tab="results" onclick="switchTab('results',this)">
+    <i class="bi bi-graph-up-arrow"></i> Results
+  </button>
   <button class="afl-tab" data-tab="predictions" onclick="switchTab('predictions',this)">
     <i class="bi bi-bar-chart-fill"></i> Match Predictions
   </button>
@@ -870,6 +885,54 @@
           <i class="bi bi-bar-chart-steps"></i>
           <p>Select a match on the <strong>Players</strong> tab, then click <strong>Analyse Lines</strong>.</p>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════
+     TAB: RESULTS
+     ════════════════════════════════════════════════════════════════ -->
+<div id="tab-results" class="tab-panel">
+  <div class="afl-card">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-graph-up-arrow"></i> Captured Results Analysis</h4>
+      <span style="font-size:11px;color:var(--text-muted);">Tracked model selections · settled + pending</span>
+    </div>
+    <div class="afl-card-body">
+      <div id="resultsSummary" class="vf-results-meta">Loading captured AFL results…</div>
+      <div id="resultsKpis" class="results-kpis"></div>
+      <div class="scroll-x">
+        <table class="value-table">
+          <thead>
+            <tr>
+              <th>Market</th><th>Picks</th><th>W-L-P</th><th>Strike</th><th>Profit</th><th>ROI</th>
+            </tr>
+          </thead>
+          <tbody id="resultsMarketRows">
+            <tr><td colspan="6" style="padding:14px;color:var(--text-muted);">Loading market analysis…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="afl-card">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-check2-square"></i> Recently Settled Picks</h4>
+      <span style="font-size:11px;color:var(--text-muted);">Latest analyzed selections</span>
+    </div>
+    <div class="afl-card-body" style="padding:0;">
+      <div class="scroll-x">
+        <table class="value-table">
+          <thead>
+            <tr>
+              <th>Date</th><th>Player</th><th>Market</th><th>Pick</th><th>Result</th><th>Actual</th><th>P/L</th>
+            </tr>
+          </thead>
+          <tbody id="resultsSettledRows">
+            <tr><td colspan="7" style="padding:14px;color:var(--text-muted);">Loading settled results…</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -1193,6 +1256,9 @@ function switchTab(name, btn) {
     }
     loadModelTracker();
     loadCommandCentre();
+  }
+  if (name === 'results') {
+    loadAflResultsAnalysis();
   }
   if (name === 'predictions') {
     loadBettingEdges();
@@ -2524,6 +2590,71 @@ function loadModelTracker() {
     })
     .catch(() => {
       rowsEl.innerHTML = '<tr><td colspan="8" style="padding:14px;color:var(--danger);">Failed to load tracked selections.</td></tr>';
+    });
+}
+
+function loadAflResultsAnalysis() {
+  const summaryEl = document.getElementById('resultsSummary');
+  const kpiEl = document.getElementById('resultsKpis');
+  const marketRowsEl = document.getElementById('resultsMarketRows');
+  const settledRowsEl = document.getElementById('resultsSettledRows');
+  if (!summaryEl || !kpiEl || !marketRowsEl || !settledRowsEl) return;
+
+  fetch(`/api/afl/results-analysis?year={{ year }}&limit=80`)
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    .then(data => {
+      const summary = data.summary || {};
+      const perf = data.performance || {};
+      const breakdowns = data.breakdowns || {};
+      const marketRows = breakdowns.market || [];
+      const settledRows = data.recent_settled || [];
+
+      summaryEl.innerHTML = `
+        Captured picks: <strong>${safeNum(summary.captured_total, 0).toLocaleString()}</strong> ·
+        Settled: <strong>${safeNum(summary.settled_total, 0).toLocaleString()}</strong> ·
+        Pending: <strong>${safeNum(summary.pending_total, 0).toLocaleString()}</strong> ·
+        Settlement rate: <strong>${safeNum(summary.settled_rate, 0).toFixed(1)}%</strong>
+      `;
+
+      kpiEl.innerHTML = `
+        <div class="results-kpi"><div class="results-kpi-label">Strike Rate</div><div class="results-kpi-val">${safeNum(perf.strike_rate, 0).toFixed(1)}%</div></div>
+        <div class="results-kpi"><div class="results-kpi-label">Profit Units</div><div class="results-kpi-val">${safeNum(perf.total_profit, 0).toFixed(2)}u</div></div>
+        <div class="results-kpi"><div class="results-kpi-label">ROI</div><div class="results-kpi-val">${safeNum(perf.roi, 0).toFixed(1)}%</div></div>
+        <div class="results-kpi"><div class="results-kpi-label">Avg Edge</div><div class="results-kpi-val">${safeNum(perf.avg_edge, 0).toFixed(2)}%</div></div>
+      `;
+
+      marketRowsEl.innerHTML = marketRows.length ? marketRows.slice(0, 12).map(r => `
+        <tr>
+          <td>${esc((r.bucket || 'unknown').replace('player_', '').replace(/_/g, ' '))}</td>
+          <td>${safeNum(r.total_bets, 0)}</td>
+          <td>${safeNum(r.wins, 0)}-${safeNum(r.losses, 0)}-${safeNum(r.pushes, 0)}</td>
+          <td>${safeNum(r.strike_rate, 0).toFixed(1)}%</td>
+          <td>${safeNum(r.total_profit, 0).toFixed(2)}u</td>
+          <td>${safeNum(r.roi, 0).toFixed(1)}%</td>
+        </tr>
+      `).join('') : '<tr><td colspan="6" style="padding:14px;color:var(--text-muted);">No settled market rows yet.</td></tr>';
+
+      settledRowsEl.innerHTML = settledRows.length ? settledRows.slice(0, 80).map(r => {
+        const res = (r.result || 'pending').toLowerCase();
+        const resCls = res === 'win' ? 'pos' : res === 'loss' ? 'neg' : 'neu';
+        const dt = r.settled_at || r.commence_time || '';
+        const dtText = dt ? String(dt).slice(0, 16).replace('T', ' ') : '—';
+        return `<tr>
+          <td>${esc(dtText)}</td>
+          <td>${esc(r.player_name || '—')}</td>
+          <td>${esc((r.market || '').replace('player_', '').replace(/_/g, ' '))}</td>
+          <td>${esc(r.line_type || '—')} ${safeNum(r.line, 0)}</td>
+          <td><span class="edge-chip ${resCls}">${esc(res)}</span></td>
+          <td>${r.actual_stat != null ? safeNum(r.actual_stat, 0).toFixed(1) : '—'}</td>
+          <td>${r.profit_units != null ? safeNum(r.profit_units, 0).toFixed(2) : '—'}</td>
+        </tr>`;
+      }).join('') : '<tr><td colspan="7" style="padding:14px;color:var(--text-muted);">No settled picks available yet.</td></tr>';
+    })
+    .catch((err) => {
+      summaryEl.textContent = `Results analysis unavailable (${esc(err.message || 'unknown error')}).`;
+      kpiEl.innerHTML = '';
+      marketRowsEl.innerHTML = '<tr><td colspan="6" style="padding:14px;color:var(--danger);">Failed to load market analysis.</td></tr>';
+      settledRowsEl.innerHTML = '<tr><td colspan="7" style="padding:14px;color:var(--danger);">Failed to load settled picks.</td></tr>';
     });
 }
 

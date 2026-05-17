@@ -1103,6 +1103,51 @@ def register_afl_routes(app, db):
             }
         )
 
+    @app.route("/api/afl/results-analysis")
+    @login_required
+    def api_afl_results_analysis():
+        season = request.args.get("year", CURRENT_YEAR, type=int)
+        limit = min(request.args.get("limit", 60, type=int), 200)
+        rows = _db_model_selections(db, season=season, settled_only=False)
+        settled_rows = [r for r in rows if (r.get("result") or "").lower() in {"win", "loss", "push"}]
+        pending_rows = [r for r in rows if (r.get("result") or "").lower() == "pending"]
+
+        by_team: dict[str, list[dict]] = defaultdict(list)
+        for row in settled_rows:
+            by_team[str(row.get("team") or "unknown")].append(row)
+        team_breakdown = []
+        for team, team_rows in by_team.items():
+            team_breakdown.append({"bucket": team, **_calc_model_metrics(team_rows)})
+        team_breakdown.sort(key=lambda x: x.get("total_bets", 0), reverse=True)
+
+        def _row_sort_key(row: dict) -> str:
+            value = row.get("settled_at") or row.get("commence_time") or row.get("created_at")
+            return value.isoformat() if hasattr(value, "isoformat") else str(value or "")
+
+        recent_settled = sorted(settled_rows, key=_row_sort_key, reverse=True)[:limit]
+        recent_pending = sorted(pending_rows, key=_row_sort_key, reverse=True)[:limit]
+        settled_total = len(settled_rows)
+        total = len(rows)
+        return jsonify(
+            {
+                "season": season,
+                "summary": {
+                    "captured_total": total,
+                    "settled_total": settled_total,
+                    "pending_total": len(pending_rows),
+                    "settled_rate": round((settled_total / total) * 100, 2) if total else 0.0,
+                },
+                "performance": _calc_model_metrics(settled_rows),
+                "breakdowns": {
+                    "market": _calc_model_breakdown(settled_rows, "market"),
+                    "line_type": _calc_model_breakdown(settled_rows, "line_type"),
+                    "team": team_breakdown,
+                },
+                "recent_settled": recent_settled,
+                "recent_pending": recent_pending,
+            }
+        )
+
     @app.route("/api/afl/command-centre")
     @login_required
     def api_afl_command_centre():
