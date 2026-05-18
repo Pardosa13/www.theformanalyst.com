@@ -105,6 +105,14 @@ def register_afl_routes(app, db):
 
         latest_stats_season = _db_latest_player_stats_season(db)
         player_stats_season = latest_stats_season or (year - 1)
+        db_diagnostics = _db_connection_diagnostics(db)
+        db_warning = db_diagnostics.get("warning")
+        if not db_warning and total_players == 0:
+            db_warning = (
+                "No AFL player stats were found in the database used by this web app. "
+                "If the Railway cron synced successfully, verify that the Railway web "
+                "service and cron service are attached to the same DATABASE_URL."
+            )
 
         return render_template(
             "afl.html",
@@ -119,6 +127,8 @@ def register_afl_routes(app, db):
             data_sources=sources,
             fixtures=fixtures,
             standings=standings,
+            db_diagnostics=db_diagnostics,
+            db_warning=db_warning,
         )
 
     @app.route("/api/afl/player-stats")
@@ -1157,6 +1167,7 @@ def register_afl_routes(app, db):
     def api_afl_command_centre():
         season = request.args.get("year", CURRENT_YEAR, type=int)
         summary = _db_model_performance_summary(db, season=season)
+        database = _db_connection_diagnostics(db)
         sql = db.text(
             """
             SELECT source, season, round, rows_synced, status, error_msg, synced_at
@@ -1171,10 +1182,13 @@ def register_afl_routes(app, db):
         return jsonify(
             {
                 "season": season,
+                "database": database,
                 "model_performance": summary,
                 "sync_recent": sync_rows,
                 "readiness": {
+                    "games": _db_count(db, "SELECT COUNT(*) FROM afl_games"),
                     "stats": _db_count(db, "SELECT COUNT(*) FROM afl_player_stats WHERE season >= 2022"),
+                    "latest_stats_season": _db_latest_player_stats_season(db) or 0,
                     "props_24h": _db_count(
                         db,
                         "SELECT COUNT(*) FROM afl_player_props WHERE fetched_at > NOW() - INTERVAL '24 hours'",
@@ -1273,7 +1287,7 @@ def register_afl_routes(app, db):
         sql = db.text(
             f"""
             SELECT DISTINCT ON (player_name, market, line_type, line)
-                   player_name, team, home_team, away_team, market,
+                   player_name, '' AS team, home_team, away_team, market,
                    line_type, line, odds, bookmaker, commence_time, fetched_at
             FROM afl_player_props
             WHERE {where_clause}
@@ -2913,6 +2927,52 @@ def _db_has_props(db, home_team: str, away_team: str) -> bool:
     with db.engine.connect() as conn:
         result = conn.execute(sql, {"home": home_team.strip()}).fetchone()
     return result is not None
+
+
+def _db_connection_diagnostics(db) -> dict:
+    """Return a safe, human-readable description of the database backing this web app."""
+    try:
+        url = db.engine.url
+        backend = (
+            url.get_backend_name()
+            if hasattr(url, "get_backend_name")
+            else str(getattr(url, "drivername", "unknown")).split("+", 1)[0]
+        )
+        backend = backend or "unknown"
+        host = str(getattr(url, "host", "") or "")
+        database = str(getattr(url, "database", "") or "")
+    except Exception:
+        return {
+            "backend": "unknown",
+            "host": "",
+            "database": "",
+            "label": "unknown",
+            "warning": "Unable to inspect the active database connection.",
+        }
+
+    if backend == "sqlite":
+        target = database.rsplit("/", 1)[-1] if database else ":memory:"
+        return {
+            "backend": backend,
+            "host": "",
+            "database": database,
+            "label": f"sqlite · {target}",
+            "warning": (
+                "This web app is reading AFL data from local SQLite. Railway AFL cron jobs "
+                "normally write to Postgres via DATABASE_URL, so an empty AFL page usually "
+                "means the Railway web service DATABASE_URL is missing or different from the "
+                "cron service."
+            ),
+        }
+
+    target = f"{host}/{database}" if host and database else database or host or "connected"
+    return {
+        "backend": backend,
+        "host": host,
+        "database": database,
+        "label": f"{backend} · {target}",
+        "warning": None,
+    }
 
 
 def _check_data_sources(db) -> dict:
