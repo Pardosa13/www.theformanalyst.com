@@ -613,12 +613,12 @@ def fetch_fixture_afl(season: int, round_number: int = None, comp: str = "AFLM")
     # response (they're already season-scoped) and emit a diagnostic warning
     # when no name evidence of the expected year is found.
     filtered = list(matches)
-    mismatched = 0
-    for match in filtered:
-        comp_season = match.get("compSeason") or {}
-        comp_season_name = _coerce_str(comp_season.get("shortName") or comp_season.get("name"))
-        if comp_season_name and str(season) not in comp_season_name:
-            mismatched += 1
+    mismatched = sum(
+        1 for m in filtered
+        if (s := _coerce_str((m.get("compSeason") or {}).get("shortName")
+                             or (m.get("compSeason") or {}).get("name")))
+        and str(season) not in s
+    )
 
     if mismatched and mismatched == len(filtered):
         logger.warning(

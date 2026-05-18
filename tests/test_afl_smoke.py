@@ -1872,10 +1872,11 @@ def test_fetch_fixture_afl_does_not_hard_filter_on_season_name():
     fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
 
     # Must NOT have the old one-liner that silently drops non-matching rows.
-    # Check for the two key components independently to avoid brittle
-    # multi-line string matching.
-    assert "if str(season) in comp_season_name:" not in fn_body or \
-           "filtered.append(match)" not in fn_body, (
+    # Check independently: if the strict if-guard is present AND filtered.append
+    # is also present in the same function body, the old filter is still active.
+    has_strict_guard = "if str(season) in comp_season_name:" in fn_body
+    has_append = "filtered.append(match)" in fn_body
+    assert not (has_strict_guard and has_append), (
         "fetch_fixture_afl still uses the strict season-name filter that was "
         "dropping all 2026 matches when the AFL API changed its name format"
     )
@@ -1918,15 +1919,10 @@ def test_workflow_uses_r_script_file_not_inline():
         "fetch-afl-2026.yml must call 'Rscript scripts/fetch_afl_2026_stats.R' "
         "for the stats-fetch step (not inline Rscript -e with multi-line code)"
     )
-    # Verify the R script call is a simple run: Rscript path pattern (not -e)
+    # Must reference the R script file (fetch step invocation)
     assert "Rscript scripts/fetch_afl_2026_stats.R" in wf_source, (
-        "fetch-afl-2026.yml should have 'Rscript scripts/fetch_afl_2026_stats.R' "
+        "fetch-afl-2026.yml must call 'Rscript scripts/fetch_afl_2026_stats.R' "
         "as the run command for the fetch step"
-    )
-
-    # Must reference the R script file
-    assert "fetch_afl_2026_stats.R" in wf_source, (
-        "fetch-afl-2026.yml must call 'Rscript scripts/fetch_afl_2026_stats.R'"
     )
 
 

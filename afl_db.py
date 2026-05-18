@@ -1588,7 +1588,7 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
             len(missing_stats),
             "; ".join(
                 f"{match} ({len(players)} pick(s): {', '.join(players[:3])}"
-                + (" ..." if len(players) > 3 else ")")
+                f"{' ...' if len(players) > 3 else ''})"
                 for match, players in sorted(missing_stats.items())
             ),
         )
