@@ -556,7 +556,7 @@ def test_api_afl_props_all_no_longer_selects_missing_team_column():
     next_route_idx = next_match.start() if next_match else -1
     fn_body = source[fn_idx:] if next_route_idx == -1 else source[fn_idx:next_route_idx]
 
-    assert not re.search(r"player_name\s*,\s*team\s*,\s*home_team", fn_body), (
+    assert not re.search(r"\bplayer_name\b[\s,]+\bteam\b[\s,]+\bhome_team\b", fn_body), (
         "api_afl_props_all still selects the non-existent afl_player_props.team column"
     )
     assert re.search(r"\bAS\s+team\b", fn_body), (
