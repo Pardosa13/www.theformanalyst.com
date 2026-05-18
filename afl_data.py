@@ -604,12 +604,29 @@ def fetch_fixture_afl(season: int, round_number: int = None, comp: str = "AFLM")
     if not isinstance(matches, list):
         return []
 
-    filtered = []
-    for match in matches:
+    # We already constrained the query to compSeasonId (unique to this season),
+    # so all returned matches should belong to the requested season.  The
+    # original name-based filter (`str(season) in comp_season_name`) was too
+    # strict: if the AFL API changes its season-name format (e.g. "AFL Season
+    # 2026" → something without "2026") every match gets rejected, producing 0
+    # rows even though data exists.  We now accept all matches from the API
+    # response (they're already season-scoped) and emit a diagnostic warning
+    # when no name evidence of the expected year is found.
+    filtered = list(matches)
+    mismatched = 0
+    for match in filtered:
         comp_season = match.get("compSeason") or {}
         comp_season_name = _coerce_str(comp_season.get("shortName") or comp_season.get("name"))
-        if str(season) in comp_season_name:
-            filtered.append(match)
+        if comp_season_name and str(season) not in comp_season_name:
+            mismatched += 1
+
+    if mismatched and mismatched == len(filtered):
+        logger.warning(
+            "AFL fixture: season %s — none of the %s matches have '%s' in "
+            "compSeason name (API may have changed season-name format). "
+            "Accepting all matches since compSeasonId=%s already scopes results.",
+            season, len(filtered), season, comp_season_id,
+        )
 
     logger.info(
         "AFL fixture: %s matches for season %s round=%s via afl/v2/matches",
@@ -1482,6 +1499,35 @@ def fetch_2026_stats_from_csv(csv_path: Path | None = None) -> list[dict]:
     df.columns = [str(c).strip().lower() for c in df.columns]
 
     logger.info("2026 CSV: loaded %s rows, %s columns from %s", len(df), len(cols), path)
+
+    # ── CSV freshness check ────────────────────────────────────────────────
+    # Detect stale data: warn if the most recent match date in the CSV is more
+    # than 10 days ago.  This surfaces situations where the GitHub Actions
+    # workflow hasn't committed updated data (e.g. workflow failure) so that
+    # settlement can't grade picks from the latest completed round.
+    date_col = next(
+        (c for c in ("date", "match_date") if c in cols),
+        None,
+    )
+    if date_col:
+        try:
+            latest_date = pd.to_datetime(df[date_col], errors="coerce").max()
+            if pd.notna(latest_date):
+                age_days = (pd.Timestamp.utcnow().normalize() - latest_date.normalize()).days
+                if age_days > 10:
+                    logger.warning(
+                        "2026 CSV: most recent match date is %s (%d days ago) — "
+                        "CSV appears stale. Check the 'Fetch AFL 2026 Stats' "
+                        "GitHub Actions workflow for failures.",
+                        latest_date.date(), age_days,
+                    )
+                else:
+                    logger.info(
+                        "2026 CSV: most recent match date %s (%d days ago)",
+                        latest_date.date(), age_days,
+                    )
+        except Exception:
+            pass
 
     # ── Fryzigg format: stable player_id column present ───────────────────
     if "player_id" in cols:

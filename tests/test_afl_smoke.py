@@ -788,24 +788,42 @@ def test_r_workflow_uses_afltables_with_fryzigg_fallback():
     0 rows for 2026 from April 25 2026, causing the CSV to go stale; afltables
     updates within a day of each round finishing and is now the reliable option.
     The afltables player_id collision issue is handled by the name-matching
-    resolution in upsert_player_stats / _resolve_player_id_2026."""
-    wf_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        ".github", "workflows", "fetch-afl-2026.yml",
+    resolution in upsert_player_stats / _resolve_player_id_2026.
+
+    The R logic now lives in scripts/fetch_afl_2026_stats.R (extracted from the
+    inline Rscript -e block to avoid bash backtick-substitution bugs)."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    r_script_path = os.path.join(repo_root, "scripts", "fetch_afl_2026_stats.R")
+    wf_path = os.path.join(repo_root, ".github", "workflows", "fetch-afl-2026.yml")
+
+    # The R source lives in the script file.
+    assert os.path.exists(r_script_path), (
+        "scripts/fetch_afl_2026_stats.R does not exist — the R fetch logic must "
+        "be in a separate file to avoid bash backtick command-substitution errors."
     )
-    with open(wf_path, encoding="utf-8") as f:
-        source = f.read()
-    assert "source = 'afltables'" in source, (
-        "fetch-afl-2026.yml does not use source = 'afltables'; "
+    with open(r_script_path, encoding="utf-8") as f:
+        r_source = f.read()
+
+    # Check for afltables as primary source (double-quoted, as used in the R script)
+    assert 'source = "afltables"' in r_source, (
+        "scripts/fetch_afl_2026_stats.R does not use source = \"afltables\"; "
         "fryzigg has been returning 0 rows for 2026 since April 25"
     )
     # fryzigg may still appear as a fallback — that is fine.
     # Verify afltables appears before fryzigg (primary, not just present).
-    afltables_pos = source.find("source = 'afltables'")
-    fryzigg_pos = source.find("source = 'fryzigg'")
+    afltables_pos = r_source.find('source = "afltables"')
+    fryzigg_pos = r_source.find('source = "fryzigg"')
     assert afltables_pos < fryzigg_pos, (
-        "afltables must appear before fryzigg in fetch-afl-2026.yml "
+        "afltables must appear before fryzigg in scripts/fetch_afl_2026_stats.R "
         "(afltables is the primary source, fryzigg is the fallback)"
+    )
+
+    # The workflow must invoke the R script file (not inline Rscript -e).
+    with open(wf_path, encoding="utf-8") as f:
+        wf_source = f.read()
+    assert "fetch_afl_2026_stats.R" in wf_source, (
+        "fetch-afl-2026.yml must invoke scripts/fetch_afl_2026_stats.R "
+        "(not inline Rscript -e) to avoid bash backtick command-substitution errors"
     )
 
 
@@ -1234,24 +1252,41 @@ def test_value_finder_match_filter_uses_exact_equality():
 
 
 def test_fetch_afl_2026_workflow_uses_afltables_source():
-    """fetch-afl-2026.yml must use source='afltables' as the primary source.
-    source='fryzigg' has been returning 0 rows since April 25 2026, causing
-    the CSV to go stale and Round 8+ data to not update on the website."""
-    workflow_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        ".github", "workflows", "fetch-afl-2026.yml",
-    )
-    with open(workflow_path, encoding="utf-8") as f:
-        source = f.read()
+    """fetch-afl-2026.yml must call scripts/fetch_afl_2026_stats.R which uses
+    source='afltables' as the primary source.
+    The R logic was extracted from the inline Rscript -e block to fix a bash
+    backtick command-substitution bug that caused 'unexpected assignment in
+    \" <-\"' errors (the backtick-quoted `%||%` operator was being run as a
+    shell command).  The afltables source is the most reliable for current-season
+    data; fryzigg has been returning 0 rows for 2026 since April 25 2026."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    workflow_path = os.path.join(repo_root, ".github", "workflows", "fetch-afl-2026.yml")
+    r_script_path = os.path.join(repo_root, "scripts", "fetch_afl_2026_stats.R")
 
-    assert "source = 'afltables'" in source, (
-        "fetch-afl-2026.yml does not use source='afltables'. "
+    with open(workflow_path, encoding="utf-8") as f:
+        wf_source = f.read()
+
+    # Workflow must call the R script file (not inline Rscript -e)
+    assert "fetch_afl_2026_stats.R" in wf_source, (
+        "fetch-afl-2026.yml must invoke scripts/fetch_afl_2026_stats.R "
+        "to avoid bash backtick command-substitution errors with inline Rscript -e"
+    )
+
+    # R script must exist and use afltables as primary source
+    assert os.path.exists(r_script_path), (
+        "scripts/fetch_afl_2026_stats.R does not exist"
+    )
+    with open(r_script_path, encoding="utf-8") as f:
+        r_source = f.read()
+
+    assert 'source = "afltables"' in r_source, (
+        "scripts/fetch_afl_2026_stats.R does not use source=\"afltables\". "
         "The fryzigg source returns 0 rows for 2026, causing the CSV to go stale."
     )
 
     # Must NOT hard-stop when fryzigg returns nothing — afltables is the primary
-    assert "source = 'fryzigg'" not in source or "afltables" in source, (
-        "fetch-afl-2026.yml still uses fryzigg as primary without afltables fallback"
+    assert 'source = "fryzigg"' not in r_source or "afltables" in r_source, (
+        "scripts/fetch_afl_2026_stats.R still uses fryzigg as primary without afltables fallback"
     )
 
 
@@ -1756,3 +1791,153 @@ def test_afl_template_has_results_tab_and_loader():
     assert 'id="tab-results"' in template
     assert "function loadAflResultsAnalysis()" in template
     assert "if (name === 'results') {" in template
+
+
+# ---------------------------------------------------------------------------
+# Settlement diagnostics: missing-stats warning
+# ---------------------------------------------------------------------------
+
+def test_settle_model_selections_logs_missing_stats():
+    """settle_model_selections must log a WARNING when overdue picks have no
+    matching rows in afl_player_stats (indicating a stale CSV / missing round).
+    This surfaces the root cause in cron logs rather than silently settling 0."""
+    db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_db.py",
+    )
+    with open(db_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # Must have missing-stats diagnostic code
+    assert "missing_stats" in source, (
+        "settle_model_selections does not track missing_stats — "
+        "add diagnostics to log when stat rows are absent for overdue picks"
+    )
+    assert "overdue pick" in source, (
+        "settle_model_selections does not emit an 'overdue pick' diagnostic warning"
+    )
+    assert "afl_player_stats" in source or "GitHub Actions" in source, (
+        "settlement diagnostic should mention afl_player_stats or the GitHub Actions workflow"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CSV freshness check
+# ---------------------------------------------------------------------------
+
+def test_fetch_2026_csv_checks_freshness():
+    """fetch_2026_stats_from_csv must check how old the latest match date in the
+    CSV is and emit a WARNING when it exceeds 10 days, surfacing stale-data issues
+    in the cron log before settlement runs."""
+    data_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_data.py",
+    )
+    with open(data_path, encoding="utf-8") as f:
+        source = f.read()
+
+    assert "age_days" in source, (
+        "fetch_2026_stats_from_csv does not compute age_days for freshness check"
+    )
+    assert "stale" in source.lower(), (
+        "fetch_2026_stats_from_csv does not mention 'stale' in freshness warning"
+    )
+    assert "GitHub Actions" in source, (
+        "fetch_2026_stats_from_csv freshness warning should mention "
+        "the 'Fetch AFL 2026 Stats' GitHub Actions workflow"
+    )
+
+
+# ---------------------------------------------------------------------------
+# AFL API season-name filter: must not reject valid 2026 matches
+# ---------------------------------------------------------------------------
+
+def test_fetch_fixture_afl_does_not_hard_filter_on_season_name():
+    """fetch_fixture_afl must NOT silently discard all matches because the AFL API
+    changed the compSeason.shortName format.  Since compSeasonId already scopes the
+    query to the correct season, the old strict filter (str(season) in name) would
+    produce 0 rows whenever the name format changed — the new code accepts all
+    matches but emits a diagnostic warning."""
+    data_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_data.py",
+    )
+    with open(data_path, encoding="utf-8") as f:
+        source = f.read()
+
+    # The old strict filter should no longer be used to discard matches
+    fn_start = source.find("def fetch_fixture_afl(")
+    assert fn_start != -1, "fetch_fixture_afl not found in afl_data.py"
+    fn_end = source.find("\ndef ", fn_start + 1)
+    fn_body = source[fn_start:] if fn_end == -1 else source[fn_start:fn_end]
+
+    # Must NOT have the old one-liner that silently drops non-matching rows
+    assert (
+        "if str(season) in comp_season_name:\n            filtered.append(match)" not in fn_body
+    ), (
+        "fetch_fixture_afl still uses the strict season-name filter that was "
+        "dropping all 2026 matches when the AFL API changed its name format"
+    )
+
+    # Must accept all matches from the already-scoped API response
+    assert "filtered = list(matches)" in fn_body, (
+        "fetch_fixture_afl does not set filtered = list(matches) to accept all "
+        "API-returned matches (they are already season-scoped via compSeasonId)"
+    )
+
+    # Must still emit a diagnostic warning when names mismatch
+    assert "API may have changed season-name format" in fn_body or "mismatched" in fn_body, (
+        "fetch_fixture_afl should warn when compSeason names don't contain the "
+        "expected year string (helps diagnose future API format changes)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# R script: workflow uses file-based invocation (not inline Rscript -e)
+# ---------------------------------------------------------------------------
+
+def test_workflow_uses_r_script_file_not_inline():
+    """The fetch-afl-2026 workflow must call Rscript with a .R file, not with
+    an inline -e '...' block.  The inline approach caused bash to interpret
+    backtick-quoted R identifiers (e.g. `%||%`) as command substitution, mangling
+    the R code and causing 'Error: unexpected assignment in \" <-\"'."""
+    wf_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        ".github", "workflows", "fetch-afl-2026.yml",
+    )
+    with open(wf_path, encoding="utf-8") as f:
+        wf_source = f.read()
+
+    # Must NOT have the problematic inline Rscript -e block
+    assert 'Rscript -e "\n' not in wf_source and "Rscript -e '\n" not in wf_source, (
+        "fetch-afl-2026.yml uses inline Rscript -e with a multi-line string — "
+        "this causes bash backtick command-substitution bugs. "
+        "Use 'Rscript scripts/fetch_afl_2026_stats.R' instead."
+    )
+
+    # Must reference the R script file
+    assert "fetch_afl_2026_stats.R" in wf_source, (
+        "fetch-afl-2026.yml must call 'Rscript scripts/fetch_afl_2026_stats.R'"
+    )
+
+
+def test_r_script_has_backtick_operator_safe_syntax():
+    """scripts/fetch_afl_2026_stats.R defines `%||%` at file scope — in a
+    standalone R script this is fine (no bash quoting issues).  Verify the
+    file exists and contains the operator definition."""
+    r_script_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "scripts", "fetch_afl_2026_stats.R",
+    )
+    assert os.path.exists(r_script_path), (
+        "scripts/fetch_afl_2026_stats.R does not exist"
+    )
+    with open(r_script_path, encoding="utf-8") as f:
+        r_source = f.read()
+
+    # The file-based script can safely define backtick operators
+    assert "`%||%`" in r_source, (
+        "scripts/fetch_afl_2026_stats.R should define the `%||%` null-coalescing "
+        "operator (it is safe here since there is no bash double-quote wrapping)"
+    )
+
