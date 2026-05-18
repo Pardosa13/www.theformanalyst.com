@@ -540,6 +540,48 @@ def test_db_get_props_applies_all_filters():
         )
 
 
+def test_api_afl_props_all_no_longer_selects_missing_team_column():
+    """api_afl_props_all must not reference a non-existent afl_player_props.team column."""
+    routes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "afl_routes.py",
+    )
+    with open(routes_path, encoding="utf-8") as f:
+        source = f.read()
+
+    fn_idx = source.find("def api_afl_props_all():")
+    assert fn_idx != -1, "api_afl_props_all not found in afl_routes.py"
+    route_marker = re.compile(r"\n\s+@app\.route")
+    next_match = route_marker.search(source, fn_idx + 1)
+    next_route_idx = next_match.start() if next_match else -1
+    fn_body = source[fn_idx:] if next_route_idx == -1 else source[fn_idx:next_route_idx]
+
+    assert not re.search(r"\bplayer_name\b[\s,]+\bteam\b[\s,]+\bhome_team\b", fn_body), (
+        "api_afl_props_all still selects the non-existent afl_player_props.team column"
+    )
+    assert re.search(r"\bAS\s+team\b", fn_body), (
+        "api_afl_props_all should still expose a team field without selecting a missing DB column"
+    )
+
+
+def test_afl_hub_includes_database_diagnostics():
+    """AFL hub should expose DB diagnostics and a warning for DB mismatch debugging."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    routes_path = os.path.join(repo_root, "afl_routes.py")
+    template_path = os.path.join(repo_root, "templates", "afl.html")
+
+    with open(routes_path, encoding="utf-8") as f:
+        routes_source = f.read()
+    with open(template_path, encoding="utf-8") as f:
+        template_source = f.read()
+
+    assert "def _db_connection_diagnostics(" in routes_source
+    assert "db_diagnostics=db_diagnostics" in routes_source
+    assert "db_warning=db_warning" in routes_source
+    assert "DB · {{ db_diagnostics.label }}" in template_source
+    assert "{% if db_warning %}" in template_source
+
+
 # ---------------------------------------------------------------------------
 # 2026 player_id collision fix — new helpers in afl_db.py
 # ---------------------------------------------------------------------------

@@ -58,6 +58,14 @@
   .connected .ds-dot { background:var(--success); box-shadow:0 0 5px rgba(16,185,129,.5); }
   .pending .ds-dot   { background:var(--warning); }
   .offline .ds-dot   { background:var(--danger); }
+  .db-warning {
+    display:flex; gap:10px; align-items:flex-start;
+    margin-bottom:18px; padding:12px 14px; border-radius:12px;
+    background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.28);
+    color:#fbbf24;
+  }
+  .db-warning i { font-size:15px; line-height:1.2; }
+  .db-warning strong { color:var(--text-primary); }
 
   /* ── Stat tiles ──────────────────────────────────────────────── */
   .stat-row {
@@ -670,7 +678,22 @@
   <div class="ds-pill {{ 'connected' if data_sources and data_sources.odds_api else 'offline' }}">
     <span class="ds-dot"></span> Odds API{% if not (data_sources and data_sources.odds_api) %} — Configure{% endif %}
   </div>
+  {% if db_diagnostics %}
+  <div class="ds-pill {{ 'offline' if db_warning else 'connected' }}">
+    <span class="ds-dot"></span> DB · {{ db_diagnostics.label }}
+  </div>
+  {% endif %}
 </div>
+
+{% if db_warning %}
+<div class="db-warning">
+  <i class="bi bi-exclamation-triangle-fill"></i>
+  <div>
+    <strong>{{ db_diagnostics.label if db_diagnostics else 'Database warning' }}</strong><br>
+    {{ db_warning }}
+  </div>
+</div>
+{% endif %}
 
 <!-- ── Stat tiles ───────────────────────────────────────────────── -->
 <div class="stat-row">
@@ -2676,11 +2699,18 @@ function loadCommandCentre() {
     .then(r => r.json())
     .then(data => {
       const r = data.readiness || {};
+      const dbInfo = data.database || {};
       summaryEl.innerHTML = `
+        Database: <strong>${esc(dbInfo.label || 'unknown')}</strong> ·
+        Games: <strong>${safeNum(r.games, 0).toLocaleString()}</strong> ·
         Readiness · Stats rows (2022+): <strong>${safeNum(r.stats, 0).toLocaleString()}</strong> ·
+        Latest stats season: <strong>${safeNum(r.latest_stats_season, 0)}</strong> ·
         Props 24h: <strong>${safeNum(r.props_24h, 0).toLocaleString()}</strong> ·
         Pending tracked picks: <strong>${safeNum(r.pending_selections, 0).toLocaleString()}</strong>
       `;
+      if (dbInfo.warning) {
+        summaryEl.innerHTML += `<div style="margin-top:8px;color:#fbbf24;">${esc(dbInfo.warning)}</div>`;
+      }
     })
     .catch(() => { summaryEl.textContent = 'Command centre unavailable.'; });
 
