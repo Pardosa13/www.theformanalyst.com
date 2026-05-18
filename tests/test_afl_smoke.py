@@ -564,7 +564,7 @@ def test_api_afl_props_all_no_longer_selects_missing_team_column():
     )
 
 
-def test_afl_hub_surfaces_database_diagnostics():
+def test_afl_hub_includes_database_diagnostics():
     """AFL hub should expose DB diagnostics and a warning for DB mismatch debugging."""
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     routes_path = os.path.join(repo_root, "afl_routes.py")

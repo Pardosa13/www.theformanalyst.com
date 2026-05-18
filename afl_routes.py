@@ -2963,7 +2963,7 @@ def _db_connection_diagnostics(db) -> dict:
             ),
         }
 
-    target = f"{host}/{database}" if host and database else database or host or "connected"
+    target = f"{host}/{database}" if host and database else database or host or "connection info unavailable"
     return {
         "backend": backend,
         "host": host,
