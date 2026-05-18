@@ -551,13 +551,15 @@ def test_api_afl_props_all_no_longer_selects_missing_team_column():
 
     fn_idx = source.find("def api_afl_props_all():")
     assert fn_idx != -1, "api_afl_props_all not found in afl_routes.py"
-    next_def = source.find("\n    @app.route", fn_idx + 1)
+    route_marker = re.compile(r"\n\s+@app\.route")
+    next_match = route_marker.search(source, fn_idx + 1)
+    next_def = next_match.start() if next_match else -1
     fn_body = source[fn_idx:] if next_def == -1 else source[fn_idx:next_def]
 
-    assert "player_name, team, home_team" not in fn_body, (
+    assert not re.search(r"player_name\s*,\s*team\s*,\s*home_team", fn_body), (
         "api_afl_props_all still selects the non-existent afl_player_props.team column"
     )
-    assert "AS team" in fn_body, (
+    assert re.search(r"\bAS\s+team\b", fn_body), (
         "api_afl_props_all should still expose a team field without selecting a missing DB column"
     )
 

@@ -1287,7 +1287,7 @@ def register_afl_routes(app, db):
         sql = db.text(
             f"""
             SELECT DISTINCT ON (player_name, market, line_type, line)
-                   player_name, '' AS team, home_team, away_team, market,
+                   player_name, NULL AS team, home_team, away_team, market,
                    line_type, line, odds, bookmaker, commence_time, fetched_at
             FROM afl_player_props
             WHERE {where_clause}
@@ -2933,11 +2933,9 @@ def _db_connection_diagnostics(db) -> dict:
     """Return a safe, human-readable description of the database backing this web app."""
     try:
         url = db.engine.url
-        backend = (
-            url.get_backend_name()
-            if hasattr(url, "get_backend_name")
-            else str(getattr(url, "drivername", "unknown")).split("+", 1)[0]
-        )
+        driver_name = str(getattr(url, "drivername", "") or "")
+        fallback_backend = driver_name.partition("+")[0] or driver_name or "unknown"
+        backend = url.get_backend_name() if hasattr(url, "get_backend_name") else fallback_backend
         backend = backend or "unknown"
         host = str(getattr(url, "host", "") or "")
         database = str(getattr(url, "database", "") or "")
