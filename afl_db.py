@@ -1521,7 +1521,7 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
     # Diagnostics: track picks that can't be settled due to missing stats,
     # grouped by match so we emit one log line per missing match rather than
     # one per player (which would flood the log).
-    missing_stats: dict[str, list[str]] = {}  # "home vs away YYYY-MM-DD" → [player, ...]
+    missing_stats: dict[str, list[str]] = {}  # "home vs away YYYY-MM-DD" -> [player, ...]
 
     with db.engine.begin() as conn:
         for row in pending:
