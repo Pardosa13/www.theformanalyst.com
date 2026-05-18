@@ -1461,6 +1461,9 @@ def snapshot_model_selections_from_props(
 
 def settle_model_selections(db, settle_after_hours: int = 2) -> int:
     """Settle pending tracked selections using afl_player_stats (idempotent)."""
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
     market_map = {
         "player_disposals": "disposals",
         "player_kicks": "kicks",
@@ -1515,6 +1518,11 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
     """)
 
     settled = 0
+    # Diagnostics: track picks that can't be settled due to missing stats,
+    # grouped by match so we emit one log line per missing match rather than
+    # one per player (which would flood the log).
+    missing_stats: dict[str, list[str]] = {}  # "home vs away YYYY-MM-DD" -> [player, ...]
+
     with db.engine.begin() as conn:
         for row in pending:
             stat_col = market_map.get(_normalise_name(row.get("market")))
@@ -1538,6 +1546,15 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
                 },
             ).mappings().fetchone()
             if not stat_row:
+                # Accumulate missing-stats diagnostics keyed by match identity
+                match_key = (
+                    f"{row.get('home_team','?')} vs {row.get('away_team','?')} "
+                    f"{match_time.date() if hasattr(match_time,'date') else '?'}"
+                )
+                missing_stats.setdefault(match_key, [])
+                pname = row.get("player_name") or "unknown"
+                if pname not in missing_stats[match_key]:
+                    missing_stats[match_key].append(pname)
                 continue
             actual_stat = float(stat_row.get(stat_col, 0) or 0)
             line = float(row.get("line") or 0)
@@ -1558,4 +1575,22 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
                 {"id": row["id"], "actual_stat": actual_stat, "result": result, "profit_units": profit},
             ).rowcount
             settled += int(updated or 0)
+
+    if missing_stats:
+        total_missing = sum(len(v) for v in missing_stats.values())
+        _log.warning(
+            "settle_model_selections: %d overdue pick(s) across %d match(es) could not "
+            "be settled — no matching rows in afl_player_stats. "
+            "This usually means the 2026 stats CSV is stale or the GitHub Actions "
+            "'Fetch AFL 2026 Stats' workflow has not yet committed data for these rounds. "
+            "Affected matches: %s",
+            total_missing,
+            len(missing_stats),
+            "; ".join(
+                f"{match} ({len(players)} pick(s): {', '.join(players[:3])}"
+                f"{' ...' if len(players) > 3 else ''})"
+                for match, players in sorted(missing_stats.items())
+            ),
+        )
+
     return settled
