@@ -917,6 +917,7 @@
      TAB: RESULTS
      ════════════════════════════════════════════════════════════════ -->
 <div id="tab-results" class="tab-panel">
+  <div id="results-content" data-role="results">
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-graph-up-arrow"></i> Captured Results Analysis</h4>
@@ -958,6 +959,27 @@
         </table>
       </div>
     </div>
+  </div>
+  <div class="afl-card">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-hourglass-split"></i> Recent Pending Picks</h4>
+      <span style="font-size:11px;color:var(--text-muted);">Weekend selections awaiting settlement</span>
+    </div>
+    <div class="afl-card-body" style="padding:0;">
+      <div class="scroll-x">
+        <table class="value-table">
+          <thead>
+            <tr>
+              <th>Date</th><th>Player</th><th>Market</th><th>Pick</th><th>Odds</th><th>Edge</th>
+            </tr>
+          </thead>
+          <tbody id="resultsPendingRows">
+            <tr><td colspan="6" style="padding:14px;color:var(--text-muted);">Loading pending picks…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
   </div>
 </div>
 
@@ -2626,12 +2648,34 @@ function loadModelTracker() {
     });
 }
 
+function logAflResultsDiagnostics() {
+  const container = document.querySelector('#results-content');
+  console.log('[AFL Results] container found:', !!container);
+  console.log('[AFL Results] rows rendered:', document.querySelectorAll('#results-content tr, #results-content .result-row, #results-content .card').length);
+}
+
 function loadAflResultsAnalysis() {
+  const containerEl = document.getElementById('results-content');
   const summaryEl = document.getElementById('resultsSummary');
   const kpiEl = document.getElementById('resultsKpis');
   const marketRowsEl = document.getElementById('resultsMarketRows');
   const settledRowsEl = document.getElementById('resultsSettledRows');
-  if (!summaryEl || !kpiEl || !marketRowsEl || !settledRowsEl) return;
+  const pendingRowsEl = document.getElementById('resultsPendingRows');
+  if (!containerEl || !summaryEl || !kpiEl || !marketRowsEl || !settledRowsEl || !pendingRowsEl) {
+    console.error('[AFL Results] Missing render target', {
+      container: !!containerEl,
+      summary: !!summaryEl,
+      kpis: !!kpiEl,
+      marketRows: !!marketRowsEl,
+      settledRows: !!settledRowsEl,
+      pendingRows: !!pendingRowsEl,
+    });
+    if (containerEl) {
+      containerEl.innerHTML = '<div class="afl-card"><div class="afl-card-body"><div class="vf-results-meta" style="color:var(--danger);">Results panel is missing one or more render targets.</div></div></div>';
+    }
+    logAflResultsDiagnostics();
+    return;
+  }
 
   fetch(`/api/afl/results-analysis?year={{ year }}&limit=${RESULTS_MAX_SETTLED_ROWS}`)
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
@@ -2641,6 +2685,7 @@ function loadAflResultsAnalysis() {
       const breakdowns = data.breakdowns || {};
       const marketRows = breakdowns.market || [];
       const settledRows = data.recent_settled || [];
+      const pendingRows = data.recent_pending || [];
 
       summaryEl.innerHTML = `
         Captured picks: <strong>${safeNum(summary.captured_total, 0).toLocaleString()}</strong> ·
@@ -2681,12 +2726,28 @@ function loadAflResultsAnalysis() {
           <td>${r.profit_units != null ? safeNum(r.profit_units, 0).toFixed(2) : '—'}</td>
         </tr>`;
       }).join('') : '<tr><td colspan="7" style="padding:14px;color:var(--text-muted);">No settled picks available yet.</td></tr>';
+
+      pendingRowsEl.innerHTML = pendingRows.length ? pendingRows.slice(0, RESULTS_MAX_SETTLED_ROWS).map(r => {
+        const dtText = fmtDateTime(r.commence_time || r.created_at);
+        return `<tr>
+          <td>${esc(dtText)}</td>
+          <td>${esc(r.player_name || '—')}</td>
+          <td>${esc((r.market || '').replace('player_', '').replace(/_/g, ' '))}</td>
+          <td>${esc(r.line_type || '—')} ${safeNum(r.line, 0).toFixed(1)}</td>
+          <td>${r.odds != null ? safeNum(r.odds, 0).toFixed(2) : '—'}</td>
+          <td>${r.edge != null ? safeNum(r.edge, 0).toFixed(1) + '%' : '—'}</td>
+        </tr>`;
+      }).join('') : '<tr><td colspan="6" style="padding:14px;color:var(--text-muted);">No pending picks available yet.</td></tr>';
+
+      logAflResultsDiagnostics();
     })
     .catch((err) => {
       summaryEl.textContent = `Results analysis unavailable (${esc(err.message || 'unknown error')}).`;
       kpiEl.innerHTML = '';
       marketRowsEl.innerHTML = '<tr><td colspan="6" style="padding:14px;color:var(--danger);">Failed to load market analysis.</td></tr>';
       settledRowsEl.innerHTML = '<tr><td colspan="7" style="padding:14px;color:var(--danger);">Failed to load settled picks.</td></tr>';
+      pendingRowsEl.innerHTML = '<tr><td colspan="6" style="padding:14px;color:var(--danger);">Failed to load pending picks.</td></tr>';
+      logAflResultsDiagnostics();
     });
 }
 
