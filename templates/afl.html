@@ -2809,6 +2809,16 @@ function _fmtSide(lt) {
   return esc(clean || '—');
 }
 
+/**
+ * Return a formatted edge-% string for a row, preferring edge_pct over edge.
+ * Falls back to '—' if neither field is set.
+ */
+function _fmtEdge(r) {
+  if (r.edge_pct != null) return safeNum(r.edge_pct, 0).toFixed(1) + '%';
+  if (r.edge    != null) return safeNum(r.edge,     0).toFixed(1) + '%';
+  return '—';
+}
+
 /** Render a standard band-breakdown tbody (6-col: band, picks, wlp, strike, profit, roi). */
 function _renderBandRows(rows, emptyColspan) {
   if (!rows || !rows.length) {
@@ -2905,7 +2915,7 @@ function loadAflResultsAnalysis() {
       const profitCls = safeNum(perf.total_profit, 0) > 0 ? 'pos' : safeNum(perf.total_profit, 0) < 0 ? 'neg' : '';
       const roiCls    = safeNum(perf.roi, 0) > 0 ? 'pos' : safeNum(perf.roi, 0) < 0 ? 'neg' : '';
       const pushRate  = perf.total_bets
-        ? ((safeNum(perf.pushes, 0) / safeNum(perf.total_bets, 1)) * 100).toFixed(1)
+        ? ((safeNum(perf.pushes, 0) / perf.total_bets) * 100).toFixed(1)
         : '0.0';
       kpiEl.innerHTML = `
         <div class="results-kpi"><div class="results-kpi-label">Captured</div><div class="results-kpi-val">${safeNum(summary.captured_total, 0).toLocaleString()}</div></div>
@@ -2995,7 +3005,7 @@ function loadAflResultsAnalysis() {
           <td>${esc(_fmtMarket(r.market))}</td>
           <td>${_fmtSide(r.line_type)} ${safeNum(r.line, 0).toFixed(1)}</td>
           <td>${r.odds != null ? safeNum(r.odds, 0).toFixed(2) : '—'}</td>
-          <td>${r.edge_pct != null ? safeNum(r.edge_pct, 0).toFixed(1) + '%' : r.edge != null ? safeNum(r.edge, 0).toFixed(1) + '%' : '—'}</td>
+          <td>${_fmtEdge(r)}</td>
         </tr>`;
       }).join('') : '<tr><td colspan="6" style="padding:14px;color:var(--text-muted);">No pending picks available yet.</td></tr>';
 
