@@ -1804,7 +1804,7 @@ def test_afl_template_has_disposals_edge_threshold_tables():
     template = Path("templates/afl.html").read_text(encoding="utf-8")
     assert 'id="disposalsEdgeThresholdRows"' in template
     assert 'id="disposalsEdgeThresholdLtRows"' in template
-    assert "10%, 15%, 20%, 25%, 30%, 35%, 40%, 45% and 50%+ edge selections" in template
+    assert "10%+ through 50%+ selections (in 5% steps)" in template
 
 
 # ---------------------------------------------------------------------------
