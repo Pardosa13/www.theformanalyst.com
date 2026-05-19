@@ -1142,6 +1142,16 @@ def register_afl_routes(app, db):
         recent_pending = sorted(pending_rows, key=_row_sort_key, reverse=True)[:limit]
         settled_total = len(settled_rows)
         total = len(rows)
+        # Disposals-specific deep-dive rows.
+        disposals_rows = [r for r in settled_rows if (r.get("market") or "").lower() == "player_disposals"]
+
+        # Market × line_type composite breakdown for Over/Under analysis.
+        target_markets = {
+            "player_kicks", "player_tackles", "player_marks",
+            "player_disposals", "player_goals", "player_handballs",
+        }
+        key_market_rows = [r for r in settled_rows if (r.get("market") or "").lower() in target_markets]
+
         return jsonify(
             {
                 "season": season,
@@ -1156,6 +1166,13 @@ def register_afl_routes(app, db):
                     "market": _calc_model_breakdown(settled_rows, "market"),
                     "line_type": _calc_model_breakdown(settled_rows, "line_type"),
                     "team": team_breakdown,
+                    # Over/Under split for each of the six key markets.
+                    "market_line_type": _calc_composite_breakdown(key_market_rows, "market", "line_type"),
+                    # Disposals deep-dive: by odds band, by edge band, and composites.
+                    "disposals_odds_band": _calc_model_breakdown(disposals_rows, "odds_band"),
+                    "disposals_edge_band": _calc_model_breakdown(disposals_rows, "edge_band"),
+                    "disposals_odds_band_line_type": _calc_composite_breakdown(disposals_rows, "odds_band", "line_type"),
+                    "disposals_edge_band_line_type": _calc_composite_breakdown(disposals_rows, "edge_band", "line_type"),
                 },
                 "recent_settled": recent_settled,
                 "recent_pending": recent_pending,
@@ -3047,24 +3064,113 @@ def _calc_model_metrics(rows: list[dict]) -> dict:
     }
 
 
+def _get_bucket_for_row(row: dict, key: str) -> str:
+    """Return the display-bucket label for a row given a virtual or stored key.
+
+    Virtual keys handled:
+    - ``edge_band``  – uses ``edge_pct`` (preferred) or ``edge`` field,
+                       bucketed into <2%, 2-4%, 4-6%, 6-8%, 8%+.
+    - ``odds_band``  – uses ``odds`` field, bucketed into AFL-prop-friendly
+                       decimal ranges labelled with $ signs.
+    All other keys are read directly from the row dict.
+    """
+    if key == "edge_band":
+        # Prefer the stored edge_pct; fall back to edge for older rows.
+        # Use explicit None checks so a value of 0 is not treated as missing.
+        _ep = row.get("edge_pct")
+        _e  = row.get("edge")
+        if _ep is None and _e is None:
+            return "Unknown"
+        edge = float(_ep if _ep is not None else _e)  # type: ignore[arg-type]
+        if edge < 2:
+            return "<2%"
+        elif edge < 4:
+            return "2-4%"
+        elif edge < 6:
+            return "4-6%"
+        elif edge < 8:
+            return "6-8%"
+        else:
+            return "8%+"
+    elif key == "odds_band":
+        _odds = row.get("odds")
+        if _odds is None:
+            return "Unknown"
+        odds = float(_odds)
+        if odds < 1.50:
+            return "$1.01-1.49"
+        elif odds < 1.70:
+            return "$1.50-1.69"
+        elif odds < 1.90:
+            return "$1.70-1.89"
+        elif odds < 2.10:
+            return "$1.90-2.09"
+        else:
+            return "$2.10+"
+    else:
+        return str(row.get(key) or "unknown")
+
+
+# Ordered bucket labels for deterministic display sorting.
+_EDGE_BAND_ORDER = ["<2%", "2-4%", "4-6%", "6-8%", "8%+"]
+_ODDS_BAND_ORDER = ["$1.01-1.49", "$1.50-1.69", "$1.70-1.89", "$1.90-2.09", "$2.10+"]
+
+
 def _calc_model_breakdown(rows: list[dict], key: str) -> list[dict]:
+    """Group *rows* by *key* and return per-bucket model metrics.
+
+    Supports the virtual keys ``edge_band`` and ``odds_band`` (see
+    ``_get_bucket_for_row``).  Results are sorted by total_bets descending
+    except for edge/odds bands which preserve logical ordering.
+    """
     grouped: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
-        if key == "edge_band":
-            edge = abs(float(row.get("edge") or 0))
-            bucket = "2-4%" if edge < 4 else "4-7%" if edge < 7 else "7%+"
-        elif key == "odds_band":
-            odds = float(row.get("odds") or 0)
-            bucket = "<1.8" if odds < 1.8 else "1.8-2.2" if odds <= 2.2 else ">2.2"
-        else:
-            bucket = str(row.get(key) or "unknown")
+        bucket = _get_bucket_for_row(row, key)
         grouped[bucket].append(row)
 
     out = []
     for bucket, bucket_rows in grouped.items():
         metrics = _calc_model_metrics(bucket_rows)
         out.append({"bucket": bucket, **metrics})
-    out.sort(key=lambda r: r.get("total_bets", 0), reverse=True)
+
+    if key == "edge_band":
+        order = _EDGE_BAND_ORDER
+        out.sort(key=lambda r: order.index(r["bucket"]) if r["bucket"] in order else 99)
+    elif key == "odds_band":
+        order = _ODDS_BAND_ORDER
+        out.sort(key=lambda r: order.index(r["bucket"]) if r["bucket"] in order else 99)
+    else:
+        out.sort(key=lambda r: r.get("total_bets", 0), reverse=True)
+    return out
+
+
+def _calc_composite_breakdown(rows: list[dict], key1: str, key2: str) -> list[dict]:
+    """Break down *rows* by the combination of *key1* and *key2*.
+
+    Returns a list of dicts with ``bucket`` (key1 value), ``sub_bucket``
+    (key2 value) and full model metrics.  Supports the same virtual keys as
+    ``_get_bucket_for_row`` (``edge_band``, ``odds_band``).
+    """
+    grouped: dict[tuple, list[dict]] = defaultdict(list)
+    for row in rows:
+        k1 = _get_bucket_for_row(row, key1)
+        k2 = _get_bucket_for_row(row, key2)
+        grouped[(k1, k2)].append(row)
+
+    out = []
+    for (k1, k2), group_rows in grouped.items():
+        metrics = _calc_model_metrics(group_rows)
+        out.append({"bucket": k1, "sub_bucket": k2, **metrics})
+
+    # Sort: logical order for band keys, then by sub_bucket, then by volume.
+    if key1 == "edge_band":
+        order = _EDGE_BAND_ORDER
+        out.sort(key=lambda r: (order.index(r["bucket"]) if r["bucket"] in order else 99, r.get("sub_bucket", "")))
+    elif key1 == "odds_band":
+        order = _ODDS_BAND_ORDER
+        out.sort(key=lambda r: (order.index(r["bucket"]) if r["bucket"] in order else 99, r.get("sub_bucket", "")))
+    else:
+        out.sort(key=lambda r: (r.get("bucket", ""), r.get("sub_bucket", "")))
     return out
 
 
