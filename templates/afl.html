@@ -505,7 +505,7 @@
     font-size:11px; color:var(--text-muted); margin-bottom:12px; padding:0 2px;
   }
   .results-kpis {
-    display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-bottom:14px;
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; margin-bottom:14px;
   }
   .results-kpi {
     border:1px solid var(--border-subtle); border-radius:10px; background:var(--bg-elevated); padding:10px 12px;
@@ -515,6 +515,26 @@
   }
   .results-kpi-val {
     margin-top:4px; font-size:1.1rem; font-family:'DM Mono',monospace; font-weight:700; color:var(--text-primary);
+  }
+  .results-kpi-val.pos { color:var(--success); }
+  .results-kpi-val.neg { color:var(--danger); }
+  /* ── Results sub-section headers ────────────────────────────── */
+  .results-section-title {
+    font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.07em;
+    color:var(--text-muted); margin:16px 0 8px; padding:0 2px;
+    display:flex; align-items:center; gap:6px;
+  }
+  .results-section-title i { font-size:13px; }
+  /* ── Over/Under badge chips ──────────────────────────────────── */
+  .lt-over  { color:#34d399; font-weight:700; }
+  .lt-under { color:#60a5fa; font-weight:700; }
+  /* ── Disposals deep-dive two-column grid ────────────────────── */
+  .disposals-grid {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:14px; margin-top:6px;
+  }
+  .disposals-grid .afl-card { margin-bottom:0; }
+  @media(max-width:680px) {
+    .disposals-grid { grid-template-columns:1fr; }
   }
   .vf-cards-grid {
     display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:12px;
@@ -918,6 +938,8 @@
      ════════════════════════════════════════════════════════════════ -->
 <div id="tab-results" class="tab-panel">
   <div id="results-content" data-role="results">
+
+  <!-- ── Section 1: KPI summary ───────────────────────────────── -->
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-graph-up-arrow"></i> Captured Results Analysis</h4>
@@ -926,20 +948,135 @@
     <div class="afl-card-body">
       <div id="resultsSummary" class="vf-results-meta">Loading captured AFL results…</div>
       <div id="resultsKpis" class="results-kpis"></div>
+    </div>
+  </div>
+
+  <!-- ── Section 2: Market performance ───────────────────────── -->
+  <div class="afl-card">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-bar-chart-line"></i> Market Performance</h4>
+      <span style="font-size:11px;color:var(--text-muted);">Settled picks by market</span>
+    </div>
+    <div class="afl-card-body">
       <div class="scroll-x">
         <table class="value-table">
           <thead>
             <tr>
-              <th>Market</th><th>Picks</th><th>W-L-P</th><th>Strike</th><th>Profit</th><th>ROI</th>
+              <th>Market</th><th>Picks</th><th>W-L-P</th><th>Strike</th><th>Avg Odds</th><th>Avg Edge</th><th>Profit</th><th>ROI</th>
             </tr>
           </thead>
           <tbody id="resultsMarketRows">
-            <tr><td colspan="6" style="padding:14px;color:var(--text-muted);">Loading market analysis…</td></tr>
+            <tr><td colspan="8" style="padding:14px;color:var(--text-muted);">Loading market analysis…</td></tr>
           </tbody>
         </table>
       </div>
     </div>
   </div>
+
+  <!-- ── Section 3: Over / Under by market ───────────────────── -->
+  <div class="afl-card">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-arrow-left-right"></i> Over / Under Performance by Market</h4>
+      <span style="font-size:11px;color:var(--text-muted);">Kicks · Tackles · Marks · Disposals · Goals · Handballs</span>
+    </div>
+    <div class="afl-card-body">
+      <div class="scroll-x">
+        <table class="value-table">
+          <thead>
+            <tr>
+              <th>Market</th><th>Side</th><th>Picks</th><th>W-L-P</th><th>Strike</th><th>Avg Odds</th><th>Avg Edge</th><th>Profit</th><th>ROI</th>
+            </tr>
+          </thead>
+          <tbody id="resultsMarketLineTypeRows">
+            <tr><td colspan="9" style="padding:14px;color:var(--text-muted);">Loading Over/Under analysis…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Section 4: Disposals deep-dive ──────────────────────── -->
+  <div class="afl-card">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-search"></i> Disposals Deep Dive</h4>
+      <span style="font-size:11px;color:var(--text-muted);">Odds bands · Edge bands · Over/Under splits</span>
+    </div>
+    <div class="afl-card-body">
+      <!-- Row 1: simple band tables -->
+      <div class="disposals-grid">
+        <!-- Disposals by odds band -->
+        <div class="afl-card" style="border:1px solid var(--border-subtle);">
+          <div class="afl-card-header" style="padding:10px 14px;">
+            <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-currency-dollar"></i> By Odds Band</h5>
+          </div>
+          <div class="afl-card-body" style="padding:0;">
+            <div class="scroll-x">
+              <table class="value-table">
+                <thead><tr><th>Odds</th><th>Picks</th><th>W-L-P</th><th>Strike</th><th>Profit</th><th>ROI</th></tr></thead>
+                <tbody id="disposalsOddsBandRows">
+                  <tr><td colspan="6" style="padding:12px;color:var(--text-muted);">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <!-- Disposals by edge band -->
+        <div class="afl-card" style="border:1px solid var(--border-subtle);">
+          <div class="afl-card-header" style="padding:10px 14px;">
+            <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-percent"></i> By Edge Band</h5>
+          </div>
+          <div class="afl-card-body" style="padding:0;">
+            <div class="scroll-x">
+              <table class="value-table">
+                <thead><tr><th>Edge %</th><th>Picks</th><th>W-L-P</th><th>Strike</th><th>Profit</th><th>ROI</th></tr></thead>
+                <tbody id="disposalsEdgeBandRows">
+                  <tr><td colspan="6" style="padding:12px;color:var(--text-muted);">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Row 2: Over/Under by band tables -->
+      <div class="results-section-title" style="margin-top:18px;"><i class="bi bi-arrow-left-right"></i> Over / Under Splits</div>
+      <div class="disposals-grid">
+        <!-- Disposals Over/Under by odds band -->
+        <div class="afl-card" style="border:1px solid var(--border-subtle);">
+          <div class="afl-card-header" style="padding:10px 14px;">
+            <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-currency-dollar"></i> Over/Under by Odds Band</h5>
+          </div>
+          <div class="afl-card-body" style="padding:0;">
+            <div class="scroll-x">
+              <table class="value-table">
+                <thead><tr><th>Odds</th><th>Side</th><th>Picks</th><th>W-L-P</th><th>Strike</th><th>Profit</th><th>ROI</th></tr></thead>
+                <tbody id="disposalsOddsBandLtRows">
+                  <tr><td colspan="7" style="padding:12px;color:var(--text-muted);">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <!-- Disposals Over/Under by edge band -->
+        <div class="afl-card" style="border:1px solid var(--border-subtle);">
+          <div class="afl-card-header" style="padding:10px 14px;">
+            <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-percent"></i> Over/Under by Edge Band</h5>
+          </div>
+          <div class="afl-card-body" style="padding:0;">
+            <div class="scroll-x">
+              <table class="value-table">
+                <thead><tr><th>Edge %</th><th>Side</th><th>Picks</th><th>W-L-P</th><th>Strike</th><th>Profit</th><th>ROI</th></tr></thead>
+                <tbody id="disposalsEdgeBandLtRows">
+                  <tr><td colspan="7" style="padding:12px;color:var(--text-muted);">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Section 5: Recently Settled Picks ───────────────────── -->
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-check2-square"></i> Recently Settled Picks</h4>
@@ -960,6 +1097,8 @@
       </div>
     </div>
   </div>
+
+  <!-- ── Section 6: Recent Pending Picks ─────────────────────── -->
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-hourglass-split"></i> Recent Pending Picks</h4>
@@ -980,6 +1119,7 @@
       </div>
     </div>
   </div>
+
   </div>
 </div>
 
@@ -2654,13 +2794,77 @@ function logAflResultsDiagnostics() {
   console.log('[AFL Results] rows rendered:', document.querySelectorAll('#results-content tr, #results-content .result-row, #results-content .card').length);
 }
 
+// ── AFL Results Analysis helpers ──────────────────────────────
+/** Capitalise and clean a market bucket label for display. */
+function _fmtMarket(raw) {
+  return (raw || 'Unknown').replace('player_', '').replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/** Return a styled span for Over/Under line type. */
+function _fmtSide(lt) {
+  const clean = (lt || '').trim();
+  if (clean.toLowerCase() === 'over') return `<span class="lt-over">▲ Over</span>`;
+  if (clean.toLowerCase() === 'under') return `<span class="lt-under">▼ Under</span>`;
+  return esc(clean || '—');
+}
+
+/** Render a standard band-breakdown tbody (6-col: band, picks, wlp, strike, profit, roi). */
+function _renderBandRows(rows, emptyColspan) {
+  if (!rows || !rows.length) {
+    return `<tr><td colspan="${emptyColspan}" style="padding:12px;color:var(--text-muted);">No data available yet.</td></tr>`;
+  }
+  return rows.map(r => {
+    const roiCls = safeNum(r.roi, 0) > 0 ? 'pos' : safeNum(r.roi, 0) < 0 ? 'neg' : '';
+    return `<tr>
+      <td><strong>${esc(r.bucket || '—')}</strong></td>
+      <td>${safeNum(r.total_bets, 0)}</td>
+      <td>${safeNum(r.wins, 0)}-${safeNum(r.losses, 0)}-${safeNum(r.pushes, 0)}</td>
+      <td>${safeNum(r.strike_rate, 0).toFixed(1)}%</td>
+      <td>${safeNum(r.total_profit, 0).toFixed(2)}u</td>
+      <td class="${roiCls}">${safeNum(r.roi, 0).toFixed(1)}%</td>
+    </tr>`;
+  }).join('');
+}
+
+/** Render an Over/Under-by-band composite tbody (7-col: band, side, picks, wlp, strike, profit, roi). */
+function _renderBandLtRows(rows, emptyColspan) {
+  if (!rows || !rows.length) {
+    return `<tr><td colspan="${emptyColspan}" style="padding:12px;color:var(--text-muted);">No data available yet.</td></tr>`;
+  }
+  return rows.map(r => {
+    const roiCls = safeNum(r.roi, 0) > 0 ? 'pos' : safeNum(r.roi, 0) < 0 ? 'neg' : '';
+    return `<tr>
+      <td><strong>${esc(r.bucket || '—')}</strong></td>
+      <td>${_fmtSide(r.sub_bucket)}</td>
+      <td>${safeNum(r.total_bets, 0)}</td>
+      <td>${safeNum(r.wins, 0)}-${safeNum(r.losses, 0)}-${safeNum(r.pushes, 0)}</td>
+      <td>${safeNum(r.strike_rate, 0).toFixed(1)}%</td>
+      <td>${safeNum(r.total_profit, 0).toFixed(2)}u</td>
+      <td class="${roiCls}">${safeNum(r.roi, 0).toFixed(1)}%</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Order for the six key AFL prop markets ────────────────────
+const _KEY_MARKET_ORDER = [
+  'player_kicks', 'player_tackles', 'player_marks',
+  'player_disposals', 'player_goals', 'player_handballs',
+];
+
 function loadAflResultsAnalysis() {
   const containerEl = document.getElementById('results-content');
-  const summaryEl = document.getElementById('resultsSummary');
-  const kpiEl = document.getElementById('resultsKpis');
-  const marketRowsEl = document.getElementById('resultsMarketRows');
-  const settledRowsEl = document.getElementById('resultsSettledRows');
-  const pendingRowsEl = document.getElementById('resultsPendingRows');
+  const summaryEl   = document.getElementById('resultsSummary');
+  const kpiEl       = document.getElementById('resultsKpis');
+  const marketRowsEl        = document.getElementById('resultsMarketRows');
+  const mktLtRowsEl         = document.getElementById('resultsMarketLineTypeRows');
+  const settledRowsEl       = document.getElementById('resultsSettledRows');
+  const pendingRowsEl       = document.getElementById('resultsPendingRows');
+  const dispOddsBandEl      = document.getElementById('disposalsOddsBandRows');
+  const dispEdgeBandEl      = document.getElementById('disposalsEdgeBandRows');
+  const dispOddsBandLtEl    = document.getElementById('disposalsOddsBandLtRows');
+  const dispEdgeBandLtEl    = document.getElementById('disposalsEdgeBandLtRows');
+
   if (!containerEl || !summaryEl || !kpiEl || !marketRowsEl || !settledRowsEl || !pendingRowsEl) {
     console.error('[AFL Results] Missing render target', {
       container: !!containerEl,
@@ -2680,13 +2884,11 @@ function loadAflResultsAnalysis() {
   fetch(`/api/afl/results-analysis?year={{ year }}&limit=${RESULTS_MAX_SETTLED_ROWS}`)
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
     .then(data => {
-      const summary = data.summary || {};
-      const perf = data.performance || {};
+      const summary    = data.summary || {};
+      const perf       = data.performance || {};
       const breakdowns = data.breakdowns || {};
-      const marketRows = breakdowns.market || [];
-      const settledRows = data.recent_settled || [];
-      const pendingRows = data.recent_pending || [];
 
+      // ── Summary meta line ──────────────────────────────────────
       summaryEl.innerHTML = `
         Captured picks: <strong>${safeNum(summary.captured_total, 0).toLocaleString()}</strong> ·
         Settled: <strong>${safeNum(summary.settled_total, 0).toLocaleString()}</strong> ·
@@ -2694,24 +2896,75 @@ function loadAflResultsAnalysis() {
         Settlement rate: <strong>${safeNum(summary.settled_rate, 0).toFixed(1)}%</strong>
       `;
 
+      // ── KPI tiles ──────────────────────────────────────────────
+      const profitCls = safeNum(perf.total_profit, 0) > 0 ? 'pos' : safeNum(perf.total_profit, 0) < 0 ? 'neg' : '';
+      const roiCls    = safeNum(perf.roi, 0) > 0 ? 'pos' : safeNum(perf.roi, 0) < 0 ? 'neg' : '';
+      const pushRate  = perf.total_bets
+        ? ((safeNum(perf.pushes, 0) / safeNum(perf.total_bets, 1)) * 100).toFixed(1)
+        : '0.0';
       kpiEl.innerHTML = `
+        <div class="results-kpi"><div class="results-kpi-label">Captured</div><div class="results-kpi-val">${safeNum(summary.captured_total, 0).toLocaleString()}</div></div>
+        <div class="results-kpi"><div class="results-kpi-label">Settled</div><div class="results-kpi-val">${safeNum(summary.settled_total, 0).toLocaleString()}</div></div>
+        <div class="results-kpi"><div class="results-kpi-label">Pending</div><div class="results-kpi-val">${safeNum(summary.pending_total, 0).toLocaleString()}</div></div>
+        <div class="results-kpi"><div class="results-kpi-label">Settlement %</div><div class="results-kpi-val">${safeNum(summary.settled_rate, 0).toFixed(1)}%</div></div>
         <div class="results-kpi"><div class="results-kpi-label">Strike Rate</div><div class="results-kpi-val">${safeNum(perf.strike_rate, 0).toFixed(1)}%</div></div>
-        <div class="results-kpi"><div class="results-kpi-label">Profit Units</div><div class="results-kpi-val">${safeNum(perf.total_profit, 0).toFixed(2)}u</div></div>
-        <div class="results-kpi"><div class="results-kpi-label">ROI</div><div class="results-kpi-val">${safeNum(perf.roi, 0).toFixed(1)}%</div></div>
+        <div class="results-kpi"><div class="results-kpi-label">Profit Units</div><div class="results-kpi-val ${profitCls}">${safeNum(perf.total_profit, 0).toFixed(2)}u</div></div>
+        <div class="results-kpi"><div class="results-kpi-label">ROI</div><div class="results-kpi-val ${roiCls}">${safeNum(perf.roi, 0).toFixed(1)}%</div></div>
         <div class="results-kpi"><div class="results-kpi-label">Avg Edge</div><div class="results-kpi-val">${safeNum(perf.avg_edge, 0).toFixed(2)}%</div></div>
+        <div class="results-kpi"><div class="results-kpi-label">Avg Odds</div><div class="results-kpi-val">${safeNum(perf.avg_odds, 0).toFixed(2)}</div></div>
+        <div class="results-kpi"><div class="results-kpi-label">Push Rate</div><div class="results-kpi-val">${pushRate}%</div></div>
       `;
 
-      marketRowsEl.innerHTML = marketRows.length ? marketRows.slice(0, RESULTS_MAX_MARKET_ROWS).map(r => `
-        <tr>
-          <td>${esc((r.bucket || 'unknown').replace('player_', '').replace(/_/g, ' '))}</td>
+      // ── Market performance table ───────────────────────────────
+      const marketRows = breakdowns.market || [];
+      marketRowsEl.innerHTML = marketRows.length ? marketRows.slice(0, RESULTS_MAX_MARKET_ROWS).map(r => {
+        const roiC = safeNum(r.roi, 0) > 0 ? 'pos' : safeNum(r.roi, 0) < 0 ? 'neg' : '';
+        return `<tr>
+          <td>${esc(_fmtMarket(r.bucket))}</td>
           <td>${safeNum(r.total_bets, 0)}</td>
           <td>${safeNum(r.wins, 0)}-${safeNum(r.losses, 0)}-${safeNum(r.pushes, 0)}</td>
           <td>${safeNum(r.strike_rate, 0).toFixed(1)}%</td>
+          <td>${safeNum(r.avg_odds, 0).toFixed(2)}</td>
+          <td>${safeNum(r.avg_edge, 0).toFixed(2)}%</td>
           <td>${safeNum(r.total_profit, 0).toFixed(2)}u</td>
-          <td>${safeNum(r.roi, 0).toFixed(1)}%</td>
-        </tr>
-      `).join('') : '<tr><td colspan="6" style="padding:14px;color:var(--text-muted);">No settled market rows yet.</td></tr>';
+          <td class="${roiC}">${safeNum(r.roi, 0).toFixed(1)}%</td>
+        </tr>`;
+      }).join('') : '<tr><td colspan="8" style="padding:14px;color:var(--text-muted);">No settled market rows yet.</td></tr>';
 
+      // ── Over/Under by market table ─────────────────────────────
+      const mktLtRows = (breakdowns.market_line_type || []);
+      // Sort by the canonical market order then by line_type.
+      mktLtRows.sort((a, b) => {
+        const ia = _KEY_MARKET_ORDER.indexOf(a.bucket);
+        const ib = _KEY_MARKET_ORDER.indexOf(b.bucket);
+        if (ia !== ib) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+        return (a.sub_bucket || '').localeCompare(b.sub_bucket || '');
+      });
+      if (mktLtRowsEl) {
+        mktLtRowsEl.innerHTML = mktLtRows.length ? mktLtRows.map(r => {
+          const roiC = safeNum(r.roi, 0) > 0 ? 'pos' : safeNum(r.roi, 0) < 0 ? 'neg' : '';
+          return `<tr>
+            <td>${esc(_fmtMarket(r.bucket))}</td>
+            <td>${_fmtSide(r.sub_bucket)}</td>
+            <td>${safeNum(r.total_bets, 0)}</td>
+            <td>${safeNum(r.wins, 0)}-${safeNum(r.losses, 0)}-${safeNum(r.pushes, 0)}</td>
+            <td>${safeNum(r.strike_rate, 0).toFixed(1)}%</td>
+            <td>${safeNum(r.avg_odds, 0).toFixed(2)}</td>
+            <td>${safeNum(r.avg_edge, 0).toFixed(2)}%</td>
+            <td>${safeNum(r.total_profit, 0).toFixed(2)}u</td>
+            <td class="${roiC}">${safeNum(r.roi, 0).toFixed(1)}%</td>
+          </tr>`;
+        }).join('') : '<tr><td colspan="9" style="padding:14px;color:var(--text-muted);">No Over/Under data available yet.</td></tr>';
+      }
+
+      // ── Disposals deep-dive ────────────────────────────────────
+      if (dispOddsBandEl) dispOddsBandEl.innerHTML = _renderBandRows(breakdowns.disposals_odds_band, 6);
+      if (dispEdgeBandEl) dispEdgeBandEl.innerHTML = _renderBandRows(breakdowns.disposals_edge_band, 6);
+      if (dispOddsBandLtEl) dispOddsBandLtEl.innerHTML = _renderBandLtRows(breakdowns.disposals_odds_band_line_type, 7);
+      if (dispEdgeBandLtEl) dispEdgeBandLtEl.innerHTML = _renderBandLtRows(breakdowns.disposals_edge_band_line_type, 7);
+
+      // ── Recent settled picks ───────────────────────────────────
+      const settledRows = data.recent_settled || [];
       settledRowsEl.innerHTML = settledRows.length ? settledRows.slice(0, RESULTS_MAX_SETTLED_ROWS).map(r => {
         const res = (r.result || 'pending').toLowerCase();
         const resCls = res === 'win' ? 'pos' : res === 'loss' ? 'neg' : 'neu';
@@ -2719,23 +2972,25 @@ function loadAflResultsAnalysis() {
         return `<tr>
           <td>${esc(dtText)}</td>
           <td>${esc(r.player_name || '—')}</td>
-          <td>${esc((r.market || '').replace('player_', '').replace(/_/g, ' '))}</td>
-          <td>${esc(r.line_type || '—')} ${safeNum(r.line, 0).toFixed(1)}</td>
+          <td>${esc(_fmtMarket(r.market))}</td>
+          <td>${_fmtSide(r.line_type)} ${safeNum(r.line, 0).toFixed(1)}</td>
           <td><span class="edge-chip ${resCls}">${esc(res)}</span></td>
           <td>${r.actual_stat != null ? safeNum(r.actual_stat, 0).toFixed(1) : '—'}</td>
           <td>${r.profit_units != null ? safeNum(r.profit_units, 0).toFixed(2) : '—'}</td>
         </tr>`;
       }).join('') : '<tr><td colspan="7" style="padding:14px;color:var(--text-muted);">No settled picks available yet.</td></tr>';
 
+      // ── Recent pending picks ───────────────────────────────────
+      const pendingRows = data.recent_pending || [];
       pendingRowsEl.innerHTML = pendingRows.length ? pendingRows.slice(0, RESULTS_MAX_SETTLED_ROWS).map(r => {
         const dtText = fmtDateTime(r.commence_time || r.created_at);
         return `<tr>
           <td>${esc(dtText)}</td>
           <td>${esc(r.player_name || '—')}</td>
-          <td>${esc((r.market || '').replace('player_', '').replace(/_/g, ' '))}</td>
-          <td>${esc(r.line_type || '—')} ${safeNum(r.line, 0).toFixed(1)}</td>
+          <td>${esc(_fmtMarket(r.market))}</td>
+          <td>${_fmtSide(r.line_type)} ${safeNum(r.line, 0).toFixed(1)}</td>
           <td>${r.odds != null ? safeNum(r.odds, 0).toFixed(2) : '—'}</td>
-          <td>${r.edge != null ? safeNum(r.edge, 0).toFixed(1) + '%' : '—'}</td>
+          <td>${r.edge_pct != null ? safeNum(r.edge_pct, 0).toFixed(1) + '%' : r.edge != null ? safeNum(r.edge, 0).toFixed(1) + '%' : '—'}</td>
         </tr>`;
       }).join('') : '<tr><td colspan="6" style="padding:14px;color:var(--text-muted);">No pending picks available yet.</td></tr>';
 
@@ -2744,7 +2999,8 @@ function loadAflResultsAnalysis() {
     .catch((err) => {
       summaryEl.textContent = `Results analysis unavailable (${esc(err.message || 'unknown error')}).`;
       kpiEl.innerHTML = '';
-      marketRowsEl.innerHTML = '<tr><td colspan="6" style="padding:14px;color:var(--danger);">Failed to load market analysis.</td></tr>';
+      marketRowsEl.innerHTML = '<tr><td colspan="8" style="padding:14px;color:var(--danger);">Failed to load market analysis.</td></tr>';
+      if (mktLtRowsEl) mktLtRowsEl.innerHTML = '<tr><td colspan="9" style="padding:14px;color:var(--danger);">Failed to load Over/Under analysis.</td></tr>';
       settledRowsEl.innerHTML = '<tr><td colspan="7" style="padding:14px;color:var(--danger);">Failed to load settled picks.</td></tr>';
       pendingRowsEl.innerHTML = '<tr><td colspan="6" style="padding:14px;color:var(--danger);">Failed to load pending picks.</td></tr>';
       logAflResultsDiagnostics();
