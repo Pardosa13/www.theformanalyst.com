@@ -1173,6 +1173,14 @@ def register_afl_routes(app, db):
                     "disposals_edge_band": _calc_model_breakdown(disposals_rows, "edge_band"),
                     "disposals_odds_band_line_type": _calc_composite_breakdown(disposals_rows, "odds_band", "line_type"),
                     "disposals_edge_band_line_type": _calc_composite_breakdown(disposals_rows, "edge_band", "line_type"),
+                    "disposals_edge_thresholds": _calc_edge_threshold_breakdown(
+                        disposals_rows,
+                        _DISPOSALS_EDGE_THRESHOLD_ORDER,
+                    ),
+                    "disposals_edge_thresholds_line_type": _calc_edge_threshold_line_type_breakdown(
+                        disposals_rows,
+                        _DISPOSALS_EDGE_THRESHOLD_ORDER,
+                    ),
                 },
                 "recent_settled": recent_settled,
                 "recent_pending": recent_pending,
@@ -3114,6 +3122,7 @@ def _get_bucket_for_row(row: dict, key: str) -> str:
 # Ordered bucket labels for deterministic display sorting.
 _EDGE_BAND_ORDER = ["<2%", "2-4%", "4-6%", "6-8%", "8%+"]
 _ODDS_BAND_ORDER = ["$1.01-1.49", "$1.50-1.69", "$1.70-1.89", "$1.90-2.09", "$2.10+"]
+_DISPOSALS_EDGE_THRESHOLD_ORDER = [10, 15, 20, 25, 30, 35, 40, 45, 50]
 
 
 def _calc_model_breakdown(rows: list[dict], key: str) -> list[dict]:
@@ -3141,6 +3150,60 @@ def _calc_model_breakdown(rows: list[dict], key: str) -> list[dict]:
         out.sort(key=lambda r: order.index(r["bucket"]) if r["bucket"] in order else 99)
     else:
         out.sort(key=lambda r: r.get("total_bets", 0), reverse=True)
+    return out
+
+
+def _edge_value_for_row(row: dict) -> float | None:
+    """Return edge value from row.
+
+    Prefers ``edge_pct`` (percentage edge) when present, and if that value is
+    missing (None) falls back to legacy ``edge``.
+    Returns None if neither field exists on the row.
+    """
+    edge_pct = row.get("edge_pct")
+    edge = row.get("edge")
+    if edge_pct is None and edge is None:
+        return None
+    if edge_pct is not None:
+        return float(edge_pct)
+    return float(edge)
+
+
+def _rows_at_or_above_edge_threshold(rows: list[dict], threshold: int) -> list[dict]:
+    """Return rows with available edge data at/above the given threshold."""
+    out: list[dict] = []
+    for row in rows:
+        edge_value = _edge_value_for_row(row)
+        if edge_value is not None and edge_value >= threshold:
+            out.append(row)
+    return out
+
+
+def _calc_edge_threshold_breakdown(rows: list[dict], thresholds: list[int]) -> list[dict]:
+    """Return cumulative edge threshold metrics (e.g. 10%+, 15%+, ...)."""
+    out: list[dict] = []
+    for threshold in thresholds:
+        threshold_rows = _rows_at_or_above_edge_threshold(rows, threshold)
+        out.append({"bucket": f"{threshold}%+", **_calc_model_metrics(threshold_rows)})
+    return out
+
+
+def _calc_edge_threshold_line_type_breakdown(rows: list[dict], thresholds: list[int]) -> list[dict]:
+    """Return cumulative edge threshold metrics split by line type."""
+    out: list[dict] = []
+    for threshold in thresholds:
+        threshold_rows = _rows_at_or_above_edge_threshold(rows, threshold)
+        by_line_type: dict[str, list[dict]] = defaultdict(list)
+        for row in threshold_rows:
+            by_line_type[_get_bucket_for_row(row, "line_type")].append(row)
+        for line_type in sorted(by_line_type):
+            out.append(
+                {
+                    "bucket": f"{threshold}%+",
+                    "sub_bucket": line_type,
+                    **_calc_model_metrics(by_line_type[line_type]),
+                }
+            )
     return out
 
 

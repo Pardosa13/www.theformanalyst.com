@@ -1785,12 +1785,26 @@ def test_afl_results_analysis_route_exists():
     assert "def api_afl_results_analysis():" in routes
 
 
+def test_afl_results_analysis_has_disposals_edge_threshold_breakdowns():
+    routes = Path("afl_routes.py").read_text(encoding="utf-8")
+    assert "_DISPOSALS_EDGE_THRESHOLD_ORDER = [10, 15, 20, 25, 30, 35, 40, 45, 50]" in routes
+    assert '"disposals_edge_thresholds"' in routes
+    assert '"disposals_edge_thresholds_line_type"' in routes
+
+
 def test_afl_template_has_results_tab_and_loader():
     template = Path("templates/afl.html").read_text(encoding="utf-8")
     assert 'data-tab="results"' in template
     assert 'id="tab-results"' in template
     assert "function loadAflResultsAnalysis()" in template
     assert "if (name === 'results') {" in template
+
+
+def test_afl_template_has_disposals_edge_threshold_tables():
+    template = Path("templates/afl.html").read_text(encoding="utf-8")
+    assert 'id="disposalsEdgeThresholdRows"' in template
+    assert 'id="disposalsEdgeThresholdLtRows"' in template
+    assert "10%+ through 50%+ selections (in 5% steps)" in template
 
 
 # ---------------------------------------------------------------------------
@@ -1945,4 +1959,3 @@ def test_r_script_has_backtick_operator_safe_syntax():
         "scripts/fetch_afl_2026_stats.R should define the `%||%` null-coalescing "
         "operator (it is safe here since there is no bash double-quote wrapping)"
     )
-
