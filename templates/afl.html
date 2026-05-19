@@ -2866,7 +2866,7 @@ function loadAflResultsAnalysis() {
   const dispEdgeBandLtEl    = document.getElementById('disposalsEdgeBandLtRows');
 
   if (!containerEl || !summaryEl || !kpiEl || !marketRowsEl || !settledRowsEl || !pendingRowsEl) {
-    console.error('[AFL Results] Missing render target', {
+    console.error('[AFL Results] Missing required render target', {
       container: !!containerEl,
       summary: !!summaryEl,
       kpis: !!kpiEl,
@@ -2879,6 +2879,11 @@ function loadAflResultsAnalysis() {
     }
     logAflResultsDiagnostics();
     return;
+  }
+  // Log warnings (non-fatal) for optional extended breakdown elements.
+  if (!mktLtRowsEl) console.warn('[AFL Results] #resultsMarketLineTypeRows not found');
+  if (!dispOddsBandEl || !dispEdgeBandEl || !dispOddsBandLtEl || !dispEdgeBandLtEl) {
+    console.warn('[AFL Results] One or more disposals deep-dive elements not found');
   }
 
   fetch(`/api/afl/results-analysis?year={{ year }}&limit=${RESULTS_MAX_SETTLED_ROWS}`)
