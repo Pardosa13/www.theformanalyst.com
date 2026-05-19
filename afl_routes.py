@@ -3079,7 +3079,9 @@ def _get_bucket_for_row(row: dict, key: str) -> str:
         # Use explicit None checks so a value of 0 is not treated as missing.
         _ep = row.get("edge_pct")
         _e  = row.get("edge")
-        edge = float(_ep if _ep is not None else (_e if _e is not None else 0))
+        if _ep is None and _e is None:
+            return "Unknown"
+        edge = float(_ep if _ep is not None else _e)  # type: ignore[arg-type]
         if edge < 2:
             return "<2%"
         elif edge < 4:
@@ -3092,7 +3094,9 @@ def _get_bucket_for_row(row: dict, key: str) -> str:
             return "8%+"
     elif key == "odds_band":
         _odds = row.get("odds")
-        odds = float(_odds if _odds is not None else 0)
+        if _odds is None:
+            return "Unknown"
+        odds = float(_odds)
         if odds < 1.50:
             return "$1.01-1.49"
         elif odds < 1.70:

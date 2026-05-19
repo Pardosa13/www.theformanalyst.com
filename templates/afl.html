@@ -2915,8 +2915,8 @@ function loadAflResultsAnalysis() {
       const profitCls = safeNum(perf.total_profit, 0) > 0 ? 'pos' : safeNum(perf.total_profit, 0) < 0 ? 'neg' : '';
       const roiCls    = safeNum(perf.roi, 0) > 0 ? 'pos' : safeNum(perf.roi, 0) < 0 ? 'neg' : '';
       const pushRate  = perf.total_bets
-        ? ((safeNum(perf.pushes, 0) / perf.total_bets) * 100).toFixed(1)
-        : '0.0';
+        ? ((safeNum(perf.pushes, 0) / perf.total_bets) * 100).toFixed(1) + '%'
+        : '—';
       kpiEl.innerHTML = `
         <div class="results-kpi"><div class="results-kpi-label">Captured</div><div class="results-kpi-val">${safeNum(summary.captured_total, 0).toLocaleString()}</div></div>
         <div class="results-kpi"><div class="results-kpi-label">Settled</div><div class="results-kpi-val">${safeNum(summary.settled_total, 0).toLocaleString()}</div></div>
@@ -2927,7 +2927,7 @@ function loadAflResultsAnalysis() {
         <div class="results-kpi"><div class="results-kpi-label">ROI</div><div class="results-kpi-val ${roiCls}">${safeNum(perf.roi, 0).toFixed(1)}%</div></div>
         <div class="results-kpi"><div class="results-kpi-label">Avg Edge</div><div class="results-kpi-val">${safeNum(perf.avg_edge, 0).toFixed(2)}%</div></div>
         <div class="results-kpi"><div class="results-kpi-label">Avg Odds</div><div class="results-kpi-val">${safeNum(perf.avg_odds, 0).toFixed(2)}</div></div>
-        <div class="results-kpi"><div class="results-kpi-label">Push Rate</div><div class="results-kpi-val">${pushRate}%</div></div>
+        <div class="results-kpi"><div class="results-kpi-label">Push Rate</div><div class="results-kpi-val">${pushRate}</div></div>
       `;
 
       // ── Market performance table ───────────────────────────────
