@@ -884,15 +884,17 @@ details pre {
   color: #d8d7ff !important;
   white-space: nowrap;
 }
+.pfai-heatmap-table col.col-horse { width: 220px; }
+.pfai-heatmap-table col.col-600,
+.pfai-heatmap-table col.col-400,
+.pfai-heatmap-table col.col-200,
+.pfai-heatmap-table col.col-avg { width: 120px; }
+
 .pfai-heatmap-table th:first-child,
 .pfai-heatmap-table td.pfai-horse-cell {
-  position: sticky;
-  left: 0;
-  z-index: 3;
   width: 220px;
   min-width: 220px;
   max-width: 220px;
-  box-shadow: 10px 0 18px rgba(0,0,0,0.28);
 }
 .pfai-heatmap-table th[data-sort-key] { cursor: pointer; user-select: none; }
 .pfai-heatmap-table th[data-sort-key]::after {
@@ -954,6 +956,7 @@ details pre {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: left;
 }
 .pfai-rank-badge {
   display: inline-flex;
@@ -1052,15 +1055,16 @@ details pre {
     font-size: 12px;
     padding: 10px 8px !important;
   }
+  .pfai-heatmap-table col.col-horse { width: 180px; }
+  .pfai-heatmap-table col.col-600,
+  .pfai-heatmap-table col.col-400,
+  .pfai-heatmap-table col.col-200,
+  .pfai-heatmap-table col.col-avg { width: 92px; }
   .pfai-heatmap-table th:first-child,
   .pfai-heatmap-table td.pfai-horse-cell {
-    position: static;
-    left: auto;
-    width: auto;
     min-width: 170px;
     max-width: 55vw;
     text-align: left;
-    box-shadow: none;
   }
   .pfai-rank-badge {
     min-width: 38px;
@@ -1311,12 +1315,14 @@ details pre {
     padding: 10px 8px !important;
     font-size: 12px;
   }
+  .pfai-heatmap-table col.col-horse { width: 44%; }
+  .pfai-heatmap-table col.col-600,
+  .pfai-heatmap-table col.col-400,
+  .pfai-heatmap-table col.col-200,
+  .pfai-heatmap-table col.col-avg { width: 14%; }
   .pfai-heatmap-table th:first-child,
   .pfai-heatmap-table td.pfai-horse-cell {
-    position: static;
-    left: auto;
     min-width: 0;
-    box-shadow: none;
     width: 44%;
   }
   .pfai-horse-cell {
@@ -2268,7 +2274,9 @@ function renderPFAIHeatmap(raceNum, horses) {
     html += '<p class="pfai-heatmap-helper">Lower rank is better. Tap a row to spotlight a horse, tap a badge for the split explanation, or tap 600m / 400m / 200m to sort.</p>';
     html += '</div>';
     html += '<div class="pfai-heatmap-scroller">';
-    html += '<table class="pfai-heatmap-table"><thead><tr>';
+    html += '<table class="pfai-heatmap-table">';
+    html += '<colgroup><col class="col-horse"><col class="col-600"><col class="col-400"><col class="col-200"><col class="col-avg"></colgroup>';
+    html += '<thead><tr>';
     html += '<th style="text-align:left; padding:12px;">Horse</th>';
     html += '<th style="text-align:center; padding:12px;" data-sort-key="rank600">600m</th>';
     html += '<th style="text-align:center; padding:12px;" data-sort-key="rank400">400m</th>';
