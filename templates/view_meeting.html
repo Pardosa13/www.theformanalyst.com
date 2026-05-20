@@ -1025,6 +1025,56 @@ details pre {
   color: #a5a5c3;
 }
 .pfai-legend-swatch { display:inline-block; width:18px; height:18px; border-radius:6px; margin:0 4px; vertical-align:middle; border:1px solid rgba(255,255,255,0.1); }
+@media (max-width: 1024px) {
+  .pfai-heatmap-wrap { padding: 12px !important; }
+  .pfai-heatmap-helper { font-size: 11px; line-height: 1.4; }
+  .pfai-heatmap-scroller {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .pfai-heatmap-table {
+    min-width: 0;
+    width: 100%;
+    table-layout: fixed;
+    border-spacing: 0 6px;
+    padding: 2px;
+  }
+  .pfai-heatmap-table th,
+  .pfai-heatmap-table tbody td {
+    font-size: 12px;
+    padding: 10px 8px !important;
+  }
+  .pfai-heatmap-table th:first-child,
+  .pfai-heatmap-table td.pfai-horse-cell {
+    position: static;
+    left: auto;
+    min-width: 0;
+    box-shadow: none;
+  }
+  .pfai-heatmap-table th:first-child,
+  .pfai-heatmap-table td.pfai-horse-cell {
+    width: 44%;
+    max-width: 44vw;
+    text-align: left;
+  }
+  .pfai-horse-cell {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pfai-heatmap-table th:not(:first-child),
+  .pfai-heatmap-table td:not(.pfai-horse-cell) {
+    width: 14%;
+    text-align: center !important;
+  }
+  .pfai-rank-badge {
+    min-width: 38px;
+    padding: 5px 7px;
+    font-size: 11px;
+  }
+  .pfai-scroll-hint { display: none; }
+}
 @keyframes pfaiRowReveal { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes pfaiRowFill { 0% { opacity: 0; transform: scaleX(0); } 35% { opacity: 1; } 100% { opacity: 0.5; transform: scaleX(1); } }
 @keyframes pfaiBadgePop { to { opacity: 1; transform: scale(1); } }
@@ -2208,11 +2258,11 @@ function renderPFAIHeatmap(raceNum, horses) {
         const rankOnes = validRanks.filter(function(rank) { return rank === 1; }).length;
         const rowClass = getHeatRankClass(entry.avgRank) + (rankOnes > 0 ? ' pfai-row-best-profile' : '');
         html += '<tr class="pfai-heatmap-row ' + rowClass + '" data-row-index="' + index + '" style="--row-index:' + index + ';" data-rank600="' + (pfai.last600_rank || 999) + '" data-rank400="' + (pfai.last400_rank || 999) + '" data-rank200="' + (pfai.last200_rank || 999) + '" data-avg-rank="' + entry.avgRank.toFixed(3) + '">';
-        html += '<td class="pfai-horse-cell" style="padding:12px; font-weight:700;">' + escapeHtml(horse.horse_name) + '</td>';
-        html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last600_rank, '600m') + '</td>';
-        html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last400_rank, '400m') + '</td>';
-        html += '<td style="padding:12px; text-align:center;">' + getRankCell(pfai.last200_rank, '200m') + '</td>';
-        html += '<td style="padding:12px; text-align:center; font-weight:800; color:#ffffff; font-family:DM Mono, monospace;">#' + entry.avgRank.toFixed(1) + '</td>';
+        html += '<td class="pfai-horse-cell" data-label="Horse" style="padding:12px; font-weight:700;">' + escapeHtml(horse.horse_name) + '</td>';
+        html += '<td data-label="600m" style="padding:12px; text-align:center;">' + getRankCell(pfai.last600_rank, '600m') + '</td>';
+        html += '<td data-label="400m" style="padding:12px; text-align:center;">' + getRankCell(pfai.last400_rank, '400m') + '</td>';
+        html += '<td data-label="200m" style="padding:12px; text-align:center;">' + getRankCell(pfai.last200_rank, '200m') + '</td>';
+        html += '<td data-label="Avg Rank" style="padding:12px; text-align:center; font-weight:800; color:#ffffff; font-family:DM Mono, monospace;">#' + entry.avgRank.toFixed(1) + '</td>';
         html += '</tr>';
     });
     html += '</tbody></table><div class="pfai-scroll-hint" aria-hidden="true"></div></div>';
