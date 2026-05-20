@@ -1292,6 +1292,37 @@ details pre {
   .speedmap-grid     { min-width: 600px; }
   .speedmap-column   { padding: 10px; }
   .vm-overview-tiles { gap: 10px; }
+  .pfai-heatmap-scroller {
+    overflow-x: hidden;
+  }
+  .pfai-heatmap-table {
+    min-width: 0;
+    width: 100%;
+    table-layout: fixed;
+  }
+  .pfai-heatmap-table th,
+  .pfai-heatmap-table tbody td {
+    padding: 10px 8px !important;
+    font-size: 12px;
+  }
+  .pfai-heatmap-table th:first-child,
+  .pfai-heatmap-table td.pfai-horse-cell {
+    position: static;
+    left: auto;
+    min-width: 0;
+    box-shadow: none;
+    width: 44%;
+  }
+  .pfai-horse-cell {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pfai-rank-badge {
+    min-width: 40px;
+    padding: 5px 8px;
+    font-size: 11px;
+  }
 }
 </style>
 
