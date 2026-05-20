@@ -915,21 +915,10 @@ details pre {
   --row-tint: 0.18;
   position: relative;
   opacity: 0;
-  transform: translateY(12px);
   background: linear-gradient(90deg, rgba(var(--heat-rgb), var(--row-tint)), rgba(18,18,32,0.76)) !important;
   isolation: isolate;
 }
-.pfai-heatmap-row::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 12px;
-  background: linear-gradient(90deg, rgba(var(--heat-rgb),0.30), rgba(var(--heat-rgb),0.07) 58%, transparent);
-  transform: scaleX(0);
-  transform-origin: left center;
-  opacity: 0;
-  z-index: 0;
-}
+.pfai-heatmap-row::before { content: none; }
 .pfai-heatmap-row.is-visible { animation: pfaiRowReveal 0.46s cubic-bezier(0.22,1,0.36,1) both; animation-delay: calc(var(--row-index, 0) * 85ms); }
 .pfai-heatmap-row.is-visible::before { animation: pfaiRowFill 0.72s cubic-bezier(0.22,1,0.36,1) both; animation-delay: calc((var(--row-index, 0) * 85ms) + 80ms); }
 .pfai-heatmap-row.heat-rank-excellent { --heat-rgb: var(--heat-excellent); --row-tint: 0.22; }
@@ -987,7 +976,6 @@ details pre {
 .pfai-heatmap-table.has-selection .pfai-heatmap-row:not(.is-selected) { opacity: 0.42; filter: saturate(0.62); }
 .pfai-heatmap-row.is-selected {
   opacity: 1 !important;
-  transform: translateY(0) scale(1.006);
   outline: 1px solid rgba(96,165,250,0.78);
   box-shadow: 0 0 0 3px rgba(124,58,237,0.18), 0 0 30px rgba(96,165,250,0.22);
   filter: brightness(1.18) saturate(1.14);
@@ -1881,11 +1869,8 @@ function initPfaiHeatmapSorting(container) {
                     const last = row.getBoundingClientRect();
                     if (!first) return;
                     const deltaY = first.top - last.top;
-                    row.style.transform = 'translateY(' + deltaY + 'px)';
-                    row.getBoundingClientRect();
-                    row.style.transition = 'transform 320ms cubic-bezier(0.22,1,0.36,1), opacity 0.22s ease, filter 0.22s ease';
-                    row.style.transform = '';
-                    window.setTimeout(function() { row.style.transition = ''; }, 360);
+                    row.style.transition = 'opacity 0.22s ease, filter 0.22s ease';
+                    window.setTimeout(function() { row.style.transition = ''; }, 260);
                 });
             }
         });
@@ -2290,11 +2275,11 @@ function renderPFAIHeatmap(raceNum, horses) {
         const rankOnes = validRanks.filter(function(rank) { return rank === 1; }).length;
         const rowClass = getHeatRankClass(entry.avgRank) + (rankOnes > 0 ? ' pfai-row-best-profile' : '');
         html += '<tr class="pfai-heatmap-row ' + rowClass + '" data-row-index="' + index + '" style="--row-index:' + index + ';" data-rank600="' + (pfai.last600_rank || 999) + '" data-rank400="' + (pfai.last400_rank || 999) + '" data-rank200="' + (pfai.last200_rank || 999) + '" data-avg-rank="' + entry.avgRank.toFixed(3) + '">';
-        html += '<td class="pfai-horse-cell" data-label="Horse" style="padding:12px; font-weight:700;">' + escapeHtml(horse.horse_name) + '</td>';
-        html += '<td data-label="600m" style="padding:12px; text-align:center;">' + getRankCell(pfai.last600_rank, '600m') + '</td>';
-        html += '<td data-label="400m" style="padding:12px; text-align:center;">' + getRankCell(pfai.last400_rank, '400m') + '</td>';
-        html += '<td data-label="200m" style="padding:12px; text-align:center;">' + getRankCell(pfai.last200_rank, '200m') + '</td>';
-        html += '<td data-label="Avg Rank" style="padding:12px; text-align:center; font-weight:800; color:#ffffff; font-family:DM Mono, monospace;">#' + entry.avgRank.toFixed(1) + '</td>';
+        html += '<td class="horse-cell pfai-horse-cell" data-label="Horse" style="padding:12px; font-weight:700;">' + escapeHtml(horse.horse_name) + '</td>';
+        html += '<td class="rank-cell rank-600" data-label="600m" style="padding:12px; text-align:center;">' + getRankCell(pfai.last600_rank, '600m') + '</td>';
+        html += '<td class="rank-cell rank-400" data-label="400m" style="padding:12px; text-align:center;">' + getRankCell(pfai.last400_rank, '400m') + '</td>';
+        html += '<td class="rank-cell rank-200" data-label="200m" style="padding:12px; text-align:center;">' + getRankCell(pfai.last200_rank, '200m') + '</td>';
+        html += '<td class="rank-cell avg-rank" data-label="Avg Rank" style="padding:12px; text-align:center; font-weight:800; color:#ffffff; font-family:DM Mono, monospace;">#' + entry.avgRank.toFixed(1) + '</td>';
         html += '</tr>';
     });
     html += '</tbody></table><div class="pfai-scroll-hint" aria-hidden="true"></div></div>';
@@ -2306,6 +2291,8 @@ function renderPFAIHeatmap(raceNum, horses) {
     html += '<span class="pfai-legend-swatch" style="background:#7f1d1d;"></span>#8+ Needs more.';
     html += '</div>';
     container.innerHTML = html;
+    const firstHeatmapRow = container.querySelector('.pfai-heatmap-row');
+    if (firstHeatmapRow) console.log('PFAI Heatmap row HTML:', firstHeatmapRow.outerHTML);
     initPfaiHeatmapPremium(container);
     animateSectionalPanel(container);
 }
