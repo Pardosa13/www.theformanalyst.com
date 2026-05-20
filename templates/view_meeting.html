@@ -860,15 +860,17 @@ details pre {
   background: rgba(5,5,12,0.45);
 }
 .pfai-heatmap-table {
-  min-width: 620px;
+  width: 100%;
+  min-width: 700px;
+  table-layout: fixed;
   border-collapse: separate;
-  border-spacing: 0 7px;
+  border-spacing: 0;
   background: transparent !important;
   border: 0 !important;
   border-radius: 0;
   overflow: visible;
   margin: 0;
-  padding: 4px;
+  padding: 0;
 }
 .pfai-heatmap-table thead { background: transparent; }
 .pfai-heatmap-table th {
@@ -887,7 +889,9 @@ details pre {
   position: sticky;
   left: 0;
   z-index: 3;
-  min-width: 172px;
+  width: 220px;
+  min-width: 220px;
+  max-width: 220px;
   box-shadow: 10px 0 18px rgba(0,0,0,0.28);
 }
 .pfai-heatmap-table th[data-sort-key] { cursor: pointer; user-select: none; }
@@ -947,6 +951,9 @@ details pre {
 .pfai-horse-cell {
   background: linear-gradient(90deg, rgba(12,12,22,0.98), rgba(12,12,22,0.92)) !important;
   color: #fff !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .pfai-rank-badge {
   display: inline-flex;
@@ -1034,11 +1041,11 @@ details pre {
     scrollbar-width: thin;
   }
   .pfai-heatmap-table {
-    min-width: 560px;
+    min-width: 620px;
     width: max-content;
     table-layout: auto;
-    border-spacing: 0 6px;
-    padding: 2px;
+    border-spacing: 0;
+    padding: 0;
   }
   .pfai-heatmap-table th,
   .pfai-heatmap-table tbody td {
@@ -1047,14 +1054,13 @@ details pre {
   }
   .pfai-heatmap-table th:first-child,
   .pfai-heatmap-table td.pfai-horse-cell {
+    position: static;
+    left: auto;
+    width: auto;
     min-width: 170px;
     max-width: 55vw;
     text-align: left;
-  }
-  .pfai-horse-cell {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    box-shadow: none;
   }
   .pfai-rank-badge {
     min-width: 38px;
