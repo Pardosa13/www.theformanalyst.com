@@ -295,13 +295,20 @@ def _first_existing(columns: set[str], *names: str) -> Optional[str]:
 
 def _normalise_team_name(name: Any) -> str:
     raw = _coerce_str(name)
-    mapping = {
+    AFL_TEAM_ALIASES = {
         # Legacy / short-name aliases
         "West Coast Eagles": "West Coast",
         "Greater Western Sydney": "GWS Giants",
         "GWS": "GWS Giants",
         "Footscray": "Western Bulldogs",
         "Brisbane": "Brisbane Lions",
+        # AFL Indigenous Round temporary club names
+        "Kuwarna": "Adelaide",
+        "Walyalup": "Fremantle",
+        "Narrm": "Melbourne",
+        "Yartapuulti": "Port Adelaide",
+        "Euro-Yroke": "St Kilda",
+        "Waalitj Marawar": "West Coast",
         # Full names with mascots as returned by The Odds API
         "Adelaide Crows": "Adelaide",
         "Carlton Blues": "Carlton",
@@ -318,7 +325,7 @@ def _normalise_team_name(name: Any) -> str:
         "St Kilda Saints": "St Kilda",
         "Sydney Swans": "Sydney",
     }
-    return mapping.get(raw, raw)
+    return AFL_TEAM_ALIASES.get(raw, raw)
 
 
 def _safe_series_get(row: pd.Series, column_name: Optional[str]):
