@@ -110,6 +110,11 @@ def run_setup(db, start_year: int = 2019, end_year: int = None):
                     log_sync(db, "player_stats", season=year, rows=0, status="empty")
                     continue
 
+                logger.info(
+                    "  %s: before upsert_player_stats rows=%s",
+                    year,
+                    len(stats),
+                )
                 count = upsert_player_stats(db, stats, year)
                 total_stats += count
                 logger.info("  %s: %s player-game rows", year, count)

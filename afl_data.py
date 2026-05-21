@@ -907,84 +907,108 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
 
     all_rows: list[dict] = []
     schema_error_count = 0
-
     processed_players = 0
-    for match_provider_id, details in match_details_map.items():
-        try:
-            stats_df = _fetch_match_stats_afl(match_provider_id, token=token)
-            if stats_df.empty:
-                continue
+    rounds_processed = len(completed_rounds)
+    matches_processed = 0
+    last_provider_id = None
 
+    try:
+        for match_provider_id, details in match_details_map.items():
+            last_provider_id = match_provider_id
             try:
-                for row_idx, (_, row) in enumerate(stats_df.iterrows(), start=1):
-                    all_rows.append(_build_afl_current_row(row, details, season, match_provider_id))
-                    processed_players += 1
-                    if processed_players % 100 == 0:
-                        logger.info(
-                            "AFL current-season stats transform progress: season=%s processed_players=%s "
-                            "(providerId=%s provider_row=%s provider_total=%s)",
-                            season,
-                            processed_players,
-                            match_provider_id,
-                            row_idx,
-                            len(stats_df),
-                        )
-            except Exception:
-                schema_error_count += 1
-                logger.error(
-                    "AFL current-season stats transform crashed at season=%s providerId=%s "
-                    "provider_row=%s processed_players=%s. Full traceback follows.\n%s",
-                    season,
-                    match_provider_id,
-                    row_idx,
-                    processed_players,
-                    traceback.format_exc(),
-                )
-                raise
+                stats_df = _fetch_match_stats_afl(match_provider_id, token=token)
+                if stats_df.empty:
+                    matches_processed += 1
+                    continue
 
-            time.sleep(0.1)
+                try:
+                    for row_idx, (_, row) in enumerate(stats_df.iterrows(), start=1):
+                        all_rows.append(_build_afl_current_row(row, details, season, match_provider_id))
+                        processed_players += 1
+                        if processed_players % 100 == 0:
+                            logger.info(
+                                "AFL current-season stats transform progress: season=%s processed_players=%s "
+                                "(providerId=%s provider_row=%s provider_total=%s)",
+                                season,
+                                processed_players,
+                                match_provider_id,
+                                row_idx,
+                                len(stats_df),
+                            )
+                except Exception:
+                    schema_error_count += 1
+                    logger.error(
+                        "AFL current-season stats transform crashed at season=%s providerId=%s "
+                        "provider_row=%s processed_players=%s. Full traceback follows.\n%s",
+                        season,
+                        match_provider_id,
+                        row_idx,
+                        processed_players,
+                        traceback.format_exc(),
+                    )
+                    raise
 
-        except Exception as exc:
-            logger.warning("AFL match stats fetch failed for match %s: %s", match_provider_id, exc)
+                matches_processed += 1
+                time.sleep(0.1)
 
-    logger.info("Parsed %s raw stat rows from AFL API for season %s", len(all_rows), season)
+            except Exception as exc:
+                logger.warning("AFL match stats fetch failed for match %s: %s", match_provider_id, exc)
+                matches_processed += 1
 
-    filtered_rows: list[dict] = []
-    missing_player_id = 0
-    missing_match_id = 0
-    duplicate = 0
-    seen_keys: set[tuple[int, int]] = set()
-    for r in all_rows:
-        has_match = bool(r.get("match_id"))
-        has_player = bool(r.get("player_id"))
-        if not has_player:
-            missing_player_id += 1
-        if not has_match:
-            missing_match_id += 1
-        if not (has_player and has_match):
-            continue
-        key = (int(r.get("match_id")), int(r.get("player_id")))
-        if key in seen_keys:
-            duplicate += 1
-            continue
-        seen_keys.add(key)
-        filtered_rows.append(r)
+        raw_rows_count = len(all_rows)
+        logger.info(
+            "AFL current-season loop complete: raw_rows_count=%s season=%s rounds_processed=%s "
+            "matches_processed=%s last_providerId=%s",
+            raw_rows_count, season, rounds_processed, matches_processed, last_provider_id,
+        )
+        logger.info("Parsed %s raw stat rows from AFL API for season %s", raw_rows_count, season)
 
-    logger.info(
-        "Rejected rows: missing_player_id=%s, missing_match_id=%s, schema_error=%s, duplicate=%s",
-        missing_player_id, missing_match_id, schema_error_count, duplicate,
-    )
-
-    if len(all_rows) > 0 and len(filtered_rows) == 0:
-        raise RuntimeError(
-            "AFL API returned valid records but all rows were rejected during transform/validation"
+        pre_filter_count = len(all_rows)
+        valid_rows = _filter_valid_stat_rows(all_rows)
+        logger.info(
+            "AFL current-season post-loop: _filter_valid_stat_rows kept=%s dropped=%s season=%s",
+            len(valid_rows), pre_filter_count - len(valid_rows), season,
         )
 
-    logger.info(
-        "AFL current-season stats: prepared %s rows for season %s across rounds %s",
-        len(filtered_rows), season, completed_rounds
-    )
-    return filtered_rows
+        filtered_rows: list[dict] = []
+        duplicate = 0
+        seen_keys: set[tuple[int, int]] = set()
+        for r in valid_rows:
+            key = (int(r.get("match_id")), int(r.get("player_id")))
+            if key in seen_keys:
+                duplicate += 1
+                continue
+            seen_keys.add(key)
+            filtered_rows.append(r)
+        logger.info(
+            "AFL current-season post-loop: dedupe kept=%s dropped_duplicates=%s season=%s",
+            len(filtered_rows), duplicate, season,
+        )
+        logger.info(
+            "AFL current-season post-loop: match_id mapping rows_with_match_id=%s rows_without_match_id=%s season=%s",
+            sum(1 for r in filtered_rows if r.get("match_id")),
+            sum(1 for r in filtered_rows if not r.get("match_id")),
+            season,
+        )
+
+        logger.info(
+            "AFL current-season post-loop: fallback decision season=%s raw_rows_count=%s validated_rows=%s action=%s",
+            season, raw_rows_count, len(filtered_rows),
+            "hard_fail" if raw_rows_count > 0 and len(filtered_rows) == 0 else "return_validated_rows",
+        )
+        if raw_rows_count > 0 and len(filtered_rows) == 0:
+            raise RuntimeError(
+                "AFL API returned raw records but 0 validated rows remained; hard-failing instead of fallback"
+            )
+
+        logger.info(
+            "AFL current-season stats: prepared %s rows for season %s across rounds %s",
+            len(filtered_rows), season, completed_rounds
+        )
+        return filtered_rows
+    except Exception:
+        logger.exception("AFL current-season branch failed for season %s", season)
+        raise
 
 
 def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id: int) -> dict:
