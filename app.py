@@ -5726,22 +5726,65 @@ def get_meeting_sectionals(meeting_id):
                 if race.sectionals_json:
                     try:
                         sectionals_payload = json.loads(race.sectionals_json) if isinstance(race.sectionals_json, str) else race.sectionals_json
-                        
-                        # Find this horse's PFAI data
-                        if sectionals_payload and 'payLoad' in sectionals_payload:
-                            for runner in sectionals_payload['payLoad']:
-                                runner_name = runner.get('runnerName', '') or runner.get('name', '')
-                                
-                                if runner_name.strip().lower() == horse.horse_name.strip().lower():
-                                    pfai_sectionals = {
-                                        'last200_price': runner.get('last200TimePrice'),
-                                        'last200_rank': runner.get('last200TimeRank'),
-                                        'last400_price': runner.get('last400TimePrice'),
-                                        'last400_rank': runner.get('last400TimeRank'),
-                                        'last600_price': runner.get('last600TimePrice'),
-                                        'last600_rank': runner.get('last600TimeRank')
-                                    }
+                        payload_runners = sectionals_payload.get('payLoad', []) if sectionals_payload else []
+
+                        def _first_present(source, keys):
+                            for key in keys:
+                                if key in source and source.get(key) not in (None, ''):
+                                    return source.get(key)
+                            return None
+
+                        def _as_positive_int(value):
+                            try:
+                                if value in (None, ''):
+                                    return None
+                                parsed = int(float(value))
+                                return parsed if parsed > 0 else None
+                            except (TypeError, ValueError):
+                                return None
+
+                        if payload_runners:
+                            horse_key = horse.horse_name.strip().lower()
+                            runner_match = None
+                            for runner in payload_runners:
+                                runner_name = (runner.get('runnerName', '') or runner.get('name', '')).strip().lower()
+                                if runner_name == horse_key:
+                                    runner_match = runner
                                     break
+
+                            if runner_match:
+                                last200_rank = _as_positive_int(_first_present(runner_match, ['last200TimeRank', 'rank_200m', 'rank_200', 'pfai_200m_rank', 'sectional_200_rank']))
+                                last400_rank = _as_positive_int(_first_present(runner_match, ['last400TimeRank', 'rank_400m', 'rank_400', 'pfai_400m_rank', 'sectional_400_rank']))
+                                last600_rank = _as_positive_int(_first_present(runner_match, ['last600TimeRank', 'rank_600m', 'rank_600', 'pfai_600m_rank', 'last_600_rank', 'sectional_600_rank']))
+
+                                pfai_sectionals = {
+                                    'last200_price': _first_present(runner_match, ['last200TimePrice', 'last200AdjustedTime', 'adjustedLast200']),
+                                    'last200_rank': last200_rank,
+                                    'last400_price': _first_present(runner_match, ['last400TimePrice', 'last400AdjustedTime', 'adjustedLast400']),
+                                    'last400_rank': last400_rank,
+                                    'last600_price': _first_present(runner_match, ['last600TimePrice', 'last600AdjustedTime', 'adjustedLast600']),
+                                    'last600_rank': last600_rank
+                                }
+
+                                if pfai_sectionals['last600_price'] not in (None, '') and not pfai_sectionals['last600_rank']:
+                                    comparable = []
+                                    for runner in payload_runners:
+                                        value = _first_present(runner, ['last600TimePrice', 'last600AdjustedTime', 'adjustedLast600'])
+                                        try:
+                                            if value not in (None, ''):
+                                                comparable.append(float(value))
+                                        except (TypeError, ValueError):
+                                            continue
+
+                                    target_time = None
+                                    try:
+                                        target_time = float(pfai_sectionals['last600_price'])
+                                    except (TypeError, ValueError):
+                                        target_time = None
+
+                                    if target_time is not None and comparable:
+                                        unique_sorted = sorted(set(comparable))
+                                        pfai_sectionals['last600_rank'] = unique_sorted.index(target_time) + 1 if target_time in unique_sorted else None
                     except Exception as e:
                         print(f"Error parsing PFAI sectionals: {e}")
                 
