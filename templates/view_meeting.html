@@ -2254,9 +2254,15 @@ function renderPFAIHeatmap(raceNum, horses) {
         container.innerHTML = '<div class="no-sectionals">No PFAI sectional data available for this race</div>';
         return;
     }
+    const has600RankData = pfaiEntries.some(function(entry) {
+        return entry && entry.horse && entry.horse.pfai_sectionals && entry.horse.pfai_sectionals.last600_rank;
+    });
     let html = '<div class="pfai-heatmap-head">';
     html += '<h4 class="pfai-heatmap-title">🎯 PFAI Sectional Rankings - Last Start Performance</h4>';
     html += '<p class="pfai-heatmap-helper">Lower rank is better. Tap a row to spotlight a horse, tap a badge for the split explanation, or tap 600m / 400m / 200m to sort.</p>';
+    if (!has600RankData) {
+        html += '<p class="pfai-heatmap-helper" style="color:#fbbf24;">600m sectionals unavailable for this meeting/source.</p>';
+    }
     html += '</div>';
     html += '<div class="pfai-heatmap-scroller">';
     html += '<table class="pfai-heatmap-table">';
@@ -2291,6 +2297,7 @@ function renderPFAIHeatmap(raceNum, horses) {
     html += '<span class="pfai-legend-swatch" style="background:#7f1d1d;"></span>#8+ Needs more.';
     html += '</div>';
     container.innerHTML = html;
+    console.log('PFAI heatmap first row', pfaiEntries?.[0]);
     const firstHeatmapRow = container.querySelector('.pfai-heatmap-row');
     if (firstHeatmapRow) console.log('PFAI Heatmap row HTML:', firstHeatmapRow.outerHTML);
     initPfaiHeatmapPremium(container);
