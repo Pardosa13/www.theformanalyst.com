@@ -652,13 +652,75 @@ def _clean_names_playerstats_afl(df: pd.DataFrame) -> pd.DataFrame:
 def _fetch_match_stats_afl(match_provider_id: int, token: Optional[str] = None) -> pd.DataFrame:
     token = token or _get_afl_cookie()
     if not token:
+        logger.warning(
+            "AFL stats API diagnostics: missing auth token before player stats fetch for match providerId=%s",
+            match_provider_id,
+        )
         return pd.DataFrame()
 
-    data = _afl_get(
-        f"{AFL_API_BASE}/cfs/afl/playerStats/match/{match_provider_id}",
-        token=token,
+    stats_url = f"{AFL_API_BASE}/cfs/afl/playerStats/match/{match_provider_id}"
+    headers = dict(HEADERS)
+    headers["x-media-mis-token"] = token
+
+    logger.info(
+        "AFL stats API diagnostics: GET %s (providerId=%s)",
+        stats_url,
+        match_provider_id,
     )
+
+    try:
+        response = requests.get(stats_url, headers=headers, timeout=40)
+    except requests.RequestException as exc:
+        logger.error(
+            "AFL stats API diagnostics: request failed for providerId=%s url=%s error=%s",
+            match_provider_id,
+            stats_url,
+            exc,
+        )
+        return pd.DataFrame()
+
+    content_type = response.headers.get("Content-Type", "")
+    logger.info(
+        "AFL stats API diagnostics: providerId=%s status=%s content_type=%s headers=%s",
+        match_provider_id,
+        response.status_code,
+        content_type,
+        dict(response.headers),
+    )
+
+    raw_body_preview = (response.text or "")[:1000]
+    logger.info(
+        "AFL stats API diagnostics: providerId=%s raw_body_preview=%r",
+        match_provider_id,
+        raw_body_preview,
+    )
+
+    if response.status_code == 401:
+        logger.warning(
+            "AFL stats API diagnostics: providerId=%s returned 401 (likely token/auth issue)",
+            match_provider_id,
+        )
+
+    data = _afl_parse_response(response)
     if not data:
+        logger.warning(
+            "AFL stats API diagnostics: empty/invalid parsed response for providerId=%s",
+            match_provider_id,
+        )
+        return pd.DataFrame()
+
+    if isinstance(data, dict):
+        logger.info(
+            "AFL stats API diagnostics: providerId=%s top_level_keys=%s",
+            match_provider_id,
+            list(data.keys()),
+        )
+    else:
+        logger.warning(
+            "AFL stats API diagnostics: providerId=%s parsed payload is %s not dict",
+            match_provider_id,
+            type(data).__name__,
+        )
         return pd.DataFrame()
 
     home_stats = data.get("homeTeamPlayerStats") or []
@@ -706,6 +768,12 @@ def _fetch_match_stats_afl(match_provider_id: int, token: Optional[str] = None) 
                 if found_alt:
                     break
 
+    if not home_stats and not away_stats:
+        logger.warning(
+            "AFL stats API diagnostics: providerId=%s response contains zero player stat rows (expected home/away player stats keys missing or empty)",
+            match_provider_id,
+        )
+
     def _to_df(rows: list[dict], team_status: str) -> pd.DataFrame:
         if not rows:
             return pd.DataFrame()
@@ -723,7 +791,21 @@ def _fetch_match_stats_afl(match_provider_id: int, token: Optional[str] = None) 
     home_df = _to_df(home_stats, "home")
     away_df = _to_df(away_stats, "away")
 
+    detected_records = len(home_stats) + len(away_stats)
+    logger.info(
+        "AFL stats API diagnostics: providerId=%s detected home_records=%s away_records=%s total_records=%s",
+        match_provider_id,
+        len(home_stats),
+        len(away_stats),
+        detected_records,
+    )
+
     if home_df.empty and away_df.empty:
+        logger.warning(
+            "AFL stats API diagnostics: providerId=%s parser produced 0 dataframe rows from detected_records=%s",
+            match_provider_id,
+            detected_records,
+        )
         return pd.DataFrame()
 
     return pd.concat([home_df, away_df], ignore_index=True)
