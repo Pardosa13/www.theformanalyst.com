@@ -1005,7 +1005,7 @@
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-search"></i> Disposals Deep Dive</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Odds bands · Edge bands · 10–50% minimum-edge thresholds · Over/Under splits</span>
+      <span style="font-size:11px;color:var(--text-muted);">Odds bands · Edge bands · Over/Under splits</span>
     </div>
     <div class="afl-card-body">
       <!-- Row 1: simple band tables -->
@@ -1043,42 +1043,6 @@
           </div>
         </div>
       </div>
-      <div class="results-section-title" style="margin-top:18px;"><i class="bi bi-funnel"></i> Cumulative Minimum-Edge Lens</div>
-      <div class="disposals-threshold-note">
-        Shows cumulative performance at each minimum-edge threshold so you can compare picks at or above 10% through 50% (in 5% steps).
-      </div>
-      <div class="disposals-grid">
-        <div class="afl-card" style="border:1px solid var(--border-subtle);">
-          <div class="afl-card-header" style="padding:10px 14px;">
-            <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-graph-up-arrow"></i> Minimum-Edge Threshold Performance</h5>
-          </div>
-          <div class="afl-card-body" style="padding:0;">
-            <div class="scroll-x">
-              <table class="value-table">
-                <thead><tr><th>Threshold</th><th>Picks</th><th>W-L-P</th><th>Strike</th><th>Profit</th><th>ROI</th></tr></thead>
-                <tbody id="disposalsEdgeThresholdRows">
-                  <tr><td colspan="6" style="padding:12px;color:var(--text-muted);">Loading…</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-        <div class="afl-card" style="border:1px solid var(--border-subtle);">
-          <div class="afl-card-header" style="padding:10px 14px;">
-            <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-arrow-down-up"></i> Minimum-Edge Threshold by Side</h5>
-          </div>
-          <div class="afl-card-body" style="padding:0;">
-            <div class="scroll-x">
-              <table class="value-table">
-                <thead><tr><th>Threshold</th><th>Side</th><th>Picks</th><th>W-L-P</th><th>Strike</th><th>Profit</th><th>ROI</th></tr></thead>
-                <tbody id="disposalsEdgeThresholdLtRows">
-                  <tr><td colspan="7" style="padding:12px;color:var(--text-muted);">Loading…</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
       <!-- Row 2: Over/Under by band tables -->
       <div class="results-section-title" style="margin-top:18px;"><i class="bi bi-arrow-left-right"></i> Over / Under Splits</div>
       <div class="disposals-grid">
@@ -1101,7 +1065,7 @@
         <!-- Disposals Over/Under by edge band -->
         <div class="afl-card" style="border:1px solid var(--border-subtle);">
           <div class="afl-card-header" style="padding:10px 14px;">
-            <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-percent"></i> Over/Under by Minimum-Edge Threshold</h5>
+            <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-percent"></i> Over/Under by Edge Band</h5>
           </div>
           <div class="afl-card-body" style="padding:0;">
             <div class="scroll-x">
@@ -2916,8 +2880,6 @@ function loadAflResultsAnalysis() {
   const dispEdgeBandEl      = document.getElementById('disposalsEdgeBandRows');
   const dispOddsBandLtEl    = document.getElementById('disposalsOddsBandLtRows');
   const dispEdgeBandLtEl    = document.getElementById('disposalsEdgeBandLtRows');
-  const dispEdgeThresholdEl = document.getElementById('disposalsEdgeThresholdRows');
-  const dispEdgeThresholdLtEl = document.getElementById('disposalsEdgeThresholdLtRows');
 
   if (!containerEl || !summaryEl || !kpiEl || !marketRowsEl || !settledRowsEl || !pendingRowsEl) {
     console.error('[AFL Results] Missing required render target', {
@@ -2936,7 +2898,7 @@ function loadAflResultsAnalysis() {
   }
   // Log warnings (non-fatal) for optional extended breakdown elements.
   if (!mktLtRowsEl) console.warn('[AFL Results] #resultsMarketLineTypeRows not found');
-  if (!dispOddsBandEl || !dispEdgeBandEl || !dispOddsBandLtEl || !dispEdgeBandLtEl || !dispEdgeThresholdEl || !dispEdgeThresholdLtEl) {
+  if (!dispOddsBandEl || !dispEdgeBandEl || !dispOddsBandLtEl || !dispEdgeBandLtEl) {
     console.warn('[AFL Results] One or more disposals deep-dive elements not found');
   }
 
@@ -3020,9 +2982,7 @@ function loadAflResultsAnalysis() {
       if (dispOddsBandEl) dispOddsBandEl.innerHTML = _renderBandRows(breakdowns.disposals_odds_band, 6);
       if (dispEdgeBandEl) dispEdgeBandEl.innerHTML = _renderBandRows(breakdowns.disposals_edge_band, 6);
       if (dispOddsBandLtEl) dispOddsBandLtEl.innerHTML = _renderBandLtRows(breakdowns.disposals_odds_band_line_type, 7);
-      if (dispEdgeBandLtEl) dispEdgeBandLtEl.innerHTML = _renderBandLtRows(breakdowns.disposals_edge_thresholds_line_type, 7);
-      if (dispEdgeThresholdEl) dispEdgeThresholdEl.innerHTML = _renderBandRows(breakdowns.disposals_edge_thresholds, 6);
-      if (dispEdgeThresholdLtEl) dispEdgeThresholdLtEl.innerHTML = _renderBandLtRows(breakdowns.disposals_edge_thresholds_line_type, 7);
+      if (dispEdgeBandLtEl) dispEdgeBandLtEl.innerHTML = _renderBandLtRows(breakdowns.disposals_edge_band_line_type, 7);
 
       // ── Recent settled picks ───────────────────────────────────
       const settledRows = data.recent_settled || [];

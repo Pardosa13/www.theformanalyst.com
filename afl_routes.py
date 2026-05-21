@@ -1173,14 +1173,6 @@ def register_afl_routes(app, db):
                     "disposals_edge_band": _calc_model_breakdown(disposals_rows, "edge_band"),
                     "disposals_odds_band_line_type": _calc_composite_breakdown(disposals_rows, "odds_band", "line_type"),
                     "disposals_edge_band_line_type": _calc_composite_breakdown(disposals_rows, "edge_band", "line_type"),
-                    "disposals_edge_thresholds": _calc_edge_threshold_breakdown(
-                        disposals_rows,
-                        _DISPOSALS_EDGE_THRESHOLD_ORDER,
-                    ),
-                    "disposals_edge_thresholds_line_type": _calc_edge_threshold_line_type_breakdown(
-                        disposals_rows,
-                        _DISPOSALS_EDGE_THRESHOLD_ORDER,
-                    ),
                 },
                 "recent_settled": recent_settled,
                 "recent_pending": recent_pending,
@@ -3077,7 +3069,7 @@ def _get_bucket_for_row(row: dict, key: str) -> str:
 
     Virtual keys handled:
     - ``edge_band``  – uses ``edge_pct`` (preferred) or ``edge`` field,
-                       bucketed into <2%, 2-4%, 4-6%, 6-8%, 8%+.
+                       bucketed into 0-5%, 5.01-10%, ..., 35%+.
     - ``odds_band``  – uses ``odds`` field, bucketed into AFL-prop-friendly
                        decimal ranges labelled with $ signs.
     All other keys are read directly from the row dict.
@@ -3090,38 +3082,46 @@ def _get_bucket_for_row(row: dict, key: str) -> str:
         if _ep is None and _e is None:
             return "Unknown"
         edge = float(_ep if _ep is not None else _e)  # type: ignore[arg-type]
-        if edge < 2:
-            return "<2%"
-        elif edge < 4:
-            return "2-4%"
-        elif edge < 6:
-            return "4-6%"
-        elif edge < 8:
-            return "6-8%"
+        if edge <= 5:
+            return "0-5%"
+        elif edge <= 10:
+            return "5.01-10%"
+        elif edge <= 15:
+            return "10.01-15%"
+        elif edge <= 20:
+            return "15.01-20%"
+        elif edge <= 25:
+            return "20.01-25%"
+        elif edge <= 30:
+            return "25.01-30%"
+        elif edge <= 35:
+            return "30.01-35%"
         else:
-            return "8%+"
+            return "35%+"
     elif key == "odds_band":
         _odds = row.get("odds")
         if _odds is None:
             return "Unknown"
         odds = float(_odds)
-        if odds < 1.50:
-            return "$1.01-1.49"
-        elif odds < 1.70:
-            return "$1.50-1.69"
-        elif odds < 1.90:
-            return "$1.70-1.89"
-        elif odds < 2.10:
-            return "$1.90-2.09"
+        if odds < 1.70:
+            return "$1.01-1.70"
+        elif odds <= 1.71:
+            return "$1.70-1.71"
+        elif odds <= 1.80:
+            return "$1.71-1.80"
+        elif odds <= 1.90:
+            return "$1.81-1.90"
+        elif odds <= 2.00:
+            return "$1.91-2.00"
         else:
-            return "$2.10+"
+            return "$2.00+"
     else:
         return str(row.get(key) or "unknown")
 
 
 # Ordered bucket labels for deterministic display sorting.
-_EDGE_BAND_ORDER = ["<2%", "2-4%", "4-6%", "6-8%", "8%+"]
-_ODDS_BAND_ORDER = ["$1.01-1.49", "$1.50-1.69", "$1.70-1.89", "$1.90-2.09", "$2.10+"]
+_EDGE_BAND_ORDER = ["0-5%", "5.01-10%", "10.01-15%", "15.01-20%", "20.01-25%", "25.01-30%", "30.01-35%", "35%+"]
+_ODDS_BAND_ORDER = ["$1.01-1.70", "$1.70-1.71", "$1.71-1.80", "$1.81-1.90", "$1.91-2.00", "$2.00+"]
 _DISPOSALS_EDGE_THRESHOLD_ORDER = [10, 15, 20, 25, 30, 35, 40, 45, 50]
 
 
