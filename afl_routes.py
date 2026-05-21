@@ -295,8 +295,47 @@ def register_afl_routes(app, db):
                 }
             ), 409
 
-        all_games = sorted(player["games"], key=_sort_date_key, reverse=True)
-        season_games = [g for g in all_games if g.get("season") == effective_season] or all_games
+        # Use the exact same resolver path as Value Finder to prevent
+        # query/path mismatches between tabs.
+        resolved_profile = _resolve_player_profile_for_market(
+            db,
+            full_name=player.get("name", ""),
+            team_hint=player.get("team", "") or team,
+            prop_home_team=player.get("team", "") or team,
+            prop_away_team="",
+            effective_season=effective_season,
+            effective_seasons=effective_seasons,
+            limit=300,
+        )
+
+        if resolved_profile:
+            all_games = resolved_profile["games"]
+            season_games = resolved_profile["season_games"] or all_games
+        else:
+            all_games = sorted(player["games"], key=_sort_date_key, reverse=True)
+            season_games = [g for g in all_games if g.get("season") == effective_season] or all_games
+
+        if _canonical_player_name(player.get("name", "")) == "patrickcripps":
+            logger.info(
+                "AFL Player Props frontend->backend call Patrick Cripps: route=/api/afl/player-detail "
+                "args player_id=%s name=%s team=%s season=%s",
+                player_id,
+                name,
+                team,
+                requested_season,
+            )
+            logger.info(
+                "AFL Player Props backend resolver Patrick Cripps: function=_resolve_player_profile_for_market -> "
+                "_resolve_player_rows -> _db_player_search SQL DISTINCT ON(player_id, match_date, match_home_team, match_away_team)"
+            )
+            logger.info(
+                "AFL Player Props source rows Patrick Cripps: player_id=%s rows=%s rounds=%s disposals=%s match_ids=%s",
+                player.get("player_id"),
+                len(season_games),
+                [g.get("match_round") for g in season_games],
+                [g.get("disposals") for g in season_games],
+                [g.get("match_id") for g in season_games],
+            )
 
         # "Season avg" cards should reflect the requested season (e.g. 2026),
         # while history tabs still use the broader multi-season sample.
