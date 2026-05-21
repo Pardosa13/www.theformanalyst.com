@@ -1480,7 +1480,7 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
           AND commence_time IS NOT NULL
           AND commence_time <= NOW() - make_interval(hours => :hours)
         ORDER BY commence_time ASC
-        LIMIT 1000
+        LIMIT 5000
     """)
     with db.engine.connect() as conn:
         pending = [dict(r) for r in conn.execute(pending_sql, {"hours": settle_after_hours}).mappings().fetchall()]
