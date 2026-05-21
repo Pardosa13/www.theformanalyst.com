@@ -709,6 +709,8 @@ def upsert_games(db, games: list[dict]) -> int:
     """)
 
     count = 0
+    skipped_missing_match = 0
+    skipped_missing_match_samples: list[str] = []
     with db.engine.begin() as conn:
         for game in games:
             conn.execute(sql, {
@@ -885,6 +887,8 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             _build_historical_id_map(db)
 
     count = 0
+    skipped_missing_match = 0
+    skipped_missing_match_samples: list[str] = []
     with db.engine.begin() as conn:
         for row in stats:
             match_id = _match_id(row.get("match_id"))
@@ -924,13 +928,11 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             # ───────────────────────────────────────────────────────────────
 
             if not match_id:
-                logger.warning(
-                    "upsert_player_stats: skipping row — missing match_id | "
-                    "player=%s %s team=%s season=%s round=%s",
-                    row.get("player_first_name"), row.get("player_last_name"),
-                    row.get("player_team"), row.get("season", season),
-                    row.get("match_round"),
-                )
+                skipped_missing_match += 1
+                if len(skipped_missing_match_samples) < 20:
+                    skipped_missing_match_samples.append(
+                        f"{row.get('player_first_name','')} {row.get('player_last_name','')}`{row.get('player_team','')}|S{row.get('season', season)}R{row.get('match_round')}"
+                    )
                 continue
 
             conn.execute(sql, {
@@ -996,6 +998,13 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
                 "player_headshot_url": _headshot_url(player_id),
             })
             count += 1
+
+    if skipped_missing_match:
+        logger.warning(
+            "upsert_player_stats: skipped %s row(s) missing match_id before DB write; sample=%s",
+            skipped_missing_match,
+            skipped_missing_match_samples,
+        )
 
     if is_2026_sync:
         logger.info(
@@ -1104,6 +1113,8 @@ def upsert_standings(db, standings: list[dict], year: int, round_number: int) ->
     """)
 
     count = 0
+    skipped_missing_match = 0
+    skipped_missing_match_samples: list[str] = []
     with db.engine.begin() as conn:
         for standing in standings:
             conn.execute(sql, {
@@ -1149,6 +1160,8 @@ def upsert_player_props(db, props: list[dict]) -> int:
     """)
 
     count = 0
+    skipped_missing_match = 0
+    skipped_missing_match_samples: list[str] = []
     with db.engine.begin() as conn:
         for prop in props:
             conn.execute(sql, {
@@ -1191,6 +1204,8 @@ def upsert_match_markets(db, rows: list[dict]) -> int:
     """)
 
     count = 0
+    skipped_missing_match = 0
+    skipped_missing_match_samples: list[str] = []
     with db.engine.begin() as conn:
         for row in rows:
             conn.execute(sql, {
@@ -1255,6 +1270,8 @@ def upsert_team_logos(db, teams: list[dict]) -> int:
     """)
 
     count = 0
+    skipped_missing_match = 0
+    skipped_missing_match_samples: list[str] = []
     with db.engine.begin() as conn:
         for team in teams:
             tid = team.get("id")
@@ -1331,6 +1348,8 @@ def upsert_model_selections(db, selections: list[dict]) -> int:
     """)
 
     count = 0
+    skipped_missing_match = 0
+    skipped_missing_match_samples: list[str] = []
     with db.engine.begin() as conn:
         for row in selections:
             conn.execute(sql, row)
