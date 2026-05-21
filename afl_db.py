@@ -757,6 +757,7 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
     """
     if not stats:
         return 0
+    logger.info("Sending %s validated rows to upsert_player_stats()", len(stats))
 
     sql = db.text("""
         INSERT INTO afl_player_stats (
@@ -868,6 +869,7 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             contest_def_one_on_ones         = EXCLUDED.contest_def_one_on_ones,
             contest_off_one_on_ones         = EXCLUDED.contest_off_one_on_ones,
             player_headshot_url             = EXCLUDED.player_headshot_url
+        RETURNING (xmax = 0) AS inserted
     """)
 
     # For season 2026, build the historical player_id lookup once before the main loop.
@@ -887,6 +889,8 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             _build_historical_id_map(db)
 
     count = 0
+    inserted_count = 0
+    updated_count = 0
     skipped_missing_match = 0
     skipped_missing_match_samples: list[str] = []
     with db.engine.begin() as conn:
@@ -935,7 +939,7 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
                     )
                 continue
 
-            conn.execute(sql, {
+            result = conn.execute(sql, {
                 "match_id": match_id,
                 "match_date": row.get("match_date"),
                 "match_round": _s(row.get("match_round")),
@@ -997,6 +1001,11 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
                 "contest_off_one_on_ones": _i(row.get("contest_off_one_on_ones")),
                 "player_headshot_url": _headshot_url(player_id),
             })
+            inserted = bool(result.scalar())
+            if inserted:
+                inserted_count += 1
+            else:
+                updated_count += 1
             count += 1
 
     if skipped_missing_match:
@@ -1016,6 +1025,14 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             _debut_generated_2026,
             _ambiguous_2026,
         )
+
+    skipped_count = len(stats) - count
+    logger.info(
+        "upsert_player_stats accounting: Inserted=%s Updated=%s Skipped=%s",
+        inserted_count, updated_count, skipped_count,
+    )
+    if count > 0 and (inserted_count + updated_count) == 0:
+        raise RuntimeError("Rows reached DB layer but nothing persisted")
 
     return count
 

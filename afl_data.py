@@ -905,6 +905,7 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
     }
 
     all_rows: list[dict] = []
+    schema_error_count = 0
 
     for match_provider_id, details in match_details_map.items():
         try:
@@ -913,52 +914,52 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
                 continue
 
             for _, row in stats_df.iterrows():
-                all_rows.append(_build_afl_current_row(row, details, season, match_provider_id))
+                try:
+                    all_rows.append(_build_afl_current_row(row, details, season, match_provider_id))
+                except Exception as row_exc:
+                    schema_error_count += 1
+                    logger.warning(
+                        "AFL current-season stats: schema error while building row "
+                        "(season=%s, providerId=%s): %s",
+                        season, match_provider_id, row_exc,
+                    )
 
             time.sleep(0.1)
 
         except Exception as exc:
             logger.warning("AFL match stats fetch failed for match %s: %s", match_provider_id, exc)
 
-    # Filter rows that are missing match_id or player_id — these cannot be upserted.
-    # Collect offenders by category, then emit one WARNING summary (counts + first 20
-    # sample names per bucket).  Per-row DEBUG logging is intentionally omitted:
-    # a corrupt parse could produce thousands of skipped rows and nuke the log.
-    filtered_rows: list[dict] = []
-    _skip_no_match: list[str] = []
-    _skip_no_player: list[str] = []
-    _skip_both: list[str] = []
-    for r in all_rows:
-        has_match  = bool(r.get("match_id"))
-        has_player = bool(r.get("player_id"))
-        if has_match and has_player:
-            filtered_rows.append(r)
-            continue
-        player_label = (
-            f"{r.get('player_first_name', '')} {r.get('player_last_name', '')}".strip()
-            or "<unknown>"
-        )
-        if not has_match and not has_player:
-            _skip_both.append(player_label)
-        elif not has_match:
-            _skip_no_match.append(player_label)
-        else:
-            _skip_no_player.append(player_label)
+    logger.info("Parsed %s raw stat rows from AFL API for season %s", len(all_rows), season)
 
-    _SAMPLE = 20
-    total_skipped = len(_skip_no_match) + len(_skip_no_player) + len(_skip_both)
-    if total_skipped:
-        def _fmt(lst: list[str]) -> str:
-            sample = lst[:_SAMPLE]
-            tail = f" … +{len(lst) - _SAMPLE} more" if len(lst) > _SAMPLE else ""
-            return "[" + ", ".join(sample) + tail + "]"
-        logger.warning(
-            "AFL current-season stats: dropped %d row(s) before upsert — "
-            "missing_match_id: %d %s | missing_player_id: %d %s | missing_both: %d %s",
-            total_skipped,
-            len(_skip_no_match), _fmt(_skip_no_match),
-            len(_skip_no_player), _fmt(_skip_no_player),
-            len(_skip_both), _fmt(_skip_both),
+    filtered_rows: list[dict] = []
+    missing_player_id = 0
+    missing_match_id = 0
+    duplicate = 0
+    seen_keys: set[tuple[int, int]] = set()
+    for r in all_rows:
+        has_match = bool(r.get("match_id"))
+        has_player = bool(r.get("player_id"))
+        if not has_player:
+            missing_player_id += 1
+        if not has_match:
+            missing_match_id += 1
+        if not (has_player and has_match):
+            continue
+        key = (int(r.get("match_id")), int(r.get("player_id")))
+        if key in seen_keys:
+            duplicate += 1
+            continue
+        seen_keys.add(key)
+        filtered_rows.append(r)
+
+    logger.info(
+        "Rejected rows: missing_player_id=%s, missing_match_id=%s, schema_error=%s, duplicate=%s",
+        missing_player_id, missing_match_id, schema_error_count, duplicate,
+    )
+
+    if len(all_rows) > 0 and len(filtered_rows) == 0:
+        raise RuntimeError(
+            "AFL API returned valid records but all rows were rejected during transform/validation"
         )
 
     logger.info(
