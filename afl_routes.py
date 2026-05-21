@@ -2770,6 +2770,12 @@ def _db_player_search(
 ) -> list[dict]:
     conditions = []
     params = {"limit": limit}
+    current_api_match_prefix = f"{CURRENT_YEAR}014%"
+    current_season_match_filter = (
+        "(season < :current_year OR match_id::text LIKE :current_api_match_prefix)"
+    )
+    params["current_year"] = CURRENT_YEAR
+    params["current_api_match_prefix"] = current_api_match_prefix
 
     if name:
         normalized_name = _normalize_whitespace(name).lower()
@@ -2787,6 +2793,7 @@ def _db_player_search(
         conditions.append("season = :season")
         params["season"] = season
 
+    conditions.append(current_season_match_filter)
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     sql = db.text(
         f"""
@@ -2816,6 +2823,12 @@ def _db_player_by_id(
 ) -> list[dict]:
     params = {"player_id": player_id, "limit": limit}
     season_filter = ""
+    current_api_match_prefix = f"{CURRENT_YEAR}014%"
+    current_season_match_filter = (
+        "AND (season < :current_year OR match_id::text LIKE :current_api_match_prefix)"
+    )
+    params["current_year"] = CURRENT_YEAR
+    params["current_api_match_prefix"] = current_api_match_prefix
 
     if seasons:
         params["seasons"] = seasons
@@ -2831,6 +2844,7 @@ def _db_player_by_id(
             FROM afl_player_stats
             WHERE player_id = :player_id
             {season_filter}
+            {current_season_match_filter}
             ORDER BY match_date, match_home_team, match_away_team, id DESC
         ) deduped
         ORDER BY season DESC, match_date DESC
