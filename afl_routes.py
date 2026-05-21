@@ -1179,6 +1179,96 @@ def register_afl_routes(app, db):
             }
         )
 
+    @app.route("/api/afl/results-debug")
+    @login_required
+    def api_afl_results_debug():
+        season = request.args.get("year", CURRENT_YEAR, type=int)
+        stale_days = max(1, min(request.args.get("stale_days", 3, type=int), 14))
+        with db.engine.connect() as conn:
+            schema_rows = conn.execute(
+                db.text(
+                    """
+                    SELECT table_name, column_name, data_type
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name IN ('afl_model_selections', 'afl_player_stats')
+                    ORDER BY table_name, ordinal_position
+                    """
+                )
+            ).mappings().fetchall()
+            rows = [dict(r) for r in conn.execute(
+                db.text("SELECT * FROM afl_model_selections WHERE season = :season"),
+                {"season": season},
+            ).mappings().fetchall()]
+
+            summary = conn.execute(
+                db.text(
+                    """
+                    SELECT
+                      COUNT(*) AS captured_total,
+                      COUNT(*) FILTER (WHERE COALESCE(result, 'pending') IN ('win','loss','push')) AS settled_total,
+                      COUNT(*) FILTER (WHERE COALESCE(result, 'pending') = 'pending') AS pending_total,
+                      COUNT(*) FILTER (
+                        WHERE COALESCE(result, 'pending') = 'pending'
+                          AND commence_time IS NOT NULL
+                          AND commence_time <= NOW() - make_interval(days => :stale_days)
+                      ) AS stale_pending_total
+                    FROM afl_model_selections
+                    WHERE season = :season
+                    """
+                ),
+                {"season": season, "stale_days": stale_days},
+            ).mappings().fetchone()
+
+            top_pending_matches = [dict(r) for r in conn.execute(
+                db.text(
+                    """
+                    SELECT home_team, away_team, DATE(commence_time) AS match_date, COUNT(*) AS pending_count
+                    FROM afl_model_selections
+                    WHERE season = :season
+                      AND COALESCE(result, 'pending') = 'pending'
+                    GROUP BY home_team, away_team, DATE(commence_time)
+                    ORDER BY pending_count DESC, match_date DESC
+                    LIMIT 20
+                    """
+                ),
+                {"season": season},
+            ).mappings().fetchall()]
+
+        def _classify_pending_reason(row: dict) -> str:
+            if (row.get("result") or "pending") != "pending":
+                return "not_pending"
+            if not row.get("commence_time"):
+                return "missing_commence_time"
+            if not row.get("market"):
+                return "missing_market"
+            if not row.get("line_type"):
+                return "missing_line_type"
+            if not row.get("player_id") and not row.get("player_name"):
+                return "missing_player_identity"
+            if not row.get("match_id"):
+                return "missing_match_id"
+            if not row.get("event_id"):
+                return "missing_event_id"
+            return "join_or_stats_miss"
+
+        reason_counts: dict[str, int] = defaultdict(int)
+        for r in rows:
+            reason = _classify_pending_reason(r)
+            if reason != "not_pending":
+                reason_counts[reason] += 1
+
+        return jsonify(
+            {
+                "season": season,
+                "stale_days": stale_days,
+                "summary": dict(summary or {}),
+                "schema": [dict(r) for r in schema_rows],
+                "top_pending_matches": top_pending_matches,
+                "failed_settlement_reason_counts": dict(sorted(reason_counts.items(), key=lambda kv: kv[1], reverse=True)),
+            }
+        )
+
     @app.route("/api/afl/command-centre")
     @login_required
     def api_afl_command_centre():
