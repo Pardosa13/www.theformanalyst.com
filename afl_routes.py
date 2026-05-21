@@ -511,6 +511,25 @@ def register_afl_routes(app, db):
             )
 
         grouped = _group_players(rows)
+
+        # Deduplicate players by canonical name+team: if the same physical player
+        # has ended up with more than one player_id in the DB (e.g. due to an
+        # un-resolved AFL API ID alongside the correct Fryzigg ID), keep the
+        # record with the most current-season games — the same heuristic used by
+        # _select_value_finder_player() so that Player Props and Value Finder
+        # agree on which player_id is canonical.
+        canonical_best: dict[tuple, tuple[int, dict]] = {}  # (name_key, team) → (season_count, player)
+        for pid, player in grouped.items():
+            name_key = _canonical_player_name(player.get("name", ""))
+            team_key = _normalise_team_name(player.get("team", "")).lower()
+            season_count = sum(
+                1 for g in player.get("games", []) if g.get("season") == effective_season
+            )
+            best_count, _ = canonical_best.get((name_key, team_key), (-1, None))
+            if season_count > best_count:
+                canonical_best[(name_key, team_key)] = (season_count, player)
+
+        grouped = {p["player_id"]: p for _, p in canonical_best.values()}
         players = []
 
         for _, player in grouped.items():

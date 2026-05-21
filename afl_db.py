@@ -1004,7 +1004,70 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
     return count
 
 
-def upsert_standings(db, standings: list[dict], year: int, round_number: int) -> int:
+def normalise_player_stats_team_names(db) -> int:
+    """
+    One-time idempotent migration: normalise legacy/alias team names stored in
+    afl_player_stats to their canonical forms.
+
+    Fixes rows written by _parse_afltables_csv_df before the team-name
+    normalisation fix, where 'Greater Western Sydney' was stored instead of
+    'GWS Giants', etc.  Safe to run multiple times.
+
+    Returns total number of rows updated.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    # Maps from the alias as it may have been stored to the canonical form
+    # used by _normalise_team_name() in afl_data.py.
+    aliases = {
+        "Greater Western Sydney": "GWS Giants",
+        "GWS": "GWS Giants",
+        "West Coast Eagles": "West Coast",
+        "Footscray": "Western Bulldogs",
+        "Brisbane": "Brisbane Lions",
+        "Adelaide Crows": "Adelaide",
+        "Carlton Blues": "Carlton",
+        "Collingwood Magpies": "Collingwood",
+        "Essendon Bombers": "Essendon",
+        "Fremantle Dockers": "Fremantle",
+        "Geelong Cats": "Geelong",
+        "Gold Coast Suns": "Gold Coast",
+        "Hawthorn Hawks": "Hawthorn",
+        "Melbourne Demons": "Melbourne",
+        "North Melbourne Kangaroos": "North Melbourne",
+        "Port Adelaide Power": "Port Adelaide",
+        "Richmond Tigers": "Richmond",
+        "St Kilda Saints": "St Kilda",
+        "Sydney Swans": "Sydney",
+    }
+    columns = ("match_home_team", "match_away_team", "match_winner", "player_team")
+
+    total_updated = 0
+    try:
+        with db.engine.begin() as conn:
+            for old_name, new_name in aliases.items():
+                for col in columns:
+                    result = conn.execute(
+                        db.text(f"""
+                            UPDATE afl_player_stats
+                            SET {col} = :new_name
+                            WHERE {col} = :old_name
+                        """),
+                        {"old_name": old_name, "new_name": new_name},
+                    )
+                    total_updated += result.rowcount
+        if total_updated:
+            _log.info(
+                "normalise_player_stats_team_names: updated %d field(s)",
+                total_updated,
+            )
+    except Exception as exc:
+        _log.warning("normalise_player_stats_team_names failed: %s", exc)
+
+    return total_updated
+
+
     """Upsert ladder standings."""
     if not standings:
         return 0
@@ -1496,8 +1559,11 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
         )
           AND match_date BETWEEN :date_from AND :date_to
           AND (
-            (LOWER(match_home_team) = :home_team AND LOWER(match_away_team) = :away_team)
-            OR (LOWER(match_home_team) = :away_team AND LOWER(match_away_team) = :home_team)
+            (LOWER(match_home_team) IN (:home_team, :home_team_raw)
+             AND LOWER(match_away_team) IN (:away_team, :away_team_raw))
+            OR
+            (LOWER(match_home_team) IN (:away_team, :away_team_raw)
+             AND LOWER(match_away_team) IN (:home_team, :home_team_raw))
           )
         ORDER BY
           CASE
@@ -1538,8 +1604,13 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
                 {
                     "player_id": row.get("player_id"),
                     "player_name": _normalise_name(row.get("player_name")),
+                    # Normalised names (canonical form used by AFL API path)
                     "home_team": _team(row.get("home_team")).lower(),
                     "away_team": _team(row.get("away_team")).lower(),
+                    # Raw names as stored by the Odds API path (fallback for
+                    # existing rows written before team-name normalisation)
+                    "home_team_raw": (row.get("home_team") or "").strip().lower(),
+                    "away_team_raw": (row.get("away_team") or "").strip().lower(),
                     "date_from": (match_time - timedelta(days=2)).date(),
                     "date_to": (match_time + timedelta(days=2)).date(),
                     "match_time": match_time,
