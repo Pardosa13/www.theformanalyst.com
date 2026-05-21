@@ -18,6 +18,7 @@ import logging
 import os
 import tempfile
 import time
+import traceback
 from datetime import datetime
 from typing import Any, Optional
 from pathlib import Path
@@ -907,22 +908,39 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
     all_rows: list[dict] = []
     schema_error_count = 0
 
+    processed_players = 0
     for match_provider_id, details in match_details_map.items():
         try:
             stats_df = _fetch_match_stats_afl(match_provider_id, token=token)
             if stats_df.empty:
                 continue
 
-            for _, row in stats_df.iterrows():
-                try:
+            try:
+                for row_idx, (_, row) in enumerate(stats_df.iterrows(), start=1):
                     all_rows.append(_build_afl_current_row(row, details, season, match_provider_id))
-                except Exception as row_exc:
-                    schema_error_count += 1
-                    logger.warning(
-                        "AFL current-season stats: schema error while building row "
-                        "(season=%s, providerId=%s): %s",
-                        season, match_provider_id, row_exc,
-                    )
+                    processed_players += 1
+                    if processed_players % 100 == 0:
+                        logger.info(
+                            "AFL current-season stats transform progress: season=%s processed_players=%s "
+                            "(providerId=%s provider_row=%s provider_total=%s)",
+                            season,
+                            processed_players,
+                            match_provider_id,
+                            row_idx,
+                            len(stats_df),
+                        )
+            except Exception:
+                schema_error_count += 1
+                logger.error(
+                    "AFL current-season stats transform crashed at season=%s providerId=%s "
+                    "provider_row=%s processed_players=%s. Full traceback follows.\n%s",
+                    season,
+                    match_provider_id,
+                    row_idx,
+                    processed_players,
+                    traceback.format_exc(),
+                )
+                raise
 
             time.sleep(0.1)
 
