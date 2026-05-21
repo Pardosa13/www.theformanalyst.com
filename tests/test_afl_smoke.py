@@ -1709,8 +1709,8 @@ def test_value_finder_diagnostic_script_proves_finn_osullivan_average():
     output = os.popen(f"{sys.executable} {script}").read()
     assert "Finn O’Sullivan" in output
     assert "canonical=finnosullivan" in output
-    assert "disposals=[22, 21, 24, 21, 24, 18, 15]" in output
-    assert "season_avg=20.7" in output
+    assert "disposals=[19, 30, 28, 21, 26, 37, 35, 32, 27, 26]" in output
+    assert "season_avg=28.1" in output
     assert "Finn Callaghan" in output
 
 
@@ -1785,11 +1785,10 @@ def test_afl_results_analysis_route_exists():
     assert "def api_afl_results_analysis():" in routes
 
 
-def test_afl_results_analysis_has_disposals_edge_threshold_breakdowns():
+def test_afl_results_analysis_uses_disposals_edge_band_breakdowns():
     routes = Path("afl_routes.py").read_text(encoding="utf-8")
-    assert "_DISPOSALS_EDGE_THRESHOLD_ORDER = [10, 15, 20, 25, 30, 35, 40, 45, 50]" in routes
-    assert '"disposals_edge_thresholds"' in routes
-    assert '"disposals_edge_thresholds_line_type"' in routes
+    assert '"disposals_edge_band"' in routes
+    assert '"disposals_edge_band_line_type"' in routes
 
 
 def test_afl_template_has_results_tab_and_loader():
@@ -1800,11 +1799,11 @@ def test_afl_template_has_results_tab_and_loader():
     assert "if (name === 'results') {" in template
 
 
-def test_afl_template_has_disposals_edge_threshold_tables():
+def test_afl_template_has_disposals_edge_band_tables():
     template = Path("templates/afl.html").read_text(encoding="utf-8")
-    assert 'id="disposalsEdgeThresholdRows"' in template
-    assert 'id="disposalsEdgeThresholdLtRows"' in template
-    assert "at or above 10% through 50% (in 5% steps)" in template
+    assert 'id="disposalsEdgeBandRows"' in template
+    assert 'id="disposalsEdgeBandLtRows"' in template
+    assert "Over/Under by Edge Band" in template
 
 
 # ---------------------------------------------------------------------------
