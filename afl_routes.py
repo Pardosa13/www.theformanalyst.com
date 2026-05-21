@@ -529,7 +529,11 @@ def register_afl_routes(app, db):
             if season_count > best_count:
                 canonical_best[(name_key, team_key)] = (season_count, player)
 
-        grouped = {p["player_id"]: p for _, p in canonical_best.values()}
+        grouped = {
+            p["player_id"]: p
+            for _, p in canonical_best.values()
+            if p.get("player_id") is not None
+        }
         players = []
 
         for _, player in grouped.items():

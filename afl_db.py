@@ -1068,6 +1068,7 @@ def normalise_player_stats_team_names(db) -> int:
     return total_updated
 
 
+def upsert_standings(db, standings: list[dict], year: int, round_number: int) -> int:
     """Upsert ladder standings."""
     if not standings:
         return 0
