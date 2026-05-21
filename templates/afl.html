@@ -1775,6 +1775,9 @@ function selectPlayer(id) {
   if (_selPlayer?.team) {
     url += `&team=${encodeURIComponent(_selPlayer.team)}`;
   }
+  if ((_selPlayer?.name || '').toLowerCase() === 'patrick cripps') {
+    console.info('[AFL Player Props] frontend API call', { url, player: _selPlayer?.name, team: _selPlayer?.team });
+  }
 
   fetch(url)
     .then(async r => {
@@ -2725,7 +2728,11 @@ function loadValueFinder() {
     .then(fixturesData => {
   _vfPopulateMatchSelector(fixturesData.games || []);
 
-  return fetch(`/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=0&year={{ year }}&round=${_round}`)
+  const vfUrl = `/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=0&year={{ year }}&round=${_round}`;
+  if ((window._selPlayer?.name || '').toLowerCase() === 'patrick cripps') {
+    console.info('[AFL Value Finder] frontend API call', { url: vfUrl, player: window._selPlayer?.name });
+  }
+  return fetch(vfUrl)
         .then(r => { if (!r.ok) throw new Error(); return r.json(); })
         .then(data => {
           _vfRawData = data;
