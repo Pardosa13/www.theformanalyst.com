@@ -1448,7 +1448,7 @@ def test_sync_runs_model_snapshot_and_settlement():
     assert "settle_model_selections" in source
 
 
-def test_settlement_sql_falls_back_to_player_name_when_player_id_mismatch():
+def test_settlement_sql_uses_match_id_with_player_id_or_name_fallback():
     db_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "afl_db.py",
@@ -1456,8 +1456,9 @@ def test_settlement_sql_falls_back_to_player_name_when_player_id_mismatch():
     with open(db_path, encoding="utf-8") as f:
         source = f.read()
 
-    # Name-fallback branch must still exist in the settlement SQL (exact formatting
-    # may vary as the SQL is restructured, so we check the key sub-expressions).
+    # Match join + name-fallback branch must both exist in settlement SQL
+    # (exact formatting may vary as SQL is restructured).
+    assert "WHERE match_id = :match_id" in source, "settlement SQL must join on match_id"
     assert ":player_name <> ''" in source, "settlement SQL must have player_name fallback condition"
     assert "LOWER(TRIM(player_first_name || ' ' || player_last_name)) = :player_name" in source, \
         "settlement SQL must match normalised player name"

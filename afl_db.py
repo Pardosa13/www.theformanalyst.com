@@ -1597,36 +1597,20 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
     stat_sql = db.text("""
         SELECT *
         FROM afl_player_stats
-        WHERE (
-            -- player_id path: only needs id + date window; team names not required
-            -- because normalisation differences between props and stats sources can
-            -- prevent a match even when the data is correct.
-            (
-                :player_id IS NOT NULL
-                AND player_id = :player_id
-                AND match_date BETWEEN :date_from AND :date_to
-            )
+        WHERE match_id = :match_id
+          AND (
+            (:player_id IS NOT NULL AND player_id = :player_id)
             OR
-            -- name fallback: requires team names to avoid cross-match confusion
             (
                 :player_name <> ''
                 AND LOWER(TRIM(player_first_name || ' ' || player_last_name)) = :player_name
-                AND match_date BETWEEN :date_from AND :date_to
-                AND (
-                    (LOWER(match_home_team) IN (:home_team, :home_team_raw)
-                     AND LOWER(match_away_team) IN (:away_team, :away_team_raw))
-                    OR
-                    (LOWER(match_home_team) IN (:away_team, :away_team_raw)
-                     AND LOWER(match_away_team) IN (:home_team, :home_team_raw))
-                )
             )
-        )
+          )
         ORDER BY
           CASE
             WHEN :player_id IS NOT NULL AND player_id = :player_id THEN 0
             ELSE 1
-          END,
-          ABS(EXTRACT(EPOCH FROM ((match_date)::timestamp - :match_time)))
+          END
         LIMIT 1
     """)
     update_sql = db.text("""
@@ -1660,16 +1644,7 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
                 {
                     "player_id": row.get("player_id"),
                     "player_name": _normalise_name(row.get("player_name")),
-                    # Normalised names (canonical form used by AFL API path)
-                    "home_team": _team(row.get("home_team")).lower(),
-                    "away_team": _team(row.get("away_team")).lower(),
-                    # Raw names as stored by the Odds API path (fallback for
-                    # existing rows written before team-name normalisation)
-                    "home_team_raw": (row.get("home_team") or "").strip().lower(),
-                    "away_team_raw": (row.get("away_team") or "").strip().lower(),
-                    "date_from": (match_time - timedelta(days=2)).date(),
-                    "date_to": (match_time + timedelta(days=2)).date(),
-                    "match_time": match_time,
+                    "match_id": row.get("match_id"),
                 },
             ).mappings().fetchone()
             if not stat_row:
