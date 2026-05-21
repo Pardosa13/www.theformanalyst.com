@@ -958,11 +958,11 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
     if total_skipped:
         logger.warning(
             "AFL current-season stats: dropped %d row(s) before upsert — "
-            "missing_match_id: %d %s | missing_player_id: %d %s | missing_both: %d %s",
+            "missing_match_id: %d [%s] | missing_player_id: %d [%s] | missing_both: %d [%s]",
             total_skipped,
-            len(_skip_no_match), _skip_no_match or "",
-            len(_skip_no_player), _skip_no_player or "",
-            len(_skip_both), _skip_both or "",
+            len(_skip_no_match), ", ".join(_skip_no_match),
+            len(_skip_no_player), ", ".join(_skip_no_player),
+            len(_skip_both), ", ".join(_skip_both),
         )
 
     logger.info(
@@ -1443,12 +1443,12 @@ def _filter_valid_stat_rows(rows: list[dict]) -> list[dict]:
     total_dropped = len(missing_player) + len(missing_match) + len(missing_both)
     if total_dropped:
         logger.warning(
-            "Dropped %d stat row(s) — missing_player_id: %d %s | "
-            "missing_match_id: %d %s | missing_both: %d %s",
+            "Dropped %d stat row(s) — missing_player_id: %d [%s] | "
+            "missing_match_id: %d [%s] | missing_both: %d [%s]",
             total_dropped,
-            len(missing_player), missing_player or "",
-            len(missing_match), missing_match or "",
-            len(missing_both), missing_both or "",
+            len(missing_player), ", ".join(missing_player),
+            len(missing_match), ", ".join(missing_match),
+            len(missing_both), ", ".join(missing_both),
         )
     return valid
 
