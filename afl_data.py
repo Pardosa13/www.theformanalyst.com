@@ -920,13 +920,56 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
         except Exception as exc:
             logger.warning("AFL match stats fetch failed for match %s: %s", match_provider_id, exc)
 
-    all_rows = [r for r in all_rows if r.get("match_id") and r.get("player_id")]
+    # Filter rows that are missing match_id or player_id — these cannot be upserted.
+    # Log each skipped row individually (DEBUG) and emit a summary WARNING when any are dropped.
+    filtered_rows: list[dict] = []
+    _skip_no_match: list[str] = []
+    _skip_no_player: list[str] = []
+    _skip_both: list[str] = []
+    for r in all_rows:
+        has_match  = bool(r.get("match_id"))
+        has_player = bool(r.get("player_id"))
+        if has_match and has_player:
+            filtered_rows.append(r)
+            continue
+        player_label = (
+            f"{r.get('player_first_name', '')} {r.get('player_last_name', '')}".strip()
+            or "<unknown player>"
+        )
+        match_label = r.get("match_id") or "<missing>"
+        if not has_match and not has_player:
+            reason = "missing match_id AND player_id"
+            _skip_both.append(player_label)
+        elif not has_match:
+            reason = "missing match_id"
+            _skip_no_match.append(player_label)
+        else:
+            reason = "missing player_id"
+            _skip_no_player.append(player_label)
+        logger.debug(
+            "AFL current-season stats: skipping row — %s | player=%r match_id=%s "
+            "home=%s away=%s round=%s season=%s",
+            reason, player_label, match_label,
+            r.get("match_home_team"), r.get("match_away_team"),
+            r.get("match_round"), r.get("season"),
+        )
+
+    total_skipped = len(_skip_no_match) + len(_skip_no_player) + len(_skip_both)
+    if total_skipped:
+        logger.warning(
+            "AFL current-season stats: dropped %d row(s) before upsert — "
+            "missing_match_id: %d %s | missing_player_id: %d %s | missing_both: %d %s",
+            total_skipped,
+            len(_skip_no_match), _skip_no_match or "",
+            len(_skip_no_player), _skip_no_player or "",
+            len(_skip_both), _skip_both or "",
+        )
 
     logger.info(
         "AFL current-season stats: prepared %s rows for season %s across rounds %s",
-        len(all_rows), season, completed_rounds
+        len(filtered_rows), season, completed_rounds
     )
-    return all_rows
+    return filtered_rows
 
 
 def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id: int) -> dict:
@@ -1343,11 +1386,57 @@ def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dic
 
 
 def _filter_valid_stat_rows(rows: list[dict]) -> list[dict]:
-    """Drop rows that are missing a player_id or match_id (cannot be upserted)."""
-    valid = [r for r in rows if r.get("player_id") and r.get("match_id")]
-    dropped = len(rows) - len(valid)
-    if dropped:
-        logger.warning("Dropped %s rows with missing player_id or match_id", dropped)
+    """Drop rows that are missing a player_id or match_id (cannot be upserted).
+
+    Logs each rejected row at DEBUG level with the player name and skip reason,
+    then emits a WARNING summary broken down by skip category.
+    """
+    valid: list[dict] = []
+    missing_player: list[str] = []
+    missing_match: list[str] = []
+    missing_both: list[str] = []
+
+    for r in rows:
+        has_player = bool(r.get("player_id"))
+        has_match  = bool(r.get("match_id"))
+        if has_player and has_match:
+            valid.append(r)
+            continue
+
+        player_label = (
+            f"{r.get('player_first_name', '')} {r.get('player_last_name', '')}".strip()
+            or "<unknown player>"
+        )
+        match_label = r.get("match_id") or "<missing>"
+
+        if not has_player and not has_match:
+            reason = "missing player_id AND match_id"
+            missing_both.append(player_label)
+        elif not has_player:
+            reason = "missing player_id"
+            missing_player.append(player_label)
+        else:
+            reason = "missing match_id"
+            missing_match.append(player_label)
+
+        logger.debug(
+            "Dropping stat row — %s | player=%r match_id=%s "
+            "home=%s away=%s round=%s season=%s",
+            reason, player_label, match_label,
+            r.get("match_home_team"), r.get("match_away_team"),
+            r.get("match_round"), r.get("season"),
+        )
+
+    total_dropped = len(missing_player) + len(missing_match) + len(missing_both)
+    if total_dropped:
+        logger.warning(
+            "Dropped %d stat row(s) — missing_player_id: %d %s | "
+            "missing_match_id: %d %s | missing_both: %d %s",
+            total_dropped,
+            len(missing_player), missing_player or "",
+            len(missing_match), missing_match or "",
+            len(missing_both), missing_both or "",
+        )
     return valid
 
 
