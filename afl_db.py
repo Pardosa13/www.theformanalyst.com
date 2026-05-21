@@ -427,7 +427,7 @@ def _headshot_url(player_id: int | None) -> str | None:
 
 def _team(value: Any) -> str:
     raw = _s(value)
-    mapping = {
+    AFL_TEAM_ALIASES = {
         # Legacy / short-name aliases
         "West Coast Eagles": "West Coast",
         "Greater Western Sydney": "GWS Giants",
@@ -435,6 +435,13 @@ def _team(value: Any) -> str:
         "GWS": "GWS Giants",
         "Footscray": "Western Bulldogs",
         "Brisbane": "Brisbane Lions",
+        # AFL Indigenous Round temporary club names
+        "Kuwarna": "Adelaide",
+        "Walyalup": "Fremantle",
+        "Narrm": "Melbourne",
+        "Yartapuulti": "Port Adelaide",
+        "Euro-Yroke": "St Kilda",
+        "Waalitj Marawar": "West Coast",
         # Full names with mascots as returned by The Odds API
         "Adelaide Crows": "Adelaide",
         "Carlton Blues": "Carlton",
@@ -453,7 +460,7 @@ def _team(value: Any) -> str:
         "Western Bulldogs Bulldogs": "Western Bulldogs",
         "Brisbane Lions Lions": "Brisbane Lions",
     }
-    return mapping.get(raw, raw)
+    return AFL_TEAM_ALIASES.get(raw, raw)
 
 
 def _match_id(value: Any, default: int = 0) -> int:

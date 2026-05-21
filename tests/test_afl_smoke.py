@@ -41,13 +41,20 @@ def _s(value: Any) -> str:
 
 def _team(value: Any) -> str:
     raw = _s(value)
-    mapping = {
+    AFL_TEAM_ALIASES = {
         # Legacy / short-name aliases
         "West Coast Eagles": "West Coast",
         "Greater Western Sydney": "GWS Giants",
         "GWS": "GWS Giants",
         "Footscray": "Western Bulldogs",
         "Brisbane": "Brisbane Lions",
+        # AFL Indigenous Round temporary club names
+        "Kuwarna": "Adelaide",
+        "Walyalup": "Fremantle",
+        "Narrm": "Melbourne",
+        "Yartapuulti": "Port Adelaide",
+        "Euro-Yroke": "St Kilda",
+        "Waalitj Marawar": "West Coast",
         # Full names with mascots as returned by The Odds API
         "Adelaide Crows": "Adelaide",
         "Carlton Blues": "Carlton",
@@ -64,7 +71,7 @@ def _team(value: Any) -> str:
         "St Kilda Saints": "St Kilda",
         "Sydney Swans": "Sydney",
     }
-    return mapping.get(raw, raw)
+    return AFL_TEAM_ALIASES.get(raw, raw)
 
 _NORMALISE_PROP_MARKET_MAP = {
     "player_disposals": "player_disposals",
@@ -356,6 +363,16 @@ def test_team_normalisation_legacy_aliases():
     assert _team("GWS") == "GWS Giants"
     assert _team("Footscray") == "Western Bulldogs"
     assert _team("Brisbane") == "Brisbane Lions"
+
+
+def test_team_normalisation_indigenous_aliases():
+    """Indigenous Round temporary names should normalise to canonical club names."""
+    assert _team("Kuwarna") == "Adelaide"
+    assert _team("Walyalup") == "Fremantle"
+    assert _team("Narrm") == "Melbourne"
+    assert _team("Yartapuulti") == "Port Adelaide"
+    assert _team("Euro-Yroke") == "St Kilda"
+    assert _team("Waalitj Marawar") == "West Coast"
 
 
 def test_team_normalisation_source_has_mascot_entries():
