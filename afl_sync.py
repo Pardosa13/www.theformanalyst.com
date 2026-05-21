@@ -117,7 +117,7 @@ def sync_afl_all(season: int = None):
 
         for yr in seasons_to_sync:
             try:
-                if yr == 2026:
+                if yr == season:
                     logger.info("  • Loading 2026 player stats from AFL official API")
                     api_stats = fetch_afl_player_stats_current_season(yr, round_number=None)
 

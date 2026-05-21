@@ -1356,20 +1356,33 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
     2. Fryzigg (historical)
     """
 
-    # ── 1. 2026 CSV (PRIMARY for current year) ──────────────────────────────
-    # fetch_afltables_player_stats_rpy2 uses column names from an older CSV
-    # schema (e.g. "Home.Team", "First.Name") that do not match the current
-    # afl_2026_stats.csv produced by the GitHub Actions workflow.  Use the
-    # dedicated fetch_2026_stats_from_csv() parser which normalises column names
-    # and applies _normalise_team_name() so stored values are consistent with
-    # the AFL API path and settlement queries.
+    # ── Current-season guard ─────────────────────────────────────────────────
+    # The AFL official API is the authoritative source for the current season.
+    # Fryzigg only publishes data for completed (past) seasons, so calling it
+    # for the current year would return nothing useful.  Route through the AFL
+    # API instead, with the CSV as a fallback if the API is unavailable.
     if season >= CURRENT_YEAR:
-        logger.info("Player stats: loading current-season CSV for %s", season)
+        logger.info(
+            "Player stats: current season %s — fetching from AFL official API (not Fryzigg)",
+            season,
+        )
+        api_rows = fetch_afl_player_stats_current_season(season)
+        if api_rows:
+            logger.info("Player stats: got %s rows from AFL API for %s", len(api_rows), season)
+            return api_rows
+        logger.warning(
+            "Player stats: AFL API returned no rows for %s, falling back to CSV",
+            season,
+        )
         csv_rows = fetch_2026_stats_from_csv()
         if csv_rows:
             logger.info("Player stats: got %s rows from CSV for %s", len(csv_rows), season)
             return csv_rows
-        logger.warning("Player stats: CSV returned no rows for %s, falling back to Fryzigg RDS", season)
+        logger.warning(
+            "Player stats: CSV also empty for %s — no data available from AFL API or CSV",
+            season,
+        )
+        return []
 
     return _fetch_fryzigg_player_stats_from_rds(season)
 

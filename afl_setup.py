@@ -47,7 +47,7 @@ def run_setup(db, start_year: int = 2019, end_year: int = None):
     )
     from afl_data import (
         fetch_fryzigg_player_stats,
-        fetch_2026_stats_from_csv,
+        fetch_afl_player_stats_current_season,
         fetch_squiggle_games,
         fetch_squiggle_standings,
         fetch_squiggle_current_round,
@@ -94,17 +94,16 @@ def run_setup(db, start_year: int = 2019, end_year: int = None):
             start_year,
             end_year,
         )
-        logger.info("         Past seasons use Fryzigg. Current season uses AFL official first, with Fryzigg fallback.")
+        logger.info("         Past seasons use Fryzigg. Current season uses AFL official API.")
 
         for year in range(start_year, end_year + 1):
             try:
-                # First attempt: normal fetch path
-                stats = fetch_2026_stats_from_csv() if year == 2026 else fetch_fryzigg_player_stats(year)
-
-                # Critical retry for current season if first attempt returned nothing
-                if year == CURRENT_YEAR and not stats:
-                    logger.warning("Retrying %s without round filter...", year)
+                if year >= CURRENT_YEAR:
                     stats = fetch_afl_player_stats_current_season(year, round_number=None)
+                    if not stats:
+                        logger.warning("  %s: AFL API returned no rows", year)
+                else:
+                    stats = fetch_fryzigg_player_stats(year)
 
                 if not stats:
                     logger.warning("  %s: no stats returned", year)
