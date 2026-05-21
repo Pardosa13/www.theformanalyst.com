@@ -1639,11 +1639,19 @@ def register_afl_routes(app, db):
             if not player_rows:
                 continue
 
-            grouped = _group_players(player_rows)
-            if len(grouped) != 1:
-                continue
+            prop_home = _normalise_team_name(prop.get("home_team", ""))
+            prop_away = _normalise_team_name(prop.get("away_team", ""))
 
-            player = next(iter(grouped.values()))
+            grouped = _group_players(player_rows)
+            player = _select_value_finder_player(
+                grouped,
+                full_name=pname,
+                prop_home_team=prop_home,
+                prop_away_team=prop_away,
+                effective_season=effective_season,
+            )
+            if not player:
+                continue
             games = sorted(player["games"], key=_sort_date_key, reverse=True)
             season_games = [g for g in games if g.get("season") == effective_season] or games
 
@@ -1651,8 +1659,6 @@ def register_afl_routes(app, db):
             season_avg = _safe_avg(season_games, stat_name)
             last5_avg = _safe_avg(season_games[:5], stat_name)
 
-            prop_home = _normalise_team_name(prop.get("home_team", ""))
-            prop_away = _normalise_team_name(prop.get("away_team", ""))
             player_team = _normalise_team_name(player.get("team", ""))
             opponent = prop_away if prop_home == player_team else prop_home
 
