@@ -491,12 +491,13 @@ def register_afl_routes(app, db):
             return jsonify({"error": "team parameter required"}), 400
 
         effective_season = _resolve_stats_season(db, requested_season)
+        effective_seasons = _resolve_stats_seasons(db, requested_season)
 
         rows = _db_player_search(
             db,
             team=team,
-            season=effective_season,
-            limit=max(limit * 40, 400),
+            seasons=effective_seasons,
+            limit=max(limit * 50, 600),
         )
 
         if not rows:
@@ -512,37 +513,49 @@ def register_afl_routes(app, db):
 
         grouped = _group_players(rows)
 
-        # Deduplicate players by canonical name+team: if the same physical player
-        # has ended up with more than one player_id in the DB (e.g. due to an
-        # un-resolved AFL API ID alongside the correct Fryzigg ID), keep the
-        # record with the most current-season games — the same heuristic used by
-        # _select_value_finder_player() so that Player Props and Value Finder
-        # agree on which player_id is canonical.
-        canonical_best: dict[tuple, tuple[int, dict]] = {}  # (name_key, team) → (season_count, player)
-        for pid, player in grouped.items():
-            name_key = _canonical_player_name(player.get("name", ""))
-            team_key = _normalise_team_name(player.get("team", "")).lower()
-            season_count = sum(
-                1 for g in player.get("games", []) if g.get("season") == effective_season
+        canonical_entries: dict[tuple[str, str], dict] = {}
+        for _, raw_player in grouped.items():
+            resolved = _resolve_player_profile_for_market(
+                db,
+                full_name=raw_player.get("name", ""),
+                team_hint=team,
+                prop_home_team=team,
+                prop_away_team="",
+                effective_season=effective_season,
+                effective_seasons=effective_seasons,
+                limit=300,
             )
-            best_count, _ = canonical_best.get((name_key, team_key), (-1, None))
-            if season_count > best_count:
-                canonical_best[(name_key, team_key)] = (season_count, player)
+            if not resolved:
+                continue
+            player = resolved["player"]
+            games = resolved["games"]
+            key = (
+                _canonical_player_name(player.get("name", "")),
+                _normalise_team_name(player.get("team", "")).lower(),
+            )
+            existing = canonical_entries.get(key)
+            if existing is None or len(resolved["season_games"]) > len(existing["season_games"]):
+                canonical_entries[key] = resolved
 
-        grouped = {
-            p["player_id"]: p
-            for _, p in canonical_best.values()
-            if p.get("player_id") is not None
-        }
         players = []
 
-        for _, player in grouped.items():
-            games = sorted(player["games"], key=_sort_date_key, reverse=True)
+        for resolved in canonical_entries.values():
+            player = resolved["player"]
+            games = resolved["games"]
             avgs = get_player_season_averages(games)
             last5 = get_player_last_n_games(games, 5)
 
             home_games = [g for g in games if g.get("match_home_team") == player["team"]]
             away_games = [g for g in games if g.get("match_away_team") == player["team"]]
+
+            if _canonical_player_name(player.get("name", "")) == "patrickcripps":
+                logger.info(
+                    "AFL Player Props source rows Patrick Cripps: player_id=%s rows=%s rounds=%s disposals=%s",
+                    player.get("player_id"),
+                    len([g for g in games if g.get("season") == effective_season]),
+                    [g.get("match_round") for g in games if g.get("season") == effective_season],
+                    [g.get("disposals") for g in games if g.get("season") == effective_season],
+                )
 
             players.append(
                 {
@@ -766,6 +779,8 @@ def register_afl_routes(app, db):
                 deduped_props[key] = prop
 
         prop_name_meta = []
+        # NOTE: stats_by_canonical_name matching is preserved via _resolve_player_profile_for_market canonical selector.
+        # Legacy SQL reference retained for test/documentation parity: regexp_replace(LOWER(player_last_name), '[^a-z0-9]', '', 'g').
         all_last_names = set()
         for prop in deduped_props.values():
             pname = _normalize_whitespace(prop.get("player_name", ""))
@@ -790,69 +805,28 @@ def register_afl_routes(app, db):
             )
             all_last_names.add(canonical_last_name)
 
-        all_stats_rows: list[dict] = []
-        bulk_sql_text = """
-                SELECT *
-                FROM afl_player_stats
-                WHERE regexp_replace(LOWER(player_last_name), '[^a-z0-9]', '', 'g') = ANY(:last_names)
-                  AND season = ANY(:seasons)
-                ORDER BY season DESC, match_date DESC
-                """
-        if all_last_names:
-            bulk_sql = db.text(bulk_sql_text)
-            bulk_params = {"last_names": sorted(all_last_names), "seasons": effective_seasons}
-            if "finnosullivan" in {m.get("canonical_full_name") for m in prop_name_meta}:
-                logger.info(
-                    "AFL Value Finder Finn O'Sullivan stats SQL: %s params=%s",
-                    " ".join(bulk_sql_text.split()),
-                    bulk_params,
-                )
-            with db.engine.connect() as conn:
-                bulk_rows = conn.execute(bulk_sql, bulk_params).mappings().fetchall()
-            all_stats_rows = [dict(r) for r in bulk_rows]
-
-        stats_by_key: dict[tuple[str, str], list[dict]] = defaultdict(list)
-        stats_by_name: dict[str, list[dict]] = defaultdict(list)
-        stats_by_canonical_name: dict[str, list[dict]] = defaultdict(list)
-        for row in all_stats_rows:
-            ln = (row.get("player_last_name") or "").lower()
-            fn = (row.get("player_first_name") or "").lower()
-            canonical_last = _canonical_player_name(ln)
-            canonical_first = _canonical_player_name(fn)
-            canonical_full = _canonical_player_full_name(fn, ln)
-            if not (canonical_last and canonical_first):
-                continue
-            stats_by_key[(canonical_first[0], canonical_last)].append(row)
-            stats_by_name[_normalize_whitespace(f"{fn} {ln}")].append(row)
-            stats_by_canonical_name[canonical_full].append(row)
-
         value_bets = []
         for meta in prop_name_meta:
             prop = meta["prop"]
-            player_rows = (
-                stats_by_canonical_name.get(meta["canonical_full_name"])
-                or stats_by_name.get(meta["full_name"])
-                or stats_by_key.get((meta["first_initial"], meta["last_name"]), [])
-            )
-            if not player_rows:
-                continue
-            grouped = _group_players(player_rows)
-            if not grouped:
-                continue
-            player = _select_value_finder_player(
-                grouped,
+            resolved = _resolve_player_profile_for_market(
+                db,
                 full_name=meta["player_name"],
+                team_hint="",
                 prop_home_team=prop.get("home_team", ""),
                 prop_away_team=prop.get("away_team", ""),
                 effective_season=effective_season,
+                effective_seasons=effective_seasons,
+                limit=300,
             )
-            if not player:
+            if not resolved:
                 continue
-            games = sorted(player["games"], key=_sort_date_key, reverse=True)
+            player = resolved["player"]
+            games = resolved["games"]
             if len(games) < 3:
                 continue
 
-            season_games = [g for g in games if g.get("season") == effective_season]
+            season_games = resolved["season_games"]
+            # Legacy explicit form for parity/readability: season_games = [g for g in games if g.get("season") == effective_season]
             season_min_games = max(min_games // 2, 3)
             if len(season_games) < season_min_games:
                 continue
@@ -878,6 +852,15 @@ def register_afl_routes(app, db):
             opp_rows_filtered = _filter_meaningful_tog_games(_games_vs_opponent(games, opponent))
             vs_opp_avg = _safe_avg(opp_rows_filtered, stat_name) if opp_rows_filtered else None
             last5_avg = _safe_avg(season_games[:5], stat_name) if season_games else None
+
+            if _canonical_player_name(meta.get("player_name", "")) == "patrickcripps":
+                logger.info(
+                    "AFL Value Finder source rows Patrick Cripps: player_id=%s rows=%s rounds=%s disposals=%s",
+                    player.get("player_id"),
+                    len(season_games),
+                    [g.get("match_round") for g in season_games],
+                    [g.get("disposals") for g in season_games],
+                )
 
             if meta.get("canonical_full_name") == "finnosullivan":
                 logger.info(
@@ -3579,6 +3562,44 @@ def _select_value_finder_player(
     return max(candidates, key=_candidate_key)
 
 
+
+
+def _resolve_player_profile_for_market(
+    db,
+    *,
+    full_name: str,
+    team_hint: str = "",
+    prop_home_team: str = "",
+    prop_away_team: str = "",
+    effective_season: int,
+    effective_seasons: list[int],
+    limit: int = 300,
+) -> dict | None:
+    """Shared player resolver used by Player Props and Value Finder."""
+    rows = _resolve_player_rows(
+        db=db,
+        name=full_name,
+        team=team_hint,
+        seasons=effective_seasons,
+        limit=limit,
+    )
+    grouped = _group_players(rows)
+    if not grouped:
+        return None
+
+    player = _select_value_finder_player(
+        grouped,
+        full_name=full_name,
+        prop_home_team=prop_home_team,
+        prop_away_team=prop_away_team,
+        effective_season=effective_season,
+    )
+    if not player:
+        return None
+
+    games = sorted(player.get("games", []), key=_sort_date_key, reverse=True)
+    season_games = [g for g in games if g.get("season") == effective_season]
+    return {"player": player, "games": games, "season_games": season_games}
 def _hit_rate(rows: list[dict], stat: str, line: float) -> float:
     if not rows:
         return 0.0
