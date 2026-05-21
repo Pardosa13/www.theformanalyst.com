@@ -921,7 +921,9 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
             logger.warning("AFL match stats fetch failed for match %s: %s", match_provider_id, exc)
 
     # Filter rows that are missing match_id or player_id — these cannot be upserted.
-    # Log each skipped row individually (DEBUG) and emit a summary WARNING when any are dropped.
+    # Collect offenders by category, then emit one WARNING summary (counts + first 20
+    # sample names per bucket).  Per-row DEBUG logging is intentionally omitted:
+    # a corrupt parse could produce thousands of skipped rows and nuke the log.
     filtered_rows: list[dict] = []
     _skip_no_match: list[str] = []
     _skip_no_player: list[str] = []
@@ -934,35 +936,29 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
             continue
         player_label = (
             f"{r.get('player_first_name', '')} {r.get('player_last_name', '')}".strip()
-            or "<unknown player>"
+            or "<unknown>"
         )
-        match_label = r.get("match_id") or "<missing>"
         if not has_match and not has_player:
-            reason = "missing match_id AND player_id"
             _skip_both.append(player_label)
         elif not has_match:
-            reason = "missing match_id"
             _skip_no_match.append(player_label)
         else:
-            reason = "missing player_id"
             _skip_no_player.append(player_label)
-        logger.debug(
-            "AFL current-season stats: skipping row — %s | player=%r match_id=%s "
-            "home=%s away=%s round=%s season=%s",
-            reason, player_label, match_label,
-            r.get("match_home_team"), r.get("match_away_team"),
-            r.get("match_round"), r.get("season"),
-        )
 
+    _SAMPLE = 20
     total_skipped = len(_skip_no_match) + len(_skip_no_player) + len(_skip_both)
     if total_skipped:
+        def _fmt(lst: list[str]) -> str:
+            sample = lst[:_SAMPLE]
+            tail = f" … +{len(lst) - _SAMPLE} more" if len(lst) > _SAMPLE else ""
+            return "[" + ", ".join(sample) + tail + "]"
         logger.warning(
             "AFL current-season stats: dropped %d row(s) before upsert — "
-            "missing_match_id: %d [%s] | missing_player_id: %d [%s] | missing_both: %d [%s]",
+            "missing_match_id: %d %s | missing_player_id: %d %s | missing_both: %d %s",
             total_skipped,
-            len(_skip_no_match), ", ".join(_skip_no_match),
-            len(_skip_no_player), ", ".join(_skip_no_player),
-            len(_skip_both), ", ".join(_skip_both),
+            len(_skip_no_match), _fmt(_skip_no_match),
+            len(_skip_no_player), _fmt(_skip_no_player),
+            len(_skip_both), _fmt(_skip_both),
         )
 
     logger.info(
@@ -1358,9 +1354,10 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
 
     # ── Current-season guard ─────────────────────────────────────────────────
     # The AFL official API is the authoritative source for the current season.
-    # Fryzigg only publishes data for completed (past) seasons, so calling it
-    # for the current year would return nothing useful.  Route through the AFL
-    # API instead, with the CSV as a fallback if the API is unavailable.
+    # Fryzigg only publishes data for completed (past) seasons.
+    # If the API returns zero rows, that is a hard failure — do NOT fall back to
+    # the CSV.  Silently writing stale CSV data (with potentially mismatched
+    # player IDs) is what caused the DB poisoning problem in the first place.
     if season >= CURRENT_YEAR:
         logger.info(
             "Player stats: current season %s — fetching from AFL official API (not Fryzigg)",
@@ -1370,16 +1367,10 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
         if api_rows:
             logger.info("Player stats: got %s rows from AFL API for %s", len(api_rows), season)
             return api_rows
-        logger.warning(
-            "Player stats: AFL API returned no rows for %s, falling back to CSV",
-            season,
-        )
-        csv_rows = fetch_2026_stats_from_csv()
-        if csv_rows:
-            logger.info("Player stats: got %s rows from CSV for %s", len(csv_rows), season)
-            return csv_rows
-        logger.warning(
-            "Player stats: CSV also empty for %s — no data available from AFL API or CSV",
+        logger.error(
+            "Player stats: AFL API returned 0 rows for current season %s — "
+            "aborting rather than writing stale data. "
+            "Check auth token, round completion, and API availability.",
             season,
         )
         return []
@@ -1401,8 +1392,9 @@ def fetch_fryzigg_player_stats_range(start_year: int, end_year: int) -> list[dic
 def _filter_valid_stat_rows(rows: list[dict]) -> list[dict]:
     """Drop rows that are missing a player_id or match_id (cannot be upserted).
 
-    Logs each rejected row at DEBUG level with the player name and skip reason,
-    then emits a WARNING summary broken down by skip category.
+    Emits a WARNING with counts and a first-20 sample per skip category.
+    Per-row DEBUG logging is intentionally omitted — a broken parse could
+    produce thousands of skipped rows and flood the log.
     """
     valid: list[dict] = []
     missing_player: list[str] = []
@@ -1418,37 +1410,29 @@ def _filter_valid_stat_rows(rows: list[dict]) -> list[dict]:
 
         player_label = (
             f"{r.get('player_first_name', '')} {r.get('player_last_name', '')}".strip()
-            or "<unknown player>"
+            or "<unknown>"
         )
-        match_label = r.get("match_id") or "<missing>"
-
         if not has_player and not has_match:
-            reason = "missing player_id AND match_id"
             missing_both.append(player_label)
         elif not has_player:
-            reason = "missing player_id"
             missing_player.append(player_label)
         else:
-            reason = "missing match_id"
             missing_match.append(player_label)
 
-        logger.debug(
-            "Dropping stat row — %s | player=%r match_id=%s "
-            "home=%s away=%s round=%s season=%s",
-            reason, player_label, match_label,
-            r.get("match_home_team"), r.get("match_away_team"),
-            r.get("match_round"), r.get("season"),
-        )
-
+    _SAMPLE = 20
     total_dropped = len(missing_player) + len(missing_match) + len(missing_both)
     if total_dropped:
+        def _fmt(lst: list[str]) -> str:
+            sample = lst[:_SAMPLE]
+            tail = f" … +{len(lst) - _SAMPLE} more" if len(lst) > _SAMPLE else ""
+            return "[" + ", ".join(sample) + tail + "]"
         logger.warning(
-            "Dropped %d stat row(s) — missing_player_id: %d [%s] | "
-            "missing_match_id: %d [%s] | missing_both: %d [%s]",
+            "Dropped %d stat row(s) — missing_player_id: %d %s | "
+            "missing_match_id: %d %s | missing_both: %d %s",
             total_dropped,
-            len(missing_player), ", ".join(missing_player),
-            len(missing_match), ", ".join(missing_match),
-            len(missing_both), ", ".join(missing_both),
+            len(missing_player), _fmt(missing_player),
+            len(missing_match), _fmt(missing_match),
+            len(missing_both), _fmt(missing_both),
         )
     return valid
 
