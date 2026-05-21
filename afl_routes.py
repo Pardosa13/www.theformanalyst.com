@@ -169,7 +169,8 @@ def register_afl_routes(app, db):
         result = []
 
         for _, player in players.items():
-            games = sorted(player["games"], key=_sort_date_key, reverse=True)
+            all_games = sorted(player["games"], key=_sort_date_key, reverse=True)
+            games = [g for g in all_games if g.get("season") == effective_season] or all_games
             avgs = get_player_season_averages(games)
             last5 = get_player_last_n_games(games, 5)
             last10 = get_player_last_n_games(games, 10)
@@ -294,8 +295,8 @@ def register_afl_routes(app, db):
                 }
             ), 409
 
-        games = sorted(player["games"], key=_sort_date_key, reverse=True)
-        season_games = [g for g in games if g.get("season") == effective_season] or games
+        all_games = sorted(player["games"], key=_sort_date_key, reverse=True)
+        season_games = [g for g in all_games if g.get("season") == effective_season] or all_games
 
         # "Season avg" cards should reflect the requested season (e.g. 2026),
         # while history tabs still use the broader multi-season sample.
@@ -304,7 +305,7 @@ def register_afl_routes(app, db):
         last10 = get_player_last_n_games(season_games, 10)
 
         opponents = defaultdict(list)
-        for game in games:
+        for game in season_games:
             opponent = _get_opponent(game, player["team"])
             opponents[opponent].append(game)
 
@@ -341,7 +342,7 @@ def register_afl_routes(app, db):
                 ),
                 "season": effective_season,
                 "seasons_used": effective_seasons,
-                "games_played": len(games),
+                "games_played": len(season_games),
                 "averages": averages,
                 "last5_avg": {
                     "disposals": _safe_avg(last5, "disposals"),
@@ -366,7 +367,7 @@ def register_afl_routes(app, db):
                     "goals_1_plus": _hit_rate(season_games, "goals", 1),
                 },
                 "opponent_splits": opponent_splits,
-                "game_log": [_format_game_log_row(g, player["team"]) for g in games[:20]],
+                "game_log": [_format_game_log_row(g, player["team"]) for g in season_games[:20]],
             }
         )
 
@@ -422,7 +423,9 @@ def register_afl_routes(app, db):
                 }
             ), 409
 
-        games = sorted(player["games"], key=_sort_date_key, reverse=True)[:limit]
+        all_games = sorted(player["games"], key=_sort_date_key, reverse=True)
+        season_games = [g for g in all_games if g.get("season") == effective_season] or all_games
+        games = season_games[:limit]
 
         return jsonify(
             {
