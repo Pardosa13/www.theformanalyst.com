@@ -592,7 +592,7 @@ def fetch_fixture_afl(season: int, round_number: int = None, comp: str = "AFLM")
         "compSeasonId": comp_season_id,
         "pageSize": 1000,
     }
-    if round_number not in (None, "", 0):
+    if round_number not in (None, ""):
         params["roundNumber"] = round_number
 
     data = _afl_get(f"{AFL_META_BASE}/afl/v2/matches", params=params, token=None)
@@ -664,6 +664,48 @@ def _fetch_match_stats_afl(match_provider_id: int, token: Optional[str] = None) 
     home_stats = data.get("homeTeamPlayerStats") or []
     away_stats = data.get("awayTeamPlayerStats") or []
 
+    # If the expected keys are absent the AFL API may have changed its response
+    # structure.  Log the top-level keys so the cron log captures the new shape.
+    if not home_stats and not away_stats:
+        top_keys = list(data.keys()) if isinstance(data, dict) else type(data).__name__
+        logger.warning(
+            "AFL stats API: match %s returned no homeTeamPlayerStats/awayTeamPlayerStats. "
+            "Top-level response keys: %s — API format may have changed.",
+            match_provider_id, top_keys,
+        )
+        # Try common alternative key names used by the AFL API in past/future versions.
+        found_alt = False
+        for home_key, away_key in (
+            ("homeTeamPlayersStats", "awayTeamPlayersStats"),
+            ("home", "away"),
+            ("homeTeam", "awayTeam"),
+        ):
+            candidate_home = data.get(home_key)
+            candidate_away = data.get(away_key)
+            if isinstance(candidate_home, list) and candidate_home:
+                home_stats = candidate_home
+                away_stats = candidate_away or []
+                logger.info(
+                    "AFL stats API: match %s — found stats under '%s'/'%s'",
+                    match_provider_id, home_key, away_key,
+                )
+                found_alt = True
+                break
+            # handle {"home": {"players": [...]}} shape
+            if isinstance(candidate_home, dict):
+                for sub in ("players", "playerStats", "stats"):
+                    if isinstance(candidate_home.get(sub), list) and candidate_home[sub]:
+                        home_stats = candidate_home[sub]
+                        away_stats = (candidate_away or {}).get(sub) or []
+                        logger.info(
+                            "AFL stats API: match %s — found stats under '%s.%s'/'%s.%s'",
+                            match_provider_id, home_key, sub, away_key, sub,
+                        )
+                        found_alt = True
+                        break
+                if found_alt:
+                    break
+
     def _to_df(rows: list[dict], team_status: str) -> pd.DataFrame:
         if not rows:
             return pd.DataFrame()
@@ -728,8 +770,11 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
 
     # current_round is the first round with any incomplete game (from Squiggle complete!=100).
     # Only rounds before it are considered fully completed.
-    completed_rounds = list(range(1, current_round))
-    if not completed_rounds:
+    # Round 0 is the Opening Round (used in seasons like 2026 where an Opening Round
+    # precedes the officially-numbered rounds). Always include it — fetch_fixture_afl
+    # will return an empty list if the season has no Opening Round.
+    completed_rounds = [0] + list(range(1, current_round))
+    if current_round <= 1:
         logger.warning(
             "AFL current-season stats: no completed rounds yet for season %s "
             "(current_round=%s — season may not have started)",
@@ -765,6 +810,10 @@ def fetch_afl_player_stats_current_season(season: int, round_number: int = None,
 
     token = _get_afl_cookie()
     if not token:
+        logger.warning(
+            "AFL current-season stats: could not obtain auth token — "
+            "stats API is unavailable (WMCTok endpoint may be down or changed)."
+        )
         return []
 
     match_details_map = {

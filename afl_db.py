@@ -1555,17 +1555,29 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
         SELECT *
         FROM afl_player_stats
         WHERE (
-            (:player_id IS NOT NULL AND player_id = :player_id)
-            OR (:player_name <> '' AND LOWER(TRIM(player_first_name || ' ' || player_last_name)) = :player_name)
-        )
-          AND match_date BETWEEN :date_from AND :date_to
-          AND (
-            (LOWER(match_home_team) IN (:home_team, :home_team_raw)
-             AND LOWER(match_away_team) IN (:away_team, :away_team_raw))
+            -- player_id path: only needs id + date window; team names not required
+            -- because normalisation differences between props and stats sources can
+            -- prevent a match even when the data is correct.
+            (
+                :player_id IS NOT NULL
+                AND player_id = :player_id
+                AND match_date BETWEEN :date_from AND :date_to
+            )
             OR
-            (LOWER(match_home_team) IN (:away_team, :away_team_raw)
-             AND LOWER(match_away_team) IN (:home_team, :home_team_raw))
-          )
+            -- name fallback: requires team names to avoid cross-match confusion
+            (
+                :player_name <> ''
+                AND LOWER(TRIM(player_first_name || ' ' || player_last_name)) = :player_name
+                AND match_date BETWEEN :date_from AND :date_to
+                AND (
+                    (LOWER(match_home_team) IN (:home_team, :home_team_raw)
+                     AND LOWER(match_away_team) IN (:away_team, :away_team_raw))
+                    OR
+                    (LOWER(match_home_team) IN (:away_team, :away_team_raw)
+                     AND LOWER(match_away_team) IN (:home_team, :home_team_raw))
+                )
+            )
+        )
         ORDER BY
           CASE
             WHEN :player_id IS NOT NULL AND player_id = :player_id THEN 0
