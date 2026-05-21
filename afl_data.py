@@ -170,6 +170,34 @@ def _coerce_match_id(value: Any, default: int = 0) -> int:
         return default
 
 
+def _coerce_player_id(value: Any, default: int = 0) -> int:
+    """
+    Convert AFL API player ids like 'CD_I1012825' into an integer player_id.
+    Falls back to plain int coercion for already-numeric values.
+    """
+    if value is None:
+        return default
+
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+
+    raw = str(value).strip()
+    if not raw:
+        return default
+
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if digits:
+        try:
+            return int(digits)
+        except Exception:
+            return default
+
+    return _coerce_int(value, default=default)
+
+
 def _hash_match_key_to_bigint(match_key: str) -> int:
     """
     Derive a stable, collision-resistant signed 63-bit integer from a match key.
@@ -1089,7 +1117,7 @@ def _build_afl_current_row(row: pd.Series, details: dict, season: int, match_id:
         "playerId",
         "id",
     )
-    player_id = _coerce_int(player_id_raw)
+    player_id = _coerce_player_id(player_id_raw)
 
     return {
         "match_id": _coerce_match_id(match_id),
