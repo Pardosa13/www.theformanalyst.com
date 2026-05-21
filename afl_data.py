@@ -710,19 +710,24 @@ def _fetch_match_stats_afl(match_provider_id: int, token: Optional[str] = None) 
 
     content_type = response.headers.get("Content-Type", "")
     logger.info(
-        "AFL stats API diagnostics: providerId=%s status=%s content_type=%s headers=%s",
+        "AFL stats API diagnostics: providerId=%s status=%s content_type=%s",
         match_provider_id,
         response.status_code,
         content_type,
-        dict(response.headers),
     )
 
-    raw_body_preview = (response.text or "")[:1000]
-    logger.info(
-        "AFL stats API diagnostics: providerId=%s raw_body_preview=%r",
-        match_provider_id,
-        raw_body_preview,
-    )
+    if os.environ.get("AFL_DEBUG_RAW") == "1":
+        logger.info(
+            "AFL stats API diagnostics [debug]: providerId=%s headers=%s",
+            match_provider_id,
+            dict(response.headers),
+        )
+        raw_body_preview = (response.text or "")[:1000]
+        logger.info(
+            "AFL stats API diagnostics [debug]: providerId=%s raw_body_preview=%r",
+            match_provider_id,
+            raw_body_preview,
+        )
 
     if response.status_code == 401:
         logger.warning(

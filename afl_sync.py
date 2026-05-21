@@ -21,6 +21,28 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def normalize_round(round_value):
+    if round_value is None:
+        return None
+
+    s = str(round_value).strip()
+    if not s:
+        return None
+
+    lower = s.lower()
+    if lower in ("opening round", "round 0"):
+        return 0
+    if lower.startswith("round "):
+        try:
+            return int(s.split(" ", 1)[1])
+        except Exception:
+            pass
+    try:
+        return int(s)
+    except Exception as exc:
+        raise ValueError(f"Unrecognized AFL round format: {round_value}") from exc
+
+
 def _safe_log_sync(db, source: str, season: int = None, round_num: int = None,
                    rows: int = 0, status: str = "ok", error: str = None):
     try:
@@ -134,7 +156,7 @@ def sync_afl_all(season: int = None):
                         stats = []
                     else:
                         api_max_round = max(
-                            (int(s.get("match_round") or 0) for s in api_stats), default=0
+                            ((normalize_round(s.get("match_round")) or 0) for s in api_stats), default=0
                         )
                         try:
                             current_round = fetch_squiggle_current_round(yr)
