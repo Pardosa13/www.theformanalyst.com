@@ -1456,7 +1456,12 @@ def test_settlement_sql_falls_back_to_player_name_when_player_id_mismatch():
     with open(db_path, encoding="utf-8") as f:
         source = f.read()
 
-    assert "OR (:player_name <> '' AND LOWER(TRIM(player_first_name || ' ' || player_last_name)) = :player_name)" in source
+    # Name-fallback branch must still exist in the settlement SQL (exact formatting
+    # may vary as the SQL is restructured, so we check the key sub-expressions).
+    assert ":player_name <> ''" in source, "settlement SQL must have player_name fallback condition"
+    assert "LOWER(TRIM(player_first_name || ' ' || player_last_name)) = :player_name" in source, \
+        "settlement SQL must match normalised player name"
+    # player_id branch must have priority ordering
     assert "WHEN :player_id IS NOT NULL AND player_id = :player_id THEN 0" in source
 
 
