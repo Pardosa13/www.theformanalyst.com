@@ -66,6 +66,7 @@ def sync_afl_all(season: int = None):
         snapshot_model_selections_from_props,
         settle_model_selections,
         upsert_team_logos,
+        normalise_player_stats_team_names,
     )
 
     if season is None:
@@ -172,6 +173,17 @@ def sync_afl_all(season: int = None):
             player_stats_total,
             len(seasons_to_sync),
         )
+
+        # ── 3b. Normalise legacy team names in player stats ────────
+        # Idempotent — fixes rows written by the AFLTables CSV parser before
+        # the team-name normalisation fix (e.g. "Greater Western Sydney" →
+        # "GWS Giants").  Safe to run every sync cycle.
+        try:
+            fixed = normalise_player_stats_team_names(db)
+            if fixed:
+                logger.info("  ✓ Team name normalisation: fixed %d field(s)", fixed)
+        except Exception as exc:
+            logger.warning("  - Team name normalisation failed: %s", exc)
 
         # ── 4. Team logos ─────────────────────────────────────────
         try:

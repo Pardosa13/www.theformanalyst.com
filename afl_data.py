@@ -1182,17 +1182,20 @@ def fetch_fryzigg_player_stats(season: int) -> list[dict]:
     2. Fryzigg (historical)
     """
 
-    # ── 1. fitzRoy R package (PRIMARY for current year) ──
+    # ── 1. 2026 CSV (PRIMARY for current year) ──────────────────────────────
+    # fetch_afltables_player_stats_rpy2 uses column names from an older CSV
+    # schema (e.g. "Home.Team", "First.Name") that do not match the current
+    # afl_2026_stats.csv produced by the GitHub Actions workflow.  Use the
+    # dedicated fetch_2026_stats_from_csv() parser which normalises column names
+    # and applies _normalise_team_name() so stored values are consistent with
+    # the AFL API path and settlement queries.
     if season >= CURRENT_YEAR:
-        logger.info("Player stats: trying fitzRoy R package for %s", season)
-        
-        fitzroy_rows = fetch_afltables_player_stats_rpy2(season)
-        
-        if fitzroy_rows:
-            logger.info("Player stats: got %s rows from fitzRoy for %s", len(fitzroy_rows), season)
-            return fitzroy_rows
-        
-        logger.warning("fitzRoy returned no rows for %s", season)
+        logger.info("Player stats: loading current-season CSV for %s", season)
+        csv_rows = fetch_2026_stats_from_csv()
+        if csv_rows:
+            logger.info("Player stats: got %s rows from CSV for %s", len(csv_rows), season)
+            return csv_rows
+        logger.warning("Player stats: CSV returned no rows for %s, falling back to Fryzigg RDS", season)
 
     return _fetch_fryzigg_player_stats_from_rds(season)
 
@@ -1388,18 +1391,26 @@ def _parse_afltables_csv_df(df: pd.DataFrame, cols: set, season: int) -> list[di
 
         date_str    = _coerce_str(col(row, "date"))
         local_start = _coerce_str(col(row, "local.start.time"))
+        # Hash is computed from raw names for backward compatibility so
+        # ON CONFLICT can fire and update existing rows with normalized names.
         match_key   = f"{row_season}|{date_str}|{home_team}|{away_team}|{local_start}"
+
+        # Normalize team names for storage — ensures consistency with AFL API
+        # rows and settlement queries (e.g. "Greater Western Sydney" → "GWS Giants").
+        home_team_norm = _normalise_team_name(home_team)
+        away_team_norm = _normalise_team_name(away_team)
+        winner_norm    = _normalise_team_name(winner) if winner else ""
 
         rows.append({
             "match_id":                       _hash_match_key_to_bigint(match_key),
             "match_date":                     _coerce_date(col(row, "date")),
             "match_round":                    _coerce_str(col(row, "round")),
-            "match_home_team":                home_team,
-            "match_away_team":                away_team,
+            "match_home_team":                home_team_norm,
+            "match_away_team":                away_team_norm,
             "match_home_team_score":          home_score,
             "match_away_team_score":          away_score,
             "match_margin":                   margin,
-            "match_winner":                   winner,
+            "match_winner":                   winner_norm,
             "match_weather_temp_c":           0,
             "match_weather_type":             "",
             "match_attendance":               _coerce_int(col(row, "attendance")),
@@ -1408,7 +1419,7 @@ def _parse_afltables_csv_df(df: pd.DataFrame, cols: set, season: int) -> list[di
             "player_id":                      player_id,
             "player_first_name":              first_name,
             "player_last_name":               last_name,
-            "player_team":                    _coerce_str(col(row, "playing.for")),
+            "player_team":                    _normalise_team_name(_coerce_str(col(row, "playing.for"))),
             "guernsey_number":                _coerce_int(col(row, "jumper.no.")),
             "player_height_cm":               0,
             "player_weight_kg":               0,
