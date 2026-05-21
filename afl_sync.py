@@ -53,7 +53,6 @@ def sync_afl_all(season: int = None):
         fetch_squiggle_teams,
         fetch_fryzigg_player_stats,
         fetch_afl_player_stats_current_season,
-        fetch_2026_stats_from_csv,
         fetch_afl_player_props,
         fetch_afl_h2h_spread_odds,
     )
@@ -117,40 +116,50 @@ def sync_afl_all(season: int = None):
 
         for yr in seasons_to_sync:
             try:
-                if yr == 2026:
-                    logger.info("  • Loading 2026 player stats from AFL official API")
+                if yr == season:
+                    logger.info("  • Loading %s player stats from AFL official API", yr)
                     api_stats = fetch_afl_player_stats_current_season(yr, round_number=None)
 
-                    # Determine the latest round the AFL API actually returned data for.
-                    # If the API is lagging (e.g. round 8 finished but API only has 1-7),
-                    # fall back to the CSV which is updated daily by GitHub Actions via
-                    # afltables and is typically 1-2 hours ahead of the AFL API after a round.
-                    api_max_round = (
-                        max((int(s.get("match_round") or 0) for s in api_stats), default=0)
-                        if api_stats else 0
-                    )
-                    try:
-                        current_round = fetch_squiggle_current_round(yr)
-                    except Exception:
-                        current_round = 0
-
-                    # Allow API to be 1 round behind: current_round from Squiggle is the
-                    # first *incomplete* round, so API having data through current_round-1
-                    # means it's fully up to date with completed play.
-                    if api_stats and (current_round == 0 or api_max_round >= current_round - 1):
-                        stats = api_stats
-                        logger.info("  • AFL API: %s rows, max round %s", len(stats), api_max_round)
+                    if not api_stats:
+                        # Hard failure — do NOT fall back to stale CSV data.
+                        # Using the CSV here previously caused stale/wrong player IDs to
+                        # be written to the DB.  An empty API response is a signal that
+                        # something is wrong upstream and must be investigated, not silently
+                        # papered over.
+                        logger.error(
+                            "  ✗ AFL API returned 0 rows for season %s — skipping upsert. "
+                            "Investigate auth token, completed-round detection, or API availability.",
+                            yr,
+                        )
+                        stats = []
                     else:
-                        if api_stats:
-                            logger.warning(
-                                "  • AFL API only has data through round %s (current: %s) — using CSV",
-                                api_max_round, current_round,
+                        api_max_round = max(
+                            (int(s.get("match_round") or 0) for s in api_stats), default=0
+                        )
+                        try:
+                            current_round = fetch_squiggle_current_round(yr)
+                        except Exception:
+                            current_round = 0
+
+                        # current_round from Squiggle is the first *incomplete* round.
+                        # API having data through current_round-1 means fully up to date.
+                        if current_round == 0 or api_max_round >= current_round - 1:
+                            stats = api_stats
+                            logger.info(
+                                "  • AFL API: %s rows, max round %s (current round %s)",
+                                len(stats), api_max_round, current_round,
                             )
                         else:
-                            logger.warning("  • AFL API returned no rows, falling back to CSV")
-                        stats = fetch_2026_stats_from_csv()
-                        if not stats:
-                            stats = api_stats or []
+                            # API is more than one round behind.  This is a data-quality
+                            # problem — do NOT fall back to CSV which may carry stale or
+                            # mismatched player IDs.
+                            logger.error(
+                                "  ✗ AFL API has data only through round %s but current round "
+                                "is %s — more than one round behind. Skipping upsert rather "
+                                "than writing incomplete data.",
+                                api_max_round, current_round,
+                            )
+                            stats = []
                 else:
                     stats = fetch_fryzigg_player_stats(yr)
 

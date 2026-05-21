@@ -924,6 +924,13 @@ def upsert_player_stats(db, stats: list[dict], season: int) -> int:
             # ───────────────────────────────────────────────────────────────
 
             if not match_id:
+                logger.warning(
+                    "upsert_player_stats: skipping row — missing match_id | "
+                    "player=%s %s team=%s season=%s round=%s",
+                    row.get("player_first_name"), row.get("player_last_name"),
+                    row.get("player_team"), row.get("season", season),
+                    row.get("match_round"),
+                )
                 continue
 
             conn.execute(sql, {
