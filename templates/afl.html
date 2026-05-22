@@ -3294,11 +3294,11 @@ function sgmLoadLegs() {
 function sgmRenderLegsTable(legs) {
   const el = document.getElementById('sgmLegsTable');
   const countEl = document.getElementById('sgmLegsCount');
-  legs = legs.filter(l => safeNum(l.edge, 0) > 0);
-  countEl.textContent = `${legs.length} value legs available`;
+  const valueLegs = legs.filter(l => safeNum(l.edge, 0) > 0);
+  countEl.textContent = `${valueLegs.length} value legs · ${legs.length} total`;
 
   if (!legs.length) {
-    el.innerHTML = '<div class="prop-empty" style="padding:30px;"><p>No positive-edge legs found. Try Sync H2H + Spreads then Refresh from API.</p></div>';
+    el.innerHTML = '<div class="prop-empty" style="padding:30px;"><p>No SGM legs available yet. Try Sync H2H + Spreads then Refresh from API.</p></div>';
     return;
   }
   const rows = legs.map(leg => {
