@@ -1618,64 +1618,27 @@ def register_afl_routes(app, db):
         if not props:
             return jsonify({"legs": [], "round": round_number})
 
-        # Bulk fetch player stats for all players in props
-        all_last_names = list({
-            p["player_name"].replace(".", " ").split()[-1].lower()
-            for p in props if p.get("player_name")
-        })
-
-        all_stats_rows = []
-        if all_last_names:
-            bulk_sql = db.text("""
-                SELECT *
-                FROM afl_player_stats
-                WHERE LOWER(player_last_name) = ANY(:last_names)
-                  AND season = ANY(:seasons)
-                ORDER BY season DESC, match_date DESC
-            """)
-            with db.engine.connect() as conn:
-                bulk_rows = conn.execute(
-                    bulk_sql,
-                    {"last_names": all_last_names, "seasons": effective_seasons}
-                ).mappings().fetchall()
-            all_stats_rows = [dict(r) for r in bulk_rows]
-
-        from collections import defaultdict
-        stats_by_key = defaultdict(list)
-        for row in all_stats_rows:
-            ln = (row.get("player_last_name") or "").lower()
-            fn = (row.get("player_first_name") or "").lower()
-            if ln and fn:
-                stats_by_key[(fn[0], ln)].append(row)
-
         legs = []
+        debug_logged_round11 = False
         for prop in props:
             pname = prop.get("player_name", "")
-            parts = pname.replace(".", " ").split()
-            if len(parts) < 2:
-                continue
-            first_initial = parts[0][0].lower()
-            last_name = parts[-1].lower()
-
-            player_rows = stats_by_key.get((first_initial, last_name), [])
-            if not player_rows:
-                continue
 
             prop_home = _normalise_team_name(prop.get("home_team", ""))
             prop_away = _normalise_team_name(prop.get("away_team", ""))
-
-            grouped = _group_players(player_rows)
-            player = _select_value_finder_player(
-                grouped,
+            profile = _resolve_player_profile_for_market(
+                db,
                 full_name=pname,
+                team_hint="",
                 prop_home_team=prop_home,
                 prop_away_team=prop_away,
                 effective_season=effective_season,
+                effective_seasons=effective_seasons,
             )
-            if not player:
+            if not profile:
                 continue
-            games = sorted(player["games"], key=_sort_date_key, reverse=True)
-            season_games = [g for g in games if g.get("season") == effective_season] or games
+            player = profile["player"]
+            games = profile["games"]
+            season_games = profile["season_games"] or games
 
             stat_name = MARKET_STAT.get(prop["market"], "disposals")
             season_avg = _safe_avg(season_games, stat_name)
@@ -1705,6 +1668,22 @@ def register_afl_routes(app, db):
             total = len(games)
             hits = sum(1 for g in games if (g.get(stat_name, 0) or 0) > book_line)
             hist_pct = round(hits / total * 100, 1) if total else 0.0
+            rounds_used = sorted({str(g.get("match_round", "")).strip() for g in games if g.get("match_round")})
+            match_ids_used = sorted({str(g.get("match_id")) for g in games if g.get("match_id") is not None})
+
+            if round_number == 11 and not debug_logged_round11:
+                logger.info(
+                    "AFL SGM Round 11 resolver audit: match=%s player=%s stat=%s line=%s source_rows_count=%s rounds_used=%s match_ids_used=%s hit_rate=%s",
+                    f"{prop_home} vs {prop_away}",
+                    pname,
+                    stat_name,
+                    book_line,
+                    len(games),
+                    rounds_used,
+                    match_ids_used,
+                    hist_pct,
+                )
+                debug_logged_round11 = True
 
             legs.append({
                 "player_name": pname,
@@ -2061,7 +2040,25 @@ def register_afl_routes(app, db):
                     END"""
 
         sql = db.text(f"""
-            WITH team_match_stats AS (
+            WITH cleaned_player_stats AS (
+                SELECT DISTINCT ON (
+                    ps.player_id,
+                    ps.match_date,
+                    {_sql_norm_team('ps.match_home_team')},
+                    {_sql_norm_team('ps.match_away_team')}
+                )
+                    ps.*
+                FROM afl_player_stats ps
+                WHERE COALESCE(ps.player_team, '') <> ''
+                  AND (ps.season < :year OR ps.match_id::text LIKE :current_api_match_prefix)
+                ORDER BY
+                    ps.player_id,
+                    ps.match_date,
+                    {_sql_norm_team('ps.match_home_team')},
+                    {_sql_norm_team('ps.match_away_team')},
+                    ps.id DESC
+            ),
+            team_match_stats AS (
                 -- Normalise player_team so 2026 afltables names (e.g. "Greater Western
                 -- Sydney Giants") collapse to the same key as 2019-2025 fryzigg names
                 -- (e.g. "gws giants"), keeping the rolling average continuous across years.
@@ -2102,8 +2099,7 @@ def register_afl_routes(app, db):
                         0.65 * SUM(COALESCE(ps.clangers, 0)) -
                         0.35 * SUM(COALESCE(ps.free_kicks_against, 0))
                     ) AS team_rating
-                FROM afl_player_stats ps
-                WHERE COALESCE(ps.player_team, '') <> ''
+                FROM cleaned_player_stats ps
                 GROUP BY ps.match_date, {_sql_norm_team('ps.player_team')}
             ),
             team_rolling AS (
@@ -2145,6 +2141,18 @@ def register_afl_routes(app, db):
                 g.complete,
                 g.hscore,
                 g.ascore,
+                (
+                    SELECT COUNT(*)
+                    FROM cleaned_player_stats cps
+                    WHERE cps.match_date = g.date::DATE
+                      AND {_sql_norm_team('cps.player_team')} = {_sql_norm_team('g.hteam')}
+                ) AS home_player_rows,
+                (
+                    SELECT COUNT(*)
+                    FROM cleaned_player_stats cps
+                    WHERE cps.match_date = g.date::DATE
+                      AND {_sql_norm_team('cps.player_team')} = {_sql_norm_team('g.ateam')}
+                ) AS away_player_rows,
                 home_r.rolling_avg_5 AS home_rating,
                 away_r.rolling_avg_5 AS away_rating,
                 (home_r.rolling_avg_5 - away_r.rolling_avg_5) AS predicted_margin
@@ -2164,6 +2172,7 @@ def register_afl_routes(app, db):
             ORDER BY g.date ASC
             LIMIT :limit
         """)
+        params["current_api_match_prefix"] = f"{year}014%"
         rows = [dict(r._mapping) for r in db.session.execute(sql, params)]
 
         # Scale factor: calibrated from 1,481 historical games (avg raw=137.2 / avg actual=30.9).
@@ -2181,11 +2190,12 @@ def register_afl_routes(app, db):
             ascore = r.get("ascore")
             complete = r.get("complete") or 0
             actual_margin = (hscore - ascore) if (complete == 100 and hscore is not None and ascore is not None) else None
-            home_win_prob = (
+            home_win_prob_raw = (
                 1.0 / (1.0 + math.exp(-(predicted_margin_points / _LOGISTIC_SCALE_POINTS)))
                 if predicted_margin_points is not None
                 else None
             )
+            home_win_prob = min(0.99, max(0.01, home_win_prob_raw)) if home_win_prob_raw is not None else None
             away_win_prob = (1.0 - home_win_prob) if home_win_prob is not None else None
             confidence = abs(predicted_margin_points or 0.0)
             confidence_tier = "high" if confidence >= 24 else "medium" if confidence >= 12 else "low"
@@ -3792,3 +3802,18 @@ def _merge_fixture_tips(db, fixtures: list[dict], year: int, round_number: int |
         merged.append(row)
 
     return merged
+            team_stats_rows = 2 if (r.get("home_rating") is not None and r.get("away_rating") is not None) else 0
+            player_stats_rows = int(r.get("home_player_rows") or 0) + int(r.get("away_player_rows") or 0)
+            logger.info(
+                "AFL model prediction audit: home_team=%s away_team=%s team_stats_rows=%s player_stats_rows=%s "
+                "win_prob_home=%s win_prob_away=%s fair_odds_home=%s fair_odds_away=%s predicted_margin=%s",
+                r["hteam"],
+                r["ateam"],
+                team_stats_rows,
+                player_stats_rows,
+                round(home_win_prob, 4) if home_win_prob is not None else None,
+                round(away_win_prob, 4) if away_win_prob is not None else None,
+                round(1.0 / home_win_prob, 2) if home_win_prob else None,
+                round(1.0 / away_win_prob, 2) if away_win_prob else None,
+                round(predicted_margin_points, 2) if predicted_margin_points is not None else None,
+            )
