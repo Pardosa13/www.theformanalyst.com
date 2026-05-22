@@ -3802,18 +3802,3 @@ def _merge_fixture_tips(db, fixtures: list[dict], year: int, round_number: int |
         merged.append(row)
 
     return merged
-            team_stats_rows = 2 if (r.get("home_rating") is not None and r.get("away_rating") is not None) else 0
-            player_stats_rows = int(r.get("home_player_rows") or 0) + int(r.get("away_player_rows") or 0)
-            logger.info(
-                "AFL model prediction audit: home_team=%s away_team=%s team_stats_rows=%s player_stats_rows=%s "
-                "win_prob_home=%s win_prob_away=%s fair_odds_home=%s fair_odds_away=%s predicted_margin=%s",
-                r["hteam"],
-                r["ateam"],
-                team_stats_rows,
-                player_stats_rows,
-                round(home_win_prob, 4) if home_win_prob is not None else None,
-                round(away_win_prob, 4) if away_win_prob is not None else None,
-                round(1.0 / home_win_prob, 2) if home_win_prob else None,
-                round(1.0 / away_win_prob, 2) if away_win_prob else None,
-                round(predicted_margin_points, 2) if predicted_margin_points is not None else None,
-            )
