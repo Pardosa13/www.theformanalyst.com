@@ -719,7 +719,7 @@
                     <th>Verdict</th>
                     <th>ROI</th>
                     <th>SR%</th>
-                    <th>Runs (Sample Size)</th>
+                    <th>Runs / Wins</th>
                     <th>Avg SP</th>
                     <th>Current Pts</th>
                     <th>Suggested Pts</th>
@@ -747,9 +747,8 @@
                         </span>
                     </td>
                     <td class="mono">{{ '%.1f' % comp.strike_rate }}%</td>
-                    <td class="mono">{{ comp.appearances }}</td>
-                    {# FIX 2: replaced broken Jinja NaN check (x == x) with simple truthiness check #}
-                    <td class="mono">{% if comp.avg_sp %}${{ '%.2f' % comp.avg_sp }}{% else %}—{% endif %}</td>
+                    <td class="mono">{{ comp.appearances }} / {{ comp.wins }}</td>
+                    <td class="mono">{% if comp.avg_sp is not none %}${{ '%.2f' % comp.avg_sp }}{% else %}—{% endif %}</td>
                     <td class="mono">{{ '%+.1f' % comp.current_value }}</td>
                     <td>
                         {% if comp.suggested_value != comp.current_value %}
