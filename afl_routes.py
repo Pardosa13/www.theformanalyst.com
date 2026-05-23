@@ -1112,16 +1112,19 @@ def register_afl_routes(app, db):
         season = request.args.get("year", CURRENT_YEAR, type=int)
         status = request.args.get("status", "all").strip().lower()
         market = request.args.get("market", "").strip()
+        min_edge = request.args.get("min_edge", 0.0, type=float)
         limit = min(request.args.get("limit", 200, type=int), 500)
 
         conditions = ["season = :season"]
-        params: dict = {"season": season, "limit": limit}
+        params: dict = {"season": season, "limit": limit, "min_edge": min_edge}
         if status in {"pending", "win", "loss", "push"}:
             conditions.append("result = :status")
             params["status"] = status
         if market:
             conditions.append("market = :market")
             params["market"] = _normalise_prop_market(market)
+        # Results views should only show selections with non-negative edge.
+        conditions.append("COALESCE(edge_pct, edge, 0) >= :min_edge")
 
         sql = db.text(
             f"""
@@ -1168,6 +1171,8 @@ def register_afl_routes(app, db):
         season = request.args.get("year", CURRENT_YEAR, type=int)
         limit = min(request.args.get("limit", 60, type=int), 200)
         rows = _db_model_selections(db, season=season, settled_only=False)
+        # Ignore negative-edge selections in results analysis/tracking output.
+        rows = [r for r in rows if float(r.get("edge_pct") if r.get("edge_pct") is not None else (r.get("edge") or 0)) >= 0]
         settled_rows = [r for r in rows if (r.get("result") or "").lower() in {"win", "loss", "push"}]
         pending_rows = [r for r in rows if (r.get("result") or "").lower() == "pending"]
 
