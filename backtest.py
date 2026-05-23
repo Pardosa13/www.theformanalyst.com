@@ -1080,6 +1080,7 @@ def parse_components_from_notes(notes_text):
         return []
 
     components = []
+    seen_names = set()
     lines = str(notes_text).split('\n')
     skip_section = False
 
@@ -1117,10 +1118,20 @@ def parse_components_from_notes(notes_text):
             if score == 0:
                 continue
 
+            raw_name_lc = raw_name.lower()
+            if (
+                'weighted avg (z=' in raw_name_lc
+                or 'sectional weighted' in raw_name_lc
+                or raw_name_lc.startswith('weighted avg')
+                or raw_name_lc.startswith('adj:')
+            ):
+                continue
+
             name = normalize_component_name(raw_name)
 
-            if name:
+            if name and name not in seen_names:
                 components.append((name, score))
+                seen_names.add(name)
 
         except Exception:
             continue
@@ -1164,7 +1175,7 @@ def run_component_analysis(df):
         won = int(row['finish_position']) == 1
         sp = float(row['sp']) if row['sp'] else None
 
-        if sp is None:
+        if sp is None or sp <= 0:
             continue
 
         for comp_name, comp_score in components:
