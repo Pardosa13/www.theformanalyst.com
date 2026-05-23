@@ -3318,7 +3318,7 @@ function sgmRenderLegsTable(legs) {
       <td>
         ${alreadyAdded
           ? '<span style="font-size:11px;color:var(--text-muted);">Added</span>'
-          : `<button class="btn btn-sm btn-primary" onclick='sgmAddLegDirect(${JSON.stringify(leg)})'>+ Add</button>`
+          : `<button class="btn btn-sm btn-primary" onclick="sgmAddLegDirectFromEncoded('${encodeURIComponent(JSON.stringify(leg))}')">+ Add</button>`
         }
       </td>
     </tr>`;
@@ -3344,7 +3344,7 @@ function sgmRenderSuggestions(legs) {
     const edgeVal = safeNum(leg.edge, 0);
     return `
       <div style="background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:8px;padding:7px 10px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:border-color .12s;"
-           onclick='sgmAddLegDirect(${JSON.stringify(leg)})'
+           onclick="sgmAddLegDirectFromEncoded('${encodeURIComponent(JSON.stringify(leg))}')"
            onmouseover="this.style.borderColor='var(--accent)'"
            onmouseout="this.style.borderColor='var(--border-mid)'">
         <div>
@@ -3417,6 +3417,13 @@ function sgmOnStatChange() {
     opt.textContent = `${l.line}+${prob} @ ${safeNum(l.odds, 0).toFixed(2)}`;
     lineEl.appendChild(opt);
   });
+}
+
+function sgmAddLegDirectFromEncoded(encodedLeg) {
+  try {
+    const leg = JSON.parse(decodeURIComponent(encodedLeg));
+    sgmAddLegDirect(leg);
+  } catch (e) {}
 }
 
 function sgmAddLeg() {
