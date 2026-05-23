@@ -1575,7 +1575,7 @@ def register_afl_routes(app, db):
         elif round_number:
             fixtures = _db_get_fixtures(db, year=year, round_number=round_number)
             if not fixtures:
-                return jsonify({"legs": [], "round": round_number})
+                return jsonify({"legs": [], "round": round_number, "matches": []})
             match_conditions = []
             for i, f in enumerate(fixtures):
                 match_conditions.append(
@@ -1616,7 +1616,15 @@ def register_afl_routes(app, db):
 
         props = [dict(r) for r in rows]
         if not props:
-            return jsonify({"legs": [], "round": round_number})
+            fixture_matches = []
+            if round_number:
+                fixture_rows = _db_get_fixtures(db, year=year, round_number=round_number)
+                fixture_matches = sorted({
+                    f"{_normalise_team_name(f.get('hteam', ''))} vs {_normalise_team_name(f.get('ateam', ''))}"
+                    for f in fixture_rows
+                    if f.get('hteam') and f.get('ateam')
+                })
+            return jsonify({"legs": [], "round": round_number, "matches": fixture_matches})
 
         legs = []
         debug_logged_round11 = False
