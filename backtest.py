@@ -1173,9 +1173,15 @@ def run_component_analysis(df):
     for _, row in top_picks.iterrows():
         components = parse_components_from_notes(row.get('analyzer_notes', ''))
         won = int(row['finish_position']) == 1
-        sp = float(row['sp']) if row['sp'] else None
+        raw_sp = row.get('sp')
+        if raw_sp is None or pd.isna(raw_sp):
+            continue
+        try:
+            sp = float(raw_sp)
+        except (TypeError, ValueError):
+            continue
 
-        if sp is None or sp <= 0:
+        if not np.isfinite(sp) or sp <= 0:
             continue
 
         for comp_name, comp_score in components:
@@ -1203,6 +1209,9 @@ def run_component_analysis(df):
         wins = data['wins']
         strike_rate = wins / appearances * 100
         avg_sp = float(np.mean(data['sps']))
+        if not np.isfinite(avg_sp):
+            avg_sp = None
+
         roi = float(np.sum(data['roi_contributions']) / appearances * 100)
         current_value = float(np.mean(data['scores'])) if data['scores'] else 0.0
 
@@ -1228,7 +1237,7 @@ def run_component_analysis(df):
             'wins': wins,
             'strike_rate': round(strike_rate, 1),
             'roi': round(roi, 1),
-            'avg_sp': round(avg_sp, 2),
+            'avg_sp': round(avg_sp, 2) if avg_sp is not None else None,
             'current_value': round(current_value, 1),
             'suggested_value': suggested_value,
             'roi_delta': round(roi_delta, 1),
