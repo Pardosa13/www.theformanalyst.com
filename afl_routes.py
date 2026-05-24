@@ -67,6 +67,14 @@ from afl_db import (
 
 logger = logging.getLogger(__name__)
 
+_MARKET_WEIGHTING_OVERRIDES: dict[str, dict[str, float]] = {
+    "player_disposals": {"season_weight": 1.00, "opp_weight": 0.00, "last5_weight": 0.30, "edge_cutoff": 2.5},
+    "player_goals": {"season_weight": 1.00, "opp_weight": 0.00, "last5_weight": 0.00, "edge_cutoff": 0.0},
+    "player_marks": {"season_weight": 0.50, "opp_weight": 0.50, "last5_weight": 0.00, "edge_cutoff": 0.0},
+    "player_kicks": {"season_weight": 0.50, "opp_weight": 0.50, "last5_weight": 0.00, "edge_cutoff": 1.0},
+    "player_tackles": {"season_weight": 0.50, "opp_weight": 0.50, "last5_weight": 0.00, "edge_cutoff": 0.0},
+}
+
 
 def register_afl_routes(app, db):
     """Register all AFL routes onto the Flask app."""
@@ -740,7 +748,6 @@ def register_afl_routes(app, db):
     @login_required
     def api_afl_value_finder():
         market = request.args.get("market", "player_disposals")
-        min_edge = request.args.get("min_edge", 2.0, type=float)
         requested_season = request.args.get("year", type=int)
         round_number = request.args.get("round", type=int)
         home_team = request.args.get("home", "").strip()
@@ -748,6 +755,11 @@ def register_afl_routes(app, db):
         min_line = request.args.get("min_line", type=float)
         max_line = request.args.get("max_line", type=float)
         market = _normalise_prop_market(market)
+        market_weighting = _MARKET_WEIGHTING_OVERRIDES.get(
+            market,
+            {"season_weight": 0.50, "opp_weight": 0.50, "last5_weight": 0.00, "edge_cutoff": 2.0},
+        )
+        min_edge = request.args.get("min_edge", market_weighting["edge_cutoff"], type=float)
         effective_season = _resolve_stats_season(db, requested_season)
         effective_seasons = _resolve_stats_seasons(db, requested_season)
         min_games = request.args.get("min_games", 8, type=int)
@@ -951,6 +963,9 @@ def register_afl_routes(app, db):
                 vs_opp_avg=vs_opp_avg,
                 last5_avg=last5_avg,
                 player_stats=season_games,
+                season_weight=market_weighting["season_weight"],
+                opp_weight=market_weighting["opp_weight"],
+                last5_weight=market_weighting["last5_weight"],
             )
             edge = edge_data["edge"]
             if edge < min_edge:
