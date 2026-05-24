@@ -10532,7 +10532,7 @@ def best_bets():
     from datetime import datetime, timedelta
     from sqlalchemy.orm import load_only, selectinload
 
-    hours_back = request.args.get('hours', default=80, type=int)
+    hours_back = request.args.get('hours', default=12, type=int)
     min_score = request.args.get('min_score', type=float)
     min_gap = request.args.get('min_gap', type=float)
     mode = request.args.get('mode', default='top_pick')
