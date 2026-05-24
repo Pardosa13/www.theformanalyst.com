@@ -3716,13 +3716,22 @@ def _db_best_prop_weightings(db) -> dict:
         COALESCE(vs_opp_avg, 0.0) AS vs_opp_avg,
         COALESCE(last5_avg, 0.0) AS last5_avg,
         result,
-        CASE WHEN result = 'win' THEN odds - 1.0 ELSE -1.0 END AS pnl
+        CASE
+          WHEN result = 'win' THEN odds - 1.0
+          WHEN result = 'push' THEN 0.0
+          ELSE -1.0
+        END AS pnl
       FROM afl_model_selections
-      WHERE result IN ('win','loss')
+      WHERE result IN ('win','loss','push')
         AND line IS NOT NULL
         AND odds IS NOT NULL
         AND market IS NOT NULL
         AND line_type IN ('Over','Under')
+    ),
+    market_totals AS (
+      SELECT market, COUNT(*) AS settled_bets
+      FROM settled
+      GROUP BY market
     ),
     params AS (
       SELECT *
@@ -3771,14 +3780,16 @@ def _db_best_prop_weightings(db) -> dict:
         w_opp,
         w_l5,
         edge_cut,
+        mt.settled_bets,
         COUNT(*) FILTER (WHERE edge_stat >= edge_cut) AS bets,
         AVG(CASE WHEN edge_stat >= edge_cut AND result = 'win' THEN 1.0
                  WHEN edge_stat >= edge_cut THEN 0.0 END) AS hit_rate,
         AVG(CASE WHEN edge_stat >= edge_cut THEN pnl END) AS roi_units_per_bet,
         SUM(CASE WHEN edge_stat >= edge_cut THEN pnl ELSE 0.0 END) AS total_units
-      FROM picked
-      GROUP BY market, w_opp, w_l5, edge_cut
-      HAVING COUNT(*) FILTER (WHERE edge_stat >= edge_cut) >= 80
+      FROM picked p
+      JOIN market_totals mt ON mt.market = p.market
+      GROUP BY p.market, mt.settled_bets, w_opp, w_l5, edge_cut
+      HAVING COUNT(*) FILTER (WHERE edge_stat >= edge_cut) >= 40
     ),
     ranked AS (
       SELECT
@@ -3791,6 +3802,7 @@ def _db_best_prop_weightings(db) -> dict:
     )
     SELECT
       market,
+      settled_bets,
       w_opp,
       w_l5,
       edge_cut,
@@ -3805,7 +3817,7 @@ def _db_best_prop_weightings(db) -> dict:
     count_sql = """
       SELECT COUNT(*) AS settled_rows
       FROM afl_model_selections
-      WHERE result IN ('win','loss');
+      WHERE result IN ('win','loss','push');
     """
     try:
         with db.engine.begin() as conn:
@@ -3820,6 +3832,7 @@ def _db_best_prop_weightings(db) -> dict:
         formatted.append(
             {
                 "market": row.get("market"),
+                "settled_bets": int(row.get("settled_bets") or 0),
                 "w_opp": float(row.get("w_opp") or 0.0),
                 "w_l5": float(row.get("w_l5") or 0.0),
                 "w_season": round(1.0 - float(row.get("w_opp") or 0.0), 2),
@@ -3835,6 +3848,7 @@ def _db_best_prop_weightings(db) -> dict:
         "rows": formatted,
         "settled_rows": int(settled_rows),
         "best_overall": best_overall,
+        "min_bets": 40,
     }
 
 
