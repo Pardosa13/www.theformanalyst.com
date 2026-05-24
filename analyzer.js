@@ -1205,8 +1205,19 @@ function checkLast10runs(last10) {
         }
     }
     
+    const normalizedPlaces = note2.trim();
+    const priorityPlacePatterns = new Set([
+        '2nd 2nd 3rd',
+        '1st 1st 2nd',
+        '2nd 1st 1st',
+        '2nd 3rd 2nd'
+    ]);
+    if (priorityPlacePatterns.has(normalizedPlaces)) {
+        addScore = 25;
+    }
+
     if (addScore > 0) {
-        note = '+' + addScore.toFixed(1) + ' : Ran places:' + note2 + '\n';
+        note = '+' + addScore.toFixed(1) + ' : Ran places: ' + normalizedPlaces + '\n';
     }
     return [addScore, note];
 }
@@ -2666,13 +2677,20 @@ function calculatePerfectRecordBonus(horse, trackCondition) {
         const [runs, wins, seconds, thirds] = numbers;
         const podiums = wins + seconds + thirds;
         if (runs > 0 && wins === runs) {
-    perfectRecords.push({
-        type: label,
-        runs,
-        isPerfectWin: true,
-        isPerfectPodium: false
-    });
-}
+            perfectRecords.push({
+                type: label,
+                runs,
+                isPerfectWin: true,
+                isPerfectPodium: false
+            });
+        } else if (runs > 0 && podiums === runs) {
+            perfectRecords.push({
+                type: label,
+                runs,
+                isPerfectWin: false,
+                isPerfectPodium: true
+            });
+        }
     };
 
     evalRecord(horse['horse record track'], 'track');
@@ -2691,7 +2709,10 @@ function calculatePerfectRecordBonus(horse, trackCondition) {
             else if (record.runs <= 6) confidenceMultiplier = 0.8;
             else confidenceMultiplier = 1.0;
 
-            const bonus = (record.type === 'track+distance' || record.type === 'distance') ? 15 : baseBonus * confidenceMultiplier;
+            let bonus = (record.type === 'track+distance' || record.type === 'distance') ? 15 : baseBonus * confidenceMultiplier;
+            if (record.type === 'track' && record.isPerfectPodium && record.runs === 1) {
+                bonus = 25;
+            }
             totalBonus += bonus;
 
             const recordType = record.isPerfectWin ? 'UNDEFEATED' : '100% PODIUM';
@@ -2699,9 +2720,11 @@ function calculatePerfectRecordBonus(horse, trackCondition) {
     notes.push(`+15.0 : Specialist - Undefeated Track+Distance`);
 } else if (record.type === 'distance') {
     notes.push(`+15.0 : Specialist - Undefeated Distance`);
-} else {
-    notes.push(`+${bonus.toFixed(1)} : ${recordType} at ${record.type} (${record.runs}/${record.runs}) - specialist bonus`);
-}
+            } else if (record.type === 'track' && record.isPerfectPodium && record.runs === 1) {
+                notes.push(`+25.0 : 100% PODIUM at track (1/1) - specialist bonus`);
+            } else {
+                notes.push(`+${bonus.toFixed(1)} : ${recordType} at ${record.type} (${record.runs}/${record.runs}) - specialist bonus`);
+            }
         });
 
         if (perfectRecords.length > 1) {
