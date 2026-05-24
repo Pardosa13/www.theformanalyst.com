@@ -745,51 +745,6 @@
   </div>
 </div>
 
-<div class="afl-card">
-  <div class="afl-card-header">
-    <h4><i class="bi bi-graph-up-arrow"></i> Weighting Backtest (Settled Results)</h4>
-    <span style="font-size:11px;color:var(--text-muted);">
-      {{ weighting_backtest.settled_rows if weighting_backtest else 0 }} graded bets
-    </span>
-  </div>
-  <div class="afl-card-body" style="padding-top:12px;">
-    {% if weighting_backtest and weighting_backtest.rows %}
-    <div class="table-responsive">
-      <table class="table table-sm align-middle" style="margin-bottom:0;">
-        <thead>
-          <tr>
-            <th>Market</th>
-            <th>Season/Opp/Last5 Weights</th>
-            <th>Edge Cut</th>
-            <th>Bets</th>
-            <th>Hit Rate</th>
-            <th>ROI / Bet</th>
-            <th>Total Units</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in weighting_backtest.rows %}
-          <tr>
-            <td><strong>{{ (r.market or '').replace('player_', '').replace('_', ' ')|title }}</strong></td>
-            <td>{{ '%.2f'|format(r.w_season) }} / {{ '%.2f'|format(r.w_opp) }} / {{ '%.2f'|format(r.w_l5) }}</td>
-            <td>{{ '%.1f'|format(r.edge_cut) }}</td>
-            <td>{{ r.bets }}</td>
-            <td>{{ '%.2f'|format(r.hit_rate_pct) }}%</td>
-            <td class="{{ 'text-success' if r.roi_pct >= 0 else 'text-danger' }}">{{ '%.2f'|format(r.roi_pct) }}%</td>
-            <td class="{{ 'text-success' if r.total_units >= 0 else 'text-danger' }}">{{ '%.2f'|format(r.total_units) }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <div style="font-size:12px;color:var(--text-muted);">
-      No settled win/loss rows available yet for weighting backtesting.
-    </div>
-    {% endif %}
-  </div>
-</div>
-
 <!-- ── Main tabs ────────────────────────────────────────────────── -->
 <div class="afl-tabs">
   <button class="afl-tab active" data-tab="players" onclick="switchTab('players',this)">
@@ -885,6 +840,61 @@
      TAB: VALUE FINDER
      ════════════════════════════════════════════════════════════════ -->
 <div id="tab-value" class="tab-panel">
+  <div class="afl-card">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-sliders"></i> Recommended Weight Updates</h4>
+      <span style="font-size:11px;color:var(--text-muted);">
+        {{ weighting_backtest.settled_rows if weighting_backtest else 0 }} graded bets
+      </span>
+    </div>
+    <div class="afl-card-body" style="padding-top:12px;">
+      {% if weighting_backtest and weighting_backtest.rows %}
+      {% set top = weighting_backtest.best_overall %}
+      <div style="margin-bottom:10px;font-size:13px;">
+        <strong>Update-to now:</strong>
+        {% if top %}
+          <span class="text-success">
+            {{ (top.market or '').replace('player_', '').replace('_', ' ')|title }}
+            → season {{ '%.2f'|format(top.w_season) }}, opp {{ '%.2f'|format(top.w_opp) }}, last5 {{ '%.2f'|format(top.w_l5) }}, edge cutoff {{ '%.1f'|format(top.edge_cut) }}
+          </span>
+        {% endif %}
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle" style="margin-bottom:0;">
+          <thead>
+            <tr>
+              <th>Market</th>
+              <th>Set weights to (season/opp/last5)</th>
+              <th>Set edge cutoff to</th>
+              <th>Bets</th>
+              <th>Hit Rate</th>
+              <th>ROI / Bet</th>
+              <th>Total Units</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in weighting_backtest.rows %}
+            <tr>
+              <td><strong>{{ (r.market or '').replace('player_', '').replace('_', ' ')|title }}</strong></td>
+              <td><code>{{ '%.2f'|format(r.w_season) }} / {{ '%.2f'|format(r.w_opp) }} / {{ '%.2f'|format(r.w_l5) }}</code></td>
+              <td><code>{{ '%.1f'|format(r.edge_cut) }}</code></td>
+              <td>{{ r.bets }}</td>
+              <td>{{ '%.2f'|format(r.hit_rate_pct) }}%</td>
+              <td class="{{ 'text-success' if r.roi_pct >= 0 else 'text-danger' }}">{{ '%.2f'|format(r.roi_pct) }}%</td>
+              <td class="{{ 'text-success' if r.total_units >= 0 else 'text-danger' }}">{{ '%.2f'|format(r.total_units) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div style="font-size:12px;color:var(--text-muted);">
+        No settled win/loss rows available yet for weighting backtesting.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-lightning-charge-fill"></i> Value Finder</h4>

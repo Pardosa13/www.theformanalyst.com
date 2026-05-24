@@ -3830,7 +3830,12 @@ def _db_best_prop_weightings(db) -> dict:
                 "total_units": round(float(row.get("total_units") or 0.0), 2),
             }
         )
-    return {"rows": formatted, "settled_rows": int(settled_rows)}
+    best_overall = formatted[0] if formatted else None
+    return {
+        "rows": formatted,
+        "settled_rows": int(settled_rows),
+        "best_overall": best_overall,
+    }
 
 
 def _hit_rate(rows: list[dict], stat: str, line: float) -> float:
