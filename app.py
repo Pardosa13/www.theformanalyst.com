@@ -1357,13 +1357,23 @@ def get_meeting_results(meeting_id):
     meeting = Meeting.query.get_or_404(meeting_id)
     races = Race.query.filter_by(meeting_id=meeting_id).order_by(Race.race_number).all()
     
+    active_components = Component.query.filter_by(is_active=True).all()
     results = {
         'meeting_name': meeting.meeting_name,
         'uploaded_at': meeting.uploaded_at,
-        'races': []
+        'races': [],
+        'active_filter_components': [
+            {
+                'key': component.component_key or normalize_component_key(component.component_name),
+                'name': component_display_name_for_key(
+                    component.component_key or normalize_component_key(component.component_name),
+                    component.component_name,
+                ),
+            }
+            for component in active_components
+        ]
     }
     
-    active_components = Component.query.filter_by(is_active=True).all()
     components_by_key = build_active_component_lookup(active_components)
     component_keys = set(components_by_key)
     jockey_ride_counts = {}
@@ -1412,6 +1422,7 @@ def get_meeting_results(meeting_id):
                     if component_key in component_keys
                 ]
                 matched_components.sort(key=lambda x: x['roi'], reverse=True)
+                matched_component_keys = [component['key'] for component in matched_components]
 
                 if matched_components:
                     best_bet_reasons.append(
@@ -1442,6 +1453,7 @@ def get_meeting_results(meeting_id):
                 'is_scratched': horse.is_scratched,
                 'is_best_bet': is_best_bet,
                 'best_bet_reasons': best_bet_reasons if is_best_bet else [],
+                'matched_component_keys': matched_component_keys if pred else [],
                 'prediction': type('P', (), {
                     'score': pred.score if pred else 0,
                     'predicted_odds': pred.predicted_odds if pred else '',

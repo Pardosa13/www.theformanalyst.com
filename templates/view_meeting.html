@@ -1530,6 +1530,7 @@ function updateScratchings(meetingId) {
         {% for horse in race.horses|selectattr('prediction')|sort(attribute='prediction.score', reverse=true) %}
         <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
             data-horse-id="{{ horse.horse_id }}"
+            data-active-components="{{ horse.matched_component_keys|join(',') }}"
             class="{% if horse.is_scratched %}horse-scratched{% endif %}{% if horse.is_best_bet %} best-bet-highlight{% endif %}">
 
           <td style="padding:12px; text-align:center; font-weight:bold; border-bottom:1px solid #e2e8f0;">
@@ -2542,26 +2543,17 @@ function createHorseCard(horse, runnerKey, silkStyle, columnIndex, horseIndex, r
 
 // ── Filter System — 100% identical ──
 const FILTER_CRITERIA = {
-    coltBonus: { label: 'Colt Bonus (82.7% ROI · 20.0% SR · N=45)', detect: function(notes) { return notes.includes('+20.0 : COLT') || notes.includes('+20.0: COLT'); } },
-    coltBase: { label: 'Colt - Base Bonus (66.1% ROI · 14.3% SR · N=841)', detect: function(notes) { return notes.includes('COLT (') && !notes.includes('3yo COLT') && !notes.includes('Fast sectional'); } },
-    threeYoColt: { label: '3yo Colt Combo (49.2% ROI · 18.1% SR · N=2043)', detect: function(notes) { return notes.includes('3yo COLT'); } },
-    fastSectionalColt: { label: 'Fast Sectional + Colt (21.0% ROI · 40.0% SR · N=15)', detect: function(notes) { return notes.includes('Fast sectional + COLT combo'); } },
-    fiveYoHorse: { label: '5yo Horse Entire (224.8% ROI · 28.6% SR · N=21)', detect: function(notes) { return notes.includes('+25.0 : 5yo horse'); } },
-    leaderStaying: { label: 'Leader in Staying Race (42.9% ROI · 14.3% SR · N=14)', detect: function(notes) { return notes.includes('LEADER in Staying'); } },
-    sprintLeaderRunDown: { label: 'Pace Angle - Sprint Leader Run Down (32.1% ROI · 26.0% SR · N=123)', detect: function(notes) { return notes.includes('Sprint Leader Run Down Bonus'); } },
-    hiddenEdgeShortPriceCompetitive: { label: 'Hidden Edge - Short Price + Competitive Effort (102.3% ROI · 20.7% SR · N=179)', detect: function(notes) { return notes.includes('Hidden Edge — Short price ($2-$5) + competitive effort'); } },
-    hiddenEdgeElite600Weight: { label: 'Hidden Edge - Elite 600m + Marginally Below Weight (66.7% ROI · 16.8% SR · N=167)', detect: function(notes) { return notes.includes('Hidden Edge — Elite last 600m sectional + marginally below weight'); } },
-    hiddenEdgeConditionNarrowWin: { label: 'Hidden Edge - Good Condition WR + Narrow Win (62.1% ROI · 23.0% SR · N=152)', detect: function(notes) { return notes.includes('Hidden Edge — Good condition win rate + narrow win'); } },
-    hiddenEdgeShortPriceSlightlyBelow: { label: 'Hidden Edge - Short Price + Slightly Below Weight (59.3% ROI · 18.9% SR · N=238)', detect: function(notes) { return notes.includes('Hidden Edge — Short price ($2-$5) + slightly below weight'); } },
-    hiddenEdgeShortPriceSectional: { label: 'Hidden Edge - Short Price + Best Recent Sectional (49.9% ROI · 19.6% SR · N=286)', detect: function(notes) { return notes.includes('Hidden Edge — Short price ($2-$5) + best recent sectional'); } },
-    anyHiddenEdge: { label: '⚡ ANY Hidden Edge Combination', detect: function(notes) { return notes.includes('Hidden Edge —'); } },
-    anyPositiveAngle: { label: '🔥 ANY Positive Angle (all active components)', detect: function(notes) { return notes.includes('+20.0 : COLT') || notes.includes('3yo COLT') || notes.includes('Fast sectional + COLT combo') || notes.includes('+25.0 : 5yo horse') || notes.includes('LEADER in Staying') || notes.includes('Sprint Leader Run Down Bonus') || notes.includes('Hidden Edge —'); } }
+{% for component in results.active_filter_components %}
+    {{ component.key|tojson }}: { label: {{ component.name|tojson }} }{{ "," if not loop.last else "" }}
+{% endfor %}
 };
 let activeFilters = [];
-function parseHorseCriteria(notes) {
-    if (!notes || typeof notes !== 'string') return {};
+function parseHorseCriteria(row) {
+    if (!row) return {};
+    const activeComponentsCsv = row.getAttribute('data-active-components') || '';
+    const activeComponents = activeComponentsCsv ? activeComponentsCsv.split(',').filter(Boolean) : [];
     const criteria = {};
-    Object.keys(FILTER_CRITERIA).forEach(function(key) { criteria[key] = FILTER_CRITERIA[key].detect(notes); });
+    Object.keys(FILTER_CRITERIA).forEach(function(key) { criteria[key] = activeComponents.includes(key); });
     return criteria;
 }
 function createFilterBar() {
@@ -2604,9 +2596,7 @@ function applyFilters() {
     const allRows = document.querySelectorAll('table tbody tr');
     if (activeFilters.length === 0) { allRows.forEach(function(row) { row.classList.remove('horse-row-match'); }); return; }
     allRows.forEach(function(row) {
-        const notesElement = row.querySelector('pre'); if (!notesElement) return;
-        const notes = notesElement.textContent || '';
-        const horseCriteria = parseHorseCriteria(notes);
+        const horseCriteria = parseHorseCriteria(row);
         const meetsAllFilters = activeFilters.every(function(filterKey) { return horseCriteria[filterKey] === true; });
         if (meetsAllFilters) row.classList.add('horse-row-match'); else row.classList.remove('horse-row-match');
     });
