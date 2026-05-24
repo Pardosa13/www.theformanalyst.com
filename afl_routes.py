@@ -3776,7 +3776,7 @@ def _db_best_prop_weightings(db) -> dict:
     ),
     agg AS (
       SELECT
-        market,
+        p.market,
         w_opp,
         w_l5,
         edge_cut,
@@ -3788,7 +3788,7 @@ def _db_best_prop_weightings(db) -> dict:
         SUM(CASE WHEN edge_stat >= edge_cut THEN pnl ELSE 0.0 END) AS total_units
       FROM picked p
       JOIN market_totals mt ON mt.market = p.market
-      GROUP BY p.market, mt.settled_bets, w_opp, w_l5, edge_cut
+      GROUP BY p.market, mt.settled_bets, p.w_opp, p.w_l5, p.edge_cut
       HAVING COUNT(*) FILTER (WHERE edge_stat >= edge_cut) >= 40
     ),
     ranked AS (
