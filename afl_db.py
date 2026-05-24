@@ -1620,6 +1620,30 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
           END
         LIMIT 1
     """)
+    # Fallback for legacy 2026 AFLTables imports (hashed match_id namespace):
+    # resolve stats by natural game identity + player identity when direct
+    # match_id join misses.
+    stat_sql_fallback = db.text("""
+        SELECT *
+        FROM afl_player_stats
+        WHERE match_date = :match_date
+          AND match_home_team = :home_team
+          AND match_away_team = :away_team
+          AND (
+            (:player_id IS NOT NULL AND player_id = :player_id)
+            OR
+            (
+                :player_name <> ''
+                AND LOWER(TRIM(player_first_name || ' ' || player_last_name)) = :player_name
+            )
+          )
+        ORDER BY
+          CASE
+            WHEN :player_id IS NOT NULL AND player_id = :player_id THEN 0
+            ELSE 1
+          END
+        LIMIT 1
+    """)
     update_sql = db.text("""
         UPDATE afl_model_selections
         SET settled_at = NOW(),
@@ -1635,6 +1659,7 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
     # grouped by match so we emit one log line per missing match rather than
     # one per player (which would flood the log).
     missing_stats: dict[str, list[str]] = {}  # "home vs away YYYY-MM-DD" -> [player, ...]
+    fallback_hits = 0
 
     with db.engine.begin() as conn:
         for row in pending:
@@ -1654,6 +1679,19 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
                     "match_id": row.get("match_id"),
                 },
             ).mappings().fetchone()
+            if not stat_row:
+                stat_row = conn.execute(
+                    stat_sql_fallback,
+                    {
+                        "player_id": row.get("player_id"),
+                        "player_name": _normalise_name(row.get("player_name")),
+                        "match_date": match_time.date() if hasattr(match_time, "date") else None,
+                        "home_team": _team(row.get("home_team")),
+                        "away_team": _team(row.get("away_team")),
+                    },
+                ).mappings().fetchone()
+                if stat_row:
+                    fallback_hits += 1
             if not stat_row:
                 # Accumulate missing-stats diagnostics keyed by match identity
                 match_key = (
@@ -1700,6 +1738,12 @@ def settle_model_selections(db, settle_after_hours: int = 2) -> int:
                 f"{' ...' if len(players) > 3 else ''})"
                 for match, players in sorted(missing_stats.items())
             ),
+        )
+    if fallback_hits:
+        _log.info(
+            "settle_model_selections: settled %d pick(s) via natural-key fallback "
+            "(date/home/away + player) after match_id join miss",
+            fallback_hits,
         )
 
     return settled
