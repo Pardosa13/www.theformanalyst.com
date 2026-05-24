@@ -2413,6 +2413,9 @@ def calculate_market_edge(
     vs_opp_avg: float = None,
     last5_avg: float = None,
     player_stats: list[dict] = None,
+    season_weight: float = 0.5,
+    opp_weight: float = 0.5,
+    last5_weight: float = 0.0,
 ) -> dict:
     """
     Probability-based edge calculation for AFL player props.
@@ -2456,14 +2459,26 @@ def calculate_market_edge(
         stat_values = []
 
     # Build blended model prediction from the correct market stat.
+    season_weight = max(float(season_weight or 0.0), 0.0)
+    opp_weight = max(float(opp_weight or 0.0), 0.0)
+    last5_weight = min(max(float(last5_weight or 0.0), 0.0), 1.0)
+
+    base_mix_total = season_weight + opp_weight
+    if base_mix_total <= 0:
+        season_mix = 1.0
+        opp_mix = 0.0
+    else:
+        season_mix = season_weight / base_mix_total
+        opp_mix = opp_weight / base_mix_total
+
     base_pred = max(float(player_avg) if player_avg is not None else 0.0, 0.0)
     model_pred = base_pred
 
     if vs_opp_avg is not None and vs_opp_avg > 0:
-        model_pred = base_pred * 0.70 + float(vs_opp_avg) * 0.30
+        model_pred = base_pred * season_mix + float(vs_opp_avg) * opp_mix
 
     if last5_avg is not None and last5_avg > 0:
-        model_pred = model_pred * 0.80 + float(last5_avg) * 0.20
+        model_pred = model_pred * (1.0 - last5_weight) + float(last5_avg) * last5_weight
 
     mu = max(model_pred, 0.01)
 
