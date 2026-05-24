@@ -1716,12 +1716,12 @@ def parse_notes_components(notes):
         (r'(?:\+\s*([\d.]+)\s*:\s*)?100% PODIUM.*condition', 'Specialist - Perfect Podium Condition'),
 
         # ====== EXACT TEXT COMPONENTS (DATA PAGE TRACKING) ======
-        (r'Ran places:\s*2nd\s+1st\s+1st', 'Ran places: 2nd 1st 1st'),
+        (r'Ran places:\s*2nd[\s,]+1st[\s,]+1st', 'Ran places: 2nd 1st 1st'),
         (r'100% PODIUM at track \(1/1\) - specialist bonus', '100% PODIUM at track (1/1) - specialist bonus'),
-        (r'Ran places:\s*1st\s+1st\s+2nd', 'Ran places: 1st 1st 2nd'),
-        (r'Ran places:\s*2nd\s+2nd\s+2nd', 'Ran places: 2nd 2nd 2nd'),
-        (r'Ran places:\s*2nd\s+2nd\s+3rd', 'Ran places: 2nd 2nd 3rd'),
-        (r'Ran places:\s*2nd\s+1st\s+3rd', 'Ran places: 2nd 1st 3rd'),
+        (r'Ran places:\s*1st[\s,]+1st[\s,]+2nd', 'Ran places: 1st 1st 2nd'),
+        (r'Ran places:\s*2nd[\s,]+2nd[\s,]+2nd', 'Ran places: 2nd 2nd 2nd'),
+        (r'Ran places:\s*2nd[\s,]+2nd[\s,]+3rd', 'Ran places: 2nd 2nd 3rd'),
+        (r'Ran places:\s*2nd[\s,]+1st[\s,]+3rd', 'Ran places: 2nd 1st 3rd'),
         (r'UNDEFEATED at good condition \(1/1\) - specialist bonus', 'UNDEFEATED at good condition (1/1) - specialist bonus'),
         (r'Ran places:\s*1st\s+1st\s+1st', 'Ran places: 1st 1st 1st'),
         (r'5yo Mare', '5yo Mare'),
@@ -1731,7 +1731,7 @@ def parse_notes_components(notes):
         (r'Ran places:\s*2nd\s+1st', 'Ran places: 2nd 1st'),
         (r'Ran places:\s*2nd\s+2nd', 'Ran places: 2nd 2nd'),
         (r'Ran places:\s*1st\s+3rd', 'Ran places: 1st 3rd'),
-        (r'Ran places:\s*2nd\s+3rd\s+2nd', 'Ran places: 2nd 3rd 2nd'),
+        (r'Ran places:\s*2nd[\s,]+3rd[\s,]+2nd', 'Ran places: 2nd 3rd 2nd'),
 
         # ====== HISTORICAL SECTIONALS (CSV) ======
         # FIX: old pattern required leading + but new format uses +- prefix for negative z-scores
