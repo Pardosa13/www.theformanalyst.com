@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # fetch_afl_2026_stats.R
 # ======================
-# Fetches 2026 AFL player stats via fitzRoy (afltables primary, fryzigg fallback)
+# Fetches 2026 AFL player stats via fitzRoy (fryzigg primary, afltables fallback)
 # and writes them to data/afl_2026_stats.csv.
 #
 # Called by .github/workflows/fetch-afl-2026.yml
@@ -121,36 +121,37 @@ on.exit({
 
 data <- NULL
 
-# Try afltables first — it updates within a day of each round finishing
-# and is the most reliable source for current-season data.
+# Try fryzigg first so we preserve native match_id/player_id values that
+# align with settlement joins in the app.
 tryCatch({
-  cat("Trying source=afltables ...\n")
-  data <- fetch_player_stats(season = 2026, source = "afltables")
+  cat("Trying source=fryzigg ...\n")
+  data <- fetch_player_stats(season = 2026, source = "fryzigg")
   if (!is.null(data) && nrow(data) > 0) {
-    cat("afltables rows scraped:", nrow(data), "\n")
+    cat("fryzigg rows scraped:", nrow(data), "\n")
   } else {
-    cat("afltables rows scraped: 0\n")
+    cat("fryzigg rows scraped: 0\n")
     data <- NULL
   }
 }, error = function(e) {
-  cat("afltables failed:", conditionMessage(e), "\n")
+  cat("fryzigg failed:", conditionMessage(e), "\n")
   data <<- NULL
 })
 
-# Fall back to fryzigg if afltables returned nothing.
-# Fryzigg typically lags 1-2 weeks behind the current round.
+# Fall back to afltables only if fryzigg returned nothing.
+# WARNING: afltables output does not include native match_id values, so
+# settlement may require natural-key fallback joins.
 if (is.null(data) || nrow(data) == 0) {
   tryCatch({
-    cat("Trying source=fryzigg ...\n")
-    data <- fetch_player_stats(season = 2026, source = "fryzigg")
+    cat("Trying source=afltables ...\n")
+    data <- fetch_player_stats(season = 2026, source = "afltables")
     if (!is.null(data) && nrow(data) > 0) {
-      cat("fryzigg fallback rows:", nrow(data), "\n")
+      cat("afltables fallback rows:", nrow(data), "\n")
     } else {
-      cat("fryzigg fallback rows: 0\n")
+      cat("afltables fallback rows: 0\n")
       data <- NULL
     }
   }, error = function(e) {
-    cat("fryzigg failed:", conditionMessage(e), "\n")
+    cat("afltables failed:", conditionMessage(e), "\n")
     data <<- NULL
   })
 }
