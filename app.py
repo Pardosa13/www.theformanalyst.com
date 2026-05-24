@@ -1506,7 +1506,7 @@ def parse_notes_components(notes):
     patterns = [
 
         # ====== LAST 10 FORM ======
-        (r'([+-]?\s*[\d.]+)\s*:\s*Ran places:', '_ran_places_dynamic'),
+        (r'(?:([+-]?\s*[\d.]+)\s*:\s*)?Ran places:\s*([^\n]+)', '_ran_places_dynamic'),
 
         # ====== JOCKEYS ======
         # Live L100 strike rate patterns
@@ -1671,7 +1671,7 @@ def parse_notes_components(notes):
         (r'-\s*15\.0\s*:\s*Up.*from last start', 'Weight Change - Up 3kg+'),
 
         # ====== CAREER WIN RATE ======
-        (r'\+\s*0\.0\s*:\s*Elite career win rate', 'Career Win Rate - Elite 40%+'),
+        (r'(?:\+\s*0\.0\s*:\s*)?Elite career win rate', 'Career Win Rate - Elite 40%+'),
         (r'\+\s*0\.0\s*:\s*Strong career win rate', 'Career Win Rate - Strong 30-40%'),
         (r'-\s*15\.0\s*:\s*Poor career win rate', 'Career Win Rate - Poor <10%'),
 
@@ -1682,7 +1682,7 @@ def parse_notes_components(notes):
         (r'\+\s*0\.0\s*:\s*\(4yo\)', 'Age/Sex - 4yo'),
 
         # ====== AGE/SEX - MARE PENALTIES ======
-        (r'-\s*15\.0\s*:\s*5yo Mare', 'Age/Sex - 5yo Mare Penalty'),
+        (r'(?:-\s*15\.0\s*:\s*)?5yo Mare', 'Age/Sex - 5yo Mare Penalty'),
         (r'-\s*10\.0\s*:\s*6-7yo Mare', 'Age/Sex - 6-7yo Mare Penalty'),
 
         # ====== AGE/SEX - OLD AGE PENALTIES ======
@@ -1709,11 +1709,11 @@ def parse_notes_components(notes):
         # ====== SPECIALIST / PERFECT RECORD ======
         (r'\+\s*15\.0\s*:\s*Specialist - Undefeated Track\+Distance', 'Specialist - Undefeated Track+Distance'),
         (r'\+\s*15\.0\s*:\s*Specialist - Undefeated Distance(?!.*Track)', 'Specialist - Undefeated Distance'),
-        (r'\+\s*([\d.]+)\s*:\s*UNDEFEATED.*condition.*specialist', 'Specialist - Undefeated Condition'),
-        (r'\+\s*([\d.]+)\s*:\s*100% PODIUM.*track\+distance', 'Specialist - Perfect Podium Track+Distance'),
-        (r'\+\s*([\d.]+)\s*:\s*100% PODIUM.*track\b', 'Specialist - Perfect Podium Track'),
-        (r'\+\s*([\d.]+)\s*:\s*100% PODIUM.*distance', 'Specialist - Perfect Podium Distance'),
-        (r'\+\s*([\d.]+)\s*:\s*100% PODIUM.*condition', 'Specialist - Perfect Podium Condition'),
+        (r'(?:\+\s*([\d.]+)\s*:\s*)?UNDEFEATED.*condition.*specialist', 'Specialist - Undefeated Condition'),
+        (r'(?:\+\s*([\d.]+)\s*:\s*)?100% PODIUM.*track\+distance', 'Specialist - Perfect Podium Track+Distance'),
+        (r'(?:\+\s*([\d.]+)\s*:\s*)?100% PODIUM.*track\b', 'Specialist - Perfect Podium Track'),
+        (r'(?:\+\s*([\d.]+)\s*:\s*)?100% PODIUM.*distance', 'Specialist - Perfect Podium Distance'),
+        (r'(?:\+\s*([\d.]+)\s*:\s*)?100% PODIUM.*condition', 'Specialist - Perfect Podium Condition'),
 
         # ====== HISTORICAL SECTIONALS (CSV) ======
         # FIX: old pattern required leading + but new format uses +- prefix for negative z-scores
@@ -1916,7 +1916,21 @@ def parse_notes_components(notes):
 
             if name == '_ran_places_dynamic':
                 try:
-                    val = float(match.group(1).replace(' ', '').replace('+', ''))
+                    score_group = match.group(1)
+                    if score_group:
+                        val = float(score_group.replace(' ', '').replace('+', ''))
+                    else:
+                        places_text = (match.group(2) or '').lower()
+                        tokens = re.findall(r'\b(\d+)(?:st|nd|rd|th)\b', places_text)
+                        val = 0.0
+                        for token in tokens:
+                            place_num = int(token)
+                            if place_num == 1:
+                                val += 3.0
+                            elif place_num == 2:
+                                val += 2.0
+                            elif place_num == 3:
+                                val += 1.0
                     if val >= 8:
                         components['Ran Places - Strong (8+)'] = val
                     elif val >= 3:
