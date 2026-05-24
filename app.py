@@ -341,6 +341,11 @@ with app.app_context():
     {'component_name': 'Specialist - Undefeated Track+Distance',                'appearances': 146,  'wins': 43,  'strike_rate': 29.5, 'roi_percentage': 31.4,  'is_active': True},
     {'component_name': 'First Up - Specialist Undefeated',                      'appearances': 62,   'wins': 21,  'strike_rate': 33.9, 'roi_percentage': 27.7,  'is_active': True},
     {'component_name': 'Signal Agreement - Both Signals Agree',                 'appearances': 814,  'wins': 270, 'strike_rate': 33.2, 'roi_percentage': -15.1, 'is_active': True},
+    {'component_name': 'Ran places: 2nd 2nd 3rd',                               'appearances': 0,    'wins': 0,   'strike_rate': 0.0,  'roi_percentage': 0.0,   'is_active': True},
+    {'component_name': 'Ran places: 1st 1st 2nd',                               'appearances': 0,    'wins': 0,   'strike_rate': 0.0,  'roi_percentage': 0.0,   'is_active': True},
+    {'component_name': 'Ran places: 2nd 1st 1st',                               'appearances': 0,    'wins': 0,   'strike_rate': 0.0,  'roi_percentage': 0.0,   'is_active': True},
+    {'component_name': 'Ran places: 2nd 3rd 2nd',                               'appearances': 0,    'wins': 0,   'strike_rate': 0.0,  'roi_percentage': 0.0,   'is_active': True},
+    {'component_name': '100% PODIUM at track (1/1) - specialist bonus',         'appearances': 0,    'wins': 0,   'strike_rate': 0.0,  'roi_percentage': 0.0,   'is_active': True},
 ]
 
         added = 0
