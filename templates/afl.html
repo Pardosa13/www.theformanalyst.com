@@ -374,6 +374,7 @@
   .value-table tbody tr { border-bottom:1px solid var(--border-subtle); transition:background .12s; }
   .value-table tbody tr:hover { background:var(--bg-hover); }
   .value-table tbody td { padding:9px 12px; font-size:12px; color:var(--text-primary); vertical-align:middle; }
+  .value-table .mono { font-family:'DM Mono',monospace; color:var(--text-secondary); }
   .edge-chip {
     display:inline-flex; align-items:center; justify-content:center;
     min-width:60px; padding:3px 7px; border-radius:6px;
@@ -977,10 +978,10 @@
         {% endif %}
       </div>
       <div style="margin-bottom:10px;font-size:12px;color:var(--text-muted);">
-        Table rows require at least {{ weighting_backtest.min_bets if weighting_backtest else 40 }} qualifying bets after edge cutoff.
+        Table shows <strong>best ROI setup per market</strong> and requires at least {{ weighting_backtest.min_bets if weighting_backtest else 40 }} qualifying bets after edge cutoff.
       </div>
-      <div class="table-responsive">
-        <table class="table table-sm align-middle" style="margin-bottom:0;">
+      <div class="scroll-x">
+        <table class="value-table" style="margin-bottom:0;">
           <thead>
             <tr>
               <th>Market</th>
@@ -997,8 +998,8 @@
             {% for r in weighting_backtest.rows %}
             <tr>
               <td><strong>{{ (r.market or '').replace('player_', '').replace('_', ' ')|title }}</strong></td>
-              <td><code>{{ '%.2f'|format(r.w_season) }} / {{ '%.2f'|format(r.w_opp) }} / {{ '%.2f'|format(r.w_l5) }}</code></td>
-              <td><code>{{ '%.1f'|format(r.edge_cut) }}</code></td>
+              <td><span class="mono">{{ '%.2f'|format(r.w_season) }} / {{ '%.2f'|format(r.w_opp) }} / {{ '%.2f'|format(r.w_l5) }}</span></td>
+              <td><span class="mono">{{ '%.1f'|format(r.edge_cut) }}</span></td>
               <td>{{ r.bets }}</td>
               <td>{{ '%.2f'|format(r.hit_rate_pct) }}%</td>
               <td class="{{ 'text-success' if r.roi_pct >= 0 else 'text-danger' }}">{{ '%.2f'|format(r.roi_pct) }}%</td>
