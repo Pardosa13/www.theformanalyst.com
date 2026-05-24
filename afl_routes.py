@@ -113,6 +113,7 @@ def register_afl_routes(app, db):
                 "If the Railway cron synced successfully, verify that the Railway web "
                 "service and cron service are attached to the same DATABASE_URL."
             )
+        weighting_backtest = _db_best_prop_weightings(db)
 
         return render_template(
             "afl.html",
@@ -129,6 +130,7 @@ def register_afl_routes(app, db):
             standings=standings,
             db_diagnostics=db_diagnostics,
             db_warning=db_warning,
+            weighting_backtest=weighting_backtest,
         )
 
     @app.route("/api/afl/player-stats")
@@ -3691,6 +3693,146 @@ def _resolve_player_profile_for_market(
     games = sorted(player.get("games", []), key=_sort_date_key, reverse=True)
     season_games = [g for g in games if g.get("season") == effective_season]
     return {"player": player, "games": games, "season_games": season_games}
+
+
+def _db_best_prop_weightings(db) -> dict:
+    """
+    Backtest candidate AFL prop weightings against settled model selections.
+
+    Returns a payload suitable for direct rendering in afl.html:
+    {
+      "rows": [ ... per-market best row ... ],
+      "settled_rows": int
+    }
+    """
+    sql = """
+    WITH settled AS (
+      SELECT
+        market,
+        line_type,
+        line,
+        odds,
+        COALESCE(season_avg, model_prediction, 0.0) AS season_avg,
+        COALESCE(vs_opp_avg, 0.0) AS vs_opp_avg,
+        COALESCE(last5_avg, 0.0) AS last5_avg,
+        result,
+        CASE WHEN result = 'win' THEN odds - 1.0 ELSE -1.0 END AS pnl
+      FROM afl_model_selections
+      WHERE result IN ('win','loss')
+        AND line IS NOT NULL
+        AND odds IS NOT NULL
+        AND market IS NOT NULL
+        AND line_type IN ('Over','Under')
+    ),
+    params AS (
+      SELECT *
+      FROM (VALUES
+        (0.0::double precision),(0.1),(0.2),(0.3),(0.4),(0.5)
+      ) o(w_opp)
+      CROSS JOIN (VALUES
+        (0.0::double precision),(0.1),(0.2),(0.3),(0.4),(0.5)
+      ) l(w_l5)
+      CROSS JOIN (VALUES
+        (0.0::double precision),(0.5),(1.0),(1.5),(2.0),(2.5),(3.0),(4.0),(5.0),(6.0)
+      ) e(edge_cut)
+    ),
+    scored AS (
+      SELECT
+        s.market,
+        s.line_type,
+        s.line,
+        s.result,
+        s.pnl,
+        p.w_opp,
+        p.w_l5,
+        p.edge_cut,
+        ((((1.0 - p.w_opp) * s.season_avg) + (p.w_opp * s.vs_opp_avg)) * (1.0 - p.w_l5))
+        + (s.last5_avg * p.w_l5) AS pred_stat
+      FROM settled s
+      CROSS JOIN params p
+    ),
+    picked AS (
+      SELECT
+        market,
+        result,
+        pnl,
+        w_opp,
+        w_l5,
+        edge_cut,
+        CASE
+          WHEN line_type = 'Over' THEN (pred_stat - line)
+          ELSE (line - pred_stat)
+        END AS edge_stat
+      FROM scored
+    ),
+    agg AS (
+      SELECT
+        market,
+        w_opp,
+        w_l5,
+        edge_cut,
+        COUNT(*) FILTER (WHERE edge_stat >= edge_cut) AS bets,
+        AVG(CASE WHEN edge_stat >= edge_cut AND result = 'win' THEN 1.0
+                 WHEN edge_stat >= edge_cut THEN 0.0 END) AS hit_rate,
+        AVG(CASE WHEN edge_stat >= edge_cut THEN pnl END) AS roi_units_per_bet,
+        SUM(CASE WHEN edge_stat >= edge_cut THEN pnl ELSE 0.0 END) AS total_units
+      FROM picked
+      GROUP BY market, w_opp, w_l5, edge_cut
+      HAVING COUNT(*) FILTER (WHERE edge_stat >= edge_cut) >= 80
+    ),
+    ranked AS (
+      SELECT
+        *,
+        ROW_NUMBER() OVER (
+          PARTITION BY market
+          ORDER BY roi_units_per_bet DESC, total_units DESC, bets DESC
+        ) AS rn
+      FROM agg
+    )
+    SELECT
+      market,
+      w_opp,
+      w_l5,
+      edge_cut,
+      bets,
+      hit_rate,
+      roi_units_per_bet,
+      total_units
+    FROM ranked
+    WHERE rn = 1
+    ORDER BY roi_units_per_bet DESC, total_units DESC, market;
+    """
+    count_sql = """
+      SELECT COUNT(*) AS settled_rows
+      FROM afl_model_selections
+      WHERE result IN ('win','loss');
+    """
+    try:
+        with db.engine.begin() as conn:
+            rows = conn.execute(db.text(sql)).mappings().all()
+            settled_rows = conn.execute(db.text(count_sql)).scalar() or 0
+    except Exception as exc:
+        logger.warning("AFL weighting backtest query failed: %s", exc)
+        return {"rows": [], "settled_rows": 0}
+
+    formatted = []
+    for row in rows:
+        formatted.append(
+            {
+                "market": row.get("market"),
+                "w_opp": float(row.get("w_opp") or 0.0),
+                "w_l5": float(row.get("w_l5") or 0.0),
+                "w_season": round(1.0 - float(row.get("w_opp") or 0.0), 2),
+                "edge_cut": float(row.get("edge_cut") or 0.0),
+                "bets": int(row.get("bets") or 0),
+                "hit_rate_pct": round(float(row.get("hit_rate") or 0.0) * 100.0, 2),
+                "roi_pct": round(float(row.get("roi_units_per_bet") or 0.0) * 100.0, 2),
+                "total_units": round(float(row.get("total_units") or 0.0), 2),
+            }
+        )
+    return {"rows": formatted, "settled_rows": int(settled_rows)}
+
+
 def _hit_rate(rows: list[dict], stat: str, line: float) -> float:
     if not rows:
         return 0.0
