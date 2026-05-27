@@ -499,6 +499,15 @@
 </div>
 
 
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#statePerformance" aria-expanded="false">
+    <h5>🧭 State by State Performance</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="statePerformance" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load state-by-state performance...</p></div>
+  </div>
+</div>
 <div class="section-card">
   <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#jurisdictionStrength" aria-expanded="false">
     <h5>🗺️ Jurisdiction Strength</h5><i class="bi bi-chevron-down"></i>
@@ -734,6 +743,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (priceAnalysis) { priceAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('price-analysis')) { loadPriceAnalysis(); } }); }
     const jurisdictionStrength = document.getElementById('jurisdictionStrength');
     if (jurisdictionStrength) { jurisdictionStrength.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('jurisdiction-strength')) { loadJurisdictionStrength(); } }); }
+    const statePerformance = document.getElementById('statePerformance');
+    if (statePerformance) { statePerformance.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('state-performance')) { loadStatePerformance(); } }); }
     const probabilityCalibration = document.getElementById('probabilityCalibration');
     if (probabilityCalibration) {
         probabilityCalibration.addEventListener('show.bs.collapse', function() {
@@ -797,6 +808,54 @@ function loadExternalFactors() {
         .then(data => { renderExternalFactors(data); loadedSections.add('external-factors'); })
         .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>'; console.error('Error:', error); });
 }
+function loadStatePerformance() {
+    const container = document.getElementById('statePerformance');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading state-by-state performance...</p></div>';
+    fetch(`/api/data/state-performance?${filterParams}`)
+        .then(response => response.json())
+        .then(data => { renderStatePerformance(data); loadedSections.add('state-performance'); })
+        .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading state performance. Please try again.</div>'; console.error('Error:', error); });
+}
+
+function renderStatePerformance(data) {
+    const container = document.getElementById('statePerformance');
+    if (data.error) {
+        container.innerHTML = `<div class="card-body text-danger">${data.error}</div>`;
+        return;
+    }
+    const rows = data.states || [];
+    if (!rows.length) {
+        container.innerHTML = '<div class="card-body"><p class="text-muted mb-0">No state performance rows found for the current filters.</p></div>';
+        return;
+    }
+
+    const body = rows.map((row, idx) => `
+        <tr>
+            <td class="text-center">${idx + 1}</td>
+            <td><strong>${row.state}</strong></td>
+            <td class="text-center">${row.races}</td>
+            <td class="text-center">${row.wins}</td>
+            <td class="text-center">${row.strike_rate.toFixed(1)}%</td>
+            <td class="text-center">$${row.staked.toFixed(2)}</td>
+            <td class="text-center">$${row.returns.toFixed(2)}</td>
+            <td class="text-center ${row.profit_loss > 0 ? 'text-success fw-bold' : row.profit_loss < 0 ? 'text-danger' : ''}">$${row.profit_loss.toFixed(2)}</td>
+            <td class="text-center ${row.roi > 0 ? 'text-success fw-bold' : row.roi < 0 ? 'text-danger' : ''}">${row.roi.toFixed(1)}%</td>
+        </tr>
+    `).join('');
+
+    container.innerHTML = `<div class="card-body">
+        <p class="text-muted">Top-pick performance by race state using $10 win bets on every race.</p>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr><th class="text-center">Rank</th><th>State</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike Rate</th><th class="text-center">Staked</th><th class="text-center">Return</th><th class="text-center">P/L</th><th class="text-center">ROI</th></tr>
+                </thead>
+                <tbody>${body}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
 function loadJurisdictionStrength() {
     const container = document.getElementById('jurisdictionStrength');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Testing interstate jurisdiction strength...</p></div>';

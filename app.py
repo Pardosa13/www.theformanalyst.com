@@ -5603,6 +5603,110 @@ def api_jurisdiction_strength():
         }), 500
 
 
+@app.route("/api/data/state-performance")
+@login_required
+def api_state_performance():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    track_filter = request.args.get('track', '')
+    min_score_filter = request.args.get('min_score', type=float)
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    limit_param = request.args.get('limit', 'all')
+
+    try:
+        from collections import defaultdict
+
+        track_to_state = _build_track_to_state()
+        stake = 10.0
+
+        q = db.session.query(
+            Meeting.id,
+            Meeting.meeting_name,
+            Race.race_number,
+            Prediction.score,
+            Result.finish_position,
+            Result.sp
+        ).join(
+            Race, Race.meeting_id == Meeting.id
+        ).join(
+            Horse, Horse.race_id == Race.id
+        ).join(
+            Prediction, Prediction.horse_id == Horse.id
+        ).join(
+            Result, Result.horse_id == Horse.id
+        ).filter(Result.finish_position > 0)
+
+        if track_filter:
+            q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+        if date_from:
+            q = q.filter(Meeting.uploaded_at >= date_from)
+        if date_to:
+            q = q.filter(Meeting.uploaded_at <= date_to)
+
+        q = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc())
+        rows = q.all()
+
+        races = defaultdict(list)
+        race_keys_ordered = []
+        for meeting_id, meeting_name, race_num, score, finish_pos, sp in rows:
+            key = (meeting_id, race_num)
+            if key not in races:
+                race_keys_ordered.append(key)
+            races[key].append({'meeting_name': meeting_name, 'score': score, 'finish_pos': finish_pos, 'sp': sp or 0})
+
+        if limit_param != 'all':
+            limit = int(limit_param) if str(limit_param).isdigit() else 200
+            race_keys_ordered = race_keys_ordered[:limit]
+
+        state_stats = defaultdict(lambda: {'races': 0, 'wins': 0, 'staked': 0.0, 'returns': 0.0})
+
+        for key in race_keys_ordered:
+            horses = races[key]
+            top = max(horses, key=lambda x: x['score'])
+            if min_score_filter and top['score'] < min_score_filter:
+                continue
+
+            meeting_name = top['meeting_name'] or ''
+            meeting_track = meeting_name.split('_')[1] if '_' in meeting_name else meeting_name
+            state = track_to_state.get(_track_lookup_key(_normalise_track_name(meeting_track)))
+            if state not in AUSTRALIAN_JURISDICTION_STATES:
+                continue
+
+            bucket = state_stats[state]
+            bucket['races'] += 1
+            bucket['staked'] += stake
+
+            if top['finish_pos'] == 1:
+                bucket['wins'] += 1
+                if top['sp'] and top['sp'] > 0:
+                    bucket['returns'] += float(top['sp']) * stake
+
+        result_rows = []
+        for state, values in state_stats.items():
+            races_count = values['races']
+            staked = values['staked']
+            returns = values['returns']
+            profit_loss = returns - staked
+            result_rows.append({
+                'state': state,
+                'races': races_count,
+                'wins': values['wins'],
+                'strike_rate': round((values['wins'] / races_count * 100), 1) if races_count > 0 else 0.0,
+                'staked': round(staked, 2),
+                'returns': round(returns, 2),
+                'profit_loss': round(profit_loss, 2),
+                'roi': round((profit_loss / staked * 100), 1) if staked > 0 else 0.0
+            })
+
+        result_rows.sort(key=lambda item: item['roi'], reverse=True)
+        return jsonify({'states': result_rows})
+    except Exception as exc:
+        logger.exception("State performance API failed")
+        return jsonify({'error': 'Failed to calculate state performance', 'details': str(exc)}), 500
+
+
 @app.route("/api/data/score-analysis")
 @login_required
 def api_score_analysis():
