@@ -5621,9 +5621,32 @@ def api_state_performance():
         track_to_state = _build_track_to_state()
         stake = 10.0
 
+        meeting_state_by_id = {}
+        meeting_rows = db.session.query(Meeting.id, Meeting.meeting_name, Meeting.csv_data).all()
+        for meeting_id, meeting_name, csv_data in meeting_rows:
+            state = None
+            if csv_data and str(csv_data).strip():
+                try:
+                    reader = csv.DictReader(io.StringIO(csv_data))
+                    headers = reader.fieldnames or []
+                    track_column = _find_csv_column(headers, candidates=['track'])
+                    if track_column:
+                        first_row = next(reader, None)
+                        if first_row:
+                            csv_track = _normalise_track_name(first_row.get(track_column, ''))
+                            state = track_to_state.get(_track_lookup_key(csv_track))
+                except Exception:
+                    state = None
+
+            if state not in AUSTRALIAN_JURISDICTION_STATES:
+                fallback_track = meeting_name.split('_')[1] if meeting_name and '_' in meeting_name else (meeting_name or '')
+                state = track_to_state.get(_track_lookup_key(_normalise_track_name(fallback_track)))
+
+            if state in AUSTRALIAN_JURISDICTION_STATES:
+                meeting_state_by_id[meeting_id] = state
+
         q = db.session.query(
             Meeting.id,
-            Meeting.meeting_name,
             Race.race_number,
             Prediction.score,
             Result.finish_position,
@@ -5650,11 +5673,11 @@ def api_state_performance():
 
         races = defaultdict(list)
         race_keys_ordered = []
-        for meeting_id, meeting_name, race_num, score, finish_pos, sp in rows:
+        for meeting_id, race_num, score, finish_pos, sp in rows:
             key = (meeting_id, race_num)
             if key not in races:
                 race_keys_ordered.append(key)
-            races[key].append({'meeting_name': meeting_name, 'score': score, 'finish_pos': finish_pos, 'sp': sp or 0})
+            races[key].append({'score': score, 'finish_pos': finish_pos, 'sp': sp or 0})
 
         if limit_param != 'all':
             limit = int(limit_param) if str(limit_param).isdigit() else 200
@@ -5668,10 +5691,8 @@ def api_state_performance():
             if min_score_filter and top['score'] < min_score_filter:
                 continue
 
-            meeting_name = top['meeting_name'] or ''
-            meeting_track = meeting_name.split('_')[1] if '_' in meeting_name else meeting_name
-            state = track_to_state.get(_track_lookup_key(_normalise_track_name(meeting_track)))
-            if state not in AUSTRALIAN_JURISDICTION_STATES:
+            state = meeting_state_by_id.get(key[0])
+            if not state:
                 continue
 
             bucket = state_stats[state]
