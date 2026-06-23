@@ -1535,6 +1535,13 @@ function switchPredTab(name, btn) {
   document.querySelectorAll('[id^="ptab-"]').forEach(t => t.classList.remove('active'));
   document.getElementById(`ppanel-${name}`).style.display = 'block';
   btn?.classList.add('active');
+
+  // Sub-tabs previously only changed visibility. That meant clicking
+  // "Algorithm Match Predictions" showed the placeholder until the separate
+  // refresh button was clicked, unlike the prop-bet panels that load on entry.
+  if (name === 'predictions') loadMatchPredictions();
+  if (name === 'edges') loadBettingEdges();
+  if (name === 'markets') loadMatchMarkets();
 }
 function syncMatchMarkets() {
   fetch('/api/afl/sync/match-markets', { method: 'POST', headers: { 'Content-Type': 'application/json' }})
@@ -1563,7 +1570,17 @@ function loadMatchPredictions() {
              MAE <strong>${safeNum(perf.mae_margin, 0).toFixed(1)}</strong> points (${perf.sample} graded games)
            </div>`
         : '';
-      el.innerHTML = `${roundLabel ? `<p style="margin-bottom:6px;font-weight:600;">${esc(roundLabel)} — Algorithm Selections</p>` : ''}${perfHtml}<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Pred Margin</th><th>Pred Winner</th><th>Home Win %</th><th>Fair Odds (H/A)</th><th>Confidence</th><th>Actual Margin</th></tr></thead><tbody>${
+      const cfg = data.model_config || {};
+      const confidence = cfg.confidence_thresholds || {};
+      const configHtml = `<div class="vf-results-meta" style="margin-bottom:8px;">
+        <strong>Current match algorithm config:</strong>
+        rolling window <strong>${safeNum(cfg.team_rating_window_games, 5)}</strong> games ·
+        rating-to-points scale <strong>${safeNum(cfg.rating_to_points_scale, 0).toFixed(2)}</strong> ·
+        win-prob scale <strong>${safeNum(cfg.logistic_scale_points, 0).toFixed(1)}</strong> pts ·
+        confidence: medium ≥ <strong>${safeNum(confidence.medium_points, 12)}</strong> pts, high ≥ <strong>${safeNum(confidence.high_points, 24)}</strong> pts.
+        <div style="margin-top:3px;color:var(--text-muted);">${esc(cfg.data_rule || 'Uses rolling team ratings to select the predicted winner and margin.')}</div>
+      </div>`;
+      el.innerHTML = `${roundLabel ? `<p style="margin-bottom:6px;font-weight:600;">${esc(roundLabel)} — Algorithm Selections</p>` : ''}${configHtml}${perfHtml}<div class="scroll-x"><table class="ladder-table"><thead><tr><th>Match</th><th>Pred Margin</th><th>Pred Winner</th><th>Home Win %</th><th>Fair Odds (H/A)</th><th>Confidence</th><th>Actual Margin</th></tr></thead><tbody>${
         rows.slice(0, 80).map(r => {
           const actualCell = r.actual_margin != null ? (() => {
             const correct = (r.predicted_winner === r.home_team && r.actual_margin > 0) || (r.predicted_winner === r.away_team && r.actual_margin < 0);

@@ -2283,7 +2283,21 @@ def register_afl_routes(app, db):
                 2,
             ) if graded_rows else None,
         }
-        return jsonify({"year": year, "round": round_num, "matches": out, "count": len(out), "model_performance": model_perf})
+        model_config = {
+            "team_rating_window_games": 5,
+            "rating_to_points_scale": _RATING_TO_POINTS_SCALE,
+            "logistic_scale_points": _LOGISTIC_SCALE_POINTS,
+            "confidence_thresholds": {"medium_points": 12, "high_points": 24},
+            "data_rule": "Uses the latest rolling 5-game team rating before each fixture date; winner is selected from the sign of the predicted point margin.",
+        }
+        return jsonify({
+            "year": year,
+            "round": round_num,
+            "matches": out,
+            "count": len(out),
+            "model_performance": model_perf,
+            "model_config": model_config,
+        })
 
     @app.route("/api/afl/match-markets")
     @login_required
