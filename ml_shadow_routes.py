@@ -117,6 +117,25 @@ def _settle_meeting_results(db, meeting, recorded_by):
     }
 
 
+def _unsettled_puntingform_meetings_sql():
+    """Return SQL for PuntingForm meetings that still have active runners without results.
+
+    This intentionally does not require generated ML scores: the ML Shadow
+    dashboard can settle results before or after a meeting is scored.
+    """
+    return """
+                SELECT DISTINCT m.*
+                FROM meetings m
+                JOIN races rc ON rc.meeting_id = m.id
+                JOIN horses h ON h.race_id = rc.id
+                LEFT JOIN results r ON r.horse_id = h.id
+                WHERE COALESCE(h.is_scratched, FALSE) = FALSE
+                  AND r.id IS NULL
+                  AND m.puntingform_id IS NOT NULL
+                ORDER BY m.uploaded_at DESC
+            """
+
+
 def register_ml_shadow_routes(app, db):
     """Call this from app.py to add ML shadow routes."""
 
@@ -250,19 +269,9 @@ def register_ml_shadow_routes(app, db):
         try:
             from models import Meeting
 
-            unsettled_meetings = Meeting.query.from_statement(text("""
-                SELECT DISTINCT m.*
-                FROM meetings m
-                JOIN races rc ON rc.meeting_id = m.id
-                JOIN horses h ON h.race_id = rc.id
-                JOIN predictions p ON p.horse_id = h.id
-                LEFT JOIN results r ON r.horse_id = h.id
-                WHERE p.ml_score IS NOT NULL
-                  AND h.is_scratched = FALSE
-                  AND r.id IS NULL
-                  AND m.puntingform_id IS NOT NULL
-                ORDER BY m.uploaded_at DESC
-            """)).all()
+            unsettled_meetings = Meeting.query.from_statement(
+                text(_unsettled_puntingform_meetings_sql())
+            ).all()
 
             details = []
             for meeting in unsettled_meetings:
