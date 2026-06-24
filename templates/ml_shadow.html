@@ -373,7 +373,7 @@
       {% endfor %}
     </select>
     <button class="ml-btn" onclick="scoreMeeting()" id="score-btn">Generate ML Scores</button>
-    <button class="ml-btn secondary" onclick="settleAllResults()" id="settle-btn">Settle Unsettled Results</button>
+    <button class="ml-btn secondary" onclick="scoreVisibleMeetings()" id="bulk-score-btn">Generate Missing ML Scores</button>
     <button class="ml-btn secondary" onclick="location.reload()">Refresh</button>
   </div>
 
@@ -467,31 +467,24 @@ async function scoreMeeting() {
   }
 }
 
-async function settleAllResults() {
-  const btn = document.getElementById('settle-btn');
+async function scoreVisibleMeetings() {
+  const btn = document.getElementById('bulk-score-btn');
   const originalText = btn.innerHTML;
-  btn.innerHTML = '<span class="ml-spinner"></span>Settling...';
+  btn.innerHTML = '<span class="ml-spinner"></span>Scoring visible...';
   btn.disabled = true;
 
   try {
-    const r = await fetch('/api/ml-shadow/settle-all', { method: 'POST' });
+    const r = await fetch('/api/ml-shadow/score-visible', { method: 'POST' });
     const d = await r.json();
     if (!d.success) {
       alert('Error: ' + (d.error || 'Unknown'));
       return;
     }
 
-    let message = `Checked ${d.meetings_checked || 0} unsettled meeting(s). ` +
-      `Generated ${d.ml_scores_generated || 0} ML score(s). ` +
-      `Settled ${d.meetings_settled || 0}; created ${d.results_created || 0} result(s); updated ${d.results_updated || 0}.`;
-    if (d.ml_score_warnings) {
-      message += ` ${d.ml_score_warnings} meeting(s) could not be ML scored; result settlement still continued.`;
-    }
-    alert(message);
+    alert(d.summary || `Checked ${d.meetings_checked || 0} meetings. Generated ML scores for ${d.meetings_generated || 0} meetings. Skipped ${d.meetings_skipped || 0} already scored.`);
 
-    await loadGlobalStats();
-    const mid = getMeetingId();
-    if (mid) await loadMeeting(mid);
+    // Reload the page so the server-rendered dropdown updates newly scored meetings with ✓.
+    location.reload();
   } catch(e) {
     alert('Request failed: ' + e);
   } finally {

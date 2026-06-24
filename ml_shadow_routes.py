@@ -140,6 +140,25 @@ def _score_meeting_ml(db, meeting_id):
 
     return {'success': True, 'scored': updated}
 
+
+def _visible_ml_shadow_meetings_query():
+    """Base query for meetings shown in the ML Shadow dropdown."""
+    from models import Meeting
+
+    return Meeting.query.order_by(Meeting.uploaded_at.desc()).limit(100)
+
+
+def _ml_scored_meeting_ids(db):
+    """Return meeting ids with at least one persisted ML score."""
+    rows = db.session.execute(text("""
+        SELECT DISTINCT rc.meeting_id
+        FROM predictions p
+        JOIN horses h ON h.id = p.horse_id
+        JOIN races rc ON rc.id = h.race_id
+        WHERE p.ml_score IS NOT NULL
+    """)).fetchall()
+    return {r[0] for r in rows}
+
 def _unsettled_puntingform_meetings_sql():
     """Return SQL for PuntingForm meetings that still have active runners without results.
 
@@ -179,18 +198,8 @@ def register_ml_shadow_routes(app, db):
         if not current_user.is_admin:
             return redirect(url_for('history'))
 
-        from models import Meeting
-
-        meetings_raw = Meeting.query.order_by(Meeting.uploaded_at.desc()).limit(100).all()
-
-        rows = db.session.execute(text("""
-            SELECT DISTINCT rc.meeting_id
-            FROM predictions p
-            JOIN horses h ON h.id = p.horse_id
-            JOIN races rc ON rc.id = h.race_id
-            WHERE p.ml_score IS NOT NULL
-        """)).fetchall()
-        scored_ids = {r[0] for r in rows}
+        meetings_raw = _visible_ml_shadow_meetings_query().all()
+        scored_ids = _ml_scored_meeting_ids(db)
 
         meetings = []
         for m in meetings_raw:
@@ -225,6 +234,75 @@ def register_ml_shadow_routes(app, db):
         except Exception as e:
             db.session.rollback()
             log.error(f"ML shadow score failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+
+    @app.route('/api/ml-shadow/score-visible', methods=['POST'])
+    @login_required
+    def ml_shadow_score_visible():
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin only'}), 403
+
+        try:
+            meetings = _visible_ml_shadow_meetings_query().all()
+            scored_ids = _ml_scored_meeting_ids(db)
+            details = []
+            generated = 0
+            skipped = 0
+
+            for meeting in meetings:
+                if meeting.id in scored_ids:
+                    skipped += 1
+                    details.append({
+                        'meeting_id': meeting.id,
+                        'meeting_name': meeting.meeting_name,
+                        'status': 'skipped',
+                        'reason': 'already scored',
+                    })
+                    continue
+
+                try:
+                    score_result = _score_meeting_ml(db, meeting.id)
+                    if score_result.get('success'):
+                        generated += 1
+                        details.append({
+                            'meeting_id': meeting.id,
+                            'meeting_name': meeting.meeting_name,
+                            'status': 'generated',
+                            'scored': score_result.get('scored', 0),
+                        })
+                    else:
+                        details.append({
+                            'meeting_id': meeting.id,
+                            'meeting_name': meeting.meeting_name,
+                            'status': 'error',
+                            'reason': score_result.get('reason', 'No scores generated'),
+                        })
+                except Exception as exc:
+                    log.warning("ML shadow bulk score failed for meeting %s: %s", meeting.id, exc, exc_info=True)
+                    details.append({
+                        'meeting_id': meeting.id,
+                        'meeting_name': meeting.meeting_name,
+                        'status': 'error',
+                        'reason': str(exc),
+                    })
+
+            db.session.commit()
+
+            checked = len(meetings)
+            summary = f"Checked {checked} meetings. Generated ML scores for {generated} meetings. Skipped {skipped} already scored."
+            return jsonify({
+                'success': True,
+                'meetings_checked': checked,
+                'meetings_generated': generated,
+                'meetings_skipped': skipped,
+                'summary': summary,
+                'details': details,
+            })
+
+        except Exception as e:
+            db.session.rollback()
+            log.error(f"ML shadow bulk score failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/ml-shadow/results/<int:meeting_id>')
