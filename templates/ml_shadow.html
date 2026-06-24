@@ -481,8 +481,12 @@ async function settleAllResults() {
       return;
     }
 
-    const message = `Checked ${d.meetings_checked || 0} unsettled meeting(s). ` +
+    let message = `Checked ${d.meetings_checked || 0} unsettled meeting(s). ` +
+      `Generated ${d.ml_scores_generated || 0} ML score(s). ` +
       `Settled ${d.meetings_settled || 0}; created ${d.results_created || 0} result(s); updated ${d.results_updated || 0}.`;
+    if (d.ml_score_warnings) {
+      message += ` ${d.ml_score_warnings} meeting(s) could not be ML scored; result settlement still continued.`;
+    }
     alert(message);
 
     await loadGlobalStats();
