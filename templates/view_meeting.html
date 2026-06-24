@@ -302,6 +302,47 @@
   font-weight: 700;
 }
 
+
+/* ML Shadow overlay — display-only row highlights for existing View Meeting table */
+.vm-race-card tbody tr.ml-shadow-highlight {
+  background: rgba(16, 245, 160, 0.12) !important;
+  border-left: 5px solid #10F5A0 !important;
+  box-shadow: inset 0 0 0 1px rgba(16, 245, 160, 0.25), 0 0 16px rgba(16, 245, 160, 0.14);
+}
+.vm-race-card tbody tr.ml-shadow-highlight:hover {
+  filter: brightness(1.16);
+}
+.vm-race-card tbody tr.ml-agreement-highlight {
+  background: rgba(255, 210, 63, 0.20) !important;
+  border-left: 5px solid #FFD23F !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 210, 63, 0.35), 0 0 18px rgba(255, 210, 63, 0.18);
+}
+.vm-race-card tbody tr.ml-agreement-highlight:hover {
+  filter: brightness(1.16);
+}
+.vm-ml-shadow-badge,
+.vm-ml-agreement-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.vm-ml-shadow-badge {
+  background: rgba(16, 245, 160, 0.10);
+  border: 1px solid #10F5A0;
+  color: #10F5A0;
+}
+.vm-ml-agreement-badge {
+  background: rgba(255, 210, 63, 0.14);
+  border: 1px solid #FFD23F;
+  color: #FFD23F;
+}
+
 /* Scratched */
 .vm-race-card tbody tr[style*="#e9ecef"] {
   background: rgba(107,114,128,0.10) !important;
@@ -1527,11 +1568,21 @@ function updateScratchings(meetingId) {
         </tr>
       </thead>
       <tbody>
+        {% set ml_top = namespace(horse_id=None, score=None) %}
+        {% for ml_horse in race.horses if ml_horse.prediction and not ml_horse.is_scratched and ml_horse.prediction.ml_score is not none %}
+          {% if ml_top.score is none or ml_horse.prediction.ml_score > ml_top.score %}
+            {% set ml_top.horse_id = ml_horse.horse_id %}
+            {% set ml_top.score = ml_horse.prediction.ml_score %}
+          {% endif %}
+        {% endfor %}
         {% for horse in race.horses|selectattr('prediction')|sort(attribute='prediction.score', reverse=true) %}
+        {% set is_existing_top_pick = loop.index == 1 and not horse.is_scratched %}
+        {% set is_ml_top_pick = ml_top.horse_id is not none and horse.horse_id == ml_top.horse_id and not horse.is_scratched %}
+        {% set is_ml_agreement = is_existing_top_pick and is_ml_top_pick %}
         <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
             data-horse-id="{{ horse.horse_id }}"
             data-active-components="{{ horse.matched_component_keys|join(',') }}"
-            class="{% if horse.is_scratched %}horse-scratched{% endif %}{% if horse.is_best_bet %} best-bet-highlight{% endif %}">
+            class="{% if horse.is_scratched %}horse-scratched{% endif %}{% if horse.is_best_bet %} best-bet-highlight{% endif %}{% if is_ml_agreement %} ml-agreement-highlight{% elif is_ml_top_pick %} ml-shadow-highlight{% endif %}">
 
           <td style="padding:12px; text-align:center; font-weight:bold; border-bottom:1px solid #e2e8f0;">
             {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
@@ -1547,6 +1598,11 @@ function updateScratchings(meetingId) {
                </span>
               {% if horse.is_best_bet %}
               <span class="vm-best-bet-badge" title="This horse matches the Best Bets criteria">⭐ Best Bet</span>
+              {% endif %}
+              {% if is_ml_agreement %}
+              <span class="vm-ml-agreement-badge" title="ML Shadow and existing score top pick agree">ML &amp; Existing Score AGREE</span>
+              {% elif is_ml_top_pick %}
+              <span class="vm-ml-shadow-badge" title="ML Shadow top selection">ML SELECTION</span>
               {% endif %}
               {% if horse.is_scratched %}
               <span class="scratched-badge">SCR</span>
