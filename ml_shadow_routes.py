@@ -117,6 +117,29 @@ def _settle_meeting_results(db, meeting, recorded_by):
     }
 
 
+
+def _score_meeting_ml(db, meeting_id):
+    """Generate and persist ML scores for one meeting, mirroring the manual button."""
+    from ml_predict import predict_meeting
+    from models import Prediction
+
+    all_scores, _by_race = predict_meeting(meeting_id, db.session)
+    if not all_scores:
+        return {
+            'success': False,
+            'scored': 0,
+            'reason': 'No scores generated — model may not be loaded or meeting has no active horses.',
+        }
+
+    updated = 0
+    for horse_id, ml_score in all_scores.items():
+        pred = Prediction.query.filter_by(horse_id=horse_id).first()
+        if pred:
+            pred.ml_score = ml_score
+            updated += 1
+
+    return {'success': True, 'scored': updated}
+
 def _unsettled_puntingform_meetings_sql():
     """Return SQL for PuntingForm meetings that still have active runners without results.
 
@@ -189,21 +212,12 @@ def register_ml_shadow_routes(app, db):
             return jsonify({'error': 'Admin only'}), 403
 
         try:
-            from ml_predict import predict_meeting
-            from models import Prediction
+            score_result = _score_meeting_ml(db, meeting_id)
 
-            all_scores, by_race = predict_meeting(meeting_id, db.session)
+            if not score_result['success']:
+                return jsonify({'success': False, 'error': score_result['reason']})
 
-            if not all_scores:
-                return jsonify({'success': False, 'error': 'No scores generated — model may not be loaded or meeting has no active horses.'})
-
-            updated = 0
-            for horse_id, ml_score in all_scores.items():
-                pred = Prediction.query.filter_by(horse_id=horse_id).first()
-                if pred:
-                    pred.ml_score = ml_score
-                    updated += 1
-
+            updated = score_result['scored']
             db.session.commit()
             log.info(f"ML shadow: scored {updated} horses for meeting {meeting_id}")
             return jsonify({'success': True, 'scored': updated})
@@ -276,7 +290,12 @@ def register_ml_shadow_routes(app, db):
             details = []
             for meeting in unsettled_meetings:
                 try:
-                    details.append(_settle_meeting_results(db, meeting, current_user.id))
+                    score_result = _score_meeting_ml(db, meeting.id)
+                    settle_result = _settle_meeting_results(db, meeting, current_user.id)
+                    settle_result['ml_scored'] = score_result.get('scored', 0)
+                    if not score_result.get('success'):
+                        settle_result['ml_score_warning'] = score_result.get('reason')
+                    details.append(settle_result)
                 except Exception as exc:
                     log.warning("ML shadow settle failed for meeting %s: %s", meeting.id, exc, exc_info=True)
                     details.append({
@@ -291,12 +310,16 @@ def register_ml_shadow_routes(app, db):
             settled = sum(1 for d in details if d.get('status') == 'settled')
             created = sum(d.get('created', 0) for d in details)
             updated = sum(d.get('updated', 0) for d in details)
+            ml_scored = sum(d.get('ml_scored', 0) for d in details)
+            ml_warnings = [d for d in details if d.get('ml_score_warning')]
             return jsonify({
                 'success': True,
                 'meetings_checked': len(details),
                 'meetings_settled': settled,
                 'results_created': created,
                 'results_updated': updated,
+                'ml_scores_generated': ml_scored,
+                'ml_score_warnings': len(ml_warnings),
                 'details': details,
             })
 
