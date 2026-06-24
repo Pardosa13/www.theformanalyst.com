@@ -373,6 +373,7 @@
       {% endfor %}
     </select>
     <button class="ml-btn" onclick="scoreMeeting()" id="score-btn">Generate ML Scores</button>
+    <button class="ml-btn secondary" onclick="settleAllResults()" id="settle-btn">Settle Unsettled Results</button>
     <button class="ml-btn secondary" onclick="location.reload()">Refresh</button>
   </div>
 
@@ -462,6 +463,35 @@ async function scoreMeeting() {
     alert('Request failed: ' + e);
   } finally {
     btn.innerHTML = 'Generate ML Scores';
+    btn.disabled = false;
+  }
+}
+
+async function settleAllResults() {
+  const btn = document.getElementById('settle-btn');
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '<span class="ml-spinner"></span>Settling...';
+  btn.disabled = true;
+
+  try {
+    const r = await fetch('/api/ml-shadow/settle-all', { method: 'POST' });
+    const d = await r.json();
+    if (!d.success) {
+      alert('Error: ' + (d.error || 'Unknown'));
+      return;
+    }
+
+    const message = `Checked ${d.meetings_checked || 0} unsettled meeting(s). ` +
+      `Settled ${d.meetings_settled || 0}; created ${d.results_created || 0} result(s); updated ${d.results_updated || 0}.`;
+    alert(message);
+
+    await loadGlobalStats();
+    const mid = getMeetingId();
+    if (mid) await loadMeeting(mid);
+  } catch(e) {
+    alert('Request failed: ' + e);
+  } finally {
+    btn.innerHTML = originalText;
     btn.disabled = false;
   }
 }
