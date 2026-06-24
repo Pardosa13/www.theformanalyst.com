@@ -13,11 +13,108 @@ Adds:
 """
 
 import logging
+from datetime import datetime
+
 from flask import render_template, jsonify, request, redirect, url_for
 from flask_login import login_required, current_user
 from sqlalchemy import text
 
 log = logging.getLogger(__name__)
+
+
+def _meeting_date_string(meeting):
+    """Return YYYY-MM-DD for a meeting, using the date column or YYMMDD_Track name."""
+    if getattr(meeting, 'date', None):
+        return meeting.date.strftime('%Y-%m-%d')
+
+    name = meeting.meeting_name or ''
+    if '_' not in name:
+        return None
+
+    date_part = name.split('_', 1)[0]
+    if len(date_part) != 6 or not date_part.isdigit():
+        return None
+
+    return f"20{date_part[:2]}-{date_part[2:4]}-{date_part[4:6]}"
+
+
+def _normalise_runner_name(value):
+    return ' '.join((value or '').strip().lower().split())
+
+
+def _settle_meeting_results(db, meeting, recorded_by):
+    """Fetch PuntingForm results for one meeting and upsert any runner results."""
+    from models import Race, Result
+    from puntingform_service import PuntingFormService
+
+    if not meeting.puntingform_id:
+        return {'meeting_id': meeting.id, 'meeting_name': meeting.meeting_name, 'status': 'skipped', 'reason': 'not a PuntingForm meeting'}
+
+    date_str = _meeting_date_string(meeting)
+    if not date_str:
+        return {'meeting_id': meeting.id, 'meeting_name': meeting.meeting_name, 'status': 'skipped', 'reason': 'missing meeting date'}
+
+    pf_service = PuntingFormService()
+    response = pf_service.get_results(meeting.puntingform_id, date_str)
+    if response.get('IsError'):
+        return {'meeting_id': meeting.id, 'meeting_name': meeting.meeting_name, 'status': 'pending', 'reason': 'results not available'}
+
+    races_results = response.get('RaceDetails') or response.get('Result') or []
+    if not races_results:
+        return {'meeting_id': meeting.id, 'meeting_name': meeting.meeting_name, 'status': 'pending', 'reason': 'no race results returned'}
+
+    updated = created = matched = 0
+    for race_result in races_results:
+        race_num = race_result.get('RaceNumber') or race_result.get('RaceNo') or race_result.get('Race')
+        race = Race.query.filter_by(meeting_id=meeting.id, race_number=race_num).first()
+        if not race:
+            continue
+
+        horses_by_name = {_normalise_runner_name(h.horse_name): h for h in race.horses}
+        for runner in race_result.get('Runners', []) or []:
+            horse_name = runner.get('Name') or runner.get('Horse') or runner.get('RunnerName')
+            horse = horses_by_name.get(_normalise_runner_name(horse_name))
+            if not horse:
+                continue
+
+            finish_pos = runner.get('Position') or runner.get('FinishPosition') or runner.get('Place') or 0
+            try:
+                finish_pos = int(finish_pos or 0)
+            except (TypeError, ValueError):
+                finish_pos = 0
+            if finish_pos > 4:
+                finish_pos = 5
+
+            sp = runner.get('Price_SP') or runner.get('SP') or runner.get('StartingPrice')
+            try:
+                sp = float(sp) if sp not in (None, '') else None
+            except (TypeError, ValueError):
+                sp = None
+
+            matched += 1
+            if horse.result:
+                horse.result.finish_position = finish_pos
+                horse.result.sp = sp
+                horse.result.recorded_at = datetime.utcnow()
+                horse.result.recorded_by = recorded_by
+                updated += 1
+            else:
+                db.session.add(Result(
+                    horse_id=horse.id,
+                    finish_position=finish_pos,
+                    sp=sp,
+                    recorded_by=recorded_by,
+                ))
+                created += 1
+
+    return {
+        'meeting_id': meeting.id,
+        'meeting_name': meeting.meeting_name,
+        'status': 'settled' if matched else 'pending',
+        'matched': matched,
+        'created': created,
+        'updated': updated,
+    }
 
 
 def register_ml_shadow_routes(app, db):
@@ -143,6 +240,61 @@ def register_ml_shadow_routes(app, db):
         except Exception as e:
             log.error(f"ML shadow results failed: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/ml-shadow/settle-all', methods=['POST'])
+    @login_required
+    def ml_shadow_settle_all():
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin only'}), 403
+
+        try:
+            from models import Meeting
+
+            unsettled_meetings = Meeting.query.from_statement(text("""
+                SELECT DISTINCT m.*
+                FROM meetings m
+                JOIN races rc ON rc.meeting_id = m.id
+                JOIN horses h ON h.race_id = rc.id
+                JOIN predictions p ON p.horse_id = h.id
+                LEFT JOIN results r ON r.horse_id = h.id
+                WHERE p.ml_score IS NOT NULL
+                  AND h.is_scratched = FALSE
+                  AND r.id IS NULL
+                  AND m.puntingform_id IS NOT NULL
+                ORDER BY m.uploaded_at DESC
+            """)).all()
+
+            details = []
+            for meeting in unsettled_meetings:
+                try:
+                    details.append(_settle_meeting_results(db, meeting, current_user.id))
+                except Exception as exc:
+                    log.warning("ML shadow settle failed for meeting %s: %s", meeting.id, exc, exc_info=True)
+                    details.append({
+                        'meeting_id': meeting.id,
+                        'meeting_name': meeting.meeting_name,
+                        'status': 'error',
+                        'reason': str(exc),
+                    })
+
+            db.session.commit()
+
+            settled = sum(1 for d in details if d.get('status') == 'settled')
+            created = sum(d.get('created', 0) for d in details)
+            updated = sum(d.get('updated', 0) for d in details)
+            return jsonify({
+                'success': True,
+                'meetings_checked': len(details),
+                'meetings_settled': settled,
+                'results_created': created,
+                'results_updated': updated,
+                'details': details,
+            })
+
+        except Exception as e:
+            db.session.rollback()
+            log.error(f"ML shadow settle-all failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/ml-shadow/global-stats')
     @login_required
