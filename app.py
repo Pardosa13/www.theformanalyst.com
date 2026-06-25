@@ -14,6 +14,7 @@ import tweepy
 from anthropic import Anthropic
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from sqlalchemy import text
 import uuid
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component
@@ -3110,12 +3111,72 @@ def dashboard():
     except Exception as e:
         logger.error(f"Dashboard best_bets_stats error: {e}")
 
+    ml_performance_stats = None
+    try:
+        ml_performance_stats = calculate_ml_performance_stats()
+    except Exception as e:
+        logger.error(f"Dashboard ML performance stats error: {e}")
+
     return render_template("dashboard.html",
         recent_meetings=recent_meetings,
         upcoming_best_bets_count=upcoming_best_bets_count,
         stats=stats,
         best_bets_stats=best_bets_stats,
+        ml_performance_stats=ml_performance_stats,
     )
+
+def calculate_ml_performance_stats():
+    """Calculate ML top-pick performance using one settled, non-scratched ML pick per race."""
+    rows = db.session.execute(text("""
+        SELECT
+            rc.id AS race_id,
+            p.ml_score,
+            h.id AS horse_id,
+            r.finish_position,
+            r.sp
+        FROM predictions p
+        JOIN horses h ON h.id = p.horse_id
+        JOIN races rc ON rc.id = h.race_id
+        JOIN results r ON r.horse_id = h.id
+        WHERE p.ml_score IS NOT NULL
+          AND COALESCE(h.is_scratched, FALSE) = FALSE
+          AND r.finish_position IS NOT NULL
+          AND r.finish_position > 0
+          AND r.sp IS NOT NULL
+    """)).fetchall()
+
+    from collections import defaultdict
+    races = defaultdict(list)
+    for row in rows:
+        races[row.race_id].append(row)
+
+    selections = wins = 0
+    total_return = 0.0
+
+    for horses in races.values():
+        if not horses:
+            continue
+        top_pick = max(horses, key=lambda x: x.ml_score or 0)
+        selections += 1
+        if top_pick.finish_position == 1:
+            wins += 1
+            total_return += float(top_pick.sp or 0)
+
+    total_stake = float(selections)
+    total_profit = total_return - total_stake
+    strike_rate = (wins / selections * 100) if selections else 0.0
+    roi = (total_profit / total_stake * 100) if total_stake else 0.0
+
+    return {
+        'selections': selections,
+        'wins': wins,
+        'strike_rate': strike_rate,
+        'total_stake': total_stake,
+        'total_return': total_return,
+        'total_profit': total_profit,
+        'roi': roi,
+    }
+
 # ----- PuntingForm API Routes -----
 
 @app.route("/api/meetings/today")
@@ -5044,6 +5105,12 @@ def data_analytics():
     except Exception as e:
         print(f"Error calculating Best Bets stats: {e}")
 
+    ml_performance_stats = None
+    try:
+        ml_performance_stats = calculate_ml_performance_stats()
+    except Exception as e:
+        print(f"Error calculating ML performance stats: {e}")
+
     return render_template("data.html",
         total_races=total_races,
         strike_rate=strike_rate,
@@ -5053,6 +5120,7 @@ def data_analytics():
         avg_winner_sp=avg_winner_sp,
         track_list=track_list,
         best_bets_stats=best_bets_stats,
+        ml_performance_stats=ml_performance_stats,
         filters={
             'track': track_filter,
             'min_score': min_score_filter,
