@@ -44,7 +44,7 @@
     /* Stats bar */
     .ml-stats-bar {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: 12px;
         margin-bottom: 28px;
     }
@@ -334,31 +334,35 @@
     <span class="ml-badge">EXPERIMENTAL</span>
   </div>
 
-  <!-- Global stats bar -->
+  <!-- Global ML-only stats bar -->
   <div class="ml-stats-bar">
     <div class="ml-stat-card">
-      <div class="label">RACES TRACKED</div>
-      <div class="value" id="g-races">—</div>
+      <div class="label">SELECTIONS</div>
+      <div class="value" id="g-selections">—</div>
     </div>
     <div class="ml-stat-card">
-      <div class="label">ANALYZER WINS</div>
-      <div class="value" id="g-awins">—</div>
+      <div class="label">WINS</div>
+      <div class="value" id="g-wins">—</div>
     </div>
     <div class="ml-stat-card">
-      <div class="label">ANALYZER ROI</div>
-      <div class="value" id="g-aroi">—</div>
+      <div class="label">STRIKE RATE</div>
+      <div class="value" id="g-strike-rate">—</div>
     </div>
     <div class="ml-stat-card">
-      <div class="label">ML WINS</div>
-      <div class="value" id="g-mwins">—</div>
+      <div class="label">TOTAL STAKE (UNITS)</div>
+      <div class="value" id="g-total-stake">—</div>
     </div>
     <div class="ml-stat-card">
-      <div class="label">ML ROI</div>
-      <div class="value" id="g-mroi">—</div>
+      <div class="label">TOTAL RETURN (UNITS)</div>
+      <div class="value" id="g-total-return">—</div>
     </div>
     <div class="ml-stat-card">
-      <div class="label">AGREEMENT RATE</div>
-      <div class="value" id="g-agree">—</div>
+      <div class="label">TOTAL PROFIT (UNITS)</div>
+      <div class="value" id="g-total-profit">—</div>
+    </div>
+    <div class="ml-stat-card">
+      <div class="label">ROI</div>
+      <div class="value" id="g-roi">—</div>
     </div>
   </div>
 
@@ -427,21 +431,21 @@ async function loadGlobalStats() {
   try {
     const r = await fetch('/api/ml-shadow/global-stats');
     const d = await r.json();
-    document.getElementById('g-races').textContent  = d.races  ?? '—';
-    document.getElementById('g-awins').textContent  = d.a_wins ?? '—';
-    document.getElementById('g-mwins').textContent  = d.m_wins ?? '—';
+    const ml = d.ml_performance || {};
+    document.getElementById('g-selections').textContent  = ml.selections ?? '—';
+    document.getElementById('g-wins').textContent        = ml.wins ?? '—';
+    document.getElementById('g-strike-rate').textContent = ml.strike_rate != null ? ml.strike_rate.toFixed(2) + '%' : '—';
+    document.getElementById('g-total-stake').textContent = ml.total_stake ?? '—';
+    document.getElementById('g-total-return').textContent = ml.total_return != null ? ml.total_return.toFixed(2) : '—';
 
-    const aroi = d.a_roi;
-    const mroi = d.m_roi;
-    const aEl  = document.getElementById('g-aroi');
-    const mEl  = document.getElementById('g-mroi');
-    aEl.textContent = aroi != null ? aroi.toFixed(1) + '%' : '—';
-    aEl.className   = 'value ' + (aroi >= 0 ? 'green' : 'red');
-    mEl.textContent = mroi != null ? mroi.toFixed(1) + '%' : '—';
-    mEl.className   = 'value ' + (mroi >= 0 ? 'green' : 'red');
-
-    const ag = d.agree_rate;
-    document.getElementById('g-agree').textContent = ag != null ? ag.toFixed(1) + '%' : '—';
+    const profitEl = document.getElementById('g-total-profit');
+    const roiEl = document.getElementById('g-roi');
+    const profit = ml.total_profit;
+    const roi = ml.roi;
+    profitEl.textContent = profit != null ? (profit >= 0 ? '+' : '') + profit.toFixed(2) : '—';
+    profitEl.className = 'value' + (profit != null ? ' ' + (profit >= 0 ? 'green' : 'red') : '');
+    roiEl.textContent = roi != null ? (roi >= 0 ? '+' : '') + roi.toFixed(2) + '%' : '—';
+    roiEl.className = 'value' + (roi != null ? ' ' + (roi >= 0 ? 'green' : 'red') : '');
   } catch(e) { console.error(e); }
 }
 
