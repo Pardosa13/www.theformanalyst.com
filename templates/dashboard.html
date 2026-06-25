@@ -121,6 +121,8 @@
 
   .stat-tile-value.green { color: var(--success); }
   .stat-tile-value.amber { color: var(--warning); }
+  .stat-tile-value.lime { color: #b6ff00; text-shadow: 0 0 14px rgba(182,255,0,0.45); }
+  .stat-tile-value.loss { color: #f87171; }
 
   .stat-tile-sub {
     font-size: 11px;
@@ -128,6 +130,16 @@
     margin-top: 5px;
     font-family: 'DM Mono', monospace;
   }
+
+  .ml-performance-head { margin-top: -4px; }
+  .ml-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .ml-stat-tile { border-color: rgba(182,255,0,0.28); }
+  .ml-stat-tile::after { background: linear-gradient(90deg, #b6ff00, #34d399); opacity: 1; }
 
   /* ── Action cards ── */
   .action-row {
@@ -375,6 +387,21 @@
     </div>
   </a>
 </div>
+
+{% if ml_performance_stats %}
+<div class="section-head ml-performance-head">
+  <h2>ML Machine Learning Performance</h2>
+</div>
+<div class="ml-stat-grid">
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Selections</div><div class="stat-tile-value lime">{{ ml_performance_stats.selections }}</div><div class="stat-tile-sub">One ML top pick per settled race</div></div>
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Wins</div><div class="stat-tile-value lime">{{ ml_performance_stats.wins }}</div><div class="stat-tile-sub">Finish position 1</div></div>
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Strike Rate</div><div class="stat-tile-value lime">{{ "%.2f"|format(ml_performance_stats.strike_rate) }}%</div><div class="stat-tile-sub">Wins / selections</div></div>
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Total Stake</div><div class="stat-tile-value lime">{{ "%.0f"|format(ml_performance_stats.total_stake) }}</div><div class="stat-tile-sub">units</div></div>
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Total Return</div><div class="stat-tile-value lime">{{ "%.2f"|format(ml_performance_stats.total_return) }}</div><div class="stat-tile-sub">units</div></div>
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Total Profit</div><div class="stat-tile-value {% if ml_performance_stats.total_profit >= 0 %}green{% else %}loss{% endif %}">{{ "%+.2f"|format(ml_performance_stats.total_profit) }}</div><div class="stat-tile-sub">units</div></div>
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">ROI</div><div class="stat-tile-value {% if ml_performance_stats.roi >= 0 %}green{% else %}loss{% endif %}">{{ "%+.2f"|format(ml_performance_stats.roi) }}%</div><div class="stat-tile-sub">True profit ROI</div></div>
+</div>
+{% endif %}
 
 <!-- Action cards -->
 <div class="action-row">

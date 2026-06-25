@@ -96,6 +96,12 @@
   }
   .overview-tile.pos::before { background: linear-gradient(90deg, #059669, #34d399); }
   .overview-tile.neg::before { background: linear-gradient(90deg, #dc2626, #f87171); }
+  .ml-performance-section { margin: -4px 0 20px; }
+  .ml-performance-section h5 { font-size: 14px; font-weight: 800; margin: 0 0 14px; color: var(--text-primary); }
+  .ml-overview-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .ml-overview-tile { border-color: rgba(182,255,0,0.28); }
+  .ml-overview-tile::before { background: linear-gradient(90deg, #b6ff00, #34d399); }
+  .stat-val.ml-lime { color: #b6ff00; text-shadow: 0 0 14px rgba(182,255,0,0.45); }
   .overview-tile:hover { border-color: var(--border-mid); box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
   .stat-val {
     display: block;
@@ -469,6 +475,21 @@
     <div class="stat-label">Avg Winner SP</div>
   </div>
 </div>
+
+{% if ml_performance_stats %}
+<div class="ml-performance-section">
+  <h5>ML Machine Learning Performance</h5>
+  <div class="overview-grid ml-overview-grid">
+    <div class="overview-tile ml-overview-tile"><span class="stat-val ml-lime">{{ ml_performance_stats.selections }}</span><div class="stat-label">Selections</div></div>
+    <div class="overview-tile ml-overview-tile"><span class="stat-val ml-lime">{{ ml_performance_stats.wins }}</span><div class="stat-label">Wins</div></div>
+    <div class="overview-tile ml-overview-tile"><span class="stat-val ml-lime">{{ "%.2f"|format(ml_performance_stats.strike_rate) }}%</span><div class="stat-label">Strike Rate</div></div>
+    <div class="overview-tile ml-overview-tile"><span class="stat-val ml-lime">{{ "%.0f"|format(ml_performance_stats.total_stake) }}</span><div class="stat-label">Total Stake (units)</div></div>
+    <div class="overview-tile ml-overview-tile"><span class="stat-val ml-lime">{{ "%.2f"|format(ml_performance_stats.total_return) }}</span><div class="stat-label">Total Return (units)</div></div>
+    <div class="overview-tile ml-overview-tile {% if ml_performance_stats.total_profit >= 0 %}pos{% else %}neg{% endif %}"><span class="stat-val {% if ml_performance_stats.total_profit >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(ml_performance_stats.total_profit) }}</span><div class="stat-label">Total Profit (units)</div></div>
+    <div class="overview-tile ml-overview-tile {% if ml_performance_stats.roi >= 0 %}pos{% else %}neg{% endif %}"><span class="stat-val {% if ml_performance_stats.roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(ml_performance_stats.roi) }}%</span><div class="stat-label">ROI</div></div>
+  </div>
+</div>
+{% endif %}
 
 <!-- All collapse IDs UNCHANGED -->
 <div class="section-card">

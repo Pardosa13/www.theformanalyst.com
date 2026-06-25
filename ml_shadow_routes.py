@@ -424,10 +424,12 @@ def register_ml_shadow_routes(app, db):
                 FROM predictions p
                 JOIN horses h ON h.id = p.horse_id
                 JOIN races rc ON rc.id = h.race_id
-                LEFT JOIN results r ON r.horse_id = h.id
+                JOIN results r ON r.horse_id = h.id
                 WHERE p.ml_score IS NOT NULL
-                  AND h.is_scratched = FALSE
+                  AND COALESCE(h.is_scratched, FALSE) = FALSE
+                  AND r.finish_position IS NOT NULL
                   AND r.finish_position > 0
+                  AND r.sp IS NOT NULL
             """)).fetchall()
 
             from collections import defaultdict
@@ -458,13 +460,24 @@ def register_ml_shadow_routes(app, db):
                 if top_a.horse_id == top_m.horse_id: agree += 1
 
             n = races_with_result
+            ml_total_return = m_profit / STAKE + n
+            ml_total_profit = ml_total_return - n
             return jsonify({
                 'races':      n,
                 'a_wins':     a_wins,
                 'a_roi':      round(a_profit / (n * STAKE) * 100, 1) if n else None,
                 'm_wins':     m_wins,
-                'm_roi':      round(m_profit / (n * STAKE) * 100, 1) if n else None,
+                'm_roi':      round(ml_total_profit / n * 100, 2) if n else None,
                 'agree_rate': round(agree / n * 100, 1) if n else None,
+                'ml_performance': {
+                    'selections': n,
+                    'wins': m_wins,
+                    'strike_rate': round(m_wins / n * 100, 2) if n else None,
+                    'total_stake': n,
+                    'total_return': round(ml_total_return, 2),
+                    'total_profit': round(ml_total_profit, 2),
+                    'roi': round(ml_total_profit / n * 100, 2) if n else None,
+                },
             })
 
         except Exception as e:
