@@ -416,6 +416,10 @@ def register_ml_shadow_routes(app, db):
             rows = db.session.execute(text("""
                 SELECT
                     rc.id AS race_id,
+                    m.date AS meeting_date,
+                    m.uploaded_at AS meeting_uploaded_at,
+                    rc.race_number,
+                    MAX(r.recorded_at) OVER (PARTITION BY rc.id) AS latest_result_at,
                     p.score AS analyzer_score,
                     p.ml_score,
                     h.id AS horse_id,
@@ -424,6 +428,7 @@ def register_ml_shadow_routes(app, db):
                 FROM predictions p
                 JOIN horses h ON h.id = p.horse_id
                 JOIN races rc ON rc.id = h.race_id
+                JOIN meetings m ON m.id = rc.meeting_id
                 JOIN results r ON r.horse_id = h.id
                 WHERE p.ml_score IS NOT NULL
                   AND COALESCE(h.is_scratched, FALSE) = FALSE
@@ -437,48 +442,81 @@ def register_ml_shadow_routes(app, db):
             for row in rows:
                 races[row.race_id].append(row)
 
-            a_wins = m_wins = races_with_result = 0
-            a_profit = m_profit = 0.0
-            agree = 0
             STAKE = 10.0
-
+            race_results = []
             for race_id, horses in races.items():
                 if not horses:
                     continue
                 top_a = max(horses, key=lambda x: x.analyzer_score or 0)
                 top_m = max(horses, key=lambda x: x.ml_score or 0)
-                races_with_result += 1
 
                 a_won = top_a.finish_position == 1
                 m_won = top_m.finish_position == 1
+                a_profit = (top_a.sp * STAKE - STAKE) if (a_won and top_a.sp) else -STAKE
+                m_profit = (top_m.sp * STAKE - STAKE) if (m_won and top_m.sp) else -STAKE
 
-                a_profit += (top_a.sp * STAKE - STAKE) if (a_won and top_a.sp) else -STAKE
-                m_profit += (top_m.sp * STAKE - STAKE) if (m_won and top_m.sp) else -STAKE
+                sort_value = top_m.meeting_date or top_m.latest_result_at or top_m.meeting_uploaded_at
+                sort_key = sort_value.isoformat() if sort_value else ''
+                race_results.append({
+                    'race_id': race_id,
+                    'race_number': top_m.race_number or 0,
+                    'sort_key': sort_key,
+                    'meeting_uploaded_at': top_m.meeting_uploaded_at,
+                    'latest_result_at': top_m.latest_result_at,
+                    'a_won': a_won,
+                    'm_won': m_won,
+                    'a_profit': a_profit,
+                    'm_profit': m_profit,
+                    'agree': top_a.horse_id == top_m.horse_id,
+                })
 
-                if a_won: a_wins += 1
-                if m_won: m_wins += 1
-                if top_a.horse_id == top_m.horse_id: agree += 1
+            race_results.sort(
+                key=lambda r: (
+                    bool(r['sort_key']),
+                    r['sort_key'],
+                    r['race_number'],
+                    r['race_id'],
+                ),
+                reverse=True,
+            )
 
-            n = races_with_result
-            ml_total_return = m_profit / STAKE + n
-            ml_total_profit = ml_total_return - n
-            return jsonify({
-                'races':      n,
-                'a_wins':     a_wins,
-                'a_roi':      round(a_profit / (n * STAKE) * 100, 1) if n else None,
-                'm_wins':     m_wins,
-                'm_roi':      round(ml_total_profit / n * 100, 2) if n else None,
-                'agree_rate': round(agree / n * 100, 1) if n else None,
-                'ml_performance': {
-                    'selections': n,
-                    'wins': m_wins,
-                    'strike_rate': round(m_wins / n * 100, 2) if n else None,
-                    'total_stake': n,
-                    'total_return': round(ml_total_return, 2),
-                    'total_profit': round(ml_total_profit, 2),
-                    'roi': round(ml_total_profit / n * 100, 2) if n else None,
-                },
-            })
+            def summarise(sample):
+                n = len(sample)
+                a_wins = sum(1 for r in sample if r['a_won'])
+                m_wins = sum(1 for r in sample if r['m_won'])
+                a_profit = sum(r['a_profit'] for r in sample)
+                m_profit = sum(r['m_profit'] for r in sample)
+                agree = sum(1 for r in sample if r['agree'])
+                ml_total_return = m_profit / STAKE + n
+                ml_total_profit = ml_total_return - n
+                return {
+                    'races': n,
+                    'a_wins': a_wins,
+                    'a_roi': round(a_profit / (n * STAKE) * 100, 1) if n else None,
+                    'm_wins': m_wins,
+                    'm_roi': round(ml_total_profit / n * 100, 2) if n else None,
+                    'agree_rate': round(agree / n * 100, 1) if n else None,
+                    'ml_performance': {
+                        'selections': n,
+                        'wins': m_wins,
+                        'strike_rate': round(m_wins / n * 100, 2) if n else None,
+                        'total_stake': n,
+                        'total_return': round(ml_total_return, 2),
+                        'total_profit': round(ml_total_profit, 2),
+                        'roi': round(ml_total_profit / n * 100, 2) if n else None,
+                    },
+                }
+
+            n = len(race_results)
+            payload = summarise(race_results)
+            payload['windows'] = [
+                {'label': f'Last {limit:,} races', 'limit': limit, **summarise(race_results[:limit])}
+                for limit in (50, 100, 200, 500, 1000, 2000, 3000, 4000)
+                if n >= limit
+            ]
+            if n and (not payload['windows'] or payload['windows'][-1]['races'] != n):
+                payload['windows'].append({'label': 'All ML races', 'limit': 'all', **summarise(race_results)})
+            return jsonify(payload)
 
         except Exception as e:
             log.error(f"Global stats failed: {e}", exc_info=True)

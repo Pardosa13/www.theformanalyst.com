@@ -81,6 +81,85 @@
     .ml-stat-card .value.green { color: var(--ml-win); }
     .ml-stat-card .value.red   { color: var(--ml-lose); }
 
+    /* Recent ML performance breakdown */
+    .ml-window-panel {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 28px;
+    }
+
+    .ml-window-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+    }
+
+    .ml-window-header h2 {
+        color: var(--text-primary);
+        font-size: 14px;
+        letter-spacing: 1px;
+        margin: 0;
+        font-family: 'DM Mono', monospace;
+        text-transform: uppercase;
+    }
+
+    .ml-window-select {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-mid);
+        color: var(--text-primary);
+        padding: 7px 10px;
+        border-radius: 6px;
+        font-family: 'DM Mono', monospace;
+        font-size: 12px;
+        min-width: 190px;
+    }
+
+    .ml-window-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(110px, 1fr));
+        gap: 10px;
+        margin-bottom: 14px;
+    }
+
+    @media (max-width: 900px) {
+        .ml-window-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    @media (max-width: 500px) {
+        .ml-window-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .ml-window-metric {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-subtle);
+        border-radius: 7px;
+        padding: 12px;
+    }
+
+    .ml-window-metric .label {
+        color: var(--text-muted);
+        font-size: 9px;
+        letter-spacing: 0.8px;
+        margin-bottom: 5px;
+        font-family: 'DM Mono', monospace;
+    }
+
+    .ml-window-metric .value {
+        font-size: 20px;
+        font-weight: 700;
+        font-family: 'Outfit', sans-serif;
+    }
+
+    .ml-window-metric .value.green { color: var(--ml-win); }
+    .ml-window-metric .value.red { color: var(--ml-lose); }
+
+    .ml-window-table-wrap { overflow-x: auto; }
+
     /* Meeting selector row */
     .ml-meeting-bar {
         display: flex;
@@ -267,6 +346,8 @@
 
     .ml-table tr:last-child td { border-bottom: none; }
     .ml-table tr:hover td { background: var(--bg-hover); }
+    .ml-table td.green { color: var(--ml-win) !important; }
+    .ml-table td.red { color: var(--ml-lose) !important; }
 
     /* Score bars */
     .score-bar-wrap { display: flex; align-items: center; gap: 8px; }
@@ -366,6 +447,36 @@
     </div>
   </div>
 
+  <!-- Recent ML performance breakdown -->
+  <div class="ml-window-panel">
+    <div class="ml-window-header">
+      <h2>How ML has been going lately</h2>
+      <select id="ml-window-select" class="ml-window-select" onchange="renderSelectedWindow()" disabled>
+        <option>Loading race ranges...</option>
+      </select>
+    </div>
+    <div class="ml-window-grid">
+      <div class="ml-window-metric"><div class="label">RACES</div><div class="value" id="w-races">—</div></div>
+      <div class="ml-window-metric"><div class="label">WINS</div><div class="value" id="w-wins">—</div></div>
+      <div class="ml-window-metric"><div class="label">STRIKE RATE</div><div class="value" id="w-strike-rate">—</div></div>
+      <div class="ml-window-metric"><div class="label">PROFIT (UNITS)</div><div class="value" id="w-profit">—</div></div>
+      <div class="ml-window-metric"><div class="label">ROI</div><div class="value" id="w-roi">—</div></div>
+      <div class="ml-window-metric"><div class="label">AGREE RATE</div><div class="value" id="w-agree-rate">—</div></div>
+    </div>
+    <div class="ml-window-table-wrap">
+      <table class="ml-table">
+        <thead>
+          <tr>
+            <th>RANGE</th><th>RACES</th><th>WINS</th><th>STRIKE</th><th>PROFIT</th><th>ROI</th><th>AGREE</th>
+          </tr>
+        </thead>
+        <tbody id="ml-window-table">
+          <tr><td colspan="7" style="color:var(--text-muted)">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- Meeting selector -->
   <div class="ml-meeting-bar">
     <select id="meeting-select" onchange="loadMeeting(this.value)">
@@ -422,6 +533,58 @@
 {% block extra_js %}
 <script>
 const STAKE = 10;
+let mlWindows = [];
+
+function formatSigned(value, suffix = '') {
+  if (value == null) return '—';
+  return (value >= 0 ? '+' : '') + value.toFixed(2) + suffix;
+}
+
+function setTrendValue(id, value, suffix = '') {
+  const el = document.getElementById(id);
+  el.textContent = formatSigned(value, suffix);
+  el.className = 'value' + (value != null ? ' ' + (value >= 0 ? 'green' : 'red') : '');
+}
+
+function renderSelectedWindow() {
+  const select = document.getElementById('ml-window-select');
+  const selected = mlWindows.find(w => String(w.limit) === select.value) || mlWindows[0];
+  const ml = selected?.ml_performance || {};
+  document.getElementById('w-races').textContent = selected?.races ?? '—';
+  document.getElementById('w-wins').textContent = ml.wins ?? '—';
+  document.getElementById('w-strike-rate').textContent = ml.strike_rate != null ? ml.strike_rate.toFixed(2) + '%' : '—';
+  setTrendValue('w-profit', ml.total_profit);
+  setTrendValue('w-roi', ml.roi, '%');
+  document.getElementById('w-agree-rate').textContent = selected?.agree_rate != null ? selected.agree_rate.toFixed(1) + '%' : '—';
+}
+
+function renderWindowBreakdown(windows) {
+  mlWindows = windows || [];
+  const select = document.getElementById('ml-window-select');
+  const tbody = document.getElementById('ml-window-table');
+  if (!mlWindows.length) {
+    select.innerHTML = '<option>No completed ML races yet</option>';
+    select.disabled = true;
+    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted)">No completed ML races yet.</td></tr>';
+    renderSelectedWindow();
+    return;
+  }
+  select.disabled = false;
+  select.innerHTML = mlWindows.map(w => `<option value="${w.limit}">${w.label}</option>`).join('');
+  tbody.innerHTML = mlWindows.map(w => {
+    const ml = w.ml_performance || {};
+    const profitClass = ml.total_profit >= 0 ? 'green' : 'red';
+    const roiClass = ml.roi >= 0 ? 'green' : 'red';
+    return `<tr>
+      <td>${w.label}</td><td>${w.races}</td><td>${ml.wins ?? '—'}</td>
+      <td>${ml.strike_rate != null ? ml.strike_rate.toFixed(2) + '%' : '—'}</td>
+      <td class="${profitClass}">${formatSigned(ml.total_profit)}</td>
+      <td class="${roiClass}">${formatSigned(ml.roi, '%')}</td>
+      <td>${w.agree_rate != null ? w.agree_rate.toFixed(1) + '%' : '—'}</td>
+    </tr>`;
+  }).join('');
+  renderSelectedWindow();
+}
 
 function getMeetingId() {
   return document.getElementById('meeting-select').value;
@@ -446,6 +609,7 @@ async function loadGlobalStats() {
     profitEl.className = 'value' + (profit != null ? ' ' + (profit >= 0 ? 'green' : 'red') : '');
     roiEl.textContent = roi != null ? (roi >= 0 ? '+' : '') + roi.toFixed(2) + '%' : '—';
     roiEl.className = 'value' + (roi != null ? ' ' + (roi >= 0 ? 'green' : 'red') : '');
+    renderWindowBreakdown(d.windows || []);
   } catch(e) { console.error(e); }
 }
 
