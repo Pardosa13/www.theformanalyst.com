@@ -3065,12 +3065,14 @@ def dashboard():
         race_map[key].append({'score': score, 'finish_pos': fpos, 'sp': sp or 0})
 
     stake = 10.0
-    total_races = top_pick_wins = 0
+    total_races = top_pick_wins = top_pick_places = 0
     total_profit = 0.0
     for key in race_keys[:100]:
         horses = race_map[key]
         top = max(horses, key=lambda x: x['score'])
         total_races += 1
+        if top['finish_pos'] in [1, 2, 3]:
+            top_pick_places += 1
         if top['finish_pos'] == 1:
             top_pick_wins += 1
             total_profit += top['sp'] * stake - stake
@@ -3079,6 +3081,7 @@ def dashboard():
 
     stats = {
         'last_100_strike_rate': f"{top_pick_wins / total_races * 100:.1f}%" if total_races else '—',
+        'last_100_place_rate': f"{top_pick_places / total_races * 100:.1f}%" if total_races else '—',
         'last_100_roi': f"{total_profit / (total_races * stake) * 100:.1f}%" if total_races else '—',
         'races_total': len(race_keys),
     }
@@ -3150,7 +3153,7 @@ def calculate_ml_performance_stats():
     for row in rows:
         races[row.race_id].append(row)
 
-    selections = wins = 0
+    selections = wins = places = 0
     total_return = 0.0
 
     for horses in races.values():
@@ -3158,6 +3161,8 @@ def calculate_ml_performance_stats():
             continue
         top_pick = max(horses, key=lambda x: x.ml_score or 0)
         selections += 1
+        if top_pick.finish_position in [1, 2, 3]:
+            places += 1
         if top_pick.finish_position == 1:
             wins += 1
             total_return += float(top_pick.sp or 0)
@@ -3165,12 +3170,15 @@ def calculate_ml_performance_stats():
     total_stake = float(selections)
     total_profit = total_return - total_stake
     strike_rate = (wins / selections * 100) if selections else 0.0
+    place_rate = (places / selections * 100) if selections else 0.0
     roi = (total_profit / total_stake * 100) if total_stake else 0.0
 
     return {
         'selections': selections,
         'wins': wins,
+        'places': places,
         'strike_rate': strike_rate,
+        'place_rate': place_rate,
         'total_stake': total_stake,
         'total_return': total_return,
         'total_profit': total_profit,
@@ -5018,6 +5026,7 @@ def data_analytics():
     stake = 10.0
     total_races = 0
     top_pick_wins = 0
+    top_pick_places = 0
     total_profit = 0.0
     winner_sps = []
 
@@ -5029,8 +5038,12 @@ def data_analytics():
             continue
 
         total_races += 1
+        placed = top['finish_pos'] in [1, 2, 3]
         won = top['finish_pos'] == 1
         sp = top['sp']
+
+        if placed:
+            top_pick_places += 1
 
         if won:
             top_pick_wins += 1
@@ -5041,6 +5054,7 @@ def data_analytics():
             total_profit -= stake
 
     strike_rate = (top_pick_wins / total_races * 100) if total_races > 0 else 0
+    place_rate = (top_pick_places / total_races * 100) if total_races > 0 else 0
     roi = (total_profit / (total_races * stake) * 100) if total_races > 0 else 0
     avg_winner_sp = sum(winner_sps) / len(winner_sps) if winner_sps else 0
 
@@ -5114,7 +5128,9 @@ def data_analytics():
     return render_template("data.html",
         total_races=total_races,
         strike_rate=strike_rate,
+        place_rate=place_rate,
         top_pick_wins=top_pick_wins,
+        top_pick_places=top_pick_places,
         roi=roi,
         total_profit=total_profit,
         avg_winner_sp=avg_winner_sp,
