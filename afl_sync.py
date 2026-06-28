@@ -11,6 +11,8 @@ Does not use ORM models.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import time
 import logging
 
@@ -59,6 +61,62 @@ def _safe_log_sync(db, source: str, season: int = None, round_num: int = None,
     except Exception as exc:
         logger.warning("Failed writing sync log for %s season=%s: %s", source, season, exc)
 
+
+
+def _run_afl_ml_command(args: list[str], success_message: str | None = None) -> bool:
+    """Run one AFL ML command from the existing Railway cron environment."""
+    cmd = [sys.executable, "afl_backtest.py", *args]
+    label = " ".join(["python", "afl_backtest.py", *args])
+    try:
+        result = subprocess.run(
+            cmd,
+            check=False,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            text=True,
+            capture_output=True,
+        )
+    except Exception as exc:
+        logger.error("AFL ML command failed to start (%s): %s", label, exc, exc_info=True)
+        return False
+
+    if result.stdout:
+        logger.info("AFL ML stdout (%s):\n%s", label, result.stdout.rstrip())
+    if result.stderr:
+        log_method = logger.error if result.returncode else logger.info
+        log_method("AFL ML stderr (%s):\n%s", label, result.stderr.rstrip())
+
+    if result.returncode != 0:
+        logger.error("AFL ML command failed (%s) with exit code %s", label, result.returncode)
+        return False
+
+    if success_message:
+        logger.info(success_message)
+    return True
+
+
+def run_afl_ml_pipeline_after_sync() -> None:
+    """Run the post-sync AFL ML pipeline without breaking the AFL cron."""
+    logger.info("Starting AFL ML schema report")
+    schema_ok = _run_afl_ml_command(["--schema-report"])
+    if not schema_ok:
+        logger.warning(
+            "AFL ML schema report failed; continuing to training because training performs "
+            "its own validation and writes model artifacts atomically."
+        )
+
+    logger.info("Starting AFL ML training")
+    train_ok = _run_afl_ml_command(["--train"], success_message="AFL ML model saved")
+    if not train_ok:
+        logger.error(
+            "AFL ML training failed; old model artifact was not intentionally replaced. "
+            "Skipping current scoring to avoid scoring with a failed training run."
+        )
+        return
+
+    logger.info("Starting AFL ML current scoring")
+    score_ok = _run_afl_ml_command(["--score-current"], success_message="AFL ML current scoring complete")
+    if not score_ok:
+        logger.error("AFL ML current scoring failed; AFL sync completed but current ML scores were not refreshed.")
 
 def sync_afl_all(season: int = None):
     """
@@ -256,6 +314,7 @@ def sync_afl_all(season: int = None):
             _safe_log_sync(db, "afl_model_selections_settle", season=season, status="error", error=str(exc))
 
         logger.info("=== AFL sync complete ===")
+        run_afl_ml_pipeline_after_sync()
 
     finally:
         if previous_cron_mode is None:
