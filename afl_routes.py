@@ -1163,6 +1163,40 @@ def register_afl_routes(app, db):
             }
         )
 
+
+    @app.route("/api/afl/ml-current-selections")
+    @login_required
+    def api_afl_ml_current_selections():
+        """Score unsettled AFL model selections with the AFL-only .pkl meta model.
+
+        This connects the AFL bet-quality artifact to the AFL API layer without
+        changing the existing Value Finder, Predictions, or horse racing flows.
+        """
+        try:
+            from afl_backtest import MODEL_PATH, score_current
+        except Exception as exc:
+            logger.exception("AFL ML scorer import failed")
+            return jsonify({"status": "error", "message": str(exc)}), 500
+
+        if not MODEL_PATH.exists():
+            return jsonify({
+                "status": "missing_model",
+                "message": "AFL bet-quality model not found. Run: python afl_backtest.py --train",
+                "model_path": str(MODEL_PATH),
+                "rows": [],
+                "count": 0,
+            }), 404
+
+        try:
+            scored = score_current()
+        except Exception as exc:
+            logger.exception("AFL ML current-selection scoring failed")
+            return jsonify({"status": "error", "message": str(exc)}), 500
+
+        import numpy as np
+        rows = scored.replace({np.nan: None}).to_dict("records") if hasattr(scored, "replace") else []
+        return jsonify({"status": "ok", "count": len(rows), "rows": rows})
+
     @app.route("/api/afl/model-performance")
     @login_required
     def api_afl_model_performance():
