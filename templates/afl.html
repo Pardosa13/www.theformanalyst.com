@@ -383,6 +383,21 @@
   .edge-chip.pos { background:rgba(16,185,129,.12); border:1px solid rgba(16,185,129,.3); color:#34d399; }
   .edge-chip.neg { background:rgba(239,68,68,.12);  border:1px solid rgba(239,68,68,.3);  color:#f87171; }
   .edge-chip.neu { background:var(--bg-elevated); border:1px solid var(--border-mid); color:var(--text-muted); }
+  .ml-rec-chip {
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:56px; padding:4px 9px; border-radius:999px;
+    font-family:'DM Mono',monospace; font-size:11px; font-weight:800;
+  }
+  .ml-rec-chip.bet {
+    background:rgba(16,185,129,.18); border:1px solid rgba(16,185,129,.42);
+    color:#34d399; box-shadow:0 0 16px rgba(16,185,129,.12);
+  }
+  .ml-rec-chip.pass {
+    background:var(--bg-elevated); border:1px solid var(--border-mid);
+    color:var(--text-muted);
+  }
+  .ml-row-bet { background:rgba(16,185,129,.055); }
+  .ml-row-pass { opacity:.72; }
   .lt-over  { color:#34d399; font-weight:700; font-size:11px; font-family:'DM Mono',monospace; }
   .lt-under { color:#f87171; font-weight:700; font-size:11px; font-family:'DM Mono',monospace; }
 
@@ -759,6 +774,9 @@
   </button>
   <button class="afl-tab" data-tab="predictions" onclick="switchTab('predictions',this)">
     <i class="bi bi-bar-chart-fill"></i> Match Predictions
+  </button>
+  <button class="afl-tab" data-tab="ml" onclick="switchTab('ml',this)">
+    <i class="bi bi-cpu-fill"></i> AFL Machine Learning
   </button>
   <button class="afl-tab" data-tab="fixtures" onclick="switchTab('fixtures',this)">
     <i class="bi bi-calculator"></i> SGM Calculator
@@ -1192,6 +1210,29 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════
+     TAB: AFL MACHINE LEARNING
+     ════════════════════════════════════════════════════════════════ -->
+<div id="tab-ml" class="tab-panel">
+  <div class="afl-card">
+    <div class="afl-card-header">
+      <h4><i class="bi bi-cpu-fill"></i> AFL Machine Learning Selections</h4>
+      <button class="btn btn-primary btn-sm" onclick="loadAflMachineLearningSelections()">
+        <i class="bi bi-arrow-repeat"></i> Refresh ML Selections
+      </button>
+    </div>
+    <div class="afl-card-body">
+      <div id="aflMlSummary" class="vf-results-meta">All Machine Learning selections · display only from the AFL ML backend endpoint.</div>
+      <div id="aflMlSelectionsWrap">
+        <div class="prop-empty">
+          <i class="bi bi-cpu"></i>
+          <p>Click <strong>Refresh ML Selections</strong> to load current AFL ML selections.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════
      TAB: SGM CALCULATOR
      ════════════════════════════════════════════════════════════════ -->
 <div id="tab-fixtures" class="tab-panel">
@@ -1526,6 +1567,9 @@ function switchTab(name, btn) {
   if (name === 'predictions') {
     loadBettingEdges();
   }
+  if (name === 'ml') {
+    loadAflMachineLearningSelections();
+  }
   if (name === 'fixtures') {
     sgmLoadLegs();
   }
@@ -1687,6 +1731,90 @@ function loadBettingEdges() {
       }</tbody></table></div>`;
     })
     .catch((err) => { el.textContent = `Failed to load betting edges (${esc(err.message || 'unknown error')}).`; });
+}
+
+function fmtPctFromUnit(v) {
+  if (v == null || v === '') return '—';
+  return (safeNum(v) * 100).toFixed(1) + '%';
+}
+
+function fmtMlScore(v) {
+  if (v == null || v === '') return '—';
+  return safeNum(v).toFixed(4);
+}
+
+function loadAflMachineLearningSelections() {
+  const wrap = document.getElementById('aflMlSelectionsWrap');
+  const summary = document.getElementById('aflMlSummary');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="prop-empty"><span class="spinner-sm"></span><p>Loading AFL ML selections…</p></div>';
+
+  fetch('/api/afl/ml-current-selections')
+    .then(async response => {
+      const data = await response.json().catch(() => ({}));
+      if (data.status === 'missing_model') return data;
+      if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
+      return data;
+    })
+    .then(data => {
+      if (data.status === 'missing_model') {
+        if (summary) summary.textContent = 'AFL Machine Learning model status: missing model.';
+        wrap.innerHTML = `<div class="props-banner"><i class="bi bi-exclamation-triangle-fill"></i> AFL Machine Learning model has not been trained yet. Run training on Railway first.</div>`;
+        return;
+      }
+
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      if (!rows.length) {
+        if (summary) summary.textContent = 'All Machine Learning selections · 0 current rows.';
+        wrap.innerHTML = `<div class="prop-empty"><i class="bi bi-cpu"></i><p>No current AFL ML selections available.</p></div>`;
+        return;
+      }
+
+      const betCount = rows.filter(r => String(r.ml_recommendation || '').toUpperCase() === 'BET').length;
+      if (summary) summary.textContent = `All Machine Learning selections · ${rows.length} current rows · ${betCount} ML BET selections.`;
+
+      wrap.innerHTML = `<div class="scroll-x"><table class="value-table">
+        <thead>
+          <tr>
+            <th>Match</th><th>Commence</th><th>Market</th><th>Line Type</th><th>Line</th>
+            <th>Team / Player</th><th>Opponent</th><th>Bookmaker</th><th>Odds</th>
+            <th>Existing Rec</th><th>Original Model Prob</th><th>Original Edge</th><th>Original Confidence</th>
+            <th>ML Bet Probability</th><th>ML EV Score</th><th>ML Recommendation</th><th>Threshold Used</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => {
+            const rec = String(r.ml_recommendation || 'PASS').toUpperCase();
+            const isBet = rec === 'BET';
+            const match = r.match || ((r.home_team || r.away_team) ? `${r.home_team || '—'} vs ${r.away_team || '—'}` : '—');
+            const teamPlayer = r.player_name || r.team || r.selection_name || '—';
+            return `<tr class="${isBet ? 'ml-row-bet' : 'ml-row-pass'}">
+              <td><strong>${esc(match)}</strong></td>
+              <td class="mono">${esc(fmtDateTime(r.commence_time))}</td>
+              <td>${esc(r.market || '—')}</td>
+              <td>${esc(r.line_type || '—')}</td>
+              <td class="mono">${r.line == null ? '—' : esc(r.line)}</td>
+              <td>${esc(teamPlayer)}</td>
+              <td>${esc(r.opponent || '—')}</td>
+              <td>${esc(r.bookmaker || '—')}</td>
+              <td class="mono">${r.odds == null ? '—' : safeNum(r.odds).toFixed(2)}</td>
+              <td>${esc(r.existing_recommendation || r.recommendation || '—')}</td>
+              <td class="mono">${fmtPctFromUnit(r.original_model_prob ?? r.model_prob)}</td>
+              <td class="mono">${r.original_edge == null && r.edge == null ? '—' : safeNum(r.original_edge ?? r.edge).toFixed(2)}</td>
+              <td class="mono">${r.confidence_score == null ? '—' : safeNum(r.confidence_score).toFixed(1)}</td>
+              <td class="mono"><strong>${fmtPctFromUnit(r.ml_bet_probability)}</strong></td>
+              <td class="mono">${fmtMlScore(r.ml_expected_value_score)}</td>
+              <td><span class="ml-rec-chip ${isBet ? 'bet' : 'pass'}">${esc(rec)}</span></td>
+              <td class="mono">${fmtMlScore(r.threshold_used)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>`;
+    })
+    .catch(err => {
+      if (summary) summary.textContent = 'AFL Machine Learning selections could not be loaded.';
+      wrap.innerHTML = `<div class="props-banner"><i class="bi bi-exclamation-triangle-fill"></i> Failed to load AFL ML selections (${esc(err.message || 'unknown error')}).</div>`;
+    });
 }
 
 // ── Round navigation ─────────────────────────────────────────────
