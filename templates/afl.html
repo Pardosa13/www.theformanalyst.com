@@ -1783,8 +1783,15 @@ function loadAflMachineLearningSelections() {
         return;
       }
 
-      const betCount = rows.filter(r => String(r.ml_recommendation || '').toUpperCase() === 'BET').length;
+      const betSelections = rows.filter(r =>
+        String(r.recommendation || r.status || r.decision || r.ml_recommendation || '').toUpperCase() === 'BET'
+      );
+      const betCount = betSelections.length;
       if (summary) summary.textContent = `All Machine Learning selections · ${rows.length} current rows · ${betCount} ML BET selections.`;
+      if (!betSelections.length) {
+        wrap.innerHTML = '<div class="prop-empty"><i class="bi bi-cpu"></i><p>No AFL ML bet selections currently available.</p></div>';
+        return;
+      }
 
       wrap.innerHTML = `<div class="scroll-x"><table class="value-table">
         <thead>
@@ -1796,8 +1803,8 @@ function loadAflMachineLearningSelections() {
           </tr>
         </thead>
         <tbody>
-          ${rows.map(r => {
-            const rec = String(r.ml_recommendation || 'PASS').toUpperCase();
+          ${betSelections.map(r => {
+            const rec = String(r.recommendation || r.status || r.decision || r.ml_recommendation || 'PASS').toUpperCase();
             const isBet = rec === 'BET';
             const match = r.match || ((r.home_team || r.away_team) ? `${r.home_team || '—'} vs ${r.away_team || '—'}` : '—');
             const teamPlayer = r.player_name || r.team || r.selection_name || '—';
