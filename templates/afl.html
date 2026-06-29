@@ -1757,7 +1757,7 @@ function loadAflMachineLearningSelections() {
         try {
           data = JSON.parse(rawBody);
         } catch (e) {
-          throw new Error(`Invalid JSON returned by AFL ML endpoint: ${e.message}. Response preview: ${rawBody.slice(0, 180)}`);
+          throw new Error(`Invalid JSON returned by AFL ML endpoint: ${e.message}`);
         }
       }
       if (['missing_model', 'no_data', 'error'].includes(data.status)) return data;

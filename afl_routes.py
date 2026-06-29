@@ -145,7 +145,7 @@ def register_afl_routes(app, db):
                 except Exception:
                     logger.exception(
                         "AFL endpoint produced malformed JSON",
-                        extra={"path": path, "status": response.status_code, "body_preview": body[:200]},
+                        extra={"path": path, "status": response.status_code, "response_length": len(body)},
                     )
                     return _as_json(
                         {
@@ -159,8 +159,7 @@ def register_afl_routes(app, db):
                 if payload != _safe_json_value(payload):
                     return _as_json(payload, response.status_code)
                 return response
-            body = (response.get_data(as_text=True) or "").strip()
-            message = body or f"AFL endpoint returned non-JSON response (status {response.status_code})"
+            message = f"AFL endpoint returned non-JSON response (status {response.status_code})"
             return _as_json(
                 {
                     "ok": False,
