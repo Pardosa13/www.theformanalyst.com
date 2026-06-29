@@ -19,6 +19,7 @@ import math
 import re
 import time
 import unicodedata
+import json
 from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
@@ -117,6 +118,54 @@ _MARKET_WEIGHTING_OVERRIDES: dict[str, dict[str, float]] = {
 
 def register_afl_routes(app, db):
     """Register all AFL routes onto the Flask app."""
+
+    @app.after_request
+    def _ensure_afl_json_response_integrity(response):
+        def _as_json(payload, status_code):
+            safe_payload = _safe_json_value(payload)
+            resp = jsonify(safe_payload)
+            resp.status_code = status_code
+            return resp
+
+        path = request.path or ""
+        if not path.startswith("/api/afl"):
+            return response
+        if path.startswith("/api/afl/player-headshot"):
+            return response
+        if response.status_code == 204:
+            return response
+        content_type = (response.headers.get("Content-Type") or "").lower()
+        if "application/json" in content_type:
+            body = response.get_data(as_text=True) or ""
+            if not body.strip():
+                return response
+            try:
+                payload = json.loads(body)
+            except Exception:
+                logger.exception("AFL endpoint produced malformed JSON", extra={"path": path, "status": response.status_code})
+                return _as_json(
+                    {
+                        "ok": False,
+                        "status": "error",
+                        "message": "AFL endpoint returned malformed JSON",
+                        "path": path,
+                    },
+                    500,
+                )
+            if payload != _safe_json_value(payload):
+                return _as_json(payload, response.status_code)
+            return response
+        body = (response.get_data(as_text=True) or "").strip()
+        message = body or f"AFL endpoint returned non-JSON response (status {response.status_code})"
+        return _as_json(
+            {
+                "ok": False,
+                "status": "error",
+                "message": message,
+                "path": path,
+            },
+            response.status_code if response.status_code >= 400 else 500,
+        )
 
     @app.route("/afl")
     @login_required
@@ -1256,7 +1305,7 @@ def register_afl_routes(app, db):
 
         logger.info("AFL ML current selections using model artifact source=%s", artifact_source)
         try:
-            scored = score_current()
+            scored = score_current(emit=False)
         except Exception as exc:
             logger.exception("AFL ML current-selection scoring failed")
             return safe_json_response({"ok": False, "status": "error", "message": str(exc), "selections": [], "summary": {}}, 500)

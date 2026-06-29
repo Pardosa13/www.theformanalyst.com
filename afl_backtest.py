@@ -662,7 +662,7 @@ def validate_artifact(artifact: dict[str, Any]) -> None:
         )
 
 
-def score_current() -> pd.DataFrame:
+def score_current(emit: bool = True) -> pd.DataFrame:
     require_dependencies()
     e = engine()
     artifact, artifact_source = load_model_artifact(e)
@@ -676,7 +676,8 @@ def score_current() -> pd.DataFrame:
     log_dataframe_diagnostics("current_with_features", df)
     if df.empty:
         SCORES_PATH.write_text("[]\n")
-        print("[]")
+        if emit:
+            print("[]")
         return df
     features = artifact["feature_columns"]
     for c in features:
@@ -693,7 +694,8 @@ def score_current() -> pd.DataFrame:
     out["threshold_used"] = threshold
     safe_rows = df_to_safe_records(out)
     SCORES_PATH.write_text(json.dumps(safe_rows, default=str, indent=2, allow_nan=False) + "\n")
-    print(json.dumps(safe_rows, default=str, indent=2, allow_nan=False))
+    if emit:
+        print(json.dumps(safe_rows, default=str, indent=2, allow_nan=False))
     LOG.info("AFL_PIPELINE_DIAG current_scored rows=%s response_keys=%s", len(safe_rows), list(safe_rows[0].keys()) if safe_rows else [])
     return out
 
@@ -753,7 +755,7 @@ def debug_pipeline() -> dict[str, Any]:
         "ml": status,
     })
     try:
-        scored = score_current()
+        scored = score_current(emit=False)
         out["sample_5_scored_selections"] = df_to_safe_records(scored.head(5))
     except Exception as exc:
         out["sample_5_scored_selections"] = []
