@@ -16,6 +16,7 @@ from datetime import datetime, date
 
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
+from mma_data import normalise_name
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,34 @@ def register_mma_routes(app, db):
                 LIMIT 10
             """)
             event_rows = db.session.execute(events_sql).fetchall()
+
+            headshot_rows = db.session.execute(text("""
+                SELECT full_name, headshot_url
+                FROM mma_fighters
+                WHERE headshot_url IS NOT NULL
+            """)).fetchall()
+            headshots_by_norm = {}
+            headshots_by_last_name = {}
+            for fighter_name, headshot_url in headshot_rows:
+                norm = normalise_name(fighter_name)
+                if norm and norm not in headshots_by_norm:
+                    headshots_by_norm[norm] = headshot_url
+                last_name = norm.split()[-1] if norm else ""
+                if last_name:
+                    headshots_by_last_name.setdefault(last_name, set()).add(headshot_url)
+
+            def resolve_headshot(fighter_name, current_headshot):
+                if current_headshot or not fighter_name:
+                    return current_headshot
+
+                norm_fighter_name = normalise_name(fighter_name)
+                direct = headshots_by_norm.get(norm_fighter_name)
+                if direct:
+                    return direct
+
+                last_name = norm_fighter_name.split()[-1] if norm_fighter_name else ""
+                matched = list(headshots_by_last_name.get(last_name, set()))
+                return matched[0] if len(matched) == 1 else None
 
             result = []
             for ev in event_rows:
@@ -97,6 +126,9 @@ def register_mma_routes(app, db):
                      f2h, f2r, f2s, f2rec,
                      pred_winner, f1_prob, f2_prob, conf, factors_json,
                      f1_headshot_url, f2_headshot_url) = fr
+
+                    f1_headshot_url = resolve_headshot(f1, f1_headshot_url)
+                    f2_headshot_url = resolve_headshot(f2, f2_headshot_url)
 
                     factors = {}
                     if factors_json:
