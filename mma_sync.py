@@ -862,11 +862,10 @@ def rebuild_stats_from_db(conn):
         fid1, fid2, n1, n2, winner, method, rnd, t_str, fight_date = row[:9]
         if not fight_date:
             continue
-        if isinstance(fight_date, str):
-            try:
-                fight_date = pd.to_datetime(fight_date)
-            except Exception:
-                continue
+        try:
+            fight_date = pd.Timestamp(fight_date)
+        except Exception:
+            continue
 
         time_sec = pars_time(t_str, rnd) if t_str and rnd else 300
         result_1 = 'W' if winner == n1 else ('L' if winner else 'D')
@@ -1528,7 +1527,7 @@ def main():
     events = scrape_upcoming_events()
     log.info(f"Found {len(events)} events to process")
 
-    today = datetime.utcnow()
+    today = pd.Timestamp.now()
     default_stats = FighterStats()
     default_sv = default_stats.get_stat_vector(today)
 
