@@ -1261,6 +1261,59 @@ def is_apex_event(name, location):
 
 # ── ESPN headshot helpers ─────────────────────────────────────────────────────
 
+def fetch_scoreboard_fighters():
+    """Extract fighter ESPN profile URLs from the scoreboard API competitions.
+
+    The scoreboard API is still live and includes competitor/athlete data in
+    each event's ``competitions`` array.  This lets us populate headshot URLs
+    even when the per-event summary API returns 404.
+
+    Returns a dict mapping normalised fighter name → (display_name, espn_url).
+    """
+    today = date.today()
+    result = {}
+
+    for year in [today.year, today.year + 1]:
+        start = f"{year}0101"
+        end = f"{year}1231"
+        url = (
+            f"https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard"
+            f"?limit=100&dates={start}-{end}"
+        )
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            log.warning(f"  Scoreboard fighters fetch failed for {year}: {e}")
+            continue
+
+        for ev in data.get('events', []):
+            for comp in ev.get('competitions', []):
+                for cmp in comp.get('competitors', []):
+                    athlete = cmp.get('athlete', {})
+                    name = (athlete.get('displayName', '')
+                            or cmp.get('displayName', ''))
+                    if not name:
+                        continue
+                    links = athlete.get('links', []) or cmp.get('links', [])
+                    espn_url = links[0].get('href', '') if links else ''
+                    if not espn_url:
+                        # Build URL from athlete ID when links are absent
+                        athlete_id = athlete.get('id', '') or cmp.get('id', '')
+                        if athlete_id:
+                            espn_url = (
+                                f'https://www.espn.com/mma/fighter/_/id/{athlete_id}'
+                            )
+                    if espn_url and not espn_url.startswith('http'):
+                        espn_url = 'https://www.espn.com' + espn_url
+                    if name and espn_url:
+                        result[normalize_name(name)] = (name, espn_url)
+
+    log.info(f"  Scoreboard: extracted ESPN data for {len(result)} fighters")
+    return result
+
+
 def espn_headshot_url(espn_url):
     """Derive ESPN CDN headshot URL from an ESPN fighter profile URL.
 
@@ -1527,6 +1580,14 @@ def main():
     events = scrape_upcoming_events()
     log.info(f"Found {len(events)} events to process")
 
+    # Pre-fetch fighter ESPN data from the scoreboard API.  The per-event
+    # summary API (/ufc/summary?event=ID) has started returning 404 for many
+    # events, so we can no longer rely on it for fighter profile URLs.  The
+    # scoreboard API is still live and embeds competitor athlete data (ESPN IDs
+    # + profile links) inside each event's competitions array.
+    log.info("Pre-fetching fighter ESPN data from scoreboard...")
+    scoreboard_fighters = fetch_scoreboard_fighters()
+
     today = pd.Timestamp.now()
     default_stats = FighterStats()
     default_sv = default_stats.get_stat_vector(today)
@@ -1560,8 +1621,19 @@ def main():
                         {
                             'fighter_1': _f['fighter_1'],
                             'fighter_2': _f['fighter_2'],
-                            'fighter_1_url': '',
-                            'fighter_2_url': '',
+                            # Attempt to back-fill ESPN URLs from scoreboard
+                            # data so headshots can be derived even though the
+                            # summary API returned 404.
+                            'fighter_1_url': (
+                                scoreboard_fighters.get(
+                                    normalize_name(_f['fighter_1']), (None, '')
+                                )[1]
+                            ),
+                            'fighter_2_url': (
+                                scoreboard_fighters.get(
+                                    normalize_name(_f['fighter_2']), (None, '')
+                                )[1]
+                            ),
                             'f1_stats': {},
                             'f2_stats': {},
                             # Card position is unknown from Odds API;
@@ -1576,6 +1648,15 @@ def main():
                     break
 
         for fight in fights:
+            # If ESPN URLs are still missing, try scoreboard lookup by name.
+            for side in ('fighter_1', 'fighter_2'):
+                url_key = f'{side}_url'
+                if not fight.get(url_key):
+                    norm = normalize_name(fight[side])
+                    sb_entry = scoreboard_fighters.get(norm)
+                    if sb_entry:
+                        fight[url_key] = sb_entry[1]
+
             fight_id = upsert_fight(conn, event['event_id'], fight)
 
             # Resolve fighter IDs (needed for headshot linking + predictions)
@@ -1651,6 +1732,19 @@ def main():
                      f"{fight['fighter_1']} vs {fight['fighter_2']}")
 
         time.sleep(1)
+
+    # Bulk-update headshot URLs for all fighters found in the scoreboard.
+    # This catches any fighter whose headshot_url is still NULL in the DB but
+    # whose ESPN ID was returned by the scoreboard (e.g. fighters on cards that
+    # the per-event summary API returned 404 for).
+    if scoreboard_fighters:
+        log.info(f"Bulk-updating headshots for {len(scoreboard_fighters)} scoreboard fighters...")
+        conn2 = get_conn()
+        try:
+            for _display_name, _espn_url in scoreboard_fighters.values():
+                upsert_fighter_espn_info(conn2, _display_name, _espn_url)
+        finally:
+            conn2.close()
 
     conn.close()
 
