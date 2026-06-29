@@ -8,6 +8,7 @@ Usage:
   DATABASE_URL=postgresql://... python afl_backtest.py --schema-report
   DATABASE_URL=postgresql://... python afl_backtest.py --train
   DATABASE_URL=postgresql://... python afl_backtest.py --score-current
+  DATABASE_URL=postgresql://... python afl_backtest.py --model-status
 
 Railway setup:
   1. Attach the same Postgres DATABASE_URL used by the AFL app.
@@ -17,10 +18,10 @@ Railway setup:
 
 Model artifacts:
   --train creates models/afl_bet_quality_model.pkl and
-  models/afl_bet_quality_model_meta.json from live Railway Postgres data.
-  Do not commit generated AFL model artifacts unless they were trained from
-  live Railway data. Use a Railway volume mounted at models/ if the .pkl must
-  persist across deployments; otherwise retrain on deploy or before scoring.
+  models/afl_bet_quality_model_meta.json from live Railway Postgres data,
+  then stores the .pkl bytes and metadata in Postgres table afl_ml_artifacts.
+  The web app first tries the local .pkl and falls back to the active Postgres
+  artifact so Railway cron and web services can share the trained model.
 """
 from __future__ import annotations
 
@@ -69,6 +70,8 @@ DIFF_STATS = ["disposals", "kicks", "handballs", "marks", "tackles", "clearances
 SAFE_GAME_CATEGORICAL = ["venue", "roundname"]
 SAFE_PREFIXES = ("home_team_last5_", "away_team_last5_", "home_away_last5_", "standings_", "safe_market_")
 MODEL_SCHEMA_VERSION = 1
+ARTIFACT_MODEL_NAME = "afl_bet_quality_model"
+ARTIFACT_VERSION = f"schema_v{MODEL_SCHEMA_VERSION}"
 
 FEATURE_AUDIT = {
     "afl_model_selections": {
@@ -129,9 +132,138 @@ def read_sql(e: Engine, sql: str, params: dict[str, Any] | None = None) -> pd.Da
     return pd.read_sql_query(text(sql), e, params=params or {})
 
 
+def ensure_artifact_table(e: Engine) -> None:
+    """Ensure the AFL-only ML artifact table exists in Postgres."""
+    with e.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS afl_ml_artifacts (
+                id SERIAL PRIMARY KEY,
+                model_name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                trained_at TIMESTAMP,
+                artifact_bytes BYTEA NOT NULL,
+                meta_json JSONB,
+                is_active BOOLEAN DEFAULT FALSE
+            )
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_afl_ml_artifacts_active
+            ON afl_ml_artifacts(model_name, is_active, created_at DESC)
+        """))
+
+
+def _artifact_meta(artifact: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in artifact.items() if k != "model"}
+
+
+def save_artifact_to_postgres(e: Engine, artifact_bytes: bytes, meta: dict[str, Any]) -> int:
+    ensure_artifact_table(e)
+    trained_at = meta.get("training_timestamp")
+    LOG.info(
+        "Saving AFL ML model artifact to Postgres table afl_ml_artifacts (model_name=%s version=%s bytes=%s trained_at=%s)",
+        ARTIFACT_MODEL_NAME,
+        ARTIFACT_VERSION,
+        len(artifact_bytes),
+        trained_at,
+    )
+    with e.begin() as conn:
+        conn.execute(
+            text("UPDATE afl_ml_artifacts SET is_active = FALSE WHERE model_name = :model_name AND is_active = TRUE"),
+            {"model_name": ARTIFACT_MODEL_NAME},
+        )
+        artifact_id = conn.execute(
+            text("""
+                INSERT INTO afl_ml_artifacts
+                    (model_name, version, trained_at, artifact_bytes, meta_json, is_active)
+                VALUES
+                    (:model_name, :version, :trained_at, :artifact_bytes, CAST(:meta_json AS JSONB), TRUE)
+                RETURNING id
+            """),
+            {
+                "model_name": ARTIFACT_MODEL_NAME,
+                "version": ARTIFACT_VERSION,
+                "trained_at": trained_at,
+                "artifact_bytes": artifact_bytes,
+                "meta_json": json.dumps(meta, default=str),
+            },
+        ).scalar_one()
+    LOG.info("Saved active AFL ML model artifact to Postgres (id=%s)", artifact_id)
+    return int(artifact_id)
+
+
+def load_active_artifact_from_postgres(e: Engine) -> dict[str, Any] | None:
+    ensure_artifact_table(e)
+    LOG.info("Loading active AFL ML model artifact from Postgres table afl_ml_artifacts")
+    with e.begin() as conn:
+        row = conn.execute(
+            text("""
+                SELECT id, version, created_at, trained_at, artifact_bytes, meta_json
+                FROM afl_ml_artifacts
+                WHERE model_name = :model_name AND is_active = TRUE
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+            """),
+            {"model_name": ARTIFACT_MODEL_NAME},
+        ).mappings().first()
+    if not row:
+        LOG.warning("No active AFL ML model artifact found in Postgres")
+        return None
+    LOG.info(
+        "Loaded active AFL ML model artifact metadata from Postgres (id=%s version=%s bytes=%s trained_at=%s)",
+        row["id"], row["version"], len(row["artifact_bytes"] or b""), row["trained_at"],
+    )
+    import io
+    artifact = joblib.load(io.BytesIO(bytes(row["artifact_bytes"])))
+    return artifact
+
+
+def load_model_artifact(e: Engine | None = None) -> tuple[dict[str, Any] | None, str | None]:
+    if MODEL_PATH.exists():
+        LOG.info("Loading AFL ML model artifact from local filesystem: %s", MODEL_PATH)
+        return joblib.load(MODEL_PATH), "local"
+    LOG.warning("Local AFL ML model artifact missing at %s; trying Postgres", MODEL_PATH)
+    e = e or engine()
+    artifact = load_active_artifact_from_postgres(e)
+    if artifact is not None:
+        return artifact, "postgres"
+    return None, None
+
+
+def model_status() -> dict[str, Any]:
+    require_dependencies()
+    status: dict[str, Any] = {
+        "local_model": {"path": str(MODEL_PATH), "exists": MODEL_PATH.exists()},
+        "postgres_active_model": {"exists": False},
+    }
+    if MODEL_PATH.exists():
+        status["local_model"]["bytes"] = MODEL_PATH.stat().st_size
+    e = engine()
+    try:
+        ensure_artifact_table(e)
+        with e.begin() as conn:
+            row = conn.execute(
+                text("""
+                    SELECT id, version, created_at, trained_at, OCTET_LENGTH(artifact_bytes) AS bytes
+                    FROM afl_ml_artifacts
+                    WHERE model_name = :model_name AND is_active = TRUE
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                """),
+                {"model_name": ARTIFACT_MODEL_NAME},
+            ).mappings().first()
+        if row:
+            status["postgres_active_model"] = {"exists": True, **dict(row)}
+    except Exception as exc:
+        LOG.exception("AFL ML model-status Postgres check failed")
+        status["postgres_active_model"] = {"exists": False, "error": str(exc)}
+    print(json.dumps(status, default=str, indent=2))
+    return status
+
+
 def schema_report(e: Engine) -> dict[str, Any]:
     insp = inspect(e)
-    tables = [t for t in ["afl_games", "afl_match_markets", "afl_match_predictions", "afl_model_selections", "afl_player_stats", "afl_player_props", "afl_standings", "afl_sync_log", "afl_team_logos", "afl_tips"] if insp.has_table(t)]
+    tables = [t for t in ["afl_games", "afl_match_markets", "afl_match_predictions", "afl_model_selections", "afl_player_stats", "afl_player_props", "afl_standings", "afl_sync_log", "afl_ml_artifacts", "afl_team_logos", "afl_tips"] if insp.has_table(t)]
     out: dict[str, Any] = {"tables": {}, "feature_audit": FEATURE_AUDIT}
     for t in tables:
         out["tables"][t] = {"columns": [c["name"] for c in insp.get_columns(t)]}
@@ -403,9 +535,14 @@ def train() -> dict[str, Any]:
     tmp_model = MODEL_PATH.with_suffix(".tmp.pkl")
     tmp_meta = META_PATH.with_suffix(".tmp.json")
     joblib.dump(artifact, tmp_model)
-    tmp_meta.write_text(json.dumps({k: v for k, v in artifact.items() if k != "model"}, default=str, indent=2) + "\n")
+    meta = _artifact_meta(artifact)
+    tmp_meta.write_text(json.dumps(meta, default=str, indent=2) + "\n")
     os.replace(tmp_model, MODEL_PATH)
     os.replace(tmp_meta, META_PATH)
+    LOG.info("Saved AFL ML model artifact to local filesystem: %s", MODEL_PATH)
+    LOG.info("Saved AFL ML model metadata to local filesystem: %s", META_PATH)
+    artifact_id = save_artifact_to_postgres(e, MODEL_PATH.read_bytes(), meta)
+    summary["postgres_artifact_id"] = artifact_id
     print(json.dumps(summary, default=str, indent=2))
     return summary
 
@@ -438,9 +575,10 @@ def validate_artifact(artifact: dict[str, Any]) -> None:
 def score_current() -> pd.DataFrame:
     require_dependencies()
     e = engine()
-    if not MODEL_PATH.exists():
-        raise SystemExit(f"AFL model artifact does not exist: {MODEL_PATH}. Run python afl_backtest.py --train on Railway first.")
-    artifact = joblib.load(MODEL_PATH)
+    artifact, artifact_source = load_model_artifact(e)
+    if artifact is None:
+        raise SystemExit(f"AFL model artifact does not exist locally at {MODEL_PATH} and no active Postgres artifact was found. Run python afl_backtest.py --train on Railway first.")
+    LOG.info("Using AFL ML model artifact source=%s", artifact_source)
     validate_artifact(artifact)
     df = add_safe_features(e, load_selections(e, settled=False))
     if df.empty:
@@ -479,6 +617,7 @@ def main() -> None:
     p.add_argument("--train", action="store_true")
     p.add_argument("--score-current", action="store_true")
     p.add_argument("--schema-report", action="store_true")
+    p.add_argument("--model-status", action="store_true")
     args = p.parse_args()
     if args.schema_report:
         print(json.dumps(schema_report(engine()), default=str, indent=2))
@@ -486,7 +625,9 @@ def main() -> None:
         train()
     if args.score_current:
         score_current()
-    if not (args.schema_report or args.train or args.score_current):
+    if args.model_status:
+        model_status()
+    if not (args.schema_report or args.train or args.score_current or args.model_status):
         p.print_help()
 
 

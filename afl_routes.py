@@ -1173,20 +1173,27 @@ def register_afl_routes(app, db):
         changing the existing Value Finder, Predictions, or horse racing flows.
         """
         try:
-            from afl_backtest import MODEL_PATH, score_current
+            from afl_backtest import MODEL_PATH, engine as afl_ml_engine, load_model_artifact, score_current
         except Exception as exc:
             logger.exception("AFL ML scorer import failed")
             return jsonify({"status": "error", "message": str(exc)}), 500
 
-        if not MODEL_PATH.exists():
+        try:
+            artifact, artifact_source = load_model_artifact(afl_ml_engine())
+        except Exception as exc:
+            logger.exception("AFL ML model artifact lookup failed")
+            return jsonify({"status": "error", "message": str(exc)}), 500
+
+        if artifact is None:
             return jsonify({
                 "status": "missing_model",
-                "message": "AFL bet-quality model not found. Run: python afl_backtest.py --train",
+                "message": "AFL bet-quality model not found locally or in active Postgres artifacts. Run: python afl_backtest.py --train",
                 "model_path": str(MODEL_PATH),
                 "rows": [],
                 "count": 0,
             }), 404
 
+        logger.info("AFL ML current selections using model artifact source=%s", artifact_source)
         try:
             scored = score_current()
         except Exception as exc:
