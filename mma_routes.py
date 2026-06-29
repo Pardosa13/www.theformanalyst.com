@@ -59,7 +59,7 @@ def register_mma_routes(app, db):
             headshot_rows = db.session.execute(text("""
                 SELECT full_name, headshot_url
                 FROM mma_fighters
-                WHERE headshot_url IS NOT NULL
+                WHERE NULLIF(TRIM(headshot_url), '') IS NOT NULL
             """)).fetchall()
             headshots_by_norm = {}
             headshots_by_last_name = {}
@@ -72,13 +72,27 @@ def register_mma_routes(app, db):
                     headshots_by_last_name.setdefault(last_name, set()).add(headshot_url)
 
             def resolve_headshot(fighter_name, current_headshot):
+                current_headshot = (current_headshot or '').strip()
                 if current_headshot or not fighter_name:
-                    return current_headshot
+                    return current_headshot or None
 
                 norm_fighter_name = normalise_name(fighter_name)
                 direct = headshots_by_norm.get(norm_fighter_name)
                 if direct:
                     return direct
+
+                # ESPN/Odds API names can differ from the seeded fighter table
+                # by middle names, suffixes, punctuation, or accents. Prefer a
+                # unique containment match before falling back to a unique last
+                # name match to avoid assigning the wrong fighter's headshot.
+                containment_matches = [
+                    url for norm, url in headshots_by_norm.items()
+                    if norm_fighter_name and (
+                        norm_fighter_name in norm or norm in norm_fighter_name
+                    )
+                ]
+                if len(set(containment_matches)) == 1:
+                    return containment_matches[0]
 
                 last_name = norm_fighter_name.split()[-1] if norm_fighter_name else ""
                 matched = list(headshots_by_last_name.get(last_name, set()))
@@ -205,7 +219,29 @@ def register_mma_routes(app, db):
             """)
             row = db.session.execute(sql, {'name': fighter_name}).fetchone()
             if not row:
-                return jsonify({'error': 'Fighter not found'}), 404
+                rows = db.session.execute(text("""
+                    SELECT id, full_name, nickname, height_cm, weight_lbs, reach_cm,
+                           stance, wins, losses, draws,
+                           glicko_rating, glicko_rd,
+                           ema_slpm, ema_sapm, ema_td_avg, ema_td_def,
+                           ema_kd_rate, ema_sub_rate, ema_ctrl_pct,
+                           streak, win_rate, total_fights, recent_form,
+                           headshot_url
+                    FROM mma_fighters
+                """)).fetchall()
+                target = normalise_name(fighter_name)
+                matches = [r for r in rows if normalise_name(r[1]) == target]
+                if not matches:
+                    matches = [
+                        r for r in rows
+                        if target and (
+                            target in normalise_name(r[1])
+                            or normalise_name(r[1]) in target
+                        )
+                    ]
+                if len(matches) != 1:
+                    return jsonify({'error': 'Fighter not found'}), 404
+                row = matches[0]
 
             return jsonify({
                 'id': row[0], 'name': row[1], 'nickname': row[2],

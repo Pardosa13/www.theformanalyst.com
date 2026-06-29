@@ -1400,6 +1400,7 @@ def upsert_event(conn, event):
             date = EXCLUDED.date,
             location = EXCLUDED.location,
             is_completed = EXCLUDED.is_completed,
+            espn_url = EXCLUDED.espn_url,
             updated_at = NOW()
     """
     with conn.cursor() as cur:
@@ -1423,31 +1424,68 @@ def parse_round(val):
         return None
 
 def upsert_fight(conn, event_id, fight):
-    """Insert fight if not already present. Returns fight DB id."""
-    # Check if fight already exists (by event + fighter names)
+    """Insert or refresh a fight for an event. Returns fight DB id.
+
+    ESPN and odds providers occasionally swap home/away ordering or revise card
+    metadata after the first sync. Match both fighter orders and refresh all
+    display fields so mma.html does not show stale or duplicate fights.
+    """
     sql_check = """
         SELECT id FROM mma_fights
         WHERE event_id = %s
-          AND fighter_1_name = %s
-          AND fighter_2_name = %s
+          AND (
+            (fighter_1_name = %s AND fighter_2_name = %s)
+            OR (fighter_1_name = %s AND fighter_2_name = %s)
+          )
         LIMIT 1
     """
     with conn.cursor() as cur:
-        cur.execute(sql_check, (event_id, fight['fighter_1'], fight['fighter_2']))
+        cur.execute(sql_check, (
+            event_id,
+            fight['fighter_1'], fight['fighter_2'],
+            fight['fighter_2'], fight['fighter_1'],
+        ))
         existing = cur.fetchone()
         if existing:
             fight_id = existing[0]
-            # Update result if completed
-            if fight.get('result'):
-                r = fight['result']
-                cur.execute("""
-                    UPDATE mma_fights SET
-                        winner_name = %s, method = %s,
-                        round_ended = %s, time_ended = %s
-                    WHERE id = %s
-                """, (r.get('winner'), r.get('method'),
-                      parse_round(r.get('round')), r.get('time'), fight_id))
-                conn.commit()
+            r = fight.get('result') or {}
+            cur.execute("""
+                UPDATE mma_fights SET
+                    fighter_1_name = %s,
+                    fighter_2_name = %s,
+                    weight_class = %s,
+                    is_main_card = %s,
+                    is_title_fight = %s,
+                    f1_height = %s,
+                    f1_reach = %s,
+                    f1_stance = %s,
+                    f1_record = %s,
+                    f2_height = %s,
+                    f2_reach = %s,
+                    f2_stance = %s,
+                    f2_record = %s,
+                    winner_name = %s,
+                    method = %s,
+                    round_ended = %s,
+                    time_ended = %s
+                WHERE id = %s
+            """, (
+                fight['fighter_1'], fight['fighter_2'],
+                fight.get('weight_class', ''),
+                fight.get('is_main_card', False),
+                fight.get('is_title_fight', False),
+                fight.get('f1_stats', {}).get('Height'),
+                fight.get('f1_stats', {}).get('Reach'),
+                fight.get('f1_stats', {}).get('Stance'),
+                fight.get('f1_stats', {}).get('Record'),
+                fight.get('f2_stats', {}).get('Height'),
+                fight.get('f2_stats', {}).get('Reach'),
+                fight.get('f2_stats', {}).get('Stance'),
+                fight.get('f2_stats', {}).get('Record'),
+                r.get('winner'), r.get('method'),
+                parse_round(r.get('round')), r.get('time'), fight_id,
+            ))
+            conn.commit()
             return fight_id
 
         cur.execute("""
@@ -1481,6 +1519,28 @@ def upsert_fight(conn, event_id, fight):
         ))
         conn.commit()
         return cur.fetchone()[0]
+
+
+
+
+def prune_event_fights(conn, event_id, keep_fight_ids):
+    """Remove fights for an event that disappeared from the latest source card."""
+    if not keep_fight_ids:
+        return 0
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM mma_fights
+            WHERE event_id = %s
+              AND id <> ALL(%s)
+            """,
+            (event_id, list(keep_fight_ids)),
+        )
+        deleted = cur.rowcount
+    conn.commit()
+    if deleted:
+        log.info(f"  Pruned {deleted} stale fight(s) for event {event_id}")
+    return deleted
 
 
 def upsert_prediction(conn, fight_id, pred):
@@ -1647,6 +1707,8 @@ def main():
                     ]
                     break
 
+        synced_fight_ids = []
+
         for fight in fights:
             # If ESPN URLs are still missing, try scoreboard lookup by name.
             for side in ('fighter_1', 'fighter_2'):
@@ -1658,6 +1720,7 @@ def main():
                         fight[url_key] = sb_entry[1]
 
             fight_id = upsert_fight(conn, event['event_id'], fight)
+            synced_fight_ids.append(fight_id)
 
             # Resolve fighter IDs (needed for headshot linking + predictions)
             f1_norm = normalize_name(fight['fighter_1'])
@@ -1731,6 +1794,7 @@ def main():
             log.info(f"  Predicted: {winner} ({confidence}) — "
                      f"{fight['fighter_1']} vs {fight['fighter_2']}")
 
+        prune_event_fights(conn, event['event_id'], synced_fight_ids)
         time.sleep(1)
 
     # Bulk-update headshot URLs for all fighters found in the scoreboard.
