@@ -1327,7 +1327,7 @@ def espn_headshot_url(espn_url):
     """
     if not espn_url:
         return None
-    m = re.search(r'/id/(\d+)/', espn_url)
+    m = re.search(r'/id/(\d+)(?:[/?]|$)', espn_url)
     if not m:
         return None
     fighter_id = m.group(1)
