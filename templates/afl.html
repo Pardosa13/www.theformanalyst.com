@@ -1751,7 +1751,15 @@ function loadAflMachineLearningSelections() {
 
   fetch('/api/afl/ml-current-selections')
     .then(async response => {
-      const data = await response.json().catch(() => ({}));
+      const rawBody = await response.text();
+      let data = {};
+      if (rawBody && rawBody.trim()) {
+        try {
+          data = JSON.parse(rawBody);
+        } catch (e) {
+          throw new Error(`Invalid JSON returned by AFL ML endpoint: ${e.message}`);
+        }
+      }
       if (['missing_model', 'no_data', 'error'].includes(data.status)) return data;
       if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
       return data;
