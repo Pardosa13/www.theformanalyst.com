@@ -334,6 +334,22 @@ AFL_SCHEMA_STATEMENTS = [
        AND away.team_key = LOWER(TRIM(g.ateam))
     """,
     """
+    CREATE TABLE IF NOT EXISTS afl_ml_artifacts (
+        id              SERIAL PRIMARY KEY,
+        model_name      TEXT NOT NULL,
+        version         TEXT NOT NULL,
+        created_at      TIMESTAMP DEFAULT NOW(),
+        trained_at      TIMESTAMP,
+        artifact_bytes  BYTEA NOT NULL,
+        meta_json       JSONB,
+        is_active       BOOLEAN DEFAULT FALSE
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_afl_ml_artifacts_active
+    ON afl_ml_artifacts(model_name, is_active, created_at DESC)
+    """,
+    """
     CREATE TABLE IF NOT EXISTS afl_sync_log (
         id          SERIAL PRIMARY KEY,
         source      TEXT NOT NULL,
