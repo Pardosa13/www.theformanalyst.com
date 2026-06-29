@@ -25,7 +25,7 @@ import tempfile
 import unicodedata
 import math
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import requests
 from bs4 import BeautifulSoup
@@ -640,7 +640,8 @@ def _parse_espn_competitions(competitions):
         competitors = comp.get('competitors', [])
         if len(competitors) < 2:
             continue
-        # Normalise to home/away
+        # Normalise to home/away; when homeAway is absent fall back to list
+        # order (ESPN consistently places the "home" fighter first).
         home = next((c for c in competitors if c.get('homeAway') == 'home'), competitors[0])
         away = next((c for c in competitors if c.get('homeAway') == 'away'), competitors[1])
 
@@ -1548,7 +1549,6 @@ def main():
         if not fights and not event['is_completed'] and odds_fights_by_date:
             ev_date = (event['date'] if isinstance(event['date'], date)
                        else date.fromisoformat(str(event['date'])))
-            from datetime import timedelta
             for _delta in [0, 1, -1]:
                 _check = ev_date + timedelta(days=_delta)
                 _seed = odds_fights_by_date.get(_check, [])
@@ -1565,7 +1565,9 @@ def main():
                             'fighter_2_url': '',
                             'f1_stats': {},
                             'f2_stats': {},
-                            'is_main_card': True,
+                            # Card position is unknown from Odds API;
+                            # default to False (prelim) to avoid misleading UI
+                            'is_main_card': False,
                             'is_title_fight': False,
                             'result': None,
                             'weight_class': '',
