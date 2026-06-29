@@ -25,7 +25,7 @@ import tempfile
 import unicodedata
 import math
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import requests
 from bs4 import BeautifulSoup
@@ -516,16 +516,204 @@ def scrape_upcoming_events():
     return result
 
 
+def _parse_espn_card_segs(gp):
+    """
+    Parse fight data from an ESPN gamepackage dict that contains 'cardSegs'.
+    Returns a list of partial fight dicts (no fighter profile stats yet –
+    caller is responsible for calling scrape_fighter_profile if needed).
+    """
+    fights = []
+    for seg in gp.get('cardSegs', []):
+        is_main = seg.get('nm') == 'main'
+        for m in seg.get('mtchs', []):
+            awy = m.get('awy', {})
+            hme = m.get('hme', {})
+            n1 = awy.get('dspNm')
+            n2 = hme.get('dspNm')
+            if not n1 or not n2:
+                continue
+            u1 = awy.get('lnk', '')
+            u2 = hme.get('lnk', '')
+            if u1 and not u1.startswith('http'):
+                u1 = 'https://www.espn.com' + u1
+            if u2 and not u2.startswith('http'):
+                u2 = 'https://www.espn.com' + u2
+
+            note = m.get('nte', '')
+            is_title = bool(note and 'Title Fight' in note)
+
+            result_data = None
+            if m.get('status', {}).get('state') == 'post':
+                winner = None
+                if awy.get('isWin'):
+                    winner = n1
+                elif hme.get('isWin'):
+                    winner = n2
+                result_data = {
+                    'winner': winner,
+                    'method': m.get('dec', {}).get('shrtDspNm'),
+                    'time': m.get('status', {}).get('dspClk'),
+                    'round': m.get('status', {}).get('rd'),
+                }
+
+            fights.append({
+                'fighter_1': n1,
+                'fighter_2': n2,
+                'fighter_1_url': u1,
+                'fighter_2_url': u2,
+                'is_main_card': is_main,
+                'is_title_fight': is_title,
+                'result': result_data,
+                'weight_class': m.get('wght', ''),
+            })
+    return fights
+
+
+def _enrich_fights_with_profiles(fights):
+    """Add f1_stats / f2_stats by scraping each fighter's ESPN profile URL."""
+    for fight in fights:
+        fight['f1_stats'] = scrape_fighter_profile(fight.get('fighter_1_url', ''))
+        fight['f2_stats'] = scrape_fighter_profile(fight.get('fighter_2_url', ''))
+        time.sleep(0.3)
+    return fights
+
+
+def _fetch_espn_event_api(event_id):
+    """
+    Strategy 0: Fetch fight card directly from the ESPN public summary API.
+
+    ESPN's fightcenter HTML pages now use client-side rendering for upcoming
+    events, so the __espnfitt__ JSON may not be present in the initial HTML.
+    The public JSON API at site.api.espn.com always returns the full card.
+
+    Returns a list of fight dicts (with f1_stats / f2_stats populated), or [].
+    """
+    url = (
+        f"https://site.api.espn.com/apis/site/v2/sports/mma/ufc/summary"
+        f"?event={event_id}"
+    )
+    log.info(f"  Trying ESPN summary API: {url}")
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        log.warning(f"  ESPN summary API failed: {e}")
+        return []
+
+    # Try multiple JSON paths that ESPN uses for the gamepackage
+    gp = (
+        data.get('gamepackage')
+        or data.get('page', {}).get('content', {}).get('gamepackage', {})
+        or {}
+    )
+
+    if gp.get('cardSegs'):
+        fights = _parse_espn_card_segs(gp)
+        if fights:
+            log.info(f"  ESPN summary API (cardSegs): {len(fights)} fights")
+            return _enrich_fights_with_profiles(fights)
+
+    # Alternative structure: competitions list under 'card'
+    competitions = (
+        data.get('card', {}).get('competitions', [])
+        or data.get('competitions', [])
+        or []
+    )
+    if competitions:
+        fights = _parse_espn_competitions(competitions)
+        if fights:
+            log.info(f"  ESPN summary API (competitions): {len(fights)} fights")
+            return _enrich_fights_with_profiles(fights)
+
+    log.info("  ESPN summary API returned no fights")
+    return []
+
+
+def _parse_espn_competitions(competitions):
+    """
+    Parse fight data from ESPN competitions-style JSON (alternative to cardSegs).
+    Each competition represents one fight with two competitors.
+    """
+    fights = []
+    for comp in competitions:
+        competitors = comp.get('competitors', [])
+        if len(competitors) < 2:
+            continue
+        # Normalise to home/away; when homeAway is absent fall back to list
+        # order (ESPN consistently places the "home" fighter first).
+        home = next((c for c in competitors if c.get('homeAway') == 'home'), competitors[0])
+        away = next((c for c in competitors if c.get('homeAway') == 'away'), competitors[1])
+
+        n1 = away.get('athlete', {}).get('displayName', '') or away.get('displayName', '')
+        n2 = home.get('athlete', {}).get('displayName', '') or home.get('displayName', '')
+        if not n1 or not n2:
+            continue
+
+        links1 = away.get('athlete', {}).get('links', []) or away.get('links', [])
+        links2 = home.get('athlete', {}).get('links', []) or home.get('links', [])
+        u1 = links1[0].get('href', '') if links1 else ''
+        u2 = links2[0].get('href', '') if links2 else ''
+
+        type_info = comp.get('type', {})
+        type_text = (type_info.get('text') or type_info.get('description') or '').lower()
+        is_main = 'main' in type_text
+
+        notes = comp.get('notes', []) or []
+        is_title = any('title' in (n.get('headline', '') + n.get('text', '')).lower()
+                       for n in notes)
+
+        weight_class = (
+            comp.get('weightClass', {}).get('displayName', '')
+            or type_info.get('text', '')
+        )
+
+        result_data = None
+        status = comp.get('status', {})
+        if status.get('type', {}).get('state') == 'post':
+            winner = None
+            for c in competitors:
+                if c.get('winner'):
+                    winner = (c.get('athlete', {}).get('displayName', '')
+                              or c.get('displayName', ''))
+                    break
+            result_data = {
+                'winner': winner,
+                'method': comp.get('method', {}).get('shortDisplayName', ''),
+                'time': status.get('displayClock', ''),
+                'round': comp.get('round', {}).get('number'),
+            }
+
+        fights.append({
+            'fighter_1': n1,
+            'fighter_2': n2,
+            'fighter_1_url': u1,
+            'fighter_2_url': u2,
+            'is_main_card': is_main,
+            'is_title_fight': is_title,
+            'result': result_data,
+            'weight_class': weight_class,
+        })
+    return fights
+
+
 def scrape_event_details(event_url, event_id):
     """Scrape fight card from ESPN event page. Returns list of fight dicts."""
     log.info(f"  Scraping event details: {event_url}")
+
+    # Strategy 0: ESPN public summary API (works when fightcenter HTML uses
+    # client-side rendering and no longer embeds __espnfitt__ JSON)
+    fights = _fetch_espn_event_api(event_id)
+    if fights:
+        return fights
+
     soup = get_soup(event_url)
     if not soup:
         return []
 
     fights = []
 
-    # Strategy 1: embedded __espnfitt__ JSON (most reliable)
+    # Strategy 1: embedded __espnfitt__ JSON (most reliable for completed events)
     # ESPN uses both window['__espnfitt__']= and window.__espnfitt__ = variants
     _ESPNFITT_PATTERNS = [
         "window['__espnfitt__']=",
@@ -546,56 +734,9 @@ def scrape_event_details(event_url, event_id):
                 data = json.loads(json_str)
                 gp = data.get('page', {}).get('content', {}).get('gamepackage', {})
                 if 'cardSegs' in gp:
-                    for seg in gp['cardSegs']:
-                        is_main = seg.get('nm') == 'main'
-                        for m in seg.get('mtchs', []):
-                            awy = m.get('awy', {})
-                            hme = m.get('hme', {})
-                            n1 = awy.get('dspNm')
-                            n2 = hme.get('dspNm')
-                            if not n1 or not n2:
-                                continue
-                            u1 = awy.get('lnk', '')
-                            u2 = hme.get('lnk', '')
-                            if u1 and not u1.startswith('http'):
-                                u1 = 'https://www.espn.com' + u1
-                            if u2 and not u2.startswith('http'):
-                                u2 = 'https://www.espn.com' + u2
-
-                            note = m.get('nte', '')
-                            is_title = bool(note and 'Title Fight' in note)
-
-                            s1 = scrape_fighter_profile(u1)
-                            s2 = scrape_fighter_profile(u2)
-                            time.sleep(0.3)
-
-                            result_data = None
-                            if m.get('status', {}).get('state') == 'post':
-                                winner = None
-                                if awy.get('isWin'):
-                                    winner = n1
-                                elif hme.get('isWin'):
-                                    winner = n2
-                                result_data = {
-                                    'winner': winner,
-                                    'method': m.get('dec', {}).get('shrtDspNm'),
-                                    'time': m.get('status', {}).get('dspClk'),
-                                    'round': m.get('status', {}).get('rd'),
-                                }
-
-                            fights.append({
-                                'fighter_1': n1,
-                                'fighter_2': n2,
-                                'fighter_1_url': u1,
-                                'fighter_2_url': u2,
-                                'f1_stats': s1,
-                                'f2_stats': s2,
-                                'is_main_card': is_main,
-                                'is_title_fight': is_title,
-                                'result': result_data,
-                                'weight_class': m.get('wght', ''),
-                            })
-                    return fights
+                    raw = _parse_espn_card_segs(gp)
+                    if raw:
+                        return _enrich_fights_with_profiles(raw)
             except Exception as e:
                 log.warning(f"  JSON parse error: {e}")
 
@@ -1352,6 +1493,36 @@ def main():
         stats_tracker, name_to_id = rebuild_stats_from_db(conn)
         fighter_bio = load_fighters_bio(conn)
 
+    # ── Pre-fetch Odds API events for fallback fight seeding ──────────────────
+    # Group individual fights from the Odds API by date so they can be used to
+    # seed mma_fights when ESPN scraping returns nothing (e.g. when fightcenter
+    # pages are client-side rendered and contain no embedded JSON).
+    odds_api_key = os.environ.get('ODDS_API_KEY', '')
+    odds_fights_by_date = {}  # date -> list[{fighter_1, fighter_2}]
+    if odds_api_key:
+        try:
+            from mma_data import fetch_mma_events as _fetch_odds_events
+            _odds_events = _fetch_odds_events(api_key=odds_api_key)
+            for _ev in _odds_events:
+                _ct = _ev.get('commence_time', '')
+                _f1 = _ev.get('home_team', '')
+                _f2 = _ev.get('away_team', '')
+                if not _f1 or not _f2:
+                    continue
+                try:
+                    _d = pd.to_datetime(_ct).date()
+                    odds_fights_by_date.setdefault(_d, []).append(
+                        {'fighter_1': _f1, 'fighter_2': _f2}
+                    )
+                except Exception:
+                    pass
+            log.info(
+                f"  Odds API pre-fetch: {len(_odds_events)} fights across "
+                f"{len(odds_fights_by_date)} dates"
+            )
+        except Exception as _e:
+            log.warning(f"  Odds API pre-fetch failed: {_e}")
+
     # Scrape upcoming events
     log.info("Scraping ESPN schedule...")
     events = scrape_upcoming_events()
@@ -1370,6 +1541,40 @@ def main():
         # Scrape fight card
         fights = scrape_event_details(event['url'], event['event_id'])
         log.info(f"  {len(fights)} fights on card")
+
+        # Fallback: seed fights from Odds API when ESPN returns nothing for
+        # an upcoming event.  The Odds API lists individual fights (one entry
+        # per matchup) keyed by commence_time date, so we match on date with
+        # a ±1-day tolerance to account for timezone differences.
+        if not fights and not event['is_completed'] and odds_fights_by_date:
+            ev_date = (event['date'] if isinstance(event['date'], date)
+                       else date.fromisoformat(str(event['date'])))
+            for _delta in [0, 1, -1]:
+                _check = ev_date + timedelta(days=_delta)
+                _seed = odds_fights_by_date.get(_check, [])
+                if _seed:
+                    log.info(
+                        f"  ESPN returned 0 fights; seeding {len(_seed)} "
+                        f"fights from Odds API (date offset {_delta:+d})"
+                    )
+                    fights = [
+                        {
+                            'fighter_1': _f['fighter_1'],
+                            'fighter_2': _f['fighter_2'],
+                            'fighter_1_url': '',
+                            'fighter_2_url': '',
+                            'f1_stats': {},
+                            'f2_stats': {},
+                            # Card position is unknown from Odds API;
+                            # default to False (prelim) to avoid misleading UI
+                            'is_main_card': False,
+                            'is_title_fight': False,
+                            'result': None,
+                            'weight_class': '',
+                        }
+                        for _f in _seed
+                    ]
+                    break
 
         for fight in fights:
             fight_id = upsert_fight(conn, event['event_id'], fight)
@@ -1451,7 +1656,6 @@ def main():
     conn.close()
 
     # ── 6. Sync UFC fight odds from The Odds API ──────────────────────────────
-    odds_api_key = os.environ.get('ODDS_API_KEY', '')
     if odds_api_key:
         log.info("Fetching UFC fight odds from The Odds API …")
         try:
