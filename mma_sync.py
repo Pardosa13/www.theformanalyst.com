@@ -81,6 +81,40 @@ def normalize_name(name):
     return ' '.join(name.split())
 
 
+def is_placeholder_fighter_name(name):
+    """Return True for ESPN/card placeholder names that are not real fighters."""
+    norm = normalize_name(name)
+    return not norm or norm in {'tba', 'tbd', 'opponent tba', 'opponent tbd'}
+
+
+def fight_has_placeholder(fight):
+    return (
+        is_placeholder_fighter_name(fight.get('fighter_1'))
+        or is_placeholder_fighter_name(fight.get('fighter_2'))
+    )
+
+
+def best_name_match_key(name, lookup):
+    """Find a normalised key using exact, containment, then unique last-name matching."""
+    norm = normalize_name(name)
+    if not norm or norm in lookup:
+        return norm if norm in lookup else None
+
+    containment = [
+        key for key in lookup
+        if key and (norm in key or key in norm)
+    ]
+    if len(containment) == 1:
+        return containment[0]
+
+    last = norm.split()[-1] if norm else ''
+    if last:
+        last_matches = [key for key in lookup if key.split()[-1] == last]
+        if len(last_matches) == 1:
+            return last_matches[0]
+    return None
+
+
 # ── Glicko-2 constants ────────────────────────────────────────────────────────
 TAU = 0.5
 MIN_RD = 30.0
@@ -524,13 +558,14 @@ def _parse_espn_card_segs(gp):
     """
     fights = []
     for seg in gp.get('cardSegs', []):
-        is_main = seg.get('nm') == 'main'
+        seg_name = str(seg.get('nm') or seg.get('name') or seg.get('title') or '').lower()
+        is_main = 'main' in seg_name
         for m in seg.get('mtchs', []):
             awy = m.get('awy', {})
             hme = m.get('hme', {})
             n1 = awy.get('dspNm')
             n2 = hme.get('dspNm')
-            if not n1 or not n2:
+            if not n1 or not n2 or (is_placeholder_fighter_name(n1) and is_placeholder_fighter_name(n2)):
                 continue
             u1 = awy.get('lnk', '')
             u2 = hme.get('lnk', '')
@@ -647,7 +682,7 @@ def _parse_espn_competitions(competitions):
 
         n1 = away.get('athlete', {}).get('displayName', '') or away.get('displayName', '')
         n2 = home.get('athlete', {}).get('displayName', '') or home.get('displayName', '')
-        if not n1 or not n2:
+        if not n1 or not n2 or (is_placeholder_fighter_name(n1) and is_placeholder_fighter_name(n2)):
             continue
 
         links1 = away.get('athlete', {}).get('links', []) or away.get('links', [])
@@ -1352,12 +1387,22 @@ def upsert_fighter_espn_info(conn, name, espn_url):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                UPDATE mma_fighters
+                WITH matched AS (
+                    SELECT id
+                    FROM mma_fighters
+                    WHERE LOWER(full_name) = LOWER(%s)
+                       OR LOWER(full_name) LIKE '%%' || LOWER(%s) || '%%'
+                       OR LOWER(%s) LIKE '%%' || LOWER(full_name) || '%%'
+                    ORDER BY CASE WHEN LOWER(full_name) = LOWER(%s) THEN 0 ELSE 1 END
+                    LIMIT 1
+                )
+                UPDATE mma_fighters mf
                 SET espn_url = %s, headshot_url = %s
-                WHERE LOWER(full_name) = LOWER(%s)
-                  AND (espn_url IS DISTINCT FROM %s OR headshot_url IS DISTINCT FROM %s)
+                FROM matched
+                WHERE mf.id = matched.id
+                  AND (mf.espn_url IS DISTINCT FROM %s OR mf.headshot_url IS DISTINCT FROM %s)
                 """,
-                (espn_url, headshot, name, espn_url, headshot),
+                (name, name, name, name, espn_url, headshot, espn_url, headshot),
             )
         conn.commit()
     except Exception as e:
@@ -1666,15 +1711,20 @@ def main():
         # an upcoming event.  The Odds API lists individual fights (one entry
         # per matchup) keyed by commence_time date, so we match on date with
         # a ±1-day tolerance to account for timezone differences.
-        if not fights and not event['is_completed'] and odds_fights_by_date:
+        has_placeholder_fights = any(fight_has_placeholder(_fight) for _fight in fights)
+        if (not fights or has_placeholder_fights) and not event['is_completed'] and odds_fights_by_date:
             ev_date = (event['date'] if isinstance(event['date'], date)
                        else date.fromisoformat(str(event['date'])))
             for _delta in [0, 1, -1]:
                 _check = ev_date + timedelta(days=_delta)
                 _seed = odds_fights_by_date.get(_check, [])
                 if _seed:
+                    reason = (
+                        'returned 0 fights' if not fights
+                        else 'returned placeholder/TBA fights'
+                    )
                     log.info(
-                        f"  ESPN returned 0 fights; seeding {len(_seed)} "
+                        f"  ESPN {reason}; seeding {len(_seed)} "
                         f"fights from Odds API (date offset {_delta:+d})"
                     )
                     fights = [
@@ -1683,7 +1733,7 @@ def main():
                             'fighter_2': _f['fighter_2'],
                             # Attempt to back-fill ESPN URLs from scoreboard
                             # data so headshots can be derived even though the
-                            # summary API returned 404.
+                            # summary API returned 404 or placeholder names.
                             'fighter_1_url': (
                                 scoreboard_fighters.get(
                                     normalize_name(_f['fighter_1']), (None, '')
@@ -1704,8 +1754,18 @@ def main():
                             'weight_class': '',
                         }
                         for _f in _seed
+                        if not fight_has_placeholder(_f)
                     ]
                     break
+
+        if not event['is_completed']:
+            before_count = len(fights)
+            fights = [_fight for _fight in fights if not fight_has_placeholder(_fight)]
+            if len(fights) != before_count:
+                log.info(
+                    f"  Dropped {before_count - len(fights)} placeholder/TBA fight(s) "
+                    "from upcoming card"
+                )
 
         synced_fight_ids = []
 
@@ -1714,8 +1774,8 @@ def main():
             for side in ('fighter_1', 'fighter_2'):
                 url_key = f'{side}_url'
                 if not fight.get(url_key):
-                    norm = normalize_name(fight[side])
-                    sb_entry = scoreboard_fighters.get(norm)
+                    sb_key = best_name_match_key(fight[side], scoreboard_fighters)
+                    sb_entry = scoreboard_fighters.get(sb_key) if sb_key else None
                     if sb_entry:
                         fight[url_key] = sb_entry[1]
 
