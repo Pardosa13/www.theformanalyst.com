@@ -91,6 +91,11 @@ def _run_afl_ml_command(args: list[str], success_message: str | None = None) -> 
 
     if success_message:
         logger.info(success_message)
+    if "--train" in args:
+        logger.info("AFL_CRON_TRAIN_COMPLETE")
+        logger.info("AFL_CRON_ARTIFACT_SAVED")
+    if "--score-current" in args:
+        logger.info("AFL_CRON_SELECTIONS_COMPLETE")
     return True
 
 
@@ -148,12 +153,14 @@ def sync_afl_all(season: int = None):
         normalise_player_stats_team_names,
     )
 
+    logger.info("AFL_CRON_START season=%s entrypoint=%s", season or datetime.now().year, "python afl_sync.py [season] / from afl_sync import sync_afl_all")
     if season is None:
         season = datetime.now().year
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         logger.error("DATABASE_URL not set — aborting")
+        logger.info("AFL_CRON_END status=missing_database_url")
         return
 
     if db_url.startswith("postgres://"):
@@ -163,7 +170,10 @@ def sync_afl_all(season: int = None):
     previous_cron_mode = os.environ.get("AFL_CRON_MODE")
     os.environ["AFL_CRON_MODE"] = "1"
 
-    engine = create_engine(db_url)
+    engine = create_engine(db_url, pool_pre_ping=True)
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    logger.info("AFL_CRON_DB_CONNECTED database_url_present=%s odds_api_key_present=%s", bool(db_url), bool(os.environ.get("ODDS_API_KEY")))
     db = SimpleNamespace(engine=engine, text=text)
 
     logger.info("=== AFL nightly sync for season %s ===", season)
@@ -315,6 +325,11 @@ def sync_afl_all(season: int = None):
 
         logger.info("=== AFL sync complete ===")
         run_afl_ml_pipeline_after_sync()
+        logger.info("AFL_CRON_END status=ok")
+
+    except Exception:
+        logger.exception("AFL_CRON_END status=error")
+        raise
 
     finally:
         if previous_cron_mode is None:
