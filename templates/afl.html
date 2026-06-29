@@ -1819,7 +1819,7 @@ function loadAflMachineLearningSelections() {
               <td>${esc(r.bookmaker || '—')}</td>
               <td class="mono">${r.odds == null ? '—' : safeNum(r.odds).toFixed(2)}</td>
               <td>${esc(r.existing_recommendation || r.recommendation || '—')}</td>
-              <td class="mono">${fmtPctFromUnit(r.original_model_prob ?? r.model_prob)}</td>
+              <td class="mono">${(r.original_model_prob ?? r.model_prob) == null ? '—' : safeNum(r.original_model_prob ?? r.model_prob).toFixed(1) + '%'}</td>
               <td class="mono">${r.original_edge == null && r.edge == null ? '—' : safeNum(r.original_edge ?? r.edge).toFixed(2)}</td>
               <td class="mono">${r.confidence_score == null ? '—' : safeNum(r.confidence_score).toFixed(1)}</td>
               <td class="mono"><strong>${fmtPctFromUnit(r.ml_bet_probability)}</strong></td>
