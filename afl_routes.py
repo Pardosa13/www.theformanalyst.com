@@ -119,56 +119,59 @@ _MARKET_WEIGHTING_OVERRIDES: dict[str, dict[str, float]] = {
 def register_afl_routes(app, db):
     """Register all AFL routes onto the Flask app."""
 
-    @app.after_request
-    def _ensure_afl_json_response_integrity(response):
-        def _as_json(payload, status_code):
-            safe_payload = _safe_json_value(payload)
-            resp = jsonify(safe_payload)
-            resp.status_code = status_code
-            return resp
+    if not getattr(app, "_afl_json_response_integrity_registered", False):
+        @app.after_request
+        def _ensure_afl_json_response_integrity(response):
+            def _as_json(payload, status_code):
+                safe_payload = _safe_json_value(payload)
+                resp = jsonify(safe_payload)
+                resp.status_code = status_code
+                return resp
 
-        path = request.path or ""
-        if not path.startswith("/api/afl"):
-            return response
-        if path.startswith("/api/afl/player-headshot"):
-            return response
-        if response.status_code == 204:
-            return response
-        content_type = (response.headers.get("Content-Type") or "").lower()
-        if "application/json" in content_type:
-            body = response.get_data(as_text=True) or ""
-            if not body.strip():
+            path = request.path or ""
+            if not path.startswith("/api/afl"):
                 return response
-            try:
-                payload = json.loads(body)
-            except Exception:
-                logger.exception(
-                    "AFL endpoint produced malformed JSON",
-                    extra={"path": path, "status": response.status_code, "body_preview": body[:200]},
-                )
-                return _as_json(
-                    {
-                        "ok": False,
-                        "status": "error",
-                        "message": "AFL endpoint returned malformed JSON",
-                        "path": path,
-                    },
-                    500,
-                )
-            if payload != _safe_json_value(payload):
-                return _as_json(payload, response.status_code)
-            return response
-        body = (response.get_data(as_text=True) or "").strip()
-        message = body or f"AFL endpoint returned non-JSON response (status {response.status_code})"
-        return _as_json(
-            {
-                "ok": False,
-                "status": "error",
-                "message": message,
-                "path": path,
-            },
-            response.status_code if response.status_code >= 400 else 500,
-        )
+            if path.startswith("/api/afl/player-headshot"):
+                return response
+            if response.status_code == 204:
+                return response
+            content_type = (response.headers.get("Content-Type") or "").lower()
+            if "application/json" in content_type:
+                body = response.get_data(as_text=True) or ""
+                if not body.strip():
+                    return response
+                try:
+                    payload = json.loads(body)
+                except Exception:
+                    logger.exception(
+                        "AFL endpoint produced malformed JSON",
+                        extra={"path": path, "status": response.status_code, "body_preview": body[:200]},
+                    )
+                    return _as_json(
+                        {
+                            "ok": False,
+                            "status": "error",
+                            "message": "AFL endpoint returned malformed JSON",
+                            "path": path,
+                        },
+                        500,
+                    )
+                if payload != _safe_json_value(payload):
+                    return _as_json(payload, response.status_code)
+                return response
+            body = (response.get_data(as_text=True) or "").strip()
+            message = body or f"AFL endpoint returned non-JSON response (status {response.status_code})"
+            return _as_json(
+                {
+                    "ok": False,
+                    "status": "error",
+                    "message": message,
+                    "path": path,
+                },
+                response.status_code if response.status_code >= 400 else 500,
+            )
+
+        app._afl_json_response_integrity_registered = True
 
     @app.route("/afl")
     @login_required
