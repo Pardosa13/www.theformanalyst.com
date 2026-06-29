@@ -109,6 +109,7 @@ def run_afl_ml_pipeline_after_sync() -> None:
             "its own validation and writes model artifacts atomically."
         )
 
+    logger.info("AFL_TRAIN_START source=railway_cron")
     logger.info("Starting AFL ML training")
     train_ok = _run_afl_ml_command(["--train"], success_message="AFL ML model saved")
     if not train_ok:
@@ -116,8 +117,10 @@ def run_afl_ml_pipeline_after_sync() -> None:
             "AFL ML training failed; old model artifact was not intentionally replaced. "
             "Skipping current scoring to avoid scoring with a failed training run."
         )
+        logger.info("AFL_TRAIN_END status=error source=railway_cron")
         return
 
+    logger.info("AFL_TRAIN_END status=ok source=railway_cron")
     logger.info("Starting AFL ML current scoring")
     score_ok = _run_afl_ml_command(["--score-current"], success_message="AFL ML current scoring complete")
     if not score_ok:
