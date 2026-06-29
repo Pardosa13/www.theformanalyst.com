@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import shutil
+import importlib.util
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,13 @@ except ModuleNotFoundError as _missing_dep:
     _MISSING_DEPENDENCY = _missing_dep
 else:
     _MISSING_DEPENDENCY = None
+
+REQUIRED_ML_DEPENDENCIES = {
+    "joblib": "joblib",
+    "numpy": "numpy",
+    "pandas": "pandas",
+    "scikit-learn": "sklearn",
+}
 
 LOG = logging.getLogger("afl_backtest")
 MODEL_PATH = Path("models/afl_bet_quality_model.pkl")
@@ -119,9 +127,31 @@ def db_url() -> str:
     return url.replace("postgres://", "postgresql://", 1)
 
 
-def require_dependencies() -> None:
+def missing_ml_dependencies() -> list[str]:
+    missing = [package for package, module in REQUIRED_ML_DEPENDENCIES.items() if importlib.util.find_spec(module) is None]
     if _MISSING_DEPENDENCY is not None:
-        raise SystemExit(f"Missing Python dependency: {_MISSING_DEPENDENCY}. Install requirements.txt before running AFL ML jobs.")
+        missing_name = getattr(_MISSING_DEPENDENCY, "name", None)
+        for package, module in REQUIRED_ML_DEPENDENCIES.items():
+            if missing_name == module and package not in missing:
+                missing.append(package)
+    return missing
+
+
+def ml_dependency_install_message(missing: list[str] | None = None) -> str:
+    missing = missing or missing_ml_dependencies()
+    missing_label = ", ".join(missing) if missing else str(_MISSING_DEPENDENCY)
+    return (
+        f"AFL ML runtime dependencies missing: {missing_label}. "
+        "Install locally with: python -m pip install -r requirements.txt. "
+        "On Railway, redeploy the AFL web/cron service so requirements.txt is installed. "
+        "Required packages: joblib, scikit-learn, numpy, pandas."
+    )
+
+
+def require_dependencies() -> None:
+    missing = missing_ml_dependencies()
+    if _MISSING_DEPENDENCY is not None or missing:
+        raise SystemExit(ml_dependency_install_message(missing))
 
 def engine() -> Engine:
     require_dependencies()
@@ -275,8 +305,10 @@ def load_model_artifact(e: Engine | None = None) -> tuple[dict[str, Any] | None,
 def model_status(emit: bool = True) -> dict[str, Any]:
     require_dependencies()
     status: dict[str, Any] = {
+        "expected_model_name": ARTIFACT_MODEL_NAME,
         "local_model": {"path": str(MODEL_PATH), "exists": MODEL_PATH.exists()},
         "postgres_active_model": {"exists": False},
+        "model_source": "local" if MODEL_PATH.exists() else "missing",
     }
     if MODEL_PATH.exists():
         status["local_model"]["bytes"] = MODEL_PATH.stat().st_size
@@ -286,7 +318,10 @@ def model_status(emit: bool = True) -> dict[str, Any]:
         with e.begin() as conn:
             row = conn.execute(
                 text("""
-                    SELECT id, version, created_at, trained_at, OCTET_LENGTH(artifact_bytes) AS bytes
+                    SELECT id, model_name, version, created_at, trained_at,
+                           OCTET_LENGTH(artifact_bytes) AS bytes,
+                           (artifact_bytes IS NOT NULL) AS artifact_bytes_not_null,
+                           is_active
                     FROM afl_ml_artifacts
                     WHERE model_name = :model_name AND is_active = TRUE
                     ORDER BY created_at DESC, id DESC
@@ -296,6 +331,8 @@ def model_status(emit: bool = True) -> dict[str, Any]:
             ).mappings().first()
         if row:
             status["postgres_active_model"] = {"exists": True, **dict(row)}
+            if not MODEL_PATH.exists():
+                status["model_source"] = "postgres"
     except Exception as exc:
         LOG.exception("AFL ML model-status Postgres check failed")
         status["postgres_active_model"] = {"exists": False, "error": str(exc)}
@@ -532,8 +569,10 @@ def train() -> dict[str, Any]:
     require_dependencies()
     e = engine()
     report = schema_report(e)
+    LOG.info("AFL_TRAIN_START model_name=%s local_path=%s", ARTIFACT_MODEL_NAME, MODEL_PATH)
     LOG.info("Pre-implementation AFL schema/data report:\n%s", json.dumps(report, default=str, indent=2))
     raw_df = load_selections(e, settled=True)
+    LOG.info("AFL_TRAIN_ROWS_LOADED rows=%s", len(raw_df))
     log_dataframe_diagnostics("settled_loaded", raw_df, ["profit_units", "result", "odds", "settled_at"])
     df = add_safe_features(e, raw_df)
     log_dataframe_diagnostics("settled_with_features", df)
@@ -588,9 +627,12 @@ def train() -> dict[str, Any]:
     os.replace(tmp_model, MODEL_PATH)
     os.replace(tmp_meta, META_PATH)
     LOG.info("Saved AFL ML model artifact to local filesystem: %s bytes=%s", MODEL_PATH, MODEL_PATH.stat().st_size)
+    LOG.info("AFL_TRAIN_MODEL_SAVED_LOCAL path=%s bytes=%s", MODEL_PATH, MODEL_PATH.stat().st_size)
     LOG.info("Saved AFL ML model metadata to local filesystem: %s", META_PATH)
     artifact_id = save_artifact_to_postgres(e, MODEL_PATH.read_bytes(), meta)
     summary["postgres_artifact_id"] = artifact_id
+    LOG.info("AFL_TRAIN_MODEL_SAVED_POSTGRES artifact_id=%s model_name=%s", artifact_id, ARTIFACT_MODEL_NAME)
+    LOG.info("AFL_TRAIN_END status=ok artifact_id=%s", artifact_id)
     print(json.dumps(summary, default=str, indent=2))
     return summary
 
@@ -662,7 +704,7 @@ def debug_pipeline() -> dict[str, Any]:
     out: dict[str, Any] = {"ok": True, "database": {}, "counts": {}, "ml": {}}
     if _MISSING_DEPENDENCY is not None:
         out["ok"] = False
-        out["dependency_error"] = str(_MISSING_DEPENDENCY)
+        out["dependency_error"] = ml_dependency_install_message()
         out["ml"] = {
             "local_model": {"path": str(MODEL_PATH), "exists": MODEL_PATH.exists()},
             "postgres_active_model": {"exists": False, "error": "dependencies unavailable"},

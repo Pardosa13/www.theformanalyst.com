@@ -1203,6 +1203,21 @@ def register_afl_routes(app, db):
         )
 
 
+
+    def _afl_ml_artifact_response_fields(status_info: dict | None, artifact_source: str | None = None) -> dict:
+        """Flatten AFL ML artifact status for current-selections diagnostics."""
+        status_info = status_info or {}
+        local = status_info.get("local_model") or {}
+        pg = status_info.get("postgres_active_model") or {}
+        pg_exists = bool(pg.get("exists") and pg.get("artifact_bytes_not_null", True))
+        return {
+            "local_model_exists": bool(local.get("exists")),
+            "postgres_active_artifact_exists": pg_exists,
+            "postgres_artifact_id": pg.get("id"),
+            "artifact_model_name": pg.get("model_name"),
+            "model_source": artifact_source or status_info.get("model_source") or "missing",
+        }
+
     @app.route("/api/afl/ml-current-selections")
     @login_required
     def api_afl_ml_current_selections():
@@ -1212,17 +1227,20 @@ def register_afl_routes(app, db):
         changing the existing Value Finder, Predictions, or horse racing flows.
         """
         try:
-            from afl_backtest import MODEL_PATH, df_to_safe_records, engine as afl_ml_engine, load_model_artifact, score_current
+            from afl_backtest import MODEL_PATH, df_to_safe_records, engine as afl_ml_engine, load_model_artifact, model_status, score_current
         except Exception as exc:
             logger.exception("AFL ML scorer import failed")
             return safe_json_response({"ok": False, "status": "error", "message": str(exc), "selections": [], "summary": {}}, 500)
 
+        status_info = {}
         try:
+            status_info = model_status(emit=False)
             artifact, artifact_source = load_model_artifact(afl_ml_engine())
         except Exception as exc:
             logger.exception("AFL ML model artifact lookup failed")
-            return safe_json_response({"ok": False, "status": "error", "message": str(exc), "selections": [], "summary": {}}, 500)
+            return safe_json_response({"ok": False, "status": "error", "message": str(exc), "selections": [], "summary": {}, **_afl_ml_artifact_response_fields(status_info)}, 500)
 
+        artifact_fields = _afl_ml_artifact_response_fields(status_info, artifact_source)
         if artifact is None:
             return safe_json_response({
                 "ok": True,
@@ -1233,6 +1251,7 @@ def register_afl_routes(app, db):
                 "selections": [],
                 "summary": {},
                 "count": 0,
+                **artifact_fields,
             }, 404)
 
         logger.info("AFL ML current selections using model artifact source=%s", artifact_source)
@@ -1252,7 +1271,7 @@ def register_afl_routes(app, db):
                 "selections": [],
                 "summary": {},
                 "count": 0,
-                "model_source": artifact_source,
+                **artifact_fields,
             })
         bet_count = sum(1 for r in rows if str(r.get("ml_recommendation", "")).upper() == "BET")
         return safe_json_response({
@@ -1262,7 +1281,7 @@ def register_afl_routes(app, db):
             "rows": rows,
             "selections": rows,
             "summary": {"total": len(rows), "bet_count": bet_count},
-            "model_source": artifact_source,
+            **artifact_fields,
         })
 
     @app.route("/api/afl/model-performance")
