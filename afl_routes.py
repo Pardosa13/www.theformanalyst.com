@@ -15,11 +15,13 @@ Key fixes in this rewrite:
 from __future__ import annotations
 
 import logging
+import math
 import re
 import time
 import unicodedata
 from collections import defaultdict
 from datetime import date, datetime
+from decimal import Decimal
 
 import requests as _requests
 from flask import abort, current_app, jsonify, make_response, render_template, request
@@ -66,6 +68,43 @@ from afl_db import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_json_value(value):
+    """Return JSON-safe values for AFL endpoints (no NaN/Inf/Decimal/numpy)."""
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        value = float(value)
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    try:
+        import numpy as _np
+        if isinstance(value, _np.integer):
+            return int(value)
+        if isinstance(value, _np.floating):
+            value = float(value)
+            return value if math.isfinite(value) else None
+        if isinstance(value, _np.ndarray):
+            return [_safe_json_value(v) for v in value.tolist()]
+    except Exception:
+        pass
+    if isinstance(value, dict):
+        return {str(k): _safe_json_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_safe_json_value(v) for v in value]
+    return value
+
+
+def safe_json_response(payload, status_code: int = 200):
+    safe_payload = _safe_json_value(payload)
+    top_keys = list(safe_payload.keys()) if isinstance(safe_payload, dict) else []
+    size = len(safe_payload) if hasattr(safe_payload, "__len__") else 0
+    logger.info("AFL_API_RESPONSE status=%s size=%s top_level_keys=%s", status_code, size, top_keys)
+    return jsonify(safe_payload), status_code
+
 
 _MARKET_WEIGHTING_OVERRIDES: dict[str, dict[str, float]] = {
     "player_disposals": {"season_weight": 1.00, "opp_weight": 0.00, "last5_weight": 0.30, "edge_cutoff": 2.5},
@@ -1173,36 +1212,58 @@ def register_afl_routes(app, db):
         changing the existing Value Finder, Predictions, or horse racing flows.
         """
         try:
-            from afl_backtest import MODEL_PATH, engine as afl_ml_engine, load_model_artifact, score_current
+            from afl_backtest import MODEL_PATH, df_to_safe_records, engine as afl_ml_engine, load_model_artifact, score_current
         except Exception as exc:
             logger.exception("AFL ML scorer import failed")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return safe_json_response({"ok": False, "status": "error", "message": str(exc), "selections": [], "summary": {}}, 500)
 
         try:
             artifact, artifact_source = load_model_artifact(afl_ml_engine())
         except Exception as exc:
             logger.exception("AFL ML model artifact lookup failed")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return safe_json_response({"ok": False, "status": "error", "message": str(exc), "selections": [], "summary": {}}, 500)
 
         if artifact is None:
-            return jsonify({
+            return safe_json_response({
+                "ok": True,
                 "status": "missing_model",
                 "message": "AFL bet-quality model not found locally or in active Postgres artifacts. Run: python afl_backtest.py --train",
                 "model_path": str(MODEL_PATH),
                 "rows": [],
+                "selections": [],
+                "summary": {},
                 "count": 0,
-            }), 404
+            }, 404)
 
         logger.info("AFL ML current selections using model artifact source=%s", artifact_source)
         try:
             scored = score_current()
         except Exception as exc:
             logger.exception("AFL ML current-selection scoring failed")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return safe_json_response({"ok": False, "status": "error", "message": str(exc), "selections": [], "summary": {}}, 500)
 
-        import numpy as np
-        rows = scored.replace({np.nan: None}).to_dict("records") if hasattr(scored, "replace") else []
-        return jsonify({"status": "ok", "count": len(rows), "rows": rows})
+        rows = df_to_safe_records(scored) if hasattr(scored, "empty") else []
+        if not rows:
+            return safe_json_response({
+                "ok": True,
+                "status": "no_data",
+                "message": "No AFL selections available yet",
+                "rows": [],
+                "selections": [],
+                "summary": {},
+                "count": 0,
+                "model_source": artifact_source,
+            })
+        bet_count = sum(1 for r in rows if str(r.get("ml_recommendation", "")).upper() == "BET")
+        return safe_json_response({
+            "ok": True,
+            "status": "ok",
+            "count": len(rows),
+            "rows": rows,
+            "selections": rows,
+            "summary": {"total": len(rows), "bet_count": bet_count},
+            "model_source": artifact_source,
+        })
 
     @app.route("/api/afl/model-performance")
     @login_required

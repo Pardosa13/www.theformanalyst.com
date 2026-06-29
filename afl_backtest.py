@@ -132,6 +132,48 @@ def read_sql(e: Engine, sql: str, params: dict[str, Any] | None = None) -> pd.Da
     return pd.read_sql_query(text(sql), e, params=params or {})
 
 
+def json_safe(value: Any) -> Any:
+    """Convert pandas/numpy/Decimal/NaN values to JSON-safe Python values."""
+    if value is None:
+        return None
+    if pd is not None:
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
+    if np is not None:
+        if isinstance(value, np.integer):
+            return int(value)
+        if isinstance(value, np.floating):
+            value = float(value)
+        if isinstance(value, np.ndarray):
+            return [json_safe(v) for v in value.tolist()]
+    if isinstance(value, float):
+        return value if np is None or np.isfinite(value) else None
+    if isinstance(value, (datetime,)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [json_safe(v) for v in value]
+    return value
+
+
+def df_to_safe_records(df: pd.DataFrame) -> list[dict[str, Any]]:
+    if df.empty:
+        return []
+    safe = df.replace([np.inf, -np.inf], np.nan).replace({np.nan: None})
+    return json_safe(safe.to_dict(orient="records"))
+
+
+def log_dataframe_diagnostics(label: str, df: pd.DataFrame, required: list[str] | None = None) -> dict[str, Any]:
+    required = required or []
+    missing = [c for c in required if c not in df.columns]
+    LOG.info("AFL_PIPELINE_DIAG %s rows=%s cols=%s missing_required=%s", label, len(df), list(df.columns), missing)
+    return {"rows": int(len(df)), "columns": list(df.columns), "missing_required_columns": missing}
+
+
 def ensure_artifact_table(e: Engine) -> None:
     """Ensure the AFL-only ML artifact table exists in Postgres."""
     with e.begin() as conn:
@@ -230,7 +272,7 @@ def load_model_artifact(e: Engine | None = None) -> tuple[dict[str, Any] | None,
     return None, None
 
 
-def model_status() -> dict[str, Any]:
+def model_status(emit: bool = True) -> dict[str, Any]:
     require_dependencies()
     status: dict[str, Any] = {
         "local_model": {"path": str(MODEL_PATH), "exists": MODEL_PATH.exists()},
@@ -257,7 +299,8 @@ def model_status() -> dict[str, Any]:
     except Exception as exc:
         LOG.exception("AFL ML model-status Postgres check failed")
         status["postgres_active_model"] = {"exists": False, "error": str(exc)}
-    print(json.dumps(status, default=str, indent=2))
+    if emit:
+        print(json.dumps(json_safe(status), default=str, indent=2, allow_nan=False))
     return status
 
 
@@ -490,10 +533,14 @@ def train() -> dict[str, Any]:
     e = engine()
     report = schema_report(e)
     LOG.info("Pre-implementation AFL schema/data report:\n%s", json.dumps(report, default=str, indent=2))
-    df = add_safe_features(e, load_selections(e, settled=True))
+    raw_df = load_selections(e, settled=True)
+    log_dataframe_diagnostics("settled_loaded", raw_df, ["profit_units", "result", "odds", "settled_at"])
+    df = add_safe_features(e, raw_df)
+    log_dataframe_diagnostics("settled_with_features", df)
     if len(df) < 50:
         raise SystemExit(f"Not enough settled AFL rows to train: {len(df)}")
     df["target"] = (pd.to_numeric(df["profit_units"], errors="coerce") > 0).astype(int)
+    LOG.info("AFL_PIPELINE_DIAG target_distribution=%s", df["target"].value_counts(dropna=False).to_dict())
     if df["target"].nunique() < 2:
         raise SystemExit("Not enough class diversity to train AFL bet-quality model: target has one class")
     df["_order_date"] = pd.to_datetime(df.get("commence_time"), utc=True, errors="coerce").fillna(pd.to_datetime(df.get("settled_at"), utc=True, errors="coerce")).fillna(pd.to_datetime(df.get("created_at"), utc=True, errors="coerce"))
@@ -505,6 +552,7 @@ def train() -> dict[str, Any]:
     if test_df.empty or train_df["target"].nunique() < 2:
         raise SystemExit("Chronological split did not leave enough train/test class diversity")
     numeric, categorical = feature_columns(df)
+    LOG.info("AFL_PIPELINE_DIAG feature_matrix rows=%s numeric=%s categorical=%s shape=(%s,%s)", len(df), numeric, categorical, len(df), len(numeric) + len(categorical))
     pre = ColumnTransformer([
         ("num", SimpleImputer(strategy="median"), numeric),
         ("cat", Pipeline([("imputer", SimpleImputer(strategy="most_frequent")), ("onehot", OneHotEncoder(handle_unknown="ignore", min_frequency=5))]), categorical),
@@ -539,7 +587,7 @@ def train() -> dict[str, Any]:
     tmp_meta.write_text(json.dumps(meta, default=str, indent=2) + "\n")
     os.replace(tmp_model, MODEL_PATH)
     os.replace(tmp_meta, META_PATH)
-    LOG.info("Saved AFL ML model artifact to local filesystem: %s", MODEL_PATH)
+    LOG.info("Saved AFL ML model artifact to local filesystem: %s bytes=%s", MODEL_PATH, MODEL_PATH.stat().st_size)
     LOG.info("Saved AFL ML model metadata to local filesystem: %s", META_PATH)
     artifact_id = save_artifact_to_postgres(e, MODEL_PATH.read_bytes(), meta)
     summary["postgres_artifact_id"] = artifact_id
@@ -580,7 +628,10 @@ def score_current() -> pd.DataFrame:
         raise SystemExit(f"AFL model artifact does not exist locally at {MODEL_PATH} and no active Postgres artifact was found. Run python afl_backtest.py --train on Railway first.")
     LOG.info("Using AFL ML model artifact source=%s", artifact_source)
     validate_artifact(artifact)
-    df = add_safe_features(e, load_selections(e, settled=False))
+    raw_df = load_selections(e, settled=False)
+    log_dataframe_diagnostics("current_loaded", raw_df, ["odds", "result"])
+    df = add_safe_features(e, raw_df)
+    log_dataframe_diagnostics("current_with_features", df)
     if df.empty:
         SCORES_PATH.write_text("[]\n")
         print("[]")
@@ -598,10 +649,75 @@ def score_current() -> pd.DataFrame:
     out["ml_expected_value_score"] = np.round(prob * (pd.to_numeric(df["odds"], errors="coerce") - 1.0) - (1.0 - prob), 4)
     out["ml_recommendation"] = np.where(out["ml_bet_probability"] >= threshold, "BET", "PASS")
     out["threshold_used"] = threshold
-    SCORES_PATH.write_text(out.replace({np.nan: None}).to_json(orient="records", date_format="iso", indent=2) + "\n")
-    print(out.replace({np.nan: None}).to_json(orient="records", date_format="iso", indent=2))
+    safe_rows = df_to_safe_records(out)
+    SCORES_PATH.write_text(json.dumps(safe_rows, default=str, indent=2, allow_nan=False) + "\n")
+    print(json.dumps(safe_rows, default=str, indent=2, allow_nan=False))
+    LOG.info("AFL_PIPELINE_DIAG current_scored rows=%s response_keys=%s", len(safe_rows), list(safe_rows[0].keys()) if safe_rows else [])
     return out
 
+
+
+def debug_pipeline() -> dict[str, Any]:
+    """Print an evidence-first AFL ML/backtest health report and exit 0."""
+    out: dict[str, Any] = {"ok": True, "database": {}, "counts": {}, "ml": {}}
+    if _MISSING_DEPENDENCY is not None:
+        out["ok"] = False
+        out["dependency_error"] = str(_MISSING_DEPENDENCY)
+        out["ml"] = {
+            "local_model": {"path": str(MODEL_PATH), "exists": MODEL_PATH.exists()},
+            "postgres_active_model": {"exists": False, "error": "dependencies unavailable"},
+        }
+        print(json.dumps(json_safe(out), indent=2, default=str, allow_nan=False))
+        return out
+    try:
+        e = engine()
+        with e.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        out["database"] = {"connected": True}
+        LOG.info("AFL_CRON_DB_CONNECTED debug_pipeline=1")
+    except BaseException as exc:
+        out["ok"] = False
+        out["database"] = {"connected": False, "error": str(exc)}
+        out["ml"] = {
+            "local_model": {"path": str(MODEL_PATH), "exists": MODEL_PATH.exists()},
+            "postgres_active_model": {"exists": False, "error": "database unavailable"},
+        }
+        print(json.dumps(json_safe(out), indent=2, default=str, allow_nan=False))
+        return out
+
+    tables = ["afl_games", "afl_player_stats", "afl_player_props", "afl_match_markets", "afl_model_selections", "afl_ml_artifacts"]
+    with e.begin() as conn:
+        for table in tables:
+            try:
+                out["counts"][table] = int(conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar() or 0)
+            except Exception as exc:
+                out["counts"][table] = {"error": str(exc)}
+        try:
+            out["counts"]["completed_games"] = int(conn.execute(text("SELECT COUNT(*) FROM afl_games WHERE complete = 100 OR complete = TRUE OR winner IS NOT NULL OR (hscore IS NOT NULL AND ascore IS NOT NULL)")).scalar() or 0)
+        except Exception as exc:
+            out["counts"]["completed_games"] = {"error": str(exc)}
+
+    raw = load_selections(e, settled=True)
+    raw_diag = log_dataframe_diagnostics("debug_settled_loaded", raw, ["profit_units", "result", "odds", "settled_at"])
+    featured = add_safe_features(e, raw)
+    numeric, categorical = feature_columns(featured)
+    target = (pd.to_numeric(featured.get("profit_units"), errors="coerce") > 0).astype(int) if not featured.empty and "profit_units" in featured else pd.Series(dtype=int)
+    status = model_status(emit=False)
+    out.update({
+        "rows_usable_for_ml": int(len(featured)),
+        "missing_required_columns": raw_diag["missing_required_columns"],
+        "feature_columns_used": numeric + categorical,
+        "target_distribution": {str(k): int(v) for k, v in target.value_counts(dropna=False).to_dict().items()},
+        "ml": status,
+    })
+    try:
+        scored = score_current()
+        out["sample_5_scored_selections"] = df_to_safe_records(scored.head(5))
+    except Exception as exc:
+        out["sample_5_scored_selections"] = []
+        out["scoring_error"] = str(exc)
+    print(json.dumps(json_safe(out), indent=2, default=str, allow_nan=False))
+    return out
 
 def main() -> None:
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
@@ -618,6 +734,7 @@ def main() -> None:
     p.add_argument("--score-current", action="store_true")
     p.add_argument("--schema-report", action="store_true")
     p.add_argument("--model-status", action="store_true")
+    p.add_argument("--debug-pipeline", action="store_true")
     args = p.parse_args()
     if args.schema_report:
         print(json.dumps(schema_report(engine()), default=str, indent=2))
@@ -627,7 +744,9 @@ def main() -> None:
         score_current()
     if args.model_status:
         model_status()
-    if not (args.schema_report or args.train or args.score_current or args.model_status):
+    if args.debug_pipeline:
+        debug_pipeline()
+    if not (args.schema_report or args.train or args.score_current or args.model_status or args.debug_pipeline):
         p.print_help()
 
 

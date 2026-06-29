@@ -1752,21 +1752,26 @@ function loadAflMachineLearningSelections() {
   fetch('/api/afl/ml-current-selections')
     .then(async response => {
       const data = await response.json().catch(() => ({}));
-      if (data.status === 'missing_model') return data;
+      if (['missing_model', 'no_data', 'error'].includes(data.status)) return data;
       if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
       return data;
     })
     .then(data => {
       if (data.status === 'missing_model') {
         if (summary) summary.textContent = 'AFL Machine Learning model status: missing model.';
-        wrap.innerHTML = `<div class="props-banner"><i class="bi bi-exclamation-triangle-fill"></i> AFL Machine Learning model has not been trained yet. Run training on Railway first.</div>`;
+        wrap.innerHTML = `<div class="props-banner"><i class="bi bi-exclamation-triangle-fill"></i> ${esc(data.message || 'AFL Machine Learning model has not been trained yet. Run training on Railway first.')}</div>`;
+        return;
+      }
+      if (data.status === 'error') {
+        if (summary) summary.textContent = 'AFL Machine Learning endpoint returned an error.';
+        wrap.innerHTML = `<div class="props-banner"><i class="bi bi-exclamation-triangle-fill"></i> ${esc(data.message || 'AFL Machine Learning selections could not be loaded.')}</div>`;
         return;
       }
 
-      const rows = Array.isArray(data.rows) ? data.rows : [];
+      const rows = Array.isArray(data.selections) ? data.selections : (Array.isArray(data.rows) ? data.rows : []);
       if (!rows.length) {
-        if (summary) summary.textContent = 'All Machine Learning selections · 0 current rows.';
-        wrap.innerHTML = `<div class="prop-empty"><i class="bi bi-cpu"></i><p>No current AFL ML selections available.</p></div>`;
+        if (summary) summary.textContent = `All Machine Learning selections · 0 current rows · ${data.status || 'no_data'}.`;
+        wrap.innerHTML = `<div class="prop-empty"><i class="bi bi-cpu"></i><p>${esc(data.message || 'No current AFL ML selections available.')}</p></div>`;
         return;
       }
 
