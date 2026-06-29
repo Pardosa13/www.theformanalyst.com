@@ -685,7 +685,7 @@ def score_current(emit: bool = True) -> pd.DataFrame:
             df[c] = np.nan
     prob = artifact["model"].predict_proba(df[features])[:, 1]
     threshold = float(artifact.get("validation_summary", {}).get("recommended_threshold", {}).get("threshold", 0.5))
-    out_cols = ["id", "event_id", "match_id", "commence_time", "home_team", "away_team", "team", "opponent", "market", "line_type", "line", "odds", "bookmaker", "recommendation", "model_prob", "edge", "confidence_score"]
+    out_cols = ["id", "event_id", "match_id", "commence_time", "home_team", "away_team", "player_name", "team", "opponent", "market", "line_type", "line", "odds", "bookmaker", "recommendation", "model_prob", "edge", "confidence_score"]
     out = df[[c for c in out_cols if c in df]].copy()
     out = out.rename(columns={"id": "selection_id", "recommendation": "existing_recommendation", "model_prob": "original_model_prob", "edge": "original_edge"})
     out["ml_bet_probability"] = np.round(prob, 4)
