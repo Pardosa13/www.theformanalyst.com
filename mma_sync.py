@@ -630,6 +630,12 @@ def _fetch_espn_event_api(event_id):
     log.info(f"  Trying ESPN summary API: {url}")
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
+        if r.status_code == 404:
+            log.warning(
+                "  ESPN summary API returned 404 for event %s; continuing with fallback sources",
+                event_id,
+            )
+            return []
         r.raise_for_status()
         data = r.json()
     except Exception as e:
@@ -811,6 +817,12 @@ def scrape_event_details(event_url, event_id):
             'result': None,
             'weight_class': '',
         })
+
+    if not fights:
+        log.warning(
+            "  ESPN fightcenter DOM parser returned 0 fights for event %s; continuing with fallback sources",
+            event_id,
+        )
 
     return fights
 
@@ -1569,22 +1581,62 @@ def upsert_fight(conn, event_id, fight):
 
 
 def prune_event_fights(conn, event_id, keep_fight_ids):
-    """Remove fights for an event that disappeared from the latest source card."""
+    """Remove unreferenced fights that disappeared from the latest source card.
+
+    Never hard-delete a fight that already has a prediction.  ESPN card data is
+    no longer authoritative for MMA: a 404 summary endpoint or an empty
+    fightcenter DOM can make valid fights appear to have disappeared.  Fights
+    referenced by mma_predictions are therefore preserved so the frontend/API can
+    continue displaying previously generated, Odds API-seeded cards.
+    """
     if not keep_fight_ids:
+        log.info(
+            "  No source fights to prune for event %s; preserving existing fights",
+            event_id,
+        )
         return 0
+
+    keep_ids = list(keep_fight_ids)
     with conn.cursor() as cur:
         cur.execute(
             """
-            DELETE FROM mma_fights
-            WHERE event_id = %s
-              AND id <> ALL(%s)
+            SELECT COUNT(*)
+            FROM mma_fights f
+            WHERE f.event_id = %s
+              AND f.id <> ALL(%s)
+              AND EXISTS (
+                  SELECT 1
+                  FROM mma_predictions p
+                  WHERE p.fight_id = f.id
+              )
             """,
-            (event_id, list(keep_fight_ids)),
+            (event_id, keep_ids),
+        )
+        skipped = cur.fetchone()[0]
+
+        cur.execute(
+            """
+            DELETE FROM mma_fights f
+            WHERE f.event_id = %s
+              AND f.id <> ALL(%s)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM mma_predictions p
+                  WHERE p.fight_id = f.id
+              )
+            """,
+            (event_id, keep_ids),
         )
         deleted = cur.rowcount
     conn.commit()
+    if skipped:
+        log.warning(
+            "  Preserved %s stale fight(s) for event %s because predictions reference them",
+            skipped,
+            event_id,
+        )
     if deleted:
-        log.info(f"  Pruned {deleted} stale fight(s) for event {event_id}")
+        log.info(f"  Pruned {deleted} unreferenced stale fight(s) for event {event_id}")
     return deleted
 
 
