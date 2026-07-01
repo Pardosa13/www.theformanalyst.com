@@ -636,7 +636,7 @@ function loadMlMarketDivergence() {
 function loadMlJurisdictionStrength() {
     const container = document.getElementById('mlJurisdictionStrength');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML jurisdiction strength...</p></div>';
-    fetch('/api/data/jurisdiction-strength')
+    fetch(`/api/data/jurisdiction-strength?${filterParams}`)
         .then(r => r.json())
         .then(data => { renderMlJurisdictionStrength(data); loadedSections.add('ml-jurisdiction-strength'); })
         .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML jurisdiction strength. Please try again.</div>'; console.error(err); });
@@ -708,7 +708,7 @@ function loadMlCombinationAnalysis() {
 function loadMlPfaiAnalysis() {
     const container = document.getElementById('mlPfaiAnalysis');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML PFAI analysis...</p></div>';
-    fetch('/api/data/pfai-analysis')
+    fetch(`/api/data/pfai-analysis?${filterParams}`)
         .then(r => r.json())
         .then(data => { renderMlPfaiAnalysis(data); loadedSections.add('ml-pfai-analysis'); })
         .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML PFAI analysis. Please try again.</div>'; console.error(err); });
@@ -1156,7 +1156,6 @@ function renderMlMarketDivergence(data) {
 
     container.innerHTML = html;
 }
-</script>
 
 function renderMlJurisdictionStrength(data) {
     const container = document.getElementById('mlJurisdictionStrength');
@@ -3331,4 +3330,5 @@ function renderMlRaceTempo(data) {
         });
     }
 }
+</script>
 {% endblock %}
