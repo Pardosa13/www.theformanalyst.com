@@ -1,0 +1,3009 @@
+{% extends "base.html" %}
+
+{% block title %}🤖 ML — {{ meeting.meeting_name }}{% endblock %}
+
+{% block content %}
+
+<style>
+/* ══════════════════════════════════════════
+   ML RACE MEETINGS — dark high-contrast, teal ML accent
+   Horses are sorted by ML Score, not Analyzer Score
+   
+   COLOUR BRIEF:
+   • 1st place row    → dark emerald tint  + #00e5b0 border (ML teal)
+   • 2nd place row    → dark amber tint    + #fbbf24 border
+   • 3rd place row    → dark bronze tint   + #f59e0b border
+   • Scratched row    → dark grey, 0.55 opacity, strikethrough
+   • Odds             → #34d399 bright green
+   • ML Score         → #00e5b0 teal DM Mono (primary)
+   • Analyzer Score   → #9090a8 muted (secondary)
+   • PFAI badges      → teal
+   • Sectionals       → dark card, teal accent
+   • Speed map        → dark columns, vivid pos/neg colours
+   • Notes pre        → dark bg, bright white text
+   --ml-teal: #00e5b0; --ml-lime: #b6ff00;
+   ALL JS IDs / API endpoints / Jinja / onclick UNCHANGED
+══════════════════════════════════════════ */
+
+/* ── ML override vars ── */
+:root { --ml-teal: #00e5b0; --ml-lime: #b6ff00; }
+
+/* ── Page header ── */
+.vm-page-title {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: var(--ml-teal, #00e5b0);
+  margin: 0 0 8px;
+}
+.vm-back-link {
+  color: var(--accent) !important;
+  text-decoration: none !important;
+  font-size: 14px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 20px;
+}
+.vm-back-link:hover { color: var(--accent-2) !important; }
+
+/* ── Header card (meta + print) ── */
+.vm-meta-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.vm-meta-card p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.vm-meta-card p + p { margin-top: 4px; }
+.vm-meta-card strong { color: var(--text-primary); }
+
+/* ── Meeting overview card ── */
+.vm-overview-card {
+  background: linear-gradient(135deg, #14142a 0%, #1a1a2e 100%);
+  border: 1px solid var(--border-accent);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.vm-overview-card h3 {
+  margin: 0 0 16px;
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 700;
+}
+.vm-overview-tiles {
+  display: flex;
+  justify-content: space-around;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.vm-overview-tile {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 16px;
+  border-radius: 10px;
+  text-align: center;
+  min-width: 150px;
+}
+.vm-overview-tile .tile-label {
+  font-size: 12px;
+  color: rgba(255,255,255,0.7);
+  margin-bottom: 6px;
+}
+.vm-overview-tile .tile-value {
+  font-size: 1.7rem;
+  font-weight: 800;
+  font-family: 'DM Mono', monospace;
+  color: #fff;
+  line-height: 1.1;
+}
+.vm-overview-tile .tile-sub {
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  margin-top: 4px;
+}
+
+
+.horse-scratched {
+  opacity: 0.45;
+  color: #9ca3af !important;
+  text-decoration: line-through;
+}
+.horse-scratched td {
+  color: #9ca3af !important;
+}
+.scratched-badge {
+  background: #dc3545;
+  color: white;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  font-weight: bold;
+  text-decoration: none;
+}
+.scratched-label {
+  background: #6c757d;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  text-decoration: none;
+}
+
+/* ── Race navigation pills ── */
+.vm-nav-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.vm-nav-label {
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-right: 6px;
+}
+.vm-nav-pill {
+  padding: 7px 14px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  color: white !important;
+  border-radius: 8px;
+  text-decoration: none !important;
+  font-weight: 700;
+  font-size: 13px;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.vm-nav-pill:hover { opacity: 0.85; transform: translateY(-1px); }
+.vm-nav-pill:active { transform: scale(0.97); }
+
+/* ── Per-race cards ── */
+.vm-race-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 18px;
+  scroll-margin-top: 20px;
+}
+.vm-race-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.vm-race-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+.vm-race-meta {
+  display: flex;
+  gap: 14px;
+  font-size: 13px;
+  color: var(--text-primary);
+  flex-wrap: wrap;
+}
+.vm-race-meta strong { color: var(--text-primary); }
+
+/* ── Maiden warning ── */
+.vm-maiden-warning {
+  background: rgba(245,158,11,0.1);
+  border-left: 4px solid #fbbf24;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+.vm-maiden-warning strong { color: #fbbf24; }
+.vm-maiden-warning span   { color: #fbbf24; }
+
+/* ══════════════════════════════════════════
+   HORSE RANKING TABLE
+   Inline styles on <tr> overridden via CSS
+   attribute selectors — Jinja untouched
+══════════════════════════════════════════ */
+
+.vm-race-card table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  --bs-table-bg: transparent !important;
+}
+
+/* Table header — purple gradient kept, refined */
+.vm-race-card thead tr {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+}
+.vm-race-card thead th {
+  padding: 11px 12px !important;
+  color: rgba(255,255,255,0.92) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.07em !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+/* All rows — base */
+.vm-race-card tbody tr {
+  border-bottom: 1px solid var(--border-subtle);
+  transition: filter 0.1s;
+}
+.vm-race-card tbody tr:last-child { border-bottom: none; }
+.vm-race-card tbody tr:hover { filter: brightness(1.12); }
+
+/* Override all inline bg-colors on <tr style="..."> */
+
+/* 1st — bright emerald tint */
+.vm-race-card tbody tr[style*="#d4edda"] {
+  background: rgba(16,185,129,0.15) !important;
+  border-left: 3px solid #34d399 !important;
+}
+/* 2nd — amber tint */
+.vm-race-card tbody tr[style*="#fff3cd"] {
+  background: rgba(245,158,11,0.12) !important;
+  border-left: 3px solid #fbbf24 !important;
+}
+/* 3rd — bronze tint */
+.vm-race-card tbody tr[style*="#ffe4b3"] {
+  background: rgba(234,136,13,0.10) !important;
+  border-left: 3px solid #f59e0b !important;
+}
+
+/* Best Bets highlight — gold rows matching /best-bets selections */
+.vm-race-card tbody tr.best-bet-highlight {
+  background: linear-gradient(135deg, rgba(251,191,36,0.34) 0%, rgba(180,83,9,0.22) 100%) !important;
+  border-left: 5px solid #fbbf24 !important;
+  box-shadow: inset 0 0 0 1px rgba(251,191,36,0.35), 0 0 18px rgba(251,191,36,0.18);
+}
+.vm-race-card tbody tr.best-bet-highlight:hover {
+  filter: brightness(1.16);
+}
+.vm-race-card tbody tr.best-bet-highlight td:nth-child(2) > div:first-child,
+.vm-race-card tbody tr.best-bet-highlight td:nth-child(3) {
+  color: #fde68a !important;
+}
+.vm-best-bet-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
+  color: #111827;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 2px 8px rgba(251,191,36,0.35);
+}
+.vm-best-bet-reasons {
+  margin-top: 5px;
+  color: #fde68a !important;
+  font-size: 11px !important;
+  font-weight: 700;
+}
+
+
+/* ML Shadow overlay — display-only row highlights for existing View Meeting table */
+.vm-race-card tbody tr.ml-shadow-highlight {
+  background: rgba(16, 245, 160, 0.12) !important;
+  border-left: 5px solid #10F5A0 !important;
+  box-shadow: inset 0 0 0 1px rgba(16, 245, 160, 0.25), 0 0 16px rgba(16, 245, 160, 0.14);
+}
+.vm-race-card tbody tr.ml-shadow-highlight:hover {
+  filter: brightness(1.16);
+}
+.vm-race-card tbody tr.ml-agreement-highlight {
+  background: rgba(255, 210, 63, 0.20) !important;
+  border-left: 5px solid #FFD23F !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 210, 63, 0.35), 0 0 18px rgba(255, 210, 63, 0.18);
+}
+.vm-race-card tbody tr.ml-agreement-highlight:hover {
+  filter: brightness(1.16);
+}
+.vm-ml-shadow-badge,
+.vm-ml-agreement-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.vm-ml-shadow-badge {
+  background: rgba(16, 245, 160, 0.10);
+  border: 1px solid #10F5A0;
+  color: #10F5A0;
+}
+.vm-ml-agreement-badge {
+  background: rgba(255, 210, 63, 0.14);
+  border: 1px solid #FFD23F;
+  color: #FFD23F;
+}
+
+/* Scratched */
+.vm-race-card tbody tr[style*="#e9ecef"] {
+  background: rgba(107,114,128,0.10) !important;
+  opacity: 0.55 !important;
+  border-left: 3px solid #6b7280 !important;
+}
+/* Odd rows */
+.vm-race-card tbody tr[style*="#f8f9fa"] {
+  background: rgba(255,255,255,0.025) !important;
+}
+/* Even rows */
+.vm-race-card tbody tr[style*="#ffffff"] {
+  background: transparent !important;
+}
+
+/* All td base */
+.vm-race-card tbody td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+/* Position cell (medal / number) */
+.vm-race-card tbody td:nth-child(1) {
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+/* Horse name cell */
+.vm-race-card tbody td:nth-child(2) > div:first-child {
+  font-weight: 700;
+  color: var(--text-primary) !important;
+}
+/* J: / T: subtitle */
+.vm-race-card tbody td:nth-child(2) > div:last-child {
+  color: var(--text-primary) !important;
+  font-size: 11px;
+}
+
+/* Score — bold white DM Mono */
+.vm-race-card tbody td:nth-child(3) {
+  font-family: 'DM Mono', monospace !important;
+  font-weight: 800 !important;
+  font-size: 17px !important;
+  color: var(--text-primary) !important;
+  text-align: center;
+}
+
+/* Odds — bright green */
+.vm-race-card tbody td:nth-child(4) {
+  font-family: 'DM Mono', monospace !important;
+  font-weight: 700 !important;
+  color: #34d399 !important;
+  font-size: 14px !important;
+  text-align: center;
+}
+
+/* Ladbrokes Price column */
+.vm-race-card tbody td:nth-child(5) {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 13px !important;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* Win % — near-white mono */
+.vm-race-card tbody td:nth-child(6) {
+  font-family: 'DM Mono', monospace !important;
+  color: var(--text-primary) !important;
+  text-align: center;
+}
+
+/* Notes cell — details/summary */
+.vm-race-card tbody td:nth-child(7) { font-size: 11px; }
+
+.vm-race-card details summary {
+  cursor: pointer;
+  color: var(--accent) !important;
+  font-weight: 700;
+  font-size: 12px;
+  list-style: none;
+}
+.vm-race-card details summary::-webkit-details-marker { display: none; }
+
+/* Notes pre — dark bg, bright white */
+.vm-race-card details pre,
+details pre {
+  white-space: pre-wrap;
+  margin: 8px 0 0;
+  font-family: 'DM Mono', monospace !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: var(--text-primary) !important;
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-subtle) !important;
+  padding: 10px 12px !important;
+  border-radius: 6px !important;
+  line-height: 1.6;
+}
+
+/* PFAI badge — purple */
+.pfai-badge,
+.vm-race-card [style*="764ba2"] {
+  background: var(--accent) !important;
+  color: white !important;
+  border-radius: 5px !important;
+}
+
+/* Scratch / unscratch buttons */
+.vm-race-card button[onclick*="toggleScratch"] {
+  border-radius: 5px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  cursor: pointer;
+  border: none;
+}
+
+/* Quick analysis bar */
+.vm-quick-analysis {
+  margin-top: 14px;
+  padding: 12px 16px;
+  background: rgba(102,126,234,0.10);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.vm-quick-analysis strong { color: var(--text-primary); }
+
+/* ══════════════════════════════════════════
+   SPEED MAP — dark columns, vivid colours
+══════════════════════════════════════════ */
+.speedmap-container { overflow-x: auto; padding: 20px 0; }
+.speedmap-collapse { overflow: hidden; max-height: 0; opacity: 0; transform: translateY(-6px); transition: max-height 0.36s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.24s ease, transform 0.24s ease; }
+.speedmap-collapse.is-open { opacity: 1; transform: translateY(0); }
+
+.speedmap-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  min-width: 800px;
+  align-items: start;
+}
+
+.speedmap-column {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 14px;
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.28s ease, transform 0.28s ease;
+  transition-delay: var(--speedmap-column-delay, 0ms);
+}
+.speedmap-grid.speedmap-grid-visible .speedmap-column {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.speedmap-column-header {
+  background: linear-gradient(135deg, #1e1e3a 0%, #2d2d5e 100%);
+  color: rgba(255,255,255,0.9);
+  padding: 11px;
+  text-align: center;
+  font-weight: 800;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-radius: 7px 7px 0 0;
+  margin: -14px -14px 14px -14px;
+  border-bottom: 2px solid var(--accent);
+}
+
+.speedmap-horse-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 11px;
+  margin-bottom: 9px;
+  opacity: 0;
+  transform: translate3d(var(--speedmap-enter-x, 0), 16px, 0) scale(0.96);
+  transition:
+    opacity 0.34s ease,
+    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.2s,
+    box-shadow 0.2s;
+  transition-delay: var(--speedmap-card-delay, 0ms);
+}
+.speedmap-grid.speedmap-grid-visible .speedmap-horse-card {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+}
+.speedmap-horse-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 3px 12px rgba(102,126,234,0.2);
+}
+
+.speedmap-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
+.speedmap-tab-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  color: white;
+  border-radius: 50%;
+  font-weight: 800;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.speedmap-tab-number--silk {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.2);
+  box-shadow: 0 5px 14px rgba(0,0,0,0.24);
+}
+
+.speedmap-tab-number-label {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(7,10,19,0.82);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.28);
+}
+
+.speedmap-tab-number-fallback {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+}
+
+.speedmap-horse-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.speedmap-pfai {
+  display: inline-block;
+  background: rgba(118,75,162,0.3);
+  border: 1px solid rgba(118,75,162,0.5);
+  color: #c084fc;
+  padding: 3px 9px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 7px;
+}
+
+.speedmap-badges {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 7px;
+  flex-wrap: wrap;
+}
+.speedmap-badge {
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.speedmap-badge-speed  { background: rgba(102,126,234,0.2); color: #a5b4fc; border: 1px solid rgba(102,126,234,0.3); }
+.speedmap-badge-settle { background: rgba(16,185,129,0.15); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.25); }
+
+/* MAP values — vivid so they POP */
+.speedmap-map {
+  padding: 5px 9px;
+  border-radius: 5px;
+  font-weight: 800;
+  font-size: 13px;
+  margin-bottom: 5px;
+  display: inline-block;
+}
+.speedmap-map-positive { background: rgba(16,185,129,0.25); color: #34d399; border: 1px solid rgba(16,185,129,0.4); }
+.speedmap-map-neutral  { background: rgba(107,114,128,0.2);  color: #9ca3af; border: 1px solid rgba(107,114,128,0.3); }
+.speedmap-map-negative { background: rgba(239,68,68,0.2);    color: #f87171; border: 1px solid rgba(239,68,68,0.35); }
+.speedmap-map-standout {
+  box-shadow: 0 0 0 1px rgba(52,211,153,0.18), 0 0 14px rgba(52,211,153,0.22);
+  animation: mapGlowPulse 3.8s ease-in-out infinite;
+}
+.speedmap-map-elite {
+  box-shadow: 0 0 0 1px rgba(52,211,153,0.28), 0 0 22px rgba(52,211,153,0.32);
+  animation-duration: 3.2s;
+}
+.speedmap-metric { font-variant-numeric: tabular-nums; }
+@keyframes mapGlowPulse {
+  0%, 100% { filter: brightness(1); box-shadow: 0 0 0 1px rgba(52,211,153,0.18), 0 0 12px rgba(52,211,153,0.18); }
+  50% { filter: brightness(1.08); box-shadow: 0 0 0 1px rgba(52,211,153,0.34), 0 0 24px rgba(52,211,153,0.34); }
+}
+
+.speedmap-jockey {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'DM Mono', monospace;
+}
+
+/* Speed map toggle button */
+.vm-race-card .btn-secondary,
+.vm-race-card button.btn-secondary {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-mid) !important;
+  color: var(--text-primary) !important;
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+  transition: transform 0.14s ease, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.vm-race-card .btn-secondary:hover {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 0 14px rgba(102,126,234,0.18);
+}
+.vm-race-card .btn-secondary:active { transform: scale(0.97); }
+
+/* Speed map outer card */
+.vm-speedmap-outer {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 18px;
+}
+.vm-speedmap-outer h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* ══════════════════════════════════════════
+   SECTIONAL ANALYSIS — dark card, VIVID
+══════════════════════════════════════════ */
+.sectional-section {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent);
+  padding: 18px;
+  border-radius: 10px;
+  margin: 18px 0;
+}
+
+.sectional-section h3 {
+  margin: 0 0 14px;
+  color: var(--text-primary) !important;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Chart toggle buttons — dark with vivid active state */
+.chart-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.chart-toggle-btn {
+  padding: 7px 14px;
+  border: 1.5px solid var(--border-mid);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border-radius: 7px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+  transition: transform 0.14s ease, border-color 0.15s ease, color 0.15s ease, background 0.15s ease, box-shadow 0.2s ease;
+  font-family: inherit;
+  touch-action: manipulation;
+}
+.chart-toggle-btn:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(102,126,234,0.08);
+}
+.chart-toggle-btn:active { transform: scale(0.97); box-shadow: 0 0 18px rgba(102,126,234,0.28); }
+.chart-toggle-btn.active {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 50%, var(--accent) 100%);
+  background-size: 180% 180%;
+  color: white;
+  border-color: var(--accent-2);
+  box-shadow: 0 2px 10px rgba(102,126,234,0.35);
+  animation: activeTabSheen 6s ease-in-out infinite;
+}
+@keyframes activeTabSheen { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+
+/* Chart canvas wrapper */
+#chartContainer_race,
+[id^="chartContainer_race"] {
+  background: var(--bg-surface) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 8px !important;
+  padding: 14px !important;
+}
+.sectional-chart-glow {
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 28px rgba(102,126,234,0.08);
+}
+.sectional-chart-glow canvas { filter: saturate(1.08); }
+
+/* Chart insights */
+.chart-insights {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent);
+  padding: 12px 14px;
+  border-radius: 6px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+.chart-insights h4 {
+  margin: 0 0 8px;
+  color: var(--accent) !important;
+  font-size: 13px;
+  font-weight: 700;
+}
+.insight-item {
+  padding: 4px 0;
+  color: var(--text-primary);
+  line-height: 1.5;
+  font-size: 12px;
+}
+.chart-insights.insights-visible .insight-item { animation: insightFadeUp 0.42s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: calc(var(--insight-index, 0) * 130ms); }
+@keyframes insightFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.insight-item strong { color: var(--text-primary); }
+
+.sectional-animated-panel {
+  opacity: 0;
+  transform: translateY(14px);
+}
+
+.sectional-animated-panel.sectional-animated-panel-visible {
+  animation: sectionalFadeUp 0.34s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Loading / no data */
+.loading-spinner {
+  text-align: center;
+  padding: 36px;
+  color: var(--accent);
+  font-size: 13px;
+}
+.no-sectionals {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 13px;
+}
+
+/* ══════════════════════════════════════════
+   PFAI HEATMAP TABLE
+   Thead purple kept, tbody overridden for dark
+══════════════════════════════════════════ */
+.pfai-heatmap-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-surface);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+.pfai-heatmap-table thead {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+.pfai-heatmap-table th {
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  font-size: 11px !important;
+  letter-spacing: 0.07em !important;
+  color: rgba(255,255,255,0.92) !important;
+  padding: 10px 12px !important;
+}
+.pfai-heatmap-table tbody tr {
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  transition: filter 0.1s;
+}
+.pfai-heatmap-table tbody tr:hover { filter: brightness(1.15); }
+.pfai-heatmap-row {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.pfai-heatmap-animate {
+  --pfai-row-delay-ms: 55ms;
+}
+.pfai-heatmap-animate .pfai-heatmap-row {
+  animation: sectionalFadeUp 0.32s ease forwards;
+  animation-delay: calc(var(--row-index, 0) * var(--pfai-row-delay-ms));
+}
+.pfai-heatmap-table tbody td {
+  padding: 10px 12px;
+  font-weight: 600;
+  color: white;
+  font-size: 13px;
+}
+
+/* Premium PFAI heatmap shell + interactions */
+[id^="pfaiHeatmap_"].pfai-heatmap-wrap {
+  --heat-excellent: 16, 185, 129;
+  --heat-strong: 245, 158, 11;
+  --heat-average: 234, 88, 12;
+  --heat-poor: 153, 27, 27;
+  position: relative;
+  background:
+    radial-gradient(circle at top left, rgba(102,126,234,0.18), transparent 34%),
+    linear-gradient(180deg, rgba(15,15,27,0.98), rgba(9,9,15,0.96)) !important;
+  border: 1px solid rgba(167,139,250,0.26) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 42px rgba(0,0,0,0.28);
+}
+.pfai-heatmap-head { margin-bottom: 12px; }
+[id^="pfaiHeatmap_"] h4.pfai-heatmap-title {
+  color: #ddd6fe !important;
+  font-size: 15px !important;
+  margin: 0 0 4px !important;
+  letter-spacing: -0.01em;
+}
+.pfai-heatmap-helper {
+  margin: 0;
+  color: #a5a5c3;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.pfai-heatmap-scroller {
+  position: relative;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 13px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(5,5,12,0.45);
+}
+.pfai-heatmap-table {
+  width: 100%;
+  min-width: 700px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+}
+.pfai-heatmap-table thead { background: transparent; }
+.pfai-heatmap-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(17,17,31,0.96);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(167,139,250,0.18);
+  color: #d8d7ff !important;
+  white-space: nowrap;
+}
+.pfai-heatmap-table col.col-horse { width: 220px; }
+.pfai-heatmap-table col.col-600,
+.pfai-heatmap-table col.col-400,
+.pfai-heatmap-table col.col-200,
+.pfai-heatmap-table col.col-avg { width: 120px; }
+
+.pfai-heatmap-table th:first-child,
+.pfai-heatmap-table td.pfai-horse-cell {
+  width: 220px;
+  min-width: 220px;
+  max-width: 220px;
+}
+.pfai-heatmap-table th[data-sort-key] { cursor: pointer; user-select: none; }
+.pfai-heatmap-table th[data-sort-key]::after {
+  content: '↕';
+  margin-left: 5px;
+  color: rgba(221,214,254,0.45);
+  font-size: 10px;
+}
+.pfai-heatmap-table th.pfai-sort-active {
+  color: #fff !important;
+  text-shadow: 0 0 12px rgba(167,139,250,0.55);
+}
+.pfai-heatmap-table th.pfai-sort-active::after { content: '↑'; color: #a78bfa; }
+.pfai-heatmap-table tbody tr { border: 0; transition: opacity 0.22s ease, filter 0.22s ease, transform 0.22s ease; }
+.pfai-heatmap-table tbody tr:hover { filter: brightness(1.08); }
+.pfai-heatmap-row {
+  --heat-rgb: var(--heat-poor);
+  --row-tint: 0.18;
+  position: relative;
+  opacity: 0;
+  background: linear-gradient(90deg, rgba(var(--heat-rgb), var(--row-tint)), rgba(18,18,32,0.76)) !important;
+  isolation: isolate;
+}
+.pfai-heatmap-row::before { content: none; }
+.pfai-heatmap-row.is-visible { animation: pfaiRowReveal 0.46s cubic-bezier(0.22,1,0.36,1) both; animation-delay: calc(var(--row-index, 0) * 85ms); }
+.pfai-heatmap-row.is-visible::before { animation: pfaiRowFill 0.72s cubic-bezier(0.22,1,0.36,1) both; animation-delay: calc((var(--row-index, 0) * 85ms) + 80ms); }
+.pfai-heatmap-row.heat-rank-excellent { --heat-rgb: var(--heat-excellent); --row-tint: 0.22; }
+.pfai-heatmap-row.heat-rank-strong { --heat-rgb: var(--heat-strong); --row-tint: 0.18; }
+.pfai-heatmap-row.heat-rank-average { --heat-rgb: var(--heat-average); --row-tint: 0.17; }
+.pfai-heatmap-row.heat-rank-poor { --heat-rgb: var(--heat-poor); --row-tint: 0.20; }
+.pfai-heatmap-row.pfai-row-best-profile { box-shadow: 0 0 0 1px rgba(16,185,129,0.18), 0 0 26px rgba(16,185,129,0.10); }
+.pfai-heatmap-table tbody td {
+  position: relative;
+  padding: 12px !important;
+  font-weight: 650;
+  color: #f8fafc;
+  font-size: 13px;
+  background: transparent;
+  z-index: 1;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid rgba(0,0,0,0.18);
+}
+.pfai-heatmap-table tbody td:first-child { border-radius: 12px 0 0 12px; }
+.pfai-heatmap-table tbody td:last-child { border-radius: 0 12px 12px 0; }
+.pfai-horse-cell {
+  background: linear-gradient(90deg, rgba(12,12,22,0.98), rgba(12,12,22,0.92)) !important;
+  color: #fff !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+.pfai-rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #fff;
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  font-weight: 800;
+  background: rgba(148,163,184,0.18);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+  cursor: help;
+  touch-action: manipulation;
+  opacity: 0;
+  transform: scale(0.85);
+}
+.pfai-heatmap-row.is-visible .pfai-rank-badge { animation: pfaiBadgePop 0.34s cubic-bezier(0.22,1,0.36,1) forwards; animation-delay: calc((var(--row-index, 0) * 85ms) + 190ms); }
+.pfai-rank-badge.rank-1 { background: linear-gradient(135deg, #065f46, #10b981); box-shadow: 0 0 18px rgba(16,185,129,0.45), inset 0 1px 0 rgba(255,255,255,0.18); }
+.pfai-rank-badge.rank-2, .pfai-rank-badge.rank-3 { background: linear-gradient(135deg, #166534, #34d399); box-shadow: 0 0 13px rgba(52,211,153,0.28); }
+.pfai-rank-badge.rank-4, .pfai-rank-badge.rank-5 { background: linear-gradient(135deg, #78350f, #d97706); box-shadow: 0 0 12px rgba(245,158,11,0.24); }
+.pfai-rank-badge.rank-6, .pfai-rank-badge.rank-7 { background: linear-gradient(135deg, #7c2d12, #c2410c); }
+.pfai-rank-badge.rank-poor { background: linear-gradient(135deg, #7f1d1d, #991b1b); }
+.pfai-rank-missing { color: #73738b; }
+.pfai-heatmap-table.has-selection .pfai-heatmap-row:not(.is-selected) { opacity: 0.42; filter: saturate(0.62); }
+.pfai-heatmap-row.is-selected {
+  opacity: 1 !important;
+  outline: 1px solid rgba(96,165,250,0.78);
+  box-shadow: 0 0 0 3px rgba(124,58,237,0.18), 0 0 30px rgba(96,165,250,0.22);
+  filter: brightness(1.18) saturate(1.14);
+}
+.pfai-scroll-hint {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 76px;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 9px;
+  color: #ddd6fe;
+  font-size: 11px;
+  font-weight: 800;
+  text-shadow: 0 0 10px rgba(167,139,250,0.7);
+  background: linear-gradient(90deg, transparent, rgba(9,9,15,0.92));
+  transition: opacity 0.24s ease;
+}
+.pfai-scroll-hint::after { content: 'more ›'; }
+.pfai-scroll-hint.is-hidden { opacity: 0; }
+.pfai-rank-tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: min(280px, calc(100vw - 28px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(13,13,24,0.96);
+  border: 1px solid rgba(167,139,250,0.42);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.38), 0 0 22px rgba(102,126,234,0.16);
+  color: #f7f7ff;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.pfai-heatmap-legend {
+  margin-top: 12px;
+  padding: 11px 12px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  font-size: 12px;
+  color: #a5a5c3;
+}
+.pfai-legend-swatch { display:inline-block; width:18px; height:18px; border-radius:6px; margin:0 4px; vertical-align:middle; border:1px solid rgba(255,255,255,0.1); }
+@media (max-width: 1024px) {
+  .pfai-heatmap-wrap { padding: 12px !important; }
+  .pfai-heatmap-helper { font-size: 11px; line-height: 1.4; }
+  .pfai-heatmap-scroller {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .pfai-heatmap-table {
+    min-width: 620px;
+    width: max-content;
+    table-layout: auto;
+    border-spacing: 0;
+    padding: 0;
+  }
+  .pfai-heatmap-table th,
+  .pfai-heatmap-table tbody td {
+    font-size: 12px;
+    padding: 10px 8px !important;
+  }
+  .pfai-heatmap-table col.col-horse { width: 180px; }
+  .pfai-heatmap-table col.col-600,
+  .pfai-heatmap-table col.col-400,
+  .pfai-heatmap-table col.col-200,
+  .pfai-heatmap-table col.col-avg { width: 92px; }
+  .pfai-heatmap-table th:first-child,
+  .pfai-heatmap-table td.pfai-horse-cell {
+    min-width: 170px;
+    max-width: 55vw;
+    text-align: left;
+  }
+  .pfai-rank-badge {
+    min-width: 38px;
+    padding: 5px 7px;
+    font-size: 11px;
+  }
+}
+@keyframes pfaiRowReveal { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pfaiRowFill { 0% { opacity: 0; transform: scaleX(0); } 35% { opacity: 1; } 100% { opacity: 0.5; transform: scaleX(1); } }
+@keyframes pfaiBadgePop { to { opacity: 1; transform: scale(1); } }
+
+
+.top3-podium {
+  display: none;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.top3-podium.is-visible { display: grid; }
+.top3-podium-card {
+  background: rgba(255,255,255,0.045);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 10px;
+  opacity: 0;
+  transform: translateY(12px) scale(0.98);
+  animation: podiumReveal 0.42s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: calc(var(--podium-index, 0) * 120ms);
+}
+.top3-podium-card:first-child { border-color: rgba(251,191,36,0.55); box-shadow: 0 0 22px rgba(251,191,36,0.16); }
+.top3-podium-card:nth-child(2) { border-color: rgba(192,192,192,0.36); }
+.top3-podium-card:nth-child(3) { border-color: rgba(205,127,50,0.32); }
+.top3-rank { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.top3-name { margin-top: 3px; color: var(--text-primary); font-weight: 800; font-size: 13px; }
+.top3-time { margin-top: 3px; color: #c084fc; font-family: 'DM Mono', monospace; font-size: 12px; }
+@keyframes podiumReveal { to { opacity: 1; transform: translateY(0) scale(1); } }
+.tfa-skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+  background-size: 220% 100%;
+  animation: tfaSkeletonShimmer 1.35s ease-in-out infinite;
+  border: 1px solid var(--border-subtle);
+}
+.tfa-skeleton-chart { min-height: 350px; }
+.tfa-skeleton-speedmap { min-height: 180px; }
+@keyframes tfaSkeletonShimmer { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
+@keyframes sectionalFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ══════════════════════════════════════════
+   FILTER BAR (JS-built, styled via classes)
+══════════════════════════════════════════ */
+.filter-bar-container {
+  background: linear-gradient(135deg, #2a2a4a 0%, #1e1e3a 100%);
+  border: 1px solid var(--border-accent);
+  padding: 18px 20px;
+  border-radius: 12px;
+  margin-bottom: 18px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+.filter-bar-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.filter-bar-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.9);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.filter-dropdown {
+  padding: 8px 12px;
+  border: 1.5px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.9);
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 200px;
+  transition: border-color 0.2s, background 0.2s;
+}
+.filter-dropdown:hover {
+  border-color: rgba(255,255,255,0.5);
+  background: rgba(255,255,255,0.12);
+}
+.filter-dropdown:focus {
+  outline: none;
+  border-color: #a5b4fc;
+}
+/* Dropdown options need dark bg for some browsers */
+.filter-dropdown option {
+  background: #1e1e3a;
+  color: white;
+}
+.clear-filters-btn {
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.85);
+  padding: 8px 14px;
+  border: 1.5px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.clear-filters-btn:hover {
+  background: rgba(255,255,255,0.18);
+  border-color: rgba(255,255,255,0.45);
+}
+.active-filters-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.active-filters-label {
+  color: rgba(255,255,255,0.7);
+  font-size: 13px;
+  font-weight: 600;
+}
+.filter-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.9);
+  padding: 5px 11px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+.filter-tag:hover { background: rgba(255,255,255,0.18); }
+.filter-tag-remove {
+  cursor: pointer;
+  color: #f87171;
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.filter-tag-remove:hover { color: #fca5a5; }
+.filter-match-counter {
+  color: rgba(255,255,255,0.85);
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(255,255,255,0.12);
+  padding: 5px 12px;
+  border-radius: 20px;
+}
+
+/* ── Highlighted filter match row — vivid green ── */
+.horse-row-match {
+  background: linear-gradient(90deg, rgba(52,211,153,0.18), rgba(52,211,153,0.08)) !important;
+  border-left: 4px solid #34d399 !important;
+  box-shadow: 0 2px 8px rgba(52,211,153,0.2) !important;
+}
+.vm-race-card table tr.horse-row-match td { font-weight: 600; }
+.vm-race-card table tr.horse-row-match td:first-child::before {
+  content: '✓ ';
+  color: #34d399;
+  font-weight: 800;
+}
+
+/* ── Confidence banner — JS sets inline styles, we boost text visibility ── */
+.confidence-banner {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #1a1a2e !important; /* Dark text on coloured banners — kept for readability */
+}
+
+/* ── Back to top ── */
+.vm-back-top {
+  text-align: center;
+  margin: 28px 0;
+}
+.vm-back-top a {
+  display: inline-block;
+  padding: 10px 22px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-mid);
+  color: var(--text-primary) !important;
+  border-radius: 10px;
+  text-decoration: none !important;
+  font-weight: 700;
+  font-size: 13px;
+  transition: transform 0.14s ease, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.vm-back-top a:hover {
+  border-color: var(--accent);
+  color: var(--accent) !important;
+}
+
+/* ── Print styles (unchanged logic) ── */
+@media print {
+  nav, .btn, .vm-back-link, details summary, .chart-controls, .sectional-section {
+    display: none !important;
+  }
+  details[open] pre { display: block !important; }
+  body { background: white; }
+  .vm-race-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none;
+    border: 1px solid #ddd;
+  }
+}
+
+/* ── Responsive ── */
+
+@media (prefers-reduced-motion: reduce) {
+  .speedmap-collapse, .speedmap-column, .speedmap-horse-card, .sectional-animated-panel, .insight-item, .chart-toggle-btn, .top3-podium-card, .tfa-skeleton, .pfai-heatmap-row, .pfai-heatmap-row::before, .pfai-rank-badge { animation: none !important; transition: none !important; }
+  .speedmap-column, .speedmap-horse-card, .sectional-animated-panel, .insight-item, .top3-podium-card, .pfai-heatmap-row, .pfai-rank-badge { opacity: 1 !important; transform: none !important; }
+  .speedmap-map-standout, .speedmap-map-elite { animation: none !important; }
+}
+@media (max-width: 768px) {
+  .sectional-section { padding: 14px; }
+  .chart-toggle-btn  { font-size: 11px; padding: 6px 11px; }
+  .speedmap-grid     { min-width: 600px; }
+  .speedmap-column   { padding: 10px; }
+  .vm-overview-tiles { gap: 10px; }
+  .pfai-heatmap-scroller {
+    overflow-x: hidden;
+  }
+  .pfai-heatmap-table {
+    min-width: 0;
+    width: 100%;
+    table-layout: fixed;
+  }
+  .pfai-heatmap-table th,
+  .pfai-heatmap-table tbody td {
+    padding: 10px 8px !important;
+    font-size: 12px;
+  }
+  .pfai-heatmap-table col.col-horse { width: 44%; }
+  .pfai-heatmap-table col.col-600,
+  .pfai-heatmap-table col.col-400,
+  .pfai-heatmap-table col.col-200,
+  .pfai-heatmap-table col.col-avg { width: 14%; }
+  .pfai-heatmap-table th:first-child,
+  .pfai-heatmap-table td.pfai-horse-cell {
+    min-width: 0;
+    width: 44%;
+  }
+  .pfai-horse-cell {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pfai-rank-badge {
+    min-width: 40px;
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+}
+</style>
+
+<!-- Page header -->
+<h1 class="vm-page-title" style="color:var(--ml-teal)">🤖 {{ meeting.meeting_name }}</h1>
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;">
+  <a href="{{ url_for('ml_meetings') }}" class="vm-back-link">← Back To ML Race Meetings</a>
+  <span style="display:inline-block;background:rgba(0,229,176,0.12);border:1px solid rgba(0,229,176,0.3);color:#00e5b0;padding:3px 12px;border-radius:4px;font-size:11px;letter-spacing:1px;font-family:'DM Mono',monospace;font-weight:700;">ML SELECTIONS</span>
+  <a href="{{ url_for('view_meeting', meeting_id=meeting.id) }}" style="font-size:12px;color:var(--text-muted);">View Analyzer version →</a>
+</div>
+
+<!-- Meta card -->
+<div class="vm-meta-card">
+  <div>
+    <p><strong>Analyzed:</strong> {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</p>
+    <p><strong>Total Races:</strong> {{ results.races|length }}</p>
+    <p><strong>Rail Position:</strong> {% if meeting.rail_position and meeting.rail_position > 0 %}+{{ meeting.rail_position }}m out{% else %}True Rail{% endif %}</p>
+  </div>
+  <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+
+    <!-- Track Bias Control -->
+    <div style="background:var(--bg-elevated); border:1px solid var(--border-mid); border-radius:10px; padding:12px 16px;">
+      <div style="font-size:12px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px;">
+        🏇 Track Bias
+      </div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <button onclick="setTrackBias(-2)" id="bias-btn--2"
+                style="padding:7px 11px; border-radius:7px; border:1.5px solid var(--border-mid); background:var(--bg-surface); color:var(--text-primary); font-size:12px; font-weight:700; cursor:pointer; transition:all 0.15s;"
+                title="Strong Backmarker Bias">
+          ⬅⬅ BM
+        </button>
+        <button onclick="setTrackBias(-1)" id="bias-btn--1"
+                style="padding:7px 11px; border-radius:7px; border:1.5px solid var(--border-mid); background:var(--bg-surface); color:var(--text-primary); font-size:12px; font-weight:700; cursor:pointer; transition:all 0.15s;"
+                title="Slight Backmarker Bias">
+          ⬅ BM
+        </button>
+        <button onclick="setTrackBias(0)" id="bias-btn-0"
+                style="padding:7px 11px; border-radius:7px; border:1.5px solid var(--border-mid); background:var(--bg-surface); color:var(--text-primary); font-size:12px; font-weight:700; cursor:pointer; transition:all 0.15s;"
+                title="Neutral">
+          ⚖️ Neutral
+        </button>
+        <button onclick="setTrackBias(1)" id="bias-btn-1"
+                style="padding:7px 11px; border-radius:7px; border:1.5px solid var(--border-mid); background:var(--bg-surface); color:var(--text-primary); font-size:12px; font-weight:700; cursor:pointer; transition:all 0.15s;"
+                title="Slight Leader Bias">
+          LD ➡
+        </button>
+        <button onclick="setTrackBias(2)" id="bias-btn-2"
+                style="padding:7px 11px; border-radius:7px; border:1.5px solid var(--border-mid); background:var(--bg-surface); color:var(--text-primary); font-size:12px; font-weight:700; cursor:pointer; transition:all 0.15s;"
+                title="Leaders Paradise">
+          LD ➡➡
+        </button>
+      </div>
+      <div id="bias-status" style="font-size:11px; color:var(--text-muted); margin-top:6px; text-align:center;">
+        Current: Neutral
+      </div>
+    </div>
+<button id="updateScratchingsBtn" 
+        onclick="updateScratchings({{ meeting.id }})"
+        class="btn btn-warning btn-sm">
+    🔄 Update Scratchings & Reprice
+</button>
+<span id="scratchingsStatus" style="display:none; margin-left:10px;"></span>
+
+<script>
+function updateScratchings(meetingId) {
+    const btn = document.getElementById('updateScratchingsBtn');
+    const status = document.getElementById('scratchingsStatus');
+    btn.disabled = true;
+    btn.textContent = '⏳ Updating...';
+    status.style.display = 'inline';
+    status.textContent = '';
+
+    fetch(`/api/meetings/${meetingId}/update-scratchings`, {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                status.textContent = data.message;
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                status.textContent = '✗ ' + data.error;
+                btn.disabled = false;
+                btn.textContent = '🔄 Update Scratchings & Reprice';
+            }
+        })
+        .catch(e => {
+            status.textContent = '✗ Request failed';
+            btn.disabled = false;
+            btn.textContent = '🔄 Update Scratchings & Reprice';
+        });
+}
+</script>
+    <button onclick="window.print()" class="btn btn-primary">📄 Print / Save PDF</button>
+  </div>
+</div>
+
+<!-- Meeting Overview (ML) -->
+<div class="vm-overview-card">
+  <h3>🤖 ML Meeting Overview <span style="font-size:12px;font-weight:400;color:#00e5b0;font-family:'DM Mono',monospace;">ML SCORES</span></h3>
+  <div class="vm-overview-tiles">
+    {% set ns = namespace(highest_score=0, best_horse='', best_race=0, largest_gap=0, gap_race=0) %}
+    {% for race in results.races %}
+      {% if race.horses|length > 0 %}
+        {% set top_ml = race.horses[0].ml_score if race.horses[0].ml_score is not none else 0 %}
+        {% if top_ml > ns.highest_score %}
+          {% set ns.highest_score = top_ml %}
+          {% set ns.best_horse = race.horses[0].horse_name %}
+          {% set ns.best_race = race.race_number %}
+        {% endif %}
+        {% if race.horses|length > 1 %}
+          {% set h1_ml = race.horses[0].ml_score if race.horses[0].ml_score is not none else 0 %}
+          {% set h2_ml = race.horses[1].ml_score if race.horses[1].ml_score is not none else 0 %}
+          {% set gap = h1_ml - h2_ml %}
+          {% if gap > ns.largest_gap %}
+            {% set ns.largest_gap = gap %}
+            {% set ns.gap_race = race.race_number %}
+          {% endif %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+
+    <div class="vm-overview-tile">
+      <div class="tile-label">ML High Score</div>
+      <div class="tile-value" style="color:#00e5b0">{{ "%.1f"|format(ns.highest_score) }}</div>
+      <div class="tile-sub">{{ ns.best_horse }} (R{{ ns.best_race }})</div>
+    </div>
+    <div class="vm-overview-tile">
+      <div class="tile-label">Largest ML Gap</div>
+      <div class="tile-value" style="color:#b6ff00">{{ "%.1f"|format(ns.largest_gap) }}</div>
+      <div class="tile-sub">Race {{ ns.gap_race }}</div>
+    </div>
+    <div class="vm-overview-tile">
+      <div class="tile-label">Total Races</div>
+      <div class="tile-value">{{ results.races|length }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- Race Navigation -->
+<div class="vm-nav-card">
+  <span class="vm-nav-label">Jump to Race:</span>
+  {% for race in results.races %}
+  <a href="#race-{{ race.race_number }}" class="vm-nav-pill">R{{ race.race_number }}</a>
+  {% endfor %}
+</div>
+
+<!-- Filter bar placeholder — JS appends here -->
+<div id="filter-bar-placeholder"></div>
+
+<!-- ══ Races ══ -->
+{% for race in results.races %}
+<div class="vm-race-card card" id="race-{{ race.race_number }}">
+
+  <div class="vm-race-header">
+    <h2>Race {{ race.race_number }}</h2>
+    <div class="vm-race-meta">
+      {% if race.distance %}<span><strong>Distance:</strong> {{ race.distance }}</span>{% endif %}
+      {% if race.race_class %}<span><strong>Class:</strong> {{ race.race_class }}</span>{% endif %}
+      {% if race.track_condition %}<span><strong>Track:</strong> {{ race.track_condition|capitalize }}</span>{% endif %}
+    </div>
+  </div>
+
+  <!-- Speed Map — id/onclick/data UNCHANGED -->
+  {% if race.speed_maps_json %}
+  <div class="vm-speedmap-outer">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+      <h3 style="margin:0; font-size:14px; font-weight:700; color:var(--text-primary);">🏁 Speed Map - Race {{ race.race_number }}</h3>
+      <button onclick="toggleSpeedMap({{ race.race_number }})" class="btn btn-secondary"
+              style="padding:7px 14px; font-size:13px;">
+        <span id="speedmap-toggle-{{ race.race_number }}">▼ Show</span>
+      </button>
+    </div>
+    <div id="speedmap-{{ race.race_number }}" class="speedmap-collapse" style="display:none;">
+      <div class="speedmap-container"></div>
+    </div>
+  </div>
+  <script>window.speedMapData_{{ race.race_number }} = {{ race.speed_maps_json|safe }};</script>
+  {% endif %}
+
+  <!-- Sectional analysis — id UNCHANGED -->
+  <div class="sectional-section">
+    <h3><span>📊</span><span>Sectional Analysis - Last 5 Runs</span></h3>
+    <div id="sectional_container_race{{ race.race_number }}">
+      <div class="tfa-skeleton tfa-skeleton-chart" aria-label="Loading sectional data"></div>
+    </div>
+  </div>
+
+  <!-- Maiden warning -->
+  {% if race.race_class and 'Maiden' in race.race_class %}
+  <div class="vm-maiden-warning">
+    <strong>⚠️ Maiden Race Warning:</strong>
+    <span>Some horses may not appear in this analysis as they have no previous racing form.</span>
+  </div>
+  {% endif %}
+
+  <!-- Horse ranking table — inline styles on <tr> UNCHANGED (overridden by CSS above) -->
+  <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:collapse; margin-top:10px;">
+      <thead>
+        <tr style="background: linear-gradient(135deg, #006b5e 0%, #00e5b0 100%); color: white;">
+          <th style="padding:12px; text-align:center; width:50px;">Pos</th>
+          <th style="padding:12px; text-align:left;">Horse</th>
+          <th style="padding:12px; text-align:center;">ML Score</th>
+          <th style="padding:12px; text-align:center;">Analyzer Score</th>
+          <th style="padding:12px; text-align:center;">Assessed Odds</th>
+          <th style="padding:12px; text-align:center;">Ladbrokes Price</th>
+          <th style="padding:12px; text-align:center;">Win %</th>
+          {% if current_user.is_admin %}
+          <th style="padding:12px; text-align:left;">Notes</th>
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for horse in race.horses %}
+        {% set is_ml_top = loop.index == 1 and not horse.is_scratched and horse.ml_score is not none %}
+        <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
+            data-horse-id="{{ horse.horse_id }}"
+            data-active-components="{{ horse.matched_component_keys|join(',') }}"
+            class="{% if horse.is_scratched %}horse-scratched{% endif %}{% if is_ml_top %} ml-agreement-highlight{% endif %}">
+
+          <td style="padding:12px; text-align:center; font-weight:bold; border-bottom:1px solid #e2e8f0;">
+            {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
+          </td>
+
+          <td style="padding:12px; border-bottom:1px solid #e2e8f0;">
+            <div style="font-weight:600; display:flex; align-items:center; gap:8px;">
+               <span class="horse-name-label">{{ horse.horse_name }}</span>
+               <span class="pfai-badge-placeholder" 
+                     data-horse-name="{{ horse.horse_name }}" 
+                     data-race-number="{{ race.race_number }}"
+                     style="background:#006b5e; color:white; padding:3px 10px; border-radius:4px; font-size:11px; font-weight:700; display:none;">
+               </span>
+              {% if is_ml_top %}
+              <span style="background:#00e5b0;color:#003d35;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.05em;">🤖 ML TOP PICK</span>
+              {% endif %}
+              {% if horse.is_scratched %}
+              <span class="scratched-badge">SCR</span>
+              <span class="scratched-label">SCRATCHED</span>
+              {% endif %}
+            </div>
+            <div style="font-size:12px; color:#6c757d;">
+              {% if horse.jockey %}J: {{ horse.jockey }}{% endif %}
+              {% if horse.trainer %} | T: {{ horse.trainer }}{% endif %}
+            </div>
+            {% if horse.is_best_bet and horse.best_bet_reasons %}
+            <div class="vm-best-bet-reasons" style="font-size:11px;color:var(--text-muted);margin-top:4px;">Analyzer Best Bet: {{ horse.best_bet_reasons|join(' • ') }}</div>
+            {% endif %}
+          </td>
+
+          <td style="padding:12px; text-align:center; font-weight:bold; font-size:18px; border-bottom:1px solid #e2e8f0; color:#00e5b0;">
+            {% if horse.ml_score is not none %}{{ "%.1f"|format(horse.ml_score) }}{% else %}<span style="color:#666;font-size:13px">N/A</span>{% endif %}
+          </td>
+          <td style="padding:12px; text-align:center; font-size:13px; border-bottom:1px solid #e2e8f0; color:#9090a8;">
+            {{ "%.1f"|format(horse.score) }}
+          </td>
+          <td style="padding:12px; text-align:center; font-weight:600; border-bottom:1px solid #e2e8f0; color:#28a745;">
+            {{ horse.odds }}
+          </td>
+          <td class="lb-price-cell" style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0;">
+            <!-- Populated by Ladbrokes polling JS -->
+          </td>
+          <td style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0;">
+            {{ horse.win_probability }}
+          </td>
+          {% if current_user.is_admin %}
+<td style="padding:12px; border-bottom:1px solid #e2e8f0; font-size:11px; max-width:300px;">
+  <details>
+    <summary style="cursor:pointer; color:#667eea;">View Notes</summary>
+    <pre style="white-space:pre-wrap; margin:10px 0 0 0; font-family:monospace; font-size:11px; background:#f5f5f5; padding:10px; border-radius:4px;">{{ horse.notes }}</pre>
+  </details>
+</td>
+{% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Track Bias Indicator -->
+  {% if meeting.pace_bias != 0 or (meeting.rail_position and meeting.rail_position > 0) %}
+  <div style="background:rgba(102,126,234,0.08); border:1px solid rgba(102,126,234,0.2); border-radius:8px; padding:10px 14px; margin-top:12px; font-size:12px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+    <strong style="color:var(--accent);">🏇 Track Adjustments Active:</strong>
+
+    {% if meeting.rail_position and meeting.rail_position > 0 %}
+      {% if meeting.rail_position >= 13 %}{% set rail_leader = 15.0 %}{% set rail_back = 12.75 %}
+      {% elif meeting.rail_position >= 10 %}{% set rail_leader = 11.0 %}{% set rail_back = 9.35 %}
+      {% elif meeting.rail_position >= 7 %}{% set rail_leader = 7.0 %}{% set rail_back = 5.95 %}
+      {% elif meeting.rail_position >= 4 %}{% set rail_leader = 4.0 %}{% set rail_back = 3.4 %}
+      {% else %}{% set rail_leader = 1.5 %}{% set rail_back = 1.28 %}{% endif %}
+      <span style="color:var(--text-muted);">
+        🛤️ Rail +{{ meeting.rail_position }}m:
+        <span style="color:#34d399; font-weight:700;">LEADER +{{ "%.1f"|format(rail_leader) }}</span>
+        <span style="color:#a5b4fc; margin:0 4px;">ONPACE +{{ "%.1f"|format(rail_leader * 0.65) }}</span>
+        <span style="color:#f87171; margin-left:4px;">MIDFIELD -{{ "%.1f"|format(rail_leader * 0.35) }}</span>
+        <span style="color:#f87171; font-weight:700;">BACKMARKER -{{ "%.1f"|format(rail_back) }}</span>
+      </span>
+    {% endif %}
+
+    {% if meeting.pace_bias != 0 %}
+      {% set pace_mod = meeting.pace_bias * 4.0 %}
+      {% if meeting.pace_bias == -2 %}{% set bias_label = "⬅⬅ Strong Backmarker" %}
+      {% elif meeting.pace_bias == -1 %}{% set bias_label = "⬅ Slight Backmarker" %}
+      {% elif meeting.pace_bias == 1 %}{% set bias_label = "Slight Leader ➡" %}
+      {% else %}{% set bias_label = "Leaders Paradise ➡➡" %}{% endif %}
+      <span style="color:var(--text-muted);">
+        🏇 Bias ({{ bias_label }}):
+        {% if pace_mod > 0 %}
+          <span style="color:#34d399; font-weight:700;">LEADER +{{ "%.1f"|format(pace_mod) }}</span>
+          <span style="color:#a5b4fc; margin:0 4px;">ONPACE +{{ "%.1f"|format(pace_mod * 0.65) }}</span>
+          <span style="color:#f87171; margin-left:4px;">MIDFIELD -{{ "%.1f"|format(pace_mod * 0.35) }}</span>
+          <span style="color:#f87171; font-weight:700;">BACKMARKER -{{ "%.1f"|format(pace_mod * 0.85) }}</span>
+        {% else %}
+          {% set pace_abs = (pace_mod)|abs %}
+          <span style="color:#f87171; font-weight:700;">LEADER -{{ "%.1f"|format(pace_abs) }}</span>
+          <span style="color:#f87171; margin:0 4px;">ONPACE -{{ "%.1f"|format(pace_abs * 0.65) }}</span>
+          <span style="color:#34d399; margin-left:4px;">MIDFIELD +{{ "%.1f"|format(pace_abs * 0.35) }}</span>
+          <span style="color:#34d399; font-weight:700;">BACKMARKER +{{ "%.1f"|format(pace_abs * 0.85) }}</span>
+        {% endif %}
+      </span>
+    {% endif %}
+
+  </div>
+  {% endif %}
+
+  <!-- Quick analysis -->
+  {% if race.horses|length >= 2 %}
+  <div class="vm-quick-analysis">
+    <strong>🤖 ML Quick Analysis:</strong>
+    <span style="margin-left:10px;">
+      ML Top Pick: <strong>{{ race.horses[0].horse_name }}</strong>
+      {% if race.horses[0].ml_score is not none %}(ML: {{ "%.1f"|format(race.horses[0].ml_score) }}, Analyzer: {{ "%.1f"|format(race.horses[0].score) }}){% endif %}
+      {% if race.horses|length > 1 and race.horses[0].ml_score is not none and race.horses[1].ml_score is not none %}
+      | ML Gap to 2nd: <strong>{{ "%.1f"|format(race.horses[0].ml_score - race.horses[1].ml_score) }}</strong>
+      {% endif %}
+    </span>
+  </div>
+  {% endif %}
+
+</div>
+{% endfor %}
+
+<!-- Back to top -->
+<div class="vm-back-top">
+  <a href="#">↑ Back to Top</a>
+</div>
+
+<!-- Chart.js — UNCHANGED -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<!-- ══════════════════════════════════════════
+     ALL JS 100% IDENTICAL TO ORIGINAL
+     Only change: getChartOptions() axis tick/grid
+     colours updated for dark background visibility
+══════════════════════════════════════════ -->
+<script>
+const chartInstances = {};
+const meetingId = {{ meeting.id }};
+const PFAI_RANK_THRESHOLD = 25;
+const SPEEDMAP_COLUMN_DELAY_MS = 55;
+const SPEEDMAP_CARD_DELAY_MS = 45;
+const SPEEDMAP_SILK_BADGE_SIZE = 36;
+const SPEEDMAP_SILK_BADGE_RADIUS = 10;
+const HORSE_NAME_SELECTOR = '.horse-name-label';
+var _lbSilkCache = {}; // { raceNumber: { runnerNumber: cssText } } — populated by Ladbrokes polling
+const TFA_REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const TFA_ANIMATED_ONCE = new WeakSet();
+const TFA_COUNTED_METRICS = new Set();
+
+function initializeSectionalCharts() {
+    if (typeof Chart === 'undefined') { setTimeout(initializeSectionalCharts, 100); return; }
+    if (Chart.register && !window.tfaLineGlowRegistered) { Chart.register(tfaLineGlowPlugin); window.tfaLineGlowRegistered = true; }
+    fetch('/api/meeting/' + meetingId + '/sectionals')
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            console.log('Sectional data loaded:', data);
+            Object.keys(data).forEach(function(raceKey) {
+                const raceNum = raceKey.replace('race_', '');
+                renderSectionalChart(raceNum, data[raceKey]);
+            });
+        })
+        .catch(function(error) {
+            console.error('Error loading sectional data:', error);
+            document.querySelectorAll('[id^="sectional_container_race"]').forEach(function(container) {
+                container.innerHTML = '<div class="no-sectionals">Failed to load sectional data</div>';
+            });
+        });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    initSectionalChartPremium();
+    initializeSectionalCharts();
+    initPfaiHeatmapPremium();
+    const placeholder = document.getElementById('filter-bar-placeholder');
+    if (placeholder) { placeholder.appendChild(createFilterBar()); }
+    const races = document.querySelectorAll('.card[id^="race-"]');
+    races.forEach(function(raceCard) {
+        if (raceCard.querySelector('.confidence-banner')) { return; }
+        const rows = raceCard.querySelectorAll('tbody tr');
+        const horses = [];
+        rows.forEach(function(row) {
+            const scoreCell = row.cells[2];
+            const winProbCell = row.cells[6];  // ML version: +1 for extra Analyzer Score column
+            if (scoreCell && winProbCell) {
+                const score = scoreCell.textContent.trim();
+                const winProb = winProbCell.textContent.trim().replace('%', '');
+                horses.push({ score: score, winProb: winProb });
+            }
+        });
+        if (horses.length < 2) return;
+        const result = calculateRaceConfidence(horses);
+        if (result) {
+            const banner = document.createElement('div');
+            banner.className = 'confidence-banner';
+            banner.style.cssText = result.style + ' padding: 12px 15px; margin-bottom: 15px; border-radius: 4px;';
+            banner.innerHTML = '<strong>' + result.emoji + ' ' + result.rating + ' Confidence: ' + result.confidence + '%</strong> - ' + result.description;
+            const tableContainer = raceCard.querySelector('div[style*="overflow-x"]');
+            if (tableContainer) { tableContainer.parentNode.insertBefore(banner, tableContainer); }
+        }
+    });
+    injectPFAIScores();
+});
+
+function animateSectionalPanel(panel) {
+    if (!panel) return;
+    panel.classList.remove('sectional-animated-panel-visible');
+    panel.classList.add('sectional-animated-panel');
+    // Force a reflow so the entrance animation restarts on repeated toggles.
+    panel.getBoundingClientRect();
+    window.requestAnimationFrame(function() {
+        if (!panel.isConnected) return;
+        panel.classList.add('sectional-animated-panel-visible');
+    });
+}
+
+function animateHeatmapRows(container) {
+    if (!container) return;
+    const revealRows = function() {
+        container.querySelectorAll('.pfai-heatmap-row').forEach(function(row, index) {
+            row.style.setProperty('--row-index', row.dataset.rowIndex || index);
+            row.classList.add('is-visible');
+        });
+    };
+    runWhenVisibleOnce(container, revealRows, { threshold: 0.18, rootMargin: '0px 0px -8% 0px' });
+}
+
+function initPfaiHeatmapPremium(scope) {
+    const root = scope || document;
+    const containers = [];
+    if (root.matches && root.matches('[id^="pfaiHeatmap_"]')) containers.push(root);
+    root.querySelectorAll('[id^="pfaiHeatmap_"]').forEach(function(container) { containers.push(container); });
+    containers.forEach(function(container) {
+        container.classList.add('pfai-heatmap-wrap');
+        initPfaiHeatmapAnimations(container);
+        initPfaiHeatmapRowSpotlight(container);
+        initPfaiHeatmapTooltips(container);
+        initPfaiHeatmapScrollHint(container);
+        initPfaiHeatmapSorting(container);
+    });
+}
+
+function initPfaiHeatmapAnimations(container) { animateHeatmapRows(container); }
+
+function initPfaiHeatmapRowSpotlight(container) {
+    if (!container || container.dataset.rowSpotlightBound === 'true') return;
+    container.dataset.rowSpotlightBound = 'true';
+    container.addEventListener('click', function(event) {
+        if (event.target.closest('.pfai-rank-badge') || event.target.closest('th')) return;
+        const row = event.target.closest('.pfai-heatmap-row');
+        if (!row || !container.contains(row)) return;
+        const table = row.closest('.pfai-heatmap-table');
+        const wasSelected = row.classList.contains('is-selected');
+        table.querySelectorAll('.pfai-heatmap-row.is-selected').forEach(function(item) { item.classList.remove('is-selected'); });
+        if (wasSelected) {
+            table.classList.remove('has-selection');
+        } else {
+            row.classList.add('is-selected');
+            table.classList.add('has-selection');
+        }
+    });
+}
+
+function removePfaiRankTooltip() {
+    const tooltip = document.querySelector('.pfai-rank-tooltip');
+    if (tooltip) tooltip.remove();
+}
+
+function initPfaiHeatmapTooltips(container) {
+    if (!container || container.dataset.tooltipBound === 'true') return;
+    container.dataset.tooltipBound = 'true';
+    container.addEventListener('click', function(event) {
+        const badge = event.target.closest('.pfai-rank-badge');
+        if (!badge || !container.contains(badge)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        removePfaiRankTooltip();
+        const rank = badge.dataset.rank;
+        const distance = badge.dataset.distance || 'this split';
+        const tooltip = document.createElement('div');
+        tooltip.className = 'pfai-rank-tooltip';
+        tooltip.textContent = '#' + rank + ' at ' + distance + ' = best adjusted ' + distance + ' sectional rank in this field.';
+        document.body.appendChild(tooltip);
+        const rect = badge.getBoundingClientRect();
+        const tipRect = tooltip.getBoundingClientRect();
+        const left = Math.min(Math.max(14, rect.left + (rect.width / 2) - (tipRect.width / 2)), window.innerWidth - tipRect.width - 14);
+        const top = rect.top > tipRect.height + 18 ? rect.top - tipRect.height - 10 : rect.bottom + 10;
+        tooltip.style.left = left + 'px';
+        tooltip.style.top = Math.min(top, window.innerHeight - tipRect.height - 12) + 'px';
+    });
+    document.addEventListener('click', removePfaiRankTooltip);
+    document.addEventListener('keydown', function(event) { if (event.key === 'Escape') removePfaiRankTooltip(); });
+}
+
+function initPfaiHeatmapScrollHint(container) {
+    if (!container || container.dataset.scrollHintBound === 'true') return;
+    const scroller = container.querySelector('.pfai-heatmap-scroller');
+    if (!scroller) return;
+    container.dataset.scrollHintBound = 'true';
+    const hint = container.querySelector('.pfai-scroll-hint');
+    const update = function() {
+        if (!hint) return;
+        const hasOverflow = scroller.scrollWidth > scroller.clientWidth + 6;
+        const hasScrolled = scroller.scrollLeft > 8;
+        hint.classList.toggle('is-hidden', !hasOverflow || hasScrolled);
+    };
+    scroller.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    window.requestAnimationFrame(update);
+}
+
+function initPfaiHeatmapSorting(container) {
+    if (!container || container.dataset.sortBound === 'true') return;
+    const table = container.querySelector('.pfai-heatmap-table');
+    if (!table) return;
+    container.dataset.sortBound = 'true';
+    table.querySelectorAll('th[data-sort-key]').forEach(function(header) {
+        header.addEventListener('click', function() {
+            const key = header.dataset.sortKey;
+            const tbody = table.tBodies[0];
+            if (!tbody) return;
+            const rows = Array.from(tbody.querySelectorAll('.pfai-heatmap-row'));
+            const firstPositions = new Map();
+            rows.forEach(function(row) { firstPositions.set(row, row.getBoundingClientRect()); });
+            rows.sort(function(a, b) {
+                const av = parseFloat(a.dataset[key] || '999');
+                const bv = parseFloat(b.dataset[key] || '999');
+                if (av !== bv) return av - bv;
+                return parseFloat(a.dataset.avgRank || '999') - parseFloat(b.dataset.avgRank || '999');
+            });
+            rows.forEach(function(row, index) {
+                row.dataset.rowIndex = index;
+                row.style.setProperty('--row-index', index);
+                tbody.appendChild(row);
+            });
+            table.querySelectorAll('th').forEach(function(th) { th.classList.remove('pfai-sort-active'); });
+            header.classList.add('pfai-sort-active');
+            if (!TFA_REDUCED_MOTION) {
+                rows.forEach(function(row) {
+                    const first = firstPositions.get(row);
+                    const last = row.getBoundingClientRect();
+                    if (!first) return;
+                    const deltaY = first.top - last.top;
+                    row.style.transition = 'opacity 0.22s ease, filter 0.22s ease';
+                    window.setTimeout(function() { row.style.transition = ''; }, 260);
+                });
+            }
+        });
+    });
+}
+
+function initSectionalChartPremium() {
+    if (typeof Chart !== 'undefined' && Chart.register && !window.tfaLineGlowRegistered) {
+        Chart.register(tfaLineGlowPlugin);
+        window.tfaLineGlowRegistered = true;
+    }
+}
+
+function runWhenVisibleOnce(element, callback, options) {
+    if (!element || TFA_ANIMATED_ONCE.has(element)) return;
+    if (TFA_REDUCED_MOTION || !('IntersectionObserver' in window)) {
+        TFA_ANIMATED_ONCE.add(element);
+        callback(element);
+        return;
+    }
+    const observer = new IntersectionObserver(function(entries, obs) {
+        entries.forEach(function(entry) {
+            if (!entry.isIntersecting) return;
+            TFA_ANIMATED_ONCE.add(element);
+            callback(element);
+            obs.unobserve(element);
+        });
+    }, options || { threshold: 0.2, rootMargin: '0px 0px -8% 0px' });
+    observer.observe(element);
+}
+
+function animateCountUpElement(element) {
+    if (!element || element.dataset.counted === 'true') return;
+    const countKey = element.dataset.countKey || '';
+    const finalValue = parseFloat(element.dataset.countTo || '0');
+    const decimals = parseInt(element.dataset.countDecimals || '0', 10);
+    const prefix = element.dataset.countPrefix || '';
+    const duration = TFA_REDUCED_MOTION ? 0 : parseInt(element.dataset.countDuration || '720', 10);
+    element.dataset.counted = 'true';
+    if (countKey && TFA_COUNTED_METRICS.has(countKey)) {
+        element.textContent = prefix + finalValue.toFixed(decimals);
+        return;
+    }
+    if (countKey) TFA_COUNTED_METRICS.add(countKey);
+    if (!duration) {
+        element.textContent = prefix + finalValue.toFixed(decimals);
+        return;
+    }
+    const start = performance.now();
+    function tick(now) {
+        const progress = Math.min(1, (now - start) / duration);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        element.textContent = prefix + (finalValue * eased).toFixed(decimals);
+        if (progress < 1) window.requestAnimationFrame(tick);
+    }
+    window.requestAnimationFrame(tick);
+}
+
+function animateVisibleCountUps(scope) {
+    (scope || document).querySelectorAll('[data-count-to]').forEach(function(element) {
+        runWhenVisibleOnce(element, animateCountUpElement, { threshold: 0.45 });
+    });
+}
+
+function setCollapsibleOpen(element, isOpen, afterOpen) {
+    if (!element) return;
+    if (TFA_REDUCED_MOTION) {
+        element.style.display = isOpen ? 'block' : 'none';
+        element.classList.toggle('is-open', isOpen);
+        if (isOpen && afterOpen) afterOpen();
+        return;
+    }
+    if (isOpen) {
+        element.style.display = 'block';
+        element.style.maxHeight = '0px';
+        element.classList.remove('is-open');
+        if (afterOpen) afterOpen();
+        window.requestAnimationFrame(function() {
+            element.classList.add('is-open');
+            element.style.maxHeight = element.scrollHeight + 'px';
+        });
+    } else {
+        element.style.maxHeight = element.scrollHeight + 'px';
+        element.getBoundingClientRect();
+        element.classList.remove('is-open');
+        element.style.maxHeight = '0px';
+        window.setTimeout(function() {
+            if (!element.classList.contains('is-open')) element.style.display = 'none';
+        }, 380);
+    }
+}
+
+function hexToRgba(color, alpha) {
+    if (!color || color.indexOf('#') !== 0) return color;
+    const hex = color.replace('#', '');
+    const full = hex.length === 3 ? hex.split('').map(function(c) { return c + c; }).join('') : hex;
+    const num = parseInt(full, 16);
+    return 'rgba(' + ((num >> 16) & 255) + ',' + ((num >> 8) & 255) + ',' + (num & 255) + ',' + alpha + ')';
+}
+
+function applyDatasetHighlight(chart, activeIndex) {
+    chart.data.datasets.forEach(function(dataset, index) {
+        const baseColor = dataset._baseBorderColor || dataset.borderColor;
+        const baseWidth = dataset._baseBorderWidth || dataset.borderWidth || 2;
+        dataset.borderColor = activeIndex == null || index === activeIndex ? baseColor : hexToRgba(baseColor, 0.24);
+        dataset.backgroundColor = activeIndex == null || index === activeIndex ? hexToRgba(baseColor, 0.2) : hexToRgba(baseColor, 0.08);
+        dataset.borderWidth = activeIndex == null ? baseWidth : (index === activeIndex ? baseWidth + 2 : Math.max(1, baseWidth - 1));
+        dataset.pointRadius = activeIndex == null ? (dataset._basePointRadius || 5) : (index === activeIndex ? (dataset._basePointRadius || 5) + 2 : 3);
+        dataset.tfaGlow = activeIndex == null ? 0.35 : (index === activeIndex ? 0.9 : 0.12);
+    });
+    chart.update();
+}
+
+const tfaLineGlowPlugin = {
+    id: 'tfaLineGlow',
+    beforeDatasetDraw: function(chart, args) {
+        if (TFA_REDUCED_MOTION) return;
+        const meta = chart.getDatasetMeta(args.index);
+        const dataset = chart.data.datasets[args.index];
+        if (!meta || !meta.dataset || meta.hidden) return;
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.shadowColor = dataset._baseBorderColor || dataset.borderColor;
+        ctx.shadowBlur = 10 + Math.round((dataset.tfaGlow || 0.35) * 12);
+        ctx.globalAlpha = 0.34 + (dataset.tfaGlow || 0.35) * 0.18;
+        meta.dataset.draw(ctx);
+        meta.data.forEach(function(point) { point.draw(ctx); });
+        ctx.restore();
+    }
+};
+if (typeof Chart !== 'undefined' && Chart.register && !window.tfaLineGlowRegistered) { Chart.register(tfaLineGlowPlugin); window.tfaLineGlowRegistered = true; }
+
+function normalizeHorseName(name) {
+  // Strip punctuation and bracketed suffixes so names like "Horse Name (IRE)" match the base table/API name.
+  return (name || '')
+    .toLowerCase()
+    .trim()
+    .replace(/\([^)]*\)/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function escapeHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function getValidPfaiRanks(pfaiSectionals) {
+    const ranks = [];
+    if (!pfaiSectionals) return ranks;
+    if (pfaiSectionals.last600_rank && pfaiSectionals.last600_rank < PFAI_RANK_THRESHOLD) ranks.push(pfaiSectionals.last600_rank);
+    if (pfaiSectionals.last400_rank && pfaiSectionals.last400_rank < PFAI_RANK_THRESHOLD) ranks.push(pfaiSectionals.last400_rank);
+    if (pfaiSectionals.last200_rank && pfaiSectionals.last200_rank < PFAI_RANK_THRESHOLD) ranks.push(pfaiSectionals.last200_rank);
+    return ranks;
+}
+
+function buildDedupedPFAIEntries(horses) {
+    const deduped = new Map();
+    horses.forEach(function(horse, index) {
+        const ranks = getValidPfaiRanks(horse.pfai_sectionals);
+        if (ranks.length === 0) return;
+        const horseKey = normalizeHorseName(horse.horse_name || horse.runnerName || '');
+        if (!horseKey) return;
+        const avgRank = ranks.reduce(function(a, b) { return a + b; }, 0) / ranks.length;
+        const candidate = { horse: horse, avgRank: avgRank, originalIndex: index };
+        const existing = deduped.get(horseKey);
+        if (!existing ||
+            candidate.avgRank < existing.avgRank ||
+            (candidate.avgRank === existing.avgRank && candidate.originalIndex < existing.originalIndex)) {
+            deduped.set(horseKey, candidate);
+        }
+    });
+    return Array.from(deduped.values()).sort(function(a, b) {
+        if (a.avgRank !== b.avgRank) return a.avgRank - b.avgRank;
+        return a.originalIndex - b.originalIndex;
+    });
+}
+
+function renderSectionalChart(raceNum, horsesData) {
+    const container = document.getElementById('sectional_container_race' + raceNum);
+    if (!horsesData || horsesData.length === 0) {
+        container.innerHTML = '<div class="no-sectionals">No sectional data available for this race</div>';
+        return;
+    }
+    container.innerHTML = '<div class="chart-controls">' +
+        '<button class="chart-toggle-btn active" onclick="switchView(\'race' + raceNum + '\', \'adjusted\')">Adjusted Times</button>' +
+        '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'raw\')">Raw Times</button>' +
+        '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'zscore\')">Z-Scores</button>' +
+        '<button class="chart-toggle-btn" onclick="switchView(\'race' + raceNum + '\', \'pfai\')">🎯 PFAI Sectional Heatmap</button>' +
+        '<button class="chart-toggle-btn" id="top3-btn-race' + raceNum + '" onclick="toggleTop3(\'race' + raceNum + '\')">🏆 Top 3 Adjusted Times</button>' +
+        '</div>' +
+        '<div id="chartContainer_race' + raceNum + '" class="sectional-chart-glow" style="position:relative; height:350px; background:var(--bg-surface); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);">' +
+        '<div class="top3-podium" id="top3-podium-race' + raceNum + '"></div>' +
+        '<canvas id="sectionalChart_race' + raceNum + '"></canvas>' +
+        '</div>' +
+        '<div id="pfaiHeatmap_race' + raceNum + '" style="display:none; background:var(--bg-surface); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);"></div>' +
+        '<div class="chart-insights" id="insights_race' + raceNum + '"></div>';
+    const chartData = prepareChartData(horsesData);
+    const ctx = document.getElementById('sectionalChart_race' + raceNum).getContext('2d');
+    const chart = new Chart(ctx, { type: 'line', data: chartData.adjusted, options: getChartOptions('adjusted') });
+    chartInstances['race' + raceNum] = { chart: chart, data: chartData, horsesData: horsesData };
+    generateInsights(raceNum, horsesData);
+    animateSectionalPanel(document.getElementById('chartContainer_race' + raceNum));
+    animateSectionalPanel(document.getElementById('insights_race' + raceNum));
+}
+
+function decorateChartDataset(dataset, index, color) {
+    dataset._baseBorderColor = color;
+    dataset._baseBorderWidth = dataset.borderWidth || 2;
+    dataset._basePointRadius = dataset.pointRadius || 5;
+    dataset.pointBackgroundColor = color;
+    dataset.pointBorderColor = '#0b0b12';
+    dataset.pointBorderWidth = 1.5;
+    dataset.tfaGlow = index < 3 ? 0.52 : 0.34;
+    return dataset;
+}
+
+function prepareChartData(horses) {
+    const colors = ['#FFD700', '#C0C0C0', '#CD7F32', '#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b'];
+    const datasets = { adjusted: [], raw: [], zscore: [], pfai: [] };
+    horses.forEach(function(horse, index) {
+        const color = colors[index % colors.length];
+        const historyAdj = horse.history_adjusted || [];
+        const historyRaw = horse.history_raw || [];
+        if (historyAdj.length === 0) { return; }
+        const mean = historyAdj.reduce(function(sum, val) { return sum + val; }, 0) / historyAdj.length;
+        const variance = historyAdj.reduce(function(sum, val) { return sum + Math.pow(val - mean, 2); }, 0) / historyAdj.length;
+        const stdDev = Math.sqrt(variance);
+        const zscores = historyAdj.map(function(time) { if (stdDev === 0) return 0; return -1 * (time - mean) / stdDev; });
+        const bestTime = horse.best_recent ? horse.best_recent.adjusted_time.toFixed(2) + 's' : 'N/A';
+        const bestRawTime = horse.best_recent ? horse.best_recent.raw_time.toFixed(2) + 's' : 'N/A';
+        datasets.adjusted.push(decorateChartDataset({ label: horse.horse_name + ' (' + bestTime + ')', data: historyAdj, borderColor: color, backgroundColor: color + '33', tension: 0.3, pointRadius: 5, pointHoverRadius: 8, borderWidth: index < 3 ? 3 : 2 }, index, color));
+        datasets.raw.push(decorateChartDataset({ label: horse.horse_name + ' (' + bestRawTime + ')', data: historyRaw, borderColor: color, backgroundColor: color + '33', tension: 0.3, pointRadius: 5, pointHoverRadius: 8, borderWidth: index < 3 ? 3 : 2 }, index, color));
+        datasets.zscore.push(decorateChartDataset({ label: horse.horse_name + ' (z=' + (horse.best_recent ? horse.best_recent.zscore.toFixed(2) : 'N/A') + ')', data: zscores, borderColor: color, backgroundColor: color + '33', tension: 0.3, pointRadius: 5, pointHoverRadius: 8, borderWidth: index < 3 ? 3 : 2 }, index, color));
+        if (horse.pfai_sectionals) {
+            const pfai = horse.pfai_sectionals;
+            const pfaiData = [];
+            if (pfai.last600_rank && pfai.last600_rank < PFAI_RANK_THRESHOLD) pfaiData.push(pfai.last600_rank);
+            if (pfai.last400_rank && pfai.last400_rank < PFAI_RANK_THRESHOLD) pfaiData.push(pfai.last400_rank);
+            if (pfai.last200_rank && pfai.last200_rank < PFAI_RANK_THRESHOLD) pfaiData.push(pfai.last200_rank);
+            if (pfaiData.length > 0) {
+                const avgRank = (pfaiData.reduce(function(a, b) { return a + b; }, 0) / pfaiData.length).toFixed(1);
+                datasets.pfai.push(decorateChartDataset({ label: horse.horse_name + ' (Avg: #' + avgRank + ')', data: pfaiData, borderColor: color, backgroundColor: color + '33', tension: 0, pointRadius: 8, pointHoverRadius: 12, borderWidth: index < 3 ? 4 : 3 }, index, color));
+            }
+        }
+    });
+    var maxRuns = 0;
+    horses.forEach(function(horse) { var r = (horse.history_adjusted || []).length; if (r > maxRuns) maxRuns = r; });
+    var labels = [];
+    for (var i = maxRuns; i >= 1; i--) { labels.push(i === 1 ? 'Last run' : i + ' runs ago'); }
+    return {
+        adjusted: { labels: labels, datasets: datasets.adjusted },
+        raw: { labels: labels, datasets: datasets.raw },
+        zscore: { labels: labels, datasets: datasets.zscore },
+        pfai: { labels: ['600m', '400m', '200m'], datasets: datasets.pfai }
+    };
+}
+
+function getChartOptions(viewType) {
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: TFA_REDUCED_MOTION ? 0 : 1150, easing: 'easeOutQuart', delay: function(context) { return context.type === 'dataset' ? context.datasetIndex * 110 : 0; } },
+        interaction: { mode: 'nearest', axis: 'x', intersect: false },
+        plugins: {
+            legend: {
+                position: 'bottom',
+                labels: {
+                    boxWidth: 12, padding: 8,
+                    font: { size: 11 },
+                    usePointStyle: true,
+                    color: '#c8c8d8'   /* ← dark-friendly legend text */
+                },
+                onClick: function(e, legendItem, legend) {
+                    const chart = legend.chart;
+                    const raceId = chart.canvas.id.replace('sectionalChart_', '');
+                    const instance = chartInstances[raceId];
+                    if (!instance) return;
+                    instance.activeDatasetIndex = instance.activeDatasetIndex === legendItem.datasetIndex ? null : legendItem.datasetIndex;
+                    applyDatasetHighlight(chart, instance.activeDatasetIndex);
+                }
+            },
+            tooltip: {
+                backgroundColor: 'rgba(9,9,15,0.92)',
+                borderColor: 'rgba(102,126,234,0.4)',
+                borderWidth: 1,
+                padding: 12,
+                titleColor: '#f0f0f8',
+                bodyColor: '#c8c8d8',
+                callbacks: {
+                    label: function(context) {
+                        const value = context.parsed.y.toFixed(2);
+                        const suffix = viewType === 'zscore' ? '' : viewType === 'pfai' ? '' : 's';
+                        let label = context.dataset.label.split('(')[0].trim() + ': ';
+                        if (viewType === 'pfai') { label += '#' + value; } else { label += value + suffix; }
+                        if (viewType !== 'pfai') {
+                            const horseIndex = context.datasetIndex;
+                            const horse = window.currentRaceHorses ? window.currentRaceHorses[horseIndex] : null;
+                            if (horse && horse.pfai_sectionals) {
+                                const pfai = horse.pfai_sectionals;
+                                label += '\nPFAI Ranks: ';
+                                if (pfai.last200_rank && pfai.last200_rank < PFAI_RANK_THRESHOLD) label += '200m: #' + pfai.last200_rank + ' ';
+                                if (pfai.last400_rank && pfai.last400_rank < PFAI_RANK_THRESHOLD) label += '400m: #' + pfai.last400_rank + ' ';
+                                if (pfai.last600_rank && pfai.last600_rank < PFAI_RANK_THRESHOLD) label += '600m: #' + pfai.last600_rank;
+                            }
+                        }
+                        return label;
+                    }
+                }
+            }
+        },
+        scales: {
+            y: {
+                reverse: viewType !== 'zscore' && viewType !== 'pfai',
+                title: {
+                    display: true,
+                    text: viewType === 'zscore' ? 'Z-Score (higher = faster)' :
+                          viewType === 'pfai'   ? 'PFAI Rank (#1 = best)' :
+                                                  'Sectional Time (seconds)',
+                    font: { size: 12, weight: 'bold' },
+                    color: '#9090a8'   /* ← dark-friendly axis title */
+                },
+                ticks: { color: '#9090a8' },                  /* ← dark tick labels */
+                grid:  { color: 'rgba(255,255,255,0.06)' }    /* ← subtle dark grid lines */
+            },
+            x: {
+                ticks: { color: '#9090a8' },
+                grid:  { display: false }
+            }
+        }
+    };
+}
+
+function switchView(raceId, viewType) {
+    const trigger = window.event && window.event.target ? window.event.target : null;
+    const instance = chartInstances[raceId];
+    if (!instance) return;
+    const buttons = trigger ? trigger.parentElement.querySelectorAll('.chart-toggle-btn') : [];
+    buttons.forEach(function(btn) { btn.classList.remove('active'); });
+    if (trigger) trigger.classList.add('active');
+    const chartContainer = document.getElementById('chartContainer_' + raceId);
+    const heatmapContainer = document.getElementById('pfaiHeatmap_' + raceId);
+    if (viewType === 'pfai') {
+        chartContainer.style.display = 'none';
+        heatmapContainer.style.display = 'block';
+        if (!heatmapContainer.hasAttribute('data-rendered')) {
+            renderPFAIHeatmap(raceId, instance.horsesData);
+            heatmapContainer.setAttribute('data-rendered', 'true');
+        }
+        animateSectionalPanel(heatmapContainer);
+        animateHeatmapRows(heatmapContainer);
+    } else {
+        chartContainer.style.display = 'block';
+        heatmapContainer.style.display = 'none';
+        instance.activeDatasetIndex = null;
+        instance.chart.data = instance.data[viewType];
+        instance.chart.options = getChartOptions(viewType);
+        instance.chart.update();
+        animateSectionalPanel(chartContainer);
+    }
+}
+
+function getHeatRankClass(avgRank) {
+    if (avgRank <= 3) return 'heat-rank-excellent';
+    if (avgRank <= 5) return 'heat-rank-strong';
+    if (avgRank <= 7) return 'heat-rank-average';
+    return 'heat-rank-poor';
+}
+
+function renderPFAIHeatmap(raceNum, horses) {
+    const container = document.getElementById('pfaiHeatmap_' + raceNum);
+    if (!container) return;
+    container.classList.add('pfai-heatmap-wrap');
+    const pfaiEntries = buildDedupedPFAIEntries(horses);
+    if (pfaiEntries.length === 0) {
+        container.innerHTML = '<div class="no-sectionals">No PFAI sectional data available for this race</div>';
+        return;
+    }
+    const has600RankData = pfaiEntries.some(function(entry) {
+        return entry && entry.horse && entry.horse.pfai_sectionals && entry.horse.pfai_sectionals.last600_rank;
+    });
+    let html = '<div class="pfai-heatmap-head">';
+    html += '<h4 class="pfai-heatmap-title">🎯 PFAI Sectional Rankings - Last Start Performance</h4>';
+    html += '<p class="pfai-heatmap-helper">Lower rank is better. Tap a row to spotlight a horse, tap a badge for the split explanation, or tap 600m / 400m / 200m to sort.</p>';
+    if (!has600RankData) {
+        html += '<p class="pfai-heatmap-helper" style="color:#fbbf24;">600m sectionals unavailable for this meeting/source.</p>';
+    }
+    html += '</div>';
+    html += '<div class="pfai-heatmap-scroller">';
+    html += '<table class="pfai-heatmap-table">';
+    html += '<colgroup><col class="col-horse"><col class="col-600"><col class="col-400"><col class="col-200"><col class="col-avg"></colgroup>';
+    html += '<thead><tr>';
+    html += '<th style="text-align:left; padding:12px;">Horse</th>';
+    html += '<th style="text-align:center; padding:12px;" data-sort-key="rank600">600m</th>';
+    html += '<th style="text-align:center; padding:12px;" data-sort-key="rank400">400m</th>';
+    html += '<th style="text-align:center; padding:12px;" data-sort-key="rank200">200m</th>';
+    html += '<th style="text-align:center; padding:12px;" data-sort-key="avgRank">Avg Rank</th>';
+    html += '</tr></thead><tbody>';
+    pfaiEntries.forEach(function(entry, index) {
+        const horse = entry.horse;
+        const pfai = horse.pfai_sectionals;
+        const validRanks = getValidPfaiRanks(pfai);
+        const rankOnes = validRanks.filter(function(rank) { return rank === 1; }).length;
+        const rowClass = getHeatRankClass(entry.avgRank) + (rankOnes > 0 ? ' pfai-row-best-profile' : '');
+        html += '<tr class="pfai-heatmap-row ' + rowClass + '" data-row-index="' + index + '" style="--row-index:' + index + ';" data-rank600="' + (pfai.last600_rank || 999) + '" data-rank400="' + (pfai.last400_rank || 999) + '" data-rank200="' + (pfai.last200_rank || 999) + '" data-avg-rank="' + entry.avgRank.toFixed(3) + '">';
+        html += '<td class="horse-cell pfai-horse-cell" data-label="Horse" style="padding:12px; font-weight:700;">' + escapeHtml(horse.horse_name) + '</td>';
+        html += '<td class="rank-cell rank-600" data-label="600m" style="padding:12px; text-align:center;">' + getRankCell(pfai.last600_rank, '600m') + '</td>';
+        html += '<td class="rank-cell rank-400" data-label="400m" style="padding:12px; text-align:center;">' + getRankCell(pfai.last400_rank, '400m') + '</td>';
+        html += '<td class="rank-cell rank-200" data-label="200m" style="padding:12px; text-align:center;">' + getRankCell(pfai.last200_rank, '200m') + '</td>';
+        html += '<td class="rank-cell avg-rank" data-label="Avg Rank" style="padding:12px; text-align:center; font-weight:800; color:#ffffff; font-family:DM Mono, monospace;">#' + entry.avgRank.toFixed(1) + '</td>';
+        html += '</tr>';
+    });
+    html += '</tbody></table><div class="pfai-scroll-hint" aria-hidden="true"></div></div>';
+    html += '<div class="pfai-heatmap-legend">';
+    html += '<strong style="color:#ddd6fe;">Legend:</strong> Lower rank is better. ';
+    html += '<span class="pfai-legend-swatch" style="background:#065f46;"></span>#1–#3 Excellent ';
+    html += '<span class="pfai-legend-swatch" style="background:#92400e;"></span>#4–#5 Strong ';
+    html += '<span class="pfai-legend-swatch" style="background:#9a3412;"></span>#6–#7 Average ';
+    html += '<span class="pfai-legend-swatch" style="background:#7f1d1d;"></span>#8+ Needs more.';
+    html += '</div>';
+    container.innerHTML = html;
+    console.log('PFAI heatmap first row', pfaiEntries?.[0]);
+    const firstHeatmapRow = container.querySelector('.pfai-heatmap-row');
+    if (firstHeatmapRow) console.log('PFAI Heatmap row HTML:', firstHeatmapRow.outerHTML);
+    initPfaiHeatmapPremium(container);
+    animateSectionalPanel(container);
+}
+
+function getRankCell(rank, distance) {
+    if (!rank || rank >= PFAI_RANK_THRESHOLD) { return '<span class="pfai-rank-missing">-</span>'; }
+    let rankClass;
+    if (rank <= 7) rankClass = 'rank-' + rank;
+    else rankClass = 'rank-poor';
+    return '<button type="button" class="pfai-rank-badge ' + rankClass + '" data-rank="' + rank + '" data-distance="' + escapeHtml(distance || '') + '" aria-label="Rank ' + rank + ' at ' + escapeHtml(distance || 'this split') + '">#' + rank + '</button>';
+}
+
+function generateInsights(raceNum, horses) {
+    const container = document.getElementById('insights_race' + raceNum);
+    if (!container) return;
+    let insights = [];
+    let fastest = null, fastestTime = Infinity;
+    horses.forEach(function(horse) {
+        if (horse.best_recent && horse.best_recent.adjusted_time < fastestTime) {
+            fastestTime = horse.best_recent.adjusted_time; fastest = horse.horse_name;
+        }
+    });
+    if (fastest) insights.push('🎯 <strong>Fastest Adjusted Time:</strong> ' + fastest + ' (' + fastestTime.toFixed(2) + 's)');
+    let consistent = null, bestSD = Infinity;
+    horses.forEach(function(horse) {
+        if (horse.consistency && horse.consistency.std_dev < bestSD) { bestSD = horse.consistency.std_dev; consistent = horse.horse_name; }
+    });
+    if (consistent) {
+        const rating = bestSD < 0.3 ? 'Excellent' : bestSD < 0.5 ? 'Good' : bestSD < 0.7 ? 'Fair' : 'Variable';
+        insights.push('✅ <strong>Most Consistent:</strong> ' + consistent + ' (' + rating + ' - SD: ' + bestSD.toFixed(2) + 's)');
+    }
+    let pfaiCount = 0, bestPfaiHorse = null, bestPfaiScore = Infinity;
+    horses.forEach(function(horse) {
+        if (horse.pfai_sectionals) {
+            pfaiCount++;
+            const ranks = [];
+            if (horse.pfai_sectionals.last200_rank && horse.pfai_sectionals.last200_rank < PFAI_RANK_THRESHOLD) ranks.push(horse.pfai_sectionals.last200_rank);
+            if (horse.pfai_sectionals.last400_rank && horse.pfai_sectionals.last400_rank < PFAI_RANK_THRESHOLD) ranks.push(horse.pfai_sectionals.last400_rank);
+            if (horse.pfai_sectionals.last600_rank && horse.pfai_sectionals.last600_rank < PFAI_RANK_THRESHOLD) ranks.push(horse.pfai_sectionals.last600_rank);
+            if (ranks.length > 0) {
+                const avgRank = ranks.reduce(function(a, b) { return a + b; }, 0) / ranks.length;
+                if (avgRank < bestPfaiScore) { bestPfaiScore = avgRank; bestPfaiHorse = horse.horse_name; }
+            }
+        }
+    });
+    if (bestPfaiHorse) insights.push('🎯 <strong>Best PFAI Sectionals:</strong> ' + bestPfaiHorse + ' (Avg Rank: ' + bestPfaiScore.toFixed(1) + ')');
+    if (pfaiCount > 0) insights.push('📊 <strong>PFAI Data Available:</strong> ' + pfaiCount + ' horses have API sectional rankings');
+    const times = horses.filter(function(h) { return h.best_recent; }).map(function(h) { return h.best_recent.adjusted_time; }).sort(function(a, b) { return a - b; });
+    if (times.length >= 2) {
+        const spread = times[times.length - 1] - times[0];
+        if (spread < 0.5) insights.push('⚠️ <strong>Tight Race:</strong> Top ' + times.length + ' within 0.5s - highly competitive');
+        else if (spread > 1.5) insights.push('📈 <strong>Standout:</strong> ' + spread.toFixed(2) + 's gap suggests clear leader on sectionals');
+    }
+    container.innerHTML = '<h4>Key Insights</h4>' + insights.map(function(i, index) { return '<div class="insight-item" style="--insight-index:' + index + ';">' + i + '</div>'; }).join('');
+    runWhenVisibleOnce(container, function(el) { el.classList.add('insights-visible'); }, { threshold: 0.35 });
+}
+
+function toggleSpeedMap(raceNumber) {
+    const container = document.getElementById('speedmap-' + raceNumber);
+    const toggle = document.getElementById('speedmap-toggle-' + raceNumber);
+    const isClosed = container.style.display === 'none' || container.style.display === '' || !container.classList.contains('is-open');
+    if (isClosed) {
+        toggle.textContent = '▲ Hide';
+        setCollapsibleOpen(container, true, function() { renderSpeedMap(raceNumber); });
+    } else {
+        toggle.textContent = '▼ Show';
+        setCollapsibleOpen(container, false);
+    }
+}
+const top3Active = {};
+function toggleTop3(raceId) {
+    const instance = chartInstances[raceId];
+    if (!instance) return;
+    const btn = document.getElementById('top3-btn-' + raceId);
+    top3Active[raceId] = !top3Active[raceId];
+
+    const chartContainer = document.getElementById('chartContainer_' + raceId);
+    const heatmapContainer = document.getElementById('pfaiHeatmap_' + raceId);
+    const podium = document.getElementById('top3-podium-' + raceId);
+    chartContainer.style.display = 'block';
+    heatmapContainer.style.display = 'none';
+
+    if (top3Active[raceId]) {
+        btn.classList.add('active');
+        const sorted = instance.data.adjusted.datasets.slice().sort(function(a, b) {
+            const aMin = Math.min.apply(null, a.data.filter(function(v) { return v != null; }));
+            const bMin = Math.min.apply(null, b.data.filter(function(v) { return v != null; }));
+            return aMin - bMin;
+        });
+        instance.chart.data = { labels: instance.data.adjusted.labels, datasets: sorted.slice(0, 3) };
+        if (podium) {
+            podium.innerHTML = sorted.slice(0, 3).map(function(dataset, index) {
+                const values = dataset.data.filter(function(v) { return v != null; });
+                const best = values.length ? Math.min.apply(null, values).toFixed(2) + 's' : 'N/A';
+                const medal = index === 0 ? '🏆 1st' : index === 1 ? '🥈 2nd' : '🥉 3rd';
+                return '<div class="top3-podium-card" style="--podium-index:' + index + ';"><div class="top3-rank">' + medal + '</div><div class="top3-name">' + escapeHtml(dataset.label.split('(')[0].trim()) + '</div><div class="top3-time">' + best + '</div></div>';
+            }).join('');
+            podium.classList.add('is-visible');
+        }
+    } else {
+        btn.classList.remove('active');
+        instance.chart.data = instance.data.adjusted;
+        if (podium) { podium.classList.remove('is-visible'); podium.innerHTML = ''; }
+    }
+    instance.chart.options = getChartOptions('adjusted');
+    instance.chart.update();
+    animateSectionalPanel(chartContainer);
+}
+function renderSpeedMap(raceNumber) {
+    const data = window['speedMapData_' + raceNumber];
+    if (!data || !data.payLoad || !data.payLoad[0] || !data.payLoad[0].items) {
+        console.error('No speed map data available');
+        return;
+    }
+
+    // Build a set of scratched horse names from the table rows
+    const raceCard = document.getElementById('race-' + raceNumber);
+    const scratchedNames = new Set();
+    if (raceCard) {
+        raceCard.querySelectorAll('tbody tr').forEach(function(row) {
+            const isScratchedRow = row.classList.contains('horse-scratched');
+            if (isScratchedRow) {
+                const nameSpan = row.querySelector(HORSE_NAME_SELECTOR);
+                if (nameSpan) scratchedNames.add(normalizeHorseName(nameSpan.textContent));
+            }
+        });
+    }
+
+    // Filter out scratched horses
+    const allHorses = data.payLoad[0].items.filter(function(horse) {
+        return !scratchedNames.has(normalizeHorseName(horse.runnerName));
+    });
+
+    const categories = { leader: [], onpace: [], midfield: [], backmarker: [] };
+    allHorses.forEach(function(horse) {
+        const settle = horse.settle;
+        if (settle <= 2) categories.leader.push(horse);
+        else if (settle <= 4) categories.onpace.push(horse);
+        else if (settle <= 8) categories.midfield.push(horse);
+        else categories.backmarker.push(horse);
+    });
+    Object.keys(categories).forEach(function(key) {
+        categories[key].sort(function(a, b) { return a.settle - b.settle; });
+    });
+
+    const silkStyles = collectRaceSilkStyles(raceNumber);
+    const cachedSilks = _lbSilkCache[raceNumber] || {};
+    const columns = [
+        { key: 'leader', label: 'Leader' },
+        { key: 'onpace', label: 'OnPace' },
+        { key: 'midfield', label: 'Midfield' },
+        { key: 'backmarker', label: 'Backmarker' }
+    ];
+    const html = '<div class="speedmap-grid">' +
+        columns.map(function(column, columnIndex) {
+            return '<div class="speedmap-column" style="--speedmap-column-delay:' + (columnIndex * SPEEDMAP_COLUMN_DELAY_MS) + 'ms; --speedmap-enter-x:' + (columnIndex === 0 ? '-14px' : columnIndex === 1 ? '10px' : '0px') + ';">' +
+                '<div class="speedmap-column-header">' + column.label + '</div>' +
+                categories[column.key].map(function(horse, horseIndex) {
+                    const runnerKey = normalizeHorseName(horse.runnerName);
+                    const silkStyle = cachedSilks[String(horse.tabNo)] || silkStyles[runnerKey];
+                    return createHorseCard(horse, runnerKey, silkStyle, columnIndex, horseIndex, raceNumber);
+                }).join('') +
+                '</div>';
+        }).join('') +
+        '</div>';
+
+    const speedMapContainer = document.querySelector('#speedmap-' + raceNumber + ' .speedmap-container');
+    speedMapContainer.innerHTML = html;
+    const grid = speedMapContainer.querySelector('.speedmap-grid');
+    if (grid) {
+        window.requestAnimationFrame(function() {
+            grid.classList.add('speedmap-grid-visible');
+            animateVisibleCountUps(grid);
+            const wrapper = document.getElementById('speedmap-' + raceNumber);
+            if (wrapper && wrapper.classList.contains('is-open')) wrapper.style.maxHeight = wrapper.scrollHeight + 'px';
+        });
+    }
+}
+function collectRaceSilkStyles(raceNumber) {
+    const silkLookup = {};
+    const raceCard = document.getElementById('race-' + raceNumber);
+    if (!raceCard) return silkLookup;
+    raceCard.querySelectorAll('tbody tr').forEach(function(row) {
+        const nameSpan = row.querySelector(HORSE_NAME_SELECTOR);
+        const silkEl = row.querySelector('.lb-silk');
+        if (!nameSpan || !silkEl || !silkEl.style || !silkEl.style.cssText) return;
+        silkLookup[normalizeHorseName(nameSpan.textContent)] = silkEl.style.cssText;
+    });
+    return silkLookup;
+}
+function decorateSpeedMapSilkStyle(silkStyle) {
+    return silkStyle + ';width:' + SPEEDMAP_SILK_BADGE_SIZE + 'px;height:' + SPEEDMAP_SILK_BADGE_SIZE + 'px;border-radius:' + SPEEDMAP_SILK_BADGE_RADIUS + 'px;';
+}
+function syncVisibleSpeedMapSilks(raceNumber) {
+    const speedMap = document.getElementById('speedmap-' + raceNumber);
+    if (!speedMap || speedMap.style.display === 'none') return;
+    const silkStyles = collectRaceSilkStyles(raceNumber);
+    const cachedSilks = _lbSilkCache[raceNumber] || {};
+    speedMap.querySelectorAll('.speedmap-horse-card').forEach(function(card) {
+        const runnerKey = card.getAttribute('data-runner-name');
+        const tabNo = card.getAttribute('data-tab-no') || '';
+        const numberEl = card.querySelector('.speedmap-tab-number');
+        if (!numberEl) return;
+        const silkStyle = cachedSilks[tabNo] || silkStyles[runnerKey];
+        if (silkStyle) {
+            numberEl.className = 'speedmap-tab-number speedmap-tab-number--silk';
+            numberEl.style.cssText = decorateSpeedMapSilkStyle(silkStyle);
+            numberEl.innerHTML = '<span class="speedmap-tab-number-label">' + escapeHtml(tabNo) + '</span>';
+        } else {
+            numberEl.className = 'speedmap-tab-number speedmap-tab-number-fallback';
+            numberEl.removeAttribute('style');
+            numberEl.textContent = String(tabNo);
+        }
+    });
+}
+function createHorseCard(horse, runnerKey, silkStyle, columnIndex, horseIndex, raceNumber) {
+    const mapValue = horse.mapA2E || 0;
+    let mapClass = 'speedmap-map-neutral';
+    if (mapValue > 0) mapClass = 'speedmap-map-positive';
+    if (mapValue >= 1.00) mapClass += ' speedmap-map-standout';
+    if (mapValue >= 1.05) mapClass += ' speedmap-map-elite';
+    if (mapValue < 0) mapClass = 'speedmap-map-negative';
+    const tabMarkup = silkStyle
+        ? '<span class="speedmap-tab-number speedmap-tab-number--silk" style="' + decorateSpeedMapSilkStyle(silkStyle) + '"><span class="speedmap-tab-number-label">' + escapeHtml(horse.tabNo) + '</span></span>'
+        : '<span class="speedmap-tab-number speedmap-tab-number-fallback">' + escapeHtml(horse.tabNo) + '</span>';
+    return '<div class="speedmap-horse-card" data-runner-name="' + escapeHtml(runnerKey) + '" data-tab-no="' + escapeHtml(horse.tabNo) + '" style="--speedmap-card-delay:' + ((columnIndex * SPEEDMAP_COLUMN_DELAY_MS) + (horseIndex * SPEEDMAP_CARD_DELAY_MS)) + 'ms;">' +
+        '<div class="speedmap-card-header">' +
+        tabMarkup +
+        '<div class="speedmap-horse-name">' + escapeHtml(horse.runnerName) + '</div>' +
+        '</div>' +
+        '<div class="speedmap-pfai">PFAI: <span class="speedmap-metric" data-count-key="speedmap-' + raceNumber + '-' + escapeHtml(runnerKey) + '-pfai" data-count-to="' + escapeHtml(parseFloat(horse.pfaiScore) || 0) + '" data-count-decimals="0" data-count-prefix="">0</span></div>' +
+        '<div class="speedmap-badges">' +
+        '<span class="speedmap-badge speedmap-badge-speed">Speed <span class="speedmap-metric" data-count-key="speedmap-' + raceNumber + '-' + escapeHtml(runnerKey) + '-speed" data-count-to="' + escapeHtml(parseFloat(horse.speed) || 0) + '" data-count-decimals="0">0</span></span>' +
+        '<span class="speedmap-badge speedmap-badge-settle">Settle <span class="speedmap-metric" data-count-key="speedmap-' + raceNumber + '-' + escapeHtml(runnerKey) + '-settle" data-count-to="' + escapeHtml(parseFloat(horse.settle) || 0) + '" data-count-decimals="0">0</span></span>' +
+        '</div>' +
+        '<div class="speedmap-map ' + mapClass + '">MAP: <span class="speedmap-metric" data-count-key="speedmap-' + raceNumber + '-' + escapeHtml(runnerKey) + '-map" data-count-to="' + mapValue.toFixed(2) + '" data-count-decimals="2">0.00</span></div>' +
+        '<div class="speedmap-jockey">Jockey A2E: ' + (horse.jockeyA2E > 0 ? '+' : '') + horse.jockeyA2E.toFixed(2) + '</div>' +
+        '</div>';
+}
+
+// ── Filter System — 100% identical ──
+const FILTER_CRITERIA = {
+{% for component in results.active_filter_components %}
+    {{ component.key|tojson }}: { label: {{ component.name|tojson }} }{{ "," if not loop.last else "" }}
+{% endfor %}
+};
+let activeFilters = [];
+function parseHorseCriteria(row) {
+    if (!row) return {};
+    const activeComponentsCsv = row.getAttribute('data-active-components') || '';
+    const activeComponents = activeComponentsCsv ? activeComponentsCsv.split(',').filter(Boolean) : [];
+    const criteria = {};
+    Object.keys(FILTER_CRITERIA).forEach(function(key) { criteria[key] = activeComponents.includes(key); });
+    return criteria;
+}
+function createFilterBar() {
+    const filterBar = document.createElement('div'); filterBar.className = 'filter-bar-container'; filterBar.id = 'filter-bar';
+    const headerDiv = document.createElement('div'); headerDiv.className = 'filter-bar-header';
+    const title = document.createElement('div'); title.className = 'filter-bar-title'; title.innerHTML = '🔍 Add Filter:';
+    const dropdown = document.createElement('select'); dropdown.className = 'filter-dropdown'; dropdown.id = 'filter-dropdown';
+    const defaultOption = document.createElement('option'); defaultOption.value = ''; defaultOption.textContent = 'Select a filter...'; dropdown.appendChild(defaultOption);
+    Object.keys(FILTER_CRITERIA).forEach(function(key) { const option = document.createElement('option'); option.value = key; option.textContent = FILTER_CRITERIA[key].label; dropdown.appendChild(option); });
+    const clearBtn = document.createElement('button'); clearBtn.className = 'clear-filters-btn'; clearBtn.textContent = 'Clear All Filters'; clearBtn.onclick = clearAllFilters;
+    headerDiv.appendChild(title); headerDiv.appendChild(dropdown); headerDiv.appendChild(clearBtn); filterBar.appendChild(headerDiv);
+    const activeFiltersDiv = document.createElement('div'); activeFiltersDiv.className = 'active-filters-container'; activeFiltersDiv.id = 'active-filters-container'; filterBar.appendChild(activeFiltersDiv);
+    dropdown.addEventListener('change', function() { if (this.value) { addFilter(this.value); this.value = ''; } });
+    return filterBar;
+}
+function updateActiveFiltersDisplay() {
+    const container = document.getElementById('active-filters-container'); if (!container) return; container.innerHTML = '';
+    if (activeFilters.length === 0) return;
+    const label = document.createElement('span'); label.className = 'active-filters-label'; label.textContent = 'Active Filters:'; container.appendChild(label);
+    activeFilters.forEach(function(filterKey) {
+        const tag = document.createElement('div'); tag.className = 'filter-tag';
+        const tagText = document.createElement('span'); tagText.textContent = FILTER_CRITERIA[filterKey].label;
+        const removeBtn = document.createElement('span'); removeBtn.className = 'filter-tag-remove'; removeBtn.textContent = '×'; removeBtn.onclick = function() { removeFilter(filterKey); };
+        tag.appendChild(tagText); tag.appendChild(removeBtn); container.appendChild(tag);
+    });
+    const matchCounter = document.createElement('span'); matchCounter.className = 'filter-match-counter'; matchCounter.id = 'filter-match-counter'; container.appendChild(matchCounter);
+    setTimeout(updateMatchCounter, 100);
+}
+function updateMatchCounter() {
+    const counter = document.getElementById('filter-match-counter'); if (!counter) return;
+    const matchCount = document.querySelectorAll('.horse-row-match').length;
+    if (activeFilters.length === 0) counter.textContent = 'No filters active';
+    else if (matchCount === 0) counter.textContent = 'No horses match all filters';
+    else counter.textContent = matchCount + ' horse' + (matchCount !== 1 ? 's' : '') + ' match';
+}
+function addFilter(filterKey) { if (activeFilters.includes(filterKey)) return; activeFilters.push(filterKey); updateActiveFiltersDisplay(); applyFilters(); }
+function removeFilter(filterKey) { activeFilters = activeFilters.filter(function(key) { return key !== filterKey; }); updateActiveFiltersDisplay(); applyFilters(); }
+function clearAllFilters() { activeFilters = []; updateActiveFiltersDisplay(); applyFilters(); }
+function applyFilters() {
+    const allRows = document.querySelectorAll('table tbody tr');
+    if (activeFilters.length === 0) { allRows.forEach(function(row) { row.classList.remove('horse-row-match'); }); return; }
+    allRows.forEach(function(row) {
+        const horseCriteria = parseHorseCriteria(row);
+        const meetsAllFilters = activeFilters.every(function(filterKey) { return horseCriteria[filterKey] === true; });
+        if (meetsAllFilters) row.classList.add('horse-row-match'); else row.classList.remove('horse-row-match');
+    });
+    updateMatchCounter();
+}
+
+function calculateRaceConfidence(horses) {
+    if (horses.length < 2) return null;
+    const parsedHorses = horses.map(function(h) { return { score: parseFloat(h.score), winProb: parseFloat(h.winProb) / 100 }; }).filter(function(h) { return !isNaN(h.score) && !isNaN(h.winProb); });
+    if (parsedHorses.length < 2) return null;
+    parsedHorses.sort(function(a, b) { return b.score - a.score; });
+    const top1 = parsedHorses[0], top2 = parsedHorses[1], top3 = parsedHorses[2] || top2;
+    const dominanceRatio = top1.winProb / (top1.winProb + top2.winProb + top3.winProb);
+    const dominanceScore = Math.max(0, Math.min(100, (dominanceRatio - 0.33) / (0.60 - 0.33) * 100));
+    const scoreGap = top1.score - top2.score;
+    let scoreGapScore;
+    if (scoreGap >= 50) scoreGapScore = 100; else if (scoreGap >= 30) scoreGapScore = 85; else if (scoreGap >= 20) scoreGapScore = 70; else if (scoreGap >= 10) scoreGapScore = 50; else if (scoreGap >= 5) scoreGapScore = 30; else scoreGapScore = 10;
+    const winProbRatio = top1.winProb / top2.winProb;
+    let ratioScore;
+    if (winProbRatio >= 2.0) ratioScore = 100; else if (winProbRatio >= 1.5) ratioScore = 80; else if (winProbRatio >= 1.3) ratioScore = 60; else if (winProbRatio >= 1.15) ratioScore = 40; else ratioScore = 20;
+    const gapScore = (scoreGapScore * 0.6) + (ratioScore * 0.4);
+    const strengthScore = Math.max(0, Math.min(100, (top1.winProb - 0.12) / (0.35 - 0.12) * 100));
+    const allWinProbs = parsedHorses.map(function(h) { return h.winProb; });
+    const mean = allWinProbs.reduce(function(a, b) { return a + b; }, 0) / allWinProbs.length;
+    const variance = allWinProbs.reduce(function(sum, p) { return sum + Math.pow(p - mean, 2); }, 0) / allWinProbs.length;
+    const stdDev = Math.sqrt(variance);
+    const cv = stdDev / mean;
+    const cvScore = Math.max(0, Math.min(100, (cv - 0.2) / (1.0 - 0.2) * 100));
+    const entropy = -allWinProbs.reduce(function(sum, p) { return sum + (p > 0 ? p * Math.log2(p) : 0); }, 0);
+    const maxEntropy = Math.log2(parsedHorses.length);
+    const entropyScore = Math.max(0, Math.min(100, (1 - entropy / maxEntropy) * 100));
+    const finalConfidence = Math.round(dominanceScore * 0.20 + gapScore * 0.35 + strengthScore * 0.25 + cvScore * 0.10 + entropyScore * 0.10);
+    let rating, description, style, emoji;
+    if (finalConfidence >= 90)      { rating = "Extremely High"; emoji = "🟢"; description = "Near-certainty - Maximum confidence bet"; style = "background: #d4edda; border-left: 4px solid #28a745;"; }
+    else if (finalConfidence >= 75) { rating = "Very High";      emoji = "🟢"; description = "Top pick - Strong betting opportunity"; style = "background: #d4edda; border-left: 4px solid #28a745;"; }
+    else if (finalConfidence >= 60) { rating = "High";           emoji = "🟢"; description = "Strong favorite - Solid bet recommended"; style = "background: #d1ecf1; border-left: 4px solid #17a2b8;"; }
+    else if (finalConfidence >= 50) { rating = "Medium";         emoji = "🟡"; description = "Moderate confidence - Standard stake"; style = "background: #fff3cd; border-left: 4px solid #ffc107;"; }
+    else if (finalConfidence >= 40) { rating = "Medium-Low";     emoji = "🟡"; description = "Competitive field - Reduced stake or exotics"; style = "background: #fff3cd; border-left: 4px solid #ffc107;"; }
+    else if (finalConfidence >= 30) { rating = "Low";            emoji = "🟠"; description = "Uncertain race - Small stake or avoid"; style = "background: #ffe5cc; border-left: 4px solid #fd7e14;"; }
+    else if (finalConfidence >= 20) { rating = "Very Low";       emoji = "🔴"; description = "High risk - Avoid or exotic bets only"; style = "background: #f8d7da; border-left: 4px solid #dc3545;"; }
+    else                            { rating = "No Bet";         emoji = "🔴"; description = "Too uncertain - Do not bet"; style = "background: #f8d7da; border-left: 4px solid #dc3545;"; }
+    return { confidence: finalConfidence, rating: rating, description: description, style: style, emoji: emoji };
+}
+
+function toggleScratch(horseId, shouldScratch) {
+    fetch('/api/horse/' + horseId + '/toggle-scratch', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(function(response) { return response.json(); })
+        .then(function(data) { if (data.success) { location.reload(); } else { alert('Failed to update scratch status'); } })
+        .catch(function(error) { console.error('Error:', error); alert('Failed to update scratch status'); });
+}
+
+function injectPFAIScores() {
+    const races = document.querySelectorAll('.card[id^="race-"]');
+    races.forEach(function(raceCard) {
+        const raceId = raceCard.id.replace('race-', '');
+        const speedMapData = window['speedMapData_' + raceId];
+        if (!speedMapData || !speedMapData.payLoad || !speedMapData.payLoad[0] || !speedMapData.payLoad[0].items) { return; }
+        const horses = speedMapData.payLoad[0].items;
+        const horseRows = raceCard.querySelectorAll('tbody tr');
+        horseRows.forEach(function(row) {
+            const horseNameCell = row.querySelector('td:nth-child(2)'); if (!horseNameCell) return;
+            const horseNameSpan = horseNameCell.querySelector(HORSE_NAME_SELECTOR); if (!horseNameSpan) return;
+            const horseName = horseNameSpan.textContent.trim();
+            const matchingHorse = horses.find(function(h) { return h.runnerName === horseName; });
+            if (matchingHorse && matchingHorse.pfaiScore) {
+                const existingBadge = horseNameCell.querySelector('.pfai-badge'); if (existingBadge) return;
+                const pfaiBadge = document.createElement('span');
+                pfaiBadge.className = 'pfai-badge';
+                pfaiBadge.style.cssText = 'background:var(--accent); color:white; padding:3px 10px; border-radius:4px; font-size:11px; font-weight:700; margin-left:8px;';
+                const pfaiPrice = matchingHorse.pfaiPrice;
+                const priceText = (pfaiPrice && pfaiPrice > 0 && pfaiPrice !== 900) ? ' · $' + pfaiPrice.toFixed(2) : '';
+                pfaiBadge.textContent = 'PFAI: ' + matchingHorse.pfaiScore + priceText;
+                horseNameSpan.parentNode.insertBefore(pfaiBadge, horseNameSpan.nextSibling);
+            }
+        });
+    });
+}
+</script>
+<script>
+function logSpeedmapMissingRunners() {
+  document.querySelectorAll('.vm-race-card[id^="race-"]').forEach(raceCard => {
+    const raceNo = raceCard.id.replace('race-', '');
+    const speedMapData = window['speedMapData_' + raceNo];
+    if (!speedMapData?.payLoad?.[0]?.items) return;
+
+    const speedmapNames = new Set(
+      speedMapData.payLoad[0].items.map(h => normalizeHorseName(h.runnerName))
+    );
+
+    raceCard.querySelectorAll('tbody tr').forEach(row => {
+      const nameSpan = row.querySelector(HORSE_NAME_SELECTOR);
+      if (!nameSpan) return;
+      const rowNameNorm = normalizeHorseName(nameSpan.textContent);
+      if (rowNameNorm && !speedmapNames.has(rowNameNorm) && !row.classList.contains('horse-scratched')) {
+        console.debug('Runner missing from speedmap but not marked scratched by canonical backend flag', { raceNo, runner: nameSpan.textContent.trim() });
+      }
+    });
+  });
+}
+
+document.addEventListener('DOMContentLoaded', logSpeedmapMissingRunners);
+
+// ── Track Bias ──
+const MEETING_ID = {{ meeting.id }};
+let currentBias = {{ meeting.pace_bias or 0 }};
+
+function highlightBiasButton(bias) {
+    [-2, -1, 0, 1, 2].forEach(function(b) {
+        const btn = document.getElementById('bias-btn-' + b);
+        if (!btn) return;
+        if (b === bias) {
+            btn.style.background = 'linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%)';
+            btn.style.color = 'white';
+            btn.style.borderColor = 'var(--accent-2)';
+            btn.style.boxShadow = '0 2px 10px rgba(102,126,234,0.35)';
+        } else {
+            btn.style.background = 'var(--bg-surface)';
+            btn.style.color = 'var(--text-primary)';
+            btn.style.borderColor = 'var(--border-mid)';
+            btn.style.boxShadow = 'none';
+        }
+    });
+    const labels = {'-2': '⬅⬅ Strong Backmarker', '-1': '⬅ Slight Backmarker', '0': '⚖️ Neutral', '1': 'Slight Leader ➡', '2': 'Leaders Paradise ➡➡'};
+    const statusEl = document.getElementById('bias-status');
+    if (statusEl) statusEl.textContent = 'Current: ' + (labels[String(bias)] || 'Neutral');
+}
+
+function setTrackBias(newBias) {
+    if (newBias === currentBias) return;
+    const statusEl = document.getElementById('bias-status');
+    if (statusEl) statusEl.textContent = 'Updating...';
+
+    fetch('/api/meeting/' + MEETING_ID + '/update-bias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pace_bias: newBias })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            currentBias = newBias;
+            highlightBiasButton(newBias);
+            // Reload to show recalculated scores
+            location.reload();
+        } else {
+            alert('Failed to update track bias: ' + (data.error || 'Unknown error'));
+            if (statusEl) statusEl.textContent = 'Update failed';
+        }
+    })
+    .catch(function(err) {
+        console.error('Bias update error:', err);
+        alert('Failed to update track bias');
+        if (statusEl) statusEl.textContent = 'Update failed';
+    });
+}
+
+// Highlight the current bias on page load
+document.addEventListener('DOMContentLoaded', function() {
+    highlightBiasButton(currentBias);
+});
+// ══════════════════════════════════════════
+//  LADBROKES LIVE ODDS
+//  Polls /api/odds/ladbrokes/<uuid> every 45s
+//  Injects:
+//    - Silk sprite into name cell (td:nth-child(2))
+//    - LB price + fluc arrow + fav/mover badge into odds cell (td:nth-child(4))
+// ══════════════════════════════════════════
+(function() {
+    var ladbrokesRaceMap   = {};
+    var ladbrokesIntervals = {};
+    var POLL_MS  = 45000;
+    var SILK_PX  = 32; // display size per silk tile
+
+    function lbNorm(name) {
+        return (name || '')
+            .toLowerCase().trim()
+            .replace(/\([^)]*\)/g, '')
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ').trim();
+    }
+
+    // ── Silk sprite clipping ─────────────────────────────────────────
+    // The sprite is ordered left-to-right by runner_number (1-based).
+    // Runner 1 offset = 0px, runner 2 = -32px, etc.
+    function buildSilkStyle(silkUrl, runnerNumber) {
+        var offset = -((runnerNumber - 1) * SILK_PX);
+        return [
+            'display:inline-block',
+            'width:'  + SILK_PX + 'px',
+            'height:' + SILK_PX + 'px',
+            'background-image:url(' + silkUrl + ')',
+            'background-repeat:no-repeat',
+            'background-position:' + offset + 'px 0px',
+            'background-size:auto ' + SILK_PX + 'px',
+            'border-radius:3px',
+            'vertical-align:middle',
+            'flex-shrink:0',
+        ].join(';');
+    }
+
+    // ── Fluc indicator ───────────────────────────────────────────────
+    function flucIndicator(flucs) {
+        if (!flucs || flucs.length < 2) return null;
+        var open    = flucs[0];
+        var current = flucs[flucs.length - 1];
+        var diff    = current - open;
+        if (Math.abs(diff) < 0.05) return null;
+        return diff < 0
+            ? { arrow: '▼', color: '#34d399', title: 'Firming: was $' + open.toFixed(2) }
+            : { arrow: '▲', color: '#f87171', title: 'Drifting: was $' + open.toFixed(2) };
+    }
+
+    // ── Main inject ──────────────────────────────────────────────────
+    function injectLbOdds(raceNumber, oddsData) {
+        var raceCard = document.getElementById('race-' + raceNumber);
+        if (!raceCard) return;
+
+        var status  = oddsData.status   || '';
+        var odds    = oddsData.odds     || {};
+        var silkUrl = oddsData.silk_url || '';
+
+        raceCard.querySelectorAll('tbody tr').forEach(function(row) {
+            var nameCell = row.cells[1]; // td:nth-child(2) — horse name + silk
+            var oddsCell = row.cells[4]; // td:nth-child(5) — dedicated Ladbrokes Price column
+            if (!nameCell || !oddsCell) return;
+
+            var nameSpan = nameCell.querySelector(HORSE_NAME_SELECTOR);
+            if (!nameSpan) return;
+            var normName = lbNorm(nameSpan.textContent);
+            if (!normName) return;
+
+            var horseOdds = odds[normName];
+
+            // ── 1. SILK ───────────────────────────────────────────────
+            var existingSilk = nameCell.querySelector('.lb-silk');
+            if (silkUrl && horseOdds && horseOdds.runner_number) {
+                var cssText = buildSilkStyle(silkUrl, horseOdds.runner_number);
+                // Cache silk style for speed map lookup by tabNo/runner_number
+                if (!_lbSilkCache[raceNumber]) _lbSilkCache[raceNumber] = {};
+                _lbSilkCache[raceNumber][String(horseOdds.runner_number)] = cssText;
+                if (!existingSilk) {
+                    var silkEl = document.createElement('span');
+                    silkEl.className = 'lb-silk';
+                    silkEl.style.cssText = cssText;
+                    silkEl.title = 'Silk — runner ' + horseOdds.runner_number;
+                    // Insert before the horse name inside the flex div
+                    var nameDiv = nameSpan.parentNode;
+                    nameDiv.style.display = 'flex';
+                    nameDiv.style.alignItems = 'center';
+                    nameDiv.style.gap = '8px';
+                    nameDiv.insertBefore(silkEl, nameSpan);
+                } else {
+                    existingSilk.style.cssText = cssText;
+                }
+            } else if (!silkUrl && existingSilk) {
+                existingSilk.remove();
+            }
+
+            // ── 2. LB ODDS + FLUC + FAV/MOVER ────────────────────────
+            var existing = oddsCell.querySelector('.lb-odds-span');
+
+            if (!horseOdds || !horseOdds.win) {
+                if (existing) existing.remove();
+                return;
+            }
+
+            var winPrice = '$' + parseFloat(horseOdds.win).toFixed(2);
+            var fluc     = flucIndicator(horseOdds.flucs);
+            var parts    = [];
+
+            // Badge
+            if (horseOdds.favourite) {
+                parts.push('<span style="background:#7c3aed;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:3px;">⭐ FAV</span>');
+            } else if (horseOdds.mover) {
+                parts.push('<span style="background:#b45309;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:3px;">🔥 MOVE</span>');
+            }
+
+            // LB price — show as: opening ▲/▼ current
+            if (fluc) {
+                var openPrice = '$' + parseFloat(horseOdds.flucs[0]).toFixed(2);
+                parts.push(
+                    '<span style="color:#fbbf24;font-weight:700;">' +
+                    'LB ' + openPrice +
+                    '</span>' +
+                    '<span style="color:' + fluc.color + ';margin-left:3px;margin-right:3px;">' + fluc.arrow + '</span>' +
+                    '<span style="color:#fbbf24;font-weight:700;">' + winPrice + '</span>'
+                );
+            } else {
+                parts.push('<span style="color:#fbbf24;font-weight:700;">LB ' + winPrice + '</span>');
+            }
+            var html = parts.join('');
+
+            if (existing) {
+                existing.innerHTML = html;
+            } else {
+                var span = document.createElement('span');
+                span.className = 'lb-odds-span';
+                span.style.cssText = [
+                    'display:flex',
+                    'align-items:center',
+                    'flex-wrap:wrap',
+                    'gap:2px',
+                    'font-family:"DM Mono",monospace',
+                    'font-size:11px',
+                    'font-weight:700',
+                    'letter-spacing:0.02em',
+                ].join(';');
+                span.innerHTML = html;
+                oddsCell.appendChild(span);
+            }
+        });
+
+        syncVisibleSpeedMapSilks(raceNumber);
+
+        // Stop polling once race is settled
+        if (['Closed','Final','Abandoned','Interim'].indexOf(status) !== -1) {
+            if (ladbrokesIntervals[raceNumber]) {
+                clearInterval(ladbrokesIntervals[raceNumber]);
+                delete ladbrokesIntervals[raceNumber];
+            }
+        }
+    }
+
+    function pollRace(raceNumber, uuid) {
+        fetch('/api/odds/ladbrokes/' + uuid)
+            .then(function(r) { return r.json(); })
+            .then(function(data) { injectLbOdds(raceNumber, data); })
+            .catch(function() {});
+    }
+
+    function startPolling() {
+        Object.keys(ladbrokesRaceMap).forEach(function(raceNum) {
+            var uuid = ladbrokesRaceMap[raceNum];
+            pollRace(raceNum, uuid);
+            ladbrokesIntervals[raceNum] = setInterval(function() {
+                pollRace(raceNum, uuid);
+            }, POLL_MS);
+        });
+    }
+
+    fetch('/api/meeting/' + meetingId + '/ladbrokes-map')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            ladbrokesRaceMap = data;
+            if (Object.keys(ladbrokesRaceMap).length > 0) startPolling();
+        })
+        .catch(function() {});
+
+})();
+</script>
+{% endblock %}

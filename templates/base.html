@@ -665,6 +665,11 @@ body.modal-open .main-container {
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link {{ 'active' if request.endpoint == 'ml_meetings' }}" href="{{ url_for('ml_meetings') }}" style="{{ 'color:#00e5b0!important' if request.endpoint != 'ml_meetings' else '' }}" title="ML Race Meetings — ranked by ML score">
+                                <i class="bi bi-robot"></i> ML Meetings
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link {{ 'active' if request.endpoint in ['results', 'results_entry'] }}" href="{{ url_for('results') }}">
                                 <i class="bi bi-check2-square"></i> Results
                             </a>
@@ -672,6 +677,11 @@ body.modal-open .main-container {
                         <li class="nav-item">
                             <a class="nav-link {{ 'active' if request.endpoint == 'data_analytics' }}" href="{{ url_for('data_analytics') }}">
                                 <i class="bi bi-bar-chart-line"></i> Data
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if request.endpoint == 'ml_data_analytics' }}" href="{{ url_for('ml_data_analytics') }}" style="{{ 'color:#00e5b0!important' if request.endpoint != 'ml_data_analytics' else '' }}" title="ML Analytics — model performance using ML scores">
+                                <i class="bi bi-robot"></i> ML Data
                             </a>
                         </li>
                         <li class="nav-item">

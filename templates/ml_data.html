@@ -1,0 +1,901 @@
+{% extends "base.html" %}
+
+{% block title %}ML Analytics — The Form Analyst{% endblock %}
+
+{% block content %}
+
+<style>
+  /* ══════════════════════════════════════════
+     ML DATA ANALYTICS — teal/lime accent
+     Distinguishes clearly from the Analyzer
+     purple (#667eea) used on /data
+  ══════════════════════════════════════════ */
+
+  :root {
+    --ml-accent:  #00e5b0;
+    --ml-accent2: #b6ff00;
+    --ml-border:  rgba(0,229,176,0.28);
+  }
+
+  .analytics-header {
+    margin-bottom: 24px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .analytics-header h1 {
+    font-size: 1.55rem;
+    font-weight: 800;
+    margin: 0 0 4px;
+    color: var(--ml-accent);
+  }
+  .analytics-header .ml-note {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0;
+  }
+  .ml-badge {
+    display: inline-block;
+    background: rgba(0,229,176,0.1);
+    border: 1px solid rgba(0,229,176,0.3);
+    color: var(--ml-accent);
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    letter-spacing: 1px;
+    font-family: 'DM Mono', monospace;
+    vertical-align: middle;
+    margin-left: 8px;
+  }
+
+  /* ── Filter card ── */
+  .filter-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--ml-border);
+    border-radius: 14px;
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .filter-card-header {
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 11px 20px;
+  }
+  .filter-card-header h5 {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--ml-accent);
+    margin: 0;
+  }
+  .filter-card-body { padding: 16px 20px; }
+  .filter-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+  .filter-group { display: flex; flex-direction: column; gap: 5px; }
+  .filter-group label {
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted) !important;
+    margin: 0 !important;
+  }
+  .filter-actions { display: flex; gap: 8px; align-items: flex-end; padding-bottom: 1px; }
+
+  /* ── Overview tiles ── */
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .overview-tile {
+    background: var(--bg-surface);
+    border: 1px solid var(--ml-border);
+    border-radius: 12px;
+    padding: 22px 16px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .overview-tile::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--ml-accent), var(--ml-accent2));
+  }
+  .overview-tile.pos::before { background: linear-gradient(90deg, #059669, #34d399); }
+  .overview-tile.neg::before { background: linear-gradient(90deg, #dc2626, #f87171); }
+  .overview-tile:hover { border-color: var(--ml-accent); box-shadow: 0 4px 20px rgba(0,229,176,0.12); }
+  .stat-val {
+    display: block;
+    font-size: 2rem;
+    font-weight: 800;
+    font-family: 'DM Mono', monospace;
+    color: var(--ml-accent);
+    margin-bottom: 6px;
+    line-height: 1.1;
+    text-shadow: 0 0 14px rgba(0,229,176,0.3);
+  }
+  .stat-val.profit { color: #34d399; text-shadow: 0 0 14px rgba(52,211,153,0.35); }
+  .stat-val.loss   { color: #f87171; text-shadow: none; }
+  .stat-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+
+  /* ── Collapsible section cards ── */
+  .section-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .section-card:hover { border-color: var(--ml-border); }
+  .section-card-header {
+    background: var(--bg-elevated);
+    border-bottom: 1px solid transparent;
+    padding: 14px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+  }
+  .section-card-header:hover { background: var(--bg-hover); }
+  .section-card-header[aria-expanded="true"] { border-bottom-color: var(--ml-border); }
+  .section-card-header h5 { font-size: 14px; font-weight: 700; margin: 0; color: var(--text-primary); }
+  .section-card-header .bi-chevron-down { color: var(--ml-accent); transition: transform 0.22s; font-size: 13px; }
+  .section-card-header[aria-expanded="true"] .bi-chevron-down { transform: rotate(180deg); }
+
+  .section-card .card-body { padding: 20px !important; }
+
+  /* Table system (same as data.html) */
+  .section-card table,
+  .section-card .table,
+  .collapse table,
+  .collapse .table {
+    --bs-table-bg: transparent !important;
+    --bs-table-striped-bg: rgba(255,255,255,0.025) !important;
+    --bs-table-hover-bg: var(--bg-elevated) !important;
+    --bs-table-color: var(--text-primary) !important;
+    --bs-table-striped-color: var(--text-primary) !important;
+    --bs-table-hover-color: var(--text-primary) !important;
+    --bs-table-border-color: var(--border-subtle) !important;
+  }
+  .card-body table, .card-body .table,
+  .collapse table,  .collapse .table {
+    width: 100%;
+    color: var(--text-primary) !important;
+    border-color: var(--border-subtle) !important;
+    background-color: transparent !important;
+    font-size: 13px;
+    border-collapse: collapse;
+    margin-bottom: 0 !important;
+  }
+  .card-body thead th, .card-body .table-dark th,
+  .collapse thead th,  .collapse .table-dark th {
+    background: var(--bg-hover) !important;
+    color: var(--text-muted) !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+    padding: 10px 12px !important;
+    border-color: var(--border-mid) !important;
+    white-space: nowrap;
+  }
+  .card-body tbody tr, .collapse tbody tr { border-bottom: 1px solid var(--border-subtle) !important; transition: background 0.1s; }
+  .card-body tbody tr:last-child, .collapse tbody tr:last-child { border-bottom: none !important; }
+  .card-body tbody tr:hover, .collapse tbody tr:hover { background: var(--bg-elevated) !important; }
+  .card-body tbody td, .collapse tbody td {
+    padding: 10px 12px !important;
+    border-color: var(--border-subtle) !important;
+    background-color: transparent !important;
+    color: var(--text-primary) !important;
+    vertical-align: middle;
+    font-size: 13px;
+  }
+  .card-body tbody td:not(:first-child), .collapse tbody td:not(:first-child) {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+  }
+  .card-body .text-success, .collapse .text-success { color: #34d399 !important; }
+  .card-body .text-danger,  .collapse .text-danger  { color: #f87171 !important; }
+  .card-body .fw-bold, .collapse .fw-bold { font-weight: 700 !important; }
+  .card-body .text-muted, .collapse .text-muted { color: #7070a0 !important; }
+
+  /* Nested cards */
+  .card-body .card, .collapse .card {
+    background: var(--bg-elevated) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
+    margin-bottom: 14px;
+  }
+  .card-body .card .card-header, .collapse .card .card-header {
+    background: var(--bg-hover) !important;
+    border-bottom: 1px solid var(--border-subtle) !important;
+    padding: 10px 16px !important;
+  }
+  .card-body .card .card-body, .collapse .card .card-body { padding: 16px !important; }
+  .card-body canvas { background: transparent !important; border-radius: 6px; }
+
+  /* Alert-info */
+  .card-body .alert-info, .collapse .alert-info {
+    background: rgba(0,229,176,0.06) !important;
+    border: 1px solid rgba(0,229,176,0.2) !important;
+    border-radius: 10px !important;
+    color: var(--text-primary) !important;
+  }
+  .card-body .alert-info strong, .collapse .alert-info strong { color: var(--ml-accent) !important; }
+
+  /* Empty state */
+  .analytics-empty {
+    background: rgba(0,229,176,0.05);
+    border: 1px solid rgba(0,229,176,0.18);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-top: 8px;
+  }
+  .analytics-empty h5 { color: var(--ml-accent); margin: 0 0 8px; font-size: 1rem; }
+  .analytics-empty p  { color: var(--text-muted); font-size: 13px; margin: 0; }
+
+  /* Spinner */
+  .card-body .spinner-border, .collapse .spinner-border { color: var(--ml-accent) !important; }
+
+  @media (max-width: 900px) { .overview-grid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 768px) {
+    .filter-row { flex-direction: column; }
+    .filter-group { width: 100%; }
+    .filter-actions { width: 100%; }
+    .overview-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+    .stat-val { font-size: 1.5rem; }
+  }
+</style>
+
+<!-- Page header -->
+<div class="analytics-header">
+  <h1>🤖 ML Machine Learning Analytics <span class="ml-badge">ML SCORES</span></h1>
+  <p class="ml-note">All stats and charts on this page use <strong style="color:var(--ml-accent)">ML scores</strong> to rank horses — not the Analyzer score. See <a href="{{ url_for('data_analytics') }}" style="color:var(--ml-accent)">Data Analytics</a> for Analyzer performance.</p>
+</div>
+
+<!-- Filters -->
+<div class="filter-card">
+  <div class="filter-card-header"><h5>🔍 ML Filters</h5></div>
+  <div class="filter-card-body">
+    <form method="get" class="filter-row">
+      <div class="filter-group">
+        <label>Track</label>
+        <select name="track" class="form-select">
+          <option value="">All Tracks</option>
+          {% for track in track_list %}
+          <option value="{{ track }}" {% if filters.track == track %}selected{% endif %}>{{ track }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Date From</label>
+        <input type="date" name="date_from" class="form-control" value="{{ filters.date_from }}">
+      </div>
+      <div class="filter-group">
+        <label>Date To</label>
+        <input type="date" name="date_to" class="form-control" value="{{ filters.date_to }}">
+      </div>
+      <div class="filter-group">
+        <label>Show Last</label>
+        <select name="limit" class="form-select" style="min-width:180px;">
+          <option value="50"  {% if filters.limit == 50  %}selected{% endif %}>50 Races (Fast)</option>
+          <option value="100" {% if filters.limit == 100 %}selected{% endif %}>100 Races</option>
+          <option value="200" {% if filters.limit == 200 or not filters.limit %}selected{% endif %}>200 Races</option>
+          <option value="500" {% if filters.limit == 500 %}selected{% endif %}>500 Races</option>
+          <option value="1000" {% if filters.limit == 1000 %}selected{% endif %}>1000 Races</option>
+          {% if current_user.is_admin %}
+          <option value="all" {% if filters.limit == 'all' %}selected{% endif %}>All Races (Admin)</option>
+          {% endif %}
+        </select>
+      </div>
+      <div class="filter-actions">
+        <button type="submit" class="btn btn-success">Apply Filters</button>
+        <a href="{{ url_for('ml_data_analytics') }}" class="btn btn-outline-secondary">Reset</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ML Overview tiles -->
+{% if ml_performance_stats %}
+<div class="overview-grid">
+  <div class="overview-tile">
+    <span class="stat-val">{{ ml_performance_stats.selections }}</span>
+    <div class="stat-label">ML Selections</div>
+  </div>
+  <div class="overview-tile">
+    <span class="stat-val">{{ ml_performance_stats.wins }}</span>
+    <div class="stat-label">ML Wins</div>
+  </div>
+  <div class="overview-tile">
+    <span class="stat-val">{{ "%.1f"|format(ml_performance_stats.strike_rate) }}%</span>
+    <div class="stat-label">ML Strike Rate</div>
+  </div>
+  <div class="overview-tile">
+    <span class="stat-val">{{ "%.1f"|format(ml_performance_stats.place_rate) }}%</span>
+    <div class="stat-label">ML Place Rate ({{ ml_performance_stats.places }})</div>
+  </div>
+  <div class="overview-tile">
+    <span class="stat-val">{{ "%.0f"|format(ml_performance_stats.total_stake) }}</span>
+    <div class="stat-label">Total Stake (units)</div>
+  </div>
+  <div class="overview-tile">
+    <span class="stat-val">{{ "%.2f"|format(ml_performance_stats.total_return) }}</span>
+    <div class="stat-label">Total Return (units)</div>
+  </div>
+  <div class="overview-tile {% if ml_performance_stats.total_profit >= 0 %}pos{% else %}neg{% endif %}">
+    <span class="stat-val {% if ml_performance_stats.total_profit >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(ml_performance_stats.total_profit) }}</span>
+    <div class="stat-label">ML Total Profit (units)</div>
+  </div>
+  <div class="overview-tile {% if ml_performance_stats.roi >= 0 %}pos{% else %}neg{% endif %}">
+    <span class="stat-val {% if ml_performance_stats.roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(ml_performance_stats.roi) }}%</span>
+    <div class="stat-label">ML ROI</div>
+  </div>
+</div>
+{% else %}
+<div class="analytics-empty">
+  <h5>No ML Scores Yet</h5>
+  <p>Score meetings using the <a href="{{ url_for('ml_shadow') }}" style="color:var(--ml-accent)">ML Shadow</a> page first, then enter results to see ML analytics.</p>
+</div>
+{% endif %}
+
+<!-- Accordion sections — all use source=ml -->
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlScoreAnalysis" aria-expanded="false">
+    <h5>📈 ML Score Analysis</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="mlScoreAnalysis" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load ML score analysis...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlStatePerformance" aria-expanded="false">
+    <h5>🧭 ML State by State Performance</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="mlStatePerformance" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load ML state-by-state performance...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlPnlOverTime" aria-expanded="false">
+    <h5>📈 ML Cumulative P&L Over Time</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="mlPnlOverTime" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load ML P&L chart...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlMonthlyPerformance" aria-expanded="false">
+    <h5>🗓️ ML Monthly Performance (Model Drift)</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="mlMonthlyPerformance" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load ML monthly breakdown...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlFieldSize" aria-expanded="false">
+    <h5>🏟️ ML Field Size Performance</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="mlFieldSize" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load ML field size analysis...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlMarketDivergence" aria-expanded="false">
+    <h5>🎯 Favourite vs ML Pick</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="mlMarketDivergence" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load ML market divergence analysis...</p></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const loadedSections = new Set();
+
+// All ML API calls append source=ml
+const filterParams = new URLSearchParams({
+    track: '{{ filters.track }}',
+    date_from: '{{ filters.date_from }}',
+    date_to: '{{ filters.date_to }}',
+    limit: '{{ filters.limit or 200 }}',
+    source: 'ml'
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    const mlScoreAnalysis = document.getElementById('mlScoreAnalysis');
+    if (mlScoreAnalysis) { mlScoreAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-score-analysis')) { loadMlScoreAnalysis(); } }); }
+    const mlStatePerformance = document.getElementById('mlStatePerformance');
+    if (mlStatePerformance) { mlStatePerformance.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-state-performance')) { loadMlStatePerformance(); } }); }
+    const mlPnlOverTime = document.getElementById('mlPnlOverTime');
+    if (mlPnlOverTime) { mlPnlOverTime.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-pnl-over-time')) { loadMlPnlOverTime(); } }); }
+    const mlMonthlyPerformance = document.getElementById('mlMonthlyPerformance');
+    if (mlMonthlyPerformance) { mlMonthlyPerformance.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-monthly-performance')) { loadMlMonthlyPerformance(); } }); }
+    const mlFieldSize = document.getElementById('mlFieldSize');
+    if (mlFieldSize) { mlFieldSize.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-field-size')) { loadMlFieldSize(); } }); }
+    const mlMarketDivergence = document.getElementById('mlMarketDivergence');
+    if (mlMarketDivergence) { mlMarketDivergence.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-market-divergence')) { loadMlMarketDivergence(); } }); }
+});
+
+function loadMlScoreAnalysis() {
+    const container = document.getElementById('mlScoreAnalysis');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML score analysis...</p></div>';
+    fetch(`/api/data/score-analysis?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderMlScoreAnalysis(data); loadedSections.add('ml-score-analysis'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML score analysis. Please try again.</div>'; console.error(err); });
+}
+
+function loadMlStatePerformance() {
+    const container = document.getElementById('mlStatePerformance');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML state-by-state performance...</p></div>';
+    fetch(`/api/data/state-performance?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderMlStatePerformance(data); loadedSections.add('ml-state-performance'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML state performance. Please try again.</div>'; console.error(err); });
+}
+
+function loadMlPnlOverTime() {
+    const container = document.getElementById('mlPnlOverTime');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML P&L data...</p></div>';
+    fetch(`/api/data/pnl-over-time?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderMlPnlOverTime(data); loadedSections.add('ml-pnl-over-time'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML P&L. Please try again.</div>'; console.error(err); });
+}
+
+function loadMlMonthlyPerformance() {
+    const container = document.getElementById('mlMonthlyPerformance');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML monthly data...</p></div>';
+    fetch(`/api/data/monthly-performance?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderMlMonthlyPerformance(data); loadedSections.add('ml-monthly-performance'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML monthly data. Please try again.</div>'; console.error(err); });
+}
+
+function loadMlFieldSize() {
+    const container = document.getElementById('mlFieldSize');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML field size data...</p></div>';
+    fetch(`/api/data/field-size?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderMlFieldSize(data); loadedSections.add('ml-field-size'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML field size data. Please try again.</div>'; console.error(err); });
+}
+
+function loadMlMarketDivergence() {
+    const container = document.getElementById('mlMarketDivergence');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML market divergence data...</p></div>';
+    fetch(`/api/data/market-divergence?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderMlMarketDivergence(data); loadedSections.add('ml-market-divergence'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML market divergence. Please try again.</div>'; console.error(err); });
+}
+
+// ── Render functions ────────────────────────────────────────────
+
+function renderMlScoreAnalysis(data) {
+    const container = document.getElementById('mlScoreAnalysis');
+    let html = '<div class="card-body"><p class="text-muted" style="font-size:12px;margin-bottom:14px">Performance of the ML top pick per race, grouped by ML score tier (0–100, normalised per race).</p><div class="row">';
+    html += '<div class="col-md-6"><h6 style="color:var(--ml-accent)">Strike Rate by ML Score Tier</h6><table class="table table-sm"><thead><tr><th>ML Score</th><th>Races</th><th>Wins</th><th>Strike %</th><th>ROI</th></tr></thead><tbody>';
+    const tierOrder = ['90-100', '80-89', '70-79', '60-69', '50-59', '40-49', '30-39', '20-29', '0-19'];
+    for (const tier of tierOrder) {
+        const d = data.score_tiers[tier];
+        html += `<tr><td><strong>${tier}</strong></td><td>${d.races}</td><td>${d.wins}</td><td>${d.strike_rate.toFixed(1)}%</td><td class="${d.roi >= 0 ? 'text-success' : 'text-danger'}">${d.roi.toFixed(1)}%</td></tr>`;
+    }
+    html += '</tbody></table></div>';
+    html += '<div class="col-md-6"><canvas id="mlScoreTierChart" height="200"></canvas></div></div><hr>';
+    html += '<div class="row mt-4"><div class="col-md-6"><h6 style="color:var(--ml-accent)">Strike Rate by ML Score Gap (to 2nd pick)</h6><table class="table table-sm"><thead><tr><th>Gap</th><th>Races</th><th>Wins</th><th>Strike %</th><th>ROI</th></tr></thead><tbody>';
+    const gapOrder = ['50+', '40-49', '30-39', '20-29', '10-19', '<10'];
+    for (const gap of gapOrder) {
+        const d = data.score_gaps[gap];
+        html += `<tr><td><strong>${gap}</strong></td><td>${d.races}</td><td>${d.wins}</td><td>${d.strike_rate.toFixed(1)}%</td><td class="${d.roi >= 0 ? 'text-success' : 'text-danger'}">${d.roi.toFixed(1)}%</td></tr>`;
+    }
+    html += '</tbody></table></div>';
+    html += '<div class="col-md-6"><canvas id="mlScoreGapChart" height="200"></canvas></div></div></div>';
+    container.innerHTML = html;
+
+    new Chart(document.getElementById('mlScoreTierChart'), {
+        type: 'bar',
+        data: { labels: tierOrder, datasets: [{ label: 'ML Strike Rate %', data: tierOrder.map(t => data.score_tiers[t].strike_rate),
+            backgroundColor: 'rgba(0,229,176,0.65)', borderColor: 'rgba(0,229,176,1)', borderWidth: 1 }] },
+        options: { responsive: true,
+            scales: { y: { beginAtZero: true, max: 100, ticks: { color: '#9090a8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                      x: { ticks: { color: '#9090a8', font: { size: 11 } }, grid: { display: false } } },
+            plugins: { legend: { display: false } } }
+    });
+
+    new Chart(document.getElementById('mlScoreGapChart'), {
+        type: 'bar',
+        data: { labels: gapOrder, datasets: [{ label: 'ML Strike Rate %', data: gapOrder.map(g => data.score_gaps[g].strike_rate),
+            backgroundColor: 'rgba(182,255,0,0.65)', borderColor: 'rgba(182,255,0,1)', borderWidth: 1 }] },
+        options: { responsive: true,
+            scales: { y: { beginAtZero: true, max: 100, ticks: { color: '#9090a8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                      x: { ticks: { color: '#9090a8', font: { size: 11 } }, grid: { display: false } } },
+            plugins: { legend: { display: false } } }
+    });
+}
+
+function renderMlStatePerformance(data) {
+    const container = document.getElementById('mlStatePerformance');
+    if (data.error) {
+        container.innerHTML = `<div class="card-body text-danger">${data.error}</div>`;
+        return;
+    }
+    const rows = data.states || [];
+    if (!rows.length) {
+        container.innerHTML = '<div class="card-body"><p class="text-muted mb-0">No ML state performance data found for the current filters.</p></div>';
+        return;
+    }
+
+    const body = rows.map((row, idx) => `
+        <tr>
+            <td class="text-center">${idx + 1}</td>
+            <td><strong>${row.state}</strong></td>
+            <td class="text-center">${row.races}</td>
+            <td class="text-center">${row.wins}</td>
+            <td class="text-center">${row.strike_rate.toFixed(1)}%</td>
+            <td class="text-center">$${row.staked.toFixed(2)}</td>
+            <td class="text-center">$${row.returns.toFixed(2)}</td>
+            <td class="text-center ${row.profit_loss > 0 ? 'text-success fw-bold' : row.profit_loss < 0 ? 'text-danger' : ''}">$${row.profit_loss.toFixed(2)}</td>
+            <td class="text-center ${row.roi > 0 ? 'text-success fw-bold' : row.roi < 0 ? 'text-danger' : ''}">${row.roi.toFixed(1)}%</td>
+        </tr>
+    `).join('');
+
+    container.innerHTML = `<div class="card-body">
+        <p class="text-muted">ML top-pick performance by race state using $10 win bets on every race.</p>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr><th class="text-center">Rank</th><th>State</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike Rate</th><th class="text-center">Staked</th><th class="text-center">Return</th><th class="text-center">P/L</th><th class="text-center">ROI</th></tr>
+                </thead>
+                <tbody>${body}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+function renderMlPnlOverTime(data) {
+    const container = document.getElementById('mlPnlOverTime');
+    if (!data.data_points || data.data_points.length === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No ML data with results yet.</p></div>';
+        return;
+    }
+
+    const finalPnl = data.total_profit;
+    const pnlColor = finalPnl >= 0 ? '#00e5b0' : '#f87171';
+    const pnlSign  = finalPnl >= 0 ? '+' : '';
+
+    let html = `<div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h5 style="margin:0;color:var(--ml-accent)">ML Cumulative P&L</h5>
+                <p class="text-muted" style="font-size:12px;margin:0">$10 flat stakes on every ML top pick</p>
+            </div>
+            <div style="text-align:right">
+                <span style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace;color:${pnlColor}">${pnlSign}$${finalPnl.toFixed(2)}</span>
+                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em">${data.total_races} ML races total</div>
+            </div>
+        </div>
+        <canvas id="mlPnlChart" height="140"></canvas>
+        <div class="table-responsive mt-4">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr><th>Date</th><th class="text-center">Meeting</th><th class="text-center">Race</th><th class="text-center">Result</th><th class="text-center">Race P&L</th><th class="text-center">Cumulative</th></tr>
+                </thead><tbody>`;
+
+    const tableRows = data.data_points.slice(-30).reverse();
+    for (const row of tableRows) {
+        const resultLabel = row.won ? '✅ WON' : '❌';
+        const racePnl = row.profit;
+        html += `<tr>
+            <td><strong>${row.date}</strong></td>
+            <td class="text-center" style="font-size:11px;color:var(--text-muted)">${row.meeting}</td>
+            <td class="text-center">R${row.race}</td>
+            <td class="text-center">${resultLabel}</td>
+            <td class="text-center ${racePnl >= 0 ? 'text-success' : 'text-danger'}">${racePnl >= 0 ? '+' : ''}$${racePnl.toFixed(2)}</td>
+            <td class="text-center ${row.cumulative >= 0 ? 'text-success' : 'text-danger'}">${row.cumulative >= 0 ? '+' : ''}$${row.cumulative.toFixed(2)}</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div></div>';
+    container.innerHTML = html;
+
+    const labels    = data.data_points.map(r => r.date);
+    const cumValues = data.data_points.map(r => r.cumulative);
+
+    new Chart(document.getElementById('mlPnlChart'), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'ML Cumulative P&L ($)',
+                data: cumValues,
+                borderColor: pnlColor,
+                backgroundColor: finalPnl >= 0 ? 'rgba(0,229,176,0.10)' : 'rgba(248,113,113,0.10)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointRadius: data.data_points.length > 60 ? 0 : 3,
+                pointHoverRadius: 5,
+            }]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                y: {
+                    ticks: { color: '#9090a8', font: { size: 11 }, callback: v => '$' + v.toFixed(0) },
+                    grid: { color: 'rgba(255,255,255,0.05)' }
+                },
+                x: {
+                    ticks: {
+                        color: '#9090a8', font: { size: 10 }, maxTicksLimit: 12,
+                        callback: function(val, idx) {
+                            return data.data_points.length > 30 && idx % Math.ceil(data.data_points.length / 12) !== 0 ? '' : this.getLabelForValue(val);
+                        }
+                    },
+                    grid: { display: false }
+                }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ` ML Cumulative: $${ctx.parsed.y.toFixed(2)}`,
+                        afterLabel: ctx => {
+                            const row = data.data_points[ctx.dataIndex];
+                            return ` Race P&L: ${row.profit >= 0 ? '+' : ''}$${row.profit.toFixed(2)} | ${row.won ? 'WON' : 'Lost'} | R${row.race} ${row.meeting}`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderMlMonthlyPerformance(data) {
+    const container = document.getElementById('mlMonthlyPerformance');
+    if (!data.monthly || data.monthly.length === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No ML monthly data yet.</p></div>';
+        return;
+    }
+
+    const months = data.monthly;
+    const recentMonths = months.slice(-3);
+    const recentAvgROI = recentMonths.length
+        ? recentMonths.reduce((a, b) => a + b.roi, 0) / recentMonths.length : 0;
+    const driftColor = recentAvgROI >= 0 ? '#00e5b0' : '#f87171';
+    const driftLabel = recentMonths.length >= 2
+        ? (recentAvgROI >= 0 ? '✅ ML Model Healthy' : '⚠️ Recent Decline — Review ML retraining')
+        : '⏳ Not enough months yet';
+
+    let html = `<div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h5 style="margin:0;color:var(--ml-accent)">ML Monthly Breakdown</h5>
+                <p class="text-muted" style="font-size:12px;margin:0">Period-by-period — detect if ML retraining or data changes helped or hurt</p>
+            </div>
+            <div style="text-align:right">
+                <span style="font-size:1rem;font-weight:700;color:${driftColor}">${driftLabel}</span>
+                <div style="font-size:11px;color:var(--text-muted)">Avg ROI last 3 months: ${recentAvgROI.toFixed(1)}%</div>
+            </div>
+        </div>
+        <canvas id="mlMonthlyChart" height="140" class="mb-4"></canvas>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark">
+                    <tr><th>Month</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Place %</th><th class="text-center">ROI %</th><th class="text-center">P&L</th></tr>
+                </thead><tbody>`;
+
+    for (const row of [...months].reverse()) {
+        const isRecent = recentMonths.some(r => r.period === row.period);
+        html += `<tr style="${isRecent ? 'background:rgba(0,229,176,0.06)' : ''}">
+            <td><strong>${row.period}</strong>${isRecent ? ' <span style="font-size:10px;color:var(--ml-accent)">(recent)</span>' : ''}</td>
+            <td class="text-center">${row.races}</td>
+            <td class="text-center">${row.wins}</td>
+            <td class="text-center ${row.strike_rate >= 20 ? 'text-success' : row.strike_rate < 10 ? 'text-danger' : ''}">${row.strike_rate}%</td>
+            <td class="text-center">${row.place_rate}%</td>
+            <td class="text-center ${row.roi >= 0 ? 'text-success' : 'text-danger'}">${row.roi >= 0 ? '+' : ''}${row.roi}%</td>
+            <td class="text-center ${row.profit >= 0 ? 'text-success' : 'text-danger'}">${row.profit >= 0 ? '+' : ''}$${row.profit.toFixed(2)}</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div></div>';
+    container.innerHTML = html;
+
+    new Chart(document.getElementById('mlMonthlyChart'), {
+        type: 'bar',
+        data: {
+            labels: months.map(r => r.period),
+            datasets: [
+                {
+                    label: 'ROI %',
+                    data: months.map(r => r.roi),
+                    backgroundColor: months.map(r => r.roi >= 0 ? 'rgba(0,229,176,0.65)' : 'rgba(248,113,113,0.65)'),
+                    borderColor:     months.map(r => r.roi >= 0 ? 'rgba(0,229,176,1)'    : 'rgba(248,113,113,1)'),
+                    borderWidth: 1,
+                    yAxisID: 'y',
+                },
+                {
+                    label: 'Strike %',
+                    data: months.map(r => r.strike_rate),
+                    type: 'line',
+                    borderColor: 'rgba(182,255,0,1)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    tension: 0.3,
+                    yAxisID: 'y2',
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                y:  { position: 'left',  ticks: { color: '#9090a8', font: { size: 11 }, callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                y2: { position: 'right', min: 0, max: 60, ticks: { color: 'rgba(182,255,0,0.8)', font: { size: 11 }, callback: v => v + '%' }, grid: { display: false } },
+                x:  { ticks: { color: '#9090a8', font: { size: 11 } }, grid: { display: false } }
+            },
+            plugins: { legend: { labels: { color: '#9090a8', font: { size: 11 } } } }
+        }
+    });
+}
+
+function renderMlFieldSize(data) {
+    const container = document.getElementById('mlFieldSize');
+    const fs = {};
+    (data.field_sizes || []).forEach(item => { fs[item.label] = item; });
+
+    if (!data.field_sizes || data.field_sizes.length === 0) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No ML field size data yet.</p></div>';
+        return;
+    }
+
+    const bucketOrder = ['Small (≤7)', 'Medium (8-11)', 'Large (12-15)', 'Very Large (16+)'];
+    const colours = [
+        'rgba(0,229,176,0.75)',
+        'rgba(182,255,0,0.75)',
+        'rgba(245,158,11,0.75)',
+        'rgba(239,68,68,0.75)'
+    ];
+
+    let html = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px">Performance of the ML #1 rated horse by field size.</p>
+        <div class="row mb-4">`;
+
+    bucketOrder.forEach((b, i) => {
+        const s = fs[b];
+        if (!s || s.races === 0) return;
+        const roiCol = s.roi >= 0 ? '#00e5b0' : '#f87171';
+        html += `<div class="col-md-3 mb-3">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <h6 style="color:${colours[i].replace('0.75','1')}">${b}</h6>
+                    <div style="font-size:1.5rem;font-weight:800;font-family:'DM Mono',monospace;color:var(--text-primary)">${s.wins}/${s.races}</div>
+                    <div style="font-size:13px;margin:4px 0">Strike: <strong style="color:${s.strike_rate >= 20 ? '#00e5b0' : 'var(--text-primary)'}">${s.strike_rate}%</strong></div>
+                    <div style="font-size:13px">Place: <strong>${s.place_rate}%</strong></div>
+                    <div style="font-size:13px">ROI: <strong style="color:${roiCol}">${s.roi >= 0 ? '+' : ''}${s.roi}%</strong></div>
+                    <div style="font-size:11px;color:var(--text-muted)">P&L: $${s.profit.toFixed(2)}</div>
+                </div>
+            </div>
+        </div>`;
+    });
+
+    html += `</div>
+        <canvas id="mlFieldSizeChart" height="120"></canvas>
+        <div class="table-responsive mt-4">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark"><tr><th>Field Size</th><th class="text-center">Races</th><th class="text-center">Wins</th><th class="text-center">Strike %</th><th class="text-center">Place %</th><th class="text-center">ROI %</th><th class="text-center">P&L</th></tr></thead>
+                <tbody>`;
+
+    for (const b of bucketOrder) {
+        const s = fs[b];
+        if (!s || s.races === 0) continue;
+        html += `<tr><td><strong>${b}</strong></td><td class="text-center">${s.races}</td><td class="text-center">${s.wins}</td>
+            <td class="text-center ${s.strike_rate >= 20 ? 'text-success' : ''}">${s.strike_rate}%</td>
+            <td class="text-center">${s.place_rate}%</td>
+            <td class="text-center ${s.roi >= 0 ? 'text-success' : 'text-danger'}">${s.roi >= 0 ? '+' : ''}${s.roi}%</td>
+            <td class="text-center ${s.profit >= 0 ? 'text-success' : 'text-danger'}">$${s.profit.toFixed(2)}</td></tr>`;
+    }
+    html += '</tbody></table></div></div>';
+    container.innerHTML = html;
+
+    new Chart(document.getElementById('mlFieldSizeChart'), {
+        type: 'bar',
+        data: {
+            labels: bucketOrder.filter(b => fs[b] && fs[b].races > 0),
+            datasets: [{
+                label: 'ML Strike Rate %',
+                data: bucketOrder.filter(b => fs[b]?.races > 0).map(b => fs[b].strike_rate),
+                backgroundColor: bucketOrder.filter(b => fs[b]?.races > 0).map((b, i) => colours[i]),
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: { beginAtZero: true, max: 60, ticks: { color: '#9090a8', font: { size: 11 }, callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                x: { ticks: { color: '#9090a8', font: { size: 11 } }, grid: { display: false } }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+}
+
+function renderMlMarketDivergence(data) {
+    const container = document.getElementById('mlMarketDivergence');
+    const md = data.market_divergence;
+    if (!md) {
+        container.innerHTML = '<div class="card-body text-center text-muted py-5"><p>No ML market divergence data yet.</p></div>';
+        return;
+    }
+
+    const agree    = md.agree    || {};
+    const disagree = md.disagree || {};
+    const totalRaces = (agree.races || 0) + (disagree.races || 0);
+
+    let html = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px">
+            Does the ML model add independent value beyond just following the market?
+            ${data.skipped_races > 0 ? `<span style="color:var(--text-muted)">(${data.skipped_races} races skipped — missing SP coverage)</span>` : ''}
+        </p>
+        <div class="row mb-4">
+            <div class="col-md-6 mb-3">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h6 style="color:#60a5fa">✅ ML Agrees with Market</h6>
+                        <p style="font-size:11px;color:var(--text-muted)">ML top pick = market favourite</p>
+                        <div style="font-size:1.5rem;font-weight:800;font-family:'DM Mono',monospace">${agree.wins || 0}/${agree.races || 0}</div>
+                        <div style="font-size:13px;margin:4px 0">Strike: <strong style="color:${(agree.strike_rate || 0) >= 20 ? '#00e5b0' : 'var(--text-primary)'}">${agree.strike_rate || 0}%</strong></div>
+                        <div style="font-size:13px">ROI: <strong style="color:${(agree.roi || 0) >= 0 ? '#00e5b0' : '#f87171'}">${(agree.roi || 0) >= 0 ? '+' : ''}${agree.roi || 0}%</strong></div>
+                        <div style="font-size:11px;color:var(--text-muted)">${totalRaces > 0 ? ((agree.races || 0) / totalRaces * 100).toFixed(0) : 0}% of races</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 mb-3">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h6 style="color:#b6ff00">🔥 ML Disagrees with Market</h6>
+                        <p style="font-size:11px;color:var(--text-muted)">ML pick ≠ market favourite</p>
+                        <div style="font-size:1.5rem;font-weight:800;font-family:'DM Mono',monospace">${disagree.wins || 0}/${disagree.races || 0}</div>
+                        <div style="font-size:13px;margin:4px 0">Strike: <strong style="color:${(disagree.strike_rate || 0) >= 20 ? '#00e5b0' : 'var(--text-primary)'}">${disagree.strike_rate || 0}%</strong></div>
+                        <div style="font-size:13px">ROI: <strong style="color:${(disagree.roi || 0) >= 0 ? '#00e5b0' : '#f87171'}">${(disagree.roi || 0) >= 0 ? '+' : ''}${disagree.roi || 0}%</strong></div>
+                        <div style="font-size:11px;color:var(--text-muted)">${totalRaces > 0 ? ((disagree.races || 0) / totalRaces * 100).toFixed(0) : 0}% of races</div>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+    const hasDisagreeEdge = (disagree.roi || 0) > (agree.roi || 0);
+    html += `<div class="alert alert-info">
+        <strong>💡 ML Edge: </strong>
+        ${hasDisagreeEdge
+            ? `The ML model outperforms the market when it <em>disagrees</em> with the favourite (${disagree.roi}% ROI vs ${agree.roi}% when agreeing). This suggests the ML model has genuine independent predictive power.`
+            : `The ML model performs better when it <em>agrees</em> with the market (${agree.roi}% ROI). When disagreeing (${disagree.roi}% ROI), the market tends to be right. Consider using market agreement as an ML confidence filter.`}
+    </div>
+    </div>`;
+
+    container.innerHTML = html;
+}
+</script>
+{% endblock %}

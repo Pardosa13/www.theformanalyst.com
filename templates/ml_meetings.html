@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+{% block title %}ML Race Meetings — The Form Analyst{% endblock %}
+{% block content %}
+
+<style>
+  :root {
+    --ml-accent:  #00e5b0;
+    --ml-accent2: #b6ff00;
+    --ml-border:  rgba(0,229,176,0.25);
+  }
+
+  .history-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 16px 40px;
+  }
+
+  .page-header { margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid var(--ml-border); }
+  .page-header h1 { font-size: 1.6rem; font-weight: 700; margin: 0 0 4px 0; color: var(--ml-accent); }
+  .page-header p { margin: 0; font-size: 0.875rem; color: var(--text-muted); }
+  .ml-badge {
+    display: inline-block;
+    background: rgba(0,229,176,0.1);
+    border: 1px solid rgba(0,229,176,0.3);
+    color: var(--ml-accent);
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    letter-spacing: 1px;
+    font-family: 'DM Mono', monospace;
+    vertical-align: middle;
+    margin-left: 8px;
+  }
+
+  .history-toolbar {
+    position: sticky;
+    top: 10px;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 20px;
+    margin: 0 0 10px 0;
+    background: var(--bg-surface);
+    border: 1px solid var(--ml-border);
+    border-radius: 12px;
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  }
+  .history-toolbar:hover { border-color: var(--ml-accent); background: var(--bg-elevated); box-shadow: 0 4px 20px rgba(0,0,0,0.18); }
+  .history-toolbar-label { font-size: 0.8rem; color: var(--text-muted); font-weight: 600; }
+  .history-toolbar-select {
+    padding: 8px 12px;
+    border-radius: 10px;
+    min-width: 220px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+  }
+  .history-toolbar-select:hover, .history-toolbar-select:focus { outline: none; border-color: var(--ml-accent); }
+  .history-toolbar-select option { background: var(--bg-surface); color: var(--text-primary); }
+
+  .meeting-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 20px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    margin-bottom: 10px;
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .meeting-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--ml-accent), var(--ml-accent2));
+    border-radius: 12px 0 0 12px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+  .meeting-card:hover { border-color: var(--ml-accent); background: var(--bg-elevated); box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+  .meeting-card:hover::before { opacity: 1; }
+
+  .meeting-left { display: flex; align-items: center; gap: 16px; min-width: 0; flex: 1; }
+  .meeting-icon {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, rgba(0,229,176,0.15), rgba(182,255,0,0.12));
+    border: 1px solid rgba(0,229,176,0.3);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
+  }
+  .meeting-info { min-width: 0; }
+  .meeting-title {
+    font-weight: 600; font-size: 0.975rem; color: var(--text-primary);
+    margin: 0 0 5px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 100%; line-height: 1.3;
+  }
+  .meeting-title a { color: inherit; text-decoration: none; transition: color 0.15s ease; }
+  .meeting-title a:hover { color: var(--ml-accent); }
+  .meeting-meta { font-size: 0.8rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; line-height: 1.4; }
+  .meeting-meta strong { color: var(--text-secondary); font-weight: 500; }
+  .meeting-meta .sep { color: var(--border-mid); }
+  .meeting-date-badge {
+    font-family: 'DM Mono', monospace; font-size: 0.75rem; font-weight: 500;
+    padding: 3px 8px; border-radius: 5px;
+    background: rgba(0,229,176,0.12);
+    border: 1px solid rgba(0,229,176,0.3);
+    color: var(--ml-accent); letter-spacing: 0.03em;
+  }
+
+  .meeting-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+  .btn-view-ml {
+    background: linear-gradient(135deg, #065f46, #00b894) !important;
+    color: #fff !important;
+    border: none !important;
+    white-space: nowrap;
+    min-width: 80px;
+    text-align: center;
+  }
+  .btn-view-ml:hover {
+    background: linear-gradient(135deg, #047857, #00e5b0) !important;
+    box-shadow: 0 4px 12px rgba(0,229,176,0.35) !important;
+  }
+
+  .no-meetings {
+    padding: 60px 20px; text-align: center; color: var(--text-muted);
+    background: var(--bg-surface);
+    border: 1px dashed rgba(0,229,176,0.25);
+    border-radius: 14px; margin-top: 8px;
+  }
+  .no-meetings p { margin: 6px 0; color: var(--text-muted); }
+  .no-meetings strong { color: var(--text-secondary); }
+  .no-meetings .no-meetings-icon { font-size: 2.5rem; margin-bottom: 12px; opacity: 0.4; }
+
+  @media (max-width: 640px) {
+    .meeting-card { flex-direction: column; align-items: flex-start; padding: 14px 16px; }
+    .meeting-left { width: 100%; }
+    .meeting-title { white-space: normal; }
+    .meeting-actions { width: 100%; justify-content: flex-start; }
+    .meeting-icon { display: none; }
+    .history-toolbar { padding: 14px 16px; }
+    .history-toolbar-select { min-width: 100%; width: 100%; }
+  }
+</style>
+
+<div class="history-container">
+
+  <div class="page-header">
+    <h1>🤖 ML Race Meetings <span class="ml-badge">ML SELECTIONS</span></h1>
+    <p>Race meetings with ML scores — horses ranked by ML model output, not Analyzer score.
+       See <a href="{{ url_for('history') }}" style="color:var(--ml-accent)">Race Analysis Lists</a> for Analyzer rankings.</p>
+  </div>
+
+  {% if meetings %}
+
+    <div class="history-toolbar" id="historyToolbar">
+      <span class="history-toolbar-label">Find by raceday:</span>
+      <select id="dateSelect" class="history-toolbar-select">
+        <option value="">All dates</option>
+      </select>
+      <button type="button" class="btn btn-sm btn-secondary" id="filterBtn" aria-pressed="false">Filter</button>
+      <button type="button" class="btn btn-sm btn-secondary" id="clearBtn">Clear</button>
+    </div>
+
+    {% for m in meetings %}
+      <div class="meeting-card"
+           role="article"
+           aria-labelledby="ml-meeting-{{ m.id }}"
+           data-meeting-date="{{ m.date.strftime('%Y-%m-%d') if m.date else '' }}">
+
+        <div class="meeting-left">
+          <div class="meeting-icon">🤖</div>
+          <div class="meeting-info">
+            <h2 id="ml-meeting-{{ m.id }}" class="meeting-title">
+              <a href="{{ url_for('ml_view_meeting', meeting_id=m.id) }}">
+                {{ m.meeting_name }}
+              </a>
+            </h2>
+            <div class="meeting-meta">
+              <span>Uploaded by <strong>{{ m.user.username if m.user else 'unknown' }}</strong></span>
+              <span class="sep">•</span>
+              <span title="{{ m.uploaded_at.isoformat() if m.uploaded_at }}">
+                {{ m.uploaded_at.strftime('%Y-%m-%d %H:%M') if m.uploaded_at else 'unknown' }}
+              </span>
+              {% if m.date %}
+                <span class="sep">•</span>
+                <span class="meeting-date-badge">{{ m.date.strftime('%d-%m-%y') }}</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="meeting-actions">
+          <a class="btn btn-sm btn-view-ml"
+             href="{{ url_for('ml_view_meeting', meeting_id=m.id) }}">
+            ML View
+          </a>
+        </div>
+
+      </div>
+    {% endfor %}
+
+    <script>
+      (function () {
+        const cards = Array.from(document.querySelectorAll('.meeting-card[data-meeting-date]'));
+        const dateSelect = document.getElementById('dateSelect');
+        const filterBtn = document.getElementById('filterBtn');
+        const clearBtn = document.getElementById('clearBtn');
+
+        const dates = [...new Set(cards.map(c => c.dataset.meetingDate).filter(Boolean))].sort();
+
+        function formatAuDDMMYY(isoDate) {
+          const [y, m, d] = isoDate.split('-');
+          return `${d}-${m}-${y.slice(2)}`;
+        }
+
+        function todayIsoLocal() {
+          const now = new Date();
+          const y = now.getFullYear();
+          const m = String(now.getMonth() + 1).padStart(2, '0');
+          const d = String(now.getDate()).padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        }
+
+        for (const d of dates) {
+          const opt = document.createElement('option');
+          opt.value = d;
+          opt.textContent = formatAuDDMMYY(d);
+          dateSelect.appendChild(opt);
+        }
+
+        function applyFilter(date) {
+          for (const c of cards) {
+            c.style.display = (!date || c.dataset.meetingDate === date) ? '' : 'none';
+          }
+        }
+
+        const today = todayIsoLocal();
+        if (dates.includes(today)) {
+          dateSelect.value = today;
+          filterBtn.setAttribute('aria-pressed', 'true');
+          applyFilter(today);
+        } else {
+          filterBtn.setAttribute('aria-pressed', 'false');
+          applyFilter('');
+        }
+
+        filterBtn.addEventListener('click', () => {
+          const d = dateSelect.value;
+          if (!d) { filterBtn.setAttribute('aria-pressed', 'false'); applyFilter(''); return; }
+          filterBtn.setAttribute('aria-pressed', 'true');
+          applyFilter(d);
+        });
+
+        clearBtn.addEventListener('click', () => {
+          dateSelect.value = '';
+          filterBtn.setAttribute('aria-pressed', 'false');
+          applyFilter('');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      })();
+    </script>
+
+  {% else %}
+    <div class="no-meetings">
+      <div class="no-meetings-icon">🤖</div>
+      <p><strong>No meetings with ML scores found.</strong></p>
+      <p>Score meetings using the <a href="{{ url_for('ml_shadow') }}" style="color:var(--ml-accent)">ML Shadow</a> page first, then they will appear here.</p>
+      <br>
+      <a href="{{ url_for('history') }}" class="btn btn-outline-secondary btn-sm">View All Race Meetings</a>
+    </div>
+  {% endif %}
+
+</div>
+
+{% endblock %}
