@@ -3128,6 +3128,16 @@ def dashboard():
         ml_performance_stats=ml_performance_stats,
     )
 
+
+
+def _filter_ml_predictions(query):
+    """Limit analytics queries to rows that have real ML scores when source=ml is requested."""
+    return query.filter(Prediction.ml_score.isnot(None))
+
+def _join_ml_predictions_for_race_ids(query):
+    """Limit race-id discovery to races represented in the persisted ML result set."""
+    return query.join(Prediction, Prediction.horse_id == Horse.id).filter(Prediction.ml_score.isnot(None))
+
 def calculate_ml_performance_stats():
     """Calculate ML top-pick performance using one settled, non-scratched ML pick per race."""
     rows = db.session.execute(text("""
@@ -4991,7 +5001,8 @@ def data_analytics():
         Race.race_number,
         Prediction.score,
         Result.finish_position,
-        Result.sp
+        Result.sp,
+        Prediction.ml_score
     ).join(Race,       Race.meeting_id      == Meeting.id
     ).join(Horse,      Horse.race_id        == Race.id
     ).join(Prediction, Prediction.horse_id  == Horse.id
@@ -5500,6 +5511,8 @@ def api_jurisdiction_strength():
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
 
+    use_ml = request.args.get('source', '') == 'ml'
+
     try:
         from collections import Counter, defaultdict
 
@@ -5532,7 +5545,13 @@ def api_jurisdiction_strength():
         sample_headers_without_previous_track = []
         meeting_column_map = {}
 
-        meetings = db.session.query(Meeting.id, Meeting.csv_data).filter(Meeting.csv_data.isnot(None)).all()
+        meetings_query = db.session.query(Meeting.id, Meeting.csv_data).filter(Meeting.csv_data.isnot(None))
+        if use_ml:
+            meetings_query = meetings_query.join(Race, Race.meeting_id == Meeting.id)
+            meetings_query = meetings_query.join(Horse, Horse.race_id == Race.id)
+            meetings_query = meetings_query.join(Prediction, Prediction.horse_id == Horse.id)
+            meetings_query = meetings_query.filter(Prediction.ml_score.isnot(None)).distinct()
+        meetings = meetings_query.all()
 
         for meeting_id, csv_data in meetings:
             if not csv_data or not str(csv_data).strip():
@@ -5940,6 +5959,8 @@ def api_score_analysis():
         q = q.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         q = q.filter(Meeting.uploaded_at <= date_to)
+    if use_ml:
+        q = _filter_ml_predictions(q)
 
     q = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc())
     rows = q.all()
@@ -6248,6 +6269,7 @@ def api_component_analysis():
     date_from        = request.args.get('date_from', '')
     date_to          = request.args.get('date_to', '')
     limit_param      = request.args.get('limit', 'all')
+    use_ml = request.args.get('source', '') == 'ml'
 
     # ── Build race id list ──────────────────────────────────────────────
     race_id_query = db.session.query(
@@ -6268,6 +6290,8 @@ def api_component_analysis():
         race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+    if use_ml:
+        race_id_query = _join_ml_predictions_for_race_ids(race_id_query)
 
     all_race_ids = race_id_query.distinct().order_by(
         Meeting.uploaded_at.desc(), Race.id.desc()
@@ -6299,7 +6323,10 @@ def api_component_analysis():
     ).filter(
         Result.finish_position > 0,
         Race.id.in_(recent_race_ids)
-    ).all()
+    )
+    if use_ml:
+        rows = _filter_ml_predictions(rows)
+    rows = rows.all()
 
     # ── Group into races — use analyzer score for ranking ───────────────
     races = defaultdict(list)
@@ -7370,6 +7397,7 @@ def api_external_factors():
     date_to      = request.args.get('date_to', '')
     limit_param  = request.args.get('limit', '200')
     stake        = 10.0
+    use_ml = request.args.get('source', '') == 'ml'
 
     # ── Lean race ID query ────────────────────────────────────────────
     race_id_q = db.session.query(Race.id).join(
@@ -7384,6 +7412,8 @@ def api_external_factors():
         race_id_q = race_id_q.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         race_id_q = race_id_q.filter(Meeting.uploaded_at <= date_to)
+    if use_ml:
+        race_id_q = _join_ml_predictions_for_race_ids(race_id_q)
 
     all_ids = race_id_q.add_columns(Meeting.uploaded_at).distinct().order_by(
         Meeting.uploaded_at.desc(), Race.id.desc()
@@ -7428,7 +7458,10 @@ def api_external_factors():
     ).filter(
         Result.finish_position > 0,
         Race.id.in_(race_ids)
-    ).all()
+    )
+    if use_ml:
+        rows = _filter_ml_predictions(rows)
+    rows = rows.all()
 
     # ── Group into races for top-pick analysis ────────────────────────
     races_map = defaultdict(list)
@@ -7674,6 +7707,7 @@ def api_probability_calibration():
     date_from    = request.args.get('date_from', '')
     date_to      = request.args.get('date_to', '')
     limit_param  = request.args.get('limit', '200')
+    use_ml = request.args.get('source', '') == 'ml'
 
     from collections import defaultdict
 
@@ -7698,6 +7732,8 @@ def api_probability_calibration():
         q = q.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         q = q.filter(Meeting.uploaded_at <= date_to)
+    if use_ml:
+        q = _filter_ml_predictions(q)
 
     q = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc())
     rows = q.all()
@@ -7795,6 +7831,7 @@ def api_price_analysis():
     date_to          = request.args.get('date_to', '')
     limit_param      = request.args.get('limit', '200')
     top_n            = request.args.get('top_n', 1, type=int)  # how many top-ranked runners to test
+    use_ml = request.args.get('source', '') == 'ml'
 
     # ── Race ID subquery (no hardcoded date) ──────────────────────────────────
     race_id_query = db.session.query(Race.id).join(
@@ -7815,6 +7852,8 @@ def api_price_analysis():
         race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+    if use_ml:
+        race_id_query = _join_ml_predictions_for_race_ids(race_id_query)
 
     race_id_query = race_id_query.add_columns(Meeting.uploaded_at) \
         .distinct() \
@@ -7844,6 +7883,9 @@ def api_price_analysis():
         Result.finish_position > 0,
         Race.id.in_(recent_race_ids)
     )
+
+    if use_ml:
+        base_query = _filter_ml_predictions(base_query)
 
     if min_score_filter is not None:
         base_query = base_query.filter(Prediction.score >= min_score_filter)
@@ -8187,6 +8229,7 @@ def api_sole_leader_analysis():
     date_from    = request.args.get('date_from', '')
     date_to      = request.args.get('date_to', '')
     limit_param  = request.args.get('limit', '200')
+    use_ml = request.args.get('source', '') == 'ml'
 
     race_id_query = db.session.query(Race.id).join(
         Meeting, Race.meeting_id == Meeting.id
@@ -8205,6 +8248,8 @@ def api_sole_leader_analysis():
         race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+    if use_ml:
+        race_id_query = _join_ml_predictions_for_race_ids(race_id_query)
 
     all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(
         Meeting.uploaded_at.desc(), Race.id.desc()
@@ -8444,6 +8489,8 @@ def api_field_size():
         race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+    if use_ml:
+        race_id_query = _join_ml_predictions_for_race_ids(race_id_query)
 
     all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(
         Meeting.uploaded_at.desc(), Race.id.desc()
@@ -8551,6 +8598,7 @@ def api_days_since_run():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     limit_param = request.args.get('limit', 'all')
+    use_ml = request.args.get('source', '') == 'ml'
 
     race_id_query = db.session.query(Race.id).join(
         Meeting, Race.meeting_id == Meeting.id
@@ -8566,6 +8614,8 @@ def api_days_since_run():
         race_id_query = race_id_query.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         race_id_query = race_id_query.filter(Meeting.uploaded_at <= date_to)
+    if use_ml:
+        race_id_query = _join_ml_predictions_for_race_ids(race_id_query)
 
     all_race_ids = race_id_query.add_columns(Meeting.uploaded_at).distinct().order_by(
         Meeting.uploaded_at.desc(), Race.id.desc()
@@ -8721,6 +8771,8 @@ def api_market_divergence():
         race_id_q = race_id_q.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         race_id_q = race_id_q.filter(Meeting.uploaded_at <= date_to)
+    if use_ml:
+        race_id_q = _join_ml_predictions_for_race_ids(race_id_q)
 
     all_ids = race_id_q.add_columns(Meeting.uploaded_at).distinct().order_by(
         Meeting.uploaded_at.desc(), Race.id.desc()
@@ -8920,6 +8972,8 @@ def api_pfai_analysis():
         return jsonify({'error': 'Admin access required'}), 403
 
     import re
+    use_ml = request.args.get('source', '') == 'ml'
+
     from collections import defaultdict
 
     PFAI_RE = re.compile(
@@ -8946,7 +9000,10 @@ def api_pfai_analysis():
     ).filter(
         Result.finish_position > 0,
         Prediction.notes.like('%=== PFAI BLEND ===%')
-    ).order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
+    )
+    if use_ml:
+        rows = _filter_ml_predictions(rows)
+    rows = rows.order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
 
     # Group by race, parse blend scores from notes
     races = defaultdict(list)
@@ -9165,6 +9222,7 @@ def api_combination_analysis():
     limit_param     = request.args.get('limit', 'all')
     min_appearances = int(request.args.get('min_appearances', 10))
     stake           = 10.0
+    use_ml = request.args.get('source', '') == 'ml'
 
     # ── 1. Pull ALL horse rows across all races ────────────────────────────────
     q = db.session.query(
@@ -9199,6 +9257,8 @@ def api_combination_analysis():
         q = q.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         q = q.filter(Meeting.uploaded_at <= date_to)
+    if use_ml:
+        q = _filter_ml_predictions(q)
 
     q = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc())
     rows = q.all()
@@ -10529,6 +10589,7 @@ def api_betting_filters():
     date_to      = request.args.get('date_to', '')
     limit_param  = request.args.get('limit', '200')
     stake        = 10.0
+    use_ml = request.args.get('source', '') == 'ml'
 
     # ── Race ID subquery ──────────────────────────────────────────────
     race_id_q = db.session.query(Race.id).join(
@@ -10543,6 +10604,8 @@ def api_betting_filters():
         race_id_q = race_id_q.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         race_id_q = race_id_q.filter(Meeting.uploaded_at <= date_to)
+    if use_ml:
+        race_id_q = _join_ml_predictions_for_race_ids(race_id_q)
 
     all_ids = race_id_q.add_columns(Meeting.uploaded_at).distinct().order_by(
         Meeting.uploaded_at.desc(), Race.id.desc()
@@ -10567,7 +10630,8 @@ def api_betting_filters():
         Prediction.win_probability,
         Prediction.predicted_odds,
         Result.finish_position,
-        Result.sp
+        Result.sp,
+        Prediction.ml_score
     ).join(Race,       Race.meeting_id      == Meeting.id
     ).join(Horse,      Horse.race_id        == Race.id
     ).join(Prediction, Prediction.horse_id  == Horse.id
@@ -10575,7 +10639,10 @@ def api_betting_filters():
     ).filter(
         Result.finish_position > 0,
         Race.id.in_(race_ids)
-    ).all()
+    )
+    if use_ml:
+        rows = _filter_ml_predictions(rows)
+    rows = rows.all()
 
     # ── Group by race ─────────────────────────────────────────────────
     from collections import defaultdict
@@ -10589,7 +10656,7 @@ def api_betting_filters():
     day_stats = {d: {'races': 0, 'wins': 0, 'profit': 0.0} for d in DAYS}
 
     for key, horses in races_map.items():
-        top = max(horses, key=lambda x: x[4])  # x[4] = score
+        top = max(horses, key=lambda x: (x.ml_score or 0) if use_ml else x.score)
         row = top
         # Determine date
         date_val = row[0]  # Meeting.date
@@ -12078,6 +12145,7 @@ def api_race_tempo_analysis():
     date_to      = request.args.get('date_to', '')
     limit_param  = request.args.get('limit', '200')
     stake        = 10.0
+    use_ml = request.args.get('source', '') == 'ml'
 
     # Build par time lookup from historical horses table
     par_query = """
@@ -12125,6 +12193,8 @@ def api_race_tempo_analysis():
         race_id_q = race_id_q.filter(Meeting.uploaded_at >= date_from)
     if date_to:
         race_id_q = race_id_q.filter(Meeting.uploaded_at <= date_to)
+    if use_ml:
+        race_id_q = _join_ml_predictions_for_race_ids(race_id_q)
 
     all_ids = race_id_q.add_columns(Meeting.uploaded_at).distinct().order_by(
         Meeting.uploaded_at.desc(), Race.id.desc()
@@ -12154,7 +12224,10 @@ def api_race_tempo_analysis():
     ).filter(
         Result.finish_position > 0,
         Race.id.in_(race_ids)
-    ).all()
+    )
+    if use_ml:
+        rows = _filter_ml_predictions(rows)
+    rows = rows.all()
 
     # Group by race for top-pick analysis
     races_map = defaultdict(list)
