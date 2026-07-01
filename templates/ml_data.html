@@ -552,7 +552,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (mlFieldSize) { mlFieldSize.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-field-size')) { loadMlFieldSize(); } }); }
     const mlMarketDivergence = document.getElementById('mlMarketDivergence');
     if (mlMarketDivergence) { mlMarketDivergence.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-market-divergence')) { loadMlMarketDivergence(); } }); }
-})
     const mlJurisdictionStrength = document.getElementById('mlJurisdictionStrength');
     if (mlJurisdictionStrength) { mlJurisdictionStrength.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-jurisdiction-strength')) { loadMlJurisdictionStrength(); } }); }
     const mlSoleLeaderAnalysis = document.getElementById('mlSoleLeaderAnalysis');
@@ -646,7 +645,7 @@ function loadMlJurisdictionStrength() {
 function loadMlSoleLeader() {
     const container = document.getElementById('mlSoleLeaderAnalysis');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML sole leader analysis...</p></div>';
-    fetch(`/api/data/sole-leader?${filterParams}`)
+    fetch(`/api/data/sole-leader-analysis?${filterParams}`)
         .then(r => r.json())
         .then(data => { renderMlSoleLeader(data); loadedSections.add('ml-sole-leader'); })
         .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML sole leader analysis. Please try again.</div>'; console.error(err); });
@@ -718,7 +717,7 @@ function loadMlPfaiAnalysis() {
 function loadMlDayOfWeek() {
     const container = document.getElementById('mlDayOfWeek');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML day of week performance...</p></div>';
-    fetch(`/api/data/day-of-week?${filterParams}`)
+    fetch(`/api/data/betting-filters?${filterParams}`)
         .then(r => r.json())
         .then(data => { renderMlDayOfWeek(data); loadedSections.add('ml-day-of-week'); })
         .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML day of week. Please try again.</div>'; console.error(err); });
@@ -727,7 +726,7 @@ function loadMlDayOfWeek() {
 function loadMlWinProbFilter() {
     const container = document.getElementById('mlWinProbFilter');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML win probability filter...</p></div>';
-    fetch(`/api/data/win-prob-filter?${filterParams}`)
+    fetch(`/api/data/betting-filters?${filterParams}`)
         .then(r => r.json())
         .then(data => { renderMlWinProbFilter(data); loadedSections.add('ml-win-prob-filter'); })
         .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML win probability filter. Please try again.</div>'; console.error(err); });
@@ -736,7 +735,7 @@ function loadMlWinProbFilter() {
 function loadMlRaceConfidence() {
     const container = document.getElementById('mlRaceConfidence');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML race confidence analysis...</p></div>';
-    fetch(`/api/data/race-confidence?${filterParams}`)
+    fetch(`/api/data/betting-filters?${filterParams}`)
         .then(r => r.json())
         .then(data => { renderMlRaceConfidence(data); loadedSections.add('ml-race-confidence'); })
         .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML race confidence. Please try again.</div>'; console.error(err); });
@@ -745,7 +744,7 @@ function loadMlRaceConfidence() {
 function loadMlRaceTempo() {
     const container = document.getElementById('mlRaceTempoAnalysis');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML race tempo analysis...</p></div>';
-    fetch(`/api/data/race-tempo?${filterParams}`)
+    fetch(`/api/data/race-tempo-analysis?${filterParams}`)
         .then(r => r.json())
         .then(data => { renderMlRaceTempo(data); loadedSections.add('ml-race-tempo'); })
         .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML race tempo. Please try again.</div>'; console.error(err); });
