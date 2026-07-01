@@ -5147,6 +5147,91 @@ def data_analytics():
     )
 
 
+@app.route("/ml-data")
+@login_required
+def ml_data_analytics():
+    """ML-specific data analytics page, using ml_score as the primary selection metric."""
+    if not current_user.is_admin:
+        flash("Access denied. Admin privileges required.", "danger")
+        return redirect(url_for("history"))
+
+    track_filter = request.args.get('track', '')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    limit_param = request.args.get('limit', '200')
+
+    tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
+    track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
+
+    ml_performance_stats = None
+    try:
+        ml_performance_stats = calculate_ml_performance_stats()
+    except Exception as e:
+        print(f"Error calculating ML performance stats: {e}")
+
+    return render_template("ml_data.html",
+        ml_performance_stats=ml_performance_stats,
+        track_list=track_list,
+        filters={
+            'track': track_filter,
+            'date_from': date_from,
+            'date_to': date_to,
+            'limit': int(limit_param) if limit_param != 'all' else 'all'
+        }
+    )
+
+
+@app.route("/ml-meetings")
+@login_required
+def ml_meetings():
+    """List of meetings that have ML scores, linking to the ML meeting view."""
+    from sqlalchemy import text as sa_text
+    scored_ids_rows = db.session.execute(sa_text("""
+        SELECT DISTINCT rc.meeting_id
+        FROM predictions p
+        JOIN horses h ON h.id = p.horse_id
+        JOIN races rc ON rc.id = h.race_id
+        WHERE p.ml_score IS NOT NULL
+    """)).fetchall()
+    scored_ids = {r[0] for r in scored_ids_rows}
+
+    meetings = Meeting.query.filter(Meeting.id.in_(scored_ids)).order_by(
+        Meeting.date.asc(), Meeting.uploaded_at.desc()
+    ).all()
+
+    meetings_json = [{
+        'id': m.id,
+        'meeting_name': m.meeting_name,
+        'user': m.user.username if m.user else 'unknown',
+        'uploaded_at': m.uploaded_at.isoformat() if m.uploaded_at else None,
+        'date': m.date.isoformat() if m.date else None
+    } for m in meetings]
+
+    import json
+    return render_template('ml_meetings.html', meetings=meetings, meetings_json=json.dumps(meetings_json))
+
+
+@app.route("/ml-meeting/<int:meeting_id>")
+@login_required
+def ml_view_meeting(meeting_id):
+    """View a meeting ranked by ML scores."""
+    meeting = Meeting.query.get_or_404(meeting_id)
+    results = get_meeting_results(meeting_id)
+
+    # Re-sort horses within each race by ml_score (highest first)
+    for race in results['races']:
+        race['horses'].sort(
+            key=lambda h: (h.get('ml_score') or 0),
+            reverse=True
+        )
+
+    return render_template(
+        "MLRaceMeetings.html",
+        meeting=meeting,
+        results=results,
+    )
+
+
 JURISDICTION_TRACKS = {
     'NSW_ACT': [
         'Randwick', 'Randwick-Kensington', 'Rosehill', 'Warwick Farm', 'Canterbury', 'Newcastle', 'Beaumont',
@@ -5700,6 +5785,7 @@ def api_state_performance():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     limit_param = request.args.get('limit', 'all')
+    use_ml = request.args.get('source', '') == 'ml'
 
     try:
         from collections import defaultdict
@@ -5735,6 +5821,7 @@ def api_state_performance():
             Meeting.id,
             Race.race_number,
             Prediction.score,
+            Prediction.ml_score,
             Result.finish_position,
             Result.sp
         ).join(
@@ -5747,6 +5834,8 @@ def api_state_performance():
             Result, Result.horse_id == Horse.id
         ).filter(Result.finish_position > 0)
 
+        if use_ml:
+            q = q.filter(Prediction.ml_score.isnot(None))
         if track_filter:
             q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
         if date_from:
@@ -5759,22 +5848,23 @@ def api_state_performance():
 
         races = defaultdict(list)
         race_keys_ordered = []
-        for meeting_id, race_num, score, finish_pos, sp in rows:
+        for meeting_id, race_num, score, ml_score, finish_pos, sp in rows:
             key = (meeting_id, race_num)
             if key not in races:
                 race_keys_ordered.append(key)
-            races[key].append({'score': score, 'finish_pos': finish_pos, 'sp': sp or 0})
+            races[key].append({'score': score, 'ml_score': ml_score or 0, 'finish_pos': finish_pos, 'sp': sp or 0})
 
         if limit_param != 'all':
             limit = int(limit_param) if str(limit_param).isdigit() else 200
             race_keys_ordered = race_keys_ordered[:limit]
 
         state_stats = defaultdict(lambda: {'races': 0, 'wins': 0, 'staked': 0.0, 'returns': 0.0})
+        sort_key = 'ml_score' if use_ml else 'score'
 
         for key in race_keys_ordered:
             horses = races[key]
-            top = max(horses, key=lambda x: x['score'])
-            if min_score_filter and top['score'] < min_score_filter:
+            top = max(horses, key=lambda x: x[sort_key])
+            if min_score_filter and top[sort_key] < min_score_filter:
                 continue
 
             state = meeting_state_by_id.get(key[0])
@@ -5825,6 +5915,7 @@ def api_score_analysis():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     limit_param = request.args.get('limit', 'all')
+    use_ml = request.args.get('source', '') == 'ml'
 
     from collections import defaultdict
 
@@ -5832,6 +5923,7 @@ def api_score_analysis():
         Meeting.id,
         Race.race_number,
         Prediction.score,
+        Prediction.ml_score,
         Result.finish_position,
         Result.sp
     ).join(Race,       Race.meeting_id      == Meeting.id
@@ -5840,6 +5932,8 @@ def api_score_analysis():
     ).join(Result,     Result.horse_id      == Horse.id
     ).filter(Result.finish_position > 0)
 
+    if use_ml:
+        q = q.filter(Prediction.ml_score.isnot(None))
     if track_filter:
         q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
@@ -5852,11 +5946,11 @@ def api_score_analysis():
 
     races = defaultdict(list)
     race_keys_ordered = []
-    for meeting_id, race_num, score, finish_pos, sp in rows:
+    for meeting_id, race_num, score, ml_score, finish_pos, sp in rows:
         key = (meeting_id, race_num)
         if key not in races:
             race_keys_ordered.append(key)
-        races[key].append({'score': score, 'finish_pos': finish_pos, 'sp': sp or 0})
+        races[key].append({'score': score, 'ml_score': ml_score or 0, 'finish_pos': finish_pos, 'sp': sp or 0})
 
     if limit_param != 'all':
         limit = int(limit_param) if str(limit_param).isdigit() else 200
@@ -5868,16 +5962,17 @@ def api_score_analysis():
     score_gaps  = {g: {'races': 0, 'wins': 0, 'profit': 0} for g in
                    ['50+','40-49','30-39','20-29','10-19','<10']}
 
+    sort_key = 'ml_score' if use_ml else 'score'
     for key in race_keys_ordered:
-        horses = sorted(races[key], key=lambda x: x['score'], reverse=True)
+        horses = sorted(races[key], key=lambda x: x[sort_key], reverse=True)
         if not horses:
             continue
         top = horses[0]
-        if min_score_filter and top['score'] < min_score_filter:
+        if min_score_filter and top[sort_key] < min_score_filter:
             continue
 
-        s = top['score']
-        gap = s - (horses[1]['score'] if len(horses) > 1 else 0)
+        s = top[sort_key]
+        gap = s - (horses[1][sort_key] if len(horses) > 1 else 0)
         won = top['finish_pos'] == 1
         profit = (top['sp'] * stake - stake) if won else -stake
 
@@ -7982,6 +8077,7 @@ def api_pnl_over_time():
     date_from    = request.args.get('date_from', '')
     date_to      = request.args.get('date_to', '')
     limit_param  = request.args.get('limit', '200')
+    use_ml = request.args.get('source', '') == 'ml'
 
     # SINGLE QUERY — no IN clause, only fetch what we need
     q = db.session.query(
@@ -7990,6 +8086,7 @@ def api_pnl_over_time():
         Meeting.meeting_name,
         Race.race_number,
         Prediction.score,
+        Prediction.ml_score,
         Result.finish_position,
         Result.sp
     ).join(Race,      Race.meeting_id      == Meeting.id
@@ -7998,6 +8095,8 @@ def api_pnl_over_time():
     ).join(Result,    Result.horse_id      == Horse.id
     ).filter(Result.finish_position > 0)
 
+    if use_ml:
+        q = q.filter(Prediction.ml_score.isnot(None))
     if track_filter:
         q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
@@ -8013,9 +8112,9 @@ def api_pnl_over_time():
     from collections import defaultdict
     races = defaultdict(list)
     race_meta = {}
-    for meeting_id, uploaded_at, meeting_name, race_num, score, finish_pos, sp in rows:
+    for meeting_id, uploaded_at, meeting_name, race_num, score, ml_score, finish_pos, sp in rows:
         key = (meeting_id, race_num)
-        races[key].append({'score': score, 'finish_pos': finish_pos, 'sp': sp or 0})
+        races[key].append({'score': score, 'ml_score': ml_score or 0, 'finish_pos': finish_pos, 'sp': sp or 0})
         if key not in race_meta:
             race_meta[key] = (uploaded_at, meeting_name, race_num)
 
@@ -8029,10 +8128,11 @@ def api_pnl_over_time():
     cumulative = 0.0
     data_points = []
     monthly = {}
+    sort_key = 'ml_score' if use_ml else 'score'
 
     for key in all_keys:
         horses = races[key]
-        top = max(horses, key=lambda x: x['score'])
+        top = max(horses, key=lambda x: x[sort_key])
         won   = top['finish_pos'] == 1
         sp    = top['sp']
         profit = (sp * stake - stake) if won else -stake
@@ -8328,6 +8428,7 @@ def api_field_size():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     limit_param = request.args.get('limit', 'all')
+    use_ml = request.args.get('source', '') == 'ml'
 
     race_id_query = db.session.query(Race.id).join(
         Meeting, Race.meeting_id == Meeting.id
@@ -8354,7 +8455,7 @@ def api_field_size():
         limit = int(limit_param) if limit_param.isdigit() else 200
         recent_race_ids = [r[0] for r in all_race_ids[:limit]]
 
-    all_results = db.session.query(
+    q = db.session.query(
         Horse, Prediction, Result, Race, Meeting
     ).join(
         Prediction, Horse.id == Prediction.horse_id
@@ -8367,7 +8468,10 @@ def api_field_size():
     ).filter(
         Result.finish_position > 0,
         Race.id.in_(recent_race_ids)
-    ).all()
+    )
+    if use_ml:
+        q = q.filter(Prediction.ml_score.isnot(None))
+    all_results = q.all()
 
     races_data = {}
     for horse, pred, result, race, meeting in all_results:
@@ -8397,7 +8501,10 @@ def api_field_size():
         else:
             bucket = 'Very Large (16+)'
 
-        horses_sorted = sorted(active, key=lambda x: x['prediction'].score, reverse=True)
+        if use_ml:
+            horses_sorted = sorted(active, key=lambda x: (x['prediction'].ml_score or 0), reverse=True)
+        else:
+            horses_sorted = sorted(active, key=lambda x: x['prediction'].score, reverse=True)
         top = horses_sorted[0]
         won = top['result'].finish_position == 1
         placed = top['result'].finish_position in [1, 2, 3]
@@ -8598,6 +8705,7 @@ def api_market_divergence():
     date_to      = request.args.get('date_to', '')
     limit_param  = request.args.get('limit', '200')
     stake        = 10.0
+    use_ml = request.args.get('source', '') == 'ml'
 
     race_id_q = db.session.query(Race.id).join(
         Meeting, Race.meeting_id == Meeting.id
@@ -8624,7 +8732,7 @@ def api_market_divergence():
         limit = int(limit_param) if limit_param.isdigit() else 200
         race_ids = [r[0] for r in all_ids[:limit]]
 
-    rows = db.session.query(
+    q = db.session.query(
         Horse, Prediction, Result, Race, Meeting
     ).join(
         Prediction, Horse.id == Prediction.horse_id
@@ -8637,7 +8745,10 @@ def api_market_divergence():
     ).filter(
         Result.finish_position > 0,
         Race.id.in_(race_ids)
-    ).all()
+    )
+    if use_ml:
+        q = q.filter(Prediction.ml_score.isnot(None))
+    rows = q.all()
 
     from collections import defaultdict
     races_map = defaultdict(list)
@@ -8646,6 +8757,7 @@ def api_market_divergence():
         races_map[key].append({
             'horse_id': horse.id,
             'score':    pred.score,
+            'ml_score': pred.ml_score or 0,
             'sp':       result.sp or 999,
             'result':   result,
         })
@@ -8655,6 +8767,7 @@ def api_market_divergence():
         'disagree': {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
     }
     skipped = 0
+    sort_key = 'ml_score' if use_ml else 'score'
 
     for race_data in races_map.values():
         valid = [h for h in race_data if h['sp'] < 900]
@@ -8662,7 +8775,7 @@ def api_market_divergence():
             skipped += 1
             continue
 
-        top_pick   = max(race_data, key=lambda x: x['score'])
+        top_pick   = max(race_data, key=lambda x: x[sort_key])
         market_fav = min(valid, key=lambda x: x['sp'])
 
         won    = top_pick['result'].finish_position == 1
@@ -8705,6 +8818,7 @@ def api_monthly_performance():
     date_to      = request.args.get('date_to', '')
     limit_param  = request.args.get('limit', '500')
     stake        = 10.0
+    use_ml = request.args.get('source', '') == 'ml'
 
     q = db.session.query(
         Meeting.id,
@@ -8712,6 +8826,7 @@ def api_monthly_performance():
         Meeting.date,
         Race.race_number,
         Prediction.score,
+        Prediction.ml_score,
         Result.finish_position,
         Result.sp
     ).join(Race,       Race.meeting_id       == Meeting.id
@@ -8720,6 +8835,8 @@ def api_monthly_performance():
     ).join(Result,     Result.horse_id       == Horse.id
     ).filter(Result.finish_position > 0)
 
+    if use_ml:
+        q = q.filter(Prediction.ml_score.isnot(None))
     if track_filter:
         q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
@@ -8734,7 +8851,7 @@ def api_monthly_performance():
     # Group into races first
     races = defaultdict(list)
     race_keys_ordered = []
-    for meeting_id, uploaded_at, meeting_date, race_num, score, finish_pos, sp in rows:
+    for meeting_id, uploaded_at, meeting_date, race_num, score, ml_score, finish_pos, sp in rows:
         key = (meeting_id, race_num)
         if key not in races:
             race_keys_ordered.append(key)
@@ -8752,6 +8869,7 @@ def api_monthly_performance():
         races[key].append({
             'period':     period,
             'score':      score,
+            'ml_score':   ml_score or 0,
             'finish_pos': finish_pos,
             'sp':         sp or 0
         })
@@ -8762,10 +8880,11 @@ def api_monthly_performance():
         race_keys_ordered = race_keys_ordered[:limit]
 
     monthly = defaultdict(lambda: {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0})
+    sort_key = 'ml_score' if use_ml else 'score'
 
     for key in race_keys_ordered:
         race_data = races[key]
-        top    = max(race_data, key=lambda x: x['score'])
+        top    = max(race_data, key=lambda x: x[sort_key])
         period = top['period']
         won    = top['finish_pos'] == 1
         placed = top['finish_pos'] in [1, 2, 3]
