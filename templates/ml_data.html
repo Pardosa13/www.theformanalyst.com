@@ -1251,7 +1251,7 @@ function renderMlJurisdictionStrength(data) {
             <h6 class="mb-0">State-to-State Interstate Matrix</h6>
             <div class="d-flex flex-wrap gap-2">
                 <label class="small text-muted">Origin
-                    <select id="jurisdictionMatrixOrigin" class="form-select form-select-sm">
+                    <select id="mlJurisdictionMatrixOrigin" class="form-select form-select-sm">
                         <option value="ALL">All origins</option>
                         <option value="NSW_ACT">NSW_ACT</option>
                         <option value="VIC">VIC</option>
@@ -1263,7 +1263,7 @@ function renderMlJurisdictionStrength(data) {
                     </select>
                 </label>
                 <label class="small text-muted">Minimum sample
-                    <select id="jurisdictionMatrixMinimum" class="form-select form-select-sm">
+                    <select id="mlJurisdictionMatrixMinimum" class="form-select form-select-sm">
                         <option value="0">0+</option>
                         <option value="25" selected>25+</option>
                         <option value="50">50+</option>
@@ -1272,7 +1272,7 @@ function renderMlJurisdictionStrength(data) {
                 </label>
             </div>
         </div>
-        <div id="jurisdictionMatrixTable"></div>
+        <div id="mlJurisdictionMatrixTable"></div>
         ${renderMlJurisdictionUnmapped(unmappedTracks, escapeHtml)}
         ${renderMlJurisdictionMeta(meta, escapeHtml)}
     </div>`;
@@ -2306,7 +2306,7 @@ function renderMlProbabilityCalibration(data) {
 
     html += `<div class="row">
         <div class="col-md-8">
-            <canvas id="calibrationChart" height="160"></canvas>
+            <canvas id="mlCalibrationChart" height="160"></canvas>
         </div>
         <div class="col-md-4">
             <div class="p-3 bg-light rounded">
@@ -2424,7 +2424,7 @@ function renderMlDaysSinceRun(data) {
         // FIX: chartBuckets filter uses s.runs (not s.races)
         const chartBuckets = order.filter(b => b !== 'First Start / Unknown' && dsr[b]?.runs > 0);
         if (chartBuckets.length > 0) {
-            html += `<canvas id="dsrChart" height="120" class="mt-3"></canvas>`;
+            html += `<canvas id="mlDsrChart" height="120" class="mt-3"></canvas>`;
         }
     }
     html += '</div>';
@@ -2836,7 +2836,7 @@ function renderMlPfaiAnalysis(data) {
                         <tbody>${bandRows}</tbody>
                     </table>
                 </div>
-                <canvas id="pfaiBandChart" height="120" class="mt-3"></canvas>
+                <canvas id="mlPfaiBandChart" height="120" class="mt-3"></canvas>
             </div>
         </div>
 
@@ -2964,7 +2964,7 @@ function renderMlDayOfWeek(data) {
     }
 
     html += `</tbody></table></div>
-        <canvas id="dowChart" height="120" class="mt-3"></canvas>
+        <canvas id="mlDowChart" height="120" class="mt-3"></canvas>
         <div class="alert alert-info mt-3">
             <strong>💡 How to use this:</strong>
             If Saturday produces a consistently higher ROI than mid-week days, it likely means better quality racing and more accurate market prices to compare against.
@@ -3050,7 +3050,7 @@ function renderMlWinProbFilter(data) {
     }
 
     html += `</tbody></table></div>
-        <canvas id="wpChart" height="120" class="mt-3"></canvas>
+        <canvas id="mlWpChart" height="120" class="mt-3"></canvas>
         <div class="alert alert-info mt-3">
             <strong>💡 How to interpret this:</strong>
             If ROI climbs as the threshold increases, the win probability is <em>predictive</em> — your model's confidence is meaningful and filtering by it adds real value.
@@ -3176,7 +3176,7 @@ function renderMlRaceConfidence(data) {
     }
 
     html += `</tbody></table></div>
-        <canvas id="confChart" height="120" class="mt-3"></canvas>
+        <canvas id="mlConfChart" height="120" class="mt-3"></canvas>
         <div class="alert alert-info mt-3">
             <strong>💡 How to interpret this:</strong>
             A rising ROI curve as the gap threshold increases means your model <em>knows when it knows</em> — high-confidence races genuinely perform better.
@@ -3295,7 +3295,7 @@ function renderMlRaceTempo(data) {
     }
 
     html += `</tbody></table></div>
-        <canvas id="tempoChart" height="120" class="mt-3"></canvas>
+        <canvas id="mlTempoChart" height="120" class="mt-3"></canvas>
         <div class="alert alert-info mt-3">
             <strong>💡 What to look for:</strong>
             If fast race horses (1s+ quicker than par) show meaningfully higher ROI, this is a genuine edge —
