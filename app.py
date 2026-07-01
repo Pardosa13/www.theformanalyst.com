@@ -3138,9 +3138,22 @@ def _join_ml_predictions_for_race_ids(query):
     """Limit race-id discovery to races represented in the persisted ML result set."""
     return query.join(Prediction, Prediction.horse_id == Horse.id).filter(Prediction.ml_score.isnot(None))
 
-def calculate_ml_performance_stats():
-    """Calculate ML top-pick performance using one settled, non-scratched ML pick per race."""
-    rows = db.session.execute(text("""
+def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", limit_param="all"):
+    """Calculate ML top-pick performance using filtered, limited settled ML races."""
+    params = {}
+    filters = []
+    if track_filter:
+        filters.append("LOWER(m.meeting_name) LIKE :track_filter")
+        params["track_filter"] = f"%{track_filter.lower()}%"
+    if date_from:
+        filters.append("m.uploaded_at >= :date_from")
+        params["date_from"] = date_from
+    if date_to:
+        filters.append("m.uploaded_at <= :date_to")
+        params["date_to"] = date_to
+    extra_where = " AND " + " AND ".join(filters) if filters else ""
+
+    rows = db.session.execute(text(f"""
         SELECT
             rc.id AS race_id,
             p.ml_score,
@@ -3150,23 +3163,36 @@ def calculate_ml_performance_stats():
         FROM predictions p
         JOIN horses h ON h.id = p.horse_id
         JOIN races rc ON rc.id = h.race_id
+        JOIN meetings m ON m.id = rc.meeting_id
         JOIN results r ON r.horse_id = h.id
         WHERE p.ml_score IS NOT NULL
           AND COALESCE(h.is_scratched, FALSE) = FALSE
           AND r.finish_position IS NOT NULL
           AND r.finish_position > 0
           AND r.sp IS NOT NULL
-    """)).fetchall()
+          {extra_where}
+        ORDER BY m.uploaded_at DESC, rc.id DESC
+    """), params).fetchall()
 
     from collections import defaultdict
     races = defaultdict(list)
+    race_order = []
     for row in rows:
+        if row.race_id not in races:
+            race_order.append(row.race_id)
         races[row.race_id].append(row)
+
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        race_order = race_order[:limit]
+    else:
+        race_order = list(races.keys())
 
     selections = wins = places = 0
     total_return = 0.0
 
-    for horses in races.values():
+    for race_id in race_order:
+        horses = races[race_id]
         if not horses:
             continue
         top_pick = max(horses, key=lambda x: x.ml_score or 0)
@@ -5132,7 +5158,7 @@ def data_analytics():
 
     ml_performance_stats = None
     try:
-        ml_performance_stats = calculate_ml_performance_stats()
+        ml_performance_stats = calculate_ml_performance_stats(track_filter, date_from, date_to, limit_param)
     except Exception as e:
         print(f"Error calculating ML performance stats: {e}")
 
@@ -5176,7 +5202,7 @@ def ml_data_analytics():
 
     ml_performance_stats = None
     try:
-        ml_performance_stats = calculate_ml_performance_stats()
+        ml_performance_stats = calculate_ml_performance_stats(track_filter, date_from, date_to, limit_param)
     except Exception as e:
         print(f"Error calculating ML performance stats: {e}")
 
@@ -6314,6 +6340,7 @@ def api_component_analysis():
         Race.id,
         Horse.horse_name,
         Prediction.score,
+        Prediction.ml_score,
         Prediction.notes,
         Result.finish_position,
         Result.sp
@@ -6328,13 +6355,14 @@ def api_component_analysis():
         rows = _filter_ml_predictions(rows)
     rows = rows.all()
 
-    # ── Group into races — use analyzer score for ranking ───────────────
+    # ── Group into races — use ML score for ranking when source=ml ───────
     races = defaultdict(list)
-    for race_id, horse_name, score, notes, finish_pos, sp in rows:
+    for race_id, horse_name, score, ml_score, notes, finish_pos, sp in rows:
         analyzer_score = _parse_analyzer_score(notes)
+        ranking_score = (ml_score or 0) if use_ml else (analyzer_score if analyzer_score is not None else (score or 0))
         races[race_id].append({
             'horse_name': horse_name,
-            'score':      analyzer_score if analyzer_score is not None else (score or 0),
+            'score':      ranking_score,
             'notes':      notes or '',
             'finish_pos': finish_pos,
             'sp':         sp or 0,
@@ -7888,7 +7916,8 @@ def api_price_analysis():
         base_query = _filter_ml_predictions(base_query)
 
     if min_score_filter is not None:
-        base_query = base_query.filter(Prediction.score >= min_score_filter)
+        score_column = Prediction.ml_score if use_ml else Prediction.score
+        base_query = base_query.filter(score_column >= min_score_filter)
 
     all_results = base_query.all()
 
@@ -7945,8 +7974,12 @@ def api_price_analysis():
             skipped += 1
             continue
 
-        # Sort by model score descending
-        horses_sorted = sorted(horses, key=lambda x: x['prediction'].score, reverse=True)
+        # Sort by the requested model score descending
+        horses_sorted = sorted(
+            horses,
+            key=lambda x: ((x['prediction'].ml_score or 0) if use_ml else (x['prediction'].score or 0)),
+            reverse=True
+        )
 
         # ── Top-N picks overlay ───────────────────────────────────────────────
         for rank_idx, runner in enumerate(horses_sorted[:top_n]):
@@ -7989,7 +8022,7 @@ def api_price_analysis():
 
                     overlay_examples.append({
                         'horse':       runner['horse'].horse_name,
-                        'score':       pred.score,
+                        'score':       (pred.ml_score if use_ml else pred.score),
                         'your_price':  predicted_odds,
                         'sp':          sp,
                         'overlay_pct': round(edge, 1),
