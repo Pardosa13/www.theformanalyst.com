@@ -25,6 +25,21 @@ from afl_routes import register_afl_routes, afl_nightly_sync
 from mma_routes import register_mma_routes
 from ml_shadow_routes import register_ml_shadow_routes
 
+# Temporary ML performance verification filter. Remove this helper when a verified
+# prediction timestamp column is available; it must only affect performance stats.
+ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260625'
+
+
+def _ml_performance_meeting_name_sql(alias='m'):
+    """Temporary SQL fragment for verified ML performance meetings."""
+    return f"LEFT({alias}.meeting_name, 6) >= '{ML_PERFORMANCE_MEETING_NAME_CUTOFF}'"
+
+
+def _filter_verified_ml_performance_meetings(query):
+    """Restrict ML performance analytics to meetings from 25 June 2026 onwards."""
+    return query.filter(text(_ml_performance_meeting_name_sql('meetings')))
+
+
 import logging
 import sys
 
@@ -3131,12 +3146,16 @@ def dashboard():
 
 
 def _filter_ml_predictions(query):
-    """Limit analytics queries to rows that have real ML scores when source=ml is requested."""
-    return query.filter(Prediction.ml_score.isnot(None))
+    """Limit ML performance analytics to verified rows with real ML scores."""
+    return _filter_verified_ml_performance_meetings(
+        query.filter(Prediction.ml_score.isnot(None))
+    )
 
 def _join_ml_predictions_for_race_ids(query):
-    """Limit race-id discovery to races represented in the persisted ML result set."""
-    return query.join(Prediction, Prediction.horse_id == Horse.id).filter(Prediction.ml_score.isnot(None))
+    """Limit race-id discovery to races represented in verified persisted ML results."""
+    return _filter_verified_ml_performance_meetings(
+        query.join(Prediction, Prediction.horse_id == Horse.id).filter(Prediction.ml_score.isnot(None))
+    )
 
 def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", limit_param="all"):
     """Calculate ML top-pick performance using filtered, limited settled ML races."""
@@ -3166,6 +3185,7 @@ def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", li
         JOIN meetings m ON m.id = rc.meeting_id
         JOIN results r ON r.horse_id = h.id
         WHERE p.ml_score IS NOT NULL
+          AND {_ml_performance_meeting_name_sql('m')}
           AND COALESCE(h.is_scratched, FALSE) = FALSE
           AND r.finish_position IS NOT NULL
           AND r.finish_position > 0
@@ -5156,12 +5176,6 @@ def data_analytics():
     except Exception as e:
         print(f"Error calculating Best Bets stats: {e}")
 
-    ml_performance_stats = None
-    try:
-        ml_performance_stats = calculate_ml_performance_stats(track_filter, date_from, date_to, limit_param)
-    except Exception as e:
-        print(f"Error calculating ML performance stats: {e}")
-
     return render_template("data.html",
         total_races=total_races,
         strike_rate=strike_rate,
@@ -5173,7 +5187,6 @@ def data_analytics():
         avg_winner_sp=avg_winner_sp,
         track_list=track_list,
         best_bets_stats=best_bets_stats,
-        ml_performance_stats=ml_performance_stats,
         filters={
             'track': track_filter,
             'min_score': min_score_filter,
@@ -5202,7 +5215,7 @@ def ml_data_analytics():
 
     ml_performance_stats = None
     try:
-        ml_performance_stats = calculate_ml_performance_stats(track_filter, date_from, date_to, limit_param)
+        ml_performance_stats = calculate_ml_performance_stats()
     except Exception as e:
         print(f"Error calculating ML performance stats: {e}")
 
@@ -5576,7 +5589,7 @@ def api_jurisdiction_strength():
             meetings_query = meetings_query.join(Race, Race.meeting_id == Meeting.id)
             meetings_query = meetings_query.join(Horse, Horse.race_id == Race.id)
             meetings_query = meetings_query.join(Prediction, Prediction.horse_id == Horse.id)
-            meetings_query = meetings_query.filter(Prediction.ml_score.isnot(None)).distinct()
+            meetings_query = _filter_ml_predictions(meetings_query).distinct()
         meetings = meetings_query.all()
 
         for meeting_id, csv_data in meetings:
@@ -5880,7 +5893,7 @@ def api_state_performance():
         ).filter(Result.finish_position > 0)
 
         if use_ml:
-            q = q.filter(Prediction.ml_score.isnot(None))
+            q = _filter_ml_predictions(q)
         if track_filter:
             q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
         if date_from:
@@ -5978,7 +5991,7 @@ def api_score_analysis():
     ).filter(Result.finish_position > 0)
 
     if use_ml:
-        q = q.filter(Prediction.ml_score.isnot(None))
+        q = _filter_ml_predictions(q)
     if track_filter:
         q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
@@ -8171,7 +8184,7 @@ def api_pnl_over_time():
     ).filter(Result.finish_position > 0)
 
     if use_ml:
-        q = q.filter(Prediction.ml_score.isnot(None))
+        q = _filter_ml_predictions(q)
     if track_filter:
         q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
@@ -8550,7 +8563,7 @@ def api_field_size():
         Race.id.in_(recent_race_ids)
     )
     if use_ml:
-        q = q.filter(Prediction.ml_score.isnot(None))
+        q = _filter_ml_predictions(q)
     all_results = q.all()
 
     races_data = {}
@@ -8832,7 +8845,7 @@ def api_market_divergence():
         Race.id.in_(race_ids)
     )
     if use_ml:
-        q = q.filter(Prediction.ml_score.isnot(None))
+        q = _filter_ml_predictions(q)
     rows = q.all()
 
     from collections import defaultdict
@@ -8921,7 +8934,7 @@ def api_monthly_performance():
     ).filter(Result.finish_position > 0)
 
     if use_ml:
-        q = q.filter(Prediction.ml_score.isnot(None))
+        q = _filter_ml_predictions(q)
     if track_filter:
         q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
     if date_from:
