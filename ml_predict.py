@@ -343,26 +343,87 @@ FEATURE_NAMES = [
     'jockeys_can_claim'
 ]
 
+# ── In-memory model cache ─────────────────────────────────────────────────────
+# Stores the last loaded model together with the fingerprint that was current
+# when it was loaded.  ``_cache_fingerprint`` is either:
+#   • a (run_date, updated_at) tuple when the model came from Postgres, or
+#   • the file mtime (float) when it came from the local filesystem.
+_cached_model = None
+_cache_fingerprint = None
+
+
+def _db_fingerprint(db_url: str):
+    """
+    Return (run_date, updated_at) for the most-recent row in
+    backtest_best_model, or None if the table is empty / unreachable.
+    """
+    try:
+        from sqlalchemy import create_engine, text
+        if db_url.startswith('postgres://'):
+            db_url = db_url.replace('postgres://', 'postgresql://', 1)
+        eng = create_engine(db_url, pool_pre_ping=True)
+        with eng.connect() as conn:
+            row = conn.execute(text(
+                "SELECT run_date, updated_at FROM backtest_best_model "
+                "ORDER BY run_date DESC LIMIT 1"
+            )).fetchone()
+            if row:
+                return (row[0], row[1])
+    except Exception as e:
+        log.debug(f"Could not query model fingerprint from DB: {e}")
+    return None
+
+
 def load_model():
-    """Load the pkl model. Tries filesystem first, then DB."""
+    """
+    Return the trained Random Forest model, using a module-level cache.
+
+    The cache is invalidated automatically whenever the active artifact in
+    Postgres changes (detected via the ``run_date`` / ``updated_at`` columns)
+    or, for the filesystem path, whenever the ``.pkl`` file is modified.
+    A fresh load is performed only on the first call and after a change is
+    detected; all other calls return the cached object immediately.
+    """
+    global _cached_model, _cache_fingerprint
+
     model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'form_analyst_best.pkl')
+
+    # ── Filesystem path ───────────────────────────────────────────────────────
     if os.path.exists(model_path):
         import joblib
-        return joblib.load(model_path)
+        mtime = os.path.getmtime(model_path)
+        if _cached_model is not None and _cache_fingerprint == mtime:
+            log.debug("Returning cached model (filesystem, mtime unchanged).")
+            return _cached_model
+        log.info(f"Loading model from filesystem (mtime changed or first load): {model_path}")
+        _cached_model = joblib.load(model_path)
+        _cache_fingerprint = mtime
+        return _cached_model
 
+    # ── Postgres path ─────────────────────────────────────────────────────────
+    db_url = os.environ.get('DATABASE_URL', '')
+    if db_url.startswith('postgres://'):
+        db_url = db_url.replace('postgres://', 'postgresql://', 1)
+
+    # Lightweight fingerprint check — avoids a full pkl download when unchanged.
+    fp = _db_fingerprint(db_url)
+    if fp is not None and _cached_model is not None and _cache_fingerprint == fp:
+        log.debug("Returning cached model (DB artifact unchanged, fingerprint=%s).", fp)
+        return _cached_model
+
+    log.info("Loading model from DB (artifact changed or first load, fingerprint=%s).", fp)
     try:
         from sqlalchemy import create_engine, text
         import io, joblib
-        db_url = os.environ.get('DATABASE_URL', '')
-        if db_url.startswith('postgres://'):
-            db_url = db_url.replace('postgres://', 'postgresql://', 1)
         eng = create_engine(db_url, pool_pre_ping=True)
         with eng.connect() as conn:
             row = conn.execute(text(
                 "SELECT pkl_data FROM backtest_best_model ORDER BY run_date DESC LIMIT 1"
             )).fetchone()
             if row and row[0]:
-                return joblib.load(io.BytesIO(bytes(row[0])))
+                _cached_model = joblib.load(io.BytesIO(bytes(row[0])))
+                _cache_fingerprint = fp
+                return _cached_model
     except Exception as e:
         log.warning(f"Could not load model from DB: {e}")
 
