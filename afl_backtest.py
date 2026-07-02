@@ -477,16 +477,19 @@ def _add_safe_market_features(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
             how="left",
         ).drop(columns=["__event_id_key"], errors="ignore")
     except Exception as exc:
-        left_info = {c: {"dtype": str(out[c].dtype), "nulls": int(out[c].isna().sum())} for c in merge_cols if c in out.columns}
-        right_info = {c: {"dtype": str(agg[c].dtype), "nulls": int(agg[c].isna().sum())} for c in merge_cols if c in agg.columns}
+        def _col_info(frame: pd.DataFrame, cols: list[str]) -> dict:
+            return {c: {"dtype": str(frame[c].dtype), "nulls": int(frame[c].isna().sum())} for c in cols if c in frame.columns}
+        left_info = _col_info(out, merge_cols)
+        right_info = _col_info(agg, merge_cols)
         LOG.error(
             "AFL_MERGE_FAILED market_features error=%s left_cols=%s right_cols=%s",
             exc, left_info, right_info,
         )
+        left_eid_dtype = out["event_id"].dtype if "event_id" in out.columns else "MISSING"
+        right_eid_dtype = agg["event_id"].dtype if "event_id" in agg.columns else "MISSING"
         raise RuntimeError(
             f"AFL market features merge failed: {exc}. "
-            f"Left event_id dtype={str(out.get('event_id', pd.Series(dtype='object')).dtype)}, "
-            f"Right event_id dtype={str(agg.get('event_id', pd.Series(dtype='object')).dtype)}. "
+            f"Left event_id dtype={left_eid_dtype}, Right event_id dtype={right_eid_dtype}, "
             f"merge_cols={merge_cols}"
         ) from exc
     return result
