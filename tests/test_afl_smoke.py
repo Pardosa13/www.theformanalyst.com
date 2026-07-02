@@ -2012,3 +2012,13 @@ def test_r_script_has_backtick_operator_safe_syntax():
         "scripts/fetch_afl_2026_stats.R should define the `%||%` null-coalescing "
         "operator (it is safe here since there is no bash double-quote wrapping)"
     )
+
+
+def test_afl_ml_tab_only_shows_bet_rows_ranked_by_ev_score():
+    """AFL ML tab should hide PASS rows and rank recommendations by the best betting value."""
+    source = Path("templates/afl.html").read_text()
+
+    assert "String(r.recommendation || r.status || r.decision || r.ml_recommendation || '').toUpperCase() === 'BET'" in source
+    assert ".sort(compareAflMlBetQuality)" in source
+    assert "['ml_expected_value_score']" in source
+    assert "ranked best to worst by ML EV Score" in source
