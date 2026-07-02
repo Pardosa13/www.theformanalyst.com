@@ -3081,6 +3081,12 @@ function _vfPopulateMatchSelector(fixtures, valueMatches) {
     _vfPendingMatchValue = '';
   }
 }
+function _getPlayerPropsFixtures() {
+  return Array.from(document.getElementById('matchSelector')?.options || [])
+    .filter(o => o.value)
+    .map(o => { const p = o.value.split('|'); return { hteam: p[0] || '', ateam: p[1] || '' }; });
+}
+
 function loadValueFinder() {
   const el = document.getElementById('valueResults');
   if (!el) {
@@ -3094,9 +3100,16 @@ function loadValueFinder() {
   fetch(`/api/afl/fixtures?year={{ year }}&round=${_round}`)
     .then(r => r.json())
     .then(fixturesData => {
-  _vfPopulateMatchSelector(fixturesData.games || []);
+  const apiGames = fixturesData.games || [];
+  // When the round-specific API returns no fixtures (e.g. all games already complete),
+  // fall back to the server-rendered Player Props fixtures so the dropdown stays populated.
+  const seedFixtures = apiGames.length ? apiGames : _getPlayerPropsFixtures();
+  _vfPopulateMatchSelector(seedFixtures);
 
-  const vfUrl = `/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=0&year={{ year }}&round=${_round}`;
+  // Skip the round filter when there are no upcoming fixtures for _round so the
+  // value-finder returns all recently-synced props instead of an empty result set.
+  const roundParam = apiGames.length ? `&round=${_round}` : '';
+  const vfUrl = `/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=0&year={{ year }}${roundParam}`;
   if ((window._selPlayer?.name || '').toLowerCase() === 'patrick cripps') {
     console.info('[AFL Value Finder] frontend API call', { url: vfUrl, player: window._selPlayer?.name });
   }
@@ -3104,7 +3117,7 @@ function loadValueFinder() {
         .then(r => { if (!r.ok) throw new Error(); return r.json(); })
         .then(data => {
           _vfRawData = data;
-          _vfPopulateMatchSelector(fixturesData.games || [], data.matches || []);
+          _vfPopulateMatchSelector(seedFixtures, data.matches || []);
           console.debug('[ValueFinder] response received', {
             market,
             round: _round,
