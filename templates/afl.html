@@ -1763,6 +1763,35 @@ function fmtMlScore(v) {
   return safeNum(v).toFixed(4);
 }
 
+function aflMlRankValue(row, keys, fallback = Number.NEGATIVE_INFINITY) {
+  for (const key of keys) {
+    const raw = row?.[key];
+    if (raw !== null && raw !== undefined && raw !== '') {
+      const n = safeNum(raw, NaN);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return fallback;
+}
+
+function compareAflMlBetQuality(a, b) {
+  // ML EV Score is the overall betting-quality marker because it combines the
+  // model's win probability with available odds. Use probability/confidence/edge
+  // only as deterministic tie-breakers when EV is equal or absent.
+  const rankKeys = [
+    ['ml_expected_value_score'],
+    ['ml_bet_probability'],
+    ['confidence_score'],
+    ['original_edge', 'edge'],
+    ['original_model_prob', 'model_prob'],
+  ];
+  for (const keys of rankKeys) {
+    const diff = aflMlRankValue(b, keys) - aflMlRankValue(a, keys);
+    if (diff !== 0) return diff;
+  }
+  return String(a.player_name || a.team || '').localeCompare(String(b.player_name || b.team || ''));
+}
+
 function loadAflMachineLearningSelections() {
   const wrap = document.getElementById('aflMlSelectionsWrap');
   const summary = document.getElementById('aflMlSummary');
@@ -1803,11 +1832,11 @@ function loadAflMachineLearningSelections() {
         return;
       }
 
-      const betSelections = rows.filter(r =>
-        String(r.recommendation || r.status || r.decision || r.ml_recommendation || '').toUpperCase() === 'BET'
-      );
+      const betSelections = rows
+        .filter(r => String(r.recommendation || r.status || r.decision || r.ml_recommendation || '').toUpperCase() === 'BET')
+        .sort(compareAflMlBetQuality);
       const betCount = betSelections.length;
-      if (summary) summary.textContent = `All Machine Learning selections · ${rows.length} current rows · ${betCount} ML BET selections.`;
+      if (summary) summary.textContent = `AFL Machine Learning BET selections · ${betCount} ranked best to worst by ML EV Score${rows.length !== betCount ? ` · ${rows.length - betCount} PASS hidden` : ''}.`;
       if (!betSelections.length) {
         wrap.innerHTML = '<div class="prop-empty"><i class="bi bi-cpu"></i><p>No AFL ML bet selections currently available.</p></div>';
         return;
