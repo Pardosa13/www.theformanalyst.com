@@ -514,9 +514,19 @@ def _add_safe_standings_features(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
         left = left.dropna(subset=["season", "round"]).sort_values("round")
         merged_parts = []
         for (season, team_key), group in left.groupby(["season", "team_key"], dropna=False):
-            right = standings[(standings["season"] == season) & (standings["team_key"] == team_key)].sort_values("round")
-            if right.empty:
+            right = standings[(standings["season"] == season) & (standings["team_key"] == team_key)].copy()
+            group = group.copy()
+            group["round"] = pd.to_numeric(group["round"], errors="coerce")
+            right["round"] = pd.to_numeric(right["round"], errors="coerce")
+            group = group.dropna(subset=["round"]).copy()
+            right = right.dropna(subset=["round"]).copy()
+            if group.empty or right.empty:
                 continue
+            group["round"] = group["round"].astype("float64")
+            right["round"] = right["round"].astype("float64")
+            group = group.sort_values("round")
+            right = right.sort_values("round")
+            _log_pre_merge("standings_asof", group, right, ["round"])
             merged_parts.append(pd.merge_asof(group, right, on="round", direction="backward", allow_exact_matches=False))
         if not merged_parts:
             continue
