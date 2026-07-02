@@ -408,10 +408,10 @@ def load_model():
     # Lightweight fingerprint check — avoids a full pkl download when unchanged.
     fp = _db_fingerprint(db_url)
     if fp is not None and _cached_model is not None and _cache_fingerprint == fp:
-        log.debug("Returning cached model (DB artifact unchanged, fingerprint=%s).", fp)
+        log.debug(f"Returning cached model (DB artifact unchanged, fingerprint={fp}).")
         return _cached_model
 
-    log.info("Loading model from DB (artifact changed or first load, fingerprint=%s).", fp)
+    log.info(f"Loading model from DB (artifact changed or first load, fingerprint={fp}).")
     try:
         from sqlalchemy import create_engine, text
         import io, joblib
