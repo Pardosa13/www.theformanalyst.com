@@ -61,3 +61,11 @@ def test_ml_specific_analytics_use_ml_score_for_ranking():
     price_source = _function_source('api_price_analysis')
     assert 'Prediction.ml_score if use_ml else Prediction.score' in price_source
     assert "x['prediction'].ml_score" in price_source
+
+
+def test_ml_performance_cutoff_is_centralized():
+    source = Path('app.py').read_text()
+    assert "ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260625'" in source
+    assert "def _ml_performance_meeting_name_sql" in source
+    assert "_ml_performance_meeting_name_sql('m')" in _function_source('calculate_ml_performance_stats')
+    assert "_filter_verified_ml_performance_meetings" in _function_source('_filter_ml_predictions')

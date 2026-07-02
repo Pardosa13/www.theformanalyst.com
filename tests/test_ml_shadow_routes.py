@@ -39,3 +39,12 @@ def test_ml_shadow_bulk_button_calls_score_visible_not_settle_all():
     end = source.index("async function loadMeeting", start)
     function_source = source[start:end]
     assert "/api/ml-shadow/settle-all" not in function_source
+
+
+def test_ml_shadow_global_stats_uses_central_cutoff_helper():
+    source = Path('ml_shadow_routes.py').read_text()
+    assert "ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260625'" in source
+    assert "def _ml_performance_meeting_name_sql" in source
+    start = source.index("@app.route('/api/ml-shadow/global-stats')")
+    function_source = source[start:]
+    assert "_ml_performance_meeting_name_sql('m')" in function_source
