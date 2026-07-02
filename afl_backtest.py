@@ -385,6 +385,21 @@ def load_selections(e: Engine, settled: bool) -> pd.DataFrame:
     return read_sql(e, f"SELECT * FROM afl_model_selections WHERE {where}")
 
 
+def _normalise_merge_key(values: pd.Series) -> pd.Series:
+    """Return a stable string key for joins where DB drivers may disagree on int/float dtypes.
+
+    PostgreSQL integer columns can arrive as int64 in one dataframe and float64 in
+    another when NULLs are present. Pandas refuses to merge those directly, so we
+    normalise integer-like values to the same string representation before joins.
+    """
+    numeric = pd.to_numeric(values, errors="coerce")
+    text = values.astype("string").str.strip()
+    integer_like = numeric.notna() & np.isclose(numeric, np.floor(numeric))
+    normalised = text.copy()
+    normalised.loc[integer_like] = numeric.loc[integer_like].astype("Int64").astype("string")
+    normalised = normalised.mask(text.isna() | text.eq("") | text.str.lower().isin(["nan", "none", "<na>"]))
+    return normalised
+
 def _normalise_team_series(values: pd.Series) -> pd.Series:
     return values.fillna("").astype(str).str.strip().str.lower()
 
@@ -396,7 +411,15 @@ def _add_game_context(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
             if col not in df:
                 df[col] = None
         return df
-    return df.merge(games.drop_duplicates("match_id"), on="match_id", how="left")
+    out = df.copy()
+    games = games.copy()
+    out["__match_id_key"] = _normalise_merge_key(out["match_id"])
+    games["__match_id_key"] = _normalise_merge_key(games["match_id"])
+    return out.merge(
+        games.drop_duplicates("__match_id_key").drop(columns=["match_id"]),
+        on="__match_id_key",
+        how="left",
+    ).drop(columns=["__match_id_key"], errors="ignore")
 
 
 def _add_safe_market_features(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
@@ -454,7 +477,14 @@ def _add_safe_standings_features(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
         merged = pd.concat(merged_parts, ignore_index=True)
         cols = ["rank", "pts", "wins", "losses", "percentage"]
         rename = {c: f"standings_{side}_{c}" for c in cols}
-        out = out.merge(merged[["id"] + cols].rename(columns=rename), on="id", how="left")
+        out["__selection_id_key"] = _normalise_merge_key(out["id"])
+        feature_rows = merged[["id"] + cols].rename(columns=rename).copy()
+        feature_rows["__selection_id_key"] = _normalise_merge_key(feature_rows["id"])
+        out = out.merge(
+            feature_rows.drop(columns=["id"]),
+            on="__selection_id_key",
+            how="left",
+        ).drop(columns=["__selection_id_key"], errors="ignore")
     for col in ["rank", "pts", "wins", "losses", "percentage"]:
         h, a = f"standings_home_{col}", f"standings_away_{col}"
         if h in out and a in out:
@@ -471,7 +501,14 @@ def add_safe_features(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
     df = _add_safe_standings_features(e, df)
     preds = read_sql(e, "SELECT match_id, predicted_margin FROM afl_match_predictions")
     if not preds.empty and "match_id" in df:
-        df = df.merge(preds.drop_duplicates("match_id"), on="match_id", how="left")
+        preds = preds.copy()
+        df["__match_id_key"] = _normalise_merge_key(df["match_id"])
+        preds["__match_id_key"] = _normalise_merge_key(preds["match_id"])
+        df = df.merge(
+            preds.drop_duplicates("__match_id_key").drop(columns=["match_id"]),
+            on="__match_id_key",
+            how="left",
+        ).drop(columns=["__match_id_key"], errors="ignore")
     else:
         df["predicted_margin"] = np.nan
 
@@ -494,7 +531,14 @@ def add_safe_features(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
             temp = targets[["id", "commence_time", f"{side}_team"]].rename(columns={f"{side}_team": "player_team"}).sort_values("commence_time")
             merged = pd.merge_asof(temp, form.sort_values("match_date"), left_on="commence_time", right_on="match_date", by="player_team", direction="backward", allow_exact_matches=False)
             rename = {c: f"{side}_{c}" for c in roll_cols}
-            df = df.merge(merged[["id"] + roll_cols].rename(columns=rename), on="id", how="left")
+            df["__selection_id_key"] = _normalise_merge_key(df["id"])
+            feature_rows = merged[["id"] + roll_cols].rename(columns=rename).copy()
+            feature_rows["__selection_id_key"] = _normalise_merge_key(feature_rows["id"])
+            df = df.merge(
+                feature_rows.drop(columns=["id"]),
+                on="__selection_id_key",
+                how="left",
+            ).drop(columns=["__selection_id_key"], errors="ignore")
         for s in DIFF_STATS:
             h, a = f"home_team_last5_{s}_avg", f"away_team_last5_{s}_avg"
             if h in df and a in df:
