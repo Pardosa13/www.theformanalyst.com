@@ -2990,24 +2990,47 @@ function _vfRender(bets, data) {
   el.innerHTML = _vfRenderTable(bets, data);
 }
 
-function _vfPopulateMatchSelector(fixtures) {
+function _vfPopulateMatchSelector(fixtures, valueMatches) {
   const sel = document.getElementById('valueMatch');
   if (!sel) return;
 
   const prev = sel.value;
-  sel.innerHTML = '<option value="">All Matches</option>';
+  const options = new Map();
+  const addMatch = (home, away) => {
+    home = String(home || '').trim();
+    away = String(away || '').trim();
+    if (!home || !away) return;
+    const value = `${home}||${away}`;
+    if (!options.has(value)) options.set(value, `${home} vs ${away}`);
+  };
 
   (fixtures || []).forEach(f => {
-    const home = f.hteam || '';
-    const away = f.ateam || '';
-    if (!home || !away) return;
-
-    const opt = document.createElement('option');
-    opt.value = `${home}||${away}`;
-    opt.textContent = `${home} vs ${away}`;
-    if (prev === opt.value) opt.selected = true;
-    sel.appendChild(opt);
+    if (typeof f === 'string') {
+      const parts = f.split(/\s+v(?:s\.?|)\s+/i);
+      addMatch(parts[0], parts[1]);
+      return;
+    }
+    addMatch(f.hteam || f.home_team || f.homeTeam, f.ateam || f.away_team || f.awayTeam);
   });
+  (valueMatches || []).forEach(m => {
+    if (typeof m === 'string') {
+      const parts = m.split(/\s+v(?:s\.?|)\s+/i);
+      addMatch(parts[0], parts[1]);
+      return;
+    }
+    addMatch(m.hteam || m.home_team || m.homeTeam, m.ateam || m.away_team || m.awayTeam);
+  });
+
+  sel.innerHTML = '<option value="">All Matches</option>';
+  [...options.entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]))
+    .forEach(([value, label]) => {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      if (prev === opt.value) opt.selected = true;
+      sel.appendChild(opt);
+    });
 }
 function loadValueFinder() {
   const el = document.getElementById('valueResults');
@@ -3032,6 +3055,7 @@ function loadValueFinder() {
         .then(r => { if (!r.ok) throw new Error(); return r.json(); })
         .then(data => {
           _vfRawData = data;
+          _vfPopulateMatchSelector(fixturesData.games || [], data.matches || []);
           console.debug('[ValueFinder] response received', {
             market,
             round: _round,

@@ -1144,6 +1144,13 @@ def register_afl_routes(app, db):
             key=lambda x: (x.get("edge", 0), x.get("confidence_score", 0)),
             reverse=True,
         )
+        matches = sorted(
+            {
+                f"{b.get('home_team', '')} vs {b.get('away_team', '')}"
+                for b in value_bets
+                if b.get("home_team") and b.get("away_team")
+            }
+        )
 
         # Keep "watch" recommendations in UI transparency; track only "value" picks.
         official = [
@@ -1213,6 +1220,7 @@ def register_afl_routes(app, db):
                 "tracked_count": tracked_count,
                 "settled_count": 0,
                 "model_performance": _db_model_performance_summary(db, season=effective_season),
+                "matches": matches,
             }
         )
        
