@@ -1491,6 +1491,7 @@ let _round = {{ current_round or 1 }};
 let _home = '';
 let _away = '';
 let _venue = '';
+let _vfPendingMatchValue = '';
 let _teamSide = 'home';
 let _allPlayers = [];
 let _propStat = 'disposals';
@@ -1568,7 +1569,8 @@ function switchTab(name, btn) {
   if (name === 'value') {
     // Pre-populate Value Finder match selector from Player Props tab selection
     if (_home && _away) {
-      _selectDropdownByValue('valueMatch', `${_home}||${_away}`);
+      _vfPendingMatchValue = _vfMatchValue(_home, _away);
+      _selectDropdownByValue('valueMatch', _vfPendingMatchValue);
     }
     // Only fetch from server if we don't have cached data yet
     if (_vfRawData) {
@@ -1891,6 +1893,45 @@ function _vfGetBets(data) {
     const edge = (b?.edge != null) ? safeNum(b.edge, 0) : safeNum(b?.edge_pct, 0);
     return { ...b, edge };
   });
+}
+
+function _vfNormaliseTeamName(name) {
+  const raw = String(name || '').trim();
+  const aliases = {
+    'West Coast Eagles': 'West Coast',
+    'Greater Western Sydney': 'GWS Giants',
+    'Greater Western Sydney Giants': 'GWS Giants',
+    'GWS': 'GWS Giants',
+    'Footscray': 'Western Bulldogs',
+    'Brisbane': 'Brisbane Lions',
+    'Kuwarna': 'Adelaide',
+    'Walyalup': 'Fremantle',
+    'Narrm': 'Melbourne',
+    'Yartapuulti': 'Port Adelaide',
+    'Euro-Yroke': 'St Kilda',
+    'Waalitj Marawar': 'West Coast',
+    'Adelaide Crows': 'Adelaide',
+    'Carlton Blues': 'Carlton',
+    'Collingwood Magpies': 'Collingwood',
+    'Essendon Bombers': 'Essendon',
+    'Fremantle Dockers': 'Fremantle',
+    'Geelong Cats': 'Geelong',
+    'Gold Coast Suns': 'Gold Coast',
+    'Hawthorn Hawks': 'Hawthorn',
+    'Melbourne Demons': 'Melbourne',
+    'North Melbourne Kangaroos': 'North Melbourne',
+    'Port Adelaide Power': 'Port Adelaide',
+    'Richmond Tigers': 'Richmond',
+    'St Kilda Saints': 'St Kilda',
+    'Sydney Swans': 'Sydney',
+  };
+  return aliases[raw] || raw;
+}
+
+function _vfMatchValue(home, away) {
+  const normHome = _vfNormaliseTeamName(home);
+  const normAway = _vfNormaliseTeamName(away);
+  return (normHome && normAway) ? `${normHome}||${normAway}` : '';
 }
 
 // ── Match selector ───────────────────────────────────────────────
@@ -2881,17 +2922,21 @@ function _vfMlRowsToValueBets(rows) {
   return (Array.isArray(rows) ? rows : [])
     .filter(r => String(r.recommendation || r.status || r.decision || r.ml_recommendation || '').toUpperCase() === 'BET')
     .map(r => {
-      const match = r.match || ((r.home_team || r.away_team) ? `${r.home_team || '—'} vs ${r.away_team || '—'}` : '');
+      const homeTeam = _vfNormaliseTeamName(r.home_team || '');
+      const awayTeam = _vfNormaliseTeamName(r.away_team || '');
+      const team = _vfNormaliseTeamName(r.team || r.selection_team || '');
+      const opponent = _vfNormaliseTeamName(r.opponent || '');
+      const match = r.match || ((homeTeam || awayTeam) ? `${homeTeam || '—'} vs ${awayTeam || '—'}` : '');
       const originalEdge = r.original_edge ?? r.edge ?? r.prob_edge ?? 0;
       const mlProb = r.ml_bet_probability != null ? safeNum(r.ml_bet_probability, 0) * 100 : (r.original_model_prob ?? r.model_prob);
       return {
         ...r,
         is_ml_pick: true,
-        player: r.player_name || r.selection_name || r.team || 'AFL ML Selection',
-        team: r.team || r.selection_team || '',
-        opponent: r.opponent || '',
-        home_team: r.home_team || '',
-        away_team: r.away_team || '',
+        player: r.player_name || r.selection_name || team || 'AFL ML Selection',
+        team,
+        opponent,
+        home_team: homeTeam,
+        away_team: awayTeam,
         match,
         market: r.market || '',
         line_type: r.line_type || r.side || '',
@@ -2934,12 +2979,12 @@ function _vfApplyFilters(data) {
   let mlBets = _vfGetMlBets().filter(b => !market || b.market === market);
   if (matchVal) {
     const [ht, at] = matchVal.split('||');
-    const fht = (ht || '').toLowerCase();
-    const fat = (at || '').toLowerCase();
+    const fht = _vfNormaliseTeamName(ht).toLowerCase();
+    const fat = _vfNormaliseTeamName(at).toLowerCase();
     const matchFilter = b => {
-      const bht = (b.home_team || '').toLowerCase();
-      const bat = (b.away_team || '').toLowerCase();
-      const bt  = (b.team || '').toLowerCase();
+      const bht = _vfNormaliseTeamName(b.home_team || '').toLowerCase();
+      const bat = _vfNormaliseTeamName(b.away_team || '').toLowerCase();
+      const bt  = _vfNormaliseTeamName(b.team || '').toLowerCase();
       return (bht === fht && bat === fat) ||
              bt === fht || bt === fat;
     };
@@ -2994,13 +3039,13 @@ function _vfPopulateMatchSelector(fixtures, valueMatches) {
   const sel = document.getElementById('valueMatch');
   if (!sel) return;
 
-  const prev = sel.value;
+  const prev = sel.value || _vfPendingMatchValue || '';
   const options = new Map();
   const addMatch = (home, away) => {
-    home = String(home || '').trim();
-    away = String(away || '').trim();
+    home = _vfNormaliseTeamName(home);
+    away = _vfNormaliseTeamName(away);
     if (!home || !away) return;
-    const value = `${home}||${away}`;
+    const value = _vfMatchValue(home, away);
     if (!options.has(value)) options.set(value, `${home} vs ${away}`);
   };
 
@@ -3031,6 +3076,10 @@ function _vfPopulateMatchSelector(fixtures, valueMatches) {
       if (prev === opt.value) opt.selected = true;
       sel.appendChild(opt);
     });
+  if (prev && options.has(prev)) {
+    sel.value = prev;
+    _vfPendingMatchValue = '';
+  }
 }
 function loadValueFinder() {
   const el = document.getElementById('valueResults');

@@ -505,6 +505,37 @@ def test_value_finder_render_table_called_by_apply_filters():
     )
 
 
+def test_value_finder_match_selector_normalises_teams_and_keeps_pending_pick():
+    """Value Finder must normalise fixture/team aliases and preserve a pending match selection."""
+    template_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "templates",
+        "afl.html",
+    )
+    with open(template_path, encoding="utf-8") as f:
+        source = f.read()
+
+    assert "let _vfPendingMatchValue = '';" in source
+    assert "function _vfNormaliseTeamName(" in source
+    assert "'Greater Western Sydney Giants': 'GWS Giants'" in source
+    assert "'North Melbourne Kangaroos': 'North Melbourne'" in source
+    assert "const prev = sel.value || _vfPendingMatchValue || '';" in source
+    assert "_vfPendingMatchValue = _vfMatchValue(_home, _away);" in source
+    assert "home = _vfNormaliseTeamName(home);" in source
+    assert "away = _vfNormaliseTeamName(away);" in source
+
+
+def test_value_finder_match_filter_normalises_selected_and_bet_teams():
+    """Value Finder match filtering must compare canonical team names on both sides."""
+    source = Path("templates/afl.html").read_text(encoding="utf-8")
+
+    assert "const fht = _vfNormaliseTeamName(ht).toLowerCase();" in source
+    assert "const fat = _vfNormaliseTeamName(at).toLowerCase();" in source
+    assert "const bht = _vfNormaliseTeamName(b.home_team || '').toLowerCase();" in source
+    assert "const bat = _vfNormaliseTeamName(b.away_team || '').toLowerCase();" in source
+    assert "const bt  = _vfNormaliseTeamName(b.team || '').toLowerCase();" in source
+
+
 def test_value_finder_raw_props_table_has_no_missing_team_column():
     """Value Finder card rendering must use bet.home_team / bet.away_team (or bet.opponent)
     rather than any non-existent team column from afl_player_props.
