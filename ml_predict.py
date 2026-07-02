@@ -346,7 +346,7 @@ FEATURE_NAMES = [
 # ── In-memory model cache ─────────────────────────────────────────────────────
 # Stores the last loaded model together with the fingerprint that was current
 # when it was loaded.  ``_cache_fingerprint`` is either:
-#   • a (run_date, updated_at) tuple when the model came from Postgres, or
+#   • an (id, run_date, updated_at) tuple when the model came from Postgres, or
 #   • the file mtime (float) when it came from the local filesystem.
 _cached_model = None
 _cache_fingerprint = None
@@ -354,7 +354,7 @@ _cache_fingerprint = None
 
 def _db_fingerprint(db_url: str):
     """
-    Return (run_date, updated_at) for the most-recent row in
+    Return (id, run_date, updated_at) for the most-recent row in
     backtest_best_model, or None if the table is empty / unreachable.
     """
     try:
@@ -364,11 +364,11 @@ def _db_fingerprint(db_url: str):
         eng = create_engine(db_url, pool_pre_ping=True)
         with eng.connect() as conn:
             row = conn.execute(text(
-                "SELECT run_date, updated_at FROM backtest_best_model "
-                "ORDER BY run_date DESC LIMIT 1"
+                "SELECT id, run_date, updated_at FROM backtest_best_model "
+                "ORDER BY run_date DESC, updated_at DESC, id DESC LIMIT 1"
             )).fetchone()
             if row:
-                return (row[0], row[1])
+                return (row[0], row[1], row[2])
     except Exception as e:
         log.debug(f"Could not query model fingerprint from DB: {e}")
     return None
@@ -418,7 +418,7 @@ def load_model():
         eng = create_engine(db_url, pool_pre_ping=True)
         with eng.connect() as conn:
             row = conn.execute(text(
-                "SELECT pkl_data FROM backtest_best_model ORDER BY run_date DESC LIMIT 1"
+                "SELECT pkl_data FROM backtest_best_model ORDER BY run_date DESC, updated_at DESC, id DESC LIMIT 1"
             )).fetchone()
             if row and row[0]:
                 _cached_model = joblib.load(io.BytesIO(bytes(row[0])))

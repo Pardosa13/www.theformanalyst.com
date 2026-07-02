@@ -148,11 +148,12 @@ class TestDBCache(unittest.TestCase):
         import ml_predict
         model_obj = _FakeModel()
         pkl = self._pickle_model(model_obj)
+        rid = 42
         rd = date(2025, 1, 1)
         ua = datetime(2025, 1, 1, 12, 0, 0)
 
         # Patch the entire _db_fingerprint + engine to avoid real DB calls
-        fp = (rd, ua)
+        fp = (rid, rd, ua)
         with patch('os.path.exists', return_value=False), \
              patch.dict(os.environ, {'DATABASE_URL': 'postgresql://fake'}), \
              patch('ml_predict._db_fingerprint', return_value=fp):
@@ -187,9 +188,7 @@ class TestDBCache(unittest.TestCase):
     def test_second_call_same_fingerprint_returns_cache_without_db_hit(self):
         import ml_predict
         model_obj = _FakeModel()
-        rd = date(2025, 1, 1)
-        ua = datetime(2025, 1, 1, 12, 0, 0)
-        fp = (rd, ua)
+        fp = (42, date(2025, 1, 1), datetime(2025, 1, 1, 12, 0, 0))
 
         # Pre-populate cache
         ml_predict._cached_model = model_obj
@@ -214,8 +213,8 @@ class TestDBCache(unittest.TestCase):
         import ml_predict
         old_model = _FakeModel()
         new_model = _FakeModel()
-        old_fp = (date(2025, 1, 1), datetime(2025, 1, 1, 12, 0, 0))
-        new_fp = (date(2025, 1, 2), datetime(2025, 1, 2, 8, 0, 0))
+        old_fp = (1, date(2025, 1, 1), datetime(2025, 1, 1, 12, 0, 0))
+        new_fp = (2, date(2025, 1, 2), datetime(2025, 1, 2, 8, 0, 0))
 
         # Pre-populate cache with old model
         ml_predict._cached_model = old_model
