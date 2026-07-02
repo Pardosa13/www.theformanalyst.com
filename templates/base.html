@@ -194,16 +194,32 @@
         }
 
         /* Mobile collapse */
-        @media (max-width: 991px) {
+        @media (max-width: 1199.98px) {
+            .navbar .container-fluid {
+                padding: 0 clamp(1rem, 3vw, 1.5rem);
+            }
+
             .navbar-collapse {
                 background: rgba(9, 9, 15, 0.98);
                 border: 1px solid var(--border-subtle);
                 border-radius: 12px;
-                padding: 12px;
+                padding: 10px;
                 margin-top: 8px;
                 box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+                max-height: calc(100dvh - 92px);
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
             }
-            .nav-link { margin: 2px 0 !important; }
+
+            .navbar-nav {
+                align-items: stretch !important;
+                gap: 2px;
+            }
+
+            .nav-link {
+                margin: 0 !important;
+                padding: 9px 12px !important;
+            }
         }
 
         /* ═══════════════════════════════════════════════
@@ -624,6 +640,15 @@
                 padding: 1rem 0.875rem;
             }
             body { padding-top: 68px; }
+
+            .navbar-brand {
+                font-size: 1rem !important;
+                gap: 8px;
+            }
+
+            .navbar-brand img {
+                height: 28px !important;
+            }
         }
 
         @media (max-width: 480px) {
@@ -638,7 +663,7 @@ body.modal-open .main-container {
 
 <body>
     <!-- ═══ NAVIGATION ═══ (all links/logic identical to original) -->
-    <nav class="navbar navbar-expand-lg fixed-top">
+    <nav class="navbar navbar-expand-xl fixed-top">
         <div class="container-fluid">
             <a class="navbar-brand" href="{{ url_for('history') }}">
                 <img src="{{ url_for('static', filename='apple-touch-icon.png') }}"  
