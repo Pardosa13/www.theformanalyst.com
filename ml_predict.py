@@ -348,6 +348,8 @@ def load_model():
     model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'form_analyst_best.pkl')
     if os.path.exists(model_path):
         import joblib
+        log.info("ML MODEL SOURCE: Filesystem")
+        log.info("Path: %s", model_path)
         return joblib.load(model_path)
 
     try:
@@ -362,6 +364,8 @@ def load_model():
                 "SELECT pkl_data FROM backtest_best_model ORDER BY run_date DESC LIMIT 1"
             )).fetchone()
             if row and row[0]:
+                log.info("ML MODEL SOURCE: Database")
+                log.info("Table: backtest_best_model (latest run_date)")
                 return joblib.load(io.BytesIO(bytes(row[0])))
     except Exception as e:
         log.warning(f"Could not load model from DB: {e}")
