@@ -404,6 +404,23 @@ def _normalise_team_series(values: pd.Series) -> pd.Series:
     return values.fillna("").astype(str).str.strip().str.lower()
 
 
+def _log_pre_merge(label: str, left: pd.DataFrame, right: pd.DataFrame, on: list[str]) -> None:
+    """Log dtype, null count, and sample values for merge keys on both sides before a merge."""
+    for col in on:
+        left_dtype = str(left[col].dtype) if col in left.columns else "MISSING"
+        right_dtype = str(right[col].dtype) if col in right.columns else "MISSING"
+        left_nulls = int(left[col].isna().sum()) if col in left.columns else -1
+        right_nulls = int(right[col].isna().sum()) if col in right.columns else -1
+        left_sample = left[col].dropna().head(3).tolist() if col in left.columns else []
+        right_sample = right[col].dropna().head(3).tolist() if col in right.columns else []
+        LOG.info(
+            "AFL_MERGE_PRE %s col=%s left_dtype=%s right_dtype=%s "
+            "left_nulls=%s right_nulls=%s left_sample=%s right_sample=%s",
+            label, col, left_dtype, right_dtype,
+            left_nulls, right_nulls, left_sample, right_sample,
+        )
+
+
 def _add_game_context(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
     games = read_sql(e, "SELECT id AS match_id, venue, roundname FROM afl_games")
     if games.empty or "match_id" not in df:
@@ -415,6 +432,7 @@ def _add_game_context(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
     games = games.copy()
     out["__match_id_key"] = _normalise_merge_key(out["match_id"])
     games["__match_id_key"] = _normalise_merge_key(games["match_id"])
+    _log_pre_merge("game_context", out, games.drop_duplicates("__match_id_key"), ["__match_id_key"])
     return out.merge(
         games.drop_duplicates("__match_id_key").drop(columns=["match_id"]),
         on="__match_id_key",
@@ -446,7 +464,32 @@ def _add_safe_market_features(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
     ).reset_index()
     out = df.copy()
     out["line"] = pd.to_numeric(out["line"], errors="coerce").round(3)
-    return out.merge(agg, on=["event_id", "bookmaker", "market", "line"], how="left")
+    # Normalize event_id to a stable string key to avoid float64/int64 dtype
+    # mismatch between afl_model_selections and afl_match_markets.
+    out["__event_id_key"] = _normalise_merge_key(out["event_id"])
+    agg["__event_id_key"] = _normalise_merge_key(agg["event_id"])
+    merge_cols = ["__event_id_key", "bookmaker", "market", "line"]
+    _log_pre_merge("market_features", out, agg, merge_cols)
+    try:
+        result = out.merge(
+            agg.drop(columns=["event_id"]),
+            on=merge_cols,
+            how="left",
+        ).drop(columns=["__event_id_key"], errors="ignore")
+    except Exception as exc:
+        left_info = {c: {"dtype": str(out[c].dtype), "nulls": int(out[c].isna().sum())} for c in merge_cols if c in out.columns}
+        right_info = {c: {"dtype": str(agg[c].dtype), "nulls": int(agg[c].isna().sum())} for c in merge_cols if c in agg.columns}
+        LOG.error(
+            "AFL_MERGE_FAILED market_features error=%s left_cols=%s right_cols=%s",
+            exc, left_info, right_info,
+        )
+        raise RuntimeError(
+            f"AFL market features merge failed: {exc}. "
+            f"Left event_id dtype={str(out.get('event_id', pd.Series(dtype='object')).dtype)}, "
+            f"Right event_id dtype={str(agg.get('event_id', pd.Series(dtype='object')).dtype)}. "
+            f"merge_cols={merge_cols}"
+        ) from exc
+    return result
 
 
 def _add_safe_standings_features(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
@@ -480,6 +523,7 @@ def _add_safe_standings_features(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
         out["__selection_id_key"] = _normalise_merge_key(out["id"])
         feature_rows = merged[["id"] + cols].rename(columns=rename).copy()
         feature_rows["__selection_id_key"] = _normalise_merge_key(feature_rows["id"])
+        _log_pre_merge(f"standings_{side}", out, feature_rows, ["__selection_id_key"])
         out = out.merge(
             feature_rows.drop(columns=["id"]),
             on="__selection_id_key",
@@ -504,6 +548,7 @@ def add_safe_features(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
         preds = preds.copy()
         df["__match_id_key"] = _normalise_merge_key(df["match_id"])
         preds["__match_id_key"] = _normalise_merge_key(preds["match_id"])
+        _log_pre_merge("predictions", df, preds.drop_duplicates("__match_id_key"), ["__match_id_key"])
         df = df.merge(
             preds.drop_duplicates("__match_id_key").drop(columns=["match_id"]),
             on="__match_id_key",
@@ -534,6 +579,7 @@ def add_safe_features(e: Engine, df: pd.DataFrame) -> pd.DataFrame:
             df["__selection_id_key"] = _normalise_merge_key(df["id"])
             feature_rows = merged[["id"] + roll_cols].rename(columns=rename).copy()
             feature_rows["__selection_id_key"] = _normalise_merge_key(feature_rows["id"])
+            _log_pre_merge(f"player_stats_{side}", df, feature_rows, ["__selection_id_key"])
             df = df.merge(
                 feature_rows.drop(columns=["id"]),
                 on="__selection_id_key",
