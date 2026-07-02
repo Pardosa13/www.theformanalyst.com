@@ -5047,8 +5047,7 @@ def data_analytics():
         Race.race_number,
         Prediction.score,
         Result.finish_position,
-        Result.sp,
-        Prediction.ml_score
+        Result.sp
     ).join(Race,       Race.meeting_id      == Meeting.id
     ).join(Horse,      Horse.race_id        == Race.id
     ).join(Prediction, Prediction.horse_id  == Horse.id
