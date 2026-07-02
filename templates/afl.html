@@ -3084,7 +3084,12 @@ function _vfPopulateMatchSelector(fixtures, valueMatches) {
 function _getPlayerPropsFixtures() {
   return Array.from(document.getElementById('matchSelector')?.options || [])
     .filter(o => o.value)
-    .map(o => { const p = o.value.split('|'); return { hteam: p[0] || '', ateam: p[1] || '' }; });
+    .map(o => {
+      const teamParts = o.value.split('|');
+      if (teamParts.length < 2 || !teamParts[0] || !teamParts[1]) return null;
+      return { hteam: teamParts[0], ateam: teamParts[1] };
+    })
+    .filter(Boolean);
 }
 
 function loadValueFinder() {
