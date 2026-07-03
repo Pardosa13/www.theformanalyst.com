@@ -693,6 +693,48 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None):
     return features
 
 
+def add_race_relative_features(feature_rows, race_ids):
+    temp = pd.DataFrame(feature_rows)
+    temp['race_id'] = race_ids
+
+    relative_cols = [
+        'pfai_score', 'last_sp', 'career_win_rate', 'career_podium_rate',
+        'distance_win_rate', 'track_win_rate', 'track_distance_win_rate',
+        'condition_win_rate', 'last_position', 'last_margin', 'horse_weight',
+        'weight_vs_avg', 'jockey_sr', 'trainer_sr', 'last200_rank',
+        'last400_rank', 'last600_rank', 'running_position',
+        'horse_career_prize', 'prizemoney_won', 'barrier_change',
+    ]
+
+    lower_is_better = {
+        'last_position', 'last_margin', 'last_sp',
+        'last200_rank', 'last400_rank', 'last600_rank',
+    }
+
+    temp['field_size'] = temp.groupby('race_id')['race_id'].transform('count')
+
+    for col in relative_cols:
+        if col not in temp.columns:
+            continue
+
+        grouped = temp.groupby('race_id')[col]
+        ascending = col in lower_is_better
+
+        temp[f'{col}_race_rank'] = grouped.rank(method='min', ascending=ascending)
+        temp[f'{col}_vs_race_avg'] = temp[col] - grouped.transform('mean')
+
+        if ascending:
+            temp[f'{col}_vs_race_best'] = temp[col] - grouped.transform('min')
+        else:
+            temp[f'{col}_vs_race_best'] = temp[col] - grouped.transform('max')
+
+        denom = (temp['field_size'] - 1).replace(0, np.nan)
+        temp[f'{col}_race_percentile'] = 1.0 - ((temp[f'{col}_race_rank'] - 1) / denom)
+        temp[f'{col}_race_percentile'] = temp[f'{col}_race_percentile'].fillna(1.0)
+
+    return temp.drop(columns=['race_id']).to_dict('records')
+
+
 # ─────────────────────────────────────────────
 # STEP 3: BUILD ML TRAINING SET
 # ─────────────────────────────────────────────
@@ -766,6 +808,13 @@ def build_training_set(df, strike_rate_data=None):
 
         except Exception:
             continue
+
+    feature_count_before = len(feature_rows[0]) if feature_rows else 0
+    log.info(f"Features before race-relative features: {feature_count_before}")
+    feature_rows = add_race_relative_features(feature_rows, race_ids)
+    feature_count_after = len(feature_rows[0]) if feature_rows else 0
+    log.info(f"Features after race-relative features: {feature_count_after}")
+    log.info("field_size feature added")
 
     X = pd.DataFrame(feature_rows)
     y_roi = pd.Series(targets_roi)
@@ -858,7 +907,15 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
     log.info("GRID SEARCH: Training 1000+ Random Forest models")
     log.info("=" * 80)
 
+    dates = pd.to_datetime(pd.Series(meeting_dates), errors='coerce')
+    order = dates.argsort().values
+    X = X.iloc[order].reset_index(drop=True)
+    y_roi = y_roi.iloc[order].reset_index(drop=True)
+    y_won = y_won.iloc[order].reset_index(drop=True)
+    meeting_dates = [meeting_dates[i] for i in order]
+
     feature_names = X.columns.tolist()
+    log.info(f"Total grid features available: {len(feature_names)}")
 
     # Hyperparameter grids
     n_estimators_opts = [100, 150, 200, 250]
@@ -868,9 +925,9 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
 
     # Feature subsets
     feature_subsets = {
-        'core': ['pfai_score', 'form_price', 'career_win_rate', 'distance_win_rate', 'track_win_rate'],
-        'sectionals': ['pfai_score', 'form_price', 'last200_rank', 'last400_rank', 'last600_rank'],
-        'weight': ['pfai_score', 'form_price', 'horse_weight', 'weight_change', 'weight_vs_avg'],
+        'core': ['pfai_score', 'last_sp', 'career_win_rate', 'distance_win_rate', 'track_win_rate'],
+        'sectionals': ['pfai_score', 'last_sp', 'last200_rank', 'last400_rank', 'last600_rank'],
+        'weight': ['pfai_score', 'last_sp', 'horse_weight', 'weight_change', 'weight_vs_avg'],
         'full': None,  # Use all features
     }
 
@@ -879,7 +936,6 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
 
     # Time-series split for CV
     tscv = TimeSeriesSplit(n_splits=3)
-    date_order = pd.Series(meeting_dates).argsort().values
 
     log.info(f"Grid: {len(n_estimators_opts)} × {len(max_depth_opts)} × {len(min_samples_leaf_opts)} × {len(max_features_opts)} × {len(feature_subsets)} = {len(n_estimators_opts) * len(max_depth_opts) * len(min_samples_leaf_opts) * len(max_features_opts) * len(feature_subsets)} total combinations")
 

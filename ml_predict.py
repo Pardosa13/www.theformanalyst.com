@@ -323,6 +323,45 @@ def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_look
 
     return features
 
+def add_race_relative_features(feature_rows):
+    temp = pd.DataFrame(feature_rows)
+
+    relative_cols = [
+        'pfai_score', 'last_sp', 'career_win_rate', 'career_podium_rate',
+        'distance_win_rate', 'track_win_rate', 'track_distance_win_rate',
+        'condition_win_rate', 'last_position', 'last_margin', 'horse_weight',
+        'weight_vs_avg', 'jockey_sr', 'trainer_sr', 'last200_rank',
+        'last400_rank', 'last600_rank', 'running_position',
+        'horse_career_prize', 'prizemoney_won', 'barrier_change',
+    ]
+
+    lower_is_better = {
+        'last_position', 'last_margin', 'last_sp',
+        'last200_rank', 'last400_rank', 'last600_rank',
+    }
+
+    temp['field_size'] = len(temp)
+
+    for col in relative_cols:
+        if col not in temp.columns:
+            continue
+
+        ascending = col in lower_is_better
+
+        temp[f'{col}_race_rank'] = temp[col].rank(method='min', ascending=ascending)
+        temp[f'{col}_vs_race_avg'] = temp[col] - temp[col].mean()
+
+        if ascending:
+            temp[f'{col}_vs_race_best'] = temp[col] - temp[col].min()
+        else:
+            temp[f'{col}_vs_race_best'] = temp[col] - temp[col].max()
+
+        denom = (temp['field_size'] - 1).replace(0, np.nan)
+        temp[f'{col}_race_percentile'] = 1.0 - ((temp[f'{col}_race_rank'] - 1) / denom)
+        temp[f'{col}_race_percentile'] = temp[f'{col}_race_percentile'].fillna(1.0)
+
+    return temp.to_dict('records')
+
 # ── Expected feature order (must match pkl training order) ────────────────────
 
 FEATURE_NAMES = [
@@ -342,6 +381,26 @@ FEATURE_NAMES = [
     'track_condition_change', 'form_field_size', 'same_jockey', 'same_track',
     'jockeys_can_claim'
 ]
+
+RACE_RELATIVE_BASE_COLS = [
+    'pfai_score', 'last_sp', 'career_win_rate', 'career_podium_rate',
+    'distance_win_rate', 'track_win_rate', 'track_distance_win_rate',
+    'condition_win_rate', 'last_position', 'last_margin', 'horse_weight',
+    'weight_vs_avg', 'jockey_sr', 'trainer_sr', 'last200_rank',
+    'last400_rank', 'last600_rank', 'running_position',
+    'horse_career_prize', 'prizemoney_won', 'barrier_change',
+]
+
+RACE_RELATIVE_FEATURES = []
+for col in RACE_RELATIVE_BASE_COLS:
+    RACE_RELATIVE_FEATURES.extend([
+        f'{col}_race_rank',
+        f'{col}_vs_race_avg',
+        f'{col}_vs_race_best',
+        f'{col}_race_percentile',
+    ])
+
+FEATURE_NAMES = FEATURE_NAMES + RACE_RELATIVE_FEATURES + ['field_size']
 
 def load_model():
     """Load the pkl model. Tries filesystem first, then DB."""
@@ -397,6 +456,8 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
     except FileNotFoundError as e:
         log.error(str(e))
         return {}, {}
+    model_features = list(getattr(model, 'feature_names_in_', FEATURE_NAMES))
+    log.info(f"ML model expects {len(model_features)} features")
 
     jockey_sr  = (strike_rate_data or {}).get('jockeys', {})
     trainer_sr = (strike_rate_data or {}).get('trainers', {})
@@ -442,9 +503,10 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         if not feature_rows:
             continue
 
-        X = pd.DataFrame(feature_rows, columns=FEATURE_NAMES)
-        X = X.reindex(columns=FEATURE_NAMES)
-        X = X.fillna(X.median())
+        feature_rows = add_race_relative_features(feature_rows)
+        X = pd.DataFrame(feature_rows)
+        X = X.reindex(columns=model_features, fill_value=0)
+        X = X.fillna(0)
 
         try:
             raw_preds = model.predict(X)
