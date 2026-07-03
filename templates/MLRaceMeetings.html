@@ -7,7 +7,7 @@
 <style>
 /* ══════════════════════════════════════════
    ML RACE MEETINGS — dark high-contrast, teal ML accent
-   Horses are sorted by ML Score, not Analyzer Score
+   Horses are sorted by ML Score
    
    COLOUR BRIEF:
    • 1st place row    → dark emerald tint  + #00e5b0 border (ML teal)
@@ -16,7 +16,6 @@
    • Scratched row    → dark grey, 0.55 opacity, strikethrough
    • Odds             → #34d399 bright green
    • ML Score         → #00e5b0 teal DM Mono (primary)
-   • Analyzer Score   → #9090a8 muted (secondary)
    • PFAI badges      → teal
    • Sectionals       → dark card, teal accent
    • Speed map        → dark columns, vivid pos/neg colours
@@ -1571,7 +1570,6 @@ function updateScratchings(meetingId) {
           <th style="padding:12px; text-align:center; width:50px;">Pos</th>
           <th style="padding:12px; text-align:left;">Horse</th>
           <th style="padding:12px; text-align:center;">ML Score</th>
-          <th style="padding:12px; text-align:center;">Analyzer Score</th>
           <th style="padding:12px; text-align:center;">Assessed Odds</th>
           <th style="padding:12px; text-align:center;">Ladbrokes Price</th>
           <th style="padding:12px; text-align:center;">Win %</th>
@@ -1612,25 +1610,19 @@ function updateScratchings(meetingId) {
               {% if horse.jockey %}J: {{ horse.jockey }}{% endif %}
               {% if horse.trainer %} | T: {{ horse.trainer }}{% endif %}
             </div>
-            {% if horse.is_best_bet and horse.best_bet_reasons %}
-            <div class="vm-best-bet-reasons" style="font-size:11px;color:var(--text-muted);margin-top:4px;">Analyzer Best Bet: {{ horse.best_bet_reasons|join(' • ') }}</div>
-            {% endif %}
           </td>
 
           <td style="padding:12px; text-align:center; font-weight:bold; font-size:18px; border-bottom:1px solid #e2e8f0; color:#00e5b0;">
             {% if horse.ml_score is not none %}{{ "%.1f"|format(horse.ml_score) }}{% else %}<span style="color:#666;font-size:13px">N/A</span>{% endif %}
           </td>
-          <td style="padding:12px; text-align:center; font-size:13px; border-bottom:1px solid #e2e8f0; color:#9090a8;">
-            {{ "%.1f"|format(horse.score) }}
-          </td>
           <td style="padding:12px; text-align:center; font-weight:600; border-bottom:1px solid #e2e8f0; color:#28a745;">
-            {{ horse.odds }}
+            {% if horse.ml_assessed_odds %}{{ horse.ml_assessed_odds }}{% else %}<span style="color:#666;font-size:13px">N/A</span>{% endif %}
           </td>
           <td class="lb-price-cell" style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0;">
             <!-- Populated by Ladbrokes polling JS -->
           </td>
           <td style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0;">
-            {{ horse.win_probability }}
+            {% if horse.ml_win_probability %}{{ horse.ml_win_probability }}{% else %}<span style="color:#666;font-size:13px">N/A</span>{% endif %}
           </td>
           {% if current_user.is_admin %}
 <td style="padding:12px; border-bottom:1px solid #e2e8f0; font-size:11px; max-width:300px;">
@@ -1698,7 +1690,7 @@ function updateScratchings(meetingId) {
     <strong>🤖 ML Quick Analysis:</strong>
     <span style="margin-left:10px;">
       ML Top Pick: <strong>{{ race.horses[0].horse_name }}</strong>
-      {% if race.horses[0].ml_score is not none %}(ML: {{ "%.1f"|format(race.horses[0].ml_score) }}, Analyzer: {{ "%.1f"|format(race.horses[0].score) }}){% endif %}
+      {% if race.horses[0].ml_score is not none %}(ML: {{ "%.1f"|format(race.horses[0].ml_score) }}){% endif %}
       {% if race.horses|length > 1 and race.horses[0].ml_score is not none and race.horses[1].ml_score is not none %}
       | ML Gap to 2nd: <strong>{{ "%.1f"|format(race.horses[0].ml_score - race.horses[1].ml_score) }}</strong>
       {% endif %}
@@ -1769,7 +1761,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const horses = [];
         rows.forEach(function(row) {
             const scoreCell = row.cells[2];
-            const winProbCell = row.cells[6];  // ML version: +1 for extra Analyzer Score column
+            const winProbCell = row.cells[5];
             if (scoreCell && winProbCell) {
                 const score = scoreCell.textContent.trim();
                 const winProb = winProbCell.textContent.trim().replace('%', '');

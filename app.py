@@ -5267,12 +5267,36 @@ def ml_view_meeting(meeting_id):
     meeting = Meeting.query.get_or_404(meeting_id)
     results = get_meeting_results(meeting_id)
 
-    # Re-sort horses within each race by ml_score (highest first)
+    # Re-sort horses within each race by ml_score (highest first) and build
+    # ML-only assessed prices/probabilities for the ML meeting view.  These
+    # fields intentionally do not reuse Analyzer assessed odds or win %.
     for race in results['races']:
         race['horses'].sort(
             key=lambda h: (h.get('ml_score') or 0),
             reverse=True
         )
+
+        active_ml_horses = [
+            h for h in race['horses']
+            if not h.get('is_scratched') and h.get('ml_score') is not None and (h.get('ml_score') or 0) > 0
+        ]
+        ml_score_total = sum((h.get('ml_score') or 0) for h in active_ml_horses)
+
+        for horse in race['horses']:
+            horse['ml_assessed_odds'] = ''
+            horse['ml_win_probability'] = ''
+
+            if horse.get('is_scratched') or ml_score_total <= 0:
+                continue
+
+            ml_score = horse.get('ml_score')
+            if ml_score is None or ml_score <= 0:
+                continue
+
+            ml_win_pct = (ml_score / ml_score_total) * 110.0
+            ml_assessed_price = 100.0 / ml_win_pct if ml_win_pct > 0 else 99.0
+            horse['ml_win_probability'] = f"{ml_win_pct:.1f}%"
+            horse['ml_assessed_odds'] = f"${ml_assessed_price:.2f}"
 
     return render_template(
         "MLRaceMeetings.html",
