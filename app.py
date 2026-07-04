@@ -30,6 +30,57 @@ from ml_shadow_routes import register_ml_shadow_routes
 ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260625'
 
 
+_PFAI_SCORE_RE = re.compile(r'PFAI Score:\s*([\d.]+)', re.IGNORECASE)
+
+def parse_pfai_score_from_horse(horse, prediction=None):
+    """Return the stored PFAI score for a horse, preferring CSV/API data over notes."""
+    csv_data = getattr(horse, 'csv_data', None) or {}
+    if isinstance(csv_data, dict):
+        raw_pfai = csv_data.get('pfaiScore') or csv_data.get('PFAI Score') or csv_data.get('pfai_score')
+        try:
+            if raw_pfai not in (None, ''):
+                return float(raw_pfai)
+        except (TypeError, ValueError):
+            pass
+
+    notes = getattr(prediction, 'notes', None) if prediction else None
+    if notes:
+        match = _PFAI_SCORE_RE.search(notes)
+        if match:
+            try:
+                return float(match.group(1))
+            except (TypeError, ValueError):
+                return None
+    return None
+
+def top_signal_horse_ids(horses):
+    """Return race top-pick horse ids for analyzer, PFAI and ML signals."""
+    active_horses = [horse for horse in horses if not getattr(horse, 'is_scratched', False) and getattr(horse, 'prediction', None)]
+    analyzer_top = max(active_horses, key=lambda horse: horse.prediction.score or 0, default=None)
+
+    pfai_candidates = []
+    ml_candidates = []
+    for horse in active_horses:
+        pfai_score = parse_pfai_score_from_horse(horse, horse.prediction)
+        if pfai_score is not None:
+            pfai_candidates.append((pfai_score, horse))
+        if horse.prediction.ml_score is not None:
+            ml_candidates.append((horse.prediction.ml_score, horse))
+
+    pfai_top = max(pfai_candidates, key=lambda item: item[0], default=(None, None))[1]
+    ml_top = max(ml_candidates, key=lambda item: item[0], default=(None, None))[1]
+
+    return {
+        'analyzer': analyzer_top.id if analyzer_top else None,
+        'pfai': pfai_top.id if pfai_top else None,
+        'ml': ml_top.id if ml_top else None,
+    }
+
+def signals_all_agree_top(horse_id, signal_top_ids):
+    """True when Analyzer, PFAI and ML all have top picks and select this horse."""
+    top_ids = [signal_top_ids.get('analyzer'), signal_top_ids.get('pfai'), signal_top_ids.get('ml')]
+    return all(top_id is not None for top_id in top_ids) and len(set(top_ids)) == 1 and top_ids[0] == horse_id
+
 def _ml_performance_meeting_name_sql(alias='m'):
     """Temporary SQL fragment for verified ML performance meetings."""
     return f"LEFT({alias}.meeting_name, 6) >= '{ML_PERFORMANCE_MEETING_NAME_CUTOFF}'"
@@ -1412,9 +1463,7 @@ def get_meeting_results(meeting_id):
             'horses': []
         }
         
-        ranked_horses = [horse for horse in horses if horse.prediction]
-        ranked_horses.sort(key=lambda h: h.prediction.score, reverse=True)
-        rank_by_horse_id = {horse.id: idx + 1 for idx, horse in enumerate(ranked_horses)}
+        signal_top_ids = top_signal_horse_ids(horses)
 
         for horse in horses:
             pred = horse.prediction
@@ -1451,7 +1500,9 @@ def get_meeting_results(meeting_id):
                 if jockey_ride_counts.get(horse.jockey or '', 0) == 1:
                     best_bet_reasons.append('Jockey sole ride at meeting')
 
-            is_best_bet = bool(best_bet_reasons) and rank_by_horse_id.get(horse.id) == 1
+            is_best_bet = bool(best_bet_reasons) and signals_all_agree_top(horse.id, signal_top_ids)
+            if is_best_bet:
+                best_bet_reasons.append('Analyzer, PFAI and ML all agree top selection')
             horse_data = {
                 'horse_id': horse.id,
                 'horse_name': horse.horse_name,
@@ -11097,6 +11148,8 @@ def best_bets():
                 Horse.jockey,
                 Horse.trainer,
                 Horse.form,
+                Horse.csv_data,
+                Horse.is_scratched,
             )
             .selectinload(Horse.prediction)
             .load_only(
@@ -11106,6 +11159,7 @@ def best_bets():
                 Prediction.predicted_odds,
                 Prediction.win_probability,
                 Prediction.notes,
+                Prediction.ml_score,
             ),
         )
         .filter(Meeting.uploaded_at >= cutoff)
@@ -11127,10 +11181,11 @@ def best_bets():
                     jockey_ride_counts[j] = jockey_ride_counts.get(j, 0) + 1
 
         for race in meeting.races:
+            signal_top_ids = top_signal_horse_ids(race.horses)
             horses_in_race = []
             for horse in race.horses:
                 total_horses_scanned += 1
-                if horse.prediction:
+                if horse.prediction and not horse.is_scratched:
                     horses_in_race.append({
                         'horse': horse,
                         'score': horse.prediction.score
@@ -11158,6 +11213,8 @@ def best_bets():
                 if mode == 'top_pick' and not is_top_pick:
                     continue
                 if mode == 'non_top_pick' and is_top_pick:
+                    continue
+                if not signals_all_agree_top(horse.id, signal_top_ids):
                     continue
 
                 # Parse win probability for high confidence flag
