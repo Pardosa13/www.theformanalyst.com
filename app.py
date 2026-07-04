@@ -12301,13 +12301,14 @@ def download_best_model():
     from flask import send_file, abort
     from sqlalchemy import text as sa_text
 
-    # Try DB first (most recent day that has a saved model)
+    # Try DB first (active Champion only; never blindly serve the newest nightly Challenger)
     try:
         with db.engine.connect() as conn:
             row = conn.execute(sa_text("""
                 SELECT pkl_data, run_date, combined_score
                 FROM backtest_best_model
-                ORDER BY run_date DESC
+                WHERE is_active = TRUE
+                ORDER BY promoted_at DESC NULLS LAST, updated_at DESC, id DESC
                 LIMIT 1
             """)).fetchone()
         if row and row[0]:

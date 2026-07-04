@@ -35,6 +35,7 @@ from sqlalchemy.orm import sessionmaker
 
 # ML
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.base import BaseEstimator, RegressorMixin, clone
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_squared_error
@@ -161,13 +162,119 @@ def ensure_tables():
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS backtest_best_model (
                 id SERIAL PRIMARY KEY,
-                run_date DATE NOT NULL UNIQUE,
+                run_date DATE NOT NULL,
                 combined_score FLOAT NOT NULL,
                 pkl_data BYTEA NOT NULL,
                 run_id INTEGER REFERENCES backtest_runs(id),
                 created_at TIMESTAMP DEFAULT NOW(),
-                updated_at TIMESTAMP DEFAULT NOW()
+                updated_at TIMESTAMP DEFAULT NOW(),
+                is_active BOOLEAN DEFAULT FALSE,
+                promoted_at TIMESTAMP,
+                promotion_reason TEXT,
+                validation_roi FLOAT,
+                validation_strike_rate FLOAT,
+                validation_profit_units FLOAT,
+                validation_bets INTEGER,
+                validation_drawdown FLOAT,
+                validation_longest_losing_streak INTEGER,
+                validation_bankroll_growth FLOAT,
+                validation_volatility FLOAT,
+                model_type VARCHAR(50) DEFAULT 'random_forest',
+                model_name VARCHAR(120) DEFAULT 'Random Forest',
+                deactivated_at TIMESTAMP,
+                retained_until TIMESTAMP
             )
+        """))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS backtest_model_competition (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER REFERENCES backtest_runs(id),
+                model_type VARCHAR(50),
+                model_name VARCHAR(120),
+                validation_roi FLOAT,
+                validation_profit_units FLOAT,
+                validation_strike_rate FLOAT,
+                validation_bets INTEGER,
+                validation_drawdown FLOAT,
+                validation_longest_losing_streak INTEGER,
+                validation_bankroll_growth FLOAT,
+                validation_volatility FLOAT,
+                last_100 TEXT,
+                last_250 TEXT,
+                last_500 TEXT,
+                agreement_summary TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+
+        for ddl in [
+            "ALTER TABLE backtest_best_model DROP CONSTRAINT IF EXISTS backtest_best_model_run_date_key",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMP",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS promotion_reason TEXT",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS validation_roi FLOAT",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS validation_strike_rate FLOAT",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS validation_profit_units FLOAT",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS validation_bets INTEGER",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS validation_drawdown FLOAT",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS validation_longest_losing_streak INTEGER",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS validation_bankroll_growth FLOAT",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS validation_volatility FLOAT",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS model_type VARCHAR(50) DEFAULT 'random_forest'",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS model_name VARCHAR(120) DEFAULT 'Random Forest'",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS retained_until TIMESTAMP",
+            "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS validation_longest_losing_streak INTEGER",
+            "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS validation_bankroll_growth FLOAT",
+            "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS validation_volatility FLOAT",
+        ]:
+            conn.execute(text(ddl))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS backtest_model_promotions (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER REFERENCES backtest_runs(id),
+                old_champion_id INTEGER,
+                new_champion_id INTEGER,
+                model_type VARCHAR(50),
+                promotion_reason TEXT,
+                old_validation_metrics TEXT,
+                new_validation_metrics TEXT,
+                promoted_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+
+        conn.execute(text("""
+            UPDATE backtest_best_model
+            SET is_active = TRUE,
+                promoted_at = COALESCE(promoted_at, updated_at, created_at, NOW()),
+                promotion_reason = COALESCE(promotion_reason, 'Initial champion from existing newest saved model'),
+                model_type = COALESCE(model_type, 'random_forest'),
+                model_name = COALESCE(model_name, 'Random Forest')
+            WHERE id = (
+                SELECT id FROM backtest_best_model
+                ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
+                LIMIT 1
+            )
+              AND NOT EXISTS (SELECT 1 FROM backtest_best_model WHERE is_active = TRUE)
+        """))
+
+        conn.execute(text("""
+            UPDATE backtest_best_model
+            SET is_active = FALSE
+            WHERE is_active = TRUE
+              AND id <> (
+                SELECT id FROM backtest_best_model
+                WHERE is_active = TRUE
+                ORDER BY promoted_at DESC NULLS LAST, updated_at DESC, id DESC
+                LIMIT 1
+              )
+        """))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_backtest_best_model_active
+            ON backtest_best_model (is_active)
+            WHERE is_active = TRUE
         """))
 
         conn.commit()
@@ -1534,48 +1641,418 @@ def generate_feature_recommendations(importance_sorted):
     return recommendations
 
 
+MIN_VALIDATION_BETS = int(os.environ.get('ML_MIN_VALIDATION_BETS', '100'))
+PROMOTION_ROI_EDGE_PCT = 3.0
+PROMOTION_SR_TOLERANCE_PCT = 2.0
+MIN_CHAMPION_AGE_DAYS = int(os.environ.get('ML_MIN_CHAMPION_AGE_DAYS', '7'))
+LARGE_PROMOTION_ROI_EDGE_PCT = float(os.environ.get('ML_LARGE_PROMOTION_ROI_EDGE_PCT', '10.0'))
+CHAMPION_ROLLBACK_RETENTION_DAYS = int(os.environ.get('ML_CHAMPION_ROLLBACK_RETENTION_DAYS', '30'))
+
+
+class ConsensusRegressor(BaseEstimator, RegressorMixin):
+    """Weighted consensus of regressors without changing downstream score normalisation."""
+
+    def __init__(self, estimators, weights=None):
+        self.estimators = estimators
+        self.weights = weights
+
+    def fit(self, X, y):
+        self.feature_names_in_ = np.asarray(list(X.columns)) if hasattr(X, 'columns') else None
+        self.estimators_ = []
+        for _, estimator in self.estimators:
+            fitted = clone(estimator)
+            fitted.fit(X, y)
+            self.estimators_.append(fitted)
+        if self.weights is None:
+            self.weights_ = np.ones(len(self.estimators_), dtype=float)
+        else:
+            self.weights_ = np.asarray(self.weights, dtype=float)
+            if len(self.weights_) != len(self.estimators_) or np.sum(self.weights_) <= 0:
+                self.weights_ = np.ones(len(self.estimators_), dtype=float)
+        self.weights_ = self.weights_ / np.sum(self.weights_)
+        return self
+
+    def predict(self, X):
+        preds = np.column_stack([est.predict(X) for est in self.estimators_])
+        return np.average(preds, axis=1, weights=self.weights_)
+
+
+def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
+    """Evaluate top model selection in every validation race with betting metrics."""
+    pred = np.asarray(model.predict(X_val), dtype=float)
+    eval_df = pd.DataFrame({
+        'race_id': list(race_ids_val),
+        'pred': pred,
+        'won': np.asarray(y_won_val, dtype=int),
+        'sp': np.asarray(sp_val, dtype=float),
+    })
+    selections = eval_df.loc[eval_df.groupby('race_id')['pred'].idxmax()].copy()
+    profits = np.where(selections['won'] == 1, selections['sp'] - 1.0, -1.0)
+    bets = int(len(selections))
+    wins = int(selections['won'].sum())
+    cumulative = np.cumsum(profits)
+    running_peak = np.maximum.accumulate(np.insert(cumulative, 0, 0.0))[1:]
+    drawdown = abs(float(np.min(cumulative - running_peak))) if bets else 0.0
+    longest_losing_streak = 0
+    current_losing_streak = 0
+    for won in selections['won'].astype(int):
+        if won:
+            current_losing_streak = 0
+        else:
+            current_losing_streak += 1
+            longest_losing_streak = max(longest_losing_streak, current_losing_streak)
+    bankroll_growth = float(np.prod(1.0 + (profits * 0.01)) - 1.0) if bets else 0.0
+    volatility = float(np.std(profits, ddof=1)) if bets > 1 else 0.0
+
+    def window_metrics(n):
+        tail = selections.tail(n)
+        if tail.empty:
+            return {'bets': 0, 'roi': 0.0, 'strike_rate': 0.0, 'profit_units': 0.0}
+        p = np.where(tail['won'] == 1, tail['sp'] - 1.0, -1.0)
+        return {
+            'bets': int(len(tail)),
+            'roi': float(np.mean(p) * 100.0),
+            'strike_rate': float(tail['won'].mean() * 100.0),
+            'profit_units': float(np.sum(p)),
+        }
+
+    return {
+        'roi': float(np.mean(profits) * 100.0) if bets else 0.0,
+        'profit_units': float(np.sum(profits)) if bets else 0.0,
+        'strike_rate': float(wins / bets * 100.0) if bets else 0.0,
+        'number_of_bets': bets,
+        'drawdown': drawdown,
+        'longest_losing_streak': int(longest_losing_streak),
+        'bankroll_growth': bankroll_growth,
+        'volatility': volatility,
+        'last_100': window_metrics(100),
+        'last_250': window_metrics(250),
+        'last_500': window_metrics(500),
+    }
+
+
+def _optional_regressor(model_type, trial=None):
+    if model_type == 'xgboost':
+        from xgboost import XGBRegressor
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 80, 300) if trial else 180,
+            'max_depth': trial.suggest_int('max_depth', 2, 6) if trial else 4,
+            'learning_rate': trial.suggest_float('learning_rate', 0.02, 0.2, log=True) if trial else 0.06,
+            'subsample': trial.suggest_float('subsample', 0.7, 1.0) if trial else 0.9,
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 1.0) if trial else 0.9,
+            'random_state': 42,
+            'n_jobs': -1,
+            'objective': 'reg:squarederror',
+        }
+        return XGBRegressor(**params)
+    if model_type == 'lightgbm':
+        from lightgbm import LGBMRegressor
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 80, 300) if trial else 180,
+            'max_depth': trial.suggest_int('max_depth', 2, 8) if trial else 5,
+            'learning_rate': trial.suggest_float('learning_rate', 0.02, 0.2, log=True) if trial else 0.06,
+            'num_leaves': trial.suggest_int('num_leaves', 8, 64) if trial else 31,
+            'subsample': trial.suggest_float('subsample', 0.7, 1.0) if trial else 0.9,
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 1.0) if trial else 0.9,
+            'random_state': 42,
+            'n_jobs': -1,
+            'verbosity': -1,
+        }
+        return LGBMRegressor(**params)
+    if model_type == 'catboost':
+        from catboost import CatBoostRegressor
+        return CatBoostRegressor(
+            iterations=trial.suggest_int('iterations', 80, 250) if trial else 160,
+            depth=trial.suggest_int('depth', 3, 8) if trial else 5,
+            learning_rate=trial.suggest_float('learning_rate', 0.02, 0.2, log=True) if trial else 0.06,
+            loss_function='RMSE',
+            random_seed=42,
+            verbose=False,
+        )
+    raise ValueError(model_type)
+
+
+def run_model_competition(X, y_roi, y_won, race_ids, meeting_dates, df):
+    """Train RF, boosted candidates and consensus on one shared unseen validation set."""
+    dates = pd.to_datetime(pd.Series(meeting_dates), errors='coerce')
+    order = dates.argsort().values
+    X = X.iloc[order].reset_index(drop=True)
+    y_roi = y_roi.iloc[order].reset_index(drop=True)
+    y_won = y_won.iloc[order].reset_index(drop=True)
+    race_ids = [race_ids[i] for i in order]
+    cutoff = dates.iloc[order].quantile(0.8)
+    train_mask = dates.iloc[order].reset_index(drop=True) <= cutoff
+    val_mask = ~train_mask
+    # build_training_set preserves horse order after filtering, so use y_roi/y_won to recover SP for winners/losses.
+    sp_val = np.where(y_won[val_mask].values == 1, y_roi[val_mask].values + 1.0, 2.0)
+    X_train, X_val = X[train_mask], X[val_mask]
+    y_train, y_won_val = y_roi[train_mask], y_won[val_mask]
+    race_ids_val = [r for r, keep in zip(race_ids, val_mask) if keep]
+
+    candidates = {
+        'random_forest': RandomForestRegressor(n_estimators=250, max_depth=10, min_samples_leaf=15, max_features='sqrt', random_state=42, n_jobs=-1)
+    }
+    try:
+        import optuna
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+        tune_cutoff = pd.Series(dates.iloc[order][train_mask]).quantile(0.8)
+        tune_dates = dates.iloc[order].reset_index(drop=True)[train_mask].reset_index(drop=True)
+        tune_train_mask = tune_dates <= tune_cutoff
+        X_tune_train = X_train.reset_index(drop=True)[tune_train_mask]
+        y_tune_train = y_train.reset_index(drop=True)[tune_train_mask]
+        X_tune_eval = X_train.reset_index(drop=True)[~tune_train_mask]
+        y_tune_eval = y_train.reset_index(drop=True)[~tune_train_mask]
+
+        for mt in ('xgboost', 'lightgbm', 'catboost'):
+            try:
+                if len(X_tune_train) < 50 or len(X_tune_eval) < 20:
+                    raise ValueError("not enough training rows for safe internal tuning split")
+
+                def objective(trial, model_type=mt):
+                    model = _optional_regressor(model_type, trial)
+                    model.fit(X_tune_train, y_tune_train)
+                    preds = model.predict(X_tune_eval)
+                    return -float(mean_squared_error(y_tune_eval, preds))
+
+                study = optuna.create_study(direction='maximize')
+                study.optimize(
+                    objective,
+                    n_trials=int(os.environ.get('ML_OPTUNA_TRIALS', '12')),
+                    timeout=int(os.environ.get('ML_OPTUNA_TIMEOUT_SECONDS', '180')),
+                    show_progress_bar=False
+                )
+                candidates[mt] = _optional_regressor(mt, study.best_trial)
+            except Exception as e:
+                log.warning(f"Skipping {mt} challenger; training/tuning failed: {e}")
+    except Exception as e:
+        log.warning(f"Skipping boosted challengers; Optuna unavailable or failed to initialise: {e}")
+
+    fitted = {}
+    results = []
+    for mt, model in candidates.items():
+        try:
+            model.fit(X_train, y_train)
+            metrics = evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val)
+            fitted[mt] = model
+            results.append({'model_type': mt, 'model_name': mt.replace('_', ' ').title(), 'model': model, 'metrics': metrics})
+        except Exception as e:
+            if mt == 'random_forest':
+                raise
+            log.warning(f"Skipping {mt} challenger; final fit/evaluation failed: {e}")
+
+    if len(fitted) > 1:
+        ensemble_members = list(fitted.items())
+        ensemble_weights = []
+        for _, model in ensemble_members:
+            try:
+                train_preds = model.predict(X_train)
+                train_mse = float(mean_squared_error(y_train, train_preds))
+                ensemble_weights.append(1.0 / max(train_mse, 0.0001))
+            except Exception:
+                ensemble_weights.append(1.0)
+        ensemble = ConsensusRegressor(ensemble_members, weights=ensemble_weights)
+        ensemble.fit(X_train, y_train)
+        metrics = evaluate_model_on_validation(ensemble, X_val, y_won_val, race_ids_val, sp_val)
+        metrics['ensemble_weights'] = dict(zip([name for name, _ in ensemble_members], ensemble.weights_.tolist()))
+        results.append({'model_type': 'ensemble', 'model_name': 'Ensemble / Consensus', 'model': ensemble, 'metrics': metrics})
+
+    agreement_summary = {'4_of_4': 0, '3_of_4': 0, '2_of_4': 0, '1_of_4': 0}
+    if fitted:
+        val_frame = pd.DataFrame({'race_id': race_ids_val, 'row_id': range(len(race_ids_val))})
+        selections_by_model = {}
+        for mt, model in fitted.items():
+            temp = val_frame.copy()
+            temp['pred'] = np.asarray(model.predict(X_val), dtype=float)
+            selections_by_model[mt] = temp.loc[temp.groupby('race_id')['pred'].idxmax()].set_index('race_id')['row_id'].to_dict()
+        for race_id in val_frame['race_id'].unique():
+            chosen = [sel.get(race_id) for sel in selections_by_model.values()]
+            max_agreement = max(chosen.count(row_id) for row_id in set(chosen))
+            agreement_summary[f'{max_agreement}_of_4'] = agreement_summary.get(f'{max_agreement}_of_4', 0) + 1
+    for result in results:
+        result['agreement_summary'] = agreement_summary
+
+    best = max(results, key=lambda r: (r['metrics']['roi'], r['metrics']['strike_rate']))
+    log.info("ML competition: best=%s roi=%.1f%% sr=%.1f%% bets=%s",
+             best['model_type'], best['metrics']['roi'], best['metrics']['strike_rate'], best['metrics']['number_of_bets'])
+    return best, results
+
+
 # ─────────────────────────────────────────────
 # SAVE BEST MODEL TO DB (persists across container restarts)
 # ─────────────────────────────────────────────
-def save_best_model_to_db(pkl_file, combined_score, run_id):
+def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_forest',
+                          model_name='Random Forest', validation_metrics=None):
     """
-    Store rank-#1 .pkl in the database for the current date.
-    Only replaces the existing entry if the new score is strictly better.
-    One row per calendar day (UTC) — keyed by run_date UNIQUE constraint.
+    Store Challenger .pkl in the database and only activate it if it beats Champion.
     """
     today = datetime.utcnow().date()
     with open(pkl_file, 'rb') as f:
         pkl_bytes = f.read()
 
     with engine.connect() as conn:
-        existing = conn.execute(text(
-            "SELECT combined_score FROM backtest_best_model WHERE run_date = :d"
-        ), {'d': today}).fetchone()
+        champion = conn.execute(text("""
+            SELECT id, validation_roi, validation_strike_rate, promoted_at,
+                   validation_profit_units, validation_bets, validation_drawdown,
+                   validation_longest_losing_streak, validation_bankroll_growth, validation_volatility
+            FROM backtest_best_model
+            WHERE is_active = TRUE
+            ORDER BY promoted_at DESC NULLS LAST, updated_at DESC, id DESC
+            LIMIT 1
+        """)).fetchone()
+        val_roi = (validation_metrics or {}).get('roi')
+        val_sr = (validation_metrics or {}).get('strike_rate')
+        val_profit = (validation_metrics or {}).get('profit_units')
+        val_bets = (validation_metrics or {}).get('number_of_bets', 0)
+        val_drawdown = (validation_metrics or {}).get('drawdown')
+        val_losing_streak = (validation_metrics or {}).get('longest_losing_streak')
+        val_bankroll_growth = (validation_metrics or {}).get('bankroll_growth')
+        val_volatility = (validation_metrics or {}).get('volatility')
+        challenger_id = conn.execute(text("""
+            INSERT INTO backtest_best_model
+            (run_date, combined_score, pkl_data, run_id, is_active, validation_roi,
+             validation_strike_rate, validation_profit_units, validation_bets, validation_drawdown,
+             validation_longest_losing_streak, validation_bankroll_growth, validation_volatility,
+             model_type, model_name, promotion_reason)
+            VALUES (:d, :score, :data, :run_id, FALSE, :val_roi, :val_sr, :val_profit, :val_bets,
+                    :val_drawdown, :val_losing_streak, :val_bankroll_growth, :val_volatility,
+                    :model_type, :model_name,
+                    'Saved as challenger pending champion comparison')
+            RETURNING id
+        """), {'d': today, 'score': combined_score, 'data': pkl_bytes, 'run_id': run_id,
+               'val_roi': val_roi, 'val_sr': val_sr, 'val_profit': val_profit, 'val_bets': val_bets,
+               'val_drawdown': val_drawdown, 'val_losing_streak': val_losing_streak,
+               'val_bankroll_growth': val_bankroll_growth, 'val_volatility': val_volatility,
+               'model_type': model_type, 'model_name': model_name}).fetchone()[0]
 
-        if existing is None:
-            conn.execute(text("""
-                INSERT INTO backtest_best_model (run_date, combined_score, pkl_data, run_id)
-                VALUES (:d, :score, :data, :run_id)
-            """), {'d': today, 'score': combined_score, 'data': pkl_bytes, 'run_id': run_id})
-            log.info(f"Best model saved to DB for {today} (score={combined_score:.4f})")
-        elif combined_score > existing[0]:
+        promote = False
+        reason = "Rejected: validation sample too small"
+        champion_roi = float(champion[1]) if champion and champion[1] is not None else None
+        champion_sr = float(champion[2]) if champion and champion[2] is not None else None
+        champion_promoted_at = champion[3] if champion else None
+        champion_age_days = None
+        if champion_promoted_at:
+            champion_age_days = (datetime.utcnow() - champion_promoted_at).total_seconds() / 86400.0
+        if val_bets >= MIN_VALIDATION_BETS:
+            if champion is None or champion_roi is None or champion_sr is None:
+                promote = True
+                reason = "Promoted: no comparable active champion metrics existed"
+            elif val_roi >= champion_roi + PROMOTION_ROI_EDGE_PCT and val_sr >= champion_sr - PROMOTION_SR_TOLERANCE_PCT:
+                roi_edge = val_roi - champion_roi
+                if (
+                    champion_age_days is not None
+                    and champion_age_days < MIN_CHAMPION_AGE_DAYS
+                    and roi_edge < LARGE_PROMOTION_ROI_EDGE_PCT
+                ):
+                    reason = (
+                        f"Rejected: Champion age {champion_age_days:.1f}d is below "
+                        f"{MIN_CHAMPION_AGE_DAYS}d and ROI edge {roi_edge:.1f}pp is below large-promotion threshold"
+                    )
+                else:
+                    promote = True
+                    reason = "Promoted: Challenger beat Champion ROI threshold without unacceptable strike-rate drop"
+            else:
+                reason = "Rejected: Challenger did not clearly beat Champion"
+
+        if promote:
+            old_champion_id = champion[0] if champion else None
             conn.execute(text("""
                 UPDATE backtest_best_model
-                SET combined_score = :score, pkl_data = :data, run_id = :run_id,
-                    updated_at = NOW()
-                WHERE run_date = :d
-            """), {'d': today, 'score': combined_score, 'data': pkl_bytes, 'run_id': run_id})
-            log.info(
-                f"Best model updated in DB for {today} "
-                f"(old={existing[0]:.4f} → new={combined_score:.4f})"
-            )
+                SET is_active = FALSE,
+                    deactivated_at = NOW(),
+                    retained_until = NOW() + (:retention_days * INTERVAL '1 day')
+                WHERE is_active = TRUE
+            """), {'retention_days': CHAMPION_ROLLBACK_RETENTION_DAYS})
+            conn.execute(text("""
+                UPDATE backtest_best_model
+                SET is_active = TRUE, promoted_at = NOW(), promotion_reason = :reason, updated_at = NOW()
+                WHERE id = :id
+            """), {'id': challenger_id, 'reason': reason})
+            conn.execute(text("""
+                INSERT INTO backtest_model_promotions
+                (run_id, old_champion_id, new_champion_id, model_type, promotion_reason,
+                 old_validation_metrics, new_validation_metrics)
+                VALUES (:run_id, :old_champion_id, :new_champion_id, :model_type, :reason,
+                        :old_metrics, :new_metrics)
+            """), {
+                'run_id': run_id,
+                'old_champion_id': old_champion_id,
+                'new_champion_id': challenger_id,
+                'model_type': model_type,
+                'reason': reason,
+                'old_metrics': json.dumps({
+                    'roi': champion_roi,
+                    'strike_rate': champion_sr,
+                    'profit_units': float(champion[4]) if champion and champion[4] is not None else None,
+                    'number_of_bets': int(champion[5]) if champion and champion[5] is not None else None,
+                    'drawdown': float(champion[6]) if champion and champion[6] is not None else None,
+                    'longest_losing_streak': int(champion[7]) if champion and champion[7] is not None else None,
+                    'bankroll_growth': float(champion[8]) if champion and champion[8] is not None else None,
+                    'volatility': float(champion[9]) if champion and champion[9] is not None else None,
+                }),
+                'new_metrics': json.dumps(validation_metrics or {}),
+            })
         else:
-            log.info(
-                f"Existing DB model for {today} is better "
-                f"({existing[0]:.4f} >= {combined_score:.4f}), skipping."
-            )
+            conn.execute(text("""
+                UPDATE backtest_best_model SET promotion_reason = :reason, updated_at = NOW()
+                WHERE id = :id
+            """), {'id': challenger_id, 'reason': reason})
+
+        log.info("Champion/Challenger: champion_id=%s challenger_id=%s champion_roi=%s champion_sr=%s challenger_roi=%.1f challenger_sr=%.1f promoted=%s reason=%s best_model=%s",
+                 champion[0] if champion else None, challenger_id,
+                 f"{champion_roi:.1f}" if champion_roi is not None else "n/a",
+                 f"{champion_sr:.1f}" if champion_sr is not None else "n/a",
+                 val_roi or 0.0, val_sr or 0.0, promote, reason, model_type)
 
         conn.commit()
+
+
+def rollback_to_champion(model_id, reason='Manual Champion rollback'):
+    """Instantly reactivate a retained previous Champion without retraining."""
+    with engine.connect() as conn:
+        target = conn.execute(text("""
+            SELECT id, retained_until
+            FROM backtest_best_model
+            WHERE id = :id
+              AND pkl_data IS NOT NULL
+              AND (retained_until IS NULL OR retained_until >= NOW())
+        """), {'id': model_id}).fetchone()
+        if not target:
+            raise ValueError(f"Model {model_id} is not available for rollback or retention has expired")
+        current = conn.execute(text("""
+            SELECT id FROM backtest_best_model
+            WHERE is_active = TRUE
+            ORDER BY promoted_at DESC NULLS LAST, updated_at DESC, id DESC
+            LIMIT 1
+        """)).fetchone()
+        current_id = current[0] if current else None
+        conn.execute(text("""
+            UPDATE backtest_best_model
+            SET is_active = FALSE,
+                deactivated_at = NOW(),
+                retained_until = COALESCE(retained_until, NOW() + (:retention_days * INTERVAL '1 day'))
+            WHERE is_active = TRUE
+        """), {'retention_days': CHAMPION_ROLLBACK_RETENTION_DAYS})
+        conn.execute(text("""
+            UPDATE backtest_best_model
+            SET is_active = TRUE,
+                promoted_at = NOW(),
+                promotion_reason = :reason,
+                updated_at = NOW(),
+                deactivated_at = NULL,
+                retained_until = NULL
+            WHERE id = :id
+        """), {'id': model_id, 'reason': reason})
+        conn.execute(text("""
+            INSERT INTO backtest_model_promotions
+            (old_champion_id, new_champion_id, model_type, promotion_reason,
+             old_validation_metrics, new_validation_metrics)
+            SELECT :old_champion_id, id, model_type, :reason, NULL, NULL
+            FROM backtest_best_model
+            WHERE id = :id
+        """), {'old_champion_id': current_id, 'id': model_id, 'reason': reason})
+        conn.commit()
+    log.info("Champion rollback complete: old_champion_id=%s new_champion_id=%s reason=%s",
+             current_id, model_id, reason)
 
 
 # ─────────────────────────────────────────────
@@ -1583,7 +2060,7 @@ def save_best_model_to_db(pkl_file, combined_score, run_id):
 # ─────────────────────────────────────────────
 def write_results(run_id, feature_recommendations, component_results,
                   momentum_results, baseline_roi, baseline_sr, total_races, total_horses,
-                  grid_search_df, top_10_models):
+                  grid_search_df, top_10_models, best_challenger=None):
     """Write all backtest findings to the database."""
     log.info("Writing results to database...")
 
@@ -1681,10 +2158,52 @@ def write_results(run_id, feature_recommendations, component_results,
             'improvement': improvement
         })
 
+        if best_challenger:
+            for result in best_challenger.get('competition_results', []):
+                metrics = result['metrics']
+                conn.execute(text("""
+                    INSERT INTO backtest_model_competition
+                    (run_id, model_type, model_name, validation_roi, validation_profit_units,
+                     validation_strike_rate, validation_bets, validation_drawdown,
+                     validation_longest_losing_streak, validation_bankroll_growth,
+                     validation_volatility, last_100, last_250, last_500, agreement_summary)
+                    VALUES (:run_id, :model_type, :model_name, :roi, :profit_units,
+                            :strike_rate, :bets, :drawdown, :longest_losing_streak,
+                            :bankroll_growth, :volatility, :last_100, :last_250,
+                            :last_500, :agreement_summary)
+                """), {
+                    'run_id': run_id,
+                    'model_type': result['model_type'],
+                    'model_name': result['model_name'],
+                    'roi': metrics['roi'],
+                    'profit_units': metrics['profit_units'],
+                    'strike_rate': metrics['strike_rate'],
+                    'bets': metrics['number_of_bets'],
+                    'drawdown': metrics['drawdown'],
+                    'longest_losing_streak': metrics['longest_losing_streak'],
+                    'bankroll_growth': metrics['bankroll_growth'],
+                    'volatility': metrics['volatility'],
+                    'last_100': json.dumps(metrics['last_100']),
+                    'last_250': json.dumps(metrics['last_250']),
+                    'last_500': json.dumps(metrics['last_500']),
+                    'agreement_summary': json.dumps(result.get('agreement_summary', {})),
+                })
+
         conn.commit()
 
     # Persist rank-#1 model to database (survives container restarts without git)
-    if top_10_models:
+    if best_challenger:
+        best = best_challenger
+        try:
+            save_best_model_to_db(
+                best['pkl_file'], best['score'], run_id,
+                model_type=best['model_type'],
+                model_name=best['model_name'],
+                validation_metrics=best['metrics'],
+            )
+        except Exception as e:
+            log.warning(f"Could not save challenger model to DB: {e}")
+    elif top_10_models:
         best = top_10_models[0]
         try:
             save_best_model_to_db(best['pkl_file'], best['score'], run_id)
@@ -1734,6 +2253,14 @@ def main():
 
     ensure_tables()
 
+    rollback_model_id = os.environ.get('ML_ROLLBACK_MODEL_ID')
+    if rollback_model_id:
+        rollback_to_champion(
+            int(rollback_model_id),
+            os.environ.get('ML_ROLLBACK_REASON', 'Manual Champion rollback via ML_ROLLBACK_MODEL_ID')
+        )
+        return
+
     with engine.connect() as conn:
         result = conn.execute(text(
             "INSERT INTO backtest_runs (status) VALUES ('running') RETURNING id"
@@ -1771,6 +2298,32 @@ def main():
         # Track D: Grid search (NEW)
         grid_search_df, top_10_models = run_grid_search(X, y_roi, y_won, meeting_dates)
 
+        # Track E: Multi-model Challenger competition on the same unseen validation set.
+        # This is additive only: if any challenger path breaks, the original RF grid-search
+        # above has already completed and the cron continues with that RF artifact.
+        best_challenger = None
+        try:
+            best_competitor, competition_results = run_model_competition(
+                X, y_roi, y_won, race_ids, meeting_dates, df
+            )
+            output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
+            os.makedirs(output_dir, exist_ok=True)
+            challenger_file = os.path.join(
+                output_dir,
+                f"form_analyst_challenger_{best_competitor['model_type']}_{run_id}.pkl"
+            )
+            joblib.dump(best_competitor['model'], challenger_file)
+            best_challenger = {
+                'pkl_file': challenger_file,
+                'score': best_competitor['metrics']['roi'],
+                'model_type': best_competitor['model_type'],
+                'model_name': best_competitor['model_name'],
+                'metrics': best_competitor['metrics'],
+                'competition_results': competition_results,
+            }
+        except Exception as e:
+            log.warning(f"Multi-model challenger competition failed; continuing with RF grid-search artifact: {e}")
+
         total_horses = len(df)
 
         # Write all results
@@ -1784,7 +2337,8 @@ def main():
             total_races,
             total_horses,
             grid_search_df,
-            top_10_models
+            top_10_models,
+            best_challenger
         )
 
         # Final summary
@@ -1803,6 +2357,7 @@ def main():
         log.info(f"Features analysed:    {len(feature_recommendations)}")
         log.info(f"Components analysed:  {len(component_results)}")
         log.info(f"Grid models trained:  {len(grid_search_df)}")
+        log.info(f"Best nightly model:   {best_challenger['model_type'] if best_challenger else 'random_forest_grid_fallback'}")
         log.info("=" * 80)
 
     except Exception as e:
