@@ -5260,6 +5260,41 @@ def ml_meetings():
     return render_template('ml_meetings.html', meetings=meetings, meetings_json=json.dumps(meetings_json))
 
 
+
+
+def _derive_ml_race_book(runners, score_getter):
+    """Derive ML-only 110% book values from per-runner ml_score values.
+
+    Returns a mapping of runner index to fair probability, 110% probability
+    percentage, and assessed odds. This mirrors the ML meeting page logic and
+    intentionally does not use Analyzer predicted_odds or win_probability.
+    """
+    weighted = []
+    for idx, runner in enumerate(runners):
+        try:
+            score = float(score_getter(runner) or 0)
+        except (TypeError, ValueError):
+            score = 0.0
+        if score > 0:
+            weighted.append((idx, score))
+
+    total_score = sum(score for _, score in weighted)
+    if total_score <= 0:
+        return {}
+
+    book = {}
+    for idx, score in weighted:
+        fair_probability = score / total_score
+        probability_110 = fair_probability * 1.10
+        probability_110_pct = probability_110 * 100.0
+        book[idx] = {
+            'ml_fair_probability': fair_probability,
+            'ml_probability_110': probability_110,
+            'ml_probability_110_pct': probability_110_pct,
+            'ml_assessed_odds': (1 / probability_110) if probability_110 > 0 else None,
+        }
+    return book
+
 @app.route("/ml-meeting/<int:meeting_id>")
 @login_required
 def ml_view_meeting(meeting_id):
@@ -5276,27 +5311,18 @@ def ml_view_meeting(meeting_id):
             reverse=True
         )
 
-        active_ml_horses = [
-            h for h in race['horses']
-            if not h.get('is_scratched') and h.get('ml_score') is not None and (h.get('ml_score') or 0) > 0
-        ]
-        ml_score_total = sum((h.get('ml_score') or 0) for h in active_ml_horses)
+        ml_book = _derive_ml_race_book(race['horses'], lambda h: None if h.get('is_scratched') else h.get('ml_score'))
 
-        for horse in race['horses']:
+        for idx, horse in enumerate(race['horses']):
             horse['ml_assessed_odds'] = ''
             horse['ml_win_probability'] = ''
 
-            if horse.get('is_scratched') or ml_score_total <= 0:
+            book_entry = ml_book.get(idx)
+            if not book_entry:
                 continue
 
-            ml_score = horse.get('ml_score')
-            if ml_score is None or ml_score <= 0:
-                continue
-
-            ml_win_pct = (ml_score / ml_score_total) * 110.0
-            ml_assessed_price = 100.0 / ml_win_pct if ml_win_pct > 0 else 99.0
-            horse['ml_win_probability'] = f"{ml_win_pct:.1f}%"
-            horse['ml_assessed_odds'] = f"${ml_assessed_price:.2f}"
+            horse['ml_win_probability'] = f"{book_entry['ml_probability_110_pct']:.1f}%"
+            horse['ml_assessed_odds'] = f"${book_entry['ml_assessed_odds']:.2f}"
 
     return render_template(
         "MLRaceMeetings.html",
@@ -7779,16 +7805,19 @@ def api_probability_calibration():
         Meeting.id,
         Race.race_number,
         Prediction.win_probability,
+        Prediction.ml_score,
         Result.finish_position
     ).join(Race,       Race.meeting_id      == Meeting.id
     ).join(Horse,      Horse.race_id        == Race.id
     ).join(Prediction, Prediction.horse_id  == Horse.id
     ).join(Result,     Result.horse_id      == Horse.id
-    ).filter(
-        Result.finish_position > 0,
-        Prediction.win_probability.isnot(None),
-        Prediction.win_probability != ''
-    )
+    ).filter(Result.finish_position > 0)
+
+    if not use_ml:
+        q = q.filter(
+            Prediction.win_probability.isnot(None),
+            Prediction.win_probability != ''
+        )
 
     if track_filter:
         q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
@@ -7802,14 +7831,13 @@ def api_probability_calibration():
     q = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc())
     rows = q.all()
 
-    # Group by race for limit
     races = defaultdict(list)
     race_keys_ordered = []
-    for meeting_id, race_num, win_prob, finish_pos in rows:
+    for meeting_id, race_num, win_prob, ml_score, finish_pos in rows:
         key = (meeting_id, race_num)
         if key not in races:
             race_keys_ordered.append(key)
-        races[key].append({'win_prob': win_prob, 'finish_pos': finish_pos})
+        races[key].append({'win_prob': win_prob, 'ml_score': ml_score, 'finish_pos': finish_pos})
 
     if limit_param != 'all':
         limit = int(limit_param) if str(limit_param).isdigit() else 200
@@ -7836,12 +7864,20 @@ def api_probability_calibration():
     for key, horse_list in races.items():
         if key not in allowed:
             continue
-        for h in horse_list:
-            try:
-                wp = float(str(h['win_prob']).replace('%', '').strip())
-            except (ValueError, TypeError):
-                skipped += 1
-                continue
+        ml_book = _derive_ml_race_book(horse_list, lambda h: h['ml_score']) if use_ml else {}
+        for idx, h in enumerate(horse_list):
+            if use_ml:
+                book_entry = ml_book.get(idx)
+                if not book_entry:
+                    skipped += 1
+                    continue
+                wp = book_entry['ml_probability_110_pct']
+            else:
+                try:
+                    wp = float(str(h['win_prob']).replace('%', '').strip())
+                except (ValueError, TypeError):
+                    skipped += 1
+                    continue
             won = h['finish_pos'] == 1
             total_horses += 1
             for label, mn, mx in bucket_defs:
@@ -8017,24 +8053,32 @@ def api_price_analysis():
             reverse=True
         )
 
+        ml_book = _derive_ml_race_book(horses_sorted, lambda h: h['prediction'].ml_score) if use_ml else {}
+
         # ── Top-N picks overlay ───────────────────────────────────────────────
         for rank_idx, runner in enumerate(horses_sorted[:top_n]):
             pred   = runner['prediction']
             result = runner['result']
 
-            try:
-                predicted_odds = float((pred.predicted_odds or '').replace('$', '').strip())
-            except (ValueError, AttributeError):
-                continue
+            if use_ml:
+                book_entry = ml_book.get(rank_idx)
+                if not book_entry or not book_entry.get('ml_assessed_odds'):
+                    continue
+                assessed_odds = book_entry['ml_assessed_odds']
+            else:
+                try:
+                    assessed_odds = float((pred.predicted_odds or '').replace('$', '').strip())
+                except (ValueError, AttributeError):
+                    continue
 
             sp = result.sp
-            if not sp or sp <= 0 or predicted_odds <= 0:
+            if not sp or sp <= 0 or assessed_odds <= 0:
                 continue
 
             total_compared += 1
             won    = result.finish_position == 1
             profit = (sp * stake - stake) if won else -stake
-            edge   = ((sp - predicted_odds) / predicted_odds) * 100
+            edge   = ((sp - assessed_odds) / assessed_odds) * 100
 
             # Existing tier buckets (top pick only — rank 0)
             if rank_idx == 0:
@@ -8059,9 +8103,9 @@ def api_price_analysis():
                     overlay_examples.append({
                         'horse':       runner['horse'].horse_name,
                         'score':       (pred.ml_score if use_ml else pred.score),
-                        'your_price':  predicted_odds,
+                        'ml_assessed_odds' if use_ml else 'your_price': assessed_odds,
                         'sp':          sp,
-                        'overlay_pct': round(edge, 1),
+                        'ml_overlay_pct' if use_ml else 'overlay_pct': round(edge, 1),
                         'won':         won,
                         'profit':      profit,
                         'race_id':     race_key[0],
@@ -8076,22 +8120,28 @@ def api_price_analysis():
                     topn_thresholds[t]['profit'] += profit
 
         # ── All runners overlay ───────────────────────────────────────────────
-        for runner in horses_sorted:
+        for all_rank_idx, runner in enumerate(horses_sorted):
             pred_all   = runner['prediction']
             result_all = runner['result']
 
-            try:
-                predicted_odds_all = float((pred_all.predicted_odds or '').replace('$', '').strip())
-            except (ValueError, AttributeError):
-                continue
+            if use_ml:
+                book_entry_all = ml_book.get(all_rank_idx)
+                if not book_entry_all or not book_entry_all.get('ml_assessed_odds'):
+                    continue
+                assessed_odds_all = book_entry_all['ml_assessed_odds']
+            else:
+                try:
+                    assessed_odds_all = float((pred_all.predicted_odds or '').replace('$', '').strip())
+                except (ValueError, AttributeError):
+                    continue
 
             sp_all = result_all.sp
-            if not sp_all or sp_all <= 0 or predicted_odds_all <= 0:
+            if not sp_all or sp_all <= 0 or assessed_odds_all <= 0:
                 continue
 
             won_all    = result_all.finish_position == 1
             profit_all = (sp_all * stake - stake) if won_all else -stake
-            edge_all   = ((sp_all - predicted_odds_all) / predicted_odds_all) * 100
+            edge_all   = ((sp_all - assessed_odds_all) / assessed_odds_all) * 100
 
             # All-horse tier buckets
             if edge_all >= 10:
@@ -9309,6 +9359,7 @@ def api_combination_analysis():
         Horse.trainer,
         Horse.csv_data,
         Prediction.score,
+        Prediction.ml_score,
         Prediction.win_probability,
         Prediction.predicted_odds,
         Prediction.notes,
@@ -9513,7 +9564,7 @@ def api_combination_analysis():
         csv_data = row.csv_data or {}
 
         # Score tier
-        _accum(score_buckets[_score_tier(row.score)], won, sp)
+        _accum(score_buckets[_score_tier((row.ml_score if use_ml else row.score) or 0)], won, sp)
 
         # Distance
         db_val = _dist_bucket(csv_data.get('distance') or row.distance)
@@ -9670,9 +9721,9 @@ def api_combination_analysis():
         factors  = set()
 
         # Score tier
-        st = _score_tier(row.score)
+        st = _score_tier((row.ml_score if use_ml else row.score) or 0)
         if st in pos_scores:
-            factors.add(f"Score: {st}")
+            factors.add(f"{'ML Score' if use_ml else 'Score'}: {st}")
 
         # Distance
         db_val = _dist_bucket(csv_data.get('distance') or row.distance)
@@ -9871,7 +9922,7 @@ def api_combination_analysis():
         factors  = set()
 
         # Score tier — tag all
-        factors.add(f"Score: {_score_tier(row.score)}")
+        factors.add(f"{'ML Score' if use_ml else 'Score'}: {_score_tier((row.ml_score if use_ml else row.score) or 0)}")
 
         # Distance
         db_val = _dist_bucket(csv_data.get('distance') or row.distance)
@@ -10760,8 +10811,16 @@ def api_betting_filters():
     wp_accum = {t: {'count': 0, 'wins': 0, 'profit': 0.0} for t in thresholds_wp}
 
     for key, horses in races_map.items():
-        top = max(horses, key=lambda x: x[4])
-        wp_raw = top[5]  # win_probability
+        top = max(horses, key=lambda x: (x.ml_score or 0) if use_ml else (x[4] or 0))
+        if use_ml:
+            ml_book = _derive_ml_race_book(horses, lambda h: h.ml_score)
+            top_idx = horses.index(top)
+            book_entry = ml_book.get(top_idx)
+            if not book_entry:
+                continue
+            wp_raw = book_entry['ml_probability_110_pct']
+        else:
+            wp_raw = top[5]  # Analyzer win_probability
         sp     = top[8] or 0
         won    = top[7] == 1
         profit = (sp * stake - stake) if won else -stake
@@ -10795,7 +10854,12 @@ def api_betting_filters():
     gap_accum = {t: {'count': 0, 'wins': 0, 'profit': 0.0} for t in gap_thresholds}
 
     # Also tier breakdown
-    tier_defs = [
+    tier_defs = ([
+        ('Strong ML gap (30+)', 30, 9999),
+        ('Medium ML gap (20-29)', 20, 29),
+        ('Small ML gap (10-19)', 10, 19),
+        ('Low ML gap (<10)', 0, 9),
+    ] if use_ml else [
         ('Dominant (50+ gap)',   50, 9999),
         ('Clear (30-49 gap)',    30,   49),
         ('Comfortable (20-29)', 20,   29),
@@ -10803,14 +10867,16 @@ def api_betting_filters():
         ('Marginal (10-14)',    10,   14),
         ('Slim (5-9)',           5,    9),
         ('Tight (<5)',           0,    4),
-    ]
+    ])
     tier_stats = {label: {'count': 0, 'wins': 0, 'profit': 0.0} for label, _, _ in tier_defs}
 
     for key, horses in races_map.items():
-        sorted_horses = sorted(horses, key=lambda x: x[4], reverse=True)
+        sorted_horses = sorted(horses, key=lambda x: (x.ml_score or 0) if use_ml else (x[4] or 0), reverse=True)
         top    = sorted_horses[0]
         second = sorted_horses[1] if len(sorted_horses) > 1 else None
-        gap    = top[4] - (second[4] if second else 0)
+        top_score = (top.ml_score or 0) if use_ml else (top[4] or 0)
+        second_score = ((second.ml_score or 0) if use_ml else (second[4] or 0)) if second else 0
+        gap    = top_score - second_score
         sp     = top[8] or 0
         won    = top[7] == 1
         profit = (sp * stake - stake) if won else -stake
