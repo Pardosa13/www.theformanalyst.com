@@ -407,8 +407,9 @@ def load_model():
     model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'form_analyst_best.pkl')
     if os.path.exists(model_path):
         import joblib
-        log.info("ML MODEL SOURCE: Filesystem")
-        log.info("Path: %s", model_path)
+        log.info("ML MODEL LOADED")
+        log.info("Source: Filesystem")
+        log.info("Path: models/form_analyst_best.pkl")
         return joblib.load(model_path)
 
     try:
@@ -420,12 +421,22 @@ def load_model():
         eng = create_engine(db_url, pool_pre_ping=True)
         with eng.connect() as conn:
             row = conn.execute(text(
-                "SELECT pkl_data FROM backtest_best_model ORDER BY run_date DESC LIMIT 1"
+                """
+                SELECT id, run_id, run_date, combined_score, updated_at, pkl_data
+                FROM backtest_best_model
+                ORDER BY run_date DESC
+                LIMIT 1
+                """
             )).fetchone()
-            if row and row[0]:
-                log.info("ML MODEL SOURCE: Database")
-                log.info("Table: backtest_best_model (latest run_date)")
-                return joblib.load(io.BytesIO(bytes(row[0])))
+            if row and row[5]:
+                log.info("ML MODEL LOADED")
+                log.info("Source: Database")
+                log.info("Model ID: %s", row[0])
+                log.info("Run ID: %s", row[1])
+                log.info("Run Date: %s", row[2])
+                log.info("Combined Score: %s", row[3])
+                log.info("Updated At: %s", row[4])
+                return joblib.load(io.BytesIO(bytes(row[5])))
     except Exception as e:
         log.warning(f"Could not load model from DB: {e}")
 
