@@ -11214,8 +11214,8 @@ def best_bets():
                     continue
                 if mode == 'non_top_pick' and is_top_pick:
                     continue
-                if not signals_all_agree_top(horse.id, signal_top_ids):
-                    continue
+
+                signal_agreement = signals_all_agree_top(horse.id, signal_top_ids)
 
                 # Parse win probability for high confidence flag
                 try:
@@ -11254,9 +11254,10 @@ def best_bets():
                     if rank_idx > 0 else 0
                 )
 
-                # Include if matched components OR ≥80% win probability
+                # Include if matched components, ≥80% win probability, jockey sole ride,
+                # or Analyzer/PFAI/ML all agree on the top selection.
                 jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
-                if matched_components or wp >= 80 or jockey_sole:
+                if matched_components or wp >= 80 or jockey_sole or signal_agreement:
                     matched_components.sort(key=lambda x: x['roi'], reverse=True)
                     best_bets.append({
                         'meeting_id': meeting.id,
@@ -11284,6 +11285,7 @@ def best_bets():
                         'is_top_pick': is_top_pick,
                         'rank_in_race': rank_in_race,
                         'high_confidence': wp >= 80,
+                        'signal_agreement': signal_agreement,
                     })
 
     best_bets.sort(key=lambda x: x['score'], reverse=True)

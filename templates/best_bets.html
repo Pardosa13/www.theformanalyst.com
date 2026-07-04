@@ -363,6 +363,30 @@
   .bets-table tbody tr.row-signal {
     border-left-color: #f59e0b;
   }
+  .bets-table tbody tr.row-signal-agreement {
+    background: rgba(255, 210, 63, 0.20) !important;
+    border-left: 5px solid #FFD23F !important;
+    box-shadow: inset 0 0 0 1px rgba(255, 210, 63, 0.35), 0 0 18px rgba(255, 210, 63, 0.18);
+  }
+  .bets-table tbody tr.row-signal-agreement:hover {
+    filter: brightness(1.16);
+  }
+  .signal-agreement-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    background: rgba(255, 210, 63, 0.16);
+    border: 1px solid rgba(255, 210, 63, 0.45);
+    color: #fde68a;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    vertical-align: middle;
+  }
   .bets-table tbody tr:last-child { border-bottom: none; }
   .bets-table tbody tr:hover {
     background: rgba(102,126,234,0.1) !important;
@@ -678,7 +702,7 @@
             </thead>
             <tbody>
               {% for bet in race_data.horses|sort(attribute='rank_in_race') %}
-              <tr class="{% if bet.is_top_pick %}row-top-pick{% else %}row-signal{% endif %}">
+              <tr class="{% if bet.is_top_pick %}row-top-pick{% else %}row-signal{% endif %}{% if bet.signal_agreement %} row-signal-agreement{% endif %}">
                 <td>
                   <input type="checkbox" name="bet_ids[]" value="{{ bet.horse_id }}" class="bet-checkbox">
                 </td>
@@ -687,6 +711,9 @@
     {{ bet.horse_name }}
     {% if bet.high_confidence %}
     <span class="badge bg-warning text-dark ms-1" style="font-size:10px;padding:2px 6px;vertical-align:middle;">🎯 80%+</span>
+    {% endif %}
+    {% if bet.signal_agreement %}
+    <span class="signal-agreement-badge" title="Analyzer, PFAI and ML all rank this horse top">⚡ 3-Way Agree</span>
     {% endif %}
   </div>
   <div class="horse-form">{{ bet.form }}</div>
