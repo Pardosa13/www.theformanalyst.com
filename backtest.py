@@ -244,6 +244,13 @@ def ensure_tables():
                 promoted_at TIMESTAMP DEFAULT NOW()
             )
         """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS backtest_data_repairs (
+                repair_key VARCHAR(120) PRIMARY KEY,
+                applied_at TIMESTAMP DEFAULT NOW(),
+                notes TEXT
+            )
+        """))
 
         conn.execute(text("""
             UPDATE backtest_best_model
@@ -271,6 +278,47 @@ def ensure_tables():
                 LIMIT 1
               )
         """))
+        repair_key = "restore_champion_52_after_run_107"
+        repair_already_applied = conn.execute(text("""
+            SELECT 1 FROM backtest_data_repairs WHERE repair_key = :repair_key
+        """), {'repair_key': repair_key}).fetchone()
+        champion_52_exists = conn.execute(text("""
+            SELECT 1 FROM backtest_best_model WHERE id = 52
+        """)).fetchone()
+        if champion_52_exists and not repair_already_applied:
+            conn.execute(text("""
+                UPDATE backtest_best_model
+                SET is_active = FALSE,
+                    deactivated_at = COALESCE(deactivated_at, NOW()),
+                    promotion_reason = CASE
+                        WHEN id = 53 THEN 'Deactivated by one-time repair: run 107 negative-ROI challenger promotion was invalid'
+                        ELSE promotion_reason
+                    END,
+                    updated_at = NOW()
+                WHERE is_active = TRUE OR id = 53
+            """))
+            conn.execute(text("""
+                UPDATE backtest_best_model
+                SET is_active = TRUE,
+                    promoted_at = COALESCE(promoted_at, NOW()),
+                    deactivated_at = NULL,
+                    retained_until = NULL,
+                    promotion_reason = 'Restored by one-time repair: Champion 52 reactivated after invalid run 107 promotion',
+                    updated_at = NOW()
+                WHERE id = 52
+            """))
+            conn.execute(text("""
+                INSERT INTO backtest_data_repairs (repair_key, notes)
+                VALUES (:repair_key, 'Reactivated Champion 52 and deactivated challenger 53 after run 107 invalid promotion.')
+            """), {'repair_key': repair_key})
+            log.info("One-time repair applied: Champion 52 restored active and challenger 53 deactivated.")
+        elif not champion_52_exists and not repair_already_applied:
+            conn.execute(text("""
+                INSERT INTO backtest_data_repairs (repair_key, notes)
+                VALUES (:repair_key, 'Skipped because Champion 52 no longer exists.')
+            """), {'repair_key': repair_key})
+            log.info("One-time repair skipped: Champion 52 no longer exists.")
+
         conn.execute(text("""
             CREATE UNIQUE INDEX IF NOT EXISTS uq_backtest_best_model_active
             ON backtest_best_model (is_active)
@@ -1647,6 +1695,7 @@ PROMOTION_SR_TOLERANCE_PCT = 2.0
 MIN_CHAMPION_AGE_DAYS = int(os.environ.get('ML_MIN_CHAMPION_AGE_DAYS', '7'))
 LARGE_PROMOTION_ROI_EDGE_PCT = float(os.environ.get('ML_LARGE_PROMOTION_ROI_EDGE_PCT', '10.0'))
 CHAMPION_ROLLBACK_RETENTION_DAYS = int(os.environ.get('ML_CHAMPION_ROLLBACK_RETENTION_DAYS', '30'))
+MIN_PROMOTION_STRIKE_RATE_PCT = float(os.environ.get('ML_MIN_PROMOTION_STRIKE_RATE_PCT', '1.0'))
 
 
 class ConsensusRegressor(BaseEstimator, RegressorMixin):
@@ -1792,19 +1841,31 @@ def run_model_competition(X, y_roi, y_won, race_ids, meeting_dates, df):
     candidates = {
         'random_forest': RandomForestRegressor(n_estimators=250, max_depth=10, min_samples_leaf=15, max_features='sqrt', random_state=42, n_jobs=-1)
     }
+    log.info(
+        "Track E split for random_forest: total_candidate_rows=%s train_rows=%s validation_rows=%s "
+        "internal_tuning_train_rows=%s internal_tuning_eval_rows=%s",
+        len(X), len(X_train), len(X_val), 0, 0
+    )
     try:
         import optuna
         optuna.logging.set_verbosity(optuna.logging.WARNING)
-        tune_cutoff = pd.Series(dates.iloc[order][train_mask]).quantile(0.8)
-        tune_dates = dates.iloc[order].reset_index(drop=True)[train_mask].reset_index(drop=True)
-        tune_train_mask = tune_dates <= tune_cutoff
-        X_tune_train = X_train.reset_index(drop=True)[tune_train_mask]
-        y_tune_train = y_train.reset_index(drop=True)[tune_train_mask]
-        X_tune_eval = X_train.reset_index(drop=True)[~tune_train_mask]
-        y_tune_eval = y_train.reset_index(drop=True)[~tune_train_mask]
+        train_dates = dates.iloc[order].reset_index(drop=True).loc[train_mask].reset_index(drop=True)
+        tune_cutoff = train_dates.quantile(0.8)
+        tune_train_mask = (train_dates <= tune_cutoff).to_numpy()
+        X_train_reset = X_train.reset_index(drop=True)
+        y_train_reset = y_train.reset_index(drop=True)
+        X_tune_train = X_train_reset.iloc[tune_train_mask]
+        y_tune_train = y_train_reset.iloc[tune_train_mask]
+        X_tune_eval = X_train_reset.iloc[~tune_train_mask]
+        y_tune_eval = y_train_reset.iloc[~tune_train_mask]
 
         for mt in ('xgboost', 'lightgbm', 'catboost'):
             try:
+                log.info(
+                    "Track E split for %s: total_candidate_rows=%s train_rows=%s validation_rows=%s "
+                    "internal_tuning_train_rows=%s internal_tuning_eval_rows=%s",
+                    mt, len(X), len(X_train), len(X_val), len(X_tune_train), len(X_tune_eval)
+                )
                 if len(X_tune_train) < 50 or len(X_tune_eval) < 20:
                     raise ValueError("not enough training rows for safe internal tuning split")
 
@@ -1932,10 +1993,27 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
         champion_age_days = None
         if champion_promoted_at:
             champion_age_days = (datetime.utcnow() - champion_promoted_at).total_seconds() / 86400.0
-        if val_bets >= MIN_VALIDATION_BETS:
-            if champion is None or champion_roi is None or champion_sr is None:
+        challenger_roi = float(val_roi) if val_roi is not None else None
+        challenger_sr = float(val_sr) if val_sr is not None else None
+        challenger_sample_ok = int(val_bets or 0) >= MIN_VALIDATION_BETS
+        challenger_roi_positive = challenger_roi is not None and challenger_roi > 0.0
+        challenger_sr_acceptable = challenger_sr is not None and challenger_sr >= MIN_PROMOTION_STRIKE_RATE_PCT
+
+        if challenger_roi is None or challenger_sr is None:
+            reason = "Rejected: challenger validation metrics missing"
+        elif not challenger_roi_positive:
+            reason = "Rejected: challenger validation ROI is not positive"
+        elif not challenger_sample_ok:
+            reason = "Rejected: validation sample too small"
+        elif not challenger_sr_acceptable:
+            reason = "Rejected: challenger validation strike rate is below promotion gate"
+        else:
+            if champion is None:
                 promote = True
-                reason = "Promoted: no comparable active champion metrics existed"
+                reason = "Promoted: no active champion existed and challenger passed positive-ROI validation gates"
+            elif champion_roi is None or champion_sr is None:
+                promote = True
+                reason = "Promoted: active Champion metrics missing, but challenger passed positive-ROI validation gates"
             elif val_roi >= champion_roi + PROMOTION_ROI_EDGE_PCT and val_sr >= champion_sr - PROMOTION_SR_TOLERANCE_PCT:
                 roi_edge = val_roi - champion_roi
                 if (
