@@ -299,6 +299,7 @@ def register_ml_shadow_routes(app, db):
             db.session.commit()
 
             checked = len(meetings)
+            log.info("ML shadow bulk score: checked=%s generated=%s skipped=%s", checked, generated, skipped)
             summary = f"Checked {checked} meetings. Generated ML scores for {generated} meetings. Skipped {skipped} already scored."
             return jsonify({
                 'success': True,
