@@ -1849,15 +1849,18 @@ def run_model_competition(X, y_roi, y_won, race_ids, meeting_dates, df):
     try:
         import optuna
         optuna.logging.set_verbosity(optuna.logging.WARNING)
-        train_dates = dates.iloc[order].reset_index(drop=True).loc[train_mask].reset_index(drop=True)
-        tune_cutoff = train_dates.quantile(0.8)
-        tune_train_mask = (train_dates <= tune_cutoff).to_numpy()
         X_train_reset = X_train.reset_index(drop=True)
         y_train_reset = y_train.reset_index(drop=True)
-        X_tune_train = X_train_reset.iloc[tune_train_mask]
-        y_tune_train = y_train_reset.iloc[tune_train_mask]
-        X_tune_eval = X_train_reset.iloc[~tune_train_mask]
-        y_tune_eval = y_train_reset.iloc[~tune_train_mask]
+        # Split the already time-ordered Track E training window by row position
+        # for Optuna only.  A date-quantile mask can collapse to all-train/zero-
+        # eval when many rows share the same meeting date around the cutoff; the
+        # challenger final fit below must still use the full outer X_train window.
+        tune_split_idx = int(len(X_train_reset) * 0.8)
+        tune_split_idx = min(max(tune_split_idx, 1), max(len(X_train_reset) - 1, 1))
+        X_tune_train = X_train_reset.iloc[:tune_split_idx]
+        y_tune_train = y_train_reset.iloc[:tune_split_idx]
+        X_tune_eval = X_train_reset.iloc[tune_split_idx:]
+        y_tune_eval = y_train_reset.iloc[tune_split_idx:]
 
         for mt in ('xgboost', 'lightgbm', 'catboost'):
             try:
