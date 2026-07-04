@@ -403,12 +403,7 @@ for col in RACE_RELATIVE_BASE_COLS:
 FEATURE_NAMES = FEATURE_NAMES + RACE_RELATIVE_FEATURES + ['field_size']
 
 def load_model():
-    """Load the pkl model. Tries filesystem first, then DB."""
-    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'form_analyst_best.pkl')
-    if os.path.exists(model_path):
-        import joblib
-        return joblib.load(model_path)
-
+    """Load only the active Champion model from DB, with filesystem fallback for local dev."""
     try:
         from sqlalchemy import create_engine, text
         import io, joblib
@@ -421,7 +416,8 @@ def load_model():
                 """
                 SELECT id, run_id, run_date, combined_score, updated_at, pkl_data
                 FROM backtest_best_model
-                ORDER BY run_date DESC
+                WHERE is_active = TRUE
+                ORDER BY promoted_at DESC NULLS LAST, updated_at DESC, id DESC
                 LIMIT 1
                 """
             )).fetchone()
@@ -429,6 +425,12 @@ def load_model():
                 return joblib.load(io.BytesIO(bytes(row[5])))
     except Exception as e:
         log.warning(f"Could not load model from DB: {e}")
+
+    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'form_analyst_best.pkl')
+    if os.path.exists(model_path):
+        import joblib
+        log.warning("Using local filesystem ML model fallback because no active Champion was loaded from DB.")
+        return joblib.load(model_path)
 
     raise FileNotFoundError("No trained model found. Run backtest.py first.")
 
