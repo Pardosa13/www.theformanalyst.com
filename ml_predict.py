@@ -407,9 +407,6 @@ def load_model():
     model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'form_analyst_best.pkl')
     if os.path.exists(model_path):
         import joblib
-        log.info("ML MODEL LOADED")
-        log.info("Source: Filesystem")
-        log.info("Path: models/form_analyst_best.pkl")
         return joblib.load(model_path)
 
     try:
@@ -429,13 +426,6 @@ def load_model():
                 """
             )).fetchone()
             if row and row[5]:
-                log.info("ML MODEL LOADED")
-                log.info("Source: Database")
-                log.info("Model ID: %s", row[0])
-                log.info("Run ID: %s", row[1])
-                log.info("Run Date: %s", row[2])
-                log.info("Combined Score: %s", row[3])
-                log.info("Updated At: %s", row[4])
                 return joblib.load(io.BytesIO(bytes(row[5])))
     except Exception as e:
         log.warning(f"Could not load model from DB: {e}")
@@ -468,7 +458,6 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         log.error(str(e))
         return {}, {}
     model_features = list(getattr(model, 'feature_names_in_', FEATURE_NAMES))
-    log.info(f"ML model expects {len(model_features)} features")
 
     jockey_sr  = (strike_rate_data or {}).get('jockeys', {})
     trainer_sr = (strike_rate_data or {}).get('trainers', {})
@@ -540,5 +529,4 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
 
         by_race[race.id] = race_scores
 
-    log.info(f"ML scores generated for {len(all_scores)} horses across {len(by_race)} races in meeting {meeting_id}")
     return all_scores, by_race
