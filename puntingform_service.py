@@ -25,7 +25,7 @@ def _safe_log_url(url):
 
 class PuntingFormService:
     def __init__(self, api_key=None):
-        self.api_key = api_key or os.environ.get('PUNTINGFORM_API_KEY')
+        self.api_key = api_key or os.getenv("PUNTINGFORM_API_KEY")
         if not self.api_key:
             raise ValueError("PuntingForm API key not found")
         self.base_url = 'https://www.puntingform.com.au/api/formdataservice'
@@ -151,7 +151,7 @@ class PuntingFormService:
             'GET',
             url,
             params=params,
-            headers={'accept': 'text/csv,text/plain'},
+            headers={'accept': 'text/plain'},
         ).prepare()
         log.info(
             "PuntingForm strike-rate request: url=%s entityType=%s entityTypeId=%s jurisdiction=%s",
@@ -160,8 +160,11 @@ class PuntingFormService:
             entity_type_id,
             jurisdiction,
         )
+        log.info("Request URL (API key redacted): %s", _safe_log_url(request.url))
         response = requests.Session().send(request, timeout=30)
         content_type = response.headers.get('content-type', '')
+        log.info("HTTP status code: %s", response.status_code)
+        log.info("Response content type: %s", content_type)
         log.info(
             "PuntingForm strike-rate response: status=%s content_type=%s body_first_500=%r",
             response.status_code,
@@ -184,6 +187,9 @@ class PuntingFormService:
         reader = csv.DictReader(io.StringIO(response.text))
         rows = list(reader)
         headers = reader.fieldnames or []
+        log.info("CSV headers returned: %s", headers)
+        log.info("First sample CSV row: %s", rows[0] if rows else None)
+        log.info("Parsed row count: %s", len(rows))
         log.info(
             "PuntingForm strike-rate CSV parsed: type=%s jurisdiction=%s headers=%s total_rows=%s first_row=%s",
             entity_type,
@@ -310,6 +316,9 @@ class PuntingFormService:
                     """), {**params, 'raw_csv_row': json.dumps(params['raw_csv_row']), 'raw_data': json.dumps(params['raw_data'])})
                     updated += 1
 
+        log.info("Inserted row count: %s", inserted)
+        log.info("Updated row count: %s", updated)
+        log.info("Skipped row count: %s", skipped)
         log.info(
             "PuntingForm strike-rate INSERT/UPSERT summary: inserted_rows=%s updated_rows=%s skipped_rows=%s",
             inserted,
