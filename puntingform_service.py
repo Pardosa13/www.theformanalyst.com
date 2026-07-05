@@ -174,12 +174,15 @@ class PuntingFormService:
         if not response.ok:
             raise Exception(f"PuntingForm strike-rate API error {response.status_code}: {response.text}")
 
-        is_csv = 'csv' in content_type.lower() or response.text.lstrip().startswith(('EntityId,', 'EntityName,'))
+        body = response.text.lstrip()
+        expected_csv_header = 'StartDate,EntityId,EntityName'
+        is_csv = 'csv' in content_type.lower() or body.startswith(expected_csv_header)
         if not is_csv:
             log.warning(
-                "Zero strike-rate rows parsed for %ss jurisdiction %s because response content type is not CSV: %s",
+                "Zero strike-rate rows parsed for %ss jurisdiction %s because response body did not start with expected CSV header %r and content type was not CSV: %s",
                 entity_type,
                 jurisdiction,
+                expected_csv_header,
                 content_type,
             )
             return [], []
