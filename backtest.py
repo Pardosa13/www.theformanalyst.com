@@ -1773,6 +1773,12 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
         'profit_units': float(np.sum(profits)) if bets else 0.0,
         'strike_rate': float(wins / bets * 100.0) if bets else 0.0,
         'number_of_bets': bets,
+        'winners': wins,
+        'average_winner_sp': float(selections.loc[selections['won'] == 1, 'sp'].mean()) if wins else 0.0,
+        'average_selection_sp': float(selections['sp'].mean()) if bets else 0.0,
+        'average_predicted_probability': float(selections['pred'].mean()) if bets else 0.0,
+        'average_winner_predicted_probability': float(selections.loc[selections['won'] == 1, 'pred'].mean()) if wins else 0.0,
+        'average_loser_predicted_probability': float(selections.loc[selections['won'] == 0, 'pred'].mean()) if wins < bets else 0.0,
         'drawdown': drawdown,
         'longest_losing_streak': int(longest_losing_streak),
         'bankroll_growth': bankroll_growth,
@@ -1837,23 +1843,70 @@ def _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val):
     return frame.loc[frame.groupby('race_id')['pred'].idxmax()].set_index('race_id')
 
 
-def _compare_model_selections(model_a, model_b, X_val, y_won_val, race_ids_val, sp_val):
+def _profit_from_selection_rows(rows):
+    """Return one-unit win-bet profit for already-selected rows."""
+    if rows.empty:
+        return 0.0
+    return float(np.where(rows['won'] == 1, rows['sp'] - 1.0, -1.0).sum())
+
+
+def _compare_model_selections(reference_name, challenger_name, reference_selections, challenger_selections):
     """Compare two models' top picks on the same validation races."""
-    a = _top_selection_rows(model_a, X_val, y_won_val, race_ids_val, sp_val)
-    b = _top_selection_rows(model_b, X_val, y_won_val, race_ids_val, sp_val)
-    joined = a[['row_id', 'won', 'sp']].join(
-        b[['row_id', 'won', 'sp']], how='inner', lsuffix='_a', rsuffix='_b'
+    joined = reference_selections[['row_id', 'won', 'sp']].join(
+        challenger_selections[['row_id', 'won', 'sp']], how='inner', lsuffix='_reference', rsuffix='_challenger'
     )
-    disagreements = joined[joined['row_id_a'] != joined['row_id_b']]
-    a_winners = disagreements[disagreements['won_a'] == 1]
-    b_winners = disagreements[disagreements['won_b'] == 1]
+    disagreements = joined[joined['row_id_reference'] != joined['row_id_challenger']]
+    same_selection_races = int((joined['row_id_reference'] == joined['row_id_challenger']).sum())
+    reference_winners = disagreements[disagreements['won_reference'] == 1]
+    challenger_winners = disagreements[disagreements['won_challenger'] == 1]
+    reference_disagreement_rows = disagreements.rename(columns={'won_reference': 'won', 'sp_reference': 'sp'})
+    challenger_disagreement_rows = disagreements.rename(columns={'won_challenger': 'won', 'sp_challenger': 'sp'})
     return {
-        'disagreement_races': int(len(disagreements)),
-        'random_forest_wins': int(disagreements['won_a'].sum()) if not disagreements.empty else 0,
-        'catboost_wins': int(disagreements['won_b'].sum()) if not disagreements.empty else 0,
-        'random_forest_winner_avg_sp': float(a_winners['sp_a'].mean()) if not a_winners.empty else 0.0,
-        'catboost_winner_avg_sp': float(b_winners['sp_b'].mean()) if not b_winners.empty else 0.0,
+        'reference_model': reference_name,
+        'challenger_model': challenger_name,
+        'same_selection_races': same_selection_races,
+        'different_selection_races': int(len(disagreements)),
+        'challenger_wins_when_disagreed': int(disagreements['won_challenger'].sum()) if not disagreements.empty else 0,
+        'random_forest_wins_when_disagreed': int(disagreements['won_reference'].sum()) if not disagreements.empty else 0,
+        'challenger_only_winner_avg_sp': float(challenger_winners['sp_challenger'].mean()) if not challenger_winners.empty else 0.0,
+        'random_forest_only_winner_avg_sp': float(reference_winners['sp_reference'].mean()) if not reference_winners.empty else 0.0,
+        'challenger_disagreement_profit_units': _profit_from_selection_rows(challenger_disagreement_rows),
+        'random_forest_disagreement_profit_units': _profit_from_selection_rows(reference_disagreement_rows),
     }
+
+
+def _audit_validation_betting_pipeline(selection_frames, race_ids_val, sp_val):
+    """Log validation/betting invariants without changing model scoring."""
+    expected_races = set(race_ids_val)
+    expected_race_count = len(expected_races)
+    log.info(
+        "ML competition betting audit: validation_rows=%s identical_validation_races=%s "
+        "sp_values_source=preserved_historical_data betting_rule=one_unit_win_bet_on_highest_predicted_probability",
+        len(race_ids_val), expected_race_count
+    )
+    log.info(
+        "ML competition betting audit: identical_SP_vector_for_all_models=%s sp_count=%s "
+        "sp_min=%.2f sp_avg=%.2f sp_max=%.2f",
+        True, len(sp_val), float(np.min(sp_val)) if len(sp_val) else 0.0,
+        float(np.mean(sp_val)) if len(sp_val) else 0.0,
+        float(np.max(sp_val)) if len(sp_val) else 0.0
+    )
+    baseline_races = None
+    for model_type, selections in sorted(selection_frames.items()):
+        model_races = set(selections.index)
+        missing = expected_races - model_races
+        extra = model_races - expected_races
+        duplicate_bets = int(selections.index.duplicated().sum())
+        one_bet_per_race = len(selections) == expected_race_count and duplicate_bets == 0 and not missing and not extra
+        if baseline_races is None:
+            baseline_races = model_races
+        log.info(
+            "ML competition betting audit for %s: identical_validation_races=%s identical_betting_rules=%s "
+            "one_bet_per_race=%s bets=%s expected_races=%s skipped_races=%s extra_races=%s duplicate_race_bets=%s "
+            "pre_roi_filtering=none ranking=max_predicted_probability",
+            model_type, model_races == expected_races and model_races == baseline_races, True,
+            one_bet_per_race, len(selections), expected_race_count, len(missing), len(extra), duplicate_bets
+        )
 
 def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, df):
     """Train RF, boosted candidates and consensus on one shared unseen validation set."""
@@ -1927,10 +1980,12 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
 
     fitted = {}
     results = []
+    selection_frames = {}
     for mt, model in candidates.items():
         try:
             model.fit(X_train, y_won[train_mask])
             metrics = evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val)
+            selection_frames[mt] = _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val)
             fitted[mt] = model
             results.append({'model_type': mt, 'model_name': mt.replace('_', ' ').title(), 'model': model, 'metrics': metrics})
         except Exception as e:
@@ -1952,6 +2007,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         ensemble.fit(X_train, y_won[train_mask])
         metrics = evaluate_model_on_validation(ensemble, X_val, y_won_val, race_ids_val, sp_val)
         metrics['ensemble_weights'] = dict(zip([name for name, _ in ensemble_members], ensemble.weights_.tolist()))
+        selection_frames['ensemble'] = _top_selection_rows(ensemble, X_val, y_won_val, race_ids_val, sp_val)
         results.append({'model_type': 'ensemble', 'model_name': 'Ensemble / Consensus', 'model': ensemble, 'metrics': metrics})
 
     agreement_summary = {'4_of_4': 0, '3_of_4': 0, '2_of_4': 0, '1_of_4': 0}
@@ -1969,29 +2025,58 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     for result in results:
         result['agreement_summary'] = agreement_summary
 
+    _audit_validation_betting_pipeline(selection_frames, race_ids_val, sp_val)
+
     log.info("ML competition per-model metrics on identical validation races:")
     for result in sorted(results, key=lambda r: r['model_type']):
         m = result['metrics']
         log.info(
-            "  %s | ROI=%.1f%% Strike=%.1f%% Bets=%s Profit=%.1fu",
-            result['model_name'], m['roi'], m['strike_rate'], m['number_of_bets'], m['profit_units']
+            "  %s | ROI=%.1f%% Profit=%.1fu Strike=%.1f%% Bets=%s Winners=%s "
+            "AvgWinnerSP=%.2f AvgSelectionSP=%.2f AvgPredProb=%.4f "
+            "AvgWinnerPredProb=%.4f AvgLoserPredProb=%.4f",
+            result['model_name'], m['roi'], m['profit_units'], m['strike_rate'],
+            m['number_of_bets'], m['winners'], m['average_winner_sp'],
+            m['average_selection_sp'], m['average_predicted_probability'],
+            m['average_winner_predicted_probability'], m['average_loser_predicted_probability']
         )
 
-    if 'random_forest' in fitted and 'catboost' in fitted:
-        comparison = _compare_model_selections(
-            fitted['random_forest'], fitted['catboost'], X_val, y_won_val, race_ids_val, sp_val
-        )
+    if 'random_forest' in selection_frames:
+        comparisons = {}
+        for result in sorted(results, key=lambda r: r['model_type']):
+            mt = result['model_type']
+            if mt == 'random_forest' or mt not in selection_frames:
+                continue
+            comparison = _compare_model_selections(
+                'random_forest', mt, selection_frames['random_forest'], selection_frames[mt]
+            )
+            comparisons[mt] = comparison
+            result['rf_comparison'] = comparison
+            result['agreement_summary'] = {**result.get('agreement_summary', {}), 'vs_random_forest': comparison}
+            log.info(
+                "RF vs %s selection comparison: same_horse_races=%s different_horse_races=%s "
+                "challenger_wins_when_disagreed=%s random_forest_wins_when_disagreed=%s "
+                "challenger_only_winner_avg_sp=%.2f random_forest_only_winner_avg_sp=%.2f "
+                "challenger_disagreement_profit=%.1fu random_forest_disagreement_profit=%.1fu",
+                mt, comparison['same_selection_races'], comparison['different_selection_races'],
+                comparison['challenger_wins_when_disagreed'], comparison['random_forest_wins_when_disagreed'],
+                comparison['challenger_only_winner_avg_sp'], comparison['random_forest_only_winner_avg_sp'],
+                comparison['challenger_disagreement_profit_units'], comparison['random_forest_disagreement_profit_units']
+            )
         for result in results:
-            if result['model_type'] in {'random_forest', 'catboost'}:
-                result['rf_catboost_comparison'] = comparison
-                result['agreement_summary'] = {**result.get('agreement_summary', {}), 'rf_catboost': comparison}
-        log.info(
-            "RF vs CatBoost disagreements: races=%s rf_wins=%s catboost_wins=%s "
-            "rf_winner_avg_sp=%.2f catboost_winner_avg_sp=%.2f",
-            comparison['disagreement_races'], comparison['random_forest_wins'],
-            comparison['catboost_wins'], comparison['random_forest_winner_avg_sp'],
-            comparison['catboost_winner_avg_sp']
-        )
+            if result['model_type'] == 'random_forest':
+                result['agreement_summary'] = {**result.get('agreement_summary', {}), 'challenger_comparisons': comparisons}
+
+    all_negative = bool(results) and all(r['metrics']['roi'] < 0 for r in results)
+    best_by_roi = max(results, key=lambda r: r['metrics']['roi']) if results else None
+    log.info(
+        "ML validation ROI diagnostic summary: all_models_negative=%s likely_cause=%s "
+        "evaluation_audit=identical_races_sp_rules_one_bet_per_race_no_pre_roi_filtering best_validation_roi_model=%s "
+        "most_likely_roi_improvement_change=%s",
+        all_negative,
+        "validation_period_or_top-pick_model_edge_at_recorded_SP_not_betting_evaluation" if all_negative else "model_selection_differences",
+        best_by_roi['model_type'] if best_by_roi else None,
+        "add_or_tune_value/odds-aware bet filtering after this diagnostics-only audit"
+    )
 
     best = max(results, key=lambda r: (r['metrics']['roi'], r['metrics']['strike_rate']))
     log.info("ML competition: best=%s roi=%.1f%% sr=%.1f%% bets=%s",
