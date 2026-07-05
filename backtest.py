@@ -1884,12 +1884,18 @@ def _audit_validation_betting_pipeline(selection_frames, race_ids_val, sp_val):
         "sp_values_source=preserved_historical_data betting_rule=one_unit_win_bet_on_highest_predicted_probability",
         len(race_ids_val), expected_race_count
     )
+    sp_array = np.asarray(sp_val, dtype=float)
+    sp_nan_count = int(np.isnan(sp_array).sum()) if len(sp_array) else 0
+    sp_finite = sp_array[np.isfinite(sp_array)] if len(sp_array) else sp_array
+    sp_finite_count = int(len(sp_finite))
+    sp_min = float(np.min(sp_finite)) if sp_finite_count else 0.0
+    sp_avg = float(np.mean(sp_finite)) if sp_finite_count else 0.0
+    sp_max = float(np.max(sp_finite)) if sp_finite_count else 0.0
     log.info(
-        "ML competition betting audit: identical_SP_vector_for_all_models=%s sp_count=%s "
-        "sp_min=%.2f sp_avg=%.2f sp_max=%.2f",
-        True, len(sp_val), float(np.min(sp_val)) if len(sp_val) else 0.0,
-        float(np.mean(sp_val)) if len(sp_val) else 0.0,
-        float(np.max(sp_val)) if len(sp_val) else 0.0
+        "ML competition betting audit: identical_SP_vector_for_all_models=%s "
+        "sp_total=%s sp_nan_count=%s sp_finite_count=%s "
+        "sp_min_finite=%.2f sp_avg_finite=%.2f sp_max_finite=%.2f",
+        True, len(sp_array), sp_nan_count, sp_finite_count, sp_min, sp_avg, sp_max
     )
     baseline_races = None
     for model_type, selections in sorted(selection_frames.items()):
