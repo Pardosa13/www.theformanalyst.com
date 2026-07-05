@@ -300,6 +300,8 @@ def register_ml_shadow_routes(app, db):
 
             checked = len(meetings)
             log.info("ML shadow bulk score: checked=%s generated=%s skipped=%s", checked, generated, skipped)
+            if skipped:
+                log.info("ML shadow bulk score skipped %s meetings because they already had persisted ml_score rows.", skipped)
             summary = f"Checked {checked} meetings. Generated ML scores for {generated} meetings. Skipped {skipped} already scored."
             return jsonify({
                 'success': True,
@@ -423,7 +425,8 @@ def register_ml_shadow_routes(app, db):
             return jsonify({'error': 'Admin only'}), 403
 
         try:
-            rows = db.session.execute(text("""
+            cutoff_sql = _ml_performance_meeting_name_sql('m')
+            rows = db.session.execute(text(f"""
                 SELECT
                     rc.id AS race_id,
                     m.date AS meeting_date,
@@ -441,7 +444,7 @@ def register_ml_shadow_routes(app, db):
                 JOIN meetings m ON m.id = rc.meeting_id
                 JOIN results r ON r.horse_id = h.id
                 WHERE p.ml_score IS NOT NULL
-                  AND {_ml_performance_meeting_name_sql('m')}
+                  AND {cutoff_sql}
                   AND COALESCE(h.is_scratched, FALSE) = FALSE
                   AND r.finish_position IS NOT NULL
                   AND r.finish_position > 0

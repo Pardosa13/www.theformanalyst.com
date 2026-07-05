@@ -398,7 +398,8 @@ def load_model():
         with eng.connect() as conn:
             row = conn.execute(text(
                 """
-                SELECT id, run_id, run_date, combined_score, updated_at, pkl_data
+                SELECT id, run_id, run_date, combined_score, updated_at, pkl_data,
+                       model_type, model_name, is_active
                 FROM backtest_best_model
                 WHERE is_active = TRUE
                 ORDER BY promoted_at DESC NULLS LAST, updated_at DESC, id DESC
@@ -406,7 +407,22 @@ def load_model():
                 """
             )).fetchone()
             if row and row[5]:
-                return joblib.load(io.BytesIO(bytes(row[5])))
+                model = joblib.load(io.BytesIO(bytes(row[5])))
+                model._form_analyst_model_id = row[0]
+                model._form_analyst_run_id = row[1]
+                model._form_analyst_model_type = row[6]
+                model._form_analyst_model_name = row[7]
+                model._form_analyst_is_active = row[8]
+                log.info(
+                    "Loaded active Champion ML model from DB: id=%s run_id=%s type=%s name=%s active=%s class=%s",
+                    row[0], row[1], row[6], row[7], row[8], type(model).__name__,
+                )
+                if row[0] != 62 or row[6] != 'xgboost':
+                    log.warning(
+                        "Active Champion model differs from expected production model: expected id=62 type=xgboost, got id=%s type=%s",
+                        row[0], row[6],
+                    )
+                return model
     except Exception as e:
         log.warning(f"Could not load model from DB: {e}")
 
@@ -417,6 +433,16 @@ def load_model():
         return joblib.load(model_path)
 
     raise FileNotFoundError("No trained model found. Run backtest.py first.")
+
+
+def _predict_raw_scores(model, X):
+    """Return raw model scores and the prediction method used."""
+    if hasattr(model, 'predict_proba'):
+        probabilities = model.predict_proba(X)
+        return probabilities[:, 1], 'predict_proba'
+
+    return model.predict(X), 'predict'
+
 
 def predict_meeting(meeting_id, db_session, strike_rate_data=None):
     """
@@ -444,6 +470,18 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         log.error(str(e))
         return {}, {}
     model_features = list(getattr(model, 'feature_names_in_', FEATURE_NAMES))
+    log.info(
+        "ML predict meeting %s using model id=%s run_id=%s type=%s name=%s active=%s class=%s has_predict_proba=%s feature_count=%s",
+        meeting_id,
+        getattr(model, '_form_analyst_model_id', None),
+        getattr(model, '_form_analyst_run_id', None),
+        getattr(model, '_form_analyst_model_type', None),
+        getattr(model, '_form_analyst_model_name', None),
+        getattr(model, '_form_analyst_is_active', None),
+        type(model).__name__,
+        hasattr(model, 'predict_proba'),
+        len(model_features),
+    )
 
     jockey_sr  = (strike_rate_data or {}).get('jockeys', {})
     trainer_sr = (strike_rate_data or {}).get('trainers', {})
@@ -495,7 +533,7 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         X = X.fillna(0)
 
         try:
-            raw_preds = model.predict(X)
+            raw_preds, prediction_method = _predict_raw_scores(model, X)
         except Exception as ex:
             log.error(f"Model prediction failed for race {race.race_number}: {ex}")
             continue
@@ -506,6 +544,21 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
             normalised = ((raw_preds - min_p) / (max_p - min_p)) * 100
         else:
             normalised = np.full_like(raw_preds, 50.0)
+            log.warning(
+                "ML predict race %s meeting %s assigned constant 50.0 scores because raw prediction min equals max (%s)",
+                race.race_number, meeting_id, min_p,
+            )
+        log.info(
+            "ML predict race %s meeting %s method=%s raw_min=%s raw_max=%s normalised_min=%s normalised_max=%s runners=%s",
+            race.race_number,
+            meeting_id,
+            prediction_method,
+            float(min_p),
+            float(max_p),
+            float(normalised.min()),
+            float(normalised.max()),
+            len(horse_ids),
+        )
 
         race_scores = {}
         for horse_id, score in zip(horse_ids, normalised):

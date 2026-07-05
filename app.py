@@ -3222,6 +3222,7 @@ def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", li
         filters.append("m.uploaded_at <= :date_to")
         params["date_to"] = date_to
     extra_where = " AND " + " AND ".join(filters) if filters else ""
+    cutoff_sql = _ml_performance_meeting_name_sql('m')
 
     rows = db.session.execute(text(f"""
         SELECT
@@ -3236,7 +3237,7 @@ def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", li
         JOIN meetings m ON m.id = rc.meeting_id
         JOIN results r ON r.horse_id = h.id
         WHERE p.ml_score IS NOT NULL
-          AND {_ml_performance_meeting_name_sql('m')}
+          AND {cutoff_sql}
           AND COALESCE(h.is_scratched, FALSE) = FALSE
           AND r.finish_position IS NOT NULL
           AND r.finish_position > 0
