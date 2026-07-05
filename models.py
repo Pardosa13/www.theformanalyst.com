@@ -190,6 +190,39 @@ class Component(db.Model):
         return self.component_name
 
 
+class StrikeRate(db.Model):
+    """PuntingForm trainer/jockey strike-rate snapshots."""
+    __tablename__ = 'strike_rates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    type = db.Column(db.String(20), nullable=False, index=True)
+    jurisdiction = db.Column(db.Integer, nullable=False, default=2, index=True)
+    entity_id = db.Column(db.String(64), nullable=True, index=True)
+    normalised_name = db.Column(db.String(255), nullable=False, index=True)
+    name = db.Column(db.String(255), nullable=False)
+    start_date = db.Column(db.String(50))
+    l100_wins = db.Column(db.Integer, default=0)
+    l100_runs = db.Column(db.Integer, default=0)
+    career_wins = db.Column(db.Integer, default=0)
+    career_runs = db.Column(db.Integer, default=0)
+    career_expected_wins = db.Column(db.Float)
+    l100_expected_wins = db.Column(db.Float)
+    career_actual_to_expected = db.Column(db.Float)
+    last100_actual_to_expected = db.Column(db.Float)
+    raw_csv_row = db.Column(db.JSON)
+    raw_data = db.Column(db.JSON)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('ix_strike_rates_entity_lookup', 'type', 'jurisdiction', 'entity_id'),
+        db.Index('ix_strike_rates_name_lookup', 'type', 'jurisdiction', 'normalised_name'),
+    )
+
+    def __repr__(self):
+        return f'<StrikeRate {self.type} {self.name}>'
+
+
 class ChatMessage(db.Model):
     """Chat messages between users and Claude AI assistant"""
     __tablename__ = 'chat_messages'

@@ -17,7 +17,7 @@ from flask_limiter.util import get_remote_address
 from sqlalchemy import text
 import uuid
 
-from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component
+from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component, StrikeRate
 from puntingform_service import PuntingFormService
 from scratchings import compute_is_scratched_final, extract_debug_scratch_fields, resolve_official_scratched_set
 from ladbrokes import match_race_uuid, fetch_race_odds
@@ -3452,8 +3452,8 @@ def api_get_ratings(meeting_id):
 def api_get_strikerate(meeting_id):
     """Get jockey/trainer career and last 100 strike rate data"""
     try:
-        entity_type = request.args.get('entityType', '0')  # 0=Jockey, 1=Trainer, 2=Both
-        jurisdiction = request.args.get('jurisdiction', '0')
+        entity_type = request.args.get('entityType', '2')  # 1=Trainer, 2=Jockey
+        jurisdiction = request.args.get('jurisdiction', '2')
         
         url = f"https://api.puntingform.com.au/v2/form/strikerate/csv?entityType={entity_type}&jurisdiction={jurisdiction}&apiKey={pf_service.api_key}"
         

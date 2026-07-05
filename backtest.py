@@ -403,7 +403,9 @@ def load_strike_rate_data():
                     name = str(row[0]).strip().lower()
                     sr_data['jockeys'][name] = {
                         'L100Wins': int(row[1] or 0),
-                        'L100Runs': int(row[2] or 0)
+                        'L100Runs': int(row[2] or 0),
+                        'l100_wins': int(row[1] or 0),
+                        'l100_runs': int(row[2] or 0)
                     }
                 log.info(f"Loaded {len(sr_data['jockeys'])} jockey SR records.")
             except Exception:
@@ -420,7 +422,9 @@ def load_strike_rate_data():
                     name = str(row[0]).strip().lower()
                     sr_data['trainers'][name] = {
                         'L100Wins': int(row[1] or 0),
-                        'L100Runs': int(row[2] or 0)
+                        'L100Runs': int(row[2] or 0),
+                        'l100_wins': int(row[1] or 0),
+                        'l100_runs': int(row[2] or 0)
                     }
                 log.info(f"Loaded {len(sr_data['trainers'])} trainer SR records.")
             except Exception:
