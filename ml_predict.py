@@ -396,6 +396,68 @@ def _model_feature_names(model):
     return [str(name) for name in list(names)]
 
 
+def _feature_defaulted_to_zero_summary(expected_features, raw_X):
+    """Return feature names/counts that live scoring will fill with zero."""
+    if not expected_features:
+        return {}
+
+    defaulted_columns = Counter(name for name in expected_features if name not in raw_X.columns)
+    null_defaulted = raw_X.reindex(columns=expected_features).isna().sum()
+    for col, count in null_defaulted.items():
+        if count:
+            defaulted_columns[col] += int(count)
+
+    return dict(defaulted_columns)
+
+
+def _log_prediction_feature_diagnostics(model, meeting_id, race, raw_X):
+    """Log the live feature contract immediately before model scoring."""
+    model_features = _model_feature_names(model)
+    generated_features = [str(name) for name in list(raw_X.columns)]
+    expected_feature_count = len(model_features) if model_features is not None else None
+    generated_feature_count = len(generated_features)
+
+    if model_features is None:
+        missing_feature_names = []
+        extra_feature_names = []
+        feature_counts_match = False
+        feature_order_matches = False
+        features_defaulted_to_zero = {}
+        model_first_10_features = []
+    else:
+        missing_feature_names = [name for name in model_features if name not in raw_X.columns]
+        extra_feature_names = [name for name in generated_features if name not in model_features]
+        feature_counts_match = expected_feature_count == generated_feature_count
+        feature_order_matches = generated_features == model_features
+        features_defaulted_to_zero = _feature_defaulted_to_zero_summary(model_features, raw_X)
+        model_first_10_features = model_features[:10]
+
+    predict_method = 'predict_proba' if hasattr(model, 'predict_proba') else 'predict'
+
+    log.info(
+        "ML_PREDICTION_FEATURE_DIAGNOSTICS "
+        "meeting=%s race=%s model_id=%s model_type=%s model_class=%s "
+        "predict_method=%s expected_feature_count=%s generated_feature_count=%s "
+        "feature_counts_match=%s feature_order_matches=%s missing_feature_names=%s "
+        "extra_feature_names=%s features_defaulted_to_zero=%s "
+        "model_first_10_feature_names=%s generated_first_10_feature_names=%s",
+        meeting_id,
+        getattr(race, 'race_number', None),
+        getattr(model, '_form_analyst_model_id', None),
+        getattr(model, '_form_analyst_model_type', None),
+        type(model).__name__,
+        predict_method,
+        expected_feature_count,
+        generated_feature_count,
+        feature_counts_match,
+        feature_order_matches,
+        missing_feature_names,
+        extra_feature_names,
+        features_defaulted_to_zero,
+        model_first_10_features,
+        generated_features[:10],
+    )
+
 def _log_live_feature_audit(model, meeting_id, race, feature_rows, raw_X, final_X):
     """
     Compare live scoring features against the active Champion model contract.
@@ -614,6 +676,7 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         X = X.fillna(0)
 
         try:
+            _log_prediction_feature_diagnostics(model, meeting_id, race, X_raw)
             raw_preds, prediction_method = _predict_raw_scores(model, X)
         except Exception as ex:
             log.error(f"Model prediction failed for race {race.race_number}: {ex}")
