@@ -376,6 +376,17 @@ def load_historical_data():
     df = pd.DataFrame(rows, columns=columns)
     log.info(f"Loaded {len(df)} horse-race records across {df['race_id'].nunique()} races.")
 
+    # Ingest fresh PuntingForm strike-rate data before loading jockey/trainer SR features.
+    try:
+        from puntingform_service import PuntingFormService
+        PuntingFormService().ingest_strike_rates(jurisdiction=2)
+    except Exception as e:
+        log.error(
+            "PuntingForm strike-rate ingestion raised before feature loading; continuing backtest: %s",
+            e,
+            exc_info=True,
+        )
+
     # Load strike rate data for jockey/trainer SR features
     strike_rate_data = load_strike_rate_data()
 
