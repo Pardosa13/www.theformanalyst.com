@@ -14,6 +14,7 @@ import os
 import json
 import re
 import logging
+from collections import Counter
 import numpy as np
 from strike_rate_matching import get_sr_win_pct, normalize_name
 import pandas as pd
@@ -386,6 +387,85 @@ for col in RACE_RELATIVE_BASE_COLS:
 
 FEATURE_NAMES = FEATURE_NAMES + RACE_RELATIVE_FEATURES + ['field_size']
 
+
+def _model_feature_names(model):
+    """Return feature names persisted on the trained estimator, if available."""
+    names = getattr(model, 'feature_names_in_', None)
+    if names is None:
+        return None
+    return [str(name) for name in list(names)]
+
+
+def _log_live_feature_audit(model, meeting_id, race, feature_rows, raw_X, final_X):
+    """
+    Compare live scoring features against the active Champion model contract.
+
+    Training builds the same raw/race-relative feature columns and applies only
+    pandas median imputation before fitting; live scoring must therefore pass the
+    same named columns in the same order and only default missing/null values.
+    """
+    model_id = getattr(model, '_form_analyst_model_id', None)
+    stored_features = _model_feature_names(model)
+    expected_count = 146
+
+    if stored_features is None:
+        log.error(
+            "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=failed reason=missing_model_feature_names expected_model_id=62 expected_features=%s",
+            meeting_id, getattr(race, 'race_number', None), model_id, expected_count,
+        )
+        return
+
+    generated_features = list(raw_X.columns)
+    missing_from_live = [name for name in stored_features if name not in raw_X.columns]
+    extra_live = [name for name in generated_features if name not in stored_features]
+    order_matches = list(final_X.columns) == stored_features
+    stored_matches_code = stored_features == FEATURE_NAMES
+    live_count_matches = len(stored_features) == expected_count and final_X.shape[1] == expected_count
+
+    if model_id != 62:
+        log.error(
+            "ML_FEATURE_AUDIT meeting=%s race=%s status=failed reason=wrong_champion_model expected_model_id=62 actual_model_id=%s",
+            meeting_id, getattr(race, 'race_number', None), model_id,
+        )
+
+    if not live_count_matches or not order_matches or missing_from_live or extra_live or not stored_matches_code:
+        log.error(
+            "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=failed expected_features=%s stored_features=%s final_features=%s order_matches=%s stored_matches_code=%s missing_from_live=%s extra_live=%s",
+            meeting_id, getattr(race, 'race_number', None), model_id, expected_count,
+            len(stored_features), final_X.shape[1], order_matches, stored_matches_code,
+            missing_from_live, extra_live,
+        )
+    else:
+        log.info(
+            "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=passed feature_count=%s order_matches=%s preprocessing=training_fillna_median live_fillna_zero scaling=none stored_names_match_champion_62=%s",
+            meeting_id, getattr(race, 'race_number', None), model_id, final_X.shape[1],
+            order_matches, model_id == 62,
+        )
+
+    defaulted_columns = Counter(missing_from_live)
+    null_defaulted = raw_X.reindex(columns=stored_features).isna().sum()
+    for col, count in null_defaulted.items():
+        if count:
+            defaulted_columns[col] += int(count)
+
+    defaulted_summary = dict(defaulted_columns)
+    if defaulted_summary:
+        log.warning(
+            "ML_FEATURE_DEFAULTS meeting=%s race=%s model_id=%s default_value=0 columns=%s",
+            meeting_id, getattr(race, 'race_number', None), model_id, defaulted_summary,
+        )
+
+    source_missing_summary = {}
+    for feature_name in FEATURE_NAMES:
+        count = sum(1 for row in feature_rows if feature_name not in row)
+        if count:
+            source_missing_summary[feature_name] = count
+    if source_missing_summary:
+        log.warning(
+            "ML_FEATURE_MISSING_SOURCE meeting=%s race=%s model_id=%s columns=%s",
+            meeting_id, getattr(race, 'race_number', None), model_id, source_missing_summary,
+        )
+
 def load_model():
     """Load only the active Champion model from DB, with filesystem fallback for local dev."""
     try:
@@ -469,7 +549,7 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
     except FileNotFoundError as e:
         log.error(str(e))
         return {}, {}
-    model_features = list(getattr(model, 'feature_names_in_', FEATURE_NAMES))
+    model_features = _model_feature_names(model) or FEATURE_NAMES
     log.info(
         "ML predict meeting %s using model id=%s run_id=%s type=%s name=%s active=%s class=%s has_predict_proba=%s feature_count=%s",
         meeting_id,
@@ -528,8 +608,9 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
             continue
 
         feature_rows = add_race_relative_features(feature_rows)
-        X = pd.DataFrame(feature_rows)
-        X = X.reindex(columns=model_features, fill_value=0)
+        X_raw = pd.DataFrame(feature_rows)
+        X = X_raw.reindex(columns=model_features, fill_value=0)
+        _log_live_feature_audit(model, meeting_id, race, feature_rows, X_raw, X)
         X = X.fillna(0)
 
         try:
