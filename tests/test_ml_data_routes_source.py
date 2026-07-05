@@ -67,5 +67,28 @@ def test_ml_performance_cutoff_is_centralized():
     source = Path('app.py').read_text()
     assert "ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260625'" in source
     assert "def _ml_performance_meeting_name_sql" in source
-    assert "_ml_performance_meeting_name_sql('m')" in _function_source('calculate_ml_performance_stats')
+    assert "cutoff_sql = _ml_performance_meeting_name_sql('m')" in _function_source('calculate_ml_performance_stats')
     assert "_filter_verified_ml_performance_meetings" in _function_source('_filter_ml_predictions')
+
+
+def test_ml_performance_raw_sql_evaluates_cutoff_helper_before_sql_execution():
+    function_sources = [
+        _function_source('calculate_ml_performance_stats'),
+        Path('ml_shadow_routes.py').read_text(),
+    ]
+
+    for function_source in function_sources:
+        search_from = 0
+        raw_sql_templates = []
+        while True:
+            sql_start = function_source.find("text(f\"\"\"", search_from)
+            if sql_start == -1:
+                break
+            sql_end = function_source.index("\"\"\"", sql_start + len("text(f\"\"\""))
+            raw_sql_templates.append(function_source[sql_start:sql_end])
+            search_from = sql_end + 3
+
+        assert raw_sql_templates
+        for raw_sql_template in raw_sql_templates:
+            assert "{_ml_performance_meeting_name_sql('m')}" not in raw_sql_template
+            assert "_ml_performance_meeting_name_sql" not in raw_sql_template
