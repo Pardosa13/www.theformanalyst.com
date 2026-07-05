@@ -925,7 +925,7 @@ def build_training_set(df, strike_rate_data=None):
             finish = int(row['finish_position'])
             sp = float(row['sp']) if row['sp'] else None
 
-            if sp is None or sp <= 1.0:
+            if sp is None or not np.isfinite(sp) or sp <= 1.0:
                 continue
 
             race_id = row['race_id']
