@@ -15,6 +15,7 @@ import json
 import re
 import logging
 import numpy as np
+from strike_rate_matching import get_sr_win_pct, normalize_name
 import pandas as pd
 from datetime import datetime
 
@@ -136,23 +137,6 @@ def calculate_class_score(class_string, prize_string):
             return 32.0
     return 50.0
 
-def normalize_name(name):
-    if not name:
-        return ''
-    return re.sub(r'\s+', ' ', str(name).lower().strip())
-
-def get_sr_win_pct(name, sr_lookup):
-    if not name or not sr_lookup:
-        return -1.0
-    key = normalize_name(name)
-    data = sr_lookup.get(key)
-    if not data:
-        return -1.0
-    runs = data.get('L100Runs', 0)
-    wins = data.get('L100Wins', 0)
-    if runs < 10:
-        return -1.0
-    return (wins / runs) * 100.0
 
 def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_lookup=None):
     """

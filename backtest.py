@@ -27,6 +27,7 @@ import logging
 import pickle
 from datetime import datetime, timedelta
 from itertools import product
+from strike_rate_matching import build_strike_rate_lookup, get_sr_win_pct, log_match_stats, normalize_name
 
 import numpy as np
 import pandas as pd
@@ -410,15 +411,9 @@ def load_strike_rate_data():
                     WHERE type = 'jockey'
                     ORDER BY updated_at DESC
                 """))
-                for row in result:
-                    name = str(row[0]).strip().lower()
-                    sr_data['jockeys'][name] = {
-                        'L100Wins': int(row[1] or 0),
-                        'L100Runs': int(row[2] or 0),
-                        'l100_wins': int(row[1] or 0),
-                        'l100_runs': int(row[2] or 0)
-                    }
-                log.info(f"Loaded {len(sr_data['jockeys'])} jockey SR records.")
+                rows = result.fetchall()
+                sr_data['jockeys'] = build_strike_rate_lookup(rows)
+                log.info(f"Loaded {len(rows)} jockey SR records.")
             except Exception:
                 log.warning("No strike_rates table or jockey data — jockey_sr feature will be 0.")
 
@@ -429,15 +424,9 @@ def load_strike_rate_data():
                     WHERE type = 'trainer'
                     ORDER BY updated_at DESC
                 """))
-                for row in result:
-                    name = str(row[0]).strip().lower()
-                    sr_data['trainers'][name] = {
-                        'L100Wins': int(row[1] or 0),
-                        'L100Runs': int(row[2] or 0),
-                        'l100_wins': int(row[1] or 0),
-                        'l100_runs': int(row[2] or 0)
-                    }
-                log.info(f"Loaded {len(sr_data['trainers'])} trainer SR records.")
+                rows = result.fetchall()
+                sr_data['trainers'] = build_strike_rate_lookup(rows)
+                log.info(f"Loaded {len(rows)} trainer SR records.")
             except Exception:
                 log.warning("No strike_rates table or trainer data — trainer_sr feature will be 0.")
 
@@ -593,26 +582,6 @@ def calculate_class_score(class_string, prize_string):
     return 50.0
 
 
-def normalize_name(name):
-    """Normalize a jockey/trainer name for lookup."""
-    if not name:
-        return ''
-    return re.sub(r'\s+', ' ', str(name).lower().strip())
-
-
-def get_sr_win_pct(name, sr_lookup):
-    """Look up L100 win % for a jockey or trainer. Returns float 0-100."""
-    if not name or not sr_lookup:
-        return -1.0
-    key = normalize_name(name)
-    data = sr_lookup.get(key)
-    if not data:
-        return -1.0
-    runs = data.get('L100Runs', 0)
-    wins = data.get('L100Wins', 0)
-    if runs < 10:
-        return -1.0
-    return (wins / runs) * 100.0
 
 
 def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None):
@@ -995,6 +964,7 @@ def build_training_set(df, strike_rate_data=None):
     log.info(f"Training set: {len(X)} horses, {X.shape[1]} features, "
              f"{y_won.sum()} winners ({y_won.mean()*100:.1f}% win rate), "
              f"avg ROI: {y_roi.mean():.3f}")
+    log_match_stats(log, jockey_sr, trainer_sr)
 
     return X, y_roi, y_won, race_ids, horse_ids, meeting_dates
 

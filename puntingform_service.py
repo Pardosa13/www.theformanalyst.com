@@ -4,7 +4,7 @@ import csv
 import io
 import requests
 import logging
-import re
+from strike_rate_matching import normalize_name
 from sqlalchemy import create_engine, text
 from datetime import datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -119,7 +119,7 @@ class PuntingFormService:
 
     @staticmethod
     def _normalise_entity_name(name):
-        return re.sub(r'\s+', ' ', str(name or '').strip().lower())
+        return normalize_name(name)
 
     @staticmethod
     def _to_int(value):
@@ -140,7 +140,7 @@ class PuntingFormService:
             return None
 
     def _fetch_v2_strike_rate_rows(self, entity_type, jurisdiction=2):
-        entity_type_id = 1 if entity_type == 'trainer' else 2
+        entity_type_id = 1 if entity_type == 'jockey' else 2
         url = 'https://api.puntingform.com.au/v2/form/strikerate/csv'
         params = {
             'apiKey': self.api_key,
@@ -222,7 +222,7 @@ class PuntingFormService:
             'type': entity_type,
             'jurisdiction': jurisdiction,
             'entity_id': entity_id,
-            'normalised_name': self._normalise_entity_name(name),
+            'normalised_name': normalize_name(name),
             'name': name,
             'start_date': (row.get('StartDate') or '').strip() or None,
             'l100_wins': l100_wins,

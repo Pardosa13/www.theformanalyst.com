@@ -1,0 +1,70 @@
+from strike_rate_matching import build_strike_rate_lookup, get_sr_win_pct, lookup_strike_rate, normalize_name
+
+
+def test_normalize_strips_titles_punctuation_and_collapses_spaces():
+    assert normalize_name(" Ms  K. Lenton ") == "k lenton"
+    assert normalize_name("O’Shea") == "o shea"
+
+
+def test_initials_and_unique_surname_matching():
+    lookup = build_strike_rate_lookup([
+        ("Chris Waller", 20, 100),
+        ("James McDonald", 18, 100),
+        ("Craig Williams", 15, 100),
+        ("Jenny Duggan", 12, 100),
+        ("Dean Yendall", 11, 100),
+        ("Michael Kropp", 10, 100),
+    ])
+
+    assert lookup_strike_rate("C J Waller", lookup)[0]["name"] == "Chris Waller"
+    assert lookup_strike_rate("James McDonald", lookup)[1] == "exact"
+    assert lookup_strike_rate("Craig Williams", lookup)[1] == "exact"
+    assert lookup_strike_rate("Jenny Duggan", lookup)[0]["name"] == "Jenny Duggan"
+    assert lookup_strike_rate("Dean Yendall", lookup)[0]["name"] == "Dean Yendall"
+    assert lookup_strike_rate("M A Kropp", lookup)[0]["name"] == "Michael Kropp"
+    assert get_sr_win_pct("M A Kropp", lookup) == 10.0
+
+
+def test_ambiguous_surname_only_does_not_match():
+    lookup = build_strike_rate_lookup([
+        ("John Smith", 20, 100),
+        ("Jane Smith", 10, 100),
+    ])
+
+    assert lookup_strike_rate("Smith", lookup) == (None, "unmatched")
+
+
+def test_puntingform_entity_type_mapping_labels():
+    import pytest
+    pytest.importorskip("requests")
+    pytest.importorskip("sqlalchemy")
+    from puntingform_service import PuntingFormService
+
+    service = PuntingFormService.__new__(PuntingFormService)
+    service.api_key = "test-key"
+    jockey_request = service._fetch_v2_strike_rate_rows.__self__ if False else None
+    # Assert via prepared request log-independent implementation details by monkeypatching requests.
+    captured = []
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        text = "StartDate,EntityId,EntityName\n"
+        headers = {"content-type": "text/csv"}
+
+    class FakeSession:
+        def send(self, request, timeout):
+            captured.append(request.url)
+            return FakeResponse()
+
+    import puntingform_service
+    original = puntingform_service.requests.Session
+    try:
+        puntingform_service.requests.Session = lambda: FakeSession()
+        service._fetch_v2_strike_rate_rows("jockey", jurisdiction=2)
+        service._fetch_v2_strike_rate_rows("trainer", jurisdiction=2)
+    finally:
+        puntingform_service.requests.Session = original
+
+    assert "entityType=1" in captured[0]
+    assert "entityType=2" in captured[1]
