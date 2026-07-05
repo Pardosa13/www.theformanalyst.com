@@ -39,7 +39,7 @@ from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.base import BaseEstimator, RegressorMixin, clone
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, log_loss
 import joblib
 import warnings
 warnings.filterwarnings('ignore')
@@ -881,7 +881,7 @@ def build_training_set(df, strike_rate_data=None):
     """
     Build one training row per horse per race.
     Also computes weight_vs_avg (requires race-level average, done here).
-    Target variable: ROI = sp if won, -1 if lost.
+    Targets: ROI for legacy/grid-search tracks and binary winner labels for challenger models.
     """
     log.info("Building ML training set...")
 
@@ -914,6 +914,7 @@ def build_training_set(df, strike_rate_data=None):
     feature_rows = []
     targets_roi = []
     targets_won = []
+    sp_values = []
     race_ids = []
     horse_ids = []
     meeting_dates = []
@@ -941,6 +942,7 @@ def build_training_set(df, strike_rate_data=None):
             feature_rows.append(features)
             targets_roi.append(roi)
             targets_won.append(won)
+            sp_values.append(sp)
             race_ids.append(race_id)
             horse_ids.append(row['horse_id'])
             meeting_dates.append(row['meeting_date'])
@@ -966,7 +968,7 @@ def build_training_set(df, strike_rate_data=None):
              f"avg ROI: {y_roi.mean():.3f}")
     log_match_stats(log, jockey_sr, trainer_sr)
 
-    return X, y_roi, y_won, race_ids, horse_ids, meeting_dates
+    return X, y_roi, y_won, sp_values, race_ids, horse_ids, meeting_dates
 
 
 # ─────────────────────────────────────────────
@@ -1684,7 +1686,7 @@ MIN_PROMOTION_STRIKE_RATE_PCT = float(os.environ.get('ML_MIN_PROMOTION_STRIKE_RA
 
 
 class ConsensusRegressor(BaseEstimator, RegressorMixin):
-    """Weighted consensus of regressors without changing downstream score normalisation."""
+    """Weighted consensus of model win-likelihood scores."""
 
     def __init__(self, estimators, weights=None):
         self.estimators = estimators
@@ -1707,13 +1709,29 @@ class ConsensusRegressor(BaseEstimator, RegressorMixin):
         return self
 
     def predict(self, X):
-        preds = np.column_stack([est.predict(X) for est in self.estimators_])
-        return np.average(preds, axis=1, weights=self.weights_)
+        preds = []
+        for est in self.estimators_:
+            if hasattr(est, 'predict_proba'):
+                proba = np.asarray(est.predict_proba(X), dtype=float)
+                preds.append(proba[:, 1] if proba.ndim == 2 and proba.shape[1] > 1 else proba.ravel())
+            else:
+                preds.append(np.asarray(est.predict(X), dtype=float))
+        return np.average(np.column_stack(preds), axis=1, weights=self.weights_)
+
+
+def _predict_win_scores(model, X):
+    """Return comparable win-likelihood scores for classifiers or regressors."""
+    if hasattr(model, 'predict_proba'):
+        proba = np.asarray(model.predict_proba(X), dtype=float)
+        if proba.ndim == 2 and proba.shape[1] > 1:
+            return proba[:, 1]
+        return proba.ravel()
+    return np.asarray(model.predict(X), dtype=float)
 
 
 def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
     """Evaluate top model selection in every validation race with betting metrics."""
-    pred = np.asarray(model.predict(X_val), dtype=float)
+    pred = _predict_win_scores(model, X_val)
     eval_df = pd.DataFrame({
         'race_id': list(race_ids_val),
         'pred': pred,
@@ -1765,9 +1783,9 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
     }
 
 
-def _optional_regressor(model_type, trial=None):
+def _optional_classifier(model_type, trial=None):
     if model_type == 'xgboost':
-        from xgboost import XGBRegressor
+        from xgboost import XGBClassifier
         params = {
             'n_estimators': trial.suggest_int('n_estimators', 80, 300) if trial else 180,
             'max_depth': trial.suggest_int('max_depth', 2, 6) if trial else 4,
@@ -1776,11 +1794,12 @@ def _optional_regressor(model_type, trial=None):
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 1.0) if trial else 0.9,
             'random_state': 42,
             'n_jobs': -1,
-            'objective': 'reg:squarederror',
+            'objective': 'binary:logistic',
+            'eval_metric': 'logloss',
         }
-        return XGBRegressor(**params)
+        return XGBClassifier(**params)
     if model_type == 'lightgbm':
-        from lightgbm import LGBMRegressor
+        from lightgbm import LGBMClassifier
         params = {
             'n_estimators': trial.suggest_int('n_estimators', 80, 300) if trial else 180,
             'max_depth': trial.suggest_int('max_depth', 2, 8) if trial else 5,
@@ -1792,21 +1811,51 @@ def _optional_regressor(model_type, trial=None):
             'n_jobs': -1,
             'verbosity': -1,
         }
-        return LGBMRegressor(**params)
+        return LGBMClassifier(**params)
     if model_type == 'catboost':
-        from catboost import CatBoostRegressor
-        return CatBoostRegressor(
+        from catboost import CatBoostClassifier
+        return CatBoostClassifier(
             iterations=trial.suggest_int('iterations', 80, 250) if trial else 160,
             depth=trial.suggest_int('depth', 3, 8) if trial else 5,
             learning_rate=trial.suggest_float('learning_rate', 0.02, 0.2, log=True) if trial else 0.06,
-            loss_function='RMSE',
+            loss_function='Logloss',
             random_seed=42,
             verbose=False,
         )
     raise ValueError(model_type)
 
 
-def run_model_competition(X, y_roi, y_won, race_ids, meeting_dates, df):
+
+def _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val):
+    frame = pd.DataFrame({
+        'race_id': list(race_ids_val),
+        'row_id': range(len(race_ids_val)),
+        'pred': _predict_win_scores(model, X_val),
+        'won': np.asarray(y_won_val, dtype=int),
+        'sp': np.asarray(sp_val, dtype=float),
+    })
+    return frame.loc[frame.groupby('race_id')['pred'].idxmax()].set_index('race_id')
+
+
+def _compare_model_selections(model_a, model_b, X_val, y_won_val, race_ids_val, sp_val):
+    """Compare two models' top picks on the same validation races."""
+    a = _top_selection_rows(model_a, X_val, y_won_val, race_ids_val, sp_val)
+    b = _top_selection_rows(model_b, X_val, y_won_val, race_ids_val, sp_val)
+    joined = a[['row_id', 'won', 'sp']].join(
+        b[['row_id', 'won', 'sp']], how='inner', lsuffix='_a', rsuffix='_b'
+    )
+    disagreements = joined[joined['row_id_a'] != joined['row_id_b']]
+    a_winners = disagreements[disagreements['won_a'] == 1]
+    b_winners = disagreements[disagreements['won_b'] == 1]
+    return {
+        'disagreement_races': int(len(disagreements)),
+        'random_forest_wins': int(disagreements['won_a'].sum()) if not disagreements.empty else 0,
+        'catboost_wins': int(disagreements['won_b'].sum()) if not disagreements.empty else 0,
+        'random_forest_winner_avg_sp': float(a_winners['sp_a'].mean()) if not a_winners.empty else 0.0,
+        'catboost_winner_avg_sp': float(b_winners['sp_b'].mean()) if not b_winners.empty else 0.0,
+    }
+
+def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, df):
     """Train RF, boosted candidates and consensus on one shared unseen validation set."""
     dates = pd.to_datetime(pd.Series(meeting_dates), errors='coerce')
     order = dates.argsort().values
@@ -1817,14 +1866,14 @@ def run_model_competition(X, y_roi, y_won, race_ids, meeting_dates, df):
     cutoff = dates.iloc[order].quantile(0.8)
     train_mask = dates.iloc[order].reset_index(drop=True) <= cutoff
     val_mask = ~train_mask
-    # build_training_set preserves horse order after filtering, so use y_roi/y_won to recover SP for winners/losses.
-    sp_val = np.where(y_won[val_mask].values == 1, y_roi[val_mask].values + 1.0, 2.0)
+    sp_values = pd.Series(sp_values).iloc[order].reset_index(drop=True)
+    sp_val = sp_values[val_mask].values
     X_train, X_val = X[train_mask], X[val_mask]
     y_train, y_won_val = y_roi[train_mask], y_won[val_mask]
     race_ids_val = [r for r, keep in zip(race_ids, val_mask) if keep]
 
     candidates = {
-        'random_forest': RandomForestRegressor(n_estimators=250, max_depth=10, min_samples_leaf=15, max_features='sqrt', random_state=42, n_jobs=-1)
+        'random_forest': RandomForestClassifier(n_estimators=250, max_depth=10, min_samples_leaf=15, max_features='sqrt', random_state=42, n_jobs=-1, class_weight='balanced_subsample')
     }
     log.info(
         "Track E split for random_forest: total_candidate_rows=%s train_rows=%s validation_rows=%s "
@@ -1835,7 +1884,7 @@ def run_model_competition(X, y_roi, y_won, race_ids, meeting_dates, df):
         import optuna
         optuna.logging.set_verbosity(optuna.logging.WARNING)
         X_train_reset = X_train.reset_index(drop=True)
-        y_train_reset = y_train.reset_index(drop=True)
+        y_train_reset = y_won[train_mask].reset_index(drop=True)
         # Split the already time-ordered Track E training window by row position
         # for Optuna only.  A date-quantile mask can collapse to all-train/zero-
         # eval when many rows share the same meeting date around the cutoff; the
@@ -1858,10 +1907,10 @@ def run_model_competition(X, y_roi, y_won, race_ids, meeting_dates, df):
                     raise ValueError("not enough training rows for safe internal tuning split")
 
                 def objective(trial, model_type=mt):
-                    model = _optional_regressor(model_type, trial)
+                    model = _optional_classifier(model_type, trial)
                     model.fit(X_tune_train, y_tune_train)
-                    preds = model.predict(X_tune_eval)
-                    return -float(mean_squared_error(y_tune_eval, preds))
+                    scores = np.clip(_predict_win_scores(model, X_tune_eval), 1e-6, 1 - 1e-6)
+                    return -float(log_loss(y_tune_eval, scores, labels=[0, 1]))
 
                 study = optuna.create_study(direction='maximize')
                 study.optimize(
@@ -1870,7 +1919,7 @@ def run_model_competition(X, y_roi, y_won, race_ids, meeting_dates, df):
                     timeout=int(os.environ.get('ML_OPTUNA_TIMEOUT_SECONDS', '180')),
                     show_progress_bar=False
                 )
-                candidates[mt] = _optional_regressor(mt, study.best_trial)
+                candidates[mt] = _optional_classifier(mt, study.best_trial)
             except Exception as e:
                 log.warning(f"Skipping {mt} challenger; training/tuning failed: {e}")
     except Exception as e:
@@ -1880,7 +1929,7 @@ def run_model_competition(X, y_roi, y_won, race_ids, meeting_dates, df):
     results = []
     for mt, model in candidates.items():
         try:
-            model.fit(X_train, y_train)
+            model.fit(X_train, y_won[train_mask])
             metrics = evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val)
             fitted[mt] = model
             results.append({'model_type': mt, 'model_name': mt.replace('_', ' ').title(), 'model': model, 'metrics': metrics})
@@ -1894,13 +1943,13 @@ def run_model_competition(X, y_roi, y_won, race_ids, meeting_dates, df):
         ensemble_weights = []
         for _, model in ensemble_members:
             try:
-                train_preds = model.predict(X_train)
-                train_mse = float(mean_squared_error(y_train, train_preds))
+                train_preds = _predict_win_scores(model, X_train)
+                train_mse = float(mean_squared_error(y_won[train_mask], train_preds))
                 ensemble_weights.append(1.0 / max(train_mse, 0.0001))
             except Exception:
                 ensemble_weights.append(1.0)
         ensemble = ConsensusRegressor(ensemble_members, weights=ensemble_weights)
-        ensemble.fit(X_train, y_train)
+        ensemble.fit(X_train, y_won[train_mask])
         metrics = evaluate_model_on_validation(ensemble, X_val, y_won_val, race_ids_val, sp_val)
         metrics['ensemble_weights'] = dict(zip([name for name, _ in ensemble_members], ensemble.weights_.tolist()))
         results.append({'model_type': 'ensemble', 'model_name': 'Ensemble / Consensus', 'model': ensemble, 'metrics': metrics})
@@ -1911,7 +1960,7 @@ def run_model_competition(X, y_roi, y_won, race_ids, meeting_dates, df):
         selections_by_model = {}
         for mt, model in fitted.items():
             temp = val_frame.copy()
-            temp['pred'] = np.asarray(model.predict(X_val), dtype=float)
+            temp['pred'] = _predict_win_scores(model, X_val)
             selections_by_model[mt] = temp.loc[temp.groupby('race_id')['pred'].idxmax()].set_index('race_id')['row_id'].to_dict()
         for race_id in val_frame['race_id'].unique():
             chosen = [sel.get(race_id) for sel in selections_by_model.values()]
@@ -1919,6 +1968,30 @@ def run_model_competition(X, y_roi, y_won, race_ids, meeting_dates, df):
             agreement_summary[f'{max_agreement}_of_4'] = agreement_summary.get(f'{max_agreement}_of_4', 0) + 1
     for result in results:
         result['agreement_summary'] = agreement_summary
+
+    log.info("ML competition per-model metrics on identical validation races:")
+    for result in sorted(results, key=lambda r: r['model_type']):
+        m = result['metrics']
+        log.info(
+            "  %s | ROI=%.1f%% Strike=%.1f%% Bets=%s Profit=%.1fu",
+            result['model_name'], m['roi'], m['strike_rate'], m['number_of_bets'], m['profit_units']
+        )
+
+    if 'random_forest' in fitted and 'catboost' in fitted:
+        comparison = _compare_model_selections(
+            fitted['random_forest'], fitted['catboost'], X_val, y_won_val, race_ids_val, sp_val
+        )
+        for result in results:
+            if result['model_type'] in {'random_forest', 'catboost'}:
+                result['rf_catboost_comparison'] = comparison
+                result['agreement_summary'] = {**result.get('agreement_summary', {}), 'rf_catboost': comparison}
+        log.info(
+            "RF vs CatBoost disagreements: races=%s rf_wins=%s catboost_wins=%s "
+            "rf_winner_avg_sp=%.2f catboost_winner_avg_sp=%.2f",
+            comparison['disagreement_races'], comparison['random_forest_wins'],
+            comparison['catboost_wins'], comparison['random_forest_winner_avg_sp'],
+            comparison['catboost_winner_avg_sp']
+        )
 
     best = max(results, key=lambda r: (r['metrics']['roi'], r['metrics']['strike_rate']))
     log.info("ML competition: best=%s roi=%.1f%% sr=%.1f%% bets=%s",
@@ -2347,7 +2420,7 @@ def main():
                 conn.commit()
             return
 
-        X, y_roi, y_won, race_ids, horse_ids, meeting_dates = build_training_set(
+        X, y_roi, y_won, sp_values, race_ids, horse_ids, meeting_dates = build_training_set(
             df, strike_rate_data
         )
 
@@ -2370,7 +2443,7 @@ def main():
         best_challenger = None
         try:
             best_competitor, competition_results = run_model_competition(
-                X, y_roi, y_won, race_ids, meeting_dates, df
+                X, y_roi, y_won, sp_values, race_ids, meeting_dates, df
             )
             output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
             os.makedirs(output_dir, exist_ok=True)
