@@ -2,7 +2,11 @@ import os
 import csv
 import io
 import requests
+import logging
+import re
 from datetime import datetime
+
+log = logging.getLogger(__name__)
 
 
 class PuntingFormService:
@@ -99,38 +103,163 @@ class PuntingFormService:
         response = self._make_request(url)
         return response.json()
 
-    def get_strike_rates(self, meeting_date, entity_type='jockey'):
-        """
-        Fetch L100 win strike rate data for all jockeys or trainers for a given meeting date.
-        Uses V1 API (same base as all other methods).
+    @staticmethod
+    def _normalise_entity_name(name):
+        return re.sub(r'\s+', ' ', str(name or '').strip().lower())
 
-        Args:
-            meeting_date: date string in YYYY-MM-DD format
-            entity_type: 'jockey' or 'trainer'
+    @staticmethod
+    def _to_int(value):
+        try:
+            if value in (None, ''):
+                return 0
+            return int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _to_float(value):
+        try:
+            if value in (None, ''):
+                return None
+            return float(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+
+    def _fetch_v2_strike_rate_rows(self, entity_type, jurisdiction=2):
+        entity_type_id = 1 if entity_type == 'trainer' else 2
+        url = 'https://api.puntingform.com.au/v2/form/strikerate/csv'
+        params = {
+            'apiKey': self.api_key,
+            'jurisdiction': jurisdiction,
+            'entityType': entity_type_id,
+        }
+        response = requests.get(url, params=params, headers={'accept': 'text/csv,text/plain'}, timeout=30)
+        if not response.ok:
+            log.error(
+                "PuntingForm strike-rate API failed: type=%s jurisdiction=%s status=%s body=%s",
+                entity_type,
+                jurisdiction,
+                response.status_code,
+                response.text[:500],
+            )
+            raise Exception(f"PuntingForm strike-rate API error {response.status_code}: {response.text}")
+
+        reader = csv.DictReader(io.StringIO(response.text))
+        headers = reader.fieldnames or []
+        log.info(
+            "PuntingForm strike-rate headers returned for %ss jurisdiction %s: %s",
+            entity_type,
+            jurisdiction,
+            headers,
+        )
+        return list(reader), headers
+
+    def _map_v2_strike_rate_row(self, row, entity_type, jurisdiction=2):
+        career_wins = self._to_int(row.get('CareerWins'))
+        career_expected_wins = self._to_float(row.get('CareerExpectedWins'))
+        l100_wins = self._to_int(row.get('Last100Wins'))
+        l100_expected_wins = self._to_float(row.get('Last100ExpectedWins'))
+        name = (row.get('EntityName') or '').strip()
+        entity_id = (row.get('EntityId') or '').strip() or None
+
+        return {
+            'type': entity_type,
+            'jurisdiction': jurisdiction,
+            'entity_id': entity_id,
+            'normalised_name': self._normalise_entity_name(name),
+            'name': name,
+            'start_date': (row.get('StartDate') or '').strip() or None,
+            'l100_wins': l100_wins,
+            'l100_runs': self._to_int(row.get('Last100Starts')),
+            'career_wins': career_wins,
+            'career_runs': self._to_int(row.get('CareerStarts')),
+            'career_expected_wins': career_expected_wins,
+            'l100_expected_wins': l100_expected_wins,
+            'career_actual_to_expected': (career_wins / career_expected_wins) if career_expected_wins and career_expected_wins > 0 else None,
+            'last100_actual_to_expected': (l100_wins / l100_expected_wins) if l100_expected_wins and l100_expected_wins > 0 else None,
+            'raw_csv_row': dict(row),
+            'raw_data': dict(row),
+        }
+
+    def _upsert_strike_rate_rows(self, mapped_rows):
+        if not mapped_rows:
+            return 0
+
+        from models import db, StrikeRate
+
+        count = 0
+        for data in mapped_rows:
+            if not data['name']:
+                continue
+
+            query = StrikeRate.query.filter_by(
+                type=data['type'],
+                jurisdiction=data['jurisdiction'],
+            )
+            if data.get('entity_id'):
+                existing = query.filter_by(entity_id=data['entity_id']).first()
+            else:
+                existing = query.filter_by(normalised_name=data['normalised_name']).first()
+
+            if existing is None:
+                existing = StrikeRate()
+                db.session.add(existing)
+
+            for key, value in data.items():
+                setattr(existing, key, value)
+            count += 1
+
+        db.session.commit()
+        return count
+
+    def ingest_strike_rates(self, jurisdiction=2):
+        """Fetch and upsert confirmed V2 strike-rate data for trainers and jockeys."""
+        totals = {'trainer': 0, 'jockey': 0}
+        for entity_type in ('trainer', 'jockey'):
+            try:
+                rows, _headers = self._fetch_v2_strike_rate_rows(entity_type, jurisdiction=jurisdiction)
+                mapped_rows = [self._map_v2_strike_rate_row(row, entity_type, jurisdiction=jurisdiction) for row in rows]
+                totals[entity_type] = self._upsert_strike_rate_rows(mapped_rows)
+                log.info("PuntingForm %s rows ingested: %s", entity_type, totals[entity_type])
+            except Exception as e:
+                log.error(
+                    "PuntingForm strike-rate failed API call for %ss jurisdiction %s: %s",
+                    entity_type,
+                    jurisdiction,
+                    e,
+                    exc_info=True,
+                )
+        return totals
+
+    def get_strike_rates(self, meeting_date=None, entity_type='jockey'):
+        """
+        Fetch confirmed V2 L100 win strike-rate data for all jockeys or trainers.
 
         Returns:
-            dict keyed by name -> {'L100Wins': int, 'L100Runs': int}
+            dict keyed by normalised name -> {'L100Wins': int, 'L100Runs': int}
         """
-        date_obj = datetime.strptime(meeting_date, '%Y-%m-%d')
-        date_str = date_obj.strftime('%d-%b-%Y')
-        endpoint = 'GetJockeyStrikeRateData' if entity_type == 'jockey' else 'GetTrainerStrikeRateData'
-        url = f"{self.base_url}/{endpoint}/{date_str}?ApiKey={self.api_key}"
+        if entity_type not in ('jockey', 'trainer'):
+            raise ValueError("entity_type must be 'jockey' or 'trainer'")
 
         try:
-            response = self._make_request(url)
-            reader = csv.DictReader(io.StringIO(response.text))
-            name_field = 'JockeyName' if entity_type == 'jockey' else 'TrainerName'
-            results = {}
-            for row in reader:
-                name = row.get(name_field, '').strip().strip('"')
-                if name:
-                    results[name] = {
-                        'L100Wins': int(row.get('L100Wins', 0) or 0),
-                        'L100Runs': int(row.get('L100Runs', 0) or 0),
-                    }
-            return results
+            rows, _headers = self._fetch_v2_strike_rate_rows(entity_type, jurisdiction=2)
+            mapped_rows = [self._map_v2_strike_rate_row(row, entity_type, jurisdiction=2) for row in rows]
+            self._upsert_strike_rate_rows(mapped_rows)
+            log.info("PuntingForm %s rows ingested: %s", entity_type, len(mapped_rows))
+
+            return {
+                row['normalised_name']: {
+                    'L100Wins': row['l100_wins'],
+                    'L100Runs': row['l100_runs'],
+                }
+                for row in mapped_rows
+                if row['normalised_name']
+            }
         except Exception as e:
-            print(f"Strike rate fetch failed for {entity_type}s on {meeting_date}: {str(e)}", flush=True)
-            import traceback
-            traceback.print_exc()
+            log.error(
+                "PuntingForm strike-rate failed API call for %ss jurisdiction 2: %s",
+                entity_type,
+                e,
+                exc_info=True,
+            )
             return {}
