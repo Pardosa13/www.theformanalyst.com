@@ -5266,7 +5266,12 @@ def ml_data_analytics():
 
     ml_performance_stats = None
     try:
-        ml_performance_stats = calculate_ml_performance_stats()
+        ml_performance_stats = calculate_ml_performance_stats(
+            track_filter=track_filter,
+            date_from=date_from,
+            date_to=date_to,
+            limit_param=limit_param,
+        )
     except Exception as e:
         print(f"Error calculating ML performance stats: {e}")
 

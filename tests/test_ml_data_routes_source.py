@@ -92,3 +92,12 @@ def test_ml_performance_raw_sql_evaluates_cutoff_helper_before_sql_execution():
         for raw_sql_template in raw_sql_templates:
             assert "{_ml_performance_meeting_name_sql('m')}" not in raw_sql_template
             assert "_ml_performance_meeting_name_sql" not in raw_sql_template
+
+
+def test_ml_data_page_passes_filters_to_overview_stats():
+    source = _function_source('ml_data_analytics')
+    assert 'calculate_ml_performance_stats(' in source
+    assert 'track_filter=track_filter' in source
+    assert 'date_from=date_from' in source
+    assert 'date_to=date_to' in source
+    assert 'limit_param=limit_param' in source
