@@ -501,23 +501,23 @@ def register_ml_shadow_routes(app, db):
                 a_profit = sum(r['a_profit'] for r in sample)
                 m_profit = sum(r['m_profit'] for r in sample)
                 agree = sum(1 for r in sample if r['agree'])
-                ml_total_return = m_profit / STAKE + n
-                ml_total_profit = ml_total_return - n
+                ml_total_return = m_profit + (n * STAKE)
+                ml_total_profit = m_profit
                 return {
                     'races': n,
                     'a_wins': a_wins,
                     'a_roi': round(a_profit / (n * STAKE) * 100, 1) if n else None,
                     'm_wins': m_wins,
-                    'm_roi': round(ml_total_profit / n * 100, 2) if n else None,
+                    'm_roi': round(ml_total_profit / (n * STAKE) * 100, 2) if n else None,
                     'agree_rate': round(agree / n * 100, 1) if n else None,
                     'ml_performance': {
                         'selections': n,
                         'wins': m_wins,
                         'strike_rate': round(m_wins / n * 100, 2) if n else None,
-                        'total_stake': n,
+                        'total_stake': round(n * STAKE, 2),
                         'total_return': round(ml_total_return, 2),
                         'total_profit': round(ml_total_profit, 2),
-                        'roi': round(ml_total_profit / n * 100, 2) if n else None,
+                        'roi': round(ml_total_profit / (n * STAKE) * 100, 2) if n else None,
                     },
                 }
 
