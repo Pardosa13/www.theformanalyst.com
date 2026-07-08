@@ -131,62 +131,148 @@
     font-family: 'DM Mono', monospace;
   }
 
-  .ml-performance-head { margin-top: -4px; }
+  :root {
+    --ml-accent: #00e5b0;
+    --ml-accent2: #b6ff00;
+    --ml-border: rgba(0,229,176,0.28);
+  }
+
   .ml-performance-panel {
     background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    padding: 16px;
+    border: 1px solid var(--ml-border);
+    border-radius: 14px;
+    padding: 20px;
     margin-bottom: 28px;
+    overflow: hidden;
+  }
+  .ml-performance-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 20px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border-subtle);
   }
   .ml-performance-head h2 {
-    color: var(--text-primary);
-    font-size: 14px;
-    letter-spacing: 1px;
-    margin: 0 0 14px;
-    font-family: 'DM Mono', monospace;
-    text-transform: uppercase;
+    color: var(--ml-accent);
+    font-size: 1.1rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    margin: 0 0 4px;
   }
+  .ml-performance-head p {
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.45;
+    margin: 0;
+  }
+  .ml-badge {
+    display: inline-block;
+    background: rgba(0,229,176,0.1);
+    border: 1px solid rgba(0,229,176,0.3);
+    color: var(--ml-accent);
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    letter-spacing: 1px;
+    font-family: 'DM Mono', monospace;
+    vertical-align: middle;
+    margin-left: 8px;
+    white-space: nowrap;
+  }
+  .ml-performance-link {
+    color: var(--ml-accent);
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .ml-performance-link:hover { color: var(--ml-accent2); }
   .ml-stat-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(130px, 1fr));
-    gap: 10px;
-    margin-bottom: 14px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
   }
   .ml-stat-tile {
-    background: var(--bg-elevated);
-    border-color: var(--border-subtle);
-    border-radius: 7px;
-    padding: 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--ml-border);
+    border-radius: 12px;
+    padding: 22px 16px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .ml-stat-tile::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--ml-accent), var(--ml-accent2));
   }
   .ml-stat-tile::after { display: none; }
-  .ml-stat-tile .stat-tile-label { font-size: 9px; letter-spacing: 0.8px; }
-  .ml-stat-tile .stat-tile-value { font-size: 20px; }
-  .ml-stat-tile .stat-tile-value.lime { color: var(--text-primary); text-shadow: none; }
-  .ml-stat-tile .stat-tile-value.green { color: #00e5b0; }
-  .ml-stat-tile .stat-tile-value.loss { color: #ff4560; }
-  .ml-performance-table-wrap { overflow-x: auto; }
+  .ml-stat-tile:hover { border-color: var(--ml-accent); box-shadow: 0 4px 20px rgba(0,229,176,0.12); }
+  .ml-stat-tile.pos::before { background: linear-gradient(90deg, #059669, #34d399); }
+  .ml-stat-tile.neg::before { background: linear-gradient(90deg, #dc2626, #f87171); }
+  .ml-stat-tile .stat-tile-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    margin: 0;
+  }
+  .ml-stat-tile .stat-tile-value {
+    display: block;
+    color: var(--ml-accent);
+    font-family: 'DM Mono', monospace;
+    font-size: 2rem;
+    font-weight: 800;
+    line-height: 1.1;
+    margin-bottom: 6px;
+    text-shadow: 0 0 14px rgba(0,229,176,0.3);
+  }
+  .ml-stat-tile .stat-tile-value.lime { color: var(--ml-accent); text-shadow: 0 0 14px rgba(0,229,176,0.3); }
+  .ml-stat-tile .stat-tile-value.green { color: #34d399; text-shadow: 0 0 14px rgba(52,211,153,0.35); }
+  .ml-stat-tile .stat-tile-value.loss { color: #f87171; text-shadow: none; }
+  .ml-stat-tile .stat-tile-sub { display: none; }
+  .ml-performance-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+  }
   .ml-performance-table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 720px;
+    min-width: 680px;
+    background: transparent;
   }
+  .ml-performance-table thead tr { background: var(--bg-hover); }
   .ml-performance-table th,
   .ml-performance-table td {
     padding: 12px 16px;
     text-align: left;
     border-bottom: 1px solid var(--border-subtle);
-    color: var(--text-secondary);
+    color: var(--text-primary);
   }
   .ml-performance-table th {
     color: var(--text-muted);
     font-size: 10px;
-    letter-spacing: 1px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
     font-family: 'DM Mono', monospace;
     text-transform: uppercase;
+    white-space: nowrap;
   }
-  .ml-performance-table td { font-size: 14px; }
+  .ml-performance-table td { font-size: 13px; }
+  .ml-performance-table td:not(:first-child) {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+  }
+  .ml-performance-table tbody tr:hover { background: var(--bg-elevated); }
   .ml-performance-table tbody tr:last-child td { border-bottom: none; }
+  .ml-performance-table .green { color: #34d399; }
+  .ml-performance-table .loss { color: #f87171; }
 
   /* ── Action cards ── */
   .action-row {
@@ -368,6 +454,7 @@
     .action-row { grid-template-columns: 1fr; }
     .stat-strip { grid-template-columns: repeat(2, 1fr); }
     .ml-stat-grid { grid-template-columns: repeat(2, 1fr); }
+    .ml-performance-head { flex-direction: column; }
     .dash-header { flex-direction: column; align-items: flex-start; }
     .recent-table thead { display: none; }
     .recent-table tbody tr {
@@ -389,6 +476,10 @@
     .stat-strip { grid-template-columns: 1fr 1fr; gap: 10px; }
     .action-card { padding: 18px; }
     .stat-tile { padding: 14px 16px; }
+    .ml-performance-panel { padding: 16px; }
+    .ml-stat-grid { gap: 10px; }
+    .ml-stat-tile { padding: 16px 10px; }
+    .ml-stat-tile .stat-tile-value { font-size: 1.45rem; }
   }
 </style>
 
@@ -438,24 +529,28 @@
 
 {% if ml_performance_stats %}
 <div class="ml-performance-panel">
-<div class="section-head ml-performance-head">
-  <h2>ML Machine Learning Performance{% if ml_performance_stats.limit %} — {{ ml_performance_stats.label }}{% endif %}</h2>
+<div class="ml-performance-head">
+  <div>
+    <h2>🤖 ML Machine Learning Performance <span class="ml-badge">ML SCORES</span></h2>
+    <p>Dashboard snapshot using <strong style="color:var(--ml-accent)">ML scores</strong>{% if ml_performance_stats.limit %} — {{ ml_performance_stats.label }}{% endif %}.</p>
+  </div>
+  <a class="ml-performance-link" href="{{ url_for('ml_data_analytics') }}">View ML Analytics →</a>
 </div>
 <div class="ml-stat-grid">
-  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Selections</div><div class="stat-tile-value lime">{{ ml_performance_stats.selections }}</div><div class="stat-tile-sub">One ML top pick per settled race</div></div>
-  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Wins</div><div class="stat-tile-value lime">{{ ml_performance_stats.wins }}</div><div class="stat-tile-sub">Finish position 1</div></div>
-  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Strike Rate</div><div class="stat-tile-value lime">{{ "%.2f"|format(ml_performance_stats.strike_rate) }}%</div><div class="stat-tile-sub">Wins / selections</div></div>
-  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Place Rate</div><div class="stat-tile-value lime">{{ "%.2f"|format(ml_performance_stats.place_rate) }}%</div><div class="stat-tile-sub">{{ ml_performance_stats.places }} places / selections</div></div>
-  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Total Stake ($10 Bets)</div><div class="stat-tile-value lime">{{ "%.0f"|format(ml_performance_stats.total_stake) }}</div><div class="stat-tile-sub">$10 win bets</div></div>
-  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Total Return ($)</div><div class="stat-tile-value lime">{{ "%.2f"|format(ml_performance_stats.total_return) }}</div><div class="stat-tile-sub">$10 win bets</div></div>
-  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">Total Profit ($)</div><div class="stat-tile-value {% if ml_performance_stats.total_profit >= 0 %}green{% else %}loss{% endif %}">{{ "%+.2f"|format(ml_performance_stats.total_profit) }}</div><div class="stat-tile-sub">$10 win bets</div></div>
-  <div class="stat-tile ml-stat-tile"><div class="stat-tile-label">ROI</div><div class="stat-tile-value {% if ml_performance_stats.roi >= 0 %}green{% else %}loss{% endif %}">{{ "%+.2f"|format(ml_performance_stats.roi) }}%</div><div class="stat-tile-sub">True profit ROI</div></div>
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-value lime">{{ ml_performance_stats.selections }}</div><div class="stat-tile-label">ML Selections</div><div class="stat-tile-sub">One ML top pick per settled race</div></div>
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-value lime">{{ ml_performance_stats.wins }}</div><div class="stat-tile-label">ML Wins</div><div class="stat-tile-sub">Finish position 1</div></div>
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-value lime">{{ "%.1f"|format(ml_performance_stats.strike_rate) }}%</div><div class="stat-tile-label">ML Strike Rate</div><div class="stat-tile-sub">Wins / selections</div></div>
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-value lime">{{ "%.1f"|format(ml_performance_stats.place_rate) }}%</div><div class="stat-tile-label">ML Place Rate ({{ ml_performance_stats.places }})</div><div class="stat-tile-sub">{{ ml_performance_stats.places }} places / selections</div></div>
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-value lime">{{ "%.0f"|format(ml_performance_stats.total_stake) }}</div><div class="stat-tile-label">Total Stake ($10 bets)</div><div class="stat-tile-sub">$10 win bets</div></div>
+  <div class="stat-tile ml-stat-tile"><div class="stat-tile-value lime">{{ "%.2f"|format(ml_performance_stats.total_return) }}</div><div class="stat-tile-label">Total Return ($)</div><div class="stat-tile-sub">$10 win bets</div></div>
+  <div class="stat-tile ml-stat-tile {% if ml_performance_stats.total_profit >= 0 %}pos{% else %}neg{% endif %}"><div class="stat-tile-value {% if ml_performance_stats.total_profit >= 0 %}green{% else %}loss{% endif %}">{{ "%+.2f"|format(ml_performance_stats.total_profit) }}</div><div class="stat-tile-label">ML Total Profit ($)</div><div class="stat-tile-sub">$10 win bets</div></div>
+  <div class="stat-tile ml-stat-tile {% if ml_performance_stats.roi >= 0 %}pos{% else %}neg{% endif %}"><div class="stat-tile-value {% if ml_performance_stats.roi >= 0 %}green{% else %}loss{% endif %}">{{ "%+.1f"|format(ml_performance_stats.roi) }}%</div><div class="stat-tile-label">ML ROI</div><div class="stat-tile-sub">True profit ROI</div></div>
 </div>
 {% if ml_performance_windows %}
 <div class="ml-performance-table-wrap">
   <table class="ml-performance-table">
     <thead>
-      <tr><th>Range</th><th>Selections</th><th>Wins</th><th>Strike</th><th>Total Return ($)</th><th>Profit ($)</th><th>ROI</th></tr>
+      <tr><th>Range</th><th>Races</th><th>Wins</th><th>Strike</th><th>Profit ($)</th><th>ROI</th></tr>
     </thead>
     <tbody>
       {% for window in ml_performance_windows %}
@@ -464,7 +559,6 @@
         <td>{{ window.selections }}</td>
         <td>{{ window.wins }}</td>
         <td>{{ "%.2f"|format(window.strike_rate) }}%</td>
-        <td>{{ "%.2f"|format(window.total_return) }}</td>
         <td class="{% if window.total_profit >= 0 %}green{% else %}loss{% endif %}">{{ "%+.2f"|format(window.total_profit) }}</td>
         <td class="{% if window.roi >= 0 %}green{% else %}loss{% endif %}">{{ "%+.2f"|format(window.roi) }}%</td>
       </tr>
