@@ -3181,8 +3181,13 @@ def dashboard():
         logger.error(f"Dashboard best_bets_stats error: {e}")
 
     ml_performance_stats = None
+    ml_performance_windows = []
     try:
-        ml_performance_stats = calculate_ml_performance_stats()
+        ml_performance_windows = calculate_ml_performance_windows()
+        ml_performance_stats = (
+            next((w for w in ml_performance_windows if w.get('limit') == 50), None)
+            or (ml_performance_windows[0] if ml_performance_windows else None)
+        )
     except Exception as e:
         logger.error(f"Dashboard ML performance stats error: {e}")
 
@@ -3192,6 +3197,7 @@ def dashboard():
         stats=stats,
         best_bets_stats=best_bets_stats,
         ml_performance_stats=ml_performance_stats,
+        ml_performance_windows=ml_performance_windows,
     )
 
 
@@ -3208,8 +3214,8 @@ def _join_ml_predictions_for_race_ids(query):
         query.join(Prediction, Prediction.horse_id == Horse.id).filter(Prediction.ml_score.isnot(None))
     )
 
-def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", limit_param="all"):
-    """Calculate ML top-pick performance using filtered, limited settled ML races."""
+def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""):
+    """Return settled ML race results ordered exactly like the Machine Learning page."""
     params = {}
     filters = []
     if track_filter:
@@ -3227,6 +3233,11 @@ def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", li
     rows = db.session.execute(text(f"""
         SELECT
             rc.id AS race_id,
+            m.date AS meeting_date,
+            m.uploaded_at AS meeting_uploaded_at,
+            rc.race_number,
+            MAX(r.recorded_at) OVER (PARTITION BY rc.id) AS latest_result_at,
+            p.score AS analyzer_score,
             p.ml_score,
             h.id AS horse_id,
             r.finish_position,
@@ -3243,46 +3254,59 @@ def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", li
           AND r.finish_position > 0
           AND r.sp IS NOT NULL
           {extra_where}
-        ORDER BY m.uploaded_at DESC, rc.id DESC
     """), params).fetchall()
 
     from collections import defaultdict
     races = defaultdict(list)
-    race_order = []
     for row in rows:
-        if row.race_id not in races:
-            race_order.append(row.race_id)
         races[row.race_id].append(row)
 
-    if limit_param != 'all':
-        limit = int(limit_param) if str(limit_param).isdigit() else 200
-        race_order = race_order[:limit]
-    else:
-        race_order = list(races.keys())
-
-    selections = wins = places = 0
-    total_return = 0.0
-
-    for race_id in race_order:
-        horses = races[race_id]
+    race_results = []
+    for race_id, horses in races.items():
         if not horses:
             continue
-        top_pick = max(horses, key=lambda x: x.ml_score or 0)
-        selections += 1
-        if top_pick.finish_position in [1, 2, 3]:
-            places += 1
-        if top_pick.finish_position == 1:
-            wins += 1
-            total_return += float(top_pick.sp or 0)
+        top_a = max(horses, key=lambda x: x.analyzer_score or 0)
+        top_m = max(horses, key=lambda x: x.ml_score or 0)
+        sort_value = top_m.meeting_date or top_m.latest_result_at or top_m.meeting_uploaded_at
+        sort_key = sort_value.isoformat() if sort_value else ''
+        race_results.append({
+            'race_id': race_id,
+            'race_number': top_m.race_number or 0,
+            'sort_key': sort_key,
+            'top_analyzer_horse_id': top_a.horse_id,
+            'top_ml_horse_id': top_m.horse_id,
+            'finish_position': top_m.finish_position,
+            'sp': float(top_m.sp or 0),
+        })
 
+    race_results.sort(
+        key=lambda r: (
+            bool(r['sort_key']),
+            r['sort_key'],
+            r['race_number'],
+            r['race_id'],
+        ),
+        reverse=True,
+    )
+    return race_results
+
+
+def _summarise_ml_performance_races(race_results):
+    """Summarise ML top-pick performance using one unit stakes."""
+    selections = len(race_results)
+    wins = sum(1 for r in race_results if r['finish_position'] == 1)
+    places = sum(1 for r in race_results if r['finish_position'] in [1, 2, 3])
+    total_return = sum(r['sp'] for r in race_results if r['finish_position'] == 1)
     total_stake = float(selections)
     total_profit = total_return - total_stake
     strike_rate = (wins / selections * 100) if selections else 0.0
     place_rate = (places / selections * 100) if selections else 0.0
     roi = (total_profit / total_stake * 100) if total_stake else 0.0
+    agree = sum(1 for r in race_results if r['top_analyzer_horse_id'] == r['top_ml_horse_id'])
 
     return {
         'selections': selections,
+        'races': selections,
         'wins': wins,
         'places': places,
         'strike_rate': strike_rate,
@@ -3291,7 +3315,38 @@ def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", li
         'total_return': total_return,
         'total_profit': total_profit,
         'roi': roi,
+        'agree_rate': (agree / selections * 100) if selections else 0.0,
     }
+
+
+def calculate_ml_performance_windows(track_filter="", date_from="", date_to=""):
+    """Calculate ML performance windows matching /api/ml-shadow/global-stats."""
+    race_results = _build_ml_performance_race_results(track_filter, date_from, date_to)
+    windows = []
+    for limit in (50, 100, 200, 500):
+        if len(race_results) >= limit:
+            windows.append({
+                'label': f'Last {limit} races',
+                'limit': limit,
+                **_summarise_ml_performance_races(race_results[:limit]),
+            })
+    if race_results:
+        windows.append({
+            'label': 'All ML races',
+            'limit': 'all',
+            **_summarise_ml_performance_races(race_results),
+        })
+    return windows
+
+
+def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", limit_param="all"):
+    """Calculate ML top-pick performance using the Machine Learning page calculation."""
+    race_results = _build_ml_performance_race_results(track_filter, date_from, date_to)
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        race_results = race_results[:limit]
+    return _summarise_ml_performance_races(race_results)
+
 
 # ----- PuntingForm API Routes -----
 
