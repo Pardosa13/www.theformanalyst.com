@@ -3292,12 +3292,13 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
 
 
 def _summarise_ml_performance_races(race_results):
-    """Summarise ML top-pick performance using one unit stakes."""
+    """Summarise ML top-pick performance using $10 win-bet stakes."""
+    stake = 10.0
     selections = len(race_results)
     wins = sum(1 for r in race_results if r['finish_position'] == 1)
     places = sum(1 for r in race_results if r['finish_position'] in [1, 2, 3])
-    total_return = sum(r['sp'] for r in race_results if r['finish_position'] == 1)
-    total_stake = float(selections)
+    total_return = sum(r['sp'] * stake for r in race_results if r['finish_position'] == 1)
+    total_stake = float(selections) * stake
     total_profit = total_return - total_stake
     strike_rate = (wins / selections * 100) if selections else 0.0
     place_rate = (places / selections * 100) if selections else 0.0
