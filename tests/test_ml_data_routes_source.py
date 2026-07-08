@@ -46,11 +46,12 @@ def test_ml_data_page_always_requests_ml_source():
 
 
 def test_ml_performance_stats_accepts_filters_and_limits():
-    source = _function_source('calculate_ml_performance_stats')
-    assert 'track_filter=""' in source
-    assert 'limit_param="all"' in source
-    assert 'LOWER(m.meeting_name) LIKE :track_filter' in source
-    assert 'race_order = race_order[:limit]' in source
+    stats_source = _function_source('calculate_ml_performance_stats')
+    helper_source = _function_source('_build_ml_performance_race_results')
+    assert 'track_filter=""' in stats_source
+    assert 'limit_param="all"' in stats_source
+    assert 'LOWER(m.meeting_name) LIKE :track_filter' in helper_source
+    assert 'race_results = race_results[:limit]' in stats_source
 
 
 def test_ml_specific_analytics_use_ml_score_for_ranking():
@@ -67,13 +68,13 @@ def test_ml_performance_cutoff_is_centralized():
     source = Path('app.py').read_text()
     assert "ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260625'" in source
     assert "def _ml_performance_meeting_name_sql" in source
-    assert "cutoff_sql = _ml_performance_meeting_name_sql('m')" in _function_source('calculate_ml_performance_stats')
+    assert "cutoff_sql = _ml_performance_meeting_name_sql('m')" in _function_source('_build_ml_performance_race_results')
     assert "_filter_verified_ml_performance_meetings" in _function_source('_filter_ml_predictions')
 
 
 def test_ml_performance_raw_sql_evaluates_cutoff_helper_before_sql_execution():
     function_sources = [
-        _function_source('calculate_ml_performance_stats'),
+        _function_source('_build_ml_performance_race_results'),
         Path('ml_shadow_routes.py').read_text(),
     ]
 
