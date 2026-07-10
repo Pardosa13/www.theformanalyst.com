@@ -61,12 +61,15 @@ _OCTAGON_CSV_PATHS = {
     'Events.csv': 'newdata/Events.csv',
     'current_glicko.csv': 'newdata/current_glicko.csv',
 }
-_OCTAGON_RAW_BASES = [
-    'https://raw.githubusercontent.com/sbalagan22/Octagon-AI/main',
-    'https://github.com/sbalagan22/Octagon-AI/raw/refs/heads/main',
-    'https://github.com/sbalagan22/Octagon-AI/raw/main',
-    'https://cdn.jsdelivr.net/gh/sbalagan22/Octagon-AI@main',
-]
+# Prefer an immutable snapshot when the moving main branch no longer carries
+# the historical training CSVs.  Set MMA_OCTAGON_CSV_COMMIT after verifying the
+# Octagon-AI history; do not add more aliases for the same missing main path.
+OCTAGON_CSV_COMMIT = os.environ.get('MMA_OCTAGON_CSV_COMMIT', '').strip()
+_OCTAGON_RAW_BASE = (
+    f'https://raw.githubusercontent.com/sbalagan22/Octagon-AI/{OCTAGON_CSV_COMMIT}'
+    if OCTAGON_CSV_COMMIT else
+    'https://raw.githubusercontent.com/sbalagan22/Octagon-AI/main'
+)
 MIN_HISTORICAL_CSV_FIGHTS = 1000
 MIN_HISTORICAL_CSV_FIGHTERS = 500
 MIN_COMPLETE_DB_FIGHTS_FOR_PRIMARY_HISTORY = 1000
@@ -1605,9 +1608,9 @@ def rebuild_stats_from_db(conn):
 # ── Octagon-AI CSV stat builder ───────────────────────────────────────────────
 
 def octagon_csv_urls():
-    """Return every candidate URL for each required Octagon-AI CSV."""
+    """Return the canonical Octagon-AI raw URL for each required CSV."""
     return {
-        fname: [f"{base}/{path}" for base in _OCTAGON_RAW_BASES]
+        fname: [f"{_OCTAGON_RAW_BASE}/{path}"]
         for fname, path in _OCTAGON_CSV_PATHS.items()
     }
 
@@ -2489,6 +2492,38 @@ def upsert_prediction(conn, fight_id, pred, commit=True):
         conn.commit()
 
 
+def load_historical_feature_data(conn):
+    """Load historical/model feature data without making the cron fatal.
+
+    Returns (available, stats_tracker, name_to_id, espn_to_id, fighter_bio).
+    Event-card and odds ingestion must continue when this stage is unavailable.
+    """
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            downloaded = download_octagon_data(tmpdir)
+            stats_tracker, name_to_id, fighter_bio = rebuild_stats_from_csv(tmpdir, conn)
+            espn_to_id = build_espn_to_fighter_id(conn, stats_tracker)
+            log.info("HISTORICAL_DATA_UNAVAILABLE=false source=octagon_csv urls=%s", json.dumps(downloaded, sort_keys=True))
+            return True, stats_tracker, name_to_id, espn_to_id, fighter_bio
+    except Exception as exc:
+        log.warning("CSV data unavailable (%s); checking whether Postgres is complete enough for fallback.", exc)
+
+    try:
+        if postgres_history_is_complete_enough(conn):
+            log.warning("Using Postgres historical fallback because it passed completeness thresholds.")
+            stats_tracker, name_to_id, espn_to_id = rebuild_stats_from_db(conn)
+            fighter_bio = load_fighters_bio(conn)
+            log.info("HISTORICAL_DATA_UNAVAILABLE=false source=postgres")
+            return True, stats_tracker, name_to_id, espn_to_id, fighter_bio
+    except Exception as exc:
+        log.warning("Postgres historical fallback unavailable: %s", exc)
+
+    log.warning(
+        "HISTORICAL_DATA_UNAVAILABLE=true; prediction generation skipped; event/card/odds sync will continue"
+    )
+    return False, {}, build_name_to_fighter_id(conn), build_espn_to_fighter_id(conn, {}), load_fighters_bio(conn)
+
+
 # ── Main sync flow ────────────────────────────────────────────────────────────
 
 def main():
@@ -2502,24 +2537,10 @@ def main():
     conn = get_conn()
     ensure_mma_integrity_schema(conn)
 
-    # Load model
-    model = load_model()
-
-    # Build stats from Octagon-AI CSV data (falls back to DB if download fails)
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            download_octagon_data(tmpdir)
-            stats_tracker, name_to_id, fighter_bio = rebuild_stats_from_csv(tmpdir, conn)
-            espn_to_id = build_espn_to_fighter_id(conn, stats_tracker)
-    except Exception as e:
-        log.warning(f"CSV data unavailable ({e}); checking whether Postgres is complete enough for fallback.")
-        if not postgres_history_is_complete_enough(conn):
-            raise RuntimeError(
-                "Octagon-AI CSV history is unavailable and Postgres does not contain a sufficiently complete historical dataset"
-            ) from e
-        log.warning("Using Postgres historical fallback because it passed completeness thresholds.")
-        stats_tracker, name_to_id, espn_to_id = rebuild_stats_from_db(conn)
-        fighter_bio = load_fighters_bio(conn)
+    # Stage 1: load historical/model feature data.  This stage is explicitly
+    # non-fatal so event-card and odds ingestion can still complete.
+    historical_data_available, stats_tracker, name_to_id, espn_to_id, fighter_bio = load_historical_feature_data(conn)
+    model = load_model() if historical_data_available else None
 
     # ── Pre-fetch Odds API events for diagnostics / odds-only enrichment ─────
     # Do not use these rows as canonical card bouts. ESPN is the card source of
@@ -2565,8 +2586,8 @@ def main():
     scoreboard_fighters = fetch_scoreboard_fighters()
 
     today = pd.Timestamp.now()
-    default_stats = FighterStats()
-    default_sv = default_stats.get_stat_vector(today)
+    default_stats = FighterStats() if historical_data_available else None
+    default_sv = default_stats.get_stat_vector(today) if default_stats else {}
 
     for event in events:
         log.info(f"Processing: {event['event_name']} ({event['date']})")
@@ -2639,6 +2660,11 @@ def main():
                 if event['is_completed']:
                     log.info(f"  Skipping prediction for completed fight: "
                              f"{fight['fighter_1']} vs {fight['fighter_2']}")
+                    continue
+
+                if not historical_data_available:
+                    log.info("PREDICTION_SKIPPED historical_data_unavailable=true fight=%s vs %s; preserving existing valid prediction",
+                             fight['fighter_1'], fight['fighter_2'])
                     continue
 
                 feature_count = len(build_feature_row(
