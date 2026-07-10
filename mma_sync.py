@@ -58,6 +58,9 @@ _OCTAGON_CSV_BASE = (
 )
 _OCTAGON_CSV_FILES = ['Fights.csv', 'Fighters.csv', 'Events.csv', 'current_glicko.csv']
 
+MIN_COMPLETE_UFC_BOUTS = 4
+MIN_COMPLETE_CARD_RATIO = 0.75
+
 HEADERS = {
     'User-Agent': (
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
@@ -92,6 +95,42 @@ def fight_has_placeholder(fight):
         is_placeholder_fighter_name(fight.get('fighter_1'))
         or is_placeholder_fighter_name(fight.get('fighter_2'))
     )
+
+
+def canonical_bout_uid(event_id, fight):
+    """Return the official source bout ID scoped to the ESPN event.
+
+    Name-derived keys are only a last-resort fallback for providers that do not
+    expose a stable bout identifier (for example Odds API fallback seeding).
+    """
+    for key in ('bout_uid', 'competition_id', 'match_id', 'id'):
+        value = fight.get(key)
+        if value:
+            return f"espn:{event_id}:{value}"
+
+    f1_id = fight.get('fighter_1_espn_id') or fight.get('fighter_1_id') or ''
+    f2_id = fight.get('fighter_2_espn_id') or fight.get('fighter_2_id') or ''
+    if f1_id and f2_id:
+        ordered = ':'.join(sorted([str(f1_id), str(f2_id)]))
+        return f"event-fighters:{event_id}:{ordered}"
+
+    names = ':'.join(sorted([normalize_name(fight.get('fighter_1')), normalize_name(fight.get('fighter_2'))]))
+    return f"fallback-names:{event_id}:{names}"
+
+
+def fight_status(fight):
+    raw = str(fight.get('status') or '').lower()
+    if raw in {'cancelled', 'canceled', 'postponed'}:
+        return 'cancelled'
+    if fight_has_placeholder(fight):
+        return 'placeholder'
+    return 'completed' if fight.get('result') else 'confirmed'
+
+
+def has_sufficient_feature_data(fid, stats_tracker):
+    if not fid or fid not in stats_tracker:
+        return False
+    return getattr(stats_tracker[fid], 'total_fights', 0) > 0
 
 
 def best_name_match_key(name, lookup):
@@ -575,6 +614,8 @@ def _parse_espn_card_segs(gp):
                 u2 = 'https://www.espn.com' + u2
 
             note = m.get('nte', '')
+            status_type = m.get('status', {}).get('type', {}) if isinstance(m.get('status'), dict) else {}
+            status_name = (status_type.get('name') or status_type.get('state') or m.get('status', {}).get('state') or '')
             is_title = bool(note and 'Title Fight' in note)
 
             result_data = None
@@ -596,10 +637,15 @@ def _parse_espn_card_segs(gp):
                 'fighter_2': n2,
                 'fighter_1_url': u1,
                 'fighter_2_url': u2,
+                'fighter_1_espn_id': awy.get('id') or awy.get('athleteId'),
+                'fighter_2_espn_id': hme.get('id') or hme.get('athleteId'),
+                'bout_uid': m.get('id') or m.get('uid') or m.get('guid'),
+                'status': status_name,
                 'is_main_card': is_main,
                 'is_title_fight': is_title,
                 'result': result_data,
                 'weight_class': m.get('wght', ''),
+                '_source_complete': True,
             })
     return fights
 
@@ -686,13 +732,15 @@ def _parse_espn_competitions(competitions):
         home = next((c for c in competitors if c.get('homeAway') == 'home'), competitors[0])
         away = next((c for c in competitors if c.get('homeAway') == 'away'), competitors[1])
 
-        n1 = away.get('athlete', {}).get('displayName', '') or away.get('displayName', '')
-        n2 = home.get('athlete', {}).get('displayName', '') or home.get('displayName', '')
+        away_athlete = away.get('athlete', {})
+        home_athlete = home.get('athlete', {})
+        n1 = away_athlete.get('displayName', '') or away.get('displayName', '')
+        n2 = home_athlete.get('displayName', '') or home.get('displayName', '')
         if not n1 or not n2 or (is_placeholder_fighter_name(n1) and is_placeholder_fighter_name(n2)):
             continue
 
-        links1 = away.get('athlete', {}).get('links', []) or away.get('links', [])
-        links2 = home.get('athlete', {}).get('links', []) or home.get('links', [])
+        links1 = away_athlete.get('links', []) or away.get('links', [])
+        links2 = home_athlete.get('links', []) or home.get('links', [])
         u1 = links1[0].get('href', '') if links1 else ''
         u2 = links2[0].get('href', '') if links2 else ''
 
@@ -730,10 +778,15 @@ def _parse_espn_competitions(competitions):
             'fighter_2': n2,
             'fighter_1_url': u1,
             'fighter_2_url': u2,
+            'fighter_1_espn_id': away_athlete.get('id') or away.get('id'),
+            'fighter_2_espn_id': home_athlete.get('id') or home.get('id'),
+            'bout_uid': comp.get('id') or comp.get('uid') or comp.get('guid'),
+            'status': (status.get('type', {}).get('name') or status.get('type', {}).get('state') or ''),
             'is_main_card': is_main,
             'is_title_fight': is_title,
             'result': result_data,
             'weight_class': weight_class,
+            '_source_complete': True,
         })
     return fights
 
@@ -1384,11 +1437,11 @@ def espn_headshot_url(espn_url):
     )
 
 
-def upsert_fighter_espn_info(conn, name, espn_url):
-    """Persist espn_url and headshot_url on mma_fighters row matched by name.
+def upsert_fighter_espn_info(conn, name, espn_url, fighter_id=None, commit=True):
+    """Persist ESPN URL/headshot on the canonical fighter row.
 
-    Safe to call repeatedly – only writes when the URL would change.
-    No-ops silently when the fighter is not found in mma_fighters.
+    Prefer the resolved mma_fighters.id. Normalized-name matching is only a
+    fallback for external ESPN-only records that have not resolved to a CSV ID.
     """
     if not espn_url:
         return
@@ -1402,10 +1455,15 @@ def upsert_fighter_espn_info(conn, name, espn_url):
                 WITH matched AS (
                     SELECT id
                     FROM mma_fighters
-                    WHERE LOWER(full_name) = LOWER(%s)
-                       OR LOWER(full_name) LIKE '%%' || LOWER(%s) || '%%'
-                       OR LOWER(%s) LIKE '%%' || LOWER(full_name) || '%%'
-                    ORDER BY CASE WHEN LOWER(full_name) = LOWER(%s) THEN 0 ELSE 1 END
+                    WHERE (%s IS NOT NULL AND id = %s)
+                       OR (%s IS NULL AND (
+                            LOWER(full_name) = LOWER(%s)
+                         OR LOWER(full_name) LIKE '%%' || LOWER(%s) || '%%'
+                         OR LOWER(%s) LIKE '%%' || LOWER(full_name) || '%%'
+                       ))
+                    ORDER BY CASE WHEN %s IS NOT NULL AND id = %s THEN 0
+                                  WHEN LOWER(full_name) = LOWER(%s) THEN 1
+                                  ELSE 2 END
                     LIMIT 1
                 )
                 UPDATE mma_fighters mf
@@ -1414,18 +1472,20 @@ def upsert_fighter_espn_info(conn, name, espn_url):
                 WHERE mf.id = matched.id
                   AND (mf.espn_url IS DISTINCT FROM %s OR mf.headshot_url IS DISTINCT FROM %s)
                 """,
-                (name, name, name, name, espn_url, headshot, espn_url, headshot),
+                (fighter_id, fighter_id, fighter_id, name, name, name,
+                 fighter_id, fighter_id, name, espn_url, headshot, espn_url, headshot),
             )
-        conn.commit()
+        if commit:
+            conn.commit()
     except Exception as e:
         log.warning(f"Could not update ESPN info for {name}: {e}")
         conn.rollback()
 
 
-def link_fight_fighters(conn, fight_id, fid1, fid2):
+def link_fight_fighters(conn, fight_id, fid1, fid2, commit=True):
     """Back-fill fighter_1_id / fighter_2_id on mma_fights when known.
 
-    Uses COALESCE so existing non-NULL values are never overwritten.
+    Overwrites links because official bout upserts may replace one side of a matchup.
     """
     if not fid1 and not fid2:
         return
@@ -1434,13 +1494,14 @@ def link_fight_fighters(conn, fight_id, fid1, fid2):
             cur.execute(
                 """
                 UPDATE mma_fights
-                SET fighter_1_id = COALESCE(fighter_1_id, %s),
-                    fighter_2_id = COALESCE(fighter_2_id, %s)
+                SET fighter_1_id = %s,
+                    fighter_2_id = %s
                 WHERE id = %s
                 """,
                 (fid1, fid2, fight_id),
             )
-        conn.commit()
+        if commit:
+            conn.commit()
     except Exception as e:
         log.warning(f"Could not link fighter IDs for fight {fight_id}: {e}")
         conn.rollback()
@@ -1448,7 +1509,34 @@ def link_fight_fighters(conn, fight_id, fid1, fid2):
 
 
 
-def upsert_event(conn, event):
+def ensure_mma_integrity_schema(conn):
+    """Add bout identity/status columns and active-bout constraints."""
+    with conn.cursor() as cur:
+        cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS bout_uid VARCHAR(200)")
+        cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'confirmed'")
+        cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")
+        cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
+        cur.execute("""
+            UPDATE mma_fights
+            SET bout_uid = 'legacy:' || event_id || ':' || id::text
+            WHERE bout_uid IS NULL OR TRIM(bout_uid) = ''
+        """)
+        cur.execute("""
+            ALTER TABLE mma_fights ALTER COLUMN bout_uid SET NOT NULL
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_mma_fights_event_bout_uid
+            ON mma_fights (event_id, bout_uid)
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_mma_fights_one_active_bout
+            ON mma_fights (event_id, bout_uid)
+            WHERE is_active = TRUE
+        """)
+    conn.commit()
+
+
+def upsert_event(conn, event, commit=True):
     sql = """
         INSERT INTO mma_events (id, name, date, location, is_completed, espn_url, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
@@ -1469,7 +1557,8 @@ def upsert_event(conn, event):
             event['is_completed'],
             event.get('url', ''),
         ))
-    conn.commit()
+    if commit:
+        conn.commit()
   
 def parse_round(val):
     """Convert 'R3' or 3 or '3' to int, or None."""
@@ -1480,83 +1569,48 @@ def parse_round(val):
     except (ValueError, TypeError):
         return None
 
-def upsert_fight(conn, event_id, fight):
-    """Insert or refresh a fight for an event. Returns fight DB id.
+def upsert_fight(conn, event_id, fight, commit=True):
+    """Insert/update a fight by canonical event-scoped bout identifier."""
+    bout_uid = canonical_bout_uid(event_id, fight)
+    status = fight_status(fight)
+    is_active = status in {'confirmed', 'completed'}
+    r = fight.get('result') or {}
 
-    ESPN and odds providers occasionally swap home/away ordering or revise card
-    metadata after the first sync. Match both fighter orders and refresh all
-    display fields so mma.html does not show stale or duplicate fights.
-    """
-    sql_check = """
-        SELECT id FROM mma_fights
-        WHERE event_id = %s
-          AND (
-            (fighter_1_name = %s AND fighter_2_name = %s)
-            OR (fighter_1_name = %s AND fighter_2_name = %s)
-          )
-        LIMIT 1
-    """
     with conn.cursor() as cur:
-        cur.execute(sql_check, (
-            event_id,
-            fight['fighter_1'], fight['fighter_2'],
-            fight['fighter_2'], fight['fighter_1'],
-        ))
-        existing = cur.fetchone()
-        if existing:
-            fight_id = existing[0]
-            r = fight.get('result') or {}
-            cur.execute("""
-                UPDATE mma_fights SET
-                    fighter_1_name = %s,
-                    fighter_2_name = %s,
-                    weight_class = %s,
-                    is_main_card = %s,
-                    is_title_fight = %s,
-                    f1_height = %s,
-                    f1_reach = %s,
-                    f1_stance = %s,
-                    f1_record = %s,
-                    f2_height = %s,
-                    f2_reach = %s,
-                    f2_stance = %s,
-                    f2_record = %s,
-                    winner_name = %s,
-                    method = %s,
-                    round_ended = %s,
-                    time_ended = %s
-                WHERE id = %s
-            """, (
-                fight['fighter_1'], fight['fighter_2'],
-                fight.get('weight_class', ''),
-                fight.get('is_main_card', False),
-                fight.get('is_title_fight', False),
-                fight.get('f1_stats', {}).get('Height'),
-                fight.get('f1_stats', {}).get('Reach'),
-                fight.get('f1_stats', {}).get('Stance'),
-                fight.get('f1_stats', {}).get('Record'),
-                fight.get('f2_stats', {}).get('Height'),
-                fight.get('f2_stats', {}).get('Reach'),
-                fight.get('f2_stats', {}).get('Stance'),
-                fight.get('f2_stats', {}).get('Record'),
-                r.get('winner'), r.get('method'),
-                parse_round(r.get('round')), r.get('time'), fight_id,
-            ))
-            conn.commit()
-            return fight_id
-
         cur.execute("""
             INSERT INTO mma_fights
-                (event_id, fighter_1_name, fighter_2_name,
+                (event_id, bout_uid, status, is_active,
+                 fighter_1_name, fighter_2_name,
                  weight_class, is_main_card, is_title_fight,
                  f1_height, f1_reach, f1_stance, f1_record,
                  f2_height, f2_reach, f2_stance, f2_record,
                  winner_name, method, round_ended, time_ended,
-                 created_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                 created_at, updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
+            ON CONFLICT (event_id, bout_uid) DO UPDATE SET
+                status = EXCLUDED.status,
+                is_active = EXCLUDED.is_active,
+                fighter_1_name = EXCLUDED.fighter_1_name,
+                fighter_2_name = EXCLUDED.fighter_2_name,
+                weight_class = EXCLUDED.weight_class,
+                is_main_card = EXCLUDED.is_main_card,
+                is_title_fight = EXCLUDED.is_title_fight,
+                f1_height = EXCLUDED.f1_height,
+                f1_reach = EXCLUDED.f1_reach,
+                f1_stance = EXCLUDED.f1_stance,
+                f1_record = EXCLUDED.f1_record,
+                f2_height = EXCLUDED.f2_height,
+                f2_reach = EXCLUDED.f2_reach,
+                f2_stance = EXCLUDED.f2_stance,
+                f2_record = EXCLUDED.f2_record,
+                winner_name = EXCLUDED.winner_name,
+                method = EXCLUDED.method,
+                round_ended = EXCLUDED.round_ended,
+                time_ended = EXCLUDED.time_ended,
+                updated_at = NOW()
             RETURNING id
         """, (
-            event_id,
+            event_id, bout_uid, status, is_active,
             fight['fighter_1'], fight['fighter_2'],
             fight.get('weight_class', ''),
             fight.get('is_main_card', False),
@@ -1569,78 +1623,126 @@ def upsert_fight(conn, event_id, fight):
             fight.get('f2_stats', {}).get('Reach'),
             fight.get('f2_stats', {}).get('Stance'),
             fight.get('f2_stats', {}).get('Record'),
-            fight.get('result', {}).get('winner') if fight.get('result') else None,
-            fight.get('result', {}).get('method') if fight.get('result') else None,
-            parse_round(fight.get('result', {}).get('round')) if fight.get('result') else None,
-            fight.get('result', {}).get('time') if fight.get('result') else None,
+            r.get('winner'), r.get('method'), parse_round(r.get('round')), r.get('time'),
         ))
+        fight_id = cur.fetchone()[0]
+    if commit:
         conn.commit()
-        return cur.fetchone()[0]
+    return fight_id
 
 
 
 
-def prune_event_fights(conn, event_id, keep_fight_ids):
-    """Remove unreferenced fights that disappeared from the latest source card.
-
-    Never hard-delete a fight that already has a prediction.  ESPN card data is
-    no longer authoritative for MMA: a 404 summary endpoint or an empty
-    fightcenter DOM can make valid fights appear to have disappeared.  Fights
-    referenced by mma_predictions are therefore preserved so the frontend/API can
-    continue displaying previously generated, Odds API-seeded cards.
-    """
-    if not keep_fight_ids:
-        log.info(
-            "  No source fights to prune for event %s; preserving existing fights",
-            event_id,
-        )
-        return 0
-
-    keep_ids = list(keep_fight_ids)
+def active_fight_count(conn, event_id):
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT COUNT(*)
-            FROM mma_fights f
-            WHERE f.event_id = %s
-              AND f.id <> ALL(%s)
-              AND EXISTS (
-                  SELECT 1
-                  FROM mma_predictions p
-                  WHERE p.fight_id = f.id
-              )
+            FROM mma_fights
+            WHERE event_id = %s
+              AND COALESCE(is_active, TRUE) = TRUE
+              AND COALESCE(status, 'confirmed') IN ('confirmed', 'completed')
             """,
-            (event_id, keep_ids),
+            (event_id,),
         )
-        skipped = cur.fetchone()[0]
+        row = cur.fetchone()
+    return int(row[0] or 0) if row else 0
 
+
+def event_card_fetch_is_complete(conn, event_id, fights):
+    """Return True only when stale cleanup is safe for this event payload."""
+    if not fights:
+        return False
+    if any(not fight.get('_source_complete', False) for fight in fights):
+        return False
+    confirmed = [f for f in fights if fight_status(f) in {'confirmed', 'completed'}]
+    if len(confirmed) < MIN_COMPLETE_UFC_BOUTS:
+        return False
+    existing_active = active_fight_count(conn, event_id)
+    if existing_active and len(confirmed) < math.ceil(existing_active * MIN_COMPLETE_CARD_RATIO):
+        return False
+    return True
+
+
+def invalidate_fight_predictions(conn, fight_ids):
+    if not fight_ids:
+        return 0
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM mma_predictions WHERE fight_id = ANY(%s)", (list(fight_ids),))
+        return cur.rowcount
+
+
+def deactivate_stale_event_bouts(conn, event_id, seen_bout_uids, payload_complete, commit=True):
+    """Deactivate active fights for this event absent from a complete payload."""
+    if not payload_complete:
+        log.info("  Skipping stale cleanup for event %s: incomplete card payload", event_id)
+        return 0
+    if not seen_bout_uids:
+        log.info("  Skipping stale cleanup for event %s: no bout IDs seen", event_id)
+        return 0
+
+    with conn.cursor() as cur:
         cur.execute(
             """
-            DELETE FROM mma_fights f
-            WHERE f.event_id = %s
-              AND f.id <> ALL(%s)
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM mma_predictions p
-                  WHERE p.fight_id = f.id
-              )
+            UPDATE mma_fights
+            SET is_active = FALSE, status = 'cancelled', updated_at = NOW()
+            WHERE event_id = %s
+              AND COALESCE(is_active, TRUE) = TRUE
+              AND bout_uid <> ALL(%s)
+            RETURNING id
             """,
-            (event_id, keep_ids),
+            (event_id, list(seen_bout_uids)),
         )
-        deleted = cur.rowcount
-    conn.commit()
-    if skipped:
-        log.warning(
-            "  Preserved %s stale fight(s) for event %s because predictions reference them",
-            skipped,
-            event_id,
-        )
-    if deleted:
-        log.info(f"  Pruned {deleted} unreferenced stale fight(s) for event {event_id}")
-    return deleted
+        stale_ids = [row[0] for row in cur.fetchall()]
+    invalidate_fight_predictions(conn, stale_ids)
+    if commit:
+        conn.commit()
+    if stale_ids:
+        log.info("  Deactivated %s stale/cancelled fight(s) for event %s", len(stale_ids), event_id)
+    return len(stale_ids)
 
 
-def upsert_prediction(conn, fight_id, pred):
+def prune_event_fights(conn, event_id, keep_fight_ids):
+    """Backward-compatible wrapper: empty keep list never deactivates."""
+    if not keep_fight_ids:
+        log.info("  No source fights to prune for event %s; preserving existing fights", event_id)
+        return 0
+    # Legacy callers cannot prove payload completeness or bout UID coverage.
+    log.info("  Legacy prune call ignored for event %s; use deactivate_stale_event_bouts", event_id)
+    return 0
+
+
+def deactivate_duplicate_active_matchups(conn, event_id, current_fight_id, bout_uid, fid1, fid2, f1, f2):
+    """Ensure a replacement leaves one active matchup for the same fighters/event."""
+    params = [event_id, current_fight_id, bout_uid]
+    if fid1 and fid2:
+        ordered = sorted([str(fid1), str(fid2)])
+        clause = "AND ARRAY[fighter_1_id, fighter_2_id]::text[] <@ ARRAY[%s, %s]::text[] AND ARRAY[%s, %s]::text[] <@ ARRAY[fighter_1_id, fighter_2_id]::text[]"
+        params.extend([ordered[0], ordered[1], ordered[0], ordered[1]])
+    else:
+        n1, n2 = normalize_name(f1), normalize_name(f2)
+        clause = "AND (LOWER(REGEXP_REPLACE(fighter_1_name, '[^a-zA-Z0-9 ]', '', 'g')) IN (%s, %s) AND LOWER(REGEXP_REPLACE(fighter_2_name, '[^a-zA-Z0-9 ]', '', 'g')) IN (%s, %s))"
+        params.extend([n1, n2, n1, n2])
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            UPDATE mma_fights
+            SET is_active = FALSE, status = 'cancelled', updated_at = NOW()
+            WHERE event_id = %s
+              AND id <> %s
+              AND bout_uid <> %s
+              AND COALESCE(is_active, TRUE) = TRUE
+              {clause}
+            RETURNING id
+            """,
+            tuple(params),
+        )
+        duplicate_ids = [row[0] for row in cur.fetchall()]
+    invalidate_fight_predictions(conn, duplicate_ids)
+    return len(duplicate_ids)
+
+
+def upsert_prediction(conn, fight_id, pred, commit=True):
     sql = """
         INSERT INTO mma_predictions
             (fight_id, predicted_winner, f1_win_probability, f2_win_probability,
@@ -1675,7 +1777,8 @@ def upsert_prediction(conn, fight_id, pred):
             pred['confidence'],
             json.dumps(pred['factors']),
         ))
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 # ── Main sync flow ────────────────────────────────────────────────────────────
@@ -1688,6 +1791,7 @@ def main():
         sys.exit(1)
 
     conn = get_conn()
+    ensure_mma_integrity_schema(conn)
 
     # Load model
     model = load_model()
@@ -1752,9 +1856,6 @@ def main():
     for event in events:
         log.info(f"Processing: {event['event_name']} ({event['date']})")
 
-        # Upsert event
-        upsert_event(conn, event)
-
         # Scrape fight card
         fights = scrape_event_details(event['url'], event['event_id'])
         log.info(f"  {len(fights)} fights on card")
@@ -1804,6 +1905,7 @@ def main():
                             'is_title_fight': False,
                             'result': None,
                             'weight_class': '',
+                            '_source_complete': False,
                         }
                         for _f in _seed
                         if not fight_has_placeholder(_f)
@@ -1819,94 +1921,117 @@ def main():
                     "from upcoming card"
                 )
 
-        synced_fight_ids = []
+        payload_complete = event_card_fetch_is_complete(conn, event['event_id'], fights)
+        seen_bout_uids = set()
 
-        for fight in fights:
-            # If ESPN URLs are still missing, try scoreboard lookup by name.
-            for side in ('fighter_1', 'fighter_2'):
-                url_key = f'{side}_url'
-                if not fight.get(url_key):
-                    sb_key = best_name_match_key(fight[side], scoreboard_fighters)
-                    sb_entry = scoreboard_fighters.get(sb_key) if sb_key else None
-                    if sb_entry:
-                        fight[url_key] = sb_entry[1]
+        try:
+            upsert_event(conn, event, commit=False)
 
-            fight_id = upsert_fight(conn, event['event_id'], fight)
-            synced_fight_ids.append(fight_id)
+            for fight in fights:
+                # If ESPN URLs are still missing, try scoreboard lookup by name.
+                for side in ('fighter_1', 'fighter_2'):
+                    url_key = f'{side}_url'
+                    if not fight.get(url_key):
+                        sb_key = best_name_match_key(fight[side], scoreboard_fighters)
+                        sb_entry = scoreboard_fighters.get(sb_key) if sb_key else None
+                        if sb_entry:
+                            fight[url_key] = sb_entry[1]
 
-            # Resolve fighter IDs (needed for headshot linking + predictions)
-            f1_norm = normalize_name(fight['fighter_1'])
-            f2_norm = normalize_name(fight['fighter_2'])
-            fid1 = name_to_id.get(f1_norm)
-            fid2 = name_to_id.get(f2_norm)
+                bout_uid = canonical_bout_uid(event['event_id'], fight)
+                fight_id = upsert_fight(conn, event['event_id'], fight, commit=False)
+                seen_bout_uids.add(bout_uid)
 
-            # Back-fill fighter_1_id / fighter_2_id on the fight row
-            link_fight_fighters(conn, fight_id, fid1, fid2)
+                # Resolve fighter IDs (needed for headshot linking + predictions)
+                f1_norm = normalize_name(fight['fighter_1'])
+                f2_norm = normalize_name(fight['fighter_2'])
+                fid1 = name_to_id.get(f1_norm)
+                fid2 = name_to_id.get(f2_norm)
 
-            # Persist ESPN profile URLs + derived headshot URLs on fighter rows
-            if fight.get('fighter_1_url'):
-                upsert_fighter_espn_info(conn, fight['fighter_1'], fight['fighter_1_url'])
-            if fight.get('fighter_2_url'):
-                upsert_fighter_espn_info(conn, fight['fighter_2'], fight['fighter_2_url'])
+                # Back-fill fighter_1_id / fighter_2_id on the fight row
+                link_fight_fighters(conn, fight_id, fid1, fid2, commit=False)
+                deactivate_duplicate_active_matchups(
+                    conn, event['event_id'], fight_id, bout_uid,
+                    fid1, fid2, fight['fighter_1'], fight['fighter_2'],
+                )
 
-            # Skip prediction for completed fights that already have one
-            if event['is_completed']:
-                log.info(f"  Skipping prediction for completed fight: "
-                         f"{fight['fighter_1']} vs {fight['fighter_2']}")
-                continue
+                # Persist ESPN profile URLs + derived headshot URLs on fighter rows
+                if fight.get('fighter_1_url'):
+                    upsert_fighter_espn_info(conn, fight['fighter_1'], fight['fighter_1_url'], fid1, commit=False)
+                if fight.get('fighter_2_url'):
+                    upsert_fighter_espn_info(conn, fight['fighter_2'], fight['fighter_2_url'], fid2, commit=False)
 
-            st1 = stats_tracker.get(fid1, default_stats).get_stat_vector(today) if fid1 else default_sv
-            st2 = stats_tracker.get(fid2, default_stats).get_stat_vector(today) if fid2 else default_sv
+                # Skip prediction for completed fights that already have one
+                if event['is_completed']:
+                    log.info(f"  Skipping prediction for completed fight: "
+                             f"{fight['fighter_1']} vs {fight['fighter_2']}")
+                    continue
 
-            b1 = fighter_bio.get(fid1, {})
-            b2 = fighter_bio.get(fid2, {})
+                if (fight_status(fight) != 'confirmed'
+                        or not has_sufficient_feature_data(fid1, stats_tracker)
+                        or not has_sufficient_feature_data(fid2, stats_tracker)):
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM mma_predictions WHERE fight_id = %s", (fight_id,))
+                    log.info("  Prediction unavailable: %s vs %s (missing/TBA/cancelled/insufficient data)",
+                             fight['fighter_1'], fight['fighter_2'])
+                    continue
 
-            g1 = {'rating': b1.get('glicko', 1500), 'rd': b1.get('glicko_rd', 350)}
-            g2 = {'rating': b2.get('glicko', 1500), 'rd': b2.get('glicko_rd', 350)}
+                st1 = stats_tracker[fid1].get_stat_vector(today)
+                st2 = stats_tracker[fid2].get_stat_vector(today)
 
-            apex = is_apex_event(event['event_name'], event['location'])
-            alt = is_altitude(event['location'])
+                b1 = fighter_bio.get(fid1, {})
+                b2 = fighter_bio.get(fid2, {})
 
-            prob = predict_fight(model, st1, st2, b1, b2, g1, g2, apex, alt,
-                                weight_class=fight.get('weight_class', ''))
+                g1 = {'rating': b1.get('glicko', 1500), 'rd': b1.get('glicko_rd', 350)}
+                g2 = {'rating': b2.get('glicko', 1500), 'rd': b2.get('glicko_rd', 350)}
 
-            winner = fight['fighter_1'] if prob > 0.5 else fight['fighter_2']
-            confidence = f"{max(prob, 1 - prob) * 100:.1f}%"
+                apex = is_apex_event(event['event_name'], event['location'])
+                alt = is_altitude(event['location'])
 
-            pred = {
-                'winner': winner,
-                'f1_prob': prob,
-                'f2_prob': 1.0 - prob,
-                'confidence': confidence,
-                'factors': {
-                    fight['fighter_1']: {
-                        'slpm': round(st1['slpm'], 2),
-                        'td_avg': round(st1['td_avg'], 2),
-                        'ctrl_rate': round(st1['ctrl_rate'], 2),
-                        'kd_rate': round(st1['kd_rate'], 2),
-                        'wins': st1['wins'],
-                        'losses': st1['losses'],
-                        'recent_form': st1['recent_form'],
-                        'glicko': round(g1['rating']),
-                    },
-                    fight['fighter_2']: {
-                        'slpm': round(st2['slpm'], 2),
-                        'td_avg': round(st2['td_avg'], 2),
-                        'ctrl_rate': round(st2['ctrl_rate'], 2),
-                        'kd_rate': round(st2['kd_rate'], 2),
-                        'wins': st2['wins'],
-                        'losses': st2['losses'],
-                        'recent_form': st2['recent_form'],
-                        'glicko': round(g2['rating']),
-                    },
+                prob = predict_fight(model, st1, st2, b1, b2, g1, g2, apex, alt,
+                                    weight_class=fight.get('weight_class', ''))
+
+                winner = fight['fighter_1'] if prob > 0.5 else fight['fighter_2']
+                confidence = f"{max(prob, 1 - prob) * 100:.1f}%"
+
+                pred = {
+                    'winner': winner,
+                    'f1_prob': prob,
+                    'f2_prob': 1.0 - prob,
+                    'confidence': confidence,
+                    'factors': {
+                        fight['fighter_1']: {
+                            'slpm': round(st1['slpm'], 2),
+                            'td_avg': round(st1['td_avg'], 2),
+                            'ctrl_rate': round(st1['ctrl_rate'], 2),
+                            'kd_rate': round(st1['kd_rate'], 2),
+                            'wins': st1['wins'],
+                            'losses': st1['losses'],
+                            'recent_form': st1['recent_form'],
+                            'glicko': round(g1['rating']),
+                        },
+                        fight['fighter_2']: {
+                            'slpm': round(st2['slpm'], 2),
+                            'td_avg': round(st2['td_avg'], 2),
+                            'ctrl_rate': round(st2['ctrl_rate'], 2),
+                            'kd_rate': round(st2['kd_rate'], 2),
+                            'wins': st2['wins'],
+                            'losses': st2['losses'],
+                            'recent_form': st2['recent_form'],
+                            'glicko': round(g2['rating']),
+                        },
+                    }
                 }
-            }
 
-            upsert_prediction(conn, fight_id, pred)
-            log.info(f"  Predicted: {winner} ({confidence}) — "
-                     f"{fight['fighter_1']} vs {fight['fighter_2']}")
+                upsert_prediction(conn, fight_id, pred, commit=False)
+                log.info(f"  Predicted: {winner} ({confidence}) — "
+                         f"{fight['fighter_1']} vs {fight['fighter_2']}")
 
-        prune_event_fights(conn, event['event_id'], synced_fight_ids)
+            deactivate_stale_event_bouts(conn, event['event_id'], seen_bout_uids, payload_complete, commit=False)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            log.exception("  Event sync failed; rolled back partial card update for %s", event['event_id'])
+            continue
         time.sleep(1)
 
     # Bulk-update headshot URLs for all fighters found in the scoreboard.

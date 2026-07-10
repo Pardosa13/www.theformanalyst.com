@@ -107,7 +107,12 @@ def init_mma_tables(db):
         f2_stance = db.Column(db.String(50))
         f2_record = db.Column(db.String(30))
 
+        bout_uid = db.Column(db.String(200))
+        status = db.Column(db.String(30), default='confirmed')
+        is_active = db.Column(db.Boolean, default=True)
+
         created_at = db.Column(db.DateTime, default=datetime.utcnow)
+        updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
         prediction = db.relationship('MMAPrediction', backref='fight', uselist=False,
                                      cascade='all, delete-orphan')
@@ -155,6 +160,21 @@ def init_mma_tables(db):
         "ALTER TABLE mma_fighters ADD COLUMN IF NOT EXISTS espn_url VARCHAR(500)",
         "ALTER TABLE mma_fighters ADD COLUMN IF NOT EXISTS headshot_url VARCHAR(500)",
         "ALTER TABLE mma_events   ADD COLUMN IF NOT EXISTS espn_url VARCHAR(500)",
+        "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS bout_uid VARCHAR(200)",
+        "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'confirmed'",
+        "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
+        "UPDATE mma_fights SET bout_uid = 'legacy:' || event_id || ':' || id::text WHERE bout_uid IS NULL OR TRIM(bout_uid) = ''",
+        "ALTER TABLE mma_fights ALTER COLUMN bout_uid SET NOT NULL",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_mma_fights_event_bout_uid
+        ON mma_fights (event_id, bout_uid)
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_mma_fights_one_active_bout
+        ON mma_fights (event_id, bout_uid)
+        WHERE is_active = TRUE
+        """,
         """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_mma_fight_odds_event_bk_fighter
         ON mma_fight_odds (event_key, bookmaker, fighter_name)
