@@ -167,3 +167,68 @@ def test_canonical_bout_uid_prefers_official_identifier_over_names():
 
     assert uid1 == "espn:401:abc"
     assert uid2 == uid1
+
+
+
+class _FakeTextNode:
+    def __init__(self, text):
+        self.text = text
+
+    def strip(self):
+        return self.text.strip()
+
+    def __str__(self):
+        return self.text
+
+
+class _FakeHeading:
+    def __init__(self, name, text, following='', href=''):
+        self.name = name
+        self._text = text
+        self.next_siblings = [_FakeTextNode(following)] if following else []
+        self._href = href
+
+    def get_text(self, *args, **kwargs):
+        return self._text
+
+    def find(self, tag, href=False):
+        if tag == 'a' and href and self._href:
+            return {'href': self._href}
+        return None
+
+
+class _FakeSoup:
+    def __init__(self, headings):
+        self._headings = headings
+
+    def find_all(self, tags):
+        return [h for h in self._headings if h.name in tags]
+
+
+def test_current_espn_fightcenter_heading_dom_parser():
+    soup = _FakeSoup([
+        _FakeHeading('h3', 'Main Card'),
+        _FakeHeading('h2', 'Welterweight - Main Event'),
+        _FakeHeading('h2', 'Conor McGregor', '22-6-0', '/mma/fighter/_/id/3022677/conor-mcgregor'),
+        _FakeHeading('h2', 'Max Holloway', '27-9-0', 'https://www.espn.com/mma/fighter/_/id/2614933/max-holloway'),
+        _FakeHeading('h2', 'Lightweight'),
+        _FakeHeading('h2', 'Benoît Saint Denis', '17-3-0'),
+        _FakeHeading('h2', 'Paddy Pimblett', '23-4-0'),
+        _FakeHeading('h3', 'Prelims'),
+        _FakeHeading('h2', 'Heavyweight'),
+        _FakeHeading('h2', 'Gable Steveson', '3-0-0'),
+        _FakeHeading('h2', 'Elisha Ellison', '5-2-0'),
+    ])
+
+    fights = mma_sync._parse_espn_fightcenter_heading_dom(soup)
+
+    assert [(f["fighter_1"], f["fighter_2"]) for f in fights] == [
+        ("Conor McGregor", "Max Holloway"),
+        ("Benoît Saint Denis", "Paddy Pimblett"),
+        ("Gable Steveson", "Elisha Ellison"),
+    ]
+    assert fights[0]["weight_class"] == "Welterweight - Main Event"
+    assert fights[0]["fighter_1_url"] == "https://www.espn.com/mma/fighter/_/id/3022677/conor-mcgregor"
+    assert fights[1]["is_main_card"] is True
+    assert fights[2]["is_main_card"] is False
+    assert all(f["_source_complete"] for f in fights)

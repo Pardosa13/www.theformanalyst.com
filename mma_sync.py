@@ -791,6 +791,85 @@ def _parse_espn_competitions(competitions):
     return fights
 
 
+
+def _next_nonempty_text_after(node, limit=6):
+    """Return nearby text after a BeautifulSoup node, skipping blank strings."""
+    checked = 0
+    for sib in node.next_siblings:
+        if checked >= limit:
+            break
+        checked += 1
+        txt = sib.get_text(" ", strip=True) if hasattr(sib, 'get_text') else str(sib).strip()
+        if txt:
+            return txt
+    return ''
+
+
+def _parse_espn_fightcenter_heading_dom(soup):
+    """Parse ESPN's current Fightcenter server-rendered heading layout.
+
+    In July 2026 ESPN no longer wraps bouts in the old AccordionPanel /
+    MMACompetitor structure.  The initial HTML is still server-rendered, but the
+    fight card is exposed as a stream of headings: an h3 card segment, an h2
+    weight class, then two h2 fighter names, each immediately followed by an
+    MMA record.  This parser follows that semantic heading structure instead of
+    brittle CSS class names.
+    """
+    record_re = re.compile(r'^(?:\d+|--)-(?:\d+|--)(?:-(?:\d+|--))?(?:\s*\(NC\))?$')
+    fights = []
+    current_segment = ''
+    current_weight = ''
+    pending = None
+
+    for heading in soup.find_all(['h2', 'h3']):
+        text = heading.get_text(' ', strip=True)
+        if not text:
+            continue
+
+        if heading.name == 'h3':
+            if 'main card' in text.lower() or 'prelim' in text.lower():
+                current_segment = text
+                pending = None
+            continue
+
+        following_text = _next_nonempty_text_after(heading)
+        is_fighter = bool(record_re.match(following_text))
+        if not is_fighter:
+            # ESPN emits the bout division / descriptor as an h2 before the two
+            # fighter h2 headings (for example "Welterweight - Main Event").
+            if not any(skip in text.lower() for skip in ('latest videos', 'mma news')):
+                current_weight = text
+            pending = None
+            continue
+
+        link = heading.find('a', href=True)
+        url = link['href'] if link else ''
+        if url and url.startswith('/'):
+            url = 'https://www.espn.com' + url
+        fighter = {'name': text, 'url': url}
+
+        if pending is None:
+            pending = fighter
+            continue
+
+        is_main = 'prelim' not in current_segment.lower()
+        fights.append({
+            'fighter_1': pending['name'],
+            'fighter_2': fighter['name'],
+            'fighter_1_url': pending['url'],
+            'fighter_2_url': fighter['url'],
+            'f1_stats': {},
+            'f2_stats': {},
+            'is_main_card': is_main,
+            'is_title_fight': 'title' in current_weight.lower(),
+            'result': None,
+            'weight_class': current_weight,
+            '_source_complete': True,
+        })
+        pending = None
+
+    return fights
+
 def scrape_event_details(event_url, event_id):
     """Scrape fight card from ESPN event page. Returns list of fight dicts."""
     log.info(f"  Scraping event details: {event_url}")
@@ -870,6 +949,11 @@ def scrape_event_details(event_url, event_id):
             'result': None,
             'weight_class': '',
         })
+
+    if not fights:
+        fights = _parse_espn_fightcenter_heading_dom(soup)
+        if fights:
+            log.info(f"  ESPN fightcenter heading DOM parser: {len(fights)} fights")
 
     if not fights:
         log.warning(
