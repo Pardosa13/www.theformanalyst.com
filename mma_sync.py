@@ -60,6 +60,9 @@ _OCTAGON_CSV_FILES = ['Fights.csv', 'Fighters.csv', 'Events.csv', 'current_glick
 
 MIN_COMPLETE_UFC_BOUTS = 4
 MIN_COMPLETE_CARD_RATIO = 0.75
+CANONICAL_CARD_SOURCES = {'espn_scoreboard_json', 'espn_summary_json', 'espn_embedded_json'}
+ESPN_SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard'
+
 
 HEADERS = {
     'User-Agent': (
@@ -390,6 +393,84 @@ def _save_espn_debug_html(event_id, html):
         log.warning("ESPN_DEBUG_HTML_SAVE_FAILED event_id=%s error=%s", event_id, exc)
 
 
+def is_espn_waf_challenge(html, response_meta=None):
+    lower = (html or '').lower()
+    status = (response_meta or {}).get('status')
+    return (
+        'awswafcookiedomainlist' in lower
+        or 'gokuprops' in lower
+        or ('enable javascript' in lower and status == 202)
+    )
+
+
+def _scoreboard_url_for_year(year):
+    return f"{ESPN_SCOREBOARD_URL}?limit=100&dates={year}0101-{year}1231"
+
+
+def _log_scoreboard_event_structure(event):
+    competitions = event.get('competitions') or []
+    comp_ids = [str(c.get('id') or c.get('$ref') or '') for c in competitions]
+    competitors = []
+    refs = []
+    links = event.get('links') or []
+    for comp in competitions:
+        if comp.get('$ref'):
+            refs.append(comp.get('$ref'))
+        if isinstance(comp.get('competition'), dict) and comp['competition'].get('$ref'):
+            refs.append(comp['competition'].get('$ref'))
+        for link in comp.get('links') or []:
+            if link.get('href'):
+                refs.append(link.get('href'))
+        names = []
+        for c in comp.get('competitors') or []:
+            athlete = c.get('athlete') or {}
+            names.append(athlete.get('displayName') or c.get('displayName') or c.get('name') or c.get('$ref') or '')
+            if c.get('$ref'):
+                refs.append(c.get('$ref'))
+            if athlete.get('$ref'):
+                refs.append(athlete.get('$ref'))
+        if names:
+            competitors.append(names)
+    log.info(
+        "ESPN_SCOREBOARD_EVENT_STRUCTURE event_id=%s event_keys=%s competition_count=%s competition_ids=%s competitors=%s links=%s refs=%s status=%s date=%s",
+        event.get('id'), sorted(event.keys()), len(competitions), comp_ids, competitors, links, refs, event.get('status'), event.get('date')
+    )
+
+
+def _fetch_espn_scoreboard_event(event_id, year=None):
+    years = [year] if year else [date.today().year, date.today().year + 1, date.today().year - 1]
+    for yr in years:
+        url = _scoreboard_url_for_year(yr)
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            log.warning(f"  ESPN scoreboard API fetch failed for {yr}: {e}")
+            continue
+        events = data.get('events') or []
+        log.info("ESPN_SCOREBOARD_API url=%s events=%s", url, len(events))
+        for ev in events:
+            if str(ev.get('id')) == str(event_id):
+                _log_scoreboard_event_structure(ev)
+                return ev, url
+    return None, None
+
+
+def _fetch_espn_scoreboard_card(event_id):
+    ev, url = _fetch_espn_scoreboard_event(event_id)
+    if not ev:
+        return []
+    fights = _parse_espn_competitions(ev.get('competitions') or [])
+    if fights:
+        for f in fights:
+            f['card_source'] = 'espn_scoreboard_json'
+            f['verified'] = True
+        log.info("  ESPN scoreboard API canonical card: %s fights source=%s endpoint=%s", len(fights), 'espn_scoreboard_json', url)
+        return _enrich_fights_with_profiles(fights)
+    return []
+
+
 def _fetch_espn_event_html(event_url):
     meta = {'status': None, 'final_url': event_url, 'content_type': '', 'byte_length': 0}
     try:
@@ -402,6 +483,9 @@ def _fetch_espn_event_html(event_url):
         })
         r.raise_for_status()
         html = (getattr(r, 'content', b'') or b'').decode(getattr(r, 'encoding', None) or 'utf-8', errors='replace')
+        if is_espn_waf_challenge(html, meta):
+            log.warning("ESPN_WAF_CHALLENGE=true status=%s final_url=%s bytes=%s", meta.get('status'), meta.get('final_url'), meta.get('byte_length'))
+            return None, html, meta
         return BeautifulSoup(html, 'html.parser'), html, meta
     except Exception as e:
         log.warning(f"Failed to fetch {event_url}: {e}")
@@ -523,10 +607,7 @@ def _fetch_espn_schedule_api(year, seen_ids):
     events = []
     start = f"{year}0101"
     end = f"{year}1231"
-    url = (
-        f"https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard"
-        f"?limit=100&dates={start}-{end}"
-    )
+    url = _scoreboard_url_for_year(year)
     log.info(f"  Trying ESPN API: {url}")
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
@@ -806,6 +887,9 @@ def _fetch_espn_event_api(event_id):
 
     if gp.get('cardSegs'):
         fights = _parse_espn_card_segs(gp)
+        for f in fights:
+            f['card_source'] = 'espn_summary_json'
+            f['verified'] = True
         if fights:
             log.info(f"  ESPN summary API (cardSegs): {len(fights)} fights")
             _log_espn_parser('summary_api', True, response_meta, None, fights)
@@ -819,6 +903,9 @@ def _fetch_espn_event_api(event_id):
     )
     if competitions:
         fights = _parse_espn_competitions(competitions)
+        for f in fights:
+            f['card_source'] = 'espn_summary_json'
+            f['verified'] = True
         if fights:
             log.info(f"  ESPN summary API (competitions): {len(fights)} fights")
             _log_espn_parser('summary_api', True, response_meta, None, fights)
@@ -986,7 +1073,12 @@ def scrape_event_details(event_url, event_id):
     """Scrape fight card from ESPN event page. Returns list of fight dicts."""
     log.info(f"  Scraping event details: {event_url}")
 
-    # Strategy 0: ESPN public summary API (works when fightcenter HTML uses
+    # Strategy 0: ESPN scoreboard JSON API is the canonical source when it exposes competitions.
+    fights = _fetch_espn_scoreboard_card(event_id)
+    if fights:
+        return fights
+
+    # Strategy 1: ESPN public summary API (works when fightcenter HTML uses
     # client-side rendering and no longer embeds __espnfitt__ JSON)
     fights = _fetch_espn_event_api(event_id)
     if fights:
@@ -994,6 +1086,9 @@ def scrape_event_details(event_url, event_id):
 
     soup, html, response_meta = _fetch_espn_event_html(event_url)
     if not soup:
+        if is_espn_waf_challenge(html, response_meta):
+            log.warning("  ESPN WAF challenge detected for event %s; aborting all Fightcenter DOM parsers and preserving existing card", event_id)
+            return []
         _log_espn_parser('embedded_json', False, response_meta, soup, [])
         _log_espn_parser('legacy_dom', False, response_meta, soup, [])
         _log_espn_parser('heading_dom', False, response_meta, soup, [])
@@ -1025,6 +1120,9 @@ def scrape_event_details(event_url, event_id):
                 gp = data.get('page', {}).get('content', {}).get('gamepackage', {})
                 if 'cardSegs' in gp:
                     raw = _parse_espn_card_segs(gp)
+                    for f in raw:
+                        f['card_source'] = 'espn_embedded_json'
+                        f['verified'] = True
                     if raw:
                         _log_espn_parser('embedded_json', True, response_meta, soup, raw)
                         _log_espn_parser('legacy_dom', False, response_meta, soup, [])
@@ -1732,7 +1830,11 @@ def ensure_mma_integrity_schema(conn):
         cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS bout_uid VARCHAR(200)")
         cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'confirmed'")
         cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")
+        cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS card_source VARCHAR(50) DEFAULT 'legacy'")
+        cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE")
         cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
+        cur.execute("UPDATE mma_fights SET card_source = 'legacy' WHERE card_source IS NULL")
+        cur.execute("UPDATE mma_fights SET verified = TRUE WHERE verified IS NULL AND card_source <> 'odds_api'")
         cur.execute("""
             UPDATE mma_fights
             SET bout_uid = 'legacy:' || event_id || ':' || id::text
@@ -1796,17 +1898,19 @@ def upsert_fight(conn, event_id, fight, commit=True):
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO mma_fights
-                (event_id, bout_uid, status, is_active,
+                (event_id, bout_uid, status, is_active, card_source, verified,
                  fighter_1_name, fighter_2_name,
                  weight_class, is_main_card, is_title_fight,
                  f1_height, f1_reach, f1_stance, f1_record,
                  f2_height, f2_reach, f2_stance, f2_record,
                  winner_name, method, round_ended, time_ended,
                  created_at, updated_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
             ON CONFLICT (event_id, bout_uid) DO UPDATE SET
                 status = EXCLUDED.status,
                 is_active = EXCLUDED.is_active,
+                card_source = EXCLUDED.card_source,
+                verified = EXCLUDED.verified,
                 fighter_1_name = EXCLUDED.fighter_1_name,
                 fighter_2_name = EXCLUDED.fighter_2_name,
                 weight_class = EXCLUDED.weight_class,
@@ -1828,6 +1932,7 @@ def upsert_fight(conn, event_id, fight, commit=True):
             RETURNING id
         """, (
             event_id, bout_uid, status, is_active,
+            fight.get('card_source', 'espn_scoreboard_json'), bool(fight.get('verified', True)),
             fight['fighter_1'], fight['fighter_2'],
             fight.get('weight_class', ''),
             fight.get('is_main_card', False),
@@ -1917,6 +2022,32 @@ def deactivate_stale_event_bouts(conn, event_id, seen_bout_uids, payload_complet
     if stale_ids:
         log.info("  Deactivated %s stale/cancelled fight(s) for event %s", len(stale_ids), event_id)
     return len(stale_ids)
+
+
+def deactivate_unverified_event_bouts(conn, event_id, commit=True):
+    """Deactivate only active rows whose provenance proves they are unverified.
+
+    This is intentionally provenance-based: no fighter-name matching and no
+    external fetch. It is safe for one-off cleanup after Odds API-only rows were
+    accidentally activated.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE mma_fights
+            SET is_active = FALSE, status = 'cancelled', updated_at = NOW()
+            WHERE event_id = %s
+              AND COALESCE(is_active, TRUE) = TRUE
+              AND (card_source = 'odds_api' OR COALESCE(verified, FALSE) = FALSE)
+            RETURNING id
+            """,
+            (event_id,),
+        )
+        ids = [row[0] for row in cur.fetchall()]
+    invalidate_fight_predictions(conn, ids)
+    if commit:
+        conn.commit()
+    return len(ids)
 
 
 def prune_event_fights(conn, event_id, keep_fight_ids):
