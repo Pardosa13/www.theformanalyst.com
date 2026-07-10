@@ -113,7 +113,7 @@ def register_mma_routes(app, db):
                     SELECT
                         f.id, f.bout_uid, f.status, f.fighter_1_id, f.fighter_2_id,
                         f.fighter_1_name, f.fighter_2_name,
-                        f.weight_class, f.is_main_card, f.is_title_fight,
+                        f.weight_class, f.is_main_card, f.card_section, f.bout_order, f.is_title_fight,
                         f.winner_name, f.method, f.round_ended, f.time_ended,
                         f.f1_height, f.f1_reach, f.f1_stance, f.f1_record,
                         f.f2_height, f.f2_reach, f.f2_stance, f.f2_record,
@@ -142,13 +142,21 @@ def register_mma_routes(app, db):
                       AND NULLIF(TRIM(f.fighter_2_name), '') IS NOT NULL
                       AND LOWER(TRIM(f.fighter_1_name)) NOT IN ('tba', 'tbd', 'opponent tba', 'opponent tbd')
                       AND LOWER(TRIM(f.fighter_2_name)) NOT IN ('tba', 'tbd', 'opponent tba', 'opponent tbd')
-                    ORDER BY f.is_main_card DESC, f.id ASC
+                    ORDER BY
+                        CASE COALESCE(f.card_section, CASE WHEN f.is_main_card THEN 'main_card' ELSE 'prelims' END)
+                            WHEN 'main_card' THEN 1
+                            WHEN 'prelims' THEN 2
+                            WHEN 'early_prelims' THEN 3
+                            ELSE 4
+                        END ASC,
+                        f.bout_order DESC NULLS LAST,
+                        f.id ASC
                 """)
                 fight_rows = db.session.execute(fights_sql, {'eid': event_id}).fetchall()
 
                 fights = []
                 for fr in fight_rows:
-                    (fight_id, bout_uid, status, f1_id, f2_id, f1, f2, wc, is_main, is_title,
+                    (fight_id, bout_uid, status, f1_id, f2_id, f1, f2, wc, is_main, card_section, bout_order, is_title,
                      winner, method, rnd, t_end,
                      f1h, f1r, f1s, f1rec,
                      f2h, f2r, f2s, f2rec,
@@ -173,6 +181,8 @@ def register_mma_routes(app, db):
                         'fighter_2': f2,
                         'weight_class': wc or '',
                         'is_main_card': bool(is_main),
+                        'card_section': card_section or ('main_card' if is_main else 'prelims'),
+                        'bout_order': bout_order,
                         'is_title_fight': bool(is_title),
                         'result': {
                             'winner': winner,
@@ -306,7 +316,7 @@ def register_mma_routes(app, db):
             fights_sql = text("""
                 SELECT
                     f.id, f.fighter_1_name, f.fighter_2_name,
-                    f.weight_class, f.is_main_card, f.is_title_fight,
+                    f.weight_class, f.is_main_card, f.card_section, f.bout_order, f.is_title_fight,
                     e.id  AS event_id,
                     e.name AS event_name, e.date AS event_date,
                     p.predicted_winner,
@@ -320,7 +330,16 @@ def register_mma_routes(app, db):
                   AND p.predicted_winner IS NOT NULL
                   AND p.f1_win_probability IS NOT NULL
                   AND p.f2_win_probability IS NOT NULL
-                ORDER BY e.date ASC, f.is_main_card DESC, f.id ASC
+                ORDER BY
+                    e.date ASC,
+                    CASE COALESCE(f.card_section, CASE WHEN f.is_main_card THEN 'main_card' ELSE 'prelims' END)
+                        WHEN 'main_card' THEN 1
+                        WHEN 'prelims' THEN 2
+                        WHEN 'early_prelims' THEN 3
+                        ELSE 4
+                    END ASC,
+                    f.bout_order DESC NULLS LAST,
+                    f.id ASC
             """)
             fight_rows = db.session.execute(fights_sql).fetchall()
 
@@ -352,7 +371,7 @@ def register_mma_routes(app, db):
             bets = []
 
             for fr in fight_rows:
-                (fight_id, f1, f2, wc, is_main, is_title,
+                (fight_id, f1, f2, wc, is_main, card_section, bout_order, is_title,
                  event_id, event_name, event_date,
                  pred_winner, f1_prob, f2_prob, confidence) = fr
 
@@ -394,6 +413,8 @@ def register_mma_routes(app, db):
                         'opponent': opponent,
                         'weight_class': wc or '',
                         'is_main_card': bool(is_main),
+                        'card_section': card_section or ('main_card' if is_main else 'prelims'),
+                        'bout_order': bout_order,
                         'is_title_fight': bool(is_title),
                         'predicted_winner': pred_winner,
                         'confidence': confidence or '',

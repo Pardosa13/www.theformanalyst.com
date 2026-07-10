@@ -389,3 +389,63 @@ def test_scrape_event_details_reaches_heading_parser_after_legacy_zero(monkeypat
     assert "ESPN_PARSER parser=legacy_dom invoked=true" in caplog.text
     assert "ESPN_HEADING_PARSER invoked=true" in caplog.text
     assert "bouts=1" in caplog.text
+
+
+def test_ufc329_scoreboard_array_index_order_stores_main_event_last_as_highest_order():
+    competitions = [
+        {
+            "id": "prelim-1",
+            "competitors": [
+                {"homeAway": "away", "athlete": {"displayName": "Prelim Fighter A"}},
+                {"homeAway": "home", "athlete": {"displayName": "Prelim Fighter B"}},
+            ],
+            "type": {"text": "Prelims"},
+        },
+        {
+            "id": "main-1",
+            "competitors": [
+                {"homeAway": "away", "athlete": {"displayName": "Co Main A"}},
+                {"homeAway": "home", "athlete": {"displayName": "Co Main B"}},
+            ],
+            "type": {"text": "Main Card"},
+        },
+        {
+            "id": "ufc329-main-event",
+            "competitors": [
+                {"homeAway": "away", "athlete": {"displayName": "Max Holloway"}},
+                {"homeAway": "home", "athlete": {"displayName": "Conor McGregor"}},
+            ],
+            "type": {"text": "Main Card"},
+            "weightClass": {"displayName": "Welterweight - Main Event"},
+        },
+    ]
+
+    fights = mma_sync._parse_espn_competitions(competitions)
+
+    assert [(f["fighter_1"], f["fighter_2"], f["bout_order"]) for f in fights] == [
+        ("Prelim Fighter A", "Prelim Fighter B", 0),
+        ("Co Main A", "Co Main B", 1),
+        ("Max Holloway", "Conor McGregor", 2),
+    ]
+    assert sorted(fights, key=lambda f: f["bout_order"], reverse=True)[0]["fighter_1"] == "Max Holloway"
+
+
+def test_mma_events_api_uses_card_section_then_bout_order_desc_for_all_frontends():
+    route_source = open("mma_routes.py", encoding="utf-8").read()
+
+    assert "f.card_section, f.bout_order" in route_source
+    assert "WHEN 'main_card' THEN 1" in route_source
+    assert "WHEN 'prelims' THEN 2" in route_source
+    assert "WHEN 'early_prelims' THEN 3" in route_source
+    assert "f.bout_order DESC NULLS LAST" in route_source
+    assert "f.id ASC" in route_source
+
+
+def test_mma_template_preserves_api_order_within_card_sections():
+    template = open("templates/mma.html", encoding="utf-8").read()
+
+    assert ".sort(" not in template
+    assert ".reverse(" not in template
+    assert "mainCard.map(f => fightCardHTML(f))" in template
+    assert "prelims.map(f => fightCardHTML(f))" in template
+    assert "earlyPrelims.map(f => fightCardHTML(f))" in template

@@ -770,6 +770,18 @@ def scrape_upcoming_events():
     return result
 
 
+
+def _card_section_from_text(text, is_main=False):
+    """Normalize ESPN card labels for stable API grouping."""
+    label = str(text or '').strip().lower()
+    if 'early' in label and 'prelim' in label:
+        return 'early_prelims'
+    if 'prelim' in label:
+        return 'prelims'
+    if is_main or 'main' in label:
+        return 'main_card'
+    return 'prelims'
+
 def _parse_espn_card_segs(gp):
     """
     Parse fight data from an ESPN gamepackage dict that contains 'cardSegs'.
@@ -780,6 +792,7 @@ def _parse_espn_card_segs(gp):
     for seg in gp.get('cardSegs', []):
         seg_name = str(seg.get('nm') or seg.get('name') or seg.get('title') or '').lower()
         is_main = 'main' in seg_name
+        card_section = _card_section_from_text(seg_name, is_main)
         for m in seg.get('mtchs', []):
             awy = m.get('awy', {})
             hme = m.get('hme', {})
@@ -823,6 +836,7 @@ def _parse_espn_card_segs(gp):
                 'bout_uid': m.get('id') or m.get('uid') or m.get('guid'),
                 'status': status_name,
                 'is_main_card': is_main,
+                'card_section': card_section,
                 'is_title_fight': is_title,
                 'result': result_data,
                 'weight_class': m.get('wght', ''),
@@ -922,7 +936,7 @@ def _parse_espn_competitions(competitions):
     Each competition represents one fight with two competitors.
     """
     fights = []
-    for comp in competitions:
+    for bout_order, comp in enumerate(competitions):
         competitors = comp.get('competitors', [])
         if len(competitors) < 2:
             continue
@@ -946,6 +960,7 @@ def _parse_espn_competitions(competitions):
         type_info = comp.get('type', {})
         type_text = (type_info.get('text') or type_info.get('description') or '').lower()
         is_main = 'main' in type_text
+        card_section = _card_section_from_text(type_text, is_main)
 
         notes = comp.get('notes', []) or []
         is_title = any('title' in (n.get('headline', '') + n.get('text', '')).lower()
@@ -982,6 +997,8 @@ def _parse_espn_competitions(competitions):
             'bout_uid': comp.get('id') or comp.get('uid') or comp.get('guid'),
             'status': (status.get('type', {}).get('name') or status.get('type', {}).get('state') or ''),
             'is_main_card': is_main,
+            'card_section': card_section,
+            'bout_order': bout_order,
             'is_title_fight': is_title,
             'result': result_data,
             'weight_class': weight_class,
@@ -1833,6 +1850,8 @@ def ensure_mma_integrity_schema(conn):
         cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS card_source VARCHAR(50) DEFAULT 'legacy'")
         cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE")
         cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
+        cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS bout_order INTEGER")
+        cur.execute("ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS card_section VARCHAR(30)")
         cur.execute("UPDATE mma_fights SET card_source = 'legacy' WHERE card_source IS NULL")
         cur.execute("UPDATE mma_fights SET verified = TRUE WHERE verified IS NULL AND card_source <> 'odds_api'")
         cur.execute("""
@@ -1900,12 +1919,12 @@ def upsert_fight(conn, event_id, fight, commit=True):
             INSERT INTO mma_fights
                 (event_id, bout_uid, status, is_active, card_source, verified,
                  fighter_1_name, fighter_2_name,
-                 weight_class, is_main_card, is_title_fight,
+                 weight_class, is_main_card, card_section, bout_order, is_title_fight,
                  f1_height, f1_reach, f1_stance, f1_record,
                  f2_height, f2_reach, f2_stance, f2_record,
                  winner_name, method, round_ended, time_ended,
                  created_at, updated_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
             ON CONFLICT (event_id, bout_uid) DO UPDATE SET
                 status = EXCLUDED.status,
                 is_active = EXCLUDED.is_active,
@@ -1915,6 +1934,8 @@ def upsert_fight(conn, event_id, fight, commit=True):
                 fighter_2_name = EXCLUDED.fighter_2_name,
                 weight_class = EXCLUDED.weight_class,
                 is_main_card = EXCLUDED.is_main_card,
+                card_section = EXCLUDED.card_section,
+                bout_order = EXCLUDED.bout_order,
                 is_title_fight = EXCLUDED.is_title_fight,
                 f1_height = EXCLUDED.f1_height,
                 f1_reach = EXCLUDED.f1_reach,
@@ -1936,6 +1957,8 @@ def upsert_fight(conn, event_id, fight, commit=True):
             fight['fighter_1'], fight['fighter_2'],
             fight.get('weight_class', ''),
             fight.get('is_main_card', False),
+            fight.get('card_section') or ('main_card' if fight.get('is_main_card') else 'prelims'),
+            fight.get('bout_order'),
             fight.get('is_title_fight', False),
             fight.get('f1_stats', {}).get('Height'),
             fight.get('f1_stats', {}).get('Reach'),
