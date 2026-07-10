@@ -196,13 +196,31 @@ class _FakeHeading:
             return {'href': self._href}
         return None
 
+    def get(self, key, default=None):
+        return default
+
 
 class _FakeSoup:
     def __init__(self, headings):
         self._headings = headings
 
     def find_all(self, tags):
+        if tags == "script":
+            return []
+        if tags == "title":
+            return []
+        if isinstance(tags, str):
+            tags = [tags]
         return [h for h in self._headings if h.name in tags]
+
+    def find(self, tag):
+        return None
+
+    def select(self, selector):
+        return []
+
+    def get_text(self, *args, **kwargs):
+        return " ".join(h.get_text() for h in self._headings)
 
 
 def test_current_espn_fightcenter_heading_dom_parser():
@@ -232,3 +250,41 @@ def test_current_espn_fightcenter_heading_dom_parser():
     assert fights[1]["is_main_card"] is True
     assert fights[2]["is_main_card"] is False
     assert all(f["_source_complete"] for f in fights)
+
+
+def test_scrape_event_details_reaches_heading_parser_after_legacy_zero(monkeypatch, caplog):
+    soup = _FakeSoup([
+        _FakeHeading('h3', 'Main Card'),
+        _FakeHeading('h2', 'Welterweight - Main Event'),
+        _FakeHeading('h2', 'Conor McGregor', '22-6-0'),
+        _FakeHeading('h2', 'Max Holloway', '27-9-0'),
+    ])
+
+    class _FakeResponse:
+        status_code = 200
+        url = "https://www.espn.com/mma/fightcenter/_/id/401"
+        headers = {"content-type": "text/html; charset=utf-8"}
+        content = b"<html><body>fightcenter</body></html>"
+        encoding = "utf-8"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(mma_sync, "_fetch_espn_event_api", lambda event_id: [])
+    monkeypatch.setattr(mma_sync.requests, "get", lambda *args, **kwargs: _FakeResponse())
+    monkeypatch.setattr(mma_sync, "BeautifulSoup", lambda *args, **kwargs: soup)
+
+    with caplog.at_level("INFO", logger="mma_sync"):
+        fights = mma_sync.scrape_event_details(
+            "https://www.espn.com/mma/fightcenter/_/id/401", "401"
+        )
+
+    assert [(f["fighter_1"], f["fighter_2"]) for f in fights] == [
+        ("Conor McGregor", "Max Holloway")
+    ]
+    assert "ESPN_PARSER parser=legacy_dom invoked=true" in caplog.text
+    assert "ESPN_HEADING_PARSER invoked=true" in caplog.text
+    assert "bouts=1" in caplog.text
