@@ -77,16 +77,58 @@ HEADERS = {
 
 # ── Name normalisation (matches Octagon-AI predict_model.py) ─────────────────
 
+_NAME_ALIASES = {
+    'king green': 'bobby green',
+    'robert green': 'bobby green',
+    'zach reese': 'zachary reese',
+    'zachary reese': 'zachary reese',
+}
+_SUFFIX_TOKENS = {'jr', 'sr', 'ii', 'iii', 'iv', 'v'}
+
+
 def normalize_name(name):
     if not name:
         return ''
-    name = str(name)
+    name = str(name).replace('’', "'").replace('`', "'")
     nfkd = unicodedata.normalize('NFKD', name)
     name = ''.join(c for c in nfkd if not unicodedata.combining(c))
     name = name.lower().replace('-', ' ')
     name = re.sub(r"[^a-zA-Z0-9\s]", '', name)
     name = name.replace(' saint ', ' st ').replace(' saint', ' st').replace('saint ', 'st ')
-    return ' '.join(name.split())
+    norm = ' '.join(name.split())
+    return _NAME_ALIASES.get(norm, norm)
+
+
+def normalized_name_aliases(name):
+    """Safe aliases for matching ESPN/Odds display names to existing CSV rows."""
+    norm = normalize_name(name)
+    aliases = {norm} if norm else set()
+    parts = norm.split()
+    if parts and parts[-1] in _SUFFIX_TOKENS:
+        aliases.add(' '.join(parts[:-1]))
+    # Saint/St and hyphen/accent variants collapse above; add known apostrophe-free variants.
+    if norm.replace(' ', '') == 'loneerkavanagh':
+        aliases.update({'loneer kavanagh', 'lone er kavanagh'})
+    if norm == 'benoit st denis':
+        aliases.update({'benoit saint denis', 'benoit saintdenis', 'benoit st denis'})
+    return {a for a in aliases if a}
+
+
+def names_match(a, b):
+    aa = normalized_name_aliases(a)
+    bb = normalized_name_aliases(b)
+    if aa & bb:
+        return True
+    for x in aa:
+        for y in bb:
+            if x and y and (x in y or y in x):
+                return True
+    return False
+
+
+def unordered_pair_key(a, b):
+    return '|'.join(sorted([next(iter(sorted(normalized_name_aliases(a))), normalize_name(a)),
+                            next(iter(sorted(normalized_name_aliases(b))), normalize_name(b))]))
 
 
 def is_placeholder_fighter_name(name):
@@ -139,24 +181,59 @@ def has_sufficient_feature_data(fid, stats_tracker):
 
 
 def best_name_match_key(name, lookup):
-    """Find a normalised key using exact, containment, then unique last-name matching."""
-    norm = normalize_name(name)
-    if not norm or norm in lookup:
-        return norm if norm in lookup else None
+    """Find a normalised key using exact/alias, containment, then unique last-name matching."""
+    aliases = normalized_name_aliases(name)
+    for alias in aliases:
+        if alias in lookup:
+            return alias
 
-    containment = [
-        key for key in lookup
-        if key and (norm in key or key in norm)
-    ]
+    containment = [key for key in lookup if key and any(alias in key or key in alias for alias in aliases)]
     if len(containment) == 1:
         return containment[0]
 
-    last = norm.split()[-1] if norm else ''
-    if last:
-        last_matches = [key for key in lookup if key.split()[-1] == last]
-        if len(last_matches) == 1:
-            return last_matches[0]
-    return None
+    lasts = {alias.split()[-1] for alias in aliases if alias.split()}
+    last_matches = [key for key in lookup if key.split() and key.split()[-1] in lasts]
+    return last_matches[0] if len(last_matches) == 1 else None
+
+
+def resolve_fighter_id(name, name_to_id, espn_id=None, espn_to_id=None):
+    """Resolve canonical ESPN competitor to the existing mma_fighters/CSV ID.
+
+    ESPN ID is preferred when a persisted mapping exists; normalized aliases are
+    only a fallback and never create duplicate fighter rows.
+    """
+    if espn_id and espn_to_id and str(espn_id) in espn_to_id:
+        return espn_to_id[str(espn_id)]
+    for alias in normalized_name_aliases(name):
+        if alias in name_to_id:
+            return name_to_id[alias]
+    key = best_name_match_key(name, name_to_id)
+    return name_to_id.get(key) if key else None
+
+
+def prediction_gate_reasons(fight, fid1, fid2, stats_tracker, feature_count=None, odds_matched=None):
+    reasons = []
+    status = fight_status(fight)
+    if status == 'cancelled':
+        reasons.append('cancelled status')
+    if status == 'placeholder':
+        reasons.append('TBA fighter')
+    if status != 'confirmed':
+        reasons.append('inactive fight')
+    for side, label, fid in (('fighter_1', fight.get('fighter_1'), fid1), ('fighter_2', fight.get('fighter_2'), fid2)):
+        if not (fight.get(f'{side}_espn_id') or fight.get(f'{side}_id') or fight.get(f'{side}_url')):
+            reasons.append(f'missing ESPN fighter ID:{label}')
+        if not fid:
+            reasons.append(f'missing fighter database row:{label}')
+        elif fid not in stats_tracker:
+            reasons.append(f'missing historical stats:{label}')
+        elif not has_sufficient_feature_data(fid, stats_tracker):
+            reasons.append(f'insufficient feature count:{label}')
+    if feature_count is not None and feature_count < 1:
+        reasons.append('missing model inputs')
+    if odds_matched is False:
+        reasons.append('failed Odds API matchup')
+    return reasons
 
 
 # ── Glicko-2 constants ────────────────────────────────────────────────────────
@@ -2273,10 +2350,8 @@ def main():
                 seen_bout_uids.add(bout_uid)
 
                 # Resolve fighter IDs (needed for headshot linking + predictions)
-                f1_norm = normalize_name(fight['fighter_1'])
-                f2_norm = normalize_name(fight['fighter_2'])
-                fid1 = name_to_id.get(f1_norm)
-                fid2 = name_to_id.get(f2_norm)
+                fid1 = resolve_fighter_id(fight['fighter_1'], name_to_id, fight.get('fighter_1_espn_id'))
+                fid2 = resolve_fighter_id(fight['fighter_2'], name_to_id, fight.get('fighter_2_espn_id'))
 
                 # Back-fill fighter_1_id / fighter_2_id on the fight row
                 link_fight_fighters(conn, fight_id, fid1, fid2, commit=False)
@@ -2297,14 +2372,40 @@ def main():
                              f"{fight['fighter_1']} vs {fight['fighter_2']}")
                     continue
 
-                if (fight_status(fight) != 'confirmed'
-                        or not has_sufficient_feature_data(fid1, stats_tracker)
-                        or not has_sufficient_feature_data(fid2, stats_tracker)):
+                feature_count = len(build_feature_row(
+                    stats_tracker[fid1].get_stat_vector(today) if fid1 in stats_tracker else default_sv,
+                    stats_tracker[fid2].get_stat_vector(today) if fid2 in stats_tracker else default_sv,
+                    fighter_bio.get(fid1, {}), fighter_bio.get(fid2, {}),
+                    {'rating': fighter_bio.get(fid1, {}).get('glicko', 1500), 'rd': fighter_bio.get(fid1, {}).get('glicko_rd', 350)},
+                    {'rating': fighter_bio.get(fid2, {}).get('glicko', 1500), 'rd': fighter_bio.get(fid2, {}).get('glicko_rd', 350)},
+                    is_apex_event(event['event_name'], event['location']), is_altitude(event['location']),
+                    fight.get('weight_class', ''),
+                ))
+                gate_reasons = prediction_gate_reasons(fight, fid1, fid2, stats_tracker, feature_count=feature_count)
+                if gate_reasons:
                     with conn.cursor() as cur:
                         cur.execute("DELETE FROM mma_predictions WHERE fight_id = %s", (fight_id,))
-                    log.info("  Prediction unavailable: %s vs %s (missing/TBA/cancelled/insufficient data)",
-                             fight['fighter_1'], fight['fighter_2'])
+                    log.info("PREDICTION_GATE fight=%s vs %s eligible=false reasons=%s",
+                             fight['fighter_1'], fight['fighter_2'], gate_reasons)
+                    log.info("UFC329_DIAG fight=%s vs %s canonical_espn_ids=%s|%s db_fighter_ids=%s|%s history_counts=%s|%s feature_count=%s odds_api_match=unknown prediction_eligible=false",
+                             fight['fighter_1'], fight['fighter_2'],
+                             fight.get('fighter_1_espn_id') or fight.get('fighter_1_id'),
+                             fight.get('fighter_2_espn_id') or fight.get('fighter_2_id'),
+                             fid1, fid2,
+                             getattr(stats_tracker.get(fid1), 'total_fights', 0) if fid1 else 0,
+                             getattr(stats_tracker.get(fid2), 'total_fights', 0) if fid2 else 0,
+                             feature_count)
                     continue
+                log.info("PREDICTION_GATE fight=%s vs %s eligible=true reasons=[]",
+                         fight['fighter_1'], fight['fighter_2'])
+                log.info("UFC329_DIAG fight=%s vs %s canonical_espn_ids=%s|%s db_fighter_ids=%s|%s history_counts=%s|%s feature_count=%s odds_api_match=unknown prediction_eligible=true",
+                         fight['fighter_1'], fight['fighter_2'],
+                         fight.get('fighter_1_espn_id') or fight.get('fighter_1_id'),
+                         fight.get('fighter_2_espn_id') or fight.get('fighter_2_id'),
+                         fid1, fid2,
+                         getattr(stats_tracker.get(fid1), 'total_fights', 0) if fid1 else 0,
+                         getattr(stats_tracker.get(fid2), 'total_fights', 0) if fid2 else 0,
+                         feature_count)
 
                 st1 = stats_tracker[fid1].get_stat_vector(today)
                 st2 = stats_tracker[fid2].get_stat_vector(today)

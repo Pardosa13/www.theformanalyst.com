@@ -14,7 +14,7 @@ import json
 import logging
 from datetime import datetime, date
 
-from flask import Blueprint, render_template, jsonify, request
+from flask import Blueprint, render_template, jsonify, request, current_app
 from flask_login import login_required
 from mma_data import normalise_name
 
@@ -307,7 +307,7 @@ def register_mma_routes(app, db):
         """
         try:
             from sqlalchemy import text
-            from mma_data import calculate_mma_edge, names_match, normalise_name
+            from mma_data import calculate_mma_edge, names_match, normalise_name, pairs_match
 
             # Clamp min_edge to a sensible range
             min_edge = max(0.0, min(100.0, request.args.get('min_edge', 2.0, type=float)))
@@ -385,6 +385,14 @@ def register_mma_routes(app, db):
                     for norm_key, odds_list in odds_by_fighter.items():
                         if names_match(fighter_name, norm_key):
                             for orow in odds_list:
+                                matched_pair = pairs_match(f1, f2, orow.fighter_1_name, orow.fighter_2_name)
+                                current_app.logger.info(
+                                    "ODDS_MATCH event_id=%s espn_pair=%s|%s matched=%s odds_pair=%s|%s reason=%s",
+                                    event_id, f1, f2, matched_pair, orow.fighter_1_name, orow.fighter_2_name,
+                                    "normalized_unordered_pair" if matched_pair else "pair_mismatch",
+                                )
+                                if not matched_pair:
+                                    continue
                                 if best_odds is None or (orow.odds or 0) > best_odds:
                                     best_odds = orow.odds
                                     best_bookmaker = orow.bookmaker
