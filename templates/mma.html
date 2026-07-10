@@ -655,8 +655,9 @@ function renderEvent(idx) {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
   }) : 'TBD';
 
-  const mainCard = ev.fights.filter(f => f.is_main_card);
-  const prelims  = ev.fights.filter(f => !f.is_main_card);
+  const mainCard = ev.fights.filter(f => (f.card_section || (f.is_main_card ? 'main_card' : 'prelims')) === 'main_card');
+  const prelims  = ev.fights.filter(f => (f.card_section || (f.is_main_card ? 'main_card' : 'prelims')) === 'prelims');
+  const earlyPrelims = ev.fights.filter(f => (f.card_section || '') === 'early_prelims');
 
   content.innerHTML = `
     <div class="event-hero">
@@ -676,6 +677,11 @@ function renderEvent(idx) {
     ${prelims.length ? `
       <div class="card-section-label">Preliminary Card</div>
       ${prelims.map(f => fightCardHTML(f)).join('')}
+    ` : ''}
+
+    ${earlyPrelims.length ? `
+      <div class="card-section-label">Early Preliminary Card</div>
+      ${earlyPrelims.map(f => fightCardHTML(f)).join('')}
     ` : ''}
 
     ${!ev.fights.length ? '<div class="mma-empty">Fight card not yet announced.</div>' : ''}
