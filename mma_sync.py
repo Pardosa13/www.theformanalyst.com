@@ -196,6 +196,13 @@ def best_name_match_key(name, lookup):
     return last_matches[0] if len(last_matches) == 1 else None
 
 
+def extract_espn_id(espn_url):
+    if not espn_url:
+        return None
+    m = re.search(r'/id/(\d+)(?:[/?]|$)', str(espn_url))
+    return m.group(1) if m else None
+
+
 def resolve_fighter_id(name, name_to_id, espn_id=None, espn_to_id=None):
     """Resolve canonical ESPN competitor to the existing mma_fighters/CSV ID.
 
@@ -234,6 +241,166 @@ def prediction_gate_reasons(fight, fid1, fid2, stats_tracker, feature_count=None
     if odds_matched is False:
         reasons.append('failed Odds API matchup')
     return reasons
+
+
+def build_espn_to_fighter_id(conn, stats_tracker=None):
+    """Map ESPN athlete IDs stored in mma_fighters.espn_url to canonical DB IDs.
+
+    If a migration produced duplicate fighter rows with the same ESPN profile,
+    prefer the row that already has historical stats, then keep the first stable
+    ID. This relinks current ESPN card ingestion to legacy completed history.
+    """
+    mapping = {}
+    rows = []
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, full_name, espn_url FROM mma_fighters")
+        rows = cur.fetchall()
+        name_best = {}
+        for fid, name, _espn_url in rows:
+            norm = normalize_name(name)
+            if not norm:
+                continue
+            current = name_best.get(norm)
+            if current is None or getattr((stats_tracker or {}).get(fid), 'total_fights', 0) > getattr((stats_tracker or {}).get(current), 'total_fights', 0):
+                name_best[norm] = fid
+        for fid, name, espn_url in rows:
+            espn_id = extract_espn_id(espn_url)
+            if not espn_id:
+                continue
+            same_name_hist = name_best.get(normalize_name(name))
+            if same_name_hist and getattr((stats_tracker or {}).get(same_name_hist), 'total_fights', 0) > getattr((stats_tracker or {}).get(fid), 'total_fights', 0):
+                fid = same_name_hist
+            current = mapping.get(espn_id)
+            if current is None:
+                mapping[espn_id] = fid
+                continue
+            cur_hist = getattr((stats_tracker or {}).get(current), 'total_fights', 0)
+            new_hist = getattr((stats_tracker or {}).get(fid), 'total_fights', 0)
+            if new_hist > cur_hist:
+                mapping[espn_id] = fid
+    return mapping
+
+
+def build_name_to_fighter_id(conn, stats_tracker=None):
+    """Map normalized names to the fighter row with the best historical link."""
+    mapping = {}
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, full_name FROM mma_fighters")
+        for fid, name in cur.fetchall():
+            norm = normalize_name(name)
+            if not norm:
+                continue
+            current = mapping.get(norm)
+            if current is None:
+                mapping[norm] = fid
+                continue
+            cur_hist = getattr((stats_tracker or {}).get(current), 'total_fights', 0)
+            new_hist = getattr((stats_tracker or {}).get(fid), 'total_fights', 0)
+            if new_hist > cur_hist:
+                mapping[norm] = fid
+    return mapping
+
+
+def _alias_historical_stats_to_canonical_fighters(conn, stats_tracker):
+    """Copy stat objects onto duplicate canonical fighter IDs when unambiguous."""
+    rows = []
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, full_name, espn_url FROM mma_fighters")
+        rows = cur.fetchall()
+
+    by_espn = {}
+    by_name = {}
+    for fid, name, espn_url in rows:
+        espn_id = extract_espn_id(espn_url)
+        if espn_id:
+            by_espn.setdefault(espn_id, []).append(fid)
+        norm = normalize_name(name)
+        if norm:
+            by_name.setdefault(norm, []).append(fid)
+
+    for ids in list(by_espn.values()) + [ids for ids in by_name.values() if len(ids) == 2]:
+        source = next((fid for fid in ids if fid in stats_tracker), None)
+        if not source:
+            continue
+        for fid in ids:
+            stats_tracker.setdefault(fid, stats_tracker[source])
+
+
+def _db_history_row_count(conn, db_id=None, name=None):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM mma_fights f
+            JOIN mma_events e ON f.event_id = e.id
+            WHERE e.is_completed = TRUE
+              AND e.date <= CURRENT_DATE
+              AND f.winner_name IS NOT NULL
+              AND (
+                    (%s IS NOT NULL AND (f.fighter_1_id = %s OR f.fighter_2_id = %s))
+                 OR (%s IS NOT NULL AND (
+                        LOWER(f.fighter_1_name) = LOWER(%s)
+                     OR LOWER(f.fighter_2_name) = LOWER(%s)
+                 ))
+              )
+            """,
+            (db_id, db_id, db_id, name, name, name),
+        )
+        return cur.fetchone()[0]
+
+
+def log_history_lookup(conn, name, espn_id, db_id, stats_tracker, name_to_id, espn_to_id):
+    aliases = sorted(normalized_name_aliases(name))
+    keys = []
+    if espn_id:
+        keys.append(f"espn:{espn_id}->{espn_to_id.get(str(espn_id))}")
+    keys.extend([f"name:{a}->{name_to_id.get(a)}" for a in aliases])
+    matched_key = db_id if db_id in stats_tracker else None
+    rows = _db_history_row_count(conn, db_id, name)
+    log.info(
+        "HISTORY_LOOKUP fighter=%s espn_id=%s db_id=%s lookup_keys=%s matched_key=%s rows=%s",
+        name, espn_id, db_id, keys, matched_key, rows,
+    )
+
+
+def _log_established_fighter_history_assertion(conn, stats_tracker):
+    names = ['Conor McGregor', 'Max Holloway', 'Robert Whittaker', 'Cody Garbrandt', 'Cory Sandhagen']
+    counts = {}
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, full_name FROM mma_fighters")
+        for fid, full_name in cur.fetchall():
+            if normalize_name(full_name) in {normalize_name(n) for n in names}:
+                counts[full_name] = getattr(stats_tracker.get(fid), 'total_fights', 0)
+    if counts and all(v == 0 for v in counts.values()):
+        raise RuntimeError(f"Established-fighter history assertion failed: {counts}")
+    log.info("HISTORY_ASSERT established_counts=%s", counts)
+
+
+def diagnose_odds_match(fight, event, odds_fights_by_date):
+    from mma_data import pairs_match
+    event_date = event.get('date')
+    try:
+        event_date = pd.to_datetime(event_date).date()
+    except Exception:
+        try:
+            event_date = datetime.fromisoformat(str(event_date)[:10]).date()
+        except Exception:
+            event_date = None
+    candidates = odds_fights_by_date.get(event_date, []) if event_date else []
+    for cand in candidates:
+        if pairs_match(fight['fighter_1'], fight['fighter_2'], cand['fighter_1'], cand['fighter_2']):
+            log.info(
+                "ODDS_MATCH fight=%s vs %s matched=true bookmaker_count=%s prices=%s reason=%s",
+                fight['fighter_1'], fight['fighter_2'], cand.get('bookmaker_count', 0), cand.get('prices', []),
+                "canonical_name_pair",
+            )
+            return {'matched': True, 'reason': 'canonical_name_pair'}
+    reason = 'no_odds_api_event_same_date' if not candidates else 'no_canonical_pair_match'
+    log.info(
+        "ODDS_MATCH fight=%s vs %s matched=false bookmaker_count=0 prices=[] reason=%s",
+        fight['fighter_1'], fight['fighter_2'], reason,
+    )
+    return {'matched': False, 'reason': reason}
 
 
 # ── Glicko-2 constants ────────────────────────────────────────────────────────
@@ -1299,6 +1466,7 @@ def load_fight_history(conn):
     """Load all historical fights from mma_fights + mma_events for stat calculation."""
     sql = """
         SELECT
+            f.id AS fight_id,
             f.fighter_1_id, f.fighter_2_id,
             f.fighter_1_name, f.fighter_2_name,
             f.winner_name, f.method, f.round_ended, f.time_ended,
@@ -1314,6 +1482,7 @@ def load_fight_history(conn):
         FROM mma_fights f
         JOIN mma_events e ON f.event_id = e.id
         WHERE e.is_completed = TRUE
+          AND e.date <= CURRENT_DATE
           AND f.winner_name IS NOT NULL
         ORDER BY e.date ASC
     """
@@ -1346,15 +1515,21 @@ def rebuild_stats_from_db(conn):
     log.info("Rebuilding fighter stats from DB fight history...")
     stats_tracker = {}
     name_to_id = {}
+    espn_to_id = {}
 
-    # Build name map
-    sql = "SELECT id, full_name FROM mma_fighters"
+    # Build identity maps. ESPN profile IDs are canonical when present;
+    # names are only a fallback, and duplicate names are resolved after history
+    # counts are known so newly-created ESPN rows do not disconnect old fights.
+    sql = "SELECT id, full_name, espn_url FROM mma_fighters"
     with conn.cursor() as cur:
         cur.execute(sql)
-        for fid, name in cur.fetchall():
+        for fid, name, espn_url in cur.fetchall():
             norm = normalize_name(name)
-            if norm:
+            if norm and norm not in name_to_id:
                 name_to_id[norm] = fid
+            espn_id = extract_espn_id(espn_url)
+            if espn_id and espn_id not in espn_to_id:
+                espn_to_id[espn_id] = fid
 
     # Load fights chronologically
     rows = load_fight_history(conn)
@@ -1368,7 +1543,7 @@ def rebuild_stats_from_db(conn):
             return 300  # default 5 min
 
     for row in rows:
-        fid1, fid2, n1, n2, winner, method, rnd, t_str, fight_date = row[:9]
+        fight_row_id, fid1, fid2, n1, n2, winner, method, rnd, t_str, fight_date = row[:10]
         if not fight_date:
             continue
         try:
@@ -1402,8 +1577,15 @@ def rebuild_stats_from_db(conn):
                 dist_p=0.8, clin_p=0.1, grou_p=0.1
             )
 
+    _alias_historical_stats_to_canonical_fighters(conn, stats_tracker)
+    # Re-point normalized names/ESPN IDs at rows that actually carry historical stats.
+    name_to_id = build_name_to_fighter_id(conn, stats_tracker)
+    espn_to_id = build_espn_to_fighter_id(conn, stats_tracker)
+    _log_established_fighter_history_assertion(conn, stats_tracker)
+    log.info("HISTORICAL_SOURCE source=completed_fight_database completed_fights=%s fighters=%s",
+             len(rows), len(stats_tracker))
     log.info(f"  Stats built for {len(stats_tracker)} fighters")
-    return stats_tracker, name_to_id
+    return stats_tracker, name_to_id, espn_to_id
 
 
 # ── Octagon-AI CSV stat builder ───────────────────────────────────────────────
@@ -1643,6 +1825,8 @@ def rebuild_stats_from_csv(data_dir, conn=None):
                 kd, sub, ctrl, sig, hd, bd, lg, dt, cl, gr,
             )
 
+    log.info("HISTORICAL_SOURCE source=octagon_csv completed_fights=%s fighters=%s",
+             len(fights_df), len(stats_tracker))
     log.info(f"  Stats built for {len(stats_tracker):,} fighters")
 
     if conn is not None:
@@ -2250,9 +2434,10 @@ def main():
         with tempfile.TemporaryDirectory() as tmpdir:
             download_octagon_data(tmpdir)
             stats_tracker, name_to_id, fighter_bio = rebuild_stats_from_csv(tmpdir, conn)
+            espn_to_id = build_espn_to_fighter_id(conn, stats_tracker)
     except Exception as e:
         log.warning(f"CSV data unavailable ({e}); falling back to DB stats.")
-        stats_tracker, name_to_id = rebuild_stats_from_db(conn)
+        stats_tracker, name_to_id, espn_to_id = rebuild_stats_from_db(conn)
         fighter_bio = load_fighters_bio(conn)
 
     # ── Pre-fetch Odds API events for diagnostics / odds-only enrichment ─────
@@ -2350,8 +2535,11 @@ def main():
                 seen_bout_uids.add(bout_uid)
 
                 # Resolve fighter IDs (needed for headshot linking + predictions)
-                fid1 = resolve_fighter_id(fight['fighter_1'], name_to_id, fight.get('fighter_1_espn_id'))
-                fid2 = resolve_fighter_id(fight['fighter_2'], name_to_id, fight.get('fighter_2_espn_id'))
+                fid1 = resolve_fighter_id(fight['fighter_1'], name_to_id, fight.get('fighter_1_espn_id'), espn_to_id)
+                fid2 = resolve_fighter_id(fight['fighter_2'], name_to_id, fight.get('fighter_2_espn_id'), espn_to_id)
+                log_history_lookup(conn, fight['fighter_1'], fight.get('fighter_1_espn_id'), fid1, stats_tracker, name_to_id, espn_to_id)
+                log_history_lookup(conn, fight['fighter_2'], fight.get('fighter_2_espn_id'), fid2, stats_tracker, name_to_id, espn_to_id)
+                odds_match = diagnose_odds_match(fight, event, odds_fights_by_date)
 
                 # Back-fill fighter_1_id / fighter_2_id on the fight row
                 link_fight_fighters(conn, fight_id, fid1, fid2, commit=False)
@@ -2387,25 +2575,25 @@ def main():
                         cur.execute("DELETE FROM mma_predictions WHERE fight_id = %s", (fight_id,))
                     log.info("PREDICTION_GATE fight=%s vs %s eligible=false reasons=%s",
                              fight['fighter_1'], fight['fighter_2'], gate_reasons)
-                    log.info("UFC329_DIAG fight=%s vs %s canonical_espn_ids=%s|%s db_fighter_ids=%s|%s history_counts=%s|%s feature_count=%s odds_api_match=unknown prediction_eligible=false",
+                    log.info("UFC329_DIAG fight=%s vs %s canonical_espn_ids=%s|%s db_fighter_ids=%s|%s history_counts=%s|%s feature_count=%s odds_api_match=%s prediction_eligible=false",
                              fight['fighter_1'], fight['fighter_2'],
                              fight.get('fighter_1_espn_id') or fight.get('fighter_1_id'),
                              fight.get('fighter_2_espn_id') or fight.get('fighter_2_id'),
                              fid1, fid2,
                              getattr(stats_tracker.get(fid1), 'total_fights', 0) if fid1 else 0,
                              getattr(stats_tracker.get(fid2), 'total_fights', 0) if fid2 else 0,
-                             feature_count)
+                             feature_count, odds_match['matched'])
                     continue
                 log.info("PREDICTION_GATE fight=%s vs %s eligible=true reasons=[]",
                          fight['fighter_1'], fight['fighter_2'])
-                log.info("UFC329_DIAG fight=%s vs %s canonical_espn_ids=%s|%s db_fighter_ids=%s|%s history_counts=%s|%s feature_count=%s odds_api_match=unknown prediction_eligible=true",
+                log.info("UFC329_DIAG fight=%s vs %s canonical_espn_ids=%s|%s db_fighter_ids=%s|%s history_counts=%s|%s feature_count=%s odds_api_match=%s prediction_eligible=true",
                          fight['fighter_1'], fight['fighter_2'],
                          fight.get('fighter_1_espn_id') or fight.get('fighter_1_id'),
                          fight.get('fighter_2_espn_id') or fight.get('fighter_2_id'),
                          fid1, fid2,
                          getattr(stats_tracker.get(fid1), 'total_fights', 0) if fid1 else 0,
                          getattr(stats_tracker.get(fid2), 'total_fights', 0) if fid2 else 0,
-                         feature_count)
+                         feature_count, odds_match['matched'])
 
                 st1 = stats_tracker[fid1].get_stat_vector(today)
                 st2 = stats_tracker[fid2].get_stat_vector(today)
@@ -2450,6 +2638,10 @@ def main():
                             'losses': st2['losses'],
                             'recent_form': st2['recent_form'],
                             'glicko': round(g2['rating']),
+                        },
+                        '_diagnostics': {
+                            'odds_api_match': odds_match['matched'],
+                            'odds_api_reason': odds_match['reason'],
                         },
                     }
                 }

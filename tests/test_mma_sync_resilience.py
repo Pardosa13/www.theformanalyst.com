@@ -483,6 +483,80 @@ def test_valid_historical_stats_produce_prediction_gate_eligibility():
     assert mma_sync.prediction_gate_reasons(fight, "a", "b", {"a": s1, "b": s2}) == []
 
 
+def test_completed_historical_fight_old_id_resolves_via_canonical_espn_identity():
+    old_stats = mma_sync.FighterStats(); old_stats.total_fights = 5
+    new_stats = mma_sync.FighterStats(); new_stats.total_fights = 0
+    stats = {"old-conor": old_stats, "new-conor": new_stats}
+
+    conn = _FakeConn(fetchall=[
+        ("new-conor", "Conor McGregor", "https://www.espn.com/mma/fighter/_/id/3022677/conor-mcgregor"),
+        ("old-conor", "Conor McGregor", "https://www.espn.com/mma/fighter/_/id/3022677/conor-mcgregor"),
+    ])
+
+    assert mma_sync.build_espn_to_fighter_id(conn, stats)["3022677"] == "old-conor"
+    assert mma_sync.resolve_fighter_id(
+        "Conor McGregor", {}, "3022677", mma_sync.build_espn_to_fighter_id(conn, stats)
+    ) == "old-conor"
+
+
+def test_established_fighters_receive_non_zero_history_after_identity_alias():
+    stats = {"old-max": mma_sync.FighterStats()}
+    stats["old-max"].total_fights = 10
+    conn = _FakeConn(fetchall=[
+        ("old-max", "Max Holloway", "https://www.espn.com/mma/fighter/_/id/2614933/max-holloway"),
+        ("new-max", "Max Holloway", "https://www.espn.com/mma/fighter/_/id/2614933/max-holloway"),
+    ])
+
+    mma_sync._alias_historical_stats_to_canonical_fighters(conn, stats)
+
+    assert stats["new-max"].total_fights == 10
+
+
+def test_upcoming_fights_are_excluded_from_historical_counts_query():
+    conn = _FakeConn()
+    mma_sync.load_fight_history(conn)
+    sql = conn.cursor_obj.statements[-1][0]
+
+    assert "e.is_completed = TRUE" in sql
+    assert "e.date <= CURRENT_DATE" in sql
+    assert "f.winner_name IS NOT NULL" in sql
+
+
+def test_odds_api_enrichment_runs_for_canonical_espn_bouts(caplog):
+    fight = {"fighter_1": "Benoît Saint Denis", "fighter_2": "King Green"}
+    event = {"date": "2026-07-10"}
+    odds = {
+        __import__("datetime").date(2026, 7, 10): [
+            {"fighter_1": "Bobby Green", "fighter_2": "Benoit Saint-Denis", "bookmaker_count": 3, "prices": [1.9, 2.0]}
+        ]
+    }
+
+    with caplog.at_level("INFO", logger="mma_sync"):
+        result = mma_sync.diagnose_odds_match(fight, event, odds)
+
+    assert result["matched"] is True
+    assert "ODDS_MATCH fight=Benoît Saint Denis vs King Green matched=true" in caplog.text
+
+
+def test_odds_api_match_is_never_unknown_after_processing():
+    result = mma_sync.diagnose_odds_match(
+        {"fighter_1": "A", "fighter_2": "B"}, {"date": "2026-07-10"}, {}
+    )
+
+    assert result["matched"] is False
+    assert result["reason"] != "unknown"
+
+
+def test_predictions_generate_with_valid_history_even_when_odds_unavailable():
+    s1 = mma_sync.FighterStats(); s1.total_fights = 4
+    s2 = mma_sync.FighterStats(); s2.total_fights = 4
+    fight = {"fighter_1": "A", "fighter_2": "B", "fighter_1_espn_id": "1", "fighter_2_espn_id": "2"}
+    odds = mma_sync.diagnose_odds_match(fight, {"date": "2026-07-10"}, {})
+
+    assert odds["matched"] is False
+    assert mma_sync.prediction_gate_reasons(fight, "a", "b", {"a": s1, "b": s2}) == []
+
+
 def test_truly_new_fighters_remain_prediction_unavailable():
     fight = {"fighter_1": "New A", "fighter_2": "New B"}
     reasons = mma_sync.prediction_gate_reasons(fight, None, None, {})
