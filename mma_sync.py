@@ -63,11 +63,13 @@ MIN_COMPLETE_CARD_RATIO = 0.75
 
 HEADERS = {
     'User-Agent': (
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
         'AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Chrome/120.0.0.0 Safari/537.36'
+        'Chrome/126.0.0.0 Safari/537.36'
     ),
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://www.espn.com/mma/',
 }
 
 # ── Name normalisation (matches Octagon-AI predict_model.py) ─────────────────
@@ -306,6 +308,104 @@ def get_soup(url):
     except Exception as e:
         log.warning(f"Failed to fetch {url}: {e}")
         return None
+
+
+def _current_commit_sha():
+    """Best-effort deployed commit SHA for production cron diagnostics."""
+    for key in ('RAILWAY_GIT_COMMIT_SHA', 'GIT_COMMIT_SHA', 'SOURCE_VERSION', 'COMMIT_SHA'):
+        if os.environ.get(key):
+            return os.environ[key]
+    try:
+        import subprocess
+        return subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], cwd=BASE_DIR, text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except Exception:
+        return 'unknown'
+
+
+def _espn_page_metrics(soup):
+    title = ''
+    if soup:
+        title_node = soup.find('title')
+        title = title_node.get_text(' ', strip=True) if title_node else ''
+    text = soup.get_text(' ', strip=True) if soup else ''
+    record_candidates = len(re.findall(r'\b(?:\d+|--)-(?:\d+|--)(?:-(?:\d+|--))?(?:\s*\(NC\))?\b', text))
+    return {
+        'page_title': title,
+        'h2': len(soup.find_all('h2')) if soup else 0,
+        'h3': len(soup.find_all('h3')) if soup else 0,
+        'record_candidates': record_candidates,
+        'script_count': len(soup.find_all('script')) if soup else 0,
+    }
+
+
+def _log_espn_parser(parser_name, invoked, response_meta, soup, bouts):
+    metrics = _espn_page_metrics(soup)
+    log.info(
+        "ESPN_PARSER parser=%s invoked=%s status=%s final_url=%s content_type=%s "
+        "bytes=%s title=%r h2=%s h3=%s record_candidates=%s bouts=%s",
+        parser_name,
+        str(bool(invoked)).lower(),
+        response_meta.get('status'),
+        response_meta.get('final_url'),
+        response_meta.get('content_type'),
+        response_meta.get('byte_length'),
+        metrics['page_title'],
+        metrics['h2'],
+        metrics['h3'],
+        metrics['record_candidates'],
+        len(bouts or []),
+    )
+
+
+def _log_failed_heading_diagnostics(html, soup):
+    metrics = _espn_page_metrics(soup)
+    sample = (html or '')[:500].replace('\n', '\\n').replace('\r', '\\r')
+    lower = (html or '').lower()
+    log.warning(
+        "ESPN_HEADING_ZERO_DIAGNOSTIC title=%r scripts=%s contains_access_denied=%s "
+        "contains_captcha=%s contains_enable_javascript=%s contains_fightcenter=%s "
+        "contains_ufc_329=%s sample=%r",
+        metrics['page_title'],
+        metrics['script_count'],
+        'access denied' in lower,
+        'captcha' in lower,
+        'enable javascript' in lower or 'enable javascript' in lower.replace(' ', ''),
+        'fightcenter' in lower,
+        'ufc 329' in lower,
+        sample,
+    )
+
+
+def _save_espn_debug_html(event_id, html):
+    if os.environ.get('MMA_ESPN_DEBUG') != '1':
+        return
+    path = os.path.join(tempfile.gettempdir(), f"mma_espn_{event_id}.html")
+    try:
+        with open(path, 'w', encoding='utf-8') as fh:
+            fh.write(html or '')
+        log.warning("ESPN_DEBUG_HTML_SAVED event_id=%s path=%s bytes=%s", event_id, path, len((html or '').encode('utf-8')))
+    except Exception as exc:
+        log.warning("ESPN_DEBUG_HTML_SAVE_FAILED event_id=%s error=%s", event_id, exc)
+
+
+def _fetch_espn_event_html(event_url):
+    meta = {'status': None, 'final_url': event_url, 'content_type': '', 'byte_length': 0}
+    try:
+        r = requests.get(event_url, headers=HEADERS, timeout=15, allow_redirects=True)
+        meta.update({
+            'status': getattr(r, 'status_code', None),
+            'final_url': getattr(r, 'url', event_url),
+            'content_type': getattr(r, 'headers', {}).get('content-type', ''),
+            'byte_length': len(getattr(r, 'content', b'') or b''),
+        })
+        r.raise_for_status()
+        html = (getattr(r, 'content', b'') or b'').decode(getattr(r, 'encoding', None) or 'utf-8', errors='replace')
+        return BeautifulSoup(html, 'html.parser'), html, meta
+    except Exception as e:
+        log.warning(f"Failed to fetch {event_url}: {e}")
+        return None, '', meta
 
 
 def scrape_fighter_profile(url):
@@ -674,18 +774,27 @@ def _fetch_espn_event_api(event_id):
         f"?event={event_id}"
     )
     log.info(f"  Trying ESPN summary API: {url}")
+    response_meta = {'status': None, 'final_url': url, 'content_type': '', 'byte_length': 0}
     try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
+        r = requests.get(url, headers=HEADERS, timeout=15, allow_redirects=True)
+        response_meta.update({
+            'status': getattr(r, 'status_code', None),
+            'final_url': getattr(r, 'url', url),
+            'content_type': getattr(r, 'headers', {}).get('content-type', ''),
+            'byte_length': len(getattr(r, 'content', b'') or b''),
+        })
         if r.status_code == 404:
             log.warning(
                 "  ESPN summary API returned 404 for event %s; continuing with fallback sources",
                 event_id,
             )
+            _log_espn_parser('summary_api', True, response_meta, None, [])
             return []
         r.raise_for_status()
         data = r.json()
     except Exception as e:
         log.warning(f"  ESPN summary API failed: {e}")
+        _log_espn_parser('summary_api', True, response_meta, None, [])
         return []
 
     # Try multiple JSON paths that ESPN uses for the gamepackage
@@ -699,6 +808,7 @@ def _fetch_espn_event_api(event_id):
         fights = _parse_espn_card_segs(gp)
         if fights:
             log.info(f"  ESPN summary API (cardSegs): {len(fights)} fights")
+            _log_espn_parser('summary_api', True, response_meta, None, fights)
             return _enrich_fights_with_profiles(fights)
 
     # Alternative structure: competitions list under 'card'
@@ -711,9 +821,11 @@ def _fetch_espn_event_api(event_id):
         fights = _parse_espn_competitions(competitions)
         if fights:
             log.info(f"  ESPN summary API (competitions): {len(fights)} fights")
+            _log_espn_parser('summary_api', True, response_meta, None, fights)
             return _enrich_fights_with_profiles(fights)
 
     log.info("  ESPN summary API returned no fights")
+    _log_espn_parser('summary_api', True, response_meta, None, [])
     return []
 
 
@@ -880,9 +992,13 @@ def scrape_event_details(event_url, event_id):
     if fights:
         return fights
 
-    soup = get_soup(event_url)
+    soup, html, response_meta = _fetch_espn_event_html(event_url)
     if not soup:
+        _log_espn_parser('embedded_json', False, response_meta, soup, [])
+        _log_espn_parser('legacy_dom', False, response_meta, soup, [])
+        _log_espn_parser('heading_dom', False, response_meta, soup, [])
         return []
+    _save_espn_debug_html(event_id, html)
 
     fights = []
 
@@ -894,6 +1010,7 @@ def scrape_event_details(event_url, event_id):
         "window.__espnfitt__ =",
         "window.__espnfitt__=",
     ]
+    log.info("ESPN_PARSER_START parser=embedded_json invoked=true")
     for script in soup.find_all('script'):
         if not script.string:
             continue
@@ -909,11 +1026,16 @@ def scrape_event_details(event_url, event_id):
                 if 'cardSegs' in gp:
                     raw = _parse_espn_card_segs(gp)
                     if raw:
+                        _log_espn_parser('embedded_json', True, response_meta, soup, raw)
+                        _log_espn_parser('legacy_dom', False, response_meta, soup, [])
+                        _log_espn_parser('heading_dom', False, response_meta, soup, [])
                         return _enrich_fights_with_profiles(raw)
             except Exception as e:
                 log.warning(f"  JSON parse error: {e}")
+    _log_espn_parser('embedded_json', True, response_meta, soup, [])
 
     # Strategy 2: DOM fallback
+    log.info("ESPN_PARSER_START parser=legacy_dom invoked=true")
     panels = soup.select('li.AccordionPanel') or soup.select('div.MMAGamestrip')
     is_main = True
     for node in soup.find_all(['h3', 'li', 'div']):
@@ -949,15 +1071,26 @@ def scrape_event_details(event_url, event_id):
             'result': None,
             'weight_class': '',
         })
+    _log_espn_parser('legacy_dom', True, response_meta, soup, fights)
 
     if not fights:
+        log.info("ESPN_PARSER_START parser=heading_dom invoked=true")
         fights = _parse_espn_fightcenter_heading_dom(soup)
-        if fights:
-            log.info(f"  ESPN fightcenter heading DOM parser: {len(fights)} fights")
+        heading_metrics = _espn_page_metrics(soup)
+        log.info(
+            "ESPN_HEADING_PARSER invoked=true h2=%s h3=%s record_candidates=%s bouts=%s",
+            heading_metrics['h2'], heading_metrics['h3'],
+            heading_metrics['record_candidates'], len(fights)
+        )
+        _log_espn_parser('heading_dom', True, response_meta, soup, fights)
+        if not fights:
+            _log_failed_heading_diagnostics(html, soup)
+    else:
+        _log_espn_parser('heading_dom', False, response_meta, soup, [])
 
     if not fights:
         log.warning(
-            "  ESPN fightcenter DOM parser returned 0 fights for event %s; continuing with fallback sources",
+            "  ESPN fightcenter DOM parser returned 0 fights for event %s; preserving existing verified card and odds-only enrichment",
             event_id,
         )
 
@@ -1869,6 +2002,7 @@ def upsert_prediction(conn, fight_id, pred, commit=True):
 
 def main():
     log.info("=== MMA Sync Starting ===")
+    log.info("MMA_SYNC_COMMIT=%s", _current_commit_sha())
 
     if not DATABASE_URL:
         log.error("DATABASE_URL not set")
@@ -1890,10 +2024,10 @@ def main():
         stats_tracker, name_to_id = rebuild_stats_from_db(conn)
         fighter_bio = load_fighters_bio(conn)
 
-    # ── Pre-fetch Odds API events for fallback fight seeding ──────────────────
-    # Group individual fights from the Odds API by date so they can be used to
-    # seed mma_fights when ESPN scraping returns nothing (e.g. when fightcenter
-    # pages are client-side rendered and contain no embedded JSON).
+    # ── Pre-fetch Odds API events for diagnostics / odds-only enrichment ─────
+    # Do not use these rows as canonical card bouts. ESPN is the card source of
+    # truth; when ESPN returns zero canonical bouts, the existing verified card
+    # must remain unchanged.
     odds_api_key = os.environ.get('ODDS_API_KEY', '')
     odds_fights_by_date = {}  # date -> list[{fighter_1, fighter_2}]
     if odds_api_key:
@@ -1944,57 +2078,16 @@ def main():
         fights = scrape_event_details(event['url'], event['event_id'])
         log.info(f"  {len(fights)} fights on card")
 
-        # Fallback: seed fights from Odds API when ESPN returns nothing for
-        # an upcoming event.  The Odds API lists individual fights (one entry
-        # per matchup) keyed by commence_time date, so we match on date with
-        # a ±1-day tolerance to account for timezone differences.
         has_placeholder_fights = any(fight_has_placeholder(_fight) for _fight in fights)
-        if (not fights or has_placeholder_fights) and not event['is_completed'] and odds_fights_by_date:
-            ev_date = (event['date'] if isinstance(event['date'], date)
-                       else date.fromisoformat(str(event['date'])))
-            for _delta in [0, 1, -1]:
-                _check = ev_date + timedelta(days=_delta)
-                _seed = odds_fights_by_date.get(_check, [])
-                if _seed:
-                    reason = (
-                        'returned 0 fights' if not fights
-                        else 'returned placeholder/TBA fights'
-                    )
-                    log.info(
-                        f"  ESPN {reason}; seeding {len(_seed)} "
-                        f"fights from Odds API (date offset {_delta:+d})"
-                    )
-                    fights = [
-                        {
-                            'fighter_1': _f['fighter_1'],
-                            'fighter_2': _f['fighter_2'],
-                            # Attempt to back-fill ESPN URLs from scoreboard
-                            # data so headshots can be derived even though the
-                            # summary API returned 404 or placeholder names.
-                            'fighter_1_url': (
-                                scoreboard_fighters.get(
-                                    normalize_name(_f['fighter_1']), (None, '')
-                                )[1]
-                            ),
-                            'fighter_2_url': (
-                                scoreboard_fighters.get(
-                                    normalize_name(_f['fighter_2']), (None, '')
-                                )[1]
-                            ),
-                            'f1_stats': {},
-                            'f2_stats': {},
-                            # Card position is unknown from Odds API;
-                            # default to False (prelim) to avoid misleading UI
-                            'is_main_card': False,
-                            'is_title_fight': False,
-                            'result': None,
-                            'weight_class': '',
-                            '_source_complete': False,
-                        }
-                        for _f in _seed
-                        if not fight_has_placeholder(_f)
-                    ]
-                    break
+        if not fights and not event['is_completed']:
+            log.warning(
+                "  ESPN returned 0 canonical fights; NOT seeding Odds API-only fights. "
+                "Keeping existing verified card unchanged; Odds API will only enrich already verified matchups."
+            )
+        elif has_placeholder_fights and not event['is_completed']:
+            log.warning(
+                "  ESPN returned placeholder/TBA fights; NOT replacing card with Odds API-only fights."
+            )
 
         if not event['is_completed']:
             before_count = len(fights)
