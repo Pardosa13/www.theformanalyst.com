@@ -52,11 +52,25 @@ if DATABASE_URL.startswith('postgres://'):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'models', 'catboost_ufc_model.pkl')
 
-# Octagon-AI source-of-truth CSVs (the model was trained on these)
-_OCTAGON_CSV_BASE = (
-    'https://raw.githubusercontent.com/sbalagan22/Octagon-AI/main/newdata'
-)
-_OCTAGON_CSV_FILES = ['Fights.csv', 'Fighters.csv', 'Events.csv', 'current_glicko.csv']
+# Octagon-AI source-of-truth CSVs (the model was trained on these).
+# Keep the GitHub blob/raw endpoint as a fallback because raw.githubusercontent.com
+# can return 404 while the files are still present in the repository tree.
+_OCTAGON_CSV_PATHS = {
+    'Fights.csv': 'newdata/Fights.csv',
+    'Fighters.csv': 'newdata/Fighters.csv',
+    'Events.csv': 'newdata/Events.csv',
+    'current_glicko.csv': 'newdata/current_glicko.csv',
+}
+_OCTAGON_RAW_BASES = [
+    'https://raw.githubusercontent.com/sbalagan22/Octagon-AI/main',
+    'https://github.com/sbalagan22/Octagon-AI/raw/refs/heads/main',
+    'https://github.com/sbalagan22/Octagon-AI/raw/main',
+    'https://cdn.jsdelivr.net/gh/sbalagan22/Octagon-AI@main',
+]
+MIN_HISTORICAL_CSV_FIGHTS = 1000
+MIN_HISTORICAL_CSV_FIGHTERS = 500
+MIN_COMPLETE_DB_FIGHTS_FOR_PRIMARY_HISTORY = 1000
+MIN_DB_FIGHTERS_FOR_PRIMARY_HISTORY = 500
 
 MIN_COMPLETE_UFC_BOUTS = 4
 MIN_COMPLETE_CARD_RATIO = 0.75
@@ -1590,17 +1604,74 @@ def rebuild_stats_from_db(conn):
 
 # ── Octagon-AI CSV stat builder ───────────────────────────────────────────────
 
+def octagon_csv_urls():
+    """Return every candidate URL for each required Octagon-AI CSV."""
+    return {
+        fname: [f"{base}/{path}" for base in _OCTAGON_RAW_BASES]
+        for fname, path in _OCTAGON_CSV_PATHS.items()
+    }
+
+
 def download_octagon_data(tmpdir):
-    """Download Octagon-AI CSV files into *tmpdir* for stat computation."""
-    for fname in _OCTAGON_CSV_FILES:
-        url = f"{_OCTAGON_CSV_BASE}/{fname}"
+    """Download Octagon-AI CSV files into *tmpdir* for stat computation.
+
+    The trained CatBoost artifact expects the original Octagon-AI feature
+    schema, so CSV history is the primary data source.  Postgres is only a
+    fallback when a sufficiently complete historical seed has already been
+    loaded there.
+    """
+    downloaded = {}
+    for fname, urls in octagon_csv_urls().items():
         dest = os.path.join(tmpdir, fname)
-        log.info(f"  Downloading {fname}…")
-        r = requests.get(url, timeout=60)
-        r.raise_for_status()
-        with open(dest, 'wb') as fh:
-            fh.write(r.content)
-        log.info(f"  {fname}: {len(r.content):,} bytes")
+        last_error = None
+        for url in urls:
+            log.info("  Downloading %s from %s", fname, url)
+            try:
+                r = requests.get(url, headers=HEADERS, timeout=60)
+                if r.status_code == 404:
+                    last_error = f"404 Not Found: {url}"
+                    continue
+                r.raise_for_status()
+                if not r.content or b'404: Not Found' in r.content[:80]:
+                    last_error = f"empty/not-found response: {url}"
+                    continue
+                with open(dest, 'wb') as fh:
+                    fh.write(r.content)
+                downloaded[fname] = url
+                log.info("  %s: %,d bytes source=%s", fname, len(r.content), url)
+                break
+            except Exception as exc:
+                last_error = f"{url}: {exc}"
+        if fname not in downloaded:
+            raise RuntimeError(f"Could not download required Octagon-AI CSV {fname}; last_error={last_error}")
+    log.info("OCTAGON_CSV_URLS %s", json.dumps(downloaded, sort_keys=True))
+    return downloaded
+
+
+def postgres_history_is_complete_enough(conn):
+    """Return True only when Postgres has a full historical MMA seed."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM mma_fights f
+            JOIN mma_events e ON f.event_id = e.id
+            WHERE e.is_completed = TRUE
+              AND e.date <= CURRENT_DATE
+              AND f.winner_name IS NOT NULL
+        """)
+        fight_count = int(cur.fetchone()[0] or 0)
+        cur.execute("SELECT COUNT(*) FROM mma_fighters")
+        fighter_count = int(cur.fetchone()[0] or 0)
+    complete = (
+        fight_count >= MIN_COMPLETE_DB_FIGHTS_FOR_PRIMARY_HISTORY
+        and fighter_count >= MIN_DB_FIGHTERS_FOR_PRIMARY_HISTORY
+    )
+    log.info(
+        "POSTGRES_HISTORY_COMPLETENESS completed_fights=%s fighters=%s required_fights=%s required_fighters=%s complete=%s",
+        fight_count, fighter_count, MIN_COMPLETE_DB_FIGHTS_FOR_PRIMARY_HISTORY,
+        MIN_DB_FIGHTERS_FOR_PRIMARY_HISTORY, str(complete).lower(),
+    )
+    return complete
 
 
 def _parse_height_cm(val):
@@ -1783,6 +1854,11 @@ def rebuild_stats_from_csv(data_dir, conn=None):
             return (int(rnd) - 1) * 300 + m * 60 + s
         except Exception:
             return 300
+
+    if len(fights_df) < MIN_HISTORICAL_CSV_FIGHTS or len(fighters_df) < MIN_HISTORICAL_CSV_FIGHTERS:
+        raise RuntimeError(
+            f"Octagon CSV dataset is incomplete: fights={len(fights_df)} fighters={len(fighters_df)}"
+        )
 
     log.info(f"  Processing {len(fights_df):,} historical fights…")
     for _, row in fights_df.iterrows():
@@ -2436,7 +2512,12 @@ def main():
             stats_tracker, name_to_id, fighter_bio = rebuild_stats_from_csv(tmpdir, conn)
             espn_to_id = build_espn_to_fighter_id(conn, stats_tracker)
     except Exception as e:
-        log.warning(f"CSV data unavailable ({e}); falling back to DB stats.")
+        log.warning(f"CSV data unavailable ({e}); checking whether Postgres is complete enough for fallback.")
+        if not postgres_history_is_complete_enough(conn):
+            raise RuntimeError(
+                "Octagon-AI CSV history is unavailable and Postgres does not contain a sufficiently complete historical dataset"
+            ) from e
+        log.warning("Using Postgres historical fallback because it passed completeness thresholds.")
         stats_tracker, name_to_id, espn_to_id = rebuild_stats_from_db(conn)
         fighter_bio = load_fighters_bio(conn)
 
