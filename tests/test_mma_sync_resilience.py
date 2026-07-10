@@ -580,3 +580,97 @@ def test_odds_api_never_creates_standalone_active_fight_contract():
     fn = src[src.index("def upsert_mma_fight_odds"): ]
     assert "INSERT INTO mma_fight_odds" in fn
     assert "INSERT INTO mma_fights" not in fn
+
+
+def test_missing_csv_incomplete_postgres_does_not_crash_and_skips_predictions(monkeypatch, caplog):
+    class Conn(_FakeConn):
+        def close(self):
+            self.closed = True
+
+    conn = Conn(fetchone=(0,))
+    monkeypatch.setattr(mma_sync, "DATABASE_URL", "postgresql://example")
+    monkeypatch.setenv("ODDS_API_KEY", "test-key")
+    monkeypatch.setattr(mma_sync, "get_conn", lambda: conn)
+    monkeypatch.setattr(mma_sync, "ensure_mma_integrity_schema", lambda _conn: None)
+    monkeypatch.setattr(mma_sync, "download_octagon_data", lambda _tmp: (_ for _ in ()).throw(RuntimeError("404")))
+    monkeypatch.setattr(mma_sync, "postgres_history_is_complete_enough", lambda _conn: False)
+    monkeypatch.setattr(mma_sync, "build_name_to_fighter_id", lambda _conn: {"a": "fid-a", "b": "fid-b"})
+    monkeypatch.setattr(mma_sync, "build_espn_to_fighter_id", lambda _conn, _stats=None: {})
+    monkeypatch.setattr(mma_sync, "load_fighters_bio", lambda _conn: {})
+    monkeypatch.setattr(mma_sync, "load_model", lambda: (_ for _ in ()).throw(AssertionError("model should not load without history")))
+    monkeypatch.setattr(mma_sync, "scrape_upcoming_events", lambda: [{"event_id": "e1", "event_name": "UFC Test", "date": "2026-07-10", "url": "u", "is_completed": False, "location": ""}])
+    monkeypatch.setattr(mma_sync, "fetch_scoreboard_fighters", lambda: {})
+    monkeypatch.setattr(mma_sync, "scrape_event_details", lambda _url, _eid: [{"fighter_1": "A", "fighter_2": "B", "bout_uid": "ab"}])
+    monkeypatch.setattr(mma_sync, "event_card_fetch_is_complete", lambda *_args: True)
+    calls = {"event": 0, "fight": 0, "odds": 0, "pred": 0}
+    monkeypatch.setattr(mma_sync, "upsert_event", lambda *_args, **_kw: calls.__setitem__("event", calls["event"] + 1))
+    monkeypatch.setattr(mma_sync, "upsert_fight", lambda *_args, **_kw: calls.__setitem__("fight", calls["fight"] + 1) or 123)
+    monkeypatch.setattr(mma_sync, "link_fight_fighters", lambda *_args, **_kw: None)
+    monkeypatch.setattr(mma_sync, "deactivate_duplicate_active_matchups", lambda *_args, **_kw: None)
+    monkeypatch.setattr(mma_sync, "deactivate_stale_event_bouts", lambda *_args, **_kw: None)
+    monkeypatch.setattr(mma_sync, "upsert_fighter_espn_info", lambda *_args, **_kw: None)
+    monkeypatch.setattr(mma_sync, "log_history_lookup", lambda *_args, **_kw: None)
+    monkeypatch.setattr(mma_sync, "diagnose_odds_match", lambda *_args: {"matched": False, "reason": "no_odds"})
+    monkeypatch.setattr(mma_sync, "upsert_prediction", lambda *_args, **_kw: calls.__setitem__("pred", calls["pred"] + 1))
+    monkeypatch.setattr(mma_sync.time, "sleep", lambda _s: None)
+    fake_mma_data = types.ModuleType("mma_data")
+    fake_mma_data.fetch_mma_events = lambda api_key=None: []
+    fake_mma_data.fetch_mma_fight_odds = lambda api_key=None: [{"event_key": "odds-1"}]
+    fake_mma_models = types.ModuleType("mma_models")
+    fake_mma_models.upsert_mma_fight_odds = lambda _db, rows: calls.__setitem__("odds", len(rows)) or len(rows)
+    fake_sqlalchemy = types.ModuleType("sqlalchemy")
+    fake_sqlalchemy.create_engine = lambda _url: object()
+    fake_sqlalchemy.text = lambda sql: sql
+    monkeypatch.setitem(sys.modules, "mma_data", fake_mma_data)
+    monkeypatch.setitem(sys.modules, "mma_models", fake_mma_models)
+    monkeypatch.setitem(sys.modules, "sqlalchemy", fake_sqlalchemy)
+    monkeypatch.setattr(mma_sync.pd, "Timestamp", SimpleNamespace(now=lambda: "2026-07-10"), raising=False)
+
+    with caplog.at_level("INFO", logger="mma_sync"):
+        mma_sync.main()
+
+    assert calls["event"] == 1
+    assert calls["fight"] == 1
+    assert calls["pred"] == 0
+    assert calls["odds"] == 1
+    assert "HISTORICAL_DATA_UNAVAILABLE=true" in caplog.text
+    assert "PREDICTION_SKIPPED historical_data_unavailable=true" in caplog.text
+    statements = "\n".join(sql for sql, _ in conn.cursor_obj.statements)
+    assert "DELETE FROM mma_predictions WHERE fight_id" not in statements
+
+
+def test_pinned_historical_csv_snapshot_url_is_used(monkeypatch, tmp_path):
+    monkeypatch.setattr(mma_sync, "_OCTAGON_RAW_BASE", "https://raw.githubusercontent.com/sbalagan22/Octagon-AI/abc123")
+    seen = []
+
+    class Response:
+        status_code = 200
+        content = b"col\nvalue\n"
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, **_kwargs):
+        seen.append(url)
+        return Response()
+
+    monkeypatch.setattr(mma_sync.requests, "get", fake_get)
+    downloaded = mma_sync.download_octagon_data(str(tmp_path))
+
+    assert downloaded["Fights.csv"] == "https://raw.githubusercontent.com/sbalagan22/Octagon-AI/abc123/newdata/Fights.csv"
+    assert len(downloaded) == 4
+    assert all("/abc123/newdata/" in url for url in seen)
+
+
+def test_octagon_validator_rejects_moving_main_ref():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("validate_octagon_data", Path("scripts/validate_octagon_data.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    try:
+        mod.validate("main")
+    except RuntimeError as exc:
+        assert "immutable commit SHA or tag" in str(exc)
+    else:
+        raise AssertionError("moving main ref must not validate")
