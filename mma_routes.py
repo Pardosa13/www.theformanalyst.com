@@ -57,13 +57,16 @@ def register_mma_routes(app, db):
             event_rows = db.session.execute(events_sql).fetchall()
 
             headshot_rows = db.session.execute(text("""
-                SELECT full_name, headshot_url
+                SELECT id, full_name, headshot_url
                 FROM mma_fighters
                 WHERE NULLIF(TRIM(headshot_url), '') IS NOT NULL
             """)).fetchall()
+            headshots_by_id = {}
             headshots_by_norm = {}
             headshots_by_last_name = {}
-            for fighter_name, headshot_url in headshot_rows:
+            for fighter_id, fighter_name, headshot_url in headshot_rows:
+                if fighter_id:
+                    headshots_by_id[str(fighter_id)] = headshot_url
                 norm = normalise_name(fighter_name)
                 if norm and norm not in headshots_by_norm:
                     headshots_by_norm[norm] = headshot_url
@@ -71,10 +74,14 @@ def register_mma_routes(app, db):
                 if last_name:
                     headshots_by_last_name.setdefault(last_name, set()).add(headshot_url)
 
-            def resolve_headshot(fighter_name, current_headshot):
+            def resolve_headshot(fighter_name, current_headshot, fighter_id=None):
                 current_headshot = (current_headshot or '').strip()
-                if current_headshot or not fighter_name:
-                    return current_headshot or None
+                if current_headshot:
+                    return current_headshot
+                if fighter_id and str(fighter_id) in headshots_by_id:
+                    return headshots_by_id[str(fighter_id)]
+                if not fighter_name:
+                    return None
 
                 norm_fighter_name = normalise_name(fighter_name)
                 direct = headshots_by_norm.get(norm_fighter_name)
@@ -104,7 +111,8 @@ def register_mma_routes(app, db):
 
                 fights_sql = text("""
                     SELECT
-                        f.id, f.fighter_1_name, f.fighter_2_name,
+                        f.id, f.bout_uid, f.status, f.fighter_1_id, f.fighter_2_id,
+                        f.fighter_1_name, f.fighter_2_name,
                         f.weight_class, f.is_main_card, f.is_title_fight,
                         f.winner_name, f.method, f.round_ended, f.time_ended,
                         f.f1_height, f.f1_reach, f.f1_stance, f.f1_record,
@@ -128,21 +136,27 @@ def register_mma_routes(app, db):
                     LEFT JOIN mma_fighters mf1 ON mf1.id = f.fighter_1_id
                     LEFT JOIN mma_fighters mf2 ON mf2.id = f.fighter_2_id
                     WHERE f.event_id = :eid
+                      AND COALESCE(f.is_active, TRUE) = TRUE
+                      AND COALESCE(f.status, 'confirmed') IN ('confirmed', 'completed')
+                      AND NULLIF(TRIM(f.fighter_1_name), '') IS NOT NULL
+                      AND NULLIF(TRIM(f.fighter_2_name), '') IS NOT NULL
+                      AND LOWER(TRIM(f.fighter_1_name)) NOT IN ('tba', 'tbd', 'opponent tba', 'opponent tbd')
+                      AND LOWER(TRIM(f.fighter_2_name)) NOT IN ('tba', 'tbd', 'opponent tba', 'opponent tbd')
                     ORDER BY f.is_main_card DESC, f.id ASC
                 """)
                 fight_rows = db.session.execute(fights_sql, {'eid': event_id}).fetchall()
 
                 fights = []
                 for fr in fight_rows:
-                    (fight_id, f1, f2, wc, is_main, is_title,
+                    (fight_id, bout_uid, status, f1_id, f2_id, f1, f2, wc, is_main, is_title,
                      winner, method, rnd, t_end,
                      f1h, f1r, f1s, f1rec,
                      f2h, f2r, f2s, f2rec,
                      pred_winner, f1_prob, f2_prob, conf, factors_json,
                      f1_headshot_url, f2_headshot_url) = fr
 
-                    f1_headshot_url = resolve_headshot(f1, f1_headshot_url)
-                    f2_headshot_url = resolve_headshot(f2, f2_headshot_url)
+                    f1_headshot_url = resolve_headshot(f1, f1_headshot_url, f1_id)
+                    f2_headshot_url = resolve_headshot(f2, f2_headshot_url, f2_id)
 
                     factors = {}
                     if factors_json:
@@ -153,6 +167,8 @@ def register_mma_routes(app, db):
 
                     fights.append({
                         'id': fight_id,
+                        'bout_uid': bout_uid,
+                        'status': status,
                         'fighter_1': f1,
                         'fighter_2': f2,
                         'weight_class': wc or '',
@@ -176,8 +192,8 @@ def register_mma_routes(app, db):
                         'f2_headshot_url': f2_headshot_url or None,
                         'prediction': {
                             'winner': pred_winner,
-                            'f1_prob': float(f1_prob) if f1_prob else 0.5,
-                            'f2_prob': float(f2_prob) if f2_prob else 0.5,
+                            'f1_prob': float(f1_prob),
+                            'f2_prob': float(f2_prob),
                             'confidence': conf or '50.0%',
                             'factors': factors,
                         } if pred_winner else None,
@@ -299,7 +315,11 @@ def register_mma_routes(app, db):
                 JOIN mma_events e ON e.id = f.event_id
                 LEFT JOIN mma_predictions p ON p.fight_id = f.id
                 WHERE e.is_completed = FALSE
+                  AND COALESCE(f.is_active, TRUE) = TRUE
+                  AND COALESCE(f.status, 'confirmed') = 'confirmed'
                   AND p.predicted_winner IS NOT NULL
+                  AND p.f1_win_probability IS NOT NULL
+                  AND p.f2_win_probability IS NOT NULL
                 ORDER BY e.date ASC, f.is_main_card DESC, f.id ASC
             """)
             fight_rows = db.session.execute(fights_sql).fetchall()
