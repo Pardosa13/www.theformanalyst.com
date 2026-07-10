@@ -110,6 +110,8 @@ def init_mma_tables(db):
         bout_uid = db.Column(db.String(200))
         status = db.Column(db.String(30), default='confirmed')
         is_active = db.Column(db.Boolean, default=True)
+        card_source = db.Column(db.String(50), default='legacy')
+        verified = db.Column(db.Boolean, default=False)
 
         created_at = db.Column(db.DateTime, default=datetime.utcnow)
         updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -163,7 +165,11 @@ def init_mma_tables(db):
         "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS bout_uid VARCHAR(200)",
         "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'confirmed'",
         "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS card_source VARCHAR(50) DEFAULT 'legacy'",
+        "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE",
         "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
+        "UPDATE mma_fights SET card_source = 'legacy' WHERE card_source IS NULL",
+        "UPDATE mma_fights SET verified = TRUE WHERE verified IS NULL AND card_source <> 'odds_api'",
         "UPDATE mma_fights SET bout_uid = 'legacy:' || event_id || ':' || id::text WHERE bout_uid IS NULL OR TRIM(bout_uid) = ''",
         "ALTER TABLE mma_fights ALTER COLUMN bout_uid SET NOT NULL",
         """

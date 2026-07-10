@@ -114,6 +114,106 @@ def test_stale_fights_deactivate_after_complete_successful_sync():
     assert "DELETE FROM mma_predictions" in statements
 
 
+def test_aws_waf_challenge_detection():
+    html = "<html><script>window.awsWafCookieDomainList=[]; window.gokuProps={}</script>Please enable JavaScript</html>"
+    assert mma_sync.is_espn_waf_challenge(html, {"status": 202}) is True
+
+
+def test_scrape_event_details_aborts_dom_parsers_on_waf(monkeypatch, caplog):
+    monkeypatch.setattr(mma_sync, "_fetch_espn_scoreboard_card", lambda event_id: [])
+    monkeypatch.setattr(mma_sync, "_fetch_espn_event_api", lambda event_id: [])
+
+    def fail_heading(_soup):
+        raise AssertionError("heading parser must not run for AWS WAF challenge HTML")
+
+    monkeypatch.setattr(mma_sync, "_parse_espn_fightcenter_heading_dom", fail_heading)
+
+    class _FakeResponse:
+        status_code = 202
+        url = "https://www.espn.com/mma/fightcenter/_/id/401"
+        headers = {"content-type": "text/html"}
+        content = b"<html><script>window.awsWafCookieDomainList=[]; window.gokuProps={}</script>Please enable JavaScript</html>"
+        encoding = "utf-8"
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(mma_sync.requests, "get", lambda *args, **kwargs: _FakeResponse())
+
+    with caplog.at_level("WARNING", logger="mma_sync"):
+        fights = mma_sync.scrape_event_details("https://www.espn.com/mma/fightcenter/_/id/401", "401")
+
+    assert fights == []
+    assert "ESPN_WAF_CHALLENGE=true" in caplog.text
+    assert "aborting all Fightcenter DOM parsers" in caplog.text
+
+
+def test_scoreboard_json_bout_extraction(monkeypatch):
+    event = {
+        "id": "401",
+        "date": "2026-11-14T00:00Z",
+        "status": {"type": {"state": "pre"}},
+        "links": [{"href": "https://www.espn.com/mma/fightcenter/_/id/401"}],
+        "competitions": [
+            {
+                "id": "9001",
+                "competitors": [
+                    {"homeAway": "away", "athlete": {"id": "1", "displayName": "Fighter A", "links": [{"href": "https://www.espn.com/mma/fighter/_/id/1/a"}]}},
+                    {"homeAway": "home", "athlete": {"id": "2", "displayName": "Fighter B", "links": [{"href": "https://www.espn.com/mma/fighter/_/id/2/b"}]}},
+                ],
+                "status": {"type": {"state": "pre", "name": "STATUS_SCHEDULED"}},
+                "type": {"text": "Main Card"},
+                "weightClass": {"displayName": "Lightweight"},
+            }
+        ],
+    }
+    monkeypatch.setattr(mma_sync, "_fetch_espn_scoreboard_event", lambda event_id: (event, "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard?limit=100&dates=20260101-20261231"))
+    monkeypatch.setattr(mma_sync, "_enrich_fights_with_profiles", lambda fights: fights)
+
+    fights = mma_sync._fetch_espn_scoreboard_card("401")
+
+    assert [(f["fighter_1"], f["fighter_2"]) for f in fights] == [("Fighter A", "Fighter B")]
+    assert fights[0]["bout_uid"] == "9001"
+    assert fights[0]["card_source"] == "espn_scoreboard_json"
+    assert fights[0]["verified"] is True
+
+
+def test_no_odds_api_only_active_card_creation_from_empty_canonical_sources(monkeypatch):
+    monkeypatch.setattr(mma_sync, "_fetch_espn_scoreboard_card", lambda event_id: [])
+    monkeypatch.setattr(mma_sync, "_fetch_espn_event_api", lambda event_id: [])
+    monkeypatch.setattr(mma_sync, "_fetch_espn_event_html", lambda event_url: (None, "", {"status": None}))
+
+    fights = mma_sync.scrape_event_details("https://www.espn.com/mma/fightcenter/_/id/401", "401")
+
+    assert fights == []
+
+
+def test_upsert_fight_marks_canonical_bouts_verified():
+    conn = _FakeConn(fetchone=(123,))
+    fight_id = mma_sync.upsert_fight(conn, "401", _fight("official-1"), commit=False)
+
+    assert fight_id == 123
+    sql, params = conn.cursor_obj.statements[-1]
+    assert "card_source, verified" in sql
+    assert "card_source = EXCLUDED.card_source" in sql
+    assert params[4] == "espn_scoreboard_json"
+    assert params[5] is True
+
+
+def test_provenance_cleanup_only_targets_unverified_or_odds_rows():
+    conn = _FakeConn(fetchall=[(10,), (11,)])
+
+    count = mma_sync.deactivate_unverified_event_bouts(conn, "401")
+
+    assert count == 2
+    statements = "\n".join(sql for sql, _ in conn.cursor_obj.statements)
+    assert "card_source = 'odds_api'" in statements
+    assert "COALESCE(verified, FALSE) = FALSE" in statements
+    assert "fighter_1_name" not in statements
+    assert "fighter_2_name" not in statements
+    assert "DELETE FROM mma_predictions" in statements
+
+
 def test_replacement_bouts_leave_exactly_one_active_matchup():
     conn = _FakeConn(fetchall=[(99,)])
 
@@ -273,6 +373,7 @@ def test_scrape_event_details_reaches_heading_parser_after_legacy_zero(monkeypat
         def json(self):
             return {}
 
+    monkeypatch.setattr(mma_sync, "_fetch_espn_scoreboard_card", lambda event_id: [])
     monkeypatch.setattr(mma_sync, "_fetch_espn_event_api", lambda event_id: [])
     monkeypatch.setattr(mma_sync.requests, "get", lambda *args, **kwargs: _FakeResponse())
     monkeypatch.setattr(mma_sync, "BeautifulSoup", lambda *args, **kwargs: soup)
