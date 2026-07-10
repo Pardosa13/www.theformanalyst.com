@@ -449,3 +449,60 @@ def test_mma_template_preserves_api_order_within_card_sections():
     assert "mainCard.map(f => fightCardHTML(f))" in template
     assert "prelims.map(f => fightCardHTML(f))" in template
     assert "earlyPrelims.map(f => fightCardHTML(f))" in template
+
+
+def test_suffix_accent_and_common_aliases_match_existing_fighters():
+    name_to_id = {
+        mma_sync.normalize_name("Kai Kamaka"): "kai-id",
+        mma_sync.normalize_name("Zachary Reese"): "reese-id",
+        mma_sync.normalize_name("Benoit Saint-Denis"): "bsd-id",
+        mma_sync.normalize_name("Bobby Green"): "green-id",
+        mma_sync.normalize_name("Loneer Kavanagh"): "kav-id",
+    }
+
+    assert mma_sync.resolve_fighter_id("Kai Kamaka III", name_to_id) == "kai-id"
+    assert mma_sync.resolve_fighter_id("Zach Reese", name_to_id) == "reese-id"
+    assert mma_sync.resolve_fighter_id("Benoît Saint Denis", name_to_id) == "bsd-id"
+    assert mma_sync.resolve_fighter_id("King Green", name_to_id) == "green-id"
+    assert mma_sync.resolve_fighter_id("Lone’er Kavanagh", name_to_id) == "kav-id"
+
+
+def test_prediction_gate_reports_each_failed_condition():
+    reasons = mma_sync.prediction_gate_reasons(
+        {"fighter_1": "TBA", "fighter_2": "New Fighter"}, None, None, {}
+    )
+    assert "TBA fighter" in reasons
+    assert "inactive fight" in reasons
+    assert any(r.startswith("missing fighter database row") for r in reasons)
+
+
+def test_valid_historical_stats_produce_prediction_gate_eligibility():
+    s1 = mma_sync.FighterStats(); s1.total_fights = 2
+    s2 = mma_sync.FighterStats(); s2.total_fights = 3
+    fight = {"fighter_1": "A", "fighter_2": "B", "fighter_1_espn_id": "1", "fighter_2_espn_id": "2"}
+    assert mma_sync.prediction_gate_reasons(fight, "a", "b", {"a": s1, "b": s2}) == []
+
+
+def test_truly_new_fighters_remain_prediction_unavailable():
+    fight = {"fighter_1": "New A", "fighter_2": "New B"}
+    reasons = mma_sync.prediction_gate_reasons(fight, None, None, {})
+    assert any("missing fighter database row" in r for r in reasons)
+
+
+def test_reversed_fighter_order_still_matches_odds_pair():
+    from mma_data import pairs_match
+    assert pairs_match("Fighter A", "Fighter B", "Fighter B", "Fighter A") is True
+
+
+def test_canonical_espn_fights_can_receive_odds_prices_by_alias_pair():
+    from mma_data import pairs_match, names_match
+    assert pairs_match("Benoît Saint Denis", "King Green", "Bobby Green", "Benoit Saint-Denis") is True
+    assert names_match("Kai Kamaka III", "Kai Kamaka") is True
+
+
+def test_odds_api_never_creates_standalone_active_fight_contract():
+    from pathlib import Path
+    src = Path("mma_models.py").read_text()
+    fn = src[src.index("def upsert_mma_fight_odds"): ]
+    assert "INSERT INTO mma_fight_odds" in fn
+    assert "INSERT INTO mma_fights" not in fn

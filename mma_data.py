@@ -67,15 +67,38 @@ def get_odds_api_key() -> str:
 
 # ─── Name normalisation (same as mma_sync.normalize_name) ────────────────────
 
+_NAME_ALIASES = {"king green": "bobby green", "robert green": "bobby green", "zach reese": "zachary reese"}
+_SUFFIX_TOKENS = {"jr", "sr", "ii", "iii", "iv", "v"}
+
 def _normalise_name(name: str) -> str:
-    """Lowercase, strip accents and punctuation, collapse whitespace."""
+    """Lowercase, strip accents/suffix punctuation and collapse common aliases."""
     if not name:
         return ""
-    nfkd = unicodedata.normalize("NFKD", str(name))
+    name = str(name).replace("’", "'")
+    nfkd = unicodedata.normalize("NFKD", name)
     name = "".join(c for c in nfkd if not unicodedata.combining(c))
     name = name.lower().replace("-", " ")
     name = re.sub(r"[^a-z0-9\s]", "", name)
-    return " ".join(name.split())
+    name = name.replace(" saint ", " st ").replace(" saint", " st").replace("saint ", "st ")
+    norm = " ".join(name.split())
+    return _NAME_ALIASES.get(norm, norm)
+
+def name_aliases(name: str) -> set[str]:
+    norm = _normalise_name(name)
+    aliases = {norm} if norm else set()
+    parts = norm.split()
+    if parts and parts[-1] in _SUFFIX_TOKENS:
+        aliases.add(" ".join(parts[:-1]))
+    if norm.replace(" ", "") == "loneerkavanagh":
+        aliases.update({"loneer kavanagh", "lone er kavanagh"})
+    if norm == "benoit st denis":
+        aliases.update({"benoit saint denis", "benoit saintdenis"})
+    return {a for a in aliases if a}
+
+def unordered_pair_key(a: str, b: str) -> str:
+    ca = sorted(name_aliases(a) or {_normalise_name(a)})[0]
+    cb = sorted(name_aliases(b) or {_normalise_name(b)})[0]
+    return "|".join(sorted([ca, cb]))
 
 
 # Public alias (imported by mma_routes.py)
@@ -83,17 +106,19 @@ normalise_name = _normalise_name
 
 
 def names_match(a: str, b: str) -> bool:
-    """True when two fighter names refer to the same person (last-name match
-    with a full-name fallback)."""
-    na, nb = _normalise_name(a), _normalise_name(b)
-    if na == nb:
+    """True when two fighter names refer to the same person using safe aliases."""
+    aa, bb = name_aliases(a), name_aliases(b)
+    if aa & bb:
         return True
-    # Last-name match
-    last_a = na.split()[-1] if na else ""
-    last_b = nb.split()[-1] if nb else ""
-    if last_a and last_b and last_a == last_b and len(last_a) > 2:
-        return True
+    for na in aa:
+        for nb in bb:
+            if na and nb and (na in nb or nb in na):
+                return True
     return False
+
+def pairs_match(a1: str, a2: str, b1: str, b2: str) -> bool:
+    return ((names_match(a1, b1) and names_match(a2, b2)) or
+            (names_match(a1, b2) and names_match(a2, b1)))
 
 
 # ─── Odds API fetch ───────────────────────────────────────────────────────────
