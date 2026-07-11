@@ -3602,10 +3602,16 @@ def _attach_internal_next_to_go_links(races):
         race = Race.query.filter_by(meeting_id=meeting.id, race_number=item.get('race_number')).first()
         if not race:
             continue
+        has_ml_score = db.session.query(Prediction.id).join(Horse, Prediction.horse_id == Horse.id).filter(
+            Horse.race_id == race.id,
+            Prediction.ml_score.isnot(None)
+        ).first() is not None
+        if not has_ml_score:
+            continue
         item['internal_meeting_id'] = meeting.id
         item['internal_race_id'] = race.id
         item['clickable'] = True
-        item['url'] = url_for('view_meeting', meeting_id=meeting.id) + f"#race-{item.get('race_number')}"
+        item['url'] = url_for('ml_view_meeting', meeting_id=meeting.id) + f"#race-{item.get('race_number')}"
     return races
 
 @app.route("/api/ladbrokes/next-to-go")
