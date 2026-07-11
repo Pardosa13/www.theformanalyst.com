@@ -2581,20 +2581,22 @@ def main():
     # Load model
     model = load_model()
 
-    # Build stats from Octagon-AI CSV data (falls back to DB if download fails)
+    # Build stats from Octagon-AI CSV data when available.  If the CSV source is
+    # unavailable, keep the cron non-fatal and use the engineered fighter
+    # features already persisted on mma_fighters for prediction.
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             download_octagon_data(tmpdir)
             stats_tracker, name_to_id, fighter_bio = rebuild_stats_from_csv(tmpdir, conn)
             espn_to_id = build_espn_to_fighter_id(conn, stats_tracker)
     except Exception as e:
-        log.warning(f"CSV data unavailable ({e}); checking whether Postgres is complete enough for fallback.")
-        if not postgres_history_is_complete_enough(conn):
-            raise RuntimeError(
-                "Octagon-AI CSV history is unavailable and Postgres does not contain a sufficiently complete historical dataset"
-            ) from e
-        log.warning("Using Postgres historical fallback because it passed completeness thresholds.")
-        stats_tracker, name_to_id, espn_to_id = rebuild_stats_from_db(conn)
+        log.warning(
+            "Octagon-AI CSV history is unavailable (%s); continuing with persisted mma_fighters features.",
+            e,
+        )
+        stats_tracker = {}
+        name_to_id = build_name_to_fighter_id(conn, stats_tracker)
+        espn_to_id = build_espn_to_fighter_id(conn, stats_tracker)
         fighter_bio = load_fighters_bio(conn)
 
     # ── Pre-fetch Odds API events for diagnostics / odds-only enrichment ─────
