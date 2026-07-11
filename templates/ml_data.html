@@ -345,6 +345,10 @@
     <span class="stat-val {% if ml_performance_stats.roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(ml_performance_stats.roi) }}%</span>
     <div class="stat-label">ML ROI</div>
   </div>
+  <div class="overview-tile">
+    <span class="stat-val">{{ "%.2f"|format(ml_performance_stats.avg_winner_sp) }}</span>
+    <div class="stat-label">Avg Price of Winners</div>
+  </div>
 </div>
 {% else %}
 <div class="analytics-empty">
@@ -491,6 +495,15 @@
 </div>
 
 <div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlSignalAgreement" aria-expanded="false">
+    <h5>✅ Analyzer + PFAI + ML Agreement Results</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="mlSignalAgreement" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load all-signal agreement results...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
   <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlDayOfWeek" aria-expanded="false">
     <h5>📆 ML Day of Week Performance</h5><i class="bi bi-chevron-down"></i>
   </div>
@@ -570,6 +583,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (mlCombinationAnalysis) { mlCombinationAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-combination-analysis')) { loadMlCombinationAnalysis(); } }); }
     const mlPfaiAnalysis = document.getElementById('mlPfaiAnalysis');
     if (mlPfaiAnalysis) { mlPfaiAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-pfai-analysis')) { loadMlPfaiAnalysis(); } }); }
+    const mlSignalAgreement = document.getElementById('mlSignalAgreement');
+    if (mlSignalAgreement) { mlSignalAgreement.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-signal-agreement')) { loadMlSignalAgreement(); } }); }
     const mlDayOfWeek = document.getElementById('mlDayOfWeek');
     if (mlDayOfWeek) { mlDayOfWeek.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-day-of-week')) { loadMlDayOfWeek(); } }); }
     const mlWinProbFilter = document.getElementById('mlWinProbFilter');
@@ -712,6 +727,15 @@ function loadMlPfaiAnalysis() {
         .then(r => r.json())
         .then(data => { renderMlPfaiAnalysis(data); loadedSections.add('ml-pfai-analysis'); })
         .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML PFAI analysis. Please try again.</div>'; console.error(err); });
+}
+
+function loadMlSignalAgreement() {
+    const container = document.getElementById('mlSignalAgreement');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading all-signal agreement results...</p></div>';
+    fetch(`/api/data/ml-signal-agreement?${filterParams}`)
+        .then(r => r.json())
+        .then(data => { renderMlSignalAgreement(data); loadedSections.add('ml-signal-agreement'); })
+        .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading all-signal agreement results. Please try again.</div>'; console.error(err); });
 }
 
 function loadMlDayOfWeek() {
@@ -2608,6 +2632,38 @@ function renderMlCombinationAnalysis(data) {
     html += `</div></div>`;
 
     container.innerHTML = html;
+}
+
+
+function renderMlSignalAgreement(data) {
+    const container = document.getElementById('mlSignalAgreement');
+    if (!data || data.error) {
+        container.innerHTML = `<div class="card-body text-danger">${data?.error || 'Unable to load all-signal agreement results.'}</div>`;
+        return;
+    }
+    const profitClass = data.profit >= 0 ? 'profit' : 'loss';
+    const roiClass = data.roi_pct >= 0 ? 'profit' : 'loss';
+    container.innerHTML = `<div class="card-body">
+        <p class="text-muted" style="font-size:12px;margin-bottom:14px">
+            Results for races where the Analyzer top pick, PFAI top pick and ML top pick all selected the same horse. Uses $10 win bets and the current page filters.
+        </p>
+        <div class="overview-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:18px;">
+            <div class="overview-tile"><span class="stat-val">${data.bets.toLocaleString()}</span><div class="stat-label">Bets</div></div>
+            <div class="overview-tile"><span class="stat-val">${data.wins.toLocaleString()}</span><div class="stat-label">Wins</div></div>
+            <div class="overview-tile"><span class="stat-val">${data.strike_rate_pct.toFixed(2)}%</span><div class="stat-label">Strike Rate</div></div>
+            <div class="overview-tile"><span class="stat-val">${data.avg_winner_sp.toFixed(2)}</span><div class="stat-label">Avg Price of Winners</div></div>
+            <div class="overview-tile"><span class="stat-val">${data.total_staked.toFixed(0)}</span><div class="stat-label">Total Staked</div></div>
+            <div class="overview-tile"><span class="stat-val">${data.total_return.toFixed(2)}</span><div class="stat-label">Total Return</div></div>
+            <div class="overview-tile ${data.profit >= 0 ? 'pos' : 'neg'}"><span class="stat-val ${profitClass}">${data.profit >= 0 ? '+' : ''}${data.profit.toFixed(2)}</span><div class="stat-label">Profit</div></div>
+            <div class="overview-tile ${data.roi_pct >= 0 ? 'pos' : 'neg'}"><span class="stat-val ${roiClass}">${data.roi_pct >= 0 ? '+' : ''}${data.roi_pct.toFixed(2)}%</span><div class="stat-label">ROI</div></div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-dark"><tr><th>Bets</th><th>Wins</th><th>Strike %</th><th>Total Staked</th><th>Total Return</th><th>Profit</th><th>ROI %</th><th>Avg Winner SP</th></tr></thead>
+                <tbody><tr><td>${data.bets}</td><td>${data.wins}</td><td>${data.strike_rate_pct.toFixed(2)}%</td><td>${data.total_staked.toFixed(0)}</td><td>${data.total_return.toFixed(2)}</td><td class="${profitClass}">${data.profit >= 0 ? '+' : ''}${data.profit.toFixed(2)}</td><td class="${roiClass}">${data.roi_pct >= 0 ? '+' : ''}${data.roi_pct.toFixed(2)}%</td><td>${data.avg_winner_sp.toFixed(2)}</td></tr></tbody>
+            </table>
+        </div>
+    </div>`;
 }
 
 function renderMlPfaiAnalysis(data) {

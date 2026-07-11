@@ -3297,6 +3297,7 @@ def _summarise_ml_performance_races(race_results):
     selections = len(race_results)
     wins = sum(1 for r in race_results if r['finish_position'] == 1)
     places = sum(1 for r in race_results if r['finish_position'] in [1, 2, 3])
+    winning_sps = [r['sp'] for r in race_results if r['finish_position'] == 1 and r['sp']]
     total_return = sum(r['sp'] * stake for r in race_results if r['finish_position'] == 1)
     total_stake = float(selections) * stake
     total_profit = total_return - total_stake
@@ -3317,6 +3318,7 @@ def _summarise_ml_performance_races(race_results):
         'total_profit': total_profit,
         'roi': roi,
         'agree_rate': (agree / selections * 100) if selections else 0.0,
+        'avg_winner_sp': (sum(winning_sps) / len(winning_sps)) if winning_sps else 0.0,
     }
 
 
@@ -9262,6 +9264,119 @@ def api_monthly_performance():
         })
 
     return jsonify({'monthly': result_list})
+
+
+@app.route("/api/data/ml-signal-agreement")
+@login_required
+def api_ml_signal_agreement():
+    """Summarise races where Analyzer, PFAI and ML all rank the same runner first."""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    track_filter = request.args.get('track', '')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    limit_param = request.args.get('limit', 'all')
+
+    params = {}
+    filters = []
+    if track_filter:
+        filters.append("LOWER(m.meeting_name) LIKE :track_filter")
+        params['track_filter'] = f"%{track_filter.lower()}%"
+    if date_from:
+        filters.append("m.uploaded_at >= :date_from")
+        params['date_from'] = date_from
+    if date_to:
+        filters.append("m.uploaded_at <= :date_to")
+        params['date_to'] = date_to
+
+    extra_where = " AND " + " AND ".join(filters) if filters else ""
+    cutoff_sql = _ml_performance_meeting_name_sql('m')
+
+    sql = text(f"""
+        WITH race_picks AS (
+            SELECT
+                r.id AS race_id,
+                m.date,
+                m.uploaded_at,
+                COALESCE(m.track, m.meeting_name) AS track,
+                r.race_number,
+                h.id AS horse_id,
+                h.horse_name,
+                p.score AS analyzer_score,
+                NULLIF(COALESCE(
+                    h.csv_data ->> 'pfaiscore',
+                    h.csv_data ->> 'pfaiScore',
+                    h.csv_data ->> 'PFAI Score',
+                    h.csv_data ->> 'pfai_score'
+                ), '')::numeric AS pfai_score,
+                p.ml_score,
+                res.finish_position,
+                res.sp,
+                ROW_NUMBER() OVER (PARTITION BY r.id ORDER BY p.score DESC NULLS LAST) AS analyzer_rank,
+                ROW_NUMBER() OVER (
+                    PARTITION BY r.id
+                    ORDER BY NULLIF(COALESCE(
+                        h.csv_data ->> 'pfaiscore',
+                        h.csv_data ->> 'pfaiScore',
+                        h.csv_data ->> 'PFAI Score',
+                        h.csv_data ->> 'pfai_score'
+                    ), '')::numeric DESC NULLS LAST
+                ) AS pfai_rank,
+                ROW_NUMBER() OVER (PARTITION BY r.id ORDER BY p.ml_score DESC NULLS LAST) AS ml_rank
+            FROM races r
+            JOIN meetings m ON m.id = r.meeting_id
+            JOIN horses h ON h.race_id = r.id
+            JOIN predictions p ON p.horse_id = h.id
+            JOIN results res ON res.horse_id = h.id
+            WHERE res.finish_position IS NOT NULL
+              AND res.finish_position > 0
+              AND res.sp IS NOT NULL
+              AND COALESCE(h.is_scratched, FALSE) = FALSE
+              AND p.ml_score IS NOT NULL
+              AND NULLIF(COALESCE(
+                    h.csv_data ->> 'pfaiscore',
+                    h.csv_data ->> 'pfaiScore',
+                    h.csv_data ->> 'PFAI Score',
+                    h.csv_data ->> 'pfai_score'
+                  ), '') IS NOT NULL
+              AND {cutoff_sql}
+              {extra_where}
+        ), agreed_picks AS (
+            SELECT *
+            FROM race_picks
+            WHERE analyzer_rank = 1
+              AND pfai_rank = 1
+              AND ml_rank = 1
+            ORDER BY COALESCE(date::timestamp, uploaded_at) DESC NULLS LAST, race_number DESC, race_id DESC
+        ), limited_picks AS (
+            SELECT * FROM agreed_picks
+            LIMIT CASE WHEN :limit_value > 0 THEN :limit_value ELSE NULL END
+        )
+        SELECT
+            COUNT(*) AS bets,
+            COUNT(*) FILTER (WHERE finish_position = 1) AS wins,
+            ROUND(COUNT(*) FILTER (WHERE finish_position = 1)::numeric / NULLIF(COUNT(*), 0) * 100, 2) AS strike_rate_pct,
+            COUNT(*) * 10 AS total_staked,
+            ROUND(SUM(CASE WHEN finish_position = 1 THEN 10 * sp::numeric ELSE 0 END), 2) AS total_return,
+            ROUND(SUM(CASE WHEN finish_position = 1 THEN (10 * sp::numeric) - 10 ELSE -10 END), 2) AS profit,
+            ROUND(SUM(CASE WHEN finish_position = 1 THEN (10 * sp::numeric) - 10 ELSE -10 END) / NULLIF(COUNT(*) * 10, 0) * 100, 2) AS roi_pct,
+            ROUND(AVG(sp::numeric) FILTER (WHERE finish_position = 1), 2) AS avg_winner_sp
+        FROM limited_picks;
+    """)
+    params['limit_value'] = int(limit_param) if str(limit_param).isdigit() else 0
+    row = db.session.execute(sql, params).mappings().first() or {}
+
+    return jsonify({
+        'bets': int(row.get('bets') or 0),
+        'wins': int(row.get('wins') or 0),
+        'strike_rate_pct': float(row.get('strike_rate_pct') or 0),
+        'total_staked': float(row.get('total_staked') or 0),
+        'total_return': float(row.get('total_return') or 0),
+        'profit': float(row.get('profit') or 0),
+        'roi_pct': float(row.get('roi_pct') or 0),
+        'avg_winner_sp': float(row.get('avg_winner_sp') or 0),
+    })
 
 @app.route("/api/data/pfai-analysis")
 @login_required

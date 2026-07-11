@@ -102,3 +102,13 @@ def test_ml_data_page_passes_filters_to_overview_stats():
     assert 'date_from=date_from' in source
     assert 'date_to=date_to' in source
     assert 'limit_param=limit_param' in source
+
+
+
+def test_ml_signal_agreement_dashboard_includes_average_winner_price():
+    route_source = _function_source('api_ml_signal_agreement')
+    template = Path('templates/ml_data.html').read_text()
+    assert 'avg_winner_sp' in route_source
+    assert 'Analyzer + PFAI + ML Agreement Results' in template
+    assert 'loadMlSignalAgreement' in template
+    assert 'Avg Price of Winners' in template
