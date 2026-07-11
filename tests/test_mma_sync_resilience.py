@@ -580,3 +580,88 @@ def test_odds_api_never_creates_standalone_active_fight_contract():
     fn = src[src.index("def upsert_mma_fight_odds"): ]
     assert "INSERT INTO mma_fight_odds" in fn
     assert "INSERT INTO mma_fights" not in fn
+
+
+def test_prediction_uses_persisted_mma_fighter_features_when_history_unavailable(monkeypatch, caplog):
+    class _NP:
+        @staticmethod
+        def clip(value, low, high):
+            return max(low, min(high, value))
+
+    class _PD:
+        class DataFrame:
+            def __init__(self, rows):
+                self.rows = rows
+
+    class _Model:
+        def __init__(self):
+            self.seen = None
+
+        def predict_proba(self, df):
+            self.seen = df.rows[0]
+            return [[0.37, 0.63]]
+
+    monkeypatch.setattr(mma_sync, "np", _NP)
+    monkeypatch.setattr(mma_sync, "pd", _PD)
+
+    today = object()
+    default_sv = {
+        'slpm': 0.0, 'sapm': 0.0, 'td_acc': 0.4, 'td_avg': 1.0, 'td_def': 0.5,
+        'kd_rate': 0.2, 'sub_rate': 0.2, 'ctrl_rate': 10.0, 'sig_str_acc': 0.45,
+        'head_pct': 0.7, 'body_pct': 0.15, 'leg_pct': 0.15, 'dist_pct': 0.8,
+        'clinch_pct': 0.1, 'ground_pct': 0.1, 'exp_time': 0, 'wins': 0, 'losses': 0,
+        'streak': 0, 'win_rate': 0.5, 'rust_days': 365, 'recent_fights_count': 0,
+        'ath_age': 0, 'recent_form': 'N/A',
+    }
+    fighter_bio = {
+        "tracy": {
+            "name": "Tracy Cortez", "height": 165.0, "reach": 165.0, "stance": "Orthodox",
+            "glicko": 1610.0, "glicko_rd": 80.0, "slpm": 4.1, "sapm": 2.9,
+            "td_acc": 0.42, "td_avg": 2.2, "td_def": 0.68, "kd_rate": 0.1,
+            "sub_rate": 0.3, "ctrl_rate": 19.0, "sig_str_acc": 0.47,
+            "streak": 2, "win_rate": 0.75, "total_fights": 8, "recent_form": "W-W-L-W-W",
+        },
+        "wang": {
+            "name": "Wang Cong", "height": 168.0, "reach": 170.0, "stance": "Southpaw",
+            "glicko": 1540.0, "glicko_rd": 120.0, "slpm": 5.0, "sapm": 2.1,
+            "td_acc": 0.35, "td_avg": 1.0, "td_def": 0.72, "kd_rate": 0.4,
+            "sub_rate": 0.1, "ctrl_rate": 8.0, "sig_str_acc": 0.5,
+            "streak": 4, "win_rate": 1.0, "total_fights": 4, "recent_form": "W-W-W-W",
+        },
+    }
+    fight = {
+        "fighter_1": "Tracy Cortez", "fighter_2": "Wang Cong",
+        "fighter_1_espn_id": "1", "fighter_2_espn_id": "2",
+    }
+
+    st1 = mma_sync.stat_vector_for_fighter("tracy", {}, fighter_bio, today, default_sv)
+    st2 = mma_sync.stat_vector_for_fighter("wang", {}, fighter_bio, today, default_sv)
+    features = mma_sync.build_feature_row(
+        st1, st2, fighter_bio["tracy"], fighter_bio["wang"],
+        {"rating": fighter_bio["tracy"]["glicko"], "rd": fighter_bio["tracy"]["glicko_rd"]},
+        {"rating": fighter_bio["wang"]["glicko"], "rd": fighter_bio["wang"]["glicko_rd"]},
+        weight_class="Flyweight",
+    )
+    gate = mma_sync.prediction_gate_reasons(
+        fight, "tracy", "wang", {}, feature_count=len(features), fighter_bio=fighter_bio,
+    )
+    model = _Model()
+
+    with caplog.at_level("INFO", logger="mma_sync"):
+        src = mma_sync.fighter_feature_source(fighter_bio["tracy"])
+        mma_sync.log.info(
+            "FEATURE_SOURCE fighter=%s source=%s total_fights=%s usable=%s",
+            "Tracy Cortez", src["source"], src["total_fights"], str(src["usable"]).lower(),
+        )
+        prob = mma_sync.predict_fight(
+            model, st1, st2, fighter_bio["tracy"], fighter_bio["wang"],
+            {"rating": fighter_bio["tracy"]["glicko"], "rd": fighter_bio["tracy"]["glicko_rd"]},
+            {"rating": fighter_bio["wang"]["glicko"], "rd": fighter_bio["wang"]["glicko_rd"]},
+            weight_class="Flyweight",
+        )
+
+    assert gate == []
+    assert prob == 0.63
+    assert len(model.seen) == 30
+    assert model.seen["slpm_diff"] == 4.1 - 5.0
+    assert "FEATURE_SOURCE fighter=Tracy Cortez source=mma_fighters total_fights=8 usable=true" in caplog.text

@@ -188,10 +188,70 @@ def fight_status(fight):
     return 'completed' if fight.get('result') else 'confirmed'
 
 
-def has_sufficient_feature_data(fid, stats_tracker):
-    if not fid or fid not in stats_tracker:
+def has_sufficient_feature_data(fid, stats_tracker, fighter_bio=None):
+    if not fid:
         return False
-    return getattr(stats_tracker[fid], 'total_fights', 0) > 0
+    if fid in stats_tracker and getattr(stats_tracker[fid], 'total_fights', 0) > 0:
+        return True
+    bio = (fighter_bio or {}).get(fid, {})
+    return fighter_feature_source(bio).get('usable', False)
+
+
+def fighter_feature_source(bio):
+    """Return persisted feature-source diagnostics for an mma_fighters row.
+
+    The prediction model consumes engineered current-form features.  Those are
+    persisted on mma_fighters by the Octagon refresh, so inference must not
+    require the transient in-memory CSV/DB history rebuild to contain the fighter.
+    """
+    total_fights = int(bio.get('total_fights') or 0)
+    required = [
+        'glicko', 'glicko_rd', 'slpm', 'sapm', 'td_acc', 'td_avg', 'td_def',
+        'kd_rate', 'sub_rate', 'ctrl_rate', 'sig_str_acc', 'streak', 'win_rate',
+    ]
+    usable = total_fights > 0 and all(bio.get(k) is not None for k in required)
+    return {'source': 'mma_fighters', 'total_fights': total_fights, 'usable': usable}
+
+
+def stat_vector_from_fighter_bio(bio, current_date=None):
+    """Build the model stat vector from persisted mma_fighters columns.
+
+    Defaults mirror FighterStats for truly new fighters; established fighters use
+    stored EMA/Glicko values even when raw historical rows/CSV are unavailable.
+    """
+    total_fights = int(bio.get('total_fights') or 0)
+    win_rate = bio.get('win_rate')
+    wins = int(round(float(win_rate or 0.5) * total_fights)) if total_fights else 0
+    return {
+        'slpm': float(bio.get('slpm') if bio.get('slpm') is not None else 0.0),
+        'sapm': float(bio.get('sapm') if bio.get('sapm') is not None else 0.0),
+        'td_acc': float(bio.get('td_acc') if bio.get('td_acc') is not None else 0.4),
+        'td_avg': float(bio.get('td_avg') if bio.get('td_avg') is not None else 1.0),
+        'td_def': float(bio.get('td_def') if bio.get('td_def') is not None else 0.5),
+        'kd_rate': float(bio.get('kd_rate') if bio.get('kd_rate') is not None else 0.2),
+        'sub_rate': float(bio.get('sub_rate') if bio.get('sub_rate') is not None else 0.2),
+        'ctrl_rate': float(bio.get('ctrl_rate') if bio.get('ctrl_rate') is not None else 10.0),
+        'sig_str_acc': float(bio.get('sig_str_acc') if bio.get('sig_str_acc') is not None else 0.45),
+        'head_pct': 0.7, 'body_pct': 0.15, 'leg_pct': 0.15,
+        'dist_pct': 0.8, 'clinch_pct': 0.1, 'ground_pct': 0.1,
+        'exp_time': total_fights * 15 * 60,
+        'wins': wins, 'losses': max(total_fights - wins, 0),
+        'streak': int(bio.get('streak') or 0),
+        'win_rate': float(win_rate if win_rate is not None else 0.5),
+        'rust_days': 365,
+        'recent_fights_count': min(total_fights, 5),
+        'ath_age': 0,
+        'recent_form': bio.get('recent_form') or 'N/A',
+    }
+
+
+def stat_vector_for_fighter(fid, stats_tracker, fighter_bio, current_date, default_sv):
+    if fid in stats_tracker and getattr(stats_tracker[fid], 'total_fights', 0) > 0:
+        return stats_tracker[fid].get_stat_vector(current_date)
+    bio = fighter_bio.get(fid, {})
+    if fighter_feature_source(bio).get('usable'):
+        return stat_vector_from_fighter_bio(bio, current_date)
+    return default_sv
 
 
 def best_name_match_key(name, lookup):
@@ -232,7 +292,7 @@ def resolve_fighter_id(name, name_to_id, espn_id=None, espn_to_id=None):
     return name_to_id.get(key) if key else None
 
 
-def prediction_gate_reasons(fight, fid1, fid2, stats_tracker, feature_count=None, odds_matched=None):
+def prediction_gate_reasons(fight, fid1, fid2, stats_tracker, feature_count=None, odds_matched=None, fighter_bio=None):
     reasons = []
     status = fight_status(fight)
     if status == 'cancelled':
@@ -246,9 +306,7 @@ def prediction_gate_reasons(fight, fid1, fid2, stats_tracker, feature_count=None
             reasons.append(f'missing ESPN fighter ID:{label}')
         if not fid:
             reasons.append(f'missing fighter database row:{label}')
-        elif fid not in stats_tracker:
-            reasons.append(f'missing historical stats:{label}')
-        elif not has_sufficient_feature_data(fid, stats_tracker):
+        elif not has_sufficient_feature_data(fid, stats_tracker, fighter_bio):
             reasons.append(f'insufficient feature count:{label}')
     if feature_count is not None and feature_count < 1:
         reasons.append('missing model inputs')
@@ -1509,15 +1567,23 @@ def load_fighters_bio(conn):
     """Load fighter bio data from mma_fighters."""
     sql = """
         SELECT id, full_name, height_cm, reach_cm, stance,
-               glicko_rating, glicko_rd
+               glicko_rating, glicko_rd, glicko_vol,
+               ema_slpm, ema_sapm, ema_td_acc, ema_td_avg, ema_td_def,
+               ema_kd_rate, ema_sub_rate, ema_ctrl_pct, ema_sig_str_acc,
+               streak, win_rate, total_fights, recent_form
         FROM mma_fighters
     """
     with conn.cursor() as cur:
         cur.execute(sql)
         rows = cur.fetchall()
-    return {r[0]: {'height': r[2], 'reach': r[3], 'stance': r[4],
-                   'glicko': r[5], 'glicko_rd': r[6], 'name': r[1]}
-            for r in rows}
+    return {r[0]: {
+                'height': r[2], 'reach': r[3], 'stance': r[4],
+                'glicko': r[5], 'glicko_rd': r[6], 'glicko_vol': r[7], 'name': r[1],
+                'slpm': r[8], 'sapm': r[9], 'td_acc': r[10], 'td_avg': r[11],
+                'td_def': r[12], 'kd_rate': r[13], 'sub_rate': r[14],
+                'ctrl_rate': r[15], 'sig_str_acc': r[16], 'streak': r[17],
+                'win_rate': r[18], 'total_fights': r[19], 'recent_form': r[20],
+            } for r in rows}
 
 
 def rebuild_stats_from_db(conn):
@@ -1912,6 +1978,16 @@ def rebuild_stats_from_csv(data_dir, conn=None):
 
 
 # ── Prediction model ──────────────────────────────────────────────────────────
+
+MODEL_FEATURE_NAMES = [
+    'glicko_diff', 'glicko_rd_diff', 'age_diff', 'height_diff', 'reach_diff',
+    'slpm_diff', 'sapm_diff', 'td_avg_diff', 'td_acc_diff', 'td_def_diff',
+    'kd_diff', 'sub_diff', 'ctrl_diff', 'sig_acc_diff', 'head_pct_diff',
+    'body_pct_diff', 'leg_pct_diff', 'dist_pct_diff', 'clinch_pct_diff',
+    'ground_pct_diff', 'exp_diff', 'streak_diff', 'win_rate_diff',
+    'rust_diff', 'activity_diff', 'is_apex', 'is_altitude', 'stance_1',
+    'stance_2', 'weight_class',
+]
 
 def load_model():
     if not os.path.exists(MODEL_PATH):
@@ -2642,15 +2718,23 @@ def main():
                     continue
 
                 feature_count = len(build_feature_row(
-                    stats_tracker[fid1].get_stat_vector(today) if fid1 in stats_tracker else default_sv,
-                    stats_tracker[fid2].get_stat_vector(today) if fid2 in stats_tracker else default_sv,
+                    stat_vector_for_fighter(fid1, stats_tracker, fighter_bio, today, default_sv),
+                    stat_vector_for_fighter(fid2, stats_tracker, fighter_bio, today, default_sv),
                     fighter_bio.get(fid1, {}), fighter_bio.get(fid2, {}),
                     {'rating': fighter_bio.get(fid1, {}).get('glicko', 1500), 'rd': fighter_bio.get(fid1, {}).get('glicko_rd', 350)},
                     {'rating': fighter_bio.get(fid2, {}).get('glicko', 1500), 'rd': fighter_bio.get(fid2, {}).get('glicko_rd', 350)},
                     is_apex_event(event['event_name'], event['location']), is_altitude(event['location']),
                     fight.get('weight_class', ''),
                 ))
-                gate_reasons = prediction_gate_reasons(fight, fid1, fid2, stats_tracker, feature_count=feature_count)
+                for _fid, _name in ((fid1, fight['fighter_1']), (fid2, fight['fighter_2'])):
+                    _src = fighter_feature_source(fighter_bio.get(_fid, {}))
+                    if _fid in stats_tracker and getattr(stats_tracker[_fid], 'total_fights', 0) > 0:
+                        _src = {'source': 'history_rebuild', 'total_fights': getattr(stats_tracker[_fid], 'total_fights', 0), 'usable': True}
+                    log.info(
+                        "FEATURE_SOURCE fighter=%s source=%s total_fights=%s usable=%s",
+                        _name, _src['source'], _src['total_fights'], str(_src['usable']).lower(),
+                    )
+                gate_reasons = prediction_gate_reasons(fight, fid1, fid2, stats_tracker, feature_count=feature_count, fighter_bio=fighter_bio)
                 if gate_reasons:
                     with conn.cursor() as cur:
                         cur.execute("DELETE FROM mma_predictions WHERE fight_id = %s", (fight_id,))
@@ -2676,8 +2760,8 @@ def main():
                          getattr(stats_tracker.get(fid2), 'total_fights', 0) if fid2 else 0,
                          feature_count, odds_match['matched'])
 
-                st1 = stats_tracker[fid1].get_stat_vector(today)
-                st2 = stats_tracker[fid2].get_stat_vector(today)
+                st1 = stat_vector_for_fighter(fid1, stats_tracker, fighter_bio, today, default_sv)
+                st2 = stat_vector_for_fighter(fid2, stats_tracker, fighter_bio, today, default_sv)
 
                 b1 = fighter_bio.get(fid1, {})
                 b2 = fighter_bio.get(fid2, {})
