@@ -657,6 +657,28 @@
 body.modal-open .main-container {
             animation: none !important;
         }
+        :root { --next-to-go-height: 48px; }
+        body.has-next-to-go { padding-bottom: var(--next-to-go-height); }
+        .next-to-go-ticker { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1040; height: var(--next-to-go-height); display: flex; align-items: center; background: rgba(9,9,15,.96); border-top: 1px solid rgba(0,229,176,.35); box-shadow: 0 -8px 28px rgba(0,0,0,.35); color: var(--text-primary); backdrop-filter: blur(14px); }
+        .ntg-label { flex: 0 0 auto; height: 100%; display:flex; align-items:center; padding: 0 16px; font-size: 11px; font-weight: 900; letter-spacing: .16em; color: #06130f; background: linear-gradient(135deg,#00e5b0,#34d399); }
+        .ntg-viewport { overflow-x: auto; overflow-y: hidden; flex: 1; height: 100%; scrollbar-width: none; touch-action: pan-x; }
+        .ntg-viewport::-webkit-scrollbar { display:none; }
+        .ntg-track { display: inline-flex; align-items: center; min-width: max-content; height: 100%; animation: ntg-scroll 42s linear infinite; will-change: transform; }
+        .next-to-go-ticker:hover .ntg-track, .next-to-go-ticker:focus-within .ntg-track { animation-play-state: paused; }
+        .ntg-item { display:inline-flex; align-items:center; gap:8px; padding:0 18px; height:100%; color:var(--text-primary); text-decoration:none; white-space:nowrap; border-right:1px solid rgba(255,255,255,.10); font-size:13px; font-weight:700; }
+        .ntg-item:hover { color:#fff; background:rgba(255,255,255,.08); }
+        .ntg-disabled { opacity:.55; cursor:not-allowed; }
+        .ntg-countdown { font-family:'DM Mono',monospace; color:#fbbf24; min-width:34px; }
+        .ntg-item.ntg-soon .ntg-countdown { color:#22c55e; }
+        .ntg-item.ntg-now .ntg-countdown { color:#34d399; font-weight:900; animation: ntg-pulse 1s ease-in-out infinite; }
+        .ntg-time { color:var(--text-muted); font-family:'DM Mono',monospace; }
+        .ntg-empty { padding:0 16px; display:flex; align-items:center; height:100%; color:var(--text-muted); font-size:12px; }
+        .ntg-target-highlight { outline: 3px solid #22c55e !important; box-shadow: 0 0 0 6px rgba(34,197,94,.18), 0 0 30px rgba(34,197,94,.35) !important; transition: box-shadow .2s, outline .2s; scroll-margin-bottom: calc(var(--next-to-go-height) + 24px); }
+        @keyframes ntg-scroll { from { transform: translateX(70vw); } to { transform: translateX(-100%); } }
+        @keyframes ntg-pulse { 0%,100% { opacity:1; } 50% { opacity:.45; } }
+        @media (prefers-reduced-motion: reduce) { .ntg-track { animation: none; transform: none; } .ntg-item.ntg-now .ntg-countdown { animation:none; } }
+        @media (max-width: 640px) { :root { --next-to-go-height: 42px; } .ntg-label { padding:0 10px; font-size:10px; letter-spacing:.08em; } .ntg-item { padding:0 12px; font-size:12px; gap:6px; } }
+
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -782,6 +804,15 @@ body.modal-open .main-container {
 
     </div>
 
+
+    {% set show_next_to_go = current_user.is_authenticated and request.endpoint not in ['login', 'admin_panel', 'data_analytics', 'ml_data_analytics', 'results', 'results_entry', 'import_from_api'] %}
+    {% if show_next_to_go %}
+    <div id="next-to-go-ticker" class="next-to-go-ticker" role="region" aria-label="Next To Go racing ticker">
+        <div class="ntg-label">NEXT TO GO</div>
+        <div class="ntg-viewport" id="ntg-viewport"><div class="ntg-track" id="ntg-track"><div class="ntg-empty">Loading upcoming races…</div></div></div>
+    </div>
+    {% endif %}
+
     <!-- Bootstrap JS (unchanged) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
@@ -795,6 +826,29 @@ body.modal-open .main-container {
             });
         }, 5000);
     </script>
+
+
+    {% if show_next_to_go %}
+    <script>
+    (function(){
+      document.body.classList.add('has-next-to-go');
+      const track = document.getElementById('ntg-track');
+      const viewport = document.getElementById('ntg-viewport');
+      let races = [];
+      function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+      function fmtCountdown(startIso){ const diff = new Date(startIso).getTime() - Date.now(); if (diff <= 0) return 'DUE'; const mins = Math.ceil(diff/60000); return mins < 60 ? mins + 'm' : Math.floor(mins/60) + 'h ' + (mins%60) + 'm'; }
+      function fmtMelbourneTime(r){ try { return new Intl.DateTimeFormat('en-AU', {hour:'numeric', minute:'2-digit', hour12:true, timeZone:'Australia/Melbourne'}).format(new Date(r.start_time_utc)).toUpperCase(); } catch(e) { return r.start_time_melbourne_display || ''; } }
+      function updateCountdowns(){ document.querySelectorAll('.ntg-item').forEach(el => { const diff = new Date(el.dataset.startUtc).getTime() - Date.now(); const cd = el.querySelector('.ntg-countdown'); if (cd) cd.textContent = fmtCountdown(el.dataset.startUtc); el.classList.toggle('ntg-soon', diff > 60000 && diff <= 5*60000); el.classList.toggle('ntg-now', diff <= 60000); }); }
+      function itemHtml(r){ const content = `<span class="ntg-countdown">${fmtCountdown(r.start_time_utc)}</span><span>${esc(String(r.track || '').toUpperCase())}</span><span>R${esc(r.race_number)}</span><span class="ntg-time">${esc(fmtMelbourneTime(r))}</span>`; const attrs = `data-start-utc="${esc(r.start_time_utc)}" data-race-number="${esc(r.race_number)}" data-track="${esc(r.track)}"`; return r.clickable && r.url ? `<a class="ntg-item" href="${esc(r.url)}" ${attrs}>${content}</a>` : `<span class="ntg-item ntg-disabled" aria-disabled="true" title="Race has not been assessed yet" ${attrs}>${content}</span>`; }
+      function render(){ if (!races.length) { track.innerHTML = '<div class="ntg-empty">Next To Go temporarily unavailable</div>'; return; } track.innerHTML = races.map(itemHtml).join(''); updateCountdowns(); }
+      async function refresh(){ try { const res = await fetch('/api/ladbrokes/next-to-go', {cache:'no-store'}); if (res.status === 401) { document.body.classList.remove('has-next-to-go'); document.getElementById('next-to-go-ticker')?.remove(); return; } const data = await res.json(); if (data && data.status === 'ok' && Array.isArray(data.races) && data.races.length) { races = data.races.slice(0, 20); render(); } else if (!races.length) { track.innerHTML = '<div class="ntg-empty">No upcoming Australian thoroughbred races found</div>'; } } catch(e) { if (!races.length) track.innerHTML = '<div class="ntg-empty">Next To Go temporarily unavailable</div>'; } }
+      function highlightTargetFromHash(attempts){ const hash = (window.location.hash || '').slice(1); if(!hash) return; const target = document.getElementById(hash); if(target){ target.scrollIntoView({behavior:'smooth', block:'center'}); target.classList.add('ntg-target-highlight'); setTimeout(()=>target.classList.remove('ntg-target-highlight'), 2000); return; } if(attempts > 0) setTimeout(() => highlightTargetFromHash(attempts - 1), 150); }
+      document.addEventListener('click', function(e){ const a = e.target.closest('a.ntg-item'); if(!a) return; const url = new URL(a.href, window.location.href); if (url.pathname !== window.location.pathname) return; e.preventDefault(); history.replaceState(null, '', url.hash); highlightTargetFromHash(10); });
+      let down=false, startX=0, scrollLeft=0; viewport.addEventListener('pointerdown', e => { down=true; startX=e.clientX; scrollLeft=viewport.scrollLeft; viewport.setPointerCapture(e.pointerId); }); viewport.addEventListener('pointermove', e => { if(down) viewport.scrollLeft = scrollLeft - (e.clientX-startX); }); ['pointerup','pointercancel','mouseleave'].forEach(ev => viewport.addEventListener(ev, () => down=false));
+      refresh(); highlightTargetFromHash(20); setInterval(updateCountdowns, 1000); setInterval(refresh, 45000);
+    })();
+    </script>
+    {% endif %}
 
     {% block extra_js %}{% endblock %}
 
