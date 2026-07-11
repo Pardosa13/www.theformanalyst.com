@@ -11,6 +11,8 @@ Two endpoints used:
 import time
 import logging
 import requests
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,87 @@ MEETINGS_CACHE_TTL = 600  # 10 minutes
 _odds_cache: dict = {}
 ODDS_CACHE_TTL = 30  # 30 seconds
 
+
+
+NEXT_TO_GO_GRACE_SECONDS = 5 * 60
+try:
+    MELBOURNE_TZ = ZoneInfo("Australia/Melbourne")
+except ZoneInfoNotFoundError:
+    logger.warning("Timezone data for Australia/Melbourne is unavailable; falling back to UTC for Next To Go display")
+    MELBOURNE_TZ = timezone.utc
+_FINAL_RACE_STATUSES = {"abandoned", "final", "finalised", "closed", "interim", "resulted", "live", "jumped"}
+_ACTIVE_RACE_STATUSES = {"open", "delayed", "suspended"}
+_NON_RACE_TERMS = ("jockey challenge", "futures", "future", "market", "special", "top jockey")
+
+def _parse_ladbrokes_utc(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        text = str(value).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        logger.debug("Ladbrokes: could not parse start_time %r", value)
+        return None
+
+def _race_field(race: dict, *names, default=None):
+    for name in names:
+        if name in race and race.get(name) is not None:
+            return race.get(name)
+    return default
+
+def _is_genuine_race(meeting: dict, race: dict, now_utc: datetime) -> bool:
+    try:
+        race_number = int(_race_field(race, "race_number", "number", "raceNumber", default=0) or 0)
+    except (TypeError, ValueError):
+        return False
+    if race_number <= 0:
+        return False
+    if str(meeting.get("category") or "T").upper() != "T":
+        return False
+    if str(meeting.get("country") or "AUS").upper() not in {"AUS", "AU"}:
+        return False
+    status = str(_race_field(race, "status", "race_status", default="") or "").strip().lower()
+    if status in _FINAL_RACE_STATUSES:
+        return False
+    haystack = " ".join(str(x or "") for x in [meeting.get("name"), race.get("name"), race.get("race_name"), race.get("market_name")]).lower()
+    if any(term in haystack for term in _NON_RACE_TERMS):
+        return False
+    start_utc = _parse_ladbrokes_utc(_race_field(race, "start_time", "startTime"))
+    if not start_utc:
+        return False
+    if status in _ACTIVE_RACE_STATUSES:
+        return True
+    return (now_utc - start_utc).total_seconds() <= NEXT_TO_GO_GRACE_SECONDS
+
+def build_next_to_go_races(date_str: str, limit: int | None = None) -> dict:
+    now_utc = datetime.now(timezone.utc)
+    races = []
+    meetings = fetch_todays_meetings(date_str)
+    for meeting in meetings:
+        track = meeting.get("name") or meeting.get("meeting_name") or ""
+        for race in meeting.get("races", []) or []:
+            if not isinstance(race, dict) or not _is_genuine_race(meeting, race, now_utc):
+                continue
+            start_utc = _parse_ladbrokes_utc(_race_field(race, "start_time", "startTime"))
+            race_number = int(_race_field(race, "race_number", "number", "raceNumber"))
+            local_dt = start_utc.astimezone(MELBOURNE_TZ)
+            races.append({
+                "ladbrokes_event_id": _race_field(race, "id", "event_id", "eventId", "uuid"),
+                "track": track,
+                "race_number": race_number,
+                "race_name": _race_field(race, "name", "race_name", "raceName", default="") or "",
+                "status": _race_field(race, "status", "race_status", default="") or "",
+                "start_time_utc": start_utc.isoformat().replace("+00:00", "Z"),
+                "start_time_melbourne": local_dt.isoformat(),
+                "start_time_melbourne_display": local_dt.strftime("%-I:%M %p"),
+            })
+    races.sort(key=lambda r: r["start_time_utc"])
+    if limit:
+        races = races[:limit]
+    return {"status": "ok", "races": races, "fetched_at": now_utc.isoformat().replace("+00:00", "Z")}
 
 # ── Name normalisation (mirrors normalize_runner_name in app.py) ───────────
 def _norm(name: str) -> str:

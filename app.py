@@ -8,7 +8,7 @@ import io
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, session
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
-from datetime import datetime
+from datetime import datetime, date
 import requests
 import tweepy
 from anthropic import Anthropic
@@ -20,7 +20,7 @@ import uuid
 from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component, StrikeRate
 from puntingform_service import PuntingFormService
 from scratchings import compute_is_scratched_final, extract_debug_scratch_fields, resolve_official_scratched_set
-from ladbrokes import match_race_uuid, fetch_race_odds
+from ladbrokes import match_race_uuid, fetch_race_odds, build_next_to_go_races, MELBOURNE_TZ
 from afl_routes import register_afl_routes, afl_nightly_sync
 from mma_routes import register_mma_routes
 from ml_shadow_routes import register_ml_shadow_routes
@@ -3559,6 +3559,66 @@ def get_ladbrokes_race_map(meeting_id):
     except Exception as e:
         logger.warning(f"Ladbrokes race map failed for meeting {meeting_id}: {e}")
         return jsonify({})
+
+
+def _slugify_anchor(value):
+    slug = re.sub(r'[^a-z0-9]+', '-', str(value or '').lower()).strip('-')
+    return slug or 'meeting'
+
+def _normalise_track_name(value):
+    text_value = re.sub(r'[^a-z0-9\s]', ' ', str(value or '').lower())
+    words = [w for w in re.sub(r'\s+', ' ', text_value).strip().split(' ') if w]
+    words = [w for w in words if w not in {'royal', 'the', 'racecourse', 'races'}]
+    return ' '.join(words)
+
+def _track_names_match(left, right):
+    a = _normalise_track_name(left)
+    b = _normalise_track_name(right)
+    return bool(a and b and (a == b or a in b or b in a))
+
+def _track_from_meeting(meeting):
+    return meeting.track or meeting.puntingform_id or ((meeting.meeting_name or '').split('_', 1)[1] if '_' in (meeting.meeting_name or '') else meeting.meeting_name)
+
+def _find_next_to_go_meeting(item, meetings):
+    track = item.get('track')
+    for meeting in meetings:
+        if _track_names_match(track, _track_from_meeting(meeting)):
+            return meeting
+    return None
+
+def _attach_internal_next_to_go_links(races):
+    today = datetime.now(MELBOURNE_TZ).date()
+    meetings = Meeting.query.filter(Meeting.date == today).all()
+    for item in races:
+        slug = _slugify_anchor(item.get('track'))
+        item['track_slug'] = slug
+        item['race_anchor'] = f"race-{slug}-{item.get('race_number')}"
+        item['meeting_anchor'] = f"meeting-{slug}"
+        item['clickable'] = False
+        item['url'] = None
+        meeting = _find_next_to_go_meeting(item, meetings)
+        if not meeting:
+            continue
+        race = Race.query.filter_by(meeting_id=meeting.id, race_number=item.get('race_number')).first()
+        if not race:
+            continue
+        item['internal_meeting_id'] = meeting.id
+        item['internal_race_id'] = race.id
+        item['clickable'] = True
+        item['url'] = url_for('view_meeting', meeting_id=meeting.id) + f"#race-{item.get('race_number')}"
+    return races
+
+@app.route("/api/ladbrokes/next-to-go")
+@login_required
+def api_ladbrokes_next_to_go():
+    """Return upcoming Australian thoroughbred races for the fixed Next To Go ticker."""
+    try:
+        payload = build_next_to_go_races(datetime.now(MELBOURNE_TZ).date().isoformat(), limit=20)
+        payload['races'] = _attach_internal_next_to_go_links(payload.get('races', []))
+        return jsonify(payload)
+    except Exception as e:
+        logger.warning(f"Ladbrokes next-to-go route failed: {e}")
+        return jsonify({"status": "error", "races": [], "message": "Next To Go temporarily unavailable"}), 503
 
 @app.route("/api/odds/ladbrokes/<race_uuid>")
 @login_required

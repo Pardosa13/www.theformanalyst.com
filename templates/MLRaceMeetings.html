@@ -1518,7 +1518,7 @@ function updateScratchings(meetingId) {
 
 <!-- ══ Races ══ -->
 {% for race in results.races %}
-<div class="vm-race-card card" id="race-{{ race.race_number }}">
+<div class="vm-race-card card" id="race-{{ race.race_number }}" data-track="{{ results.track|default(meeting.track or meeting.puntingform_id or meeting.meeting_name) }}" data-race-number="{{ race.race_number }}">
 
   <div class="vm-race-header">
     <h2>Race {{ race.race_number }}</h2>
@@ -2862,7 +2862,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // ── Main inject ──────────────────────────────────────────────────
     function injectLbOdds(raceNumber, oddsData) {
-        var raceCard = document.getElementById('race-' + raceNumber);
+        var raceCard = document.querySelector('[data-race-number="' + raceNumber + '"]') || document.getElementById('race-' + raceNumber);
         if (!raceCard) return;
 
         var status  = oddsData.status   || '';
