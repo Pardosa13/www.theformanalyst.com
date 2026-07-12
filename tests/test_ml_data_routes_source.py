@@ -109,6 +109,14 @@ def test_ml_signal_agreement_dashboard_includes_average_winner_price():
     route_source = _function_source('api_ml_signal_agreement')
     template = Path('templates/ml_data.html').read_text()
     assert 'avg_winner_sp' in route_source
+    assert 'latest_result_at' in route_source
     assert 'Analyzer + PFAI + ML Agreement Results' in template
     assert 'loadMlSignalAgreement' in template
     assert 'Avg Price of Winners' in template
+
+
+def test_ml_signal_agreement_reloads_on_every_expand():
+    template = Path('templates/ml_data.html').read_text()
+    assert "mlSignalAgreement.addEventListener('show.bs.collapse', function() { loadMlSignalAgreement(); })" in template
+    assert "params.set('_', Date.now().toString())" in template
+    assert "Latest included result" in template

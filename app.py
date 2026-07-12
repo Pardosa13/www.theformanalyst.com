@@ -9361,7 +9361,8 @@ def api_ml_signal_agreement():
             ROUND(SUM(CASE WHEN finish_position = 1 THEN 10 * sp::numeric ELSE 0 END), 2) AS total_return,
             ROUND(SUM(CASE WHEN finish_position = 1 THEN (10 * sp::numeric) - 10 ELSE -10 END), 2) AS profit,
             ROUND(SUM(CASE WHEN finish_position = 1 THEN (10 * sp::numeric) - 10 ELSE -10 END) / NULLIF(COUNT(*) * 10, 0) * 100, 2) AS roi_pct,
-            ROUND(AVG(sp::numeric) FILTER (WHERE finish_position = 1), 2) AS avg_winner_sp
+            ROUND(AVG(sp::numeric) FILTER (WHERE finish_position = 1), 2) AS avg_winner_sp,
+            TO_CHAR(MAX(COALESCE(date::timestamp, uploaded_at)), 'YYYY-MM-DD HH24:MI:SS') AS latest_result_at
         FROM limited_picks;
     """)
     params['limit_value'] = int(limit_param) if str(limit_param).isdigit() else 0
@@ -9376,6 +9377,7 @@ def api_ml_signal_agreement():
         'profit': float(row.get('profit') or 0),
         'roi_pct': float(row.get('roi_pct') or 0),
         'avg_winner_sp': float(row.get('avg_winner_sp') or 0),
+        'latest_result_at': row.get('latest_result_at'),
     })
 
 @app.route("/api/data/pfai-analysis")
