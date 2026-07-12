@@ -9328,7 +9328,10 @@ def api_ml_signal_agreement():
             WHERE res.finish_position IS NOT NULL
               AND res.finish_position > 0
               AND res.sp IS NOT NULL
-              AND COALESCE(h.is_scratched, FALSE) = FALSE
+              -- Result rows with finish_position > 0 are the settled source of truth
+              -- for agreement backtests. Do not also filter on horses.is_scratched:
+              -- that field can be stale after late-scratching refreshes and has
+              -- excluded valid runners that have a recorded result and SP.
               AND p.ml_score IS NOT NULL
               AND NULLIF(COALESCE(
                     h.csv_data ->> 'pfaiscore',
@@ -9375,7 +9378,7 @@ def api_ml_signal_agreement():
             'date_to': date_to or 'No end date',
             'selection_limit': 'Not applied — canonical all qualifying agreement selections',
             'meeting_name_cutoff': 'Not applied',
-            'canonical_logic': 'Settled, non-scratched runners with SP, ML score and PFAI score where Analyzer rank = PFAI rank = ML rank = 1',
+            'canonical_logic': 'Settled runners with finish_position > 0, SP, ML score and PFAI score where Analyzer rank = PFAI rank = ML rank = 1',
         },
     })
 
