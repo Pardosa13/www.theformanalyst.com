@@ -124,3 +124,15 @@ def test_ml_signal_agreement_reloads_on_every_expand():
     assert "params.delete('limit')" in template
     assert "params.set('_', Date.now().toString())" in template
     assert "Latest included result" in template
+
+
+def test_ml_signal_agreement_uses_result_status_not_stale_horse_scratch_flag():
+    route_source = _function_source('api_ml_signal_agreement')
+    where_start = route_source.index('WHERE res.finish_position IS NOT NULL')
+    cte_end = route_source.index('), agreed_picks AS', where_start)
+    race_picks_where = route_source[where_start:cte_end]
+
+    assert 'res.finish_position > 0' in race_picks_where
+    assert 'res.sp IS NOT NULL' in race_picks_where
+    assert 'COALESCE(h.is_scratched, FALSE) = FALSE' not in race_picks_where
+    assert 'horses.is_scratched' in route_source
