@@ -736,10 +736,8 @@ function loadMlSignalAgreement() {
     const container = document.getElementById('mlSignalAgreement');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading all-signal agreement results...</p></div>';
     const params = new URLSearchParams(filterParams);
-    // Agreement results are a canonical all-qualifying-selection query; do not
-    // inherit the page's "Show Last" limit, which is a recency-window control
-    // for the broader ML performance panels.
-    params.delete('limit');
+    // Keep the page's "Show Last" limit so agreement results use the same
+    // race-count window as the rest of the ML Data dashboard.
     params.set('_', Date.now().toString());
     fetch(`/api/data/ml-signal-agreement?${params}`)
         .then(r => r.json())
