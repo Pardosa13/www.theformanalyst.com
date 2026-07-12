@@ -9276,8 +9276,6 @@ def api_ml_signal_agreement():
     track_filter = request.args.get('track', '')
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    limit_param = request.args.get('limit', 'all')
-
     params = {}
     filters = []
     if track_filter:
@@ -9291,8 +9289,6 @@ def api_ml_signal_agreement():
         params['date_to'] = date_to
 
     extra_where = " AND " + " AND ".join(filters) if filters else ""
-    cutoff_sql = _ml_performance_meeting_name_sql('m')
-
     sql = text(f"""
         WITH race_picks AS (
             SELECT
@@ -9340,7 +9336,6 @@ def api_ml_signal_agreement():
                     h.csv_data ->> 'PFAI Score',
                     h.csv_data ->> 'pfai_score'
                   ), '') IS NOT NULL
-              AND {cutoff_sql}
               {extra_where}
         ), agreed_picks AS (
             SELECT *
@@ -9349,9 +9344,6 @@ def api_ml_signal_agreement():
               AND pfai_rank = 1
               AND ml_rank = 1
             ORDER BY COALESCE(date::timestamp, uploaded_at) DESC NULLS LAST, race_number DESC, race_id DESC
-        ), limited_picks AS (
-            SELECT * FROM agreed_picks
-            LIMIT CASE WHEN :limit_value > 0 THEN :limit_value ELSE NULL END
         )
         SELECT
             COUNT(*) AS bets,
@@ -9363,9 +9355,8 @@ def api_ml_signal_agreement():
             ROUND(SUM(CASE WHEN finish_position = 1 THEN (10 * sp::numeric) - 10 ELSE -10 END) / NULLIF(COUNT(*) * 10, 0) * 100, 2) AS roi_pct,
             ROUND(AVG(sp::numeric) FILTER (WHERE finish_position = 1), 2) AS avg_winner_sp,
             TO_CHAR(MAX(COALESCE(date::timestamp, uploaded_at)), 'YYYY-MM-DD HH24:MI:SS') AS latest_result_at
-        FROM limited_picks;
+        FROM agreed_picks;
     """)
-    params['limit_value'] = int(limit_param) if str(limit_param).isdigit() else 0
     row = db.session.execute(sql, params).mappings().first() or {}
 
     return jsonify({
@@ -9378,6 +9369,14 @@ def api_ml_signal_agreement():
         'roi_pct': float(row.get('roi_pct') or 0),
         'avg_winner_sp': float(row.get('avg_winner_sp') or 0),
         'latest_result_at': row.get('latest_result_at'),
+        'filters_applied': {
+            'track': track_filter or 'All tracks',
+            'date_from': date_from or 'No start date',
+            'date_to': date_to or 'No end date',
+            'selection_limit': 'Not applied — canonical all qualifying agreement selections',
+            'meeting_name_cutoff': 'Not applied',
+            'canonical_logic': 'Settled, non-scratched runners with SP, ML score and PFAI score where Analyzer rank = PFAI rank = ML rank = 1',
+        },
     })
 
 @app.route("/api/data/pfai-analysis")
