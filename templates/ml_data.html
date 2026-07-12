@@ -736,6 +736,10 @@ function loadMlSignalAgreement() {
     const container = document.getElementById('mlSignalAgreement');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading all-signal agreement results...</p></div>';
     const params = new URLSearchParams(filterParams);
+    // Agreement results are a canonical all-qualifying-selection query; do not
+    // inherit the page's "Show Last" limit, which is a recency-window control
+    // for the broader ML performance panels.
+    params.delete('limit');
     params.set('_', Date.now().toString());
     fetch(`/api/data/ml-signal-agreement?${params}`)
         .then(r => r.json())
@@ -2648,10 +2652,22 @@ function renderMlSignalAgreement(data) {
     const profitClass = data.profit >= 0 ? 'profit' : 'loss';
     const roiClass = data.roi_pct >= 0 ? 'profit' : 'loss';
     const latestText = data.latest_result_at ? ` Latest included result: ${escapeHtml(data.latest_result_at)}.` : '';
+    const filters = data.filters_applied || {};
+    const activeFiltersHtml = `
+        <div class="alert alert-info" style="background:rgba(79,209,197,.08);border-color:rgba(79,209,197,.25);color:var(--text);font-size:12px;">
+            <strong>Active agreement-result filters:</strong>
+            Track: <code>${escapeHtml(filters.track || 'All tracks')}</code> ·
+            Date from: <code>${escapeHtml(filters.date_from || 'No start date')}</code> ·
+            Date to: <code>${escapeHtml(filters.date_to || 'No end date')}</code> ·
+            Show Last limit: <code>${escapeHtml(filters.selection_limit || 'Not applied')}</code> ·
+            Meeting-name cutoff: <code>${escapeHtml(filters.meeting_name_cutoff || 'Not applied')}</code>
+            <div style="margin-top:6px;color:var(--text-muted);">Canonical logic: ${escapeHtml(filters.canonical_logic || 'Analyzer, PFAI and ML rank the same settled runner first.')}</div>
+        </div>`;
     container.innerHTML = `<div class="card-body">
         <p class="text-muted" style="font-size:12px;margin-bottom:14px">
-            Results for races where the Analyzer top pick, PFAI top pick and ML top pick all selected the same horse. Uses $10 win bets and the current page filters.${latestText}
+            Results for races where the Analyzer top pick, PFAI top pick and ML top pick all selected the same horse. Uses $10 win bets and the canonical agreement query.${latestText}
         </p>
+        ${activeFiltersHtml}
         <div class="overview-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:18px;">
             <div class="overview-tile"><span class="stat-val">${data.bets.toLocaleString()}</span><div class="stat-label">Bets</div></div>
             <div class="overview-tile"><span class="stat-val">${data.wins.toLocaleString()}</span><div class="stat-label">Wins</div></div>
