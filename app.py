@@ -9276,6 +9276,7 @@ def api_ml_signal_agreement():
     track_filter = request.args.get('track', '')
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
+    limit_param = request.args.get('limit', 'all')
     params = {}
     filters = []
     if track_filter:
@@ -9289,8 +9290,37 @@ def api_ml_signal_agreement():
         params['date_to'] = date_to
 
     extra_where = " AND " + " AND ".join(filters) if filters else ""
+    limit_clause = ""
+    if limit_param != 'all':
+        params['race_limit'] = int(limit_param) if str(limit_param).isdigit() else 200
+        limit_clause = "LIMIT :race_limit"
+
     sql = text(f"""
-        WITH race_picks AS (
+        WITH eligible_races AS (
+            SELECT
+                r.id AS race_id,
+                MAX(COALESCE(m.date::timestamp, m.uploaded_at)) AS race_date,
+                MAX(r.race_number) AS race_number
+            FROM races r
+            JOIN meetings m ON m.id = r.meeting_id
+            JOIN horses h ON h.race_id = r.id
+            JOIN predictions p ON p.horse_id = h.id
+            JOIN results res ON res.horse_id = h.id
+            WHERE res.finish_position IS NOT NULL
+              AND res.finish_position > 0
+              AND res.sp IS NOT NULL
+              AND p.ml_score IS NOT NULL
+              AND NULLIF(COALESCE(
+                    h.csv_data ->> 'pfaiscore',
+                    h.csv_data ->> 'pfaiScore',
+                    h.csv_data ->> 'PFAI Score',
+                    h.csv_data ->> 'pfai_score'
+                  ), '') IS NOT NULL
+              {extra_where}
+            GROUP BY r.id
+            ORDER BY race_date DESC NULLS LAST, race_number DESC, race_id DESC
+            {limit_clause}
+        ), race_picks AS (
             SELECT
                 r.id AS race_id,
                 m.date,
@@ -9320,7 +9350,8 @@ def api_ml_signal_agreement():
                     ), '')::numeric DESC NULLS LAST
                 ) AS pfai_rank,
                 ROW_NUMBER() OVER (PARTITION BY r.id ORDER BY p.ml_score DESC NULLS LAST) AS ml_rank
-            FROM races r
+            FROM eligible_races er
+            JOIN races r ON r.id = er.race_id
             JOIN meetings m ON m.id = r.meeting_id
             JOIN horses h ON h.race_id = r.id
             JOIN predictions p ON p.horse_id = h.id
@@ -9376,7 +9407,7 @@ def api_ml_signal_agreement():
             'track': track_filter or 'All tracks',
             'date_from': date_from or 'No start date',
             'date_to': date_to or 'No end date',
-            'selection_limit': 'Not applied — canonical all qualifying agreement selections',
+            'selection_limit': limit_param if limit_param == 'all' else int(limit_param) if str(limit_param).isdigit() else 200,
             'meeting_name_cutoff': 'Not applied',
             'canonical_logic': 'Settled runners with finish_position > 0, SP, ML score and PFAI score where Analyzer rank = PFAI rank = ML rank = 1',
         },
