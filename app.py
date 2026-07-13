@@ -5,6 +5,7 @@ import re
 import subprocess
 import csv
 import io
+import math
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, session
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
@@ -14,7 +15,7 @@ import tweepy
 from anthropic import Anthropic
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from sqlalchemy import text
+from sqlalchemy import text, bindparam, inspect as sa_inspect
 import uuid
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component, StrikeRate
@@ -3391,6 +3392,262 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
         reverse=True,
     )
     return race_results
+
+
+ML_STORED_PROBABILITY_COLUMNS = [
+    'ml_win_probability',
+    'ml_probability',
+    'ml_assessed_win_probability',
+    'ml_calibrated_win_probability',
+    'calibrated_ml_probability',
+    'win_probability_ml',
+]
+
+
+def _existing_prediction_probability_column(candidates):
+    """Return the first existing predictions probability column from candidates.
+
+    The Prediction model only declares the Analyzer-generated ``win_probability``
+    column today.  Some deployed databases may add a canonical stored ML
+    probability before the model class is updated, so this helper inspects the
+    physical table and lets ML staking reuse that stored field whenever present.
+    """
+    try:
+        inspector = sa_inspect(db.engine)
+        columns = {col['name'] for col in inspector.get_columns('predictions')}
+    except Exception:
+        columns = set(getattr(Prediction, '__table__').columns.keys())
+    for column in candidates:
+        if column in columns:
+            return column
+    return None
+
+
+def _parse_probability_percent(value):
+    """Parse stored probability values into a 0..1 float."""
+    try:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.replace('%', '').strip()
+        prob = float(value)
+        if prob > 1:
+            prob /= 100.0
+        return max(0.0, min(prob, 1.0))
+    except (TypeError, ValueError):
+        return None
+
+
+def _staking_strategy_definitions():
+    return [
+        {'key': 'flat_10', 'name': 'Flat $10 stake', 'type': 'flat', 'amount': 10.0},
+        {'key': 'win_10', 'name': 'Stake to win $10 profit', 'type': 'target_profit', 'profit': 10.0},
+        {'key': 'flat_1_pct', 'name': 'Flat 1% bankroll', 'type': 'bankroll_pct', 'pct': 0.01},
+        {'key': 'flat_2_pct', 'name': 'Flat 2% bankroll', 'type': 'bankroll_pct', 'pct': 0.02},
+        {'key': 'quarter_kelly', 'name': 'Quarter Kelly', 'type': 'kelly', 'fraction': 0.25},
+        {'key': 'one_third_kelly', 'name': 'One-third Kelly', 'type': 'kelly', 'fraction': 1/3},
+        {'key': 'half_kelly', 'name': 'Half Kelly', 'type': 'kelly', 'fraction': 0.5},
+        {'key': 'full_kelly', 'name': 'Full Kelly', 'type': 'kelly', 'fraction': 1.0},
+        {'key': 'quarter_kelly_cap_2', 'name': 'Quarter Kelly capped at 2% bankroll', 'type': 'kelly', 'fraction': 0.25, 'cap_pct': 0.02},
+        {'key': 'half_kelly_cap_2', 'name': 'Half Kelly capped at 2% bankroll', 'type': 'kelly', 'fraction': 0.5, 'cap_pct': 0.02},
+        {'key': 'full_kelly_cap_5', 'name': 'Full Kelly capped at 5% bankroll', 'type': 'kelly', 'fraction': 1.0, 'cap_pct': 0.05},
+    ]
+
+
+def calculate_kelly_fraction(probability, decimal_odds):
+    """Return full Kelly bankroll fraction for decimal odds; negative means no edge."""
+    try:
+        p = float(probability)
+        odds = float(decimal_odds)
+    except (TypeError, ValueError):
+        return 0.0
+    b = odds - 1.0
+    if p <= 0 or odds <= 1 or b <= 0:
+        return 0.0
+    return ((b * p) - (1.0 - p)) / b
+
+
+def _staking_stake(strategy, bankroll, selection, minimum_stake=0.0, maximum_stake=None):
+    sp = float(selection.get('sp') or 0)
+    if bankroll <= 0 or sp <= 1:
+        return 0.0
+    if strategy['type'] == 'flat':
+        stake = strategy['amount']
+    elif strategy['type'] == 'target_profit':
+        stake = strategy['profit'] / (sp - 1.0)
+    elif strategy['type'] == 'bankroll_pct':
+        stake = bankroll * strategy['pct']
+    else:
+        kelly = calculate_kelly_fraction(selection.get('probability'), sp)
+        if kelly <= 0:
+            return 0.0
+        stake = bankroll * kelly * strategy.get('fraction', 1.0)
+        if strategy.get('cap_pct') is not None:
+            stake = min(stake, bankroll * strategy['cap_pct'])
+    if maximum_stake is not None:
+        stake = min(stake, float(maximum_stake))
+    if stake < minimum_stake:
+        return 0.0
+    return min(stake, bankroll)
+
+
+def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_stake=0.0, maximum_stake=None, probability_source='Assessed win probability', probability_source_field=None):
+    """Replay chronological selections through every canonical staking strategy."""
+    ordered = sorted(selections, key=lambda s: (s.get('sort_key') or '', s.get('race_number') or 0, s.get('race_id') or 0))
+    strategies = _staking_strategy_definitions()
+    days = 0
+    if len(ordered) >= 2:
+        try:
+            d0 = datetime.fromisoformat(str(ordered[0].get('sort_key'))[:10]).date()
+            d1 = datetime.fromisoformat(str(ordered[-1].get('sort_key'))[:10]).date()
+            days = max((d1 - d0).days, 0)
+        except Exception:
+            days = 0
+    results = []
+    for strat in strategies:
+        bankroll = float(starting_bankroll)
+        peak = bankroll
+        max_dd = 0.0
+        stakes=[]; returns=[]; curve=[]; wins=0; losing=winning=max_losing=max_winning=0; turnover=0.0
+        for i, sel in enumerate(ordered, start=1):
+            stake = _staking_stake(strat, bankroll, sel, minimum_stake, maximum_stake)
+            won = sel.get('finish_position') == 1
+            ret = stake * float(sel.get('sp') or 0) if won and stake > 0 else 0.0
+            profit = ret - stake
+            bankroll += profit
+            turnover += stake
+            stakes.append(stake); returns.append(profit)
+            if stake > 0 and won:
+                wins += 1; winning += 1; losing = 0
+            elif stake > 0:
+                losing += 1; winning = 0
+            max_losing=max(max_losing, losing); max_winning=max(max_winning, winning)
+            peak=max(peak, bankroll)
+            dd = ((peak-bankroll)/peak*100) if peak else 0.0
+            max_dd=max(max_dd, dd)
+            curve.append({'bet': i, 'bankroll': round(bankroll, 2), 'stake': round(stake, 2), 'profit': round(profit, 2)})
+        n=len(ordered); final=bankroll; total_profit=final-float(starting_bankroll)
+        avg_profit = sum(returns)/len(returns) if returns else 0.0
+        variance = sum((x-avg_profit)**2 for x in returns)/len(returns) if returns else 0.0
+        volatility = math.sqrt(variance)
+        cagr = ((final/starting_bankroll)**(365.25/days)-1)*100 if days > 0 and final > 0 and starting_bankroll > 0 else 0.0
+        risk_adjusted = (total_profit / max_dd) if max_dd > 0 else (total_profit if total_profit > 0 else 0.0)
+        results.append({
+            'key': strat['key'], 'name': strat['name'], 'final_bankroll': round(final,2), 'total_profit': round(total_profit,2),
+            'roi': round((total_profit/turnover*100) if turnover else 0.0,2), 'cagr': round(cagr,2), 'maximum_drawdown': round(max_dd,2),
+            'largest_losing_streak': max_losing, 'largest_winning_streak': max_winning, 'largest_individual_stake': round(max(stakes) if stakes else 0,2),
+            'average_stake': round(sum(stakes)/len(stakes) if stakes else 0,2), 'number_of_bets': n, 'number_of_winning_bets': wins,
+            'strike_rate': round((wins/n*100) if n else 0.0,2), 'return_on_turnover': round((sum(r + s for r,s in zip(returns, stakes))/turnover*100) if turnover else 0.0,2),
+            'volatility': round(volatility,2), 'bankroll_growth_multiple': round((final/starting_bankroll) if starting_bankroll else 0.0,4),
+            'total_staked': round(turnover,2), 'risk_adjusted_return': round(risk_adjusted,4), 'curve': curve,
+        })
+    winners = {
+        'highest_final_bankroll': max(results, key=lambda r: r['final_bankroll']) if results else None,
+        'highest_profit': max(results, key=lambda r: r['total_profit']) if results else None,
+        'best_risk_adjusted_return': max(results, key=lambda r: r['risk_adjusted_return']) if results else None,
+        'smallest_maximum_drawdown': min(results, key=lambda r: r['maximum_drawdown']) if results else None,
+    }
+    summary = ''
+    if results:
+        fb = winners['highest_final_bankroll']['name']; dd = winners['smallest_maximum_drawdown']['name']
+        if fb == dd:
+            summary = f"Based on all historical selections, {fb} produced the highest ending bankroll and the lowest drawdown."
+        elif fb == 'Flat $10 stake' and all(winners['highest_final_bankroll']['final_bankroll'] >= r['final_bankroll'] for r in results if 'Kelly' in r['name']):
+            summary = 'Flat $10 staking outperformed all Kelly methods.'
+        else:
+            summary = f"Based on all historical selections, {fb} produced the highest ending bankroll while {dd} produced the lowest drawdown."
+    return {
+        'starting_bankroll': starting_bankroll, 'settings': {'probability_source': probability_source, 'probability_source_field': probability_source_field or probability_source, 'odds_source': 'Historical SP', 'kelly_formula': 'f = ((decimal_odds - 1) * p - (1 - p)) / (decimal_odds - 1)', 'bankroll': starting_bankroll, 'kelly_cap': 'Per strategy: uncapped, 2%, or 5%', 'minimum_stake': minimum_stake, 'maximum_stake': maximum_stake},
+        'strategies': results, 'winners': {k: {'key': v['key'], 'name': v['name'], 'value': v.get({'highest_final_bankroll':'final_bankroll','highest_profit':'total_profit','best_risk_adjusted_return':'risk_adjusted_return','smallest_maximum_drawdown':'maximum_drawdown'}[k])} for k,v in winners.items() if v}, 'summary': summary,
+    }
+
+
+def _build_analyzer_staking_selections(track_filter='', min_score_filter=None, date_from='', date_to='', limit_param='all'):
+    q = db.session.query(Meeting.id, Meeting.uploaded_at, Meeting.date, Race.id, Race.race_number, Prediction.score, Prediction.win_probability, Result.finish_position, Result.sp).join(Race, Race.meeting_id == Meeting.id).join(Horse, Horse.race_id == Race.id).join(Prediction, Prediction.horse_id == Horse.id).join(Result, Result.horse_id == Horse.id).filter(Result.finish_position > 0, Result.sp.isnot(None), Prediction.win_probability.isnot(None), Prediction.win_probability != '')
+    if track_filter: q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from: q = q.filter(Meeting.uploaded_at >= date_from)
+    if date_to: q = q.filter(Meeting.uploaded_at <= date_to)
+    rows = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
+    from collections import defaultdict
+    races=defaultdict(list); keys=[]
+    for mid, uploaded, mdate, rid, rnum, score, prob, fp, sp in rows:
+        key=(mid,rnum)
+        if key not in races: keys.append(key)
+        races[key].append({'race_id': rid, 'race_number': rnum, 'score': score or 0, 'probability': _parse_probability_percent(prob), 'finish_position': fp, 'sp': float(sp or 0), 'sort_key': (mdate or uploaded or datetime.min).isoformat()})
+    if limit_param != 'all': keys = keys[:(int(limit_param) if str(limit_param).isdigit() else 200)]
+    out=[]
+    for key in keys:
+        top=max(races[key], key=lambda h: h['score'])
+        if min_score_filter and top['score'] < min_score_filter: continue
+        if top['probability'] is not None and top['sp'] > 0:
+            top['probability_source_field'] = 'predictions.win_probability'
+            out.append(top)
+    return out
+
+
+def _build_ml_staking_selections(track_filter='', date_from='', date_to='', limit_param='all'):
+    base = _build_ml_performance_race_results(track_filter, date_from, date_to)
+    if limit_param != 'all':
+        base = base[:(int(limit_param) if str(limit_param).isdigit() else 200)]
+    race_ids = [r['race_id'] for r in base]
+    if not race_ids:
+        return [], 'derived from ML 110% market probabilities', {'stored': 0, 'derived': 0}
+
+    stored_probability_column = _existing_prediction_probability_column(ML_STORED_PROBABILITY_COLUMNS)
+    stored_select = f", p.{stored_probability_column} AS stored_probability" if stored_probability_column else ", NULL AS stored_probability"
+    ml_probability_sql = text(f"""
+        SELECT rc.id AS race_id,
+               p.ml_score,
+               h.id AS horse_id
+               {stored_select}
+        FROM predictions p
+        JOIN horses h ON h.id = p.horse_id
+        JOIN races rc ON rc.id = h.race_id
+        WHERE rc.id IN :race_ids
+          AND p.ml_score IS NOT NULL
+          AND COALESCE(h.is_scratched, FALSE) = FALSE
+    """).bindparams(bindparam('race_ids', expanding=True))
+    rows = db.session.execute(ml_probability_sql, {'race_ids': race_ids}).fetchall()
+
+    from collections import defaultdict
+    by = defaultdict(list)
+    for row in rows:
+        by[row.race_id].append({
+            'ml_score': row.ml_score,
+            'horse_id': row.horse_id,
+            'stored_probability': getattr(row, 'stored_probability', None),
+        })
+
+    out = []
+    source_counts = {'stored': 0, 'derived': 0}
+    for r in base:
+        runners = by.get(r['race_id'], [])
+        idx = next((i for i, h in enumerate(runners) if h['horse_id'] == r['top_ml_horse_id']), None)
+        if idx is None:
+            continue
+        top_runner = runners[idx]
+        stored_probability = _parse_probability_percent(top_runner.get('stored_probability'))
+        if stored_probability is not None:
+            source_counts['stored'] += 1
+            out.append({**r, 'probability': stored_probability, 'probability_source_field': f'predictions.{stored_probability_column}'})
+            continue
+
+        # Fallback only: if no canonical stored ML probability exists for this
+        # selection, derive the same ML 110% assessed market probability used by
+        # the ML meeting view from persisted ml_score values.
+        book = _derive_ml_race_book(runners, lambda h: h['ml_score'])
+        if idx is None or idx not in book:
+            continue
+        source_counts['derived'] += 1
+        out.append({**r, 'probability': book[idx]['ml_probability_110'], 'probability_source_field': 'derived from ML 110% market probabilities'})
+
+    if stored_probability_column and source_counts['derived']:
+        source = f'predictions.{stored_probability_column} where populated; derived from ML 110% market probabilities otherwise'
+    elif stored_probability_column:
+        source = f'predictions.{stored_probability_column}'
+    else:
+        source = 'derived from ML 110% market probabilities'
+    return out, source, source_counts
 
 
 def _summarise_ml_performance_races(race_results):
@@ -8126,6 +8383,39 @@ def api_external_factors():
         'class_performance': class_perf_filtered,
         'class_drops':       class_drops_filtered,
     })
+
+@app.route("/api/data/staking-strategy-analysis")
+@login_required
+def api_analyzer_staking_strategy_analysis():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    selections = _build_analyzer_staking_selections(
+        track_filter=request.args.get('track', ''),
+        min_score_filter=request.args.get('min_score', type=float),
+        date_from=request.args.get('date_from', ''),
+        date_to=request.args.get('date_to', ''),
+        limit_param=request.args.get('limit', 'all'),
+    )
+    bankroll = request.args.get('bankroll', default=10000.0, type=float)
+    return jsonify(replay_staking_strategies(selections, bankroll, probability_source='Analyzer assessed win probability', probability_source_field='predictions.win_probability'))
+
+
+@app.route("/api/ml-data/staking-strategy-analysis")
+@login_required
+def api_ml_staking_strategy_analysis():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    selections, probability_source_field, source_counts = _build_ml_staking_selections(
+        track_filter=request.args.get('track', ''),
+        date_from=request.args.get('date_from', ''),
+        date_to=request.args.get('date_to', ''),
+        limit_param=request.args.get('limit', '200'),
+    )
+    bankroll = request.args.get('bankroll', default=10000.0, type=float)
+    analysis = replay_staking_strategies(selections, bankroll, probability_source='ML calibrated assessed win probability', probability_source_field=probability_source_field)
+    analysis['settings']['probability_source_counts'] = source_counts
+    return jsonify(analysis)
+
 @app.route("/api/data/probability-calibration")
 @login_required
 def api_probability_calibration():
@@ -11393,7 +11683,7 @@ def backtest():
         flash('Admin access required.', 'danger')
         return redirect(url_for('dashboard'))
     
-    from sqlalchemy import text
+    from sqlalchemy import text, bindparam
     import json
     
     # Get latest completed run
@@ -12775,7 +13065,7 @@ def api_race_tempo_analysis():
             csv_data->>'form track condition'
         HAVING COUNT(*) >= 30
     """
-    from sqlalchemy import text
+    from sqlalchemy import text, bindparam
     par_rows = db.session.execute(text(par_query)).fetchall()
 
     par_lookup = {}
