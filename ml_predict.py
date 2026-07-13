@@ -556,6 +556,7 @@ def load_model():
                 model._form_analyst_run_id = row[1]
                 model._form_analyst_model_type = row[6]
                 model._form_analyst_model_name = row[7]
+                model._form_analyst_training_date = row[2]
                 model._form_analyst_is_active = row[8]
                 model._form_analyst_model_version = row[9] or getattr(model, '_form_analyst_model_version', None)
                 model._form_analyst_artifact_path = f"db://backtest_best_model/{row[0]}"
@@ -569,9 +570,9 @@ def load_model():
                 if row[11] and feature_count and int(row[11]) != feature_count:
                     raise RuntimeError(f"Active ML model feature count mismatch: db_expected={row[11]} artifact={feature_count}")
                 log.info(
-                    "ML_ACTIVE_MODEL_LOADED source=db active_algorithm=%s artifact_path=%s artifact_filename=%s training_run_id=%s model_version=%s feature_count=%s selection_metrics=%s class=%s",
+                    "ML_ACTIVE_MODEL_LOADED source=db active_algorithm=%s artifact_path=%s artifact_filename=%s training_run_id=%s training_date=%s model_version=%s feature_count=%s selected_overall_champion=%s selection_metrics=%s class=%s",
                     row[6], model._form_analyst_artifact_path, model._form_analyst_artifact_filename,
-                    row[1], model._form_analyst_model_version, feature_count,
+                    row[1], row[2], model._form_analyst_model_version, feature_count, bool(row[8]),
                     model._form_analyst_selection_metrics, type(model).__name__,
                 )
                 return model
@@ -585,15 +586,82 @@ def load_model():
         model._form_analyst_artifact_path = model_path
         model._form_analyst_artifact_filename = os.path.basename(model_path)
         log.warning(
-            "ML_ACTIVE_MODEL_LOADED source=filesystem_fallback active_algorithm=%s artifact_path=%s artifact_filename=%s training_run_id=%s model_version=%s feature_count=%s selection_metrics=%s class=%s",
+            "ML_ACTIVE_MODEL_LOADED source=filesystem_fallback active_algorithm=%s artifact_path=%s artifact_filename=%s training_run_id=%s training_date=%s model_version=%s feature_count=%s selected_overall_champion=%s selection_metrics=%s class=%s",
             getattr(model, '_form_analyst_model_type', type(model).__name__), model_path,
             os.path.basename(model_path), getattr(model, '_form_analyst_training_run_id', None),
-            getattr(model, '_form_analyst_model_version', None), len(_model_feature_names(model) or []),
+            getattr(model, '_form_analyst_training_date', None), getattr(model, '_form_analyst_model_version', None),
+            len(_model_feature_names(model) or []), getattr(model, '_form_analyst_is_active', False),
             getattr(model, '_form_analyst_selection_metrics', {}), type(model).__name__,
         )
         return model
 
     raise FileNotFoundError("No trained model found. Run backtest.py first.")
+
+
+def _display_algorithm(model):
+    """Return the production algorithm label from active model metadata."""
+    raw_name = getattr(model, '_form_analyst_model_name', None)
+    if raw_name:
+        return raw_name
+
+    raw_type = str(getattr(model, '_form_analyst_model_type', '') or '').lower()
+    labels = {
+        'random_forest': 'Random Forest',
+        'catboost': 'CatBoost',
+        'lightgbm': 'LightGBM',
+        'xgboost': 'XGBoost',
+        'ensemble': 'Ensemble',
+    }
+    for key, label in labels.items():
+        if key in raw_type:
+            return label
+
+    class_name = type(model).__name__.lower()
+    if 'catboost' in class_name:
+        return 'CatBoost'
+    if 'lgbm' in class_name or 'lightgbm' in class_name:
+        return 'LightGBM'
+    if 'xgb' in class_name or 'xgboost' in class_name:
+        return 'XGBoost'
+    if 'ensemble' in class_name or 'voting' in class_name or 'stacking' in class_name:
+        return 'Ensemble'
+    if 'forest' in class_name:
+        return 'Random Forest'
+    return type(model).__name__
+
+
+def active_production_model_metadata(emit_log=False):
+    """Inspect the exact artifact loaded by production ML inference.
+
+    This deliberately calls ``load_model()`` so the website and startup audit use
+    the same DB-first / filesystem-fallback path as live prediction scoring.
+    """
+    model = load_model()
+    feature_names = _model_feature_names(model) or []
+    expected_feature_count = getattr(model, '_form_analyst_expected_feature_count', None) or len(feature_names) or None
+    selected_overall = bool(getattr(model, '_form_analyst_is_active', False))
+    metadata = {
+        'active_algorithm': _display_algorithm(model),
+        'model_type': getattr(model, '_form_analyst_model_type', None),
+        'model_artifact_filename': getattr(model, '_form_analyst_artifact_filename', None),
+        'model_artifact_path': getattr(model, '_form_analyst_artifact_path', None),
+        'training_backtest_run_id': getattr(model, '_form_analyst_run_id', None) or getattr(model, '_form_analyst_training_run_id', None),
+        'training_date': str(getattr(model, '_form_analyst_training_date', '') or '') or None,
+        'expected_feature_count': expected_feature_count,
+        'model_version': getattr(model, '_form_analyst_model_version', None),
+        'selected_overall_champion': selected_overall,
+        'champion_status': 'Selected overall champion' if selected_overall else 'Best model for its algorithm type / fallback artifact',
+        'model_class': type(model).__name__,
+    }
+    if emit_log:
+        log.info(
+            "ML_ACTIVE_PRODUCTION_MODEL_AUDIT active_algorithm=%s artifact_filename=%s artifact_path=%s training_run_id=%s training_date=%s expected_feature_count=%s model_version=%s selected_overall_champion=%s champion_status=%s model_class=%s",
+            metadata['active_algorithm'], metadata['model_artifact_filename'], metadata['model_artifact_path'],
+            metadata['training_backtest_run_id'], metadata['training_date'], metadata['expected_feature_count'],
+            metadata['model_version'], metadata['selected_overall_champion'], metadata['champion_status'],
+            metadata['model_class'],
+        )
+    return metadata
 
 
 def _predict_raw_scores(model, X):
