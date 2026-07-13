@@ -1242,6 +1242,24 @@ function renderMlFieldSize(data) {
     });
 }
 
+
+function renderMlBreakdownTable(title, rows, recon) {
+    const ordered = rows || [];
+    const reconText = recon ? `<span class="text-muted" style="font-size:11px">Reconciliation: ${recon.row_bets}/${recon.headline_bets} bets ${recon.reconciles ? '✓' : '⚠️'}</span>` : '';
+    let html = `<h6 style="margin-top:22px;margin-bottom:8px">${escapeHtml(title)} ${reconText}</h6><div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Segment</th><th>Bets</th><th>Wins</th><th>Strike</th><th>Staked</th><th>Return</th><th>Profit</th><th>ROI</th><th>Avg Win SP</th><th>Largest Win SP</th><th>Profit ex Largest</th><th>ROI ex Largest</th><th>Sample</th></tr></thead><tbody>`;
+    for (const r of ordered) {
+        const pc = (r.profit || 0) >= 0 ? 'profit' : 'loss';
+        const rc = (r.roi_pct || 0) >= 0 ? 'profit' : 'loss';
+        html += `<tr><td><strong>${escapeHtml(r.label || 'Unknown')}</strong></td><td>${r.bets || 0}</td><td>${r.wins || 0}</td><td>${(r.strike_rate_pct || 0).toFixed(2)}%</td><td>$${(r.total_staked || 0).toFixed(0)}</td><td>$${(r.total_return || 0).toFixed(2)}</td><td class="${pc}">${(r.profit || 0) >= 0 ? '+' : ''}$${(r.profit || 0).toFixed(2)}</td><td class="${rc}">${(r.roi_pct || 0) >= 0 ? '+' : ''}${(r.roi_pct || 0).toFixed(2)}%</td><td>${(r.avg_winner_sp || 0).toFixed(2)}</td><td>${(r.largest_winner_sp || 0).toFixed(2)}</td><td class="${(r.profit_ex_largest_winner || 0) >= 0 ? 'profit' : 'loss'}">${(r.profit_ex_largest_winner || 0) >= 0 ? '+' : ''}$${(r.profit_ex_largest_winner || 0).toFixed(2)}</td><td class="${(r.roi_ex_largest_winner_pct || 0) >= 0 ? 'profit' : 'loss'}">${(r.roi_ex_largest_winner_pct || 0) >= 0 ? '+' : ''}${(r.roi_ex_largest_winner_pct || 0).toFixed(2)}%</td><td><span class="badge bg-secondary">${escapeHtml(r.sample_warning || '')}</span></td></tr>`;
+    }
+    html += '</tbody></table></div>';
+    return html;
+}
+function renderMlHeadlineTable(title, h) {
+    h = h || {};
+    return `<h6>${escapeHtml(title)}</h6><div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Bets</th><th>Wins</th><th>Strike</th><th>Staked</th><th>Return</th><th>Profit</th><th>ROI</th><th>Avg Winner SP</th><th>Largest Winner SP</th><th>Profit ex Largest</th><th>ROI ex Largest</th></tr></thead><tbody><tr><td>${h.bets || 0}</td><td>${h.wins || 0}</td><td>${(h.strike_rate_pct || 0).toFixed(2)}%</td><td>$${(h.total_staked || 0).toFixed(0)}</td><td>$${(h.total_return || 0).toFixed(2)}</td><td class="${(h.profit || 0) >= 0 ? 'profit' : 'loss'}">${(h.profit || 0) >= 0 ? '+' : ''}$${(h.profit || 0).toFixed(2)}</td><td class="${(h.roi_pct || 0) >= 0 ? 'profit' : 'loss'}">${(h.roi_pct || 0) >= 0 ? '+' : ''}${(h.roi_pct || 0).toFixed(2)}%</td><td>${(h.avg_winner_sp || 0).toFixed(2)}</td><td>${(h.largest_winner_sp || 0).toFixed(2)}</td><td>${(h.profit_ex_largest_winner || 0).toFixed(2)}</td><td>${(h.roi_ex_largest_winner_pct || 0).toFixed(2)}%</td></tr></tbody></table></div>`;
+}
+
 function renderMlMarketDivergence(data) {
     const container = document.getElementById('mlMarketDivergence');
     const md = data.market_divergence;
@@ -1292,8 +1310,24 @@ function renderMlMarketDivergence(data) {
         ${hasDisagreeEdge
             ? `The ML model outperforms the market when it <em>disagrees</em> with the favourite (${disagree.roi}% ROI vs ${agree.roi}% when agreeing). This suggests the ML model has genuine independent predictive power.`
             : `The ML model performs better when it <em>agrees</em> with the market (${agree.roi}% ROI). When disagreeing (${disagree.roi}% ROI), the market tends to be right. Consider using market agreement as an ML confidence filter.`}
-    </div>
     </div>`;
+
+    const dims = [
+        ['price_bracket', 'ML selection price bracket'], ['market_rank', 'Market rank of ML selection'],
+        ['ml_score_bracket', 'ML score bracket'], ['ml_score_gap', 'ML score gap between first and second'],
+        ['field_size', 'Field size'], ['jurisdiction', 'Jurisdiction'], ['distance', 'Race distance bracket'], ['race_class', 'Race class / race type']
+    ];
+    const analysis = data.analysis || {};
+    for (const [key, title] of [['agree', 'ML agrees with market favourite'], ['disagree', 'ML disagrees with market favourite']]) {
+        const block = analysis[key] || {};
+        html += `<div style="margin-top:24px;padding-top:18px;border-top:1px solid rgba(255,255,255,.1)">`;
+        html += renderMlHeadlineTable(title, block.headline || {});
+        for (const [dim, label] of dims) html += renderMlBreakdownTable(label, (block.breakdowns || {})[dim] || [], (block.reconciliation || {})[dim]);
+        html += `</div>`;
+    }
+    html += `<div class="alert alert-secondary mt-3" style="font-size:12px;white-space:pre-wrap"><strong>Backend helper:</strong> ${escapeHtml(data.backend_helper || '')}
+<strong>SQL / handling:</strong> ${escapeHtml(data.sql_logic || data.handling_notes || '')}</div>`;
+    html += `</div>`;
 
     container.innerHTML = html;
 }
@@ -2788,11 +2822,23 @@ function renderMlSignalAgreement(data) {
         </div>
         <div class="table-responsive">
             <table class="table table-sm table-hover">
-                <thead class="table-dark"><tr><th>Bets</th><th>Wins</th><th>Strike %</th><th>Total Staked</th><th>Total Return</th><th>Profit</th><th>ROI %</th><th>Avg Winner SP</th></tr></thead>
-                <tbody><tr><td>${data.bets}</td><td>${data.wins}</td><td>${data.strike_rate_pct.toFixed(2)}%</td><td>${data.total_staked.toFixed(0)}</td><td>${data.total_return.toFixed(2)}</td><td class="${profitClass}">${data.profit >= 0 ? '+' : ''}${data.profit.toFixed(2)}</td><td class="${roiClass}">${data.roi_pct >= 0 ? '+' : ''}${data.roi_pct.toFixed(2)}%</td><td>${data.avg_winner_sp.toFixed(2)}</td></tr></tbody>
+                <thead class="table-dark"><tr><th>Bets</th><th>Wins</th><th>Strike %</th><th>Total Staked</th><th>Total Return</th><th>Profit</th><th>ROI %</th><th>Avg Winner SP</th><th>Largest Winner SP</th><th>Profit ex Largest</th><th>ROI ex Largest</th></tr></thead>
+                <tbody><tr><td>${data.bets}</td><td>${data.wins}</td><td>${data.strike_rate_pct.toFixed(2)}%</td><td>${data.total_staked.toFixed(0)}</td><td>${data.total_return.toFixed(2)}</td><td class="${profitClass}">${data.profit >= 0 ? '+' : ''}${data.profit.toFixed(2)}</td><td class="${roiClass}">${data.roi_pct >= 0 ? '+' : ''}${data.roi_pct.toFixed(2)}%</td><td>${data.avg_winner_sp.toFixed(2)}</td><td>${(data.largest_winner_sp || 0).toFixed(2)}</td><td>${(data.profit_ex_largest_winner || 0).toFixed(2)}</td><td>${(data.roi_ex_largest_winner_pct || 0).toFixed(2)}%</td></tr></tbody>
             </table>
-        </div>
-    </div>`;
+        </div>`;
+    const dims = [
+        ['price_bracket', 'Selection price bracket'], ['ml_score_bracket', 'ML score bracket'], ['ml_score_gap', 'ML score gap'],
+        ['field_size', 'Field size'], ['jurisdiction', 'Jurisdiction'], ['distance', 'Distance'], ['day_of_week', 'Day of week'],
+        ['market_rank', 'Market rank / favourite status'], ['favourite_status', 'Favourite vs not favourite direct comparison']
+    ];
+    const analysis = data.analysis || {};
+    for (const [dim, label] of dims) container.innerHTML += '';
+    let extra = '';
+    for (const [dim, label] of dims) extra += renderMlBreakdownTable(label, ((analysis.breakdowns || {})[dim] || []), ((analysis.reconciliation || {})[dim]));
+    extra += `<div class="alert alert-secondary mt-3" style="font-size:12px;white-space:pre-wrap"><strong>Backend helper:</strong> ${escapeHtml(data.backend_helper || '')}
+<strong>SQL / handling:</strong> ${escapeHtml(data.sql_logic || data.handling_notes || '')}</div>`;
+    container.innerHTML += extra + `</div>`;
+    return;
 }
 
 function renderMlPfaiAnalysis(data) {

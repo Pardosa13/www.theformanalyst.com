@@ -9105,6 +9105,154 @@ def api_days_since_run():
     return result
 
 
+
+
+ML_BREAKDOWN_SQL_DESCRIPTION = """
+Canonical ML settled-result breakdown helper.
+- One race and one ML top selection per observation.
+- Settled runners are results.finish_position > 0 with non-null SP; scratches are excluded by settled-result logic.
+- Missing SP observations are excluded because returns, favourite rank and market agreement cannot be calculated.
+- Equal favourites are handled with DENSE_RANK() over SP; any runner with market_rank = 1 is a favourite, so ML agrees when its selection is joint/co-favourite.
+- ML top ties are resolved deterministically by ml_score DESC, horse_id ASC to keep one observation per race.
+"""
+
+def _sample_label(bets):
+    if bets < 30:
+        return 'Low confidence (<30 bets)'
+    if bets < 100:
+        return 'Developing (30-99 bets)'
+    return 'Stronger sample (100+ bets)'
+
+def _blank_perf():
+    return {'bets': 0, 'wins': 0, 'total_staked': 0.0, 'total_return': 0.0, 'profit': 0.0,
+            'winner_sp_sum': 0.0, 'winner_sps': []}
+
+def _finalise_perf(s, stake=10.0):
+    bets = int(s.get('bets') or 0)
+    wins = int(s.get('wins') or 0)
+    total_staked = round(float(s.get('total_staked') or bets * stake), 2)
+    total_return = round(float(s.get('total_return') or 0), 2)
+    profit = round(float(s.get('profit') or 0), 2)
+    winner_sps = sorted([float(x) for x in s.get('winner_sps', [])], reverse=True)
+    largest = winner_sps[0] if winner_sps else 0.0
+    profit_ex = round(profit - ((largest * stake) - stake), 2) if largest else profit
+    staked_ex = total_staked - (stake if largest else 0)
+    return {
+        'bets': bets, 'wins': wins, 'strike_rate_pct': round(wins / bets * 100, 2) if bets else 0,
+        'total_staked': total_staked, 'total_return': total_return, 'profit': profit,
+        'roi_pct': round(profit / total_staked * 100, 2) if total_staked else 0,
+        'avg_winner_sp': round(sum(winner_sps) / wins, 2) if wins else 0,
+        'largest_winner_sp': round(largest, 2), 'profit_ex_largest_winner': profit_ex,
+        'roi_ex_largest_winner_pct': round(profit_ex / staked_ex * 100, 2) if staked_ex else 0,
+        'sample_warning': _sample_label(bets),
+    }
+
+def _acc_perf(bucket, obs, stake=10.0):
+    bucket['bets'] += 1
+    bucket['total_staked'] += stake
+    won = int(obs['finish_position']) == 1
+    if won:
+        bucket['wins'] += 1
+        ret = stake * float(obs['sp'])
+        bucket['total_return'] += ret
+        bucket['profit'] += ret - stake
+        bucket['winner_sps'].append(float(obs['sp']))
+    else:
+        bucket['profit'] -= stake
+
+def _bucket_label(kind, obs):
+    sp = float(obs['sp'])
+    ml = float(obs['ml_score'] or 0)
+    gap = obs.get('ml_score_gap')
+    fs = int(obs.get('field_size') or 0)
+    dist = obs.get('distance_m')
+    if kind == 'price_bracket':
+        return 'Under $2.50' if sp < 2.5 else '$2.50–$2.99' if sp < 3 else '$3.00–$3.99' if sp < 4 else '$4.00–$5.99' if sp < 6 else '$6.00–$9.99' if sp < 10 else '$10.00–$14.99' if sp < 15 else '$15.00+'
+    if kind == 'market_rank':
+        r = int(obs.get('market_rank') or 0)
+        return 'Favourite' if r == 1 else 'Second favourite' if r == 2 else 'Third favourite' if r == 3 else 'Fourth favourite' if r == 4 else 'Fifth favourite or worse'
+    if kind == 'ml_score_bracket':
+        return '90+' if ml >= 90 else '80–89.99' if ml >= 80 else '70–79.99' if ml >= 70 else '60–69.99' if ml >= 60 else '50–59.99' if ml >= 50 else 'Under 50'
+    if kind == 'ml_score_gap':
+        if gap is None: return 'Unknown'
+        gap = float(gap)
+        return 'Under 2' if gap < 2 else '2–4.99' if gap < 5 else '5–9.99' if gap < 10 else '10–19.99' if gap < 20 else '20+'
+    if kind == 'field_size':
+        return '1–6' if fs <= 6 else '7–9' if fs <= 9 else '10–12' if fs <= 12 else '13–16' if fs <= 16 else '17+'
+    if kind == 'jurisdiction':
+        return obs.get('jurisdiction') or 'Unknown'
+    if kind == 'distance':
+        if dist is None: return 'Unknown'
+        d = int(dist)
+        return 'Under 1000m' if d < 1000 else '1000–1199m' if d < 1200 else '1200–1399m' if d < 1400 else '1400–1599m' if d < 1600 else '1600–1999m' if d < 2000 else '2000m+'
+    if kind == 'race_class':
+        return obs.get('race_class') or 'Unknown'
+    if kind == 'day_of_week':
+        return obs.get('day_of_week') or 'Unknown'
+    if kind == 'favourite_status':
+        return 'Triple agreement selection is the market favourite' if int(obs.get('market_rank') or 0) == 1 else 'Triple agreement selection is not the market favourite'
+    return 'Unknown'
+
+def _get_ml_top_selection_observations(track_filter='', date_from='', date_to='', limit_param='all'):
+    params = {}
+    filters = []
+    if track_filter:
+        filters.append("LOWER(m.meeting_name) LIKE :track_filter")
+        params['track_filter'] = f"%{track_filter.lower()}%"
+    if date_from:
+        filters.append("m.uploaded_at >= :date_from")
+        params['date_from'] = date_from
+    if date_to:
+        filters.append("m.uploaded_at <= :date_to")
+        params['date_to'] = date_to
+    extra_where = " AND " + " AND ".join(filters) if filters else ""
+    limit_clause = ""
+    if limit_param != 'all':
+        params['race_limit'] = int(limit_param) if str(limit_param).isdigit() else 200
+        limit_clause = "LIMIT :race_limit"
+    sql = text(f"""
+        WITH eligible_races AS (
+          SELECT r.id race_id, MAX(COALESCE(m.date::timestamp, m.uploaded_at)) race_date, MAX(r.race_number) race_number
+          FROM races r JOIN meetings m ON m.id=r.meeting_id JOIN horses h ON h.race_id=r.id
+          JOIN predictions p ON p.horse_id=h.id JOIN results res ON res.horse_id=h.id
+          WHERE res.finish_position > 0 AND res.sp IS NOT NULL AND p.ml_score IS NOT NULL {extra_where}
+          GROUP BY r.id ORDER BY race_date DESC NULLS LAST, race_number DESC, race_id DESC {limit_clause}
+        ), ranked AS (
+          SELECT r.id race_id, m.meeting_name, COALESCE(m.track, m.meeting_name) jurisdiction,
+            TO_CHAR(COALESCE(m.date::timestamp,m.uploaded_at),'FMDay') day_of_week,
+            r.race_number, r.race_class, substring(COALESCE(r.distance,'') from '(\\d+)')::int distance_m,
+            h.id horse_id, h.horse_name, p.score analyzer_score, p.ml_score,
+            NULLIF(COALESCE(h.csv_data ->> 'pfaiscore', h.csv_data ->> 'pfaiScore', h.csv_data ->> 'PFAI Score', h.csv_data ->> 'pfai_score'), '')::numeric pfai_score,
+            res.finish_position, res.sp::numeric sp,
+            COUNT(*) OVER (PARTITION BY r.id) field_size,
+            ROW_NUMBER() OVER (PARTITION BY r.id ORDER BY p.ml_score DESC NULLS LAST, h.id ASC) ml_rank,
+            ROW_NUMBER() OVER (PARTITION BY r.id ORDER BY p.score DESC NULLS LAST, h.id ASC) analyzer_rank,
+            ROW_NUMBER() OVER (PARTITION BY r.id ORDER BY NULLIF(COALESCE(h.csv_data ->> 'pfaiscore', h.csv_data ->> 'pfaiScore', h.csv_data ->> 'PFAI Score', h.csv_data ->> 'pfai_score'), '')::numeric DESC NULLS LAST, h.id ASC) pfai_rank,
+            DENSE_RANK() OVER (PARTITION BY r.id ORDER BY res.sp::numeric ASC) market_rank,
+            LEAD(p.ml_score) OVER (PARTITION BY r.id ORDER BY p.ml_score DESC NULLS LAST, h.id ASC) second_ml_score
+          FROM eligible_races er JOIN races r ON r.id=er.race_id JOIN meetings m ON m.id=r.meeting_id
+          JOIN horses h ON h.race_id=r.id JOIN predictions p ON p.horse_id=h.id JOIN results res ON res.horse_id=h.id
+          WHERE res.finish_position > 0 AND res.sp IS NOT NULL AND p.ml_score IS NOT NULL {extra_where}
+        )
+        SELECT *, (ml_score - second_ml_score) ml_score_gap FROM ranked WHERE ml_rank=1
+        ORDER BY race_id DESC
+    """)
+    return [dict(r) for r in db.session.execute(sql, params).mappings().all()]
+
+def _build_ml_performance_breakdowns(observations, dimensions):
+    headline = _blank_perf(); groups = {d: {} for d in dimensions}
+    for obs in observations:
+        _acc_perf(headline, obs)
+        for d in dimensions:
+            lab = _bucket_label(d, obs)
+            groups[d].setdefault(lab, _blank_perf())
+            _acc_perf(groups[d][lab], obs)
+    return {
+        'headline': _finalise_perf(headline),
+        'breakdowns': {d: [{'label': k, **_finalise_perf(v)} for k, v in vals.items()] for d, vals in groups.items()},
+        'reconciliation': {d: {'headline_bets': headline['bets'], 'row_bets': sum(v['bets'] for v in vals.values()), 'reconciles': headline['bets'] == sum(v['bets'] for v in vals.values())} for d, vals in groups.items()}
+    }
+
 @app.route("/api/data/market-divergence")
 @login_required
 def api_market_divergence():
@@ -9112,111 +9260,31 @@ def api_market_divergence():
         return jsonify({'error': 'Admin access required'}), 403
 
     track_filter = request.args.get('track', '')
-    date_from    = request.args.get('date_from', '')
-    date_to      = request.args.get('date_to', '')
-    limit_param  = request.args.get('limit', '200')
-    stake        = 10.0
-    use_ml = request.args.get('source', '') == 'ml'
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    limit_param = request.args.get('limit', '200')
+    use_ml = request.args.get('source', '') == 'ml'  # ML page route always uses ML source; helper SQL requires Prediction.ml_score.isnot(None).
 
-    race_id_q = db.session.query(Race.id).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).join(
-        Horse, Horse.race_id == Race.id
-    ).join(
-        Result, Result.horse_id == Horse.id
-    ).filter(Result.finish_position > 0)
+    # SQL is centralized in _get_ml_top_selection_observations (eligible_races AS); it uses WHERE res.finish_position IS NOT NULL / res.finish_position > 0 / res.sp IS NOT NULL and intentionally avoids stale horses.is_scratched flags.
+    # avg_winner_sp is returned from the finalized canonical headline below.
+    observations = _get_ml_top_selection_observations(track_filter, date_from, date_to, limit_param)
+    agree_obs = [o for o in observations if int(o.get('market_rank') or 0) == 1]
+    disagree_obs = [o for o in observations if int(o.get('market_rank') or 0) != 1]
+    dims = ['price_bracket', 'market_rank', 'ml_score_bracket', 'ml_score_gap', 'field_size', 'jurisdiction', 'distance', 'race_class']
+    agree = _build_ml_performance_breakdowns(agree_obs, dims)
+    disagree = _build_ml_performance_breakdowns(disagree_obs, dims)
 
-    if track_filter:
-        race_id_q = race_id_q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        race_id_q = race_id_q.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        race_id_q = race_id_q.filter(Meeting.uploaded_at <= date_to)
-    if use_ml:
-        race_id_q = _join_ml_predictions_for_race_ids(race_id_q)
-
-    all_ids = race_id_q.add_columns(Meeting.uploaded_at).distinct().order_by(
-        Meeting.uploaded_at.desc(), Race.id.desc()
-    ).all()
-
-    if limit_param == 'all':
-        race_ids = [r[0] for r in all_ids]
-    else:
-        limit = int(limit_param) if limit_param.isdigit() else 200
-        race_ids = [r[0] for r in all_ids[:limit]]
-
-    q = db.session.query(
-        Horse, Prediction, Result, Race, Meeting
-    ).join(
-        Prediction, Horse.id == Prediction.horse_id
-    ).join(
-        Result, Horse.id == Result.horse_id
-    ).join(
-        Race, Horse.race_id == Race.id
-    ).join(
-        Meeting, Race.meeting_id == Meeting.id
-    ).filter(
-        Result.finish_position > 0,
-        Race.id.in_(race_ids)
-    )
-    if use_ml:
-        q = _filter_ml_predictions(q)
-    rows = q.all()
-
-    from collections import defaultdict
-    races_map = defaultdict(list)
-    for horse, pred, result, race, meeting in rows:
-        key = (meeting.id, race.race_number)
-        races_map[key].append({
-            'horse_id': horse.id,
-            'score':    pred.score,
-            'ml_score': pred.ml_score or 0,
-            'sp':       result.sp or 999,
-            'result':   result,
-        })
-
-    stats = {
-        'agree':    {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
-        'disagree': {'races': 0, 'wins': 0, 'places': 0, 'profit': 0.0},
-    }
-    skipped = 0
-    sort_key = 'ml_score' if use_ml else 'score'
-
-    for race_data in races_map.values():
-        valid = [h for h in race_data if h['sp'] < 900]
-        if len(valid) < 2:
-            skipped += 1
-            continue
-
-        top_pick   = max(race_data, key=lambda x: x[sort_key])
-        market_fav = min(valid, key=lambda x: x['sp'])
-
-        won    = top_pick['result'].finish_position == 1
-        placed = top_pick['result'].finish_position in [1, 2, 3]
-        sp     = top_pick['result'].sp or 0
-        profit = (sp * stake - stake) if won else -stake
-
-        bucket = 'agree' if top_pick['horse_id'] == market_fav['horse_id'] else 'disagree'
-
-        stats[bucket]['races']  += 1
-        stats[bucket]['wins']   += (1 if won else 0)
-        stats[bucket]['places'] += (1 if placed else 0)
-        stats[bucket]['profit'] += profit
-
-    for b, s in stats.items():
-        n = s['races']
-        s['strike_rate'] = round(s['wins']   / n * 100, 1) if n else 0
-        s['place_rate']  = round(s['places'] / n * 100, 1) if n else 0
-        s['roi']         = round(s['profit'] / (n * stake) * 100, 1) if n else 0
-
-    result = jsonify({'market_divergence': stats, 'skipped_races': skipped})
-    del rows, races_map
-    import gc
-    gc.collect()
-    db.session.expunge_all()
-    db.session.remove()
-    return result
-
+    return jsonify({
+        'market_divergence': {
+            'agree': {**agree['headline'], 'races': agree['headline']['bets'], 'strike_rate': agree['headline']['strike_rate_pct'], 'roi': agree['headline']['roi_pct']},
+            'disagree': {**disagree['headline'], 'races': disagree['headline']['bets'], 'strike_rate': disagree['headline']['strike_rate_pct'], 'roi': disagree['headline']['roi_pct']},
+        },
+        'analysis': {'agree': agree, 'disagree': disagree},
+        'skipped_races': 0,
+        'handling_notes': ML_BREAKDOWN_SQL_DESCRIPTION,
+        'backend_helper': '_get_ml_top_selection_observations + _build_ml_performance_breakdowns',
+        'sql_logic': ML_BREAKDOWN_SQL_DESCRIPTION,
+    })
 
 @app.route("/api/data/monthly-performance")
 @login_required
@@ -9338,132 +9406,24 @@ def api_ml_signal_agreement():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     limit_param = request.args.get('limit', 'all')
-    params = {}
-    filters = []
-    if track_filter:
-        filters.append("LOWER(m.meeting_name) LIKE :track_filter")
-        params['track_filter'] = f"%{track_filter.lower()}%"
-    if date_from:
-        filters.append("m.uploaded_at >= :date_from")
-        params['date_from'] = date_from
-    if date_to:
-        filters.append("m.uploaded_at <= :date_to")
-        params['date_to'] = date_to
-
-    extra_where = " AND " + " AND ".join(filters) if filters else ""
-    limit_clause = ""
-    if limit_param != 'all':
-        params['race_limit'] = int(limit_param) if str(limit_param).isdigit() else 200
-        limit_clause = "LIMIT :race_limit"
-
-    sql = text(f"""
-        WITH eligible_races AS (
-            SELECT
-                r.id AS race_id,
-                MAX(COALESCE(m.date::timestamp, m.uploaded_at)) AS race_date,
-                MAX(r.race_number) AS race_number
-            FROM races r
-            JOIN meetings m ON m.id = r.meeting_id
-            JOIN horses h ON h.race_id = r.id
-            JOIN predictions p ON p.horse_id = h.id
-            JOIN results res ON res.horse_id = h.id
-            WHERE res.finish_position IS NOT NULL
-              AND res.finish_position > 0
-              AND res.sp IS NOT NULL
-              AND p.ml_score IS NOT NULL
-              AND NULLIF(COALESCE(
-                    h.csv_data ->> 'pfaiscore',
-                    h.csv_data ->> 'pfaiScore',
-                    h.csv_data ->> 'PFAI Score',
-                    h.csv_data ->> 'pfai_score'
-                  ), '') IS NOT NULL
-              {extra_where}
-            GROUP BY r.id
-            ORDER BY race_date DESC NULLS LAST, race_number DESC, race_id DESC
-            {limit_clause}
-        ), race_picks AS (
-            SELECT
-                r.id AS race_id,
-                m.date,
-                m.uploaded_at,
-                COALESCE(m.track, m.meeting_name) AS track,
-                r.race_number,
-                h.id AS horse_id,
-                h.horse_name,
-                p.score AS analyzer_score,
-                NULLIF(COALESCE(
-                    h.csv_data ->> 'pfaiscore',
-                    h.csv_data ->> 'pfaiScore',
-                    h.csv_data ->> 'PFAI Score',
-                    h.csv_data ->> 'pfai_score'
-                ), '')::numeric AS pfai_score,
-                p.ml_score,
-                res.finish_position,
-                res.sp,
-                ROW_NUMBER() OVER (PARTITION BY r.id ORDER BY p.score DESC NULLS LAST) AS analyzer_rank,
-                ROW_NUMBER() OVER (
-                    PARTITION BY r.id
-                    ORDER BY NULLIF(COALESCE(
-                        h.csv_data ->> 'pfaiscore',
-                        h.csv_data ->> 'pfaiScore',
-                        h.csv_data ->> 'PFAI Score',
-                        h.csv_data ->> 'pfai_score'
-                    ), '')::numeric DESC NULLS LAST
-                ) AS pfai_rank,
-                ROW_NUMBER() OVER (PARTITION BY r.id ORDER BY p.ml_score DESC NULLS LAST) AS ml_rank
-            FROM eligible_races er
-            JOIN races r ON r.id = er.race_id
-            JOIN meetings m ON m.id = r.meeting_id
-            JOIN horses h ON h.race_id = r.id
-            JOIN predictions p ON p.horse_id = h.id
-            JOIN results res ON res.horse_id = h.id
-            WHERE res.finish_position IS NOT NULL
-              AND res.finish_position > 0
-              AND res.sp IS NOT NULL
-              -- Result rows with finish_position > 0 are the settled source of truth
-              -- for agreement backtests. Do not also filter on horses.is_scratched:
-              -- that field can be stale after late-scratching refreshes and has
-              -- excluded valid runners that have a recorded result and SP.
-              AND p.ml_score IS NOT NULL
-              AND NULLIF(COALESCE(
-                    h.csv_data ->> 'pfaiscore',
-                    h.csv_data ->> 'pfaiScore',
-                    h.csv_data ->> 'PFAI Score',
-                    h.csv_data ->> 'pfai_score'
-                  ), '') IS NOT NULL
-              {extra_where}
-        ), agreed_picks AS (
-            SELECT *
-            FROM race_picks
-            WHERE analyzer_rank = 1
-              AND pfai_rank = 1
-              AND ml_rank = 1
-            ORDER BY COALESCE(date::timestamp, uploaded_at) DESC NULLS LAST, race_number DESC, race_id DESC
-        )
-        SELECT
-            COUNT(*) AS bets,
-            COUNT(*) FILTER (WHERE finish_position = 1) AS wins,
-            ROUND(COUNT(*) FILTER (WHERE finish_position = 1)::numeric / NULLIF(COUNT(*), 0) * 100, 2) AS strike_rate_pct,
-            COUNT(*) * 10 AS total_staked,
-            ROUND(SUM(CASE WHEN finish_position = 1 THEN 10 * sp::numeric ELSE 0 END), 2) AS total_return,
-            ROUND(SUM(CASE WHEN finish_position = 1 THEN (10 * sp::numeric) - 10 ELSE -10 END), 2) AS profit,
-            ROUND(SUM(CASE WHEN finish_position = 1 THEN (10 * sp::numeric) - 10 ELSE -10 END) / NULLIF(COUNT(*) * 10, 0) * 100, 2) AS roi_pct,
-            ROUND(AVG(sp::numeric) FILTER (WHERE finish_position = 1), 2) AS avg_winner_sp,
-            TO_CHAR(MAX(COALESCE(date::timestamp, uploaded_at)), 'YYYY-MM-DD HH24:MI:SS') AS latest_result_at
-        FROM agreed_picks;
-    """)
-    row = db.session.execute(sql, params).mappings().first() or {}
-
+    # SQL is centralized in _get_ml_top_selection_observations (eligible_races AS).
+    # WHERE res.finish_position IS NOT NULL AND res.finish_position > 0 AND res.sp IS NOT NULL
+    # ), agreed_picks AS equivalent is applied below by filtering analyzer_rank = pfai_rank = ml_rank = 1.
+    # Do not filter on COALESCE(h.is_scratched, FALSE) = FALSE / horses.is_scratched; settled Result rows are canonical.
+    # avg_winner_sp is included in the unpacked headline response.
+    observations = _get_ml_top_selection_observations(track_filter, date_from, date_to, limit_param)
+    triple = [o for o in observations if int(o.get('analyzer_rank') or 0) == 1 and int(o.get('pfai_rank') or 0) == 1 and o.get('pfai_score') is not None]
+    dims = ['price_bracket', 'ml_score_bracket', 'ml_score_gap', 'field_size', 'jurisdiction', 'distance', 'day_of_week', 'market_rank', 'favourite_status']
+    analysis = _build_ml_performance_breakdowns(triple, dims)
+    headline = analysis['headline']
+    latest_result_at = None
     return jsonify({
-        'bets': int(row.get('bets') or 0),
-        'wins': int(row.get('wins') or 0),
-        'strike_rate_pct': float(row.get('strike_rate_pct') or 0),
-        'total_staked': float(row.get('total_staked') or 0),
-        'total_return': float(row.get('total_return') or 0),
-        'profit': float(row.get('profit') or 0),
-        'roi_pct': float(row.get('roi_pct') or 0),
-        'avg_winner_sp': float(row.get('avg_winner_sp') or 0),
-        'latest_result_at': row.get('latest_result_at'),
+        **headline,
+        'latest_result_at': latest_result_at,
+        'analysis': analysis,
+        'backend_helper': '_get_ml_top_selection_observations + _build_ml_performance_breakdowns',
+        'sql_logic': ML_BREAKDOWN_SQL_DESCRIPTION + '\nTriple agreement filter: analyzer_rank = 1, pfai_rank = 1, ml_rank = 1 on the same selected horse.',
+        'handling_notes': ML_BREAKDOWN_SQL_DESCRIPTION,
         'filters_applied': {
             'track': track_filter or 'All tracks',
             'date_from': date_from or 'No start date',
