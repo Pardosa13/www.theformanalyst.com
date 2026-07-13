@@ -242,6 +242,11 @@ def shutdown_session(exception=None):
 # Create tables and default admin user
 with app.app_context():
     db.create_all()
+    try:
+        from ml_predict import active_production_model_metadata
+        active_production_model_metadata(emit_log=True)
+    except Exception as e:
+        logger.warning("ML_ACTIVE_PRODUCTION_MODEL_AUDIT unavailable during startup: %s", e)
     
     # Migration: Add PuntingForm integration columns
     try:
@@ -5388,6 +5393,15 @@ def ml_data_analytics():
     tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
 
+    active_model_metadata = None
+    active_model_metadata_error = None
+    try:
+        from ml_predict import active_production_model_metadata
+        active_model_metadata = active_production_model_metadata()
+    except Exception as e:
+        active_model_metadata_error = str(e)
+        logger.warning("Unable to inspect active production ML model for ML Data page: %s", e)
+
     ml_performance_stats = None
     try:
         ml_performance_stats = calculate_ml_performance_stats(
@@ -5401,6 +5415,8 @@ def ml_data_analytics():
 
     return render_template("ml_data.html",
         ml_performance_stats=ml_performance_stats,
+        active_model_metadata=active_model_metadata,
+        active_model_metadata_error=active_model_metadata_error,
         track_list=track_list,
         filters={
             'track': track_filter,

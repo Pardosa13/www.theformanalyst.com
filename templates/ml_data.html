@@ -237,6 +237,27 @@
   }
   .card-body .alert-info strong, .collapse .alert-info strong { color: var(--ml-accent) !important; }
 
+
+  /* Active production ML model panel */
+  .active-model-card {
+    background: linear-gradient(135deg, rgba(0,229,176,.12), rgba(182,255,0,.06));
+    border: 1px solid rgba(0,229,176,.28);
+    border-radius: 16px;
+    padding: 18px 20px;
+    margin: 18px 0 22px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.22);
+  }
+  .active-model-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:14px; }
+  .active-model-header h5 { color:var(--ml-accent); margin:0; font-weight:800; letter-spacing:.02em; }
+  .active-model-subtitle { color:var(--text-muted); font-size:12px; margin:4px 0 0; }
+  .active-model-grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; }
+  .active-model-field { background:rgba(6,12,20,.62); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:12px; min-height:78px; }
+  .active-model-label { color:var(--text-muted); font-size:10px; text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; }
+  .active-model-value { color:var(--text); font-size:14px; font-weight:700; word-break:break-word; }
+  .champion-pill { background:rgba(182,255,0,.14); color:var(--ml-lime); border:1px solid rgba(182,255,0,.32); border-radius:999px; padding:6px 10px; font-size:11px; font-weight:800; white-space:nowrap; }
+  .champion-pill.secondary { background:rgba(255,193,7,.12); color:#ffd166; border-color:rgba(255,193,7,.34); }
+  .active-model-error { color:#ff8a8a; font-size:13px; margin:0; }
+
   /* Empty state */
   .analytics-empty {
     background: rgba(0,229,176,0.05);
@@ -265,6 +286,57 @@
 <div class="analytics-header">
   <h1>🤖 ML Machine Learning Analytics <span class="ml-badge">ML SCORES</span></h1>
   <p class="ml-note">All stats and charts on this page use <strong style="color:var(--ml-accent)">ML scores</strong> to rank horses — not the Analyzer score. See <a href="{{ url_for('data_analytics') }}" style="color:var(--ml-accent)">Data Analytics</a> for Analyzer performance.</p>
+</div>
+
+<!-- Active production model audit -->
+<div class="active-model-card">
+  <div class="active-model-header">
+    <div>
+      <h5>🏁 Active Production Model</h5>
+      <p class="active-model-subtitle">Loaded from the same production inference path used to generate live ML scores.</p>
+    </div>
+    {% if active_model_metadata %}
+    <span class="champion-pill {% if not active_model_metadata.selected_overall_champion %}secondary{% endif %}">{{ active_model_metadata.champion_status }}</span>
+    {% endif %}
+  </div>
+  {% if active_model_metadata %}
+  <div class="active-model-grid">
+    <div class="active-model-field">
+      <div class="active-model-label">Active Algorithm</div>
+      <div class="active-model-value">{{ active_model_metadata.active_algorithm or 'Unknown' }}</div>
+    </div>
+    <div class="active-model-field">
+      <div class="active-model-label">Model Artifact Filename</div>
+      <div class="active-model-value">{{ active_model_metadata.model_artifact_filename or 'Unknown' }}</div>
+    </div>
+    <div class="active-model-field">
+      <div class="active-model-label">Training / Backtest Run ID</div>
+      <div class="active-model-value">{{ active_model_metadata.training_backtest_run_id or 'Unknown' }}</div>
+    </div>
+    <div class="active-model-field">
+      <div class="active-model-label">Training Date</div>
+      <div class="active-model-value">{{ active_model_metadata.training_date or 'Unknown' }}</div>
+    </div>
+    <div class="active-model-field">
+      <div class="active-model-label">Expected Feature Count</div>
+      <div class="active-model-value">{{ active_model_metadata.expected_feature_count or 'Unknown' }}</div>
+    </div>
+    <div class="active-model-field">
+      <div class="active-model-label">Model Version</div>
+      <div class="active-model-value">{{ active_model_metadata.model_version or 'Unknown' }}</div>
+    </div>
+    <div class="active-model-field">
+      <div class="active-model-label">Champion Scope</div>
+      <div class="active-model-value">{% if active_model_metadata.selected_overall_champion %}Selected overall champion{% else %}Best of algorithm type / fallback{% endif %}</div>
+    </div>
+    <div class="active-model-field">
+      <div class="active-model-label">Loaded Model Class</div>
+      <div class="active-model-value">{{ active_model_metadata.model_class or 'Unknown' }}</div>
+    </div>
+  </div>
+  {% else %}
+  <p class="active-model-error">Active production model metadata is unavailable{% if active_model_metadata_error %}: {{ active_model_metadata_error }}{% endif %}.</p>
+  {% endif %}
 </div>
 
 <!-- Filters -->
