@@ -3489,6 +3489,8 @@ def _staking_stake(strategy, pre_race_bankroll, selection, minimum_stake=0.0, ma
 
     All strategy calculations intentionally use ``pre_race_bankroll`` and the
     returned value is the actual stake placed after every cap has been applied.
+    Kelly strategies use ``kelly_probability`` when supplied, leaving every
+    non-Kelly staking strategy on its original stake-sizing input.
     """
     sp = float(selection.get('sp') or 0)
     bankroll = max(0.0, float(pre_race_bankroll or 0.0))
@@ -3507,7 +3509,7 @@ def _staking_stake(strategy, pre_race_bankroll, selection, minimum_stake=0.0, ma
     else:
         if sp <= 1:
             return 0.0, full_kelly_fraction
-        full_kelly_fraction = max(0.0, calculate_kelly_fraction(selection.get('probability'), sp))
+        full_kelly_fraction = max(0.0, calculate_kelly_fraction(selection.get('kelly_probability', selection.get('probability')), sp))
         if full_kelly_fraction == 0:
             return 0.0, full_kelly_fraction
         fraction = full_kelly_fraction * strategy.get('fraction', 1.0)
@@ -3577,7 +3579,7 @@ def _assert_staking_replay_invariants(result, starting_bankroll):
         if abs(float(strategy.get('total_profit') or 0.0) - expected_profit) > 0.015:
             raise ValueError(f"Staking invariant failed for {key}: total profit does not reconcile to bankroll")
 
-def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_stake=0.0, maximum_stake=None, probability_source='Assessed win probability', probability_source_field=None):
+def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_stake=0.0, maximum_stake=None, probability_source='Assessed win probability', probability_source_field=None, probability_input='Original assessed probability'):
     """Replay chronological selections through every canonical staking strategy."""
     ordered = sorted(selections, key=lambda s: (s.get('sort_key') or '', s.get('race_number') or 0, s.get('race_id') or 0))
     strategies = _staking_strategy_definitions()
@@ -3625,6 +3627,7 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
                     'sort_key': sel.get('sort_key'),
                     'sp': round(float(sel.get('sp') or 0), 4),
                     'probability': round(_normalise_probability_fraction(sel.get('probability')) or 0.0, 6),
+                    'kelly_probability': round(_normalise_probability_fraction(sel.get('kelly_probability', sel.get('probability'))) or 0.0, 6),
                     'finish_position': sel.get('finish_position'),
                 })
             if stake > 0 and won:
@@ -3673,7 +3676,7 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
         else:
             summary = f"Based on all historical selections, {fb} produced the highest ending bankroll while {dd} produced the lowest drawdown."
     payload = {
-        'starting_bankroll': starting_bankroll, 'settings': {'probability_source': probability_source, 'probability_source_field': probability_source_field or probability_source, 'odds_source': 'Historical SP', 'kelly_formula': 'f = ((decimal_odds - 1) * p - (1 - p)) / (decimal_odds - 1)', 'bankroll': starting_bankroll, 'kelly_cap': 'Per strategy: uncapped, 2%, or 5%', 'minimum_stake': minimum_stake, 'maximum_stake': maximum_stake},
+        'starting_bankroll': starting_bankroll, 'settings': {'probability_source': probability_source, 'probability_source_field': probability_source_field or probability_source, 'probability_input': probability_input, 'odds_source': 'Historical SP', 'kelly_formula': 'f = ((decimal_odds - 1) * p - (1 - p)) / (decimal_odds - 1)', 'bankroll': starting_bankroll, 'kelly_cap': 'Per strategy: uncapped, 2%, or 5%', 'minimum_stake': minimum_stake, 'maximum_stake': maximum_stake},
         'strategies': results, 'winners': {k: {'key': v['key'], 'name': v['name'], 'value': v.get({'highest_final_bankroll':'final_bankroll','highest_profit':'total_profit','best_risk_adjusted_return':'risk_adjusted_return','smallest_maximum_drawdown':'maximum_drawdown'}[k])} for k,v in winners.items() if v}, 'summary': summary,
     }
     _assert_staking_replay_invariants(payload, starting_bankroll)
@@ -5718,7 +5721,11 @@ def _build_canonical_analyzer_selections(track_filter='', min_score_filter=None,
 
     selections = []
     for key in race_keys_ordered:
-        top = max(races[key], key=lambda h: h['score'])
+        runners = races[key]
+        race_probability_sum = sum(h['probability'] or 0.0 for h in runners)
+        for runner in runners:
+            runner['kelly_probability'] = (runner['probability'] / race_probability_sum) if race_probability_sum > 0 and runner['probability'] is not None else None
+        top = max(runners, key=lambda h: h['score'])
         if min_score_filter and top['score'] < min_score_filter:
             continue
         selections.append(top)
@@ -8560,7 +8567,7 @@ def api_analyzer_staking_strategy_analysis():
         limit_param=request.args.get('limit', 'all'),
     )
     bankroll = request.args.get('bankroll', default=10000.0, type=float)
-    analysis = replay_staking_strategies(selections, bankroll, probability_source='Analyzer assessed win probability', probability_source_field='predictions.win_probability')
+    analysis = replay_staking_strategies(selections, bankroll, probability_source='Analyzer assessed win probability', probability_source_field='predictions.win_probability', probability_input='Fair probability normalised from Analyzer 110% market.')
     _log_staking_response_metrics(analysis, 'api/data/staking-strategy-analysis')
     return jsonify(analysis)
 
