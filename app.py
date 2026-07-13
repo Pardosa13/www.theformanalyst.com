@@ -3454,12 +3454,29 @@ def _staking_strategy_definitions():
     ]
 
 
+def _normalise_probability_fraction(probability):
+    """Return probability as a 0..1 fraction, accepting stored percentages defensively."""
+    try:
+        if probability is None:
+            return None
+        if isinstance(probability, str):
+            probability = probability.replace('%', '').strip()
+        p = float(probability)
+    except (TypeError, ValueError):
+        return None
+    if p > 1.0:
+        p /= 100.0
+    return max(0.0, min(p, 1.0))
+
+
 def calculate_kelly_fraction(probability, decimal_odds):
     """Return full Kelly bankroll fraction for decimal odds; negative means no edge."""
+    p = _normalise_probability_fraction(probability)
     try:
-        p = float(probability)
         odds = float(decimal_odds)
     except (TypeError, ValueError):
+        return 0.0
+    if p is None:
         return 0.0
     b = odds - 1.0
     if p <= 0 or odds <= 1 or b <= 0:
@@ -3508,15 +3525,31 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
         bankroll = float(starting_bankroll)
         peak = bankroll
         max_dd = 0.0
-        stakes=[]; returns=[]; curve=[]; wins=0; losing=winning=max_losing=max_winning=0; turnover=0.0
+        stakes=[]; returns=[]; curve=[]; wins=0; bets=0; losing=winning=max_losing=max_winning=0; turnover=0.0; largest_stakes=[]
         for i, sel in enumerate(ordered, start=1):
-            stake = _staking_stake(strat, bankroll, sel, minimum_stake, maximum_stake)
+            bankroll_before = max(0.0, bankroll)
+            kelly_fraction = calculate_kelly_fraction(sel.get('probability'), sel.get('sp')) if strat['type'] == 'kelly' else None
+            stake = _staking_stake(strat, bankroll_before, sel, minimum_stake, maximum_stake)
             won = sel.get('finish_position') == 1
             ret = stake * float(sel.get('sp') or 0) if won and stake > 0 else 0.0
             profit = ret - stake
-            bankroll += profit
+            bankroll = max(0.0, bankroll_before + profit)
             turnover += stake
             stakes.append(stake); returns.append(profit)
+            if stake > 0:
+                bets += 1
+                largest_stakes.append({
+                    'bet': i,
+                    'stake': round(stake, 2),
+                    'bankroll': round(bankroll_before, 2),
+                    'kelly_fraction': round(kelly_fraction, 6) if kelly_fraction is not None else None,
+                    'race_id': sel.get('race_id'),
+                    'race_number': sel.get('race_number'),
+                    'sort_key': sel.get('sort_key'),
+                    'sp': round(float(sel.get('sp') or 0), 4),
+                    'probability': round(_normalise_probability_fraction(sel.get('probability')) or 0.0, 6),
+                    'finish_position': sel.get('finish_position'),
+                })
             if stake > 0 and won:
                 wins += 1; winning += 1; losing = 0
             elif stake > 0:
@@ -3525,8 +3558,9 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
             peak=max(peak, bankroll)
             dd = ((peak-bankroll)/peak*100) if peak else 0.0
             max_dd=max(max_dd, dd)
-            curve.append({'bet': i, 'bankroll': round(bankroll, 2), 'stake': round(stake, 2), 'profit': round(profit, 2)})
-        n=len(ordered); final=bankroll; total_profit=final-float(starting_bankroll)
+            curve.append({'bet': i, 'bankroll': round(bankroll, 2), 'bankroll_before': round(bankroll_before, 2), 'stake': round(stake, 2), 'profit': round(profit, 2)})
+        n=bets; final=bankroll; total_profit=final-float(starting_bankroll)
+        largest_stakes = sorted(largest_stakes, key=lambda r: r['stake'], reverse=True)[:5]
         avg_profit = sum(returns)/len(returns) if returns else 0.0
         variance = sum((x-avg_profit)**2 for x in returns)/len(returns) if returns else 0.0
         volatility = math.sqrt(variance)
@@ -3536,10 +3570,10 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
             'key': strat['key'], 'name': strat['name'], 'final_bankroll': round(final,2), 'total_profit': round(total_profit,2),
             'roi': round((total_profit/turnover*100) if turnover else 0.0,2), 'cagr': round(cagr,2), 'maximum_drawdown': round(max_dd,2),
             'largest_losing_streak': max_losing, 'largest_winning_streak': max_winning, 'largest_individual_stake': round(max(stakes) if stakes else 0,2),
-            'average_stake': round(sum(stakes)/len(stakes) if stakes else 0,2), 'number_of_bets': n, 'number_of_winning_bets': wins,
+            'average_stake': round((turnover/n) if n else 0,2), 'number_of_bets': n, 'number_of_winning_bets': wins,
             'strike_rate': round((wins/n*100) if n else 0.0,2), 'return_on_turnover': round((sum(r + s for r,s in zip(returns, stakes))/turnover*100) if turnover else 0.0,2),
             'volatility': round(volatility,2), 'bankroll_growth_multiple': round((final/starting_bankroll) if starting_bankroll else 0.0,4),
-            'total_staked': round(turnover,2), 'risk_adjusted_return': round(risk_adjusted,4), 'curve': curve,
+            'total_staked': round(turnover,2), 'risk_adjusted_return': round(risk_adjusted,4), 'largest_stakes': largest_stakes, 'curve': curve,
         })
     winners = {
         'highest_final_bankroll': max(results, key=lambda r: r['final_bankroll']) if results else None,
