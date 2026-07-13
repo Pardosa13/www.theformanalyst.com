@@ -96,13 +96,15 @@ def test_summary_metrics_are_derived_from_actual_replay_stakes():
     data = replay_staking_strategies(sels, 10000)
     for strategy in data['strategies']:
         stake_history = strategy['stake_history']
-        realised_profits = [point['profit'] for point in strategy['curve'] if point['stake'] > 0]
+        replay_stakes = [row['stake'] for row in stake_history]
+        realised_profits = [row['profit_loss'] for row in stake_history]
 
-        assert strategy['total_staked'] == round(sum(stake_history), 2)
-        assert strategy['average_stake'] == round(sum(stake_history) / strategy['number_of_bets'], 2)
-        assert strategy['largest_individual_stake'] == round(max(stake_history), 2)
+        assert strategy['total_staked'] == round(sum(replay_stakes), 2)
+        assert strategy['average_stake'] == round(sum(replay_stakes) / strategy['number_of_bets'], 2)
+        assert strategy['largest_individual_stake'] == round(max(replay_stakes), 2)
         assert strategy['average_stake'] <= strategy['largest_individual_stake']
-        assert strategy['largest_individual_stake'] <= max(point['bankroll_before'] for point in strategy['curve'])
+        assert strategy['largest_individual_stake'] <= max(row['bankroll_before'] for row in stake_history)
+        assert all({'stake', 'profit_loss', 'bankroll_before', 'bankroll_after'} <= set(row) for row in stake_history)
 
         avg_profit = sum(realised_profits) / len(realised_profits)
         expected_volatility = math.sqrt(sum((profit - avg_profit) ** 2 for profit in realised_profits) / len(realised_profits))
