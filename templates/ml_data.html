@@ -257,6 +257,9 @@
   .champion-pill { background:rgba(182,255,0,.14); color:var(--ml-lime); border:1px solid rgba(182,255,0,.32); border-radius:999px; padding:6px 10px; font-size:11px; font-weight:800; white-space:nowrap; }
   .champion-pill.secondary { background:rgba(255,193,7,.12); color:#ffd166; border-color:rgba(255,193,7,.34); }
   .active-model-error { color:#ff8a8a; font-size:13px; margin:0; }
+  .latest-challenger { margin-top:14px; padding-top:14px; border-top:1px solid rgba(255,255,255,.12); }
+  .latest-challenger h6 { color:var(--ml-lime); margin:0 0 10px; font-weight:800; letter-spacing:.02em; }
+  .latest-challenger .active-model-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
 
   /* Empty state */
   .analytics-empty {
@@ -336,6 +339,41 @@
   </div>
   {% else %}
   <p class="active-model-error">Active production model metadata is unavailable{% if active_model_metadata_error %}: {{ active_model_metadata_error }}{% endif %}.</p>
+  {% endif %}
+  {% if latest_challenger %}
+  <div class="latest-challenger">
+    <h6>Latest challenger</h6>
+    {% if latest_challenger.error %}
+      <p class="active-model-error">Latest challenger metadata is unavailable: {{ latest_challenger.error }}.</p>
+    {% else %}
+    <div class="active-model-grid">
+      <div class="active-model-field">
+        <div class="active-model-label">Completed Run</div>
+        <div class="active-model-value">Run {{ latest_challenger.run_id or 'Unknown' }}</div>
+      </div>
+      <div class="active-model-field">
+        <div class="active-model-label">Winning Algorithm</div>
+        <div class="active-model-value">{{ latest_challenger.model_name or latest_challenger.model_type or 'Unknown' }}</div>
+      </div>
+      <div class="active-model-field">
+        <div class="active-model-label">Beat Champion?</div>
+        <div class="active-model-value">{% if latest_challenger.beat_champion %}Yes{% else %}No{% endif %}</div>
+      </div>
+      <div class="active-model-field">
+        <div class="active-model-label">Selection Score</div>
+        <div class="active-model-value">{{ '%.3f'|format(latest_challenger.selection_score) if latest_challenger.selection_score is not none else 'Unknown' }}</div>
+      </div>
+      <div class="active-model-field">
+        <div class="active-model-label">ROI / Strike Rate</div>
+        <div class="active-model-value">{{ '%.1f%%'|format(latest_challenger.roi) if latest_challenger.roi is not none else 'Unknown' }} / {{ '%.1f%%'|format(latest_challenger.strike_rate) if latest_challenger.strike_rate is not none else 'Unknown' }}</div>
+      </div>
+      <div class="active-model-field">
+        <div class="active-model-label">Promoted or Rejected Reason</div>
+        <div class="active-model-value">{{ latest_challenger.promotion_reason or 'Unknown' }}</div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
   {% endif %}
 </div>
 
