@@ -185,9 +185,9 @@ def fetch_todays_meetings(date_str: str) -> list:
 
 
 # ── 2. Match a race to its Ladbrokes UUID ─────────────────────────────────
-def match_race_uuid(track_name: str, date_str: str, race_number: int) -> str | None:
+def match_race_info(track_name: str, date_str: str, race_number: int) -> dict | None:
     """
-    Find the Ladbrokes event UUID for a specific race.
+    Find the Ladbrokes event metadata for a specific race.
 
     Args:
         track_name:  Venue name e.g. "Flemington", "Caulfield"
@@ -195,7 +195,7 @@ def match_race_uuid(track_name: str, date_str: str, race_number: int) -> str | N
         race_number: Integer race number
 
     Returns:
-        Ladbrokes event UUID string, or None if not found.
+        Ladbrokes event metadata dict, or None if not found.
     """
     if not track_name:
         return None
@@ -220,10 +220,23 @@ def match_race_uuid(track_name: str, date_str: str, race_number: int) -> str | N
         if race.get("race_number") == race_number:
             uuid = race.get("id")
             logger.debug(f"Ladbrokes: matched R{race_number} at {track_name} → {uuid}")
-            return uuid
+            return {
+                "id": uuid,
+                "uuid": uuid,
+                "meeting_name": matched_meeting.get("name", ""),
+                "race_number": _race_field(race, "race_number", "number", "raceNumber"),
+                "start_time": _race_field(race, "start_time", "startTime"),
+                "status": _race_field(race, "status", "race_status", default=""),
+            }
 
     logger.debug(f"Ladbrokes: meeting found for {track_name} but no R{race_number}")
     return None
+
+
+def match_race_uuid(track_name: str, date_str: str, race_number: int) -> str | None:
+    """Find the Ladbrokes event UUID for a specific race."""
+    info = match_race_info(track_name, date_str, race_number)
+    return info.get("uuid") if info else None
 
 
 # ── 3. Fetch race odds (cached 30 sec) ────────────────────────────────────
@@ -238,12 +251,16 @@ def fetch_race_odds(race_uuid: str) -> dict:
         Dict with keys:
           "status":  race status string ("Open", "Closed", "Live", "Final", etc.)
           "odds":    { normalised_horse_name: { win, place, favourite, mover } }
+        Runner win prices use runner["odds"]["fixed_win"].
         Returns {"status": "error", "odds": {}} on any failure.
     """
     now = time.time()
     cached = _odds_cache.get(race_uuid)
     if cached and (now - cached[0]) < ODDS_CACHE_TTL:
-        return cached[1]
+        result = dict(cached[1])
+        result["fetched_at"] = datetime.fromtimestamp(cached[0], timezone.utc).isoformat().replace("+00:00", "Z")
+        result["age_seconds"] = now - cached[0]
+        return result
 
     try:
         url = f"{LB_BASE_URL}/racing/events/{race_uuid}"
@@ -264,22 +281,25 @@ def fetch_race_odds(race_uuid: str) -> dict:
 
         odds = {}
         for runner in runners:
-            if runner.get("is_scratched"):
-                continue
             name_norm = _norm(runner.get("name", ""))
             if not name_norm:
                 continue
-            runner_odds = runner.get("odds", {})
+            runner_odds = runner.get("odds", {}) or {}
             odds[name_norm] = {
+                "name":          runner.get("name", ""),
                 "win":           runner_odds.get("fixed_win"),
                 "place":         runner_odds.get("fixed_place"),
                 "favourite":     runner.get("favourite", False),
                 "mover":         runner.get("mover", False),
                 "flucs":         runner.get("flucs", []),
                 "runner_number": runner.get("runner_number", 0),
+                "is_scratched":  bool(runner.get("is_scratched")),
+                "status":        runner.get("status") or runner.get("runner_status") or "",
+                "is_available":  runner.get("is_available", runner.get("available", True)),
             }
 
-        result = {"status": status, "odds": odds, "silk_url": silk_url}
+        fetched_at = datetime.fromtimestamp(now, timezone.utc).isoformat().replace("+00:00", "Z")
+        result = {"status": status, "odds": odds, "silk_url": silk_url, "fetched_at": fetched_at, "age_seconds": 0} 
         _odds_cache[race_uuid] = (now, result)
         logger.debug(f"Ladbrokes: fetched odds for {race_uuid} — status={status}, runners={len(odds)}")
         return result
