@@ -78,8 +78,10 @@ def test_bankroll_audit_invariants_and_largest_stakes():
         for point in strategy['curve']:
             assert point['bankroll'] >= 0
             assert point['stake'] <= point['bankroll_before']
+        assert strategy['peak_bankroll'] == round(max([1000] + [point['bankroll'] for point in strategy['curve']]), 2)
         for row in strategy['largest_stakes']:
             assert row['stake'] <= row['bankroll']
+            assert row['stake_bankroll_pct'] == round(row['stake'] / row['bankroll'] * 100, 4)
             if row['kelly_fraction'] is not None:
                 assert 0 <= row['kelly_fraction'] <= 1
             assert {'race_id', 'race_number', 'sort_key', 'sp', 'probability', 'finish_position'} <= set(row)
@@ -104,6 +106,7 @@ def test_summary_metrics_are_derived_from_actual_replay_stakes():
         assert strategy['largest_individual_stake'] == round(max(replay_stakes), 2)
         assert strategy['average_stake'] <= strategy['largest_individual_stake']
         assert strategy['largest_individual_stake'] <= max(row['bankroll_before'] for row in stake_history)
+        assert strategy['peak_bankroll'] == round(max([10000] + [point['bankroll'] for point in strategy['curve']]), 2)
         assert all({'stake', 'profit_loss', 'bankroll_before', 'bankroll_after'} <= set(row) for row in stake_history)
 
         avg_profit = sum(realised_profits) / len(realised_profits)
