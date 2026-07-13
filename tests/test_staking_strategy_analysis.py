@@ -26,6 +26,20 @@ def test_kelly_fraction_calculated_correctly_and_negative_no_bet():
     assert full['number_of_winning_bets'] == 0
 
 
+def test_kelly_uses_fair_probability_without_changing_flat_staking():
+    sel = _sel(2.0, .66, True, '2024-01-01')
+    sel['kelly_probability'] = .6
+
+    data = replay_staking_strategies([sel], 1000)
+    full = next(r for r in data['strategies'] if r['key'] == 'full_kelly')
+    flat = next(r for r in data['strategies'] if r['key'] == 'flat_10')
+
+    assert full['curve'][0]['stake'] == 200
+    assert full['largest_stakes'][0]['probability'] == .66
+    assert full['largest_stakes'][0]['kelly_probability'] == .6
+    assert flat['curve'][0]['stake'] == 10
+
+
 def test_capped_kelly_never_exceeds_cap():
     data = replay_staking_strategies([_sel(5.0, .9, True, '2024-01-01')], 1000)
     quarter_cap = next(r for r in data['strategies'] if r['key'] == 'quarter_kelly_cap_2')
