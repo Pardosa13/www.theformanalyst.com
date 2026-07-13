@@ -1,5 +1,5 @@
 """
-ml_predict.py - Shadow ML scoring using the trained Random Forest pkl.
+ml_predict.py - Shadow ML scoring using the active champion model artifact.
 
 Usage:
     from ml_predict import predict_meeting
@@ -392,6 +392,8 @@ def _model_feature_names(model):
     """Return feature names persisted on the trained estimator, if available."""
     names = getattr(model, 'feature_names_in_', None)
     if names is None:
+        names = getattr(model, '_form_analyst_expected_features', None)
+    if names is None:
         return None
     return [str(name) for name in list(names)]
 
@@ -475,7 +477,7 @@ def _log_live_feature_audit(model, meeting_id, race, feature_rows, raw_X, final_
             "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=failed reason=missing_model_feature_names expected_model_id=62 expected_features=%s",
             meeting_id, getattr(race, 'race_number', None), model_id, expected_count,
         )
-        return
+        raise RuntimeError("ML feature contract failed: model artifact has no persisted feature list")
 
     generated_features = list(raw_X.columns)
     missing_from_live = [name for name in stored_features if name not in raw_X.columns]
@@ -484,12 +486,6 @@ def _log_live_feature_audit(model, meeting_id, race, feature_rows, raw_X, final_
     stored_matches_code = stored_features == FEATURE_NAMES
     live_count_matches = len(stored_features) == expected_count and final_X.shape[1] == expected_count
 
-    if model_id != 62:
-        log.error(
-            "ML_FEATURE_AUDIT meeting=%s race=%s status=failed reason=wrong_champion_model expected_model_id=62 actual_model_id=%s",
-            meeting_id, getattr(race, 'race_number', None), model_id,
-        )
-
     if not live_count_matches or not order_matches or missing_from_live or extra_live or not stored_matches_code:
         log.error(
             "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=failed expected_features=%s stored_features=%s final_features=%s order_matches=%s stored_matches_code=%s missing_from_live=%s extra_live=%s",
@@ -497,11 +493,16 @@ def _log_live_feature_audit(model, meeting_id, race, feature_rows, raw_X, final_
             len(stored_features), final_X.shape[1], order_matches, stored_matches_code,
             missing_from_live, extra_live,
         )
+        raise RuntimeError(
+            f"ML feature contract failed for meeting={meeting_id} race={getattr(race, 'race_number', None)}: "
+            f"stored={len(stored_features)} final={final_X.shape[1]} order_matches={order_matches} "
+            f"missing={missing_from_live} extra={extra_live}"
+        )
     else:
         log.info(
-            "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=passed feature_count=%s order_matches=%s preprocessing=training_fillna_median live_fillna_zero scaling=none stored_names_match_champion_62=%s",
+            "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=passed feature_count=%s order_matches=%s preprocessing=training_fillna_median live_fillna_zero scaling=none stored_names_match_code=%s",
             meeting_id, getattr(race, 'race_number', None), model_id, final_X.shape[1],
-            order_matches, model_id == 62,
+            order_matches, stored_matches_code,
         )
 
     defaulted_columns = Counter(missing_from_live)
@@ -541,7 +542,8 @@ def load_model():
             row = conn.execute(text(
                 """
                 SELECT id, run_id, run_date, combined_score, updated_at, pkl_data,
-                       model_type, model_name, is_active
+                       model_type, model_name, is_active, model_version,
+                       artifact_filename, expected_feature_count, selection_metrics
                 FROM backtest_best_model
                 WHERE is_active = TRUE
                 ORDER BY promoted_at DESC NULLS LAST, updated_at DESC, id DESC
@@ -555,24 +557,41 @@ def load_model():
                 model._form_analyst_model_type = row[6]
                 model._form_analyst_model_name = row[7]
                 model._form_analyst_is_active = row[8]
+                model._form_analyst_model_version = row[9] or getattr(model, '_form_analyst_model_version', None)
+                model._form_analyst_artifact_path = f"db://backtest_best_model/{row[0]}"
+                model._form_analyst_artifact_filename = row[10] or getattr(model, '_form_analyst_artifact_filename', None)
+                model._form_analyst_expected_feature_count = row[11]
+                try:
+                    model._form_analyst_selection_metrics = json.loads(row[12]) if row[12] else getattr(model, '_form_analyst_selection_metrics', {})
+                except Exception:
+                    model._form_analyst_selection_metrics = getattr(model, '_form_analyst_selection_metrics', {})
+                feature_count = len(_model_feature_names(model) or [])
+                if row[11] and feature_count and int(row[11]) != feature_count:
+                    raise RuntimeError(f"Active ML model feature count mismatch: db_expected={row[11]} artifact={feature_count}")
                 log.info(
-                    "Loaded active Champion ML model from DB: id=%s run_id=%s type=%s name=%s active=%s class=%s",
-                    row[0], row[1], row[6], row[7], row[8], type(model).__name__,
+                    "ML_ACTIVE_MODEL_LOADED source=db active_algorithm=%s artifact_path=%s artifact_filename=%s training_run_id=%s model_version=%s feature_count=%s selection_metrics=%s class=%s",
+                    row[6], model._form_analyst_artifact_path, model._form_analyst_artifact_filename,
+                    row[1], model._form_analyst_model_version, feature_count,
+                    model._form_analyst_selection_metrics, type(model).__name__,
                 )
-                if row[0] != 62 or row[6] != 'xgboost':
-                    log.warning(
-                        "Active Champion model differs from expected production model: expected id=62 type=xgboost, got id=%s type=%s",
-                        row[0], row[6],
-                    )
                 return model
     except Exception as e:
         log.warning(f"Could not load model from DB: {e}")
 
-    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'form_analyst_best.pkl')
+    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'form_analyst_best_random_forest.pkl')
     if os.path.exists(model_path):
         import joblib
-        log.warning("Using local filesystem ML model fallback because no active Champion was loaded from DB.")
-        return joblib.load(model_path)
+        model = joblib.load(model_path)
+        model._form_analyst_artifact_path = model_path
+        model._form_analyst_artifact_filename = os.path.basename(model_path)
+        log.warning(
+            "ML_ACTIVE_MODEL_LOADED source=filesystem_fallback active_algorithm=%s artifact_path=%s artifact_filename=%s training_run_id=%s model_version=%s feature_count=%s selection_metrics=%s class=%s",
+            getattr(model, '_form_analyst_model_type', type(model).__name__), model_path,
+            os.path.basename(model_path), getattr(model, '_form_analyst_training_run_id', None),
+            getattr(model, '_form_analyst_model_version', None), len(_model_feature_names(model) or []),
+            getattr(model, '_form_analyst_selection_metrics', {}), type(model).__name__,
+        )
+        return model
 
     raise FileNotFoundError("No trained model found. Run backtest.py first.")
 
@@ -613,7 +632,7 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         return {}, {}
     model_features = _model_feature_names(model) or FEATURE_NAMES
     log.info(
-        "ML predict meeting %s using model id=%s run_id=%s type=%s name=%s active=%s class=%s has_predict_proba=%s feature_count=%s",
+        "ML_PREDICTION_ACTIVE_MODEL meeting=%s model_id=%s training_run_id=%s active_algorithm=%s model_name=%s active=%s class=%s has_predict_proba=%s feature_count=%s artifact_path=%s model_version=%s selection_metrics=%s",
         meeting_id,
         getattr(model, '_form_analyst_model_id', None),
         getattr(model, '_form_analyst_run_id', None),
@@ -623,6 +642,9 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         type(model).__name__,
         hasattr(model, 'predict_proba'),
         len(model_features),
+        getattr(model, '_form_analyst_artifact_path', None),
+        getattr(model, '_form_analyst_model_version', None),
+        getattr(model, '_form_analyst_selection_metrics', {}),
     )
 
     jockey_sr  = (strike_rate_data or {}).get('jockeys', {})

@@ -12571,7 +12571,7 @@ def export_all_data():
     return flask_send_file(zip_buffer, mimetype='application/zip',
                      as_attachment=True, download_name='database_export.zip')
 
-@app.route('/form_analyst_best.pkl')
+@app.route('/form_analyst_best_random_forest.pkl')
 @login_required
 def download_best_model():
     """Download the best RF model — loaded from DB, filesystem fallback."""
@@ -12593,17 +12593,17 @@ def download_best_model():
             buf = io.BytesIO(bytes(row[0]))
             buf.seek(0)
             return send_file(buf, as_attachment=True,
-                             download_name='form_analyst_best.pkl',
+                             download_name='form_analyst_active_champion.pkl',
                              mimetype='application/octet-stream')
     except Exception:
         pass  # fall through to filesystem
 
     # Filesystem fallback (local dev or first-run before any DB entry)
     models_dir = os.path.join(os.path.dirname(__file__), 'models')
-    pkl_file = os.path.join(models_dir, 'form_analyst_best.pkl')
+    pkl_file = os.path.join(models_dir, 'form_analyst_best_random_forest.pkl')
     if not os.path.exists(pkl_file):
         abort(404)
-    return send_file(pkl_file, as_attachment=True, download_name='form_analyst_best.pkl')
+    return send_file(pkl_file, as_attachment=True, download_name='form_analyst_best_random_forest.pkl')
 
 @app.route("/api/data/race-tempo-analysis")
 @login_required

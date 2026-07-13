@@ -39,7 +39,7 @@ from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.base import BaseEstimator, RegressorMixin, clone
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import mean_squared_error, log_loss
+from sklearn.metrics import mean_squared_error, log_loss, brier_score_loss
 import joblib
 import warnings
 warnings.filterwarnings('ignore')
@@ -183,7 +183,11 @@ def ensure_tables():
                 model_type VARCHAR(50) DEFAULT 'random_forest',
                 model_name VARCHAR(120) DEFAULT 'Random Forest',
                 deactivated_at TIMESTAMP,
-                retained_until TIMESTAMP
+                retained_until TIMESTAMP,
+                model_version VARCHAR(80),
+                artifact_filename VARCHAR(255),
+                expected_feature_count INTEGER,
+                selection_metrics TEXT
             )
         """))
 
@@ -205,6 +209,11 @@ def ensure_tables():
                 last_250 TEXT,
                 last_500 TEXT,
                 agreement_summary TEXT,
+                log_loss FLOAT,
+                brier_score FLOAT,
+                calibration TEXT,
+                stability TEXT,
+                selection_score FLOAT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """))
@@ -226,9 +235,18 @@ def ensure_tables():
             "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS model_name VARCHAR(120) DEFAULT 'Random Forest'",
             "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP",
             "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS retained_until TIMESTAMP",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS model_version VARCHAR(80)",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS artifact_filename VARCHAR(255)",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS expected_feature_count INTEGER",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS selection_metrics TEXT",
             "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS validation_longest_losing_streak INTEGER",
             "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS validation_bankroll_growth FLOAT",
             "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS validation_volatility FLOAT",
+            "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS log_loss FLOAT",
+            "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS brier_score FLOAT",
+            "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS calibration TEXT",
+            "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS stability TEXT",
+            "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS selection_score FLOAT",
         ]:
             conn.execute(text(ddl))
 
@@ -1189,6 +1207,16 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
         )
         rf_final.fit(X_final, y_roi)
 
+        rf_final._form_analyst_algorithm = 'random_forest'
+        rf_final._form_analyst_model_type = 'random_forest'
+        rf_final._form_analyst_model_name = 'Random Forest grid-search'
+        rf_final._form_analyst_model_version = MODEL_VERSION
+        rf_final._form_analyst_training_run_id = None
+        rf_final._form_analyst_selection_metrics = {
+            'cv_roi_score': float(row['roi_score']),
+            'cv_win_score': float(row['win_score']),
+            'combined_score': float(row['combined_score']),
+        }
         pkl_file = f'{output_dir}/form_analyst_rf_rank{idx:02d}_score{row["combined_score"]:.4f}.pkl'
         joblib.dump(rf_final, pkl_file)
         log.info(f"  Rank #{idx}: {pkl_file}")
@@ -1204,10 +1232,13 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
     # Save rank #1 model with a stable filename for easy loading
     if top_10_models:
         best_pkl = top_10_models[0]['pkl_file']
-        stable_path = os.path.join(output_dir, 'form_analyst_best.pkl')
+        stable_path = os.path.join(output_dir, RF_BEST_ARTIFACT_NAME)
         import shutil
         shutil.copy2(best_pkl, stable_path)
-        log.info(f"  Best model also saved as: {stable_path}")
+        legacy_path = os.path.join(output_dir, LEGACY_RF_BEST_ARTIFACT_NAME)
+        if os.path.exists(legacy_path):
+            os.remove(legacy_path)
+        log.info(f"  Best Random Forest model also saved as: {stable_path}")
 
     return results_df, top_10_models
 
@@ -1683,6 +1714,9 @@ MIN_CHAMPION_AGE_DAYS = int(os.environ.get('ML_MIN_CHAMPION_AGE_DAYS', '7'))
 LARGE_PROMOTION_ROI_EDGE_PCT = float(os.environ.get('ML_LARGE_PROMOTION_ROI_EDGE_PCT', '10.0'))
 CHAMPION_ROLLBACK_RETENTION_DAYS = int(os.environ.get('ML_CHAMPION_ROLLBACK_RETENTION_DAYS', '30'))
 MIN_PROMOTION_STRIKE_RATE_PCT = float(os.environ.get('ML_MIN_PROMOTION_STRIKE_RATE_PCT', '1.0'))
+MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
+RF_BEST_ARTIFACT_NAME = 'form_analyst_best_random_forest.pkl'
+LEGACY_RF_BEST_ARTIFACT_NAME = 'form_analyst_best.pkl'
 
 
 class ConsensusRegressor(BaseEstimator, RegressorMixin):
@@ -1729,9 +1763,56 @@ def _predict_win_scores(model, X):
     return np.asarray(model.predict(X), dtype=float)
 
 
+
+def _calibration_summary(y_true, pred, bins=10):
+    frame = pd.DataFrame({'y': np.asarray(y_true, dtype=int), 'pred': np.asarray(pred, dtype=float)})
+    frame['bin'] = pd.cut(frame['pred'], bins=np.linspace(0.0, 1.0, bins + 1), include_lowest=True)
+    grouped = frame.groupby('bin', observed=False).agg(count=('y', 'size'), avg_pred=('pred', 'mean'), observed_rate=('y', 'mean'))
+    grouped = grouped[grouped['count'] > 0].fillna(0.0)
+    if grouped.empty:
+        return {'expected_calibration_error': 0.0, 'max_calibration_error': 0.0, 'bins': []}
+    errors = (grouped['avg_pred'] - grouped['observed_rate']).abs()
+    weights = grouped['count'] / grouped['count'].sum()
+    return {
+        'expected_calibration_error': float((errors * weights).sum()),
+        'max_calibration_error': float(errors.max()),
+        'bins': [
+            {
+                'range': str(idx),
+                'count': int(row['count']),
+                'avg_pred': float(row['avg_pred']),
+                'observed_rate': float(row['observed_rate']),
+            }
+            for idx, row in grouped.iterrows()
+        ],
+    }
+
+
+def _attach_model_metadata(model, model_type, model_name, run_id, artifact_filename, feature_names, metrics):
+    model._form_analyst_algorithm = model_type
+    model._form_analyst_model_type = model_type
+    model._form_analyst_model_name = model_name
+    model._form_analyst_training_run_id = run_id
+    model._form_analyst_artifact_filename = artifact_filename
+    model._form_analyst_model_version = MODEL_VERSION
+    model._form_analyst_expected_features = list(feature_names)
+    model._form_analyst_selection_metrics = metrics or {}
+    if getattr(model, 'feature_names_in_', None) is None:
+        model.feature_names_in_ = np.asarray(list(feature_names))
+    return model
+
+
+def _artifact_feature_contract_ok(model, feature_names):
+    stored = getattr(model, 'feature_names_in_', None)
+    if stored is None:
+        stored = getattr(model, '_form_analyst_expected_features', None)
+    if stored is None:
+        return False
+    return [str(x) for x in list(stored)] == [str(x) for x in list(feature_names)]
+
 def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
     """Evaluate top model selection in every validation race with betting metrics."""
-    pred = _predict_win_scores(model, X_val)
+    pred = np.clip(_predict_win_scores(model, X_val), 1e-6, 1 - 1e-6)
     eval_df = pd.DataFrame({
         'race_id': list(race_ids_val),
         'pred': pred,
@@ -1786,6 +1867,17 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
         'last_100': window_metrics(100),
         'last_250': window_metrics(250),
         'last_500': window_metrics(500),
+        'log_loss': float(log_loss(np.asarray(y_won_val, dtype=int), pred, labels=[0, 1])),
+        'brier_score': float(brier_score_loss(np.asarray(y_won_val, dtype=int), pred)),
+        'calibration': _calibration_summary(y_won_val, pred),
+        'stability': {
+            'roi_last_100': window_metrics(100)['roi'],
+            'roi_last_250': window_metrics(250)['roi'],
+            'roi_last_500': window_metrics(500)['roi'],
+            'strike_rate_last_100': window_metrics(100)['strike_rate'],
+            'strike_rate_last_250': window_metrics(250)['strike_rate'],
+            'strike_rate_last_500': window_metrics(500)['strike_rate'],
+        },
     }
 
 
@@ -2084,9 +2176,18 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         "add_or_tune_value/odds-aware bet filtering after this diagnostics-only audit"
     )
 
-    best = max(results, key=lambda r: (r['metrics']['roi'], r['metrics']['strike_rate']))
-    log.info("ML competition: best=%s roi=%.1f%% sr=%.1f%% bets=%s",
-             best['model_type'], best['metrics']['roi'], best['metrics']['strike_rate'], best['metrics']['number_of_bets'])
+    for result in results:
+        m = result['metrics']
+        stability_penalty = abs(m['stability']['roi_last_100'] - m['roi']) + abs(m['stability']['roi_last_250'] - m['roi'])
+        calibration_penalty = (m['log_loss'] * 10.0) + (m['brier_score'] * 25.0) + (m['calibration']['expected_calibration_error'] * 100.0)
+        result['selection_score'] = float(m['roi'] + (0.5 * m['strike_rate']) - calibration_penalty - (0.05 * stability_penalty))
+    best = max(results, key=lambda r: (r['selection_score'], r['metrics']['roi'], r['metrics']['strike_rate']))
+    log.info(
+        "ML model selection on untouched chronological test set: best=%s selection_score=%.3f roi=%.1f%% sr=%.1f%% log_loss=%.4f brier=%.4f ece=%.4f bets=%s",
+        best['model_type'], best['selection_score'], best['metrics']['roi'], best['metrics']['strike_rate'],
+        best['metrics']['log_loss'], best['metrics']['brier_score'],
+        best['metrics']['calibration']['expected_calibration_error'], best['metrics']['number_of_bets']
+    )
     return best, results
 
 
@@ -2101,6 +2202,12 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
     today = datetime.utcnow().date()
     with open(pkl_file, 'rb') as f:
         pkl_bytes = f.read()
+
+    saved_model = joblib.load(pkl_file)
+    saved_features = getattr(saved_model, 'feature_names_in_', None)
+    if saved_features is None:
+        saved_features = getattr(saved_model, '_form_analyst_expected_features', [])
+    expected_feature_count = len(list(saved_features)) if saved_features is not None else 0
 
     with engine.connect() as conn:
         champion = conn.execute(text("""
@@ -2125,17 +2232,23 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
             (run_date, combined_score, pkl_data, run_id, is_active, validation_roi,
              validation_strike_rate, validation_profit_units, validation_bets, validation_drawdown,
              validation_longest_losing_streak, validation_bankroll_growth, validation_volatility,
-             model_type, model_name, promotion_reason)
+             model_type, model_name, model_version, artifact_filename, expected_feature_count,
+             selection_metrics, promotion_reason)
             VALUES (:d, :score, :data, :run_id, FALSE, :val_roi, :val_sr, :val_profit, :val_bets,
                     :val_drawdown, :val_losing_streak, :val_bankroll_growth, :val_volatility,
-                    :model_type, :model_name,
+                    :model_type, :model_name, :model_version, :artifact_filename,
+                    :expected_feature_count, :selection_metrics,
                     'Saved as challenger pending champion comparison')
             RETURNING id
         """), {'d': today, 'score': combined_score, 'data': pkl_bytes, 'run_id': run_id,
                'val_roi': val_roi, 'val_sr': val_sr, 'val_profit': val_profit, 'val_bets': val_bets,
                'val_drawdown': val_drawdown, 'val_losing_streak': val_losing_streak,
                'val_bankroll_growth': val_bankroll_growth, 'val_volatility': val_volatility,
-               'model_type': model_type, 'model_name': model_name}).fetchone()[0]
+               'model_type': model_type, 'model_name': model_name,
+               'model_version': MODEL_VERSION,
+               'artifact_filename': os.path.basename(pkl_file),
+               'expected_feature_count': expected_feature_count,
+               'selection_metrics': json.dumps(validation_metrics or {})}).fetchone()[0]
 
         promote = False
         reason = "Rejected: validation sample too small"
@@ -2396,11 +2509,13 @@ def write_results(run_id, feature_recommendations, component_results,
                     (run_id, model_type, model_name, validation_roi, validation_profit_units,
                      validation_strike_rate, validation_bets, validation_drawdown,
                      validation_longest_losing_streak, validation_bankroll_growth,
-                     validation_volatility, last_100, last_250, last_500, agreement_summary)
+                     validation_volatility, last_100, last_250, last_500, agreement_summary,
+                     log_loss, brier_score, calibration, stability, selection_score)
                     VALUES (:run_id, :model_type, :model_name, :roi, :profit_units,
                             :strike_rate, :bets, :drawdown, :longest_losing_streak,
                             :bankroll_growth, :volatility, :last_100, :last_250,
-                            :last_500, :agreement_summary)
+                            :last_500, :agreement_summary, :log_loss, :brier_score,
+                            :calibration, :stability, :selection_score)
                 """), {
                     'run_id': run_id,
                     'model_type': result['model_type'],
@@ -2417,6 +2532,11 @@ def write_results(run_id, feature_recommendations, component_results,
                     'last_250': json.dumps(metrics['last_250']),
                     'last_500': json.dumps(metrics['last_500']),
                     'agreement_summary': json.dumps(result.get('agreement_summary', {})),
+                    'log_loss': metrics.get('log_loss'),
+                    'brier_score': metrics.get('brier_score'),
+                    'calibration': json.dumps(metrics.get('calibration', {})),
+                    'stability': json.dumps(metrics.get('stability', {})),
+                    'selection_score': result.get('selection_score'),
                 })
 
         conn.commit()
@@ -2538,11 +2658,24 @@ def main():
             )
             output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
             os.makedirs(output_dir, exist_ok=True)
-            challenger_file = os.path.join(
-                output_dir,
-                f"form_analyst_challenger_{best_competitor['model_type']}_{run_id}.pkl"
-            )
-            joblib.dump(best_competitor['model'], challenger_file)
+            saved_competition_artifacts = []
+            for competitor in competition_results:
+                artifact_name = f"form_analyst_candidate_{competitor['model_type']}_{run_id}.pkl"
+                artifact_file = os.path.join(output_dir, artifact_name)
+                _attach_model_metadata(
+                    competitor['model'], competitor['model_type'], competitor['model_name'],
+                    run_id, artifact_name, X.columns, competitor['metrics']
+                )
+                if not _artifact_feature_contract_ok(competitor['model'], X.columns):
+                    raise ValueError(f"Candidate {competitor['model_type']} feature contract does not match production features")
+                joblib.dump(competitor['model'], artifact_file)
+                competitor['pkl_file'] = artifact_file
+                saved_competition_artifacts.append(artifact_file)
+                log.info(
+                    "Saved compatible model-competition artifact: model_type=%s artifact=%s feature_count=%s",
+                    competitor['model_type'], artifact_file, len(X.columns)
+                )
+            challenger_file = best_competitor.get('pkl_file')
             best_challenger = {
                 'pkl_file': challenger_file,
                 'score': best_competitor['metrics']['roi'],
@@ -2550,6 +2683,7 @@ def main():
                 'model_name': best_competitor['model_name'],
                 'metrics': best_competitor['metrics'],
                 'competition_results': competition_results,
+                'saved_artifacts': saved_competition_artifacts,
             }
         except Exception as e:
             log.warning(f"Multi-model challenger competition failed; continuing with RF grid-search artifact: {e}")
