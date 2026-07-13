@@ -209,8 +209,28 @@
   }
   .card-body .text-success, .collapse .text-success { color: #34d399 !important; }
   .card-body .text-danger,  .collapse .text-danger  { color: #f87171 !important; }
+  .card-body .profit, .collapse .profit {
+    color: #34d399 !important;
+    font-weight: 800 !important;
+    text-shadow: 0 0 12px rgba(52,211,153,0.25);
+  }
+  .card-body .loss, .collapse .loss {
+    color: #f87171 !important;
+    font-weight: 800 !important;
+    text-shadow: 0 0 12px rgba(248,113,113,0.18);
+  }
   .card-body .fw-bold, .collapse .fw-bold { font-weight: 700 !important; }
   .card-body .text-muted, .collapse .text-muted { color: #7070a0 !important; }
+
+  .card-body .alert-secondary, .collapse .alert-secondary {
+    background: linear-gradient(135deg, rgba(0,229,176,0.08), rgba(6,12,20,0.92)) !important;
+    border: 1px solid rgba(0,229,176,0.22) !important;
+    border-left: 3px solid var(--ml-accent) !important;
+    border-radius: 12px !important;
+    color: var(--text-primary) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 12px 28px rgba(0,0,0,0.22);
+  }
+  .card-body .alert-secondary strong, .collapse .alert-secondary strong { color: var(--ml-accent) !important; }
 
   /* Nested cards */
   .card-body .card, .collapse .card {
@@ -1257,7 +1277,7 @@ function renderMlBreakdownTable(title, rows, recon) {
 }
 function renderMlHeadlineTable(title, h) {
     h = h || {};
-    return `<h6>${escapeHtml(title)}</h6><div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Bets</th><th>Wins</th><th>Strike</th><th>Staked</th><th>Return</th><th>Profit</th><th>ROI</th><th>Avg Winner SP</th><th>Largest Winner SP</th><th>Profit ex Largest</th><th>ROI ex Largest</th></tr></thead><tbody><tr><td>${h.bets || 0}</td><td>${h.wins || 0}</td><td>${(h.strike_rate_pct || 0).toFixed(2)}%</td><td>$${(h.total_staked || 0).toFixed(0)}</td><td>$${(h.total_return || 0).toFixed(2)}</td><td class="${(h.profit || 0) >= 0 ? 'profit' : 'loss'}">${(h.profit || 0) >= 0 ? '+' : ''}$${(h.profit || 0).toFixed(2)}</td><td class="${(h.roi_pct || 0) >= 0 ? 'profit' : 'loss'}">${(h.roi_pct || 0) >= 0 ? '+' : ''}${(h.roi_pct || 0).toFixed(2)}%</td><td>${(h.avg_winner_sp || 0).toFixed(2)}</td><td>${(h.largest_winner_sp || 0).toFixed(2)}</td><td>${(h.profit_ex_largest_winner || 0).toFixed(2)}</td><td>${(h.roi_ex_largest_winner_pct || 0).toFixed(2)}%</td></tr></tbody></table></div>`;
+    return `<h6>${escapeHtml(title)}</h6><div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Bets</th><th>Wins</th><th>Strike</th><th>Staked</th><th>Return</th><th>Profit</th><th>ROI</th><th>Avg Winner SP</th><th>Largest Winner SP</th><th>Profit ex Largest</th><th>ROI ex Largest</th></tr></thead><tbody><tr><td>${h.bets || 0}</td><td>${h.wins || 0}</td><td>${(h.strike_rate_pct || 0).toFixed(2)}%</td><td>$${(h.total_staked || 0).toFixed(0)}</td><td>$${(h.total_return || 0).toFixed(2)}</td><td class="${(h.profit || 0) >= 0 ? 'profit' : 'loss'}">${(h.profit || 0) >= 0 ? '+' : ''}$${(h.profit || 0).toFixed(2)}</td><td class="${(h.roi_pct || 0) >= 0 ? 'profit' : 'loss'}">${(h.roi_pct || 0) >= 0 ? '+' : ''}${(h.roi_pct || 0).toFixed(2)}%</td><td>${(h.avg_winner_sp || 0).toFixed(2)}</td><td>${(h.largest_winner_sp || 0).toFixed(2)}</td><td class="${(h.profit_ex_largest_winner || 0) >= 0 ? 'profit' : 'loss'}">${(h.profit_ex_largest_winner || 0) >= 0 ? '+' : ''}$${(h.profit_ex_largest_winner || 0).toFixed(2)}</td><td class="${(h.roi_ex_largest_winner_pct || 0) >= 0 ? 'profit' : 'loss'}">${(h.roi_ex_largest_winner_pct || 0) >= 0 ? '+' : ''}${(h.roi_ex_largest_winner_pct || 0).toFixed(2)}%</td></tr></tbody></table></div>`;
 }
 
 function renderMlMarketDivergence(data) {
@@ -2823,7 +2843,7 @@ function renderMlSignalAgreement(data) {
         <div class="table-responsive">
             <table class="table table-sm table-hover">
                 <thead class="table-dark"><tr><th>Bets</th><th>Wins</th><th>Strike %</th><th>Total Staked</th><th>Total Return</th><th>Profit</th><th>ROI %</th><th>Avg Winner SP</th><th>Largest Winner SP</th><th>Profit ex Largest</th><th>ROI ex Largest</th></tr></thead>
-                <tbody><tr><td>${data.bets}</td><td>${data.wins}</td><td>${data.strike_rate_pct.toFixed(2)}%</td><td>${data.total_staked.toFixed(0)}</td><td>${data.total_return.toFixed(2)}</td><td class="${profitClass}">${data.profit >= 0 ? '+' : ''}${data.profit.toFixed(2)}</td><td class="${roiClass}">${data.roi_pct >= 0 ? '+' : ''}${data.roi_pct.toFixed(2)}%</td><td>${data.avg_winner_sp.toFixed(2)}</td><td>${(data.largest_winner_sp || 0).toFixed(2)}</td><td>${(data.profit_ex_largest_winner || 0).toFixed(2)}</td><td>${(data.roi_ex_largest_winner_pct || 0).toFixed(2)}%</td></tr></tbody>
+                <tbody><tr><td>${data.bets}</td><td>${data.wins}</td><td>${data.strike_rate_pct.toFixed(2)}%</td><td>${data.total_staked.toFixed(0)}</td><td>${data.total_return.toFixed(2)}</td><td class="${profitClass}">${data.profit >= 0 ? '+' : ''}${data.profit.toFixed(2)}</td><td class="${roiClass}">${data.roi_pct >= 0 ? '+' : ''}${data.roi_pct.toFixed(2)}%</td><td>${data.avg_winner_sp.toFixed(2)}</td><td>${(data.largest_winner_sp || 0).toFixed(2)}</td><td class="${(data.profit_ex_largest_winner || 0) >= 0 ? 'profit' : 'loss'}">${(data.profit_ex_largest_winner || 0) >= 0 ? '+' : ''}${(data.profit_ex_largest_winner || 0).toFixed(2)}</td><td class="${(data.roi_ex_largest_winner_pct || 0) >= 0 ? 'profit' : 'loss'}">${(data.roi_ex_largest_winner_pct || 0) >= 0 ? '+' : ''}${(data.roi_ex_largest_winner_pct || 0).toFixed(2)}%</td></tr></tbody>
             </table>
         </div>`;
     const dims = [
