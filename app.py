@@ -20,7 +20,7 @@ import uuid
 from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component, StrikeRate
 from puntingform_service import PuntingFormService
 from scratchings import compute_is_scratched_final, extract_debug_scratch_fields, resolve_official_scratched_set
-from ladbrokes import match_race_uuid, fetch_race_odds, build_next_to_go_races, MELBOURNE_TZ
+from ladbrokes import match_race_uuid, match_race_info, fetch_race_odds, build_next_to_go_races, MELBOURNE_TZ, ODDS_CACHE_TTL
 from afl_routes import register_afl_routes, afl_nightly_sync
 from mma_routes import register_mma_routes
 from ml_shadow_routes import register_ml_shadow_routes
@@ -80,6 +80,103 @@ def signals_all_agree_top(horse_id, signal_top_ids):
     """True when Analyzer, PFAI and ML all have top picks and select this horse."""
     top_ids = [signal_top_ids.get('analyzer'), signal_top_ids.get('pfai'), signal_top_ids.get('ml')]
     return all(top_id is not None for top_id in top_ids) and len(set(top_ids)) == 1 and top_ids[0] == horse_id
+
+BEST_BETS_LADBROKES_STALE_SECONDS = max(90, ODDS_CACHE_TTL * 3)
+LADBROKES_CLOSED_MARKET_STATUSES = {"closed", "final", "finalised", "abandoned", "resulted", "interim", "live", "jumped", "error"}
+LADBROKES_UNAVAILABLE_RUNNER_STATUSES = {"scratched", "closed", "inactive", "unavailable", "late scratching"}
+
+
+def _coerce_price(value):
+    try:
+        price = float(value)
+        return price if price > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _rank_active_ladbrokes_market(odds_payload, internal_horses):
+    """Match live Ladbrokes runners to internal horses and rank active fixed-win prices."""
+    diagnostics = []
+    status = str((odds_payload or {}).get('status') or '').strip().lower()
+    if status in LADBROKES_CLOSED_MARKET_STATUSES:
+        return {}, {'available': False, 'reason': 'closed-market', 'status': status}
+    age = odds_payload.get('age_seconds') if isinstance(odds_payload, dict) else None
+    if age is not None and age > BEST_BETS_LADBROKES_STALE_SECONDS:
+        return {}, {'available': False, 'reason': 'stale-odds', 'status': status}
+
+    by_norm = {normalize_runner_name(h.horse_name): h for h in internal_horses if normalize_runner_name(h.horse_name)}
+    matched = {}
+    active_prices = []
+    for name_norm, runner in ((odds_payload or {}).get('odds') or {}).items():
+        horse = by_norm.get(name_norm)
+        if not horse:
+            diagnostics.append(f"Unmatched Ladbrokes runner: {runner.get('name') or name_norm}")
+            continue
+        price = _coerce_price(runner.get('win'))
+        unavailable = (
+            bool(runner.get('is_scratched'))
+            or runner.get('is_available') is False
+            or str(runner.get('status') or '').strip().lower() in LADBROKES_UNAVAILABLE_RUNNER_STATUSES
+        )
+        matched[horse.id] = {'runner': runner, 'price': price, 'unavailable': unavailable}
+        if not getattr(horse, 'is_scratched', False) and not unavailable and price is not None:
+            active_prices.append((price, horse.id))
+
+    if not active_prices:
+        return matched, {'available': False, 'reason': 'odds-unavailable', 'diagnostics': diagnostics, 'status': status}
+    min_price = min(price for price, _ in active_prices)
+    sorted_prices = sorted(set(price for price, _ in active_prices))
+    rank_by_price = {price: idx + 1 for idx, price in enumerate(sorted_prices)}
+    fav_ids = {hid for price, hid in active_prices if price == min_price}
+    for price, hid in active_prices:
+        matched[hid].update({
+            'market_rank': rank_by_price[price],
+            'is_favourite': price == min_price,
+            'is_joint_favourite': price == min_price and len(fav_ids) > 1,
+        })
+    return matched, {'available': True, 'diagnostics': diagnostics, 'fetched_at': (odds_payload or {}).get('fetched_at')}
+
+
+def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_info=None):
+    """Return per-horse live Ladbrokes Best Bets fields; never uses results.sp/post-race prices."""
+    horses = list(getattr(race, 'horses', []) or [])
+    active_with_pred = [h for h in horses if not getattr(h, 'is_scratched', False) and getattr(h, 'prediction', None)]
+    analyzer_ranked = sorted(active_with_pred, key=lambda h: (h.prediction.score or 0), reverse=True)
+    pfai_ranked = sorted([h for h in active_with_pred if parse_pfai_score_from_horse(h, h.prediction) is not None], key=lambda h: parse_pfai_score_from_horse(h, h.prediction), reverse=True)
+    ml_ranked = sorted([h for h in active_with_pred if h.prediction.ml_score is not None], key=lambda h: h.prediction.ml_score, reverse=True)
+    analyzer_rank = {h.id: i + 1 for i, h in enumerate(analyzer_ranked)}
+    pfai_rank = {h.id: i + 1 for i, h in enumerate(pfai_ranked)}
+    ml_rank = {h.id: i + 1 for i, h in enumerate(ml_ranked)}
+    ml_gap = (ml_ranked[0].prediction.ml_score - ml_ranked[1].prediction.ml_score) if len(ml_ranked) > 1 else None
+    market, market_state = _rank_active_ladbrokes_market(odds_payload, horses)
+    out = {}
+    for h in horses:
+        m = market.get(h.id, {})
+        is_ml_top_fav = ml_rank.get(h.id) == 1 and m.get('is_favourite') and market_state.get('available')
+        full = analyzer_rank.get(h.id) == pfai_rank.get(h.id) == ml_rank.get(h.id) == 1 and m.get('is_favourite') and market_state.get('available')
+        sweet = bool(is_ml_top_fav and m.get('price') is not None and 2.50 <= m.get('price') <= 3.99)
+        gap20 = bool(is_ml_top_fav and ml_gap is not None and ml_gap >= 20)
+        badges=[]; reasons=[]
+        if sweet:
+            badges.append('★★★★★ ML Market Sweet Spot'); reasons.append(f"Qualified because the ML top pick is the Ladbrokes favourite at ${m.get('price'):.2f}.")
+        if full:
+            badges.append('★★★★ Full Model + Market Consensus'); reasons.append('Qualified because Analyzer, PFAI and ML all rank this horse first and it is also the Ladbrokes favourite.')
+        if gap20:
+            badges.append('★★★★ ML Market Agreement + 20 Gap'); reasons.append(f"Qualified because the ML top pick is the Ladbrokes favourite with a {ml_gap:.1f}-point ML gap.")
+        cnt=len(badges)
+        out[h.id]={
+            'ladbrokes_fixed_win_price': m.get('price'), 'ladbrokes_market_rank': m.get('market_rank'),
+            'is_ladbrokes_favourite': bool(m.get('is_favourite')), 'is_joint_ladbrokes_favourite': bool(m.get('is_joint_favourite')),
+            'ladbrokes_odds_updated_at': market_state.get('fetched_at') or (odds_payload or {}).get('fetched_at'),
+            'analyzer_rank': analyzer_rank.get(h.id), 'pfai_rank': pfai_rank.get(h.id), 'ml_rank': ml_rank.get(h.id),
+            'ml_score': h.prediction.ml_score if getattr(h, 'prediction', None) else None, 'ml_score_gap': ml_gap if ml_rank.get(h.id)==1 else None,
+            'is_ml_market_sweet_spot': sweet, 'is_full_model_market_consensus': full, 'is_ml_market_gap_20': gap20,
+            'best_bet_signal_count': cnt,
+            'best_bet_confidence_level': 'Elite Consensus Best Bet' if cnt==3 else ('Strong Consensus Best Bet' if cnt==2 else (badges[0] if cnt==1 else None)),
+            'best_bet_reasons': reasons if reasons else ([market_state.get('reason')] if not market_state.get('available') else []),
+            'best_bet_badges': badges,
+        }
+    return out
 
 def _ml_performance_meeting_name_sql(alias='m'):
     """Temporary SQL fragment for verified ML performance meetings."""
@@ -11427,7 +11524,7 @@ def best_bets():
     recent_meetings = (
         Meeting.query
         .options(
-            load_only(Meeting.id, Meeting.meeting_name, Meeting.uploaded_at),
+            load_only(Meeting.id, Meeting.meeting_name, Meeting.uploaded_at, Meeting.track, Meeting.date, Meeting.puntingform_id),
             selectinload(Meeting.races)
             .load_only(
                 Race.id,
@@ -11479,8 +11576,21 @@ def best_bets():
                 if j:
                     jockey_ride_counts[j] = jockey_ride_counts.get(j, 0) + 1
 
+        track_name = _track_from_meeting(meeting)
+        date_str = meeting.date.strftime('%Y-%m-%d') if meeting.date else None
         for race in meeting.races:
             signal_top_ids = top_signal_horse_ids(race.horses)
+            ladbrokes_signal_fields = {}
+            if track_name and date_str:
+                race_info = match_race_info(track_name, date_str, race.race_number)
+                if race_info and race_info.get('uuid'):
+                    ladbrokes_signal_fields = evaluate_ladbrokes_best_bet_signals(
+                        race, meeting, fetch_race_odds(race_info['uuid']), race_info
+                    )
+                else:
+                    ladbrokes_signal_fields = {h.id: {'best_bet_reasons': ['odds-unavailable'], 'best_bet_signal_count': 0} for h in race.horses}
+            else:
+                ladbrokes_signal_fields = {h.id: {'best_bet_reasons': ['odds-unavailable'], 'best_bet_signal_count': 0} for h in race.horses}
             horses_in_race = []
             for horse in race.horses:
                 total_horses_scanned += 1
@@ -11515,6 +11625,8 @@ def best_bets():
                     continue
 
                 signal_agreement = signals_all_agree_top(horse.id, signal_top_ids)
+                lb_fields = ladbrokes_signal_fields.get(horse.id, {})
+                ladbrokes_signal_count = int(lb_fields.get('best_bet_signal_count') or 0)
 
                 # Parse win probability for high confidence flag
                 try:
@@ -11556,7 +11668,7 @@ def best_bets():
                 # Include if matched components, ≥80% win probability, jockey sole ride,
                 # or Analyzer/PFAI/ML all agree on the top selection.
                 jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
-                if matched_components or wp >= 80 or jockey_sole or signal_agreement:
+                if matched_components or wp >= 80 or jockey_sole or signal_agreement or ladbrokes_signal_count:
                     matched_components.sort(key=lambda x: x['roi'], reverse=True)
                     best_bets.append({
                         'meeting_id': meeting.id,
@@ -11585,6 +11697,7 @@ def best_bets():
                         'rank_in_race': rank_in_race,
                         'high_confidence': wp >= 80,
                         'signal_agreement': signal_agreement,
+                        **lb_fields,
                     })
 
     best_bets.sort(key=lambda x: x['score'], reverse=True)

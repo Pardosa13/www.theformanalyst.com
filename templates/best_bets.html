@@ -691,13 +691,13 @@
                 <th>Rank</th>
                 <th>Score</th>
                 <th>Gap to Above</th>
-                <th>Odds</th>
+                <th>Ladbrokes</th>
                 <th>Win %</th>
                 <th>Barrier</th>
                 <th>Weight</th>
                 <th>Jockey</th>
                 <th>Trainer</th>
-                <th>Components</th>
+                <th>Signals</th>
               </tr>
             </thead>
             <tbody>
@@ -749,7 +749,15 @@
                   <div style="font-size:11px; color:var(--text-muted);">behind #{{ bet.rank_in_race - 1 }}</div>
                   {% endif %}
                 </td>
-                <td>{{ bet.predicted_odds }}</td>
+                <td>
+                  {% if bet.ladbrokes_fixed_win_price %}
+                    ${{ '%.2f'|format(bet.ladbrokes_fixed_win_price) }}
+                    <div style="font-size:11px;color:var(--text-muted);">Rank #{{ bet.ladbrokes_market_rank }}{% if bet.is_joint_ladbrokes_favourite %} joint fav{% elif bet.is_ladbrokes_favourite %} fav{% endif %}</div>
+                    <div style="font-size:10px;color:var(--text-muted);">{{ bet.ladbrokes_odds_updated_at or 'No timestamp' }}</div>
+                  {% else %}
+                    <span class="text-muted">Unavailable</span>
+                  {% endif %}
+                </td>
                 <td>{{ bet.win_probability }}</td>
                 <td>{{ bet.barrier }}</td>
                 <td>{{ bet.weight }}kg</td>
@@ -765,6 +773,19 @@
                 </td>
                 <td>{{ bet.trainer }}</td>
                 <td>
+                  {% if bet.best_bet_confidence_level %}
+                  <div><span class="badge bg-success">{{ bet.best_bet_confidence_level }}</span></div>
+                  {% endif %}
+                  {% for badge in bet.best_bet_badges or [] %}
+                  <div style="margin-top:4px;"><span class="badge bg-warning text-dark">{{ badge }}</span></div>
+                  {% endfor %}
+                  <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                    Analyzer #{{ bet.analyzer_rank or '—' }} · PFAI #{{ bet.pfai_rank or '—' }} · ML #{{ bet.ml_rank or '—' }}{% if bet.ml_score is not none %} · ML {{ bet.ml_score|round(1) }}{% endif %}{% if bet.ml_score_gap is not none %} · Gap {{ bet.ml_score_gap|round(1) }}{% endif %}
+                  </div>
+                  {% for reason in bet.best_bet_reasons or [] %}
+                  <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">{{ reason }}</div>
+                  {% endfor %}
+                  <hr style="border-color:rgba(255,255,255,.12);">
                   <span class="badge bg-primary">{{ bet.component_count }} matched</span>
                   <button type="button" class="btn btn-sm btn-outline-info mt-1"
                           data-bs-toggle="collapse"
