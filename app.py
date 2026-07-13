@@ -3492,17 +3492,21 @@ def _staking_stake(strategy, pre_race_bankroll, selection, minimum_stake=0.0, ma
     """
     sp = float(selection.get('sp') or 0)
     bankroll = max(0.0, float(pre_race_bankroll or 0.0))
-    if bankroll <= 0 or sp <= 1:
+    if bankroll <= 0:
         return 0.0, None
 
     full_kelly_fraction = None
     if strategy['type'] == 'flat':
         stake = min(10.0, bankroll)
     elif strategy['type'] == 'target_profit':
+        if sp <= 1:
+            return 0.0, full_kelly_fraction
         stake = min(10.0 / (sp - 1.0), bankroll)
     elif strategy['type'] == 'bankroll_pct':
         stake = bankroll * strategy['pct']
     else:
+        if sp <= 1:
+            return 0.0, full_kelly_fraction
         full_kelly_fraction = max(0.0, calculate_kelly_fraction(selection.get('probability'), sp))
         if full_kelly_fraction == 0:
             return 0.0, full_kelly_fraction
@@ -3677,26 +3681,8 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
 
 
 def _build_analyzer_staking_selections(track_filter='', min_score_filter=None, date_from='', date_to='', limit_param='all'):
-    q = db.session.query(Meeting.id, Meeting.uploaded_at, Meeting.date, Race.id, Race.race_number, Prediction.score, Prediction.win_probability, Result.finish_position, Result.sp).join(Race, Race.meeting_id == Meeting.id).join(Horse, Horse.race_id == Race.id).join(Prediction, Prediction.horse_id == Horse.id).join(Result, Result.horse_id == Horse.id).filter(Result.finish_position > 0, Result.sp.isnot(None), Prediction.win_probability.isnot(None), Prediction.win_probability != '')
-    if track_filter: q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from: q = q.filter(Meeting.uploaded_at >= date_from)
-    if date_to: q = q.filter(Meeting.uploaded_at <= date_to)
-    rows = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
-    from collections import defaultdict
-    races=defaultdict(list); keys=[]
-    for mid, uploaded, mdate, rid, rnum, score, prob, fp, sp in rows:
-        key=(mid,rnum)
-        if key not in races: keys.append(key)
-        races[key].append({'race_id': rid, 'race_number': rnum, 'score': score or 0, 'probability': _parse_probability_percent(prob), 'finish_position': fp, 'sp': float(sp or 0), 'sort_key': (mdate or uploaded or datetime.min).isoformat()})
-    if limit_param != 'all': keys = keys[:(int(limit_param) if str(limit_param).isdigit() else 200)]
-    out=[]
-    for key in keys:
-        top=max(races[key], key=lambda h: h['score'])
-        if min_score_filter and top['score'] < min_score_filter: continue
-        if top['probability'] is not None and top['sp'] > 0:
-            top['probability_source_field'] = 'predictions.win_probability'
-            out.append(top)
-    return out
+    """Compatibility wrapper around the canonical Analyzer selection helper."""
+    return _build_canonical_analyzer_selections(track_filter, min_score_filter, date_from, date_to, limit_param)
 
 
 def _build_ml_staking_selections(track_filter='', date_from='', date_to='', limit_param='all'):
@@ -5674,6 +5660,98 @@ def admin_panel():
     return render_template("admin.html", stats=stats)
 
 
+
+def _build_canonical_analyzer_selections(track_filter='', min_score_filter=None, date_from='', date_to='', limit_param='all'):
+    """Return the Analyzer Data page's canonical historical top-pick selections.
+
+    This is the single source of truth for Analyzer historical selections and
+    flat $10 performance.  Consumers may change stake sizing, but must not
+    rebuild their own Analyzer top-pick query.
+    """
+    q = db.session.query(
+        Meeting.id,
+        Meeting.uploaded_at,
+        Meeting.date,
+        Race.id,
+        Race.race_number,
+        Prediction.score,
+        Prediction.win_probability,
+        Result.finish_position,
+        Result.sp,
+    ).join(Race,       Race.meeting_id      == Meeting.id
+    ).join(Horse,      Horse.race_id        == Race.id
+    ).join(Prediction, Prediction.horse_id  == Horse.id
+    ).join(Result,     Result.horse_id      == Horse.id
+    ).filter(Result.finish_position > 0)
+
+    if track_filter:
+        q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        q = q.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        q = q.filter(Meeting.uploaded_at <= date_to)
+
+    rows = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
+
+    from collections import defaultdict
+    races = defaultdict(list)
+    race_keys_ordered = []
+    for meeting_id, uploaded, meeting_date, race_id, race_number, score, probability, finish_pos, sp in rows:
+        key = (meeting_id, race_number)
+        if key not in races:
+            race_keys_ordered.append(key)
+        sort_dt = meeting_date or uploaded or datetime.min
+        races[key].append({
+            'race_id': race_id,
+            'race_number': race_number,
+            'score': score or 0,
+            'probability': _parse_probability_percent(probability),
+            'probability_source_field': 'predictions.win_probability' if probability not in (None, '') else None,
+            'finish_position': finish_pos,
+            'sp': float(sp or 0),
+            'sort_key': sort_dt.isoformat() if hasattr(sort_dt, 'isoformat') else str(sort_dt),
+        })
+
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        race_keys_ordered = race_keys_ordered[:limit]
+
+    selections = []
+    for key in race_keys_ordered:
+        top = max(races[key], key=lambda h: h['score'])
+        if min_score_filter and top['score'] < min_score_filter:
+            continue
+        selections.append(top)
+    return selections
+
+
+def _summarise_analyzer_selections(selections, stake=10.0):
+    """Summarise canonical Analyzer selections using flat win-bet staking."""
+    total_races = len(selections)
+    top_pick_wins = sum(1 for sel in selections if sel.get('finish_position') == 1)
+    top_pick_places = sum(1 for sel in selections if sel.get('finish_position') in [1, 2, 3])
+    total_profit = 0.0
+    winner_sps = []
+    for sel in selections:
+        won = sel.get('finish_position') == 1
+        sp = float(sel.get('sp') or 0)
+        if won:
+            total_profit += (sp * stake - stake)
+            if sp > 0:
+                winner_sps.append(sp)
+        else:
+            total_profit -= stake
+    return {
+        'total_races': total_races,
+        'top_pick_wins': top_pick_wins,
+        'top_pick_places': top_pick_places,
+        'strike_rate': (top_pick_wins / total_races * 100) if total_races else 0,
+        'place_rate': (top_pick_places / total_races * 100) if total_races else 0,
+        'roi': (total_profit / (total_races * stake) * 100) if total_races else 0,
+        'total_profit': total_profit,
+        'avg_winner_sp': (sum(winner_sps) / len(winner_sps)) if winner_sps else 0,
+    }
+
 @app.route("/data")
 @login_required
 def data_analytics():
@@ -5690,78 +5768,22 @@ def data_analytics():
     tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
 
-    # SINGLE lean query — column-level only
-    q = db.session.query(
-        Meeting.id,
-        Race.race_number,
-        Prediction.score,
-        Result.finish_position,
-        Result.sp
-    ).join(Race,       Race.meeting_id      == Meeting.id
-    ).join(Horse,      Horse.race_id        == Race.id
-    ).join(Prediction, Prediction.horse_id  == Horse.id
-    ).join(Result,     Result.horse_id      == Horse.id
-    ).filter(Result.finish_position > 0)
-
-    if track_filter:
-        q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        q = q.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        q = q.filter(Meeting.uploaded_at <= date_to)
-
-    q = q.order_by(Meeting.uploaded_at.desc(), Race.id.desc())
-    rows = q.all()
-
-    # Group by race
-    from collections import defaultdict
-    races = defaultdict(list)
-    race_keys_ordered = []
-    for meeting_id, race_num, score, finish_pos, sp in rows:
-        key = (meeting_id, race_num)
-        if key not in races:
-            race_keys_ordered.append(key)
-        races[key].append({'score': score, 'finish_pos': finish_pos, 'sp': sp or 0})
-
-    # Apply limit by race count
-    if limit_param != 'all':
-        limit = int(limit_param) if str(limit_param).isdigit() else 200
-        race_keys_ordered = race_keys_ordered[:limit]
-
-    stake = 10.0
-    total_races = 0
-    top_pick_wins = 0
-    top_pick_places = 0
-    total_profit = 0.0
-    winner_sps = []
-
-    for key in race_keys_ordered:
-        horses = races[key]
-        top = max(horses, key=lambda x: x['score'])
-
-        if min_score_filter and top['score'] < min_score_filter:
-            continue
-
-        total_races += 1
-        placed = top['finish_pos'] in [1, 2, 3]
-        won = top['finish_pos'] == 1
-        sp = top['sp']
-
-        if placed:
-            top_pick_places += 1
-
-        if won:
-            top_pick_wins += 1
-            total_profit += (sp * stake - stake)
-            if sp > 0:
-                winner_sps.append(sp)
-        else:
-            total_profit -= stake
-
-    strike_rate = (top_pick_wins / total_races * 100) if total_races > 0 else 0
-    place_rate = (top_pick_places / total_races * 100) if total_races > 0 else 0
-    roi = (total_profit / (total_races * stake) * 100) if total_races > 0 else 0
-    avg_winner_sp = sum(winner_sps) / len(winner_sps) if winner_sps else 0
+    canonical_selections = _build_canonical_analyzer_selections(
+        track_filter=track_filter,
+        min_score_filter=min_score_filter,
+        date_from=date_from,
+        date_to=date_to,
+        limit_param=limit_param,
+    )
+    canonical_summary = _summarise_analyzer_selections(canonical_selections)
+    total_races = canonical_summary['total_races']
+    top_pick_wins = canonical_summary['top_pick_wins']
+    top_pick_places = canonical_summary['top_pick_places']
+    strike_rate = canonical_summary['strike_rate']
+    place_rate = canonical_summary['place_rate']
+    roi = canonical_summary['roi']
+    total_profit = canonical_summary['total_profit']
+    avg_winner_sp = canonical_summary['avg_winner_sp']
 
     # Best bets stats (already limited to 500, keep as-is)
     best_bets_stats = None
