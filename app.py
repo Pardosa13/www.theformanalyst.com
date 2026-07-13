@@ -3560,6 +3560,15 @@ def _assert_staking_replay_invariants(result, starting_bankroll):
             raise ValueError(f"Staking invariant failed for {key}: average stake exceeds largest stake")
         if float(strategy.get('largest_individual_stake') or 0.0) - max_pre_race_bankroll > 0.005:
             raise ValueError(f"Staking invariant failed for {key}: largest stake exceeds max pre-race bankroll")
+        expected_peak_bankroll = round(max([float(starting_bankroll or 0.0)] + [float(point.get('bankroll') or 0.0) for point in curve]), 2)
+        if abs(float(strategy.get('peak_bankroll') or 0.0) - expected_peak_bankroll) > 0.005:
+            raise ValueError(f"Staking invariant failed for {key}: peak bankroll does not match replay curve")
+        for row in strategy.get('largest_stakes') or []:
+            row_stake = float(row.get('stake') or 0.0)
+            row_bankroll = float(row.get('bankroll') or 0.0)
+            expected_pct = round((row_stake / row_bankroll * 100.0) if row_bankroll else 0.0, 4)
+            if abs(float(row.get('stake_bankroll_pct') or 0.0) - expected_pct) > 0.005:
+                raise ValueError(f"Staking invariant failed for {key}: largest stake percentage does not match pre-bet bankroll")
         expected_profit = float(strategy.get('final_bankroll') or 0.0) - float(starting_bankroll or 0.0)
         if abs(float(strategy.get('total_profit') or 0.0) - expected_profit) > 0.015:
             raise ValueError(f"Staking invariant failed for {key}: total profit does not reconcile to bankroll")
@@ -3605,6 +3614,7 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
                     'bet': i,
                     'stake': round(stake, 2),
                     'bankroll': round(bankroll_before, 2),
+                    'stake_bankroll_pct': round((stake / bankroll_before * 100.0) if bankroll_before else 0.0, 4),
                     'kelly_fraction': round(kelly_fraction, 6) if kelly_fraction is not None else None,
                     'race_id': sel.get('race_id'),
                     'race_number': sel.get('race_number'),
@@ -3635,7 +3645,7 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
         cagr = ((final/starting_bankroll)**(365.25/days)-1)*100 if days > 0 and final > 0 and starting_bankroll > 0 else 0.0
         risk_adjusted = (total_profit / max_dd) if max_dd > 0 else (total_profit if total_profit > 0 else 0.0)
         results.append({
-            'key': strat['key'], 'name': strat['name'], 'final_bankroll': round(final,2), 'total_profit': round(total_profit,2),
+            'key': strat['key'], 'name': strat['name'], 'final_bankroll': round(final,2), 'peak_bankroll': round(peak,2), 'total_profit': round(total_profit,2),
             'roi': round((total_profit/total_staked*100) if total_staked else 0.0,2), 'cagr': round(cagr,2), 'maximum_drawdown': round(max_dd,2),
             'largest_losing_streak': max_losing, 'largest_winning_streak': max_winning, 'largest_individual_stake': round(largest_individual_stake,2),
             'average_stake': round(average_stake,2), 'number_of_bets': n, 'number_of_winning_bets': wins,
