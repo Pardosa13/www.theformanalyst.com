@@ -460,6 +460,101 @@ def _log_prediction_feature_diagnostics(model, meeting_id, race, raw_X):
         generated_features[:10],
     )
 
+def _feature_contract_hash(feature_names):
+    """Return a stable hash for an ordered feature-name contract."""
+    import hashlib
+
+    return hashlib.sha256(json.dumps(list(feature_names), separators=(',', ':')).encode('utf-8')).hexdigest()
+
+
+def _live_feature_contract_predicates(model, raw_X, final_X):
+    """Return individually named live feature-contract predicate values."""
+    stored_features = _model_feature_names(model)
+    final_features = [str(name) for name in list(final_X.columns)]
+    raw_features = [str(name) for name in list(raw_X.columns)]
+    expected_feature_count = getattr(model, '_form_analyst_expected_feature_count', None)
+    if expected_feature_count is None and stored_features is not None:
+        expected_feature_count = len(stored_features)
+    try:
+        expected_feature_count_int = int(expected_feature_count) if expected_feature_count is not None else None
+    except (TypeError, ValueError):
+        expected_feature_count_int = None
+
+    model_n_features_in = getattr(model, 'n_features_in_', None)
+    try:
+        model_n_features_in_int = int(model_n_features_in) if model_n_features_in is not None else None
+    except (TypeError, ValueError):
+        model_n_features_in_int = None
+
+    if stored_features is None:
+        stored_features = []
+        missing_features = []
+        extra_features = raw_features
+        names_match = False
+        order_matches = False
+    else:
+        stored_features = [str(name) for name in stored_features]
+        missing_features = [name for name in stored_features if name not in raw_X.columns]
+        extra_features = [name for name in raw_features if name not in stored_features]
+        names_match = not missing_features and not extra_features and set(final_features) == set(stored_features)
+        order_matches = final_features == stored_features
+
+    duplicate_features = [name for name, count in Counter(final_features).items() if count > 1]
+    stored_count_matches = len(stored_features) == expected_feature_count_int if expected_feature_count_int is not None else bool(stored_features)
+    final_count_matches = len(final_features) == len(stored_features) if stored_features else False
+    missing_features_empty = not missing_features
+    extra_features_empty = not extra_features
+    duplicate_features_empty = not duplicate_features
+    model_n_features_matches = model_n_features_in_int is None or model_n_features_in_int == len(final_features)
+    expected_feature_count_matches = expected_feature_count_int is None or expected_feature_count_int == len(final_features)
+    expected_feature_count_matches_stored = expected_feature_count_int is None or expected_feature_count_int == len(stored_features)
+    feature_hash_matches = bool(stored_features) and _feature_contract_hash(stored_features) == _feature_contract_hash(final_features)
+    metadata_version_matches = getattr(model, '_form_analyst_model_version', None) == globals().get('MODEL_VERSION')
+    contains_nan = bool(final_X.isna().any().any())
+    numeric_values = final_X.select_dtypes(include=[np.number])
+    contains_infinity = bool(np.isinf(numeric_values.to_numpy(dtype=float)).any()) if not numeric_values.empty else False
+    dtype_check_passes = all(pd.api.types.is_numeric_dtype(dtype) for dtype in final_X.dtypes)
+
+    genuine_contract_matches = (
+        final_count_matches
+        and names_match
+        and order_matches
+        and model_n_features_matches
+        and expected_feature_count_matches
+    )
+    legacy_failure_expression = "not live_count_matches or not order_matches or missing_from_live or extra_live or not stored_matches_code"
+
+    return {
+        'stored_features': stored_features,
+        'final_features': final_features,
+        'expected_feature_count': expected_feature_count,
+        'expected_feature_count_int': expected_feature_count_int,
+        'model_n_features_in': model_n_features_in,
+        'missing_features': missing_features,
+        'extra_features': extra_features,
+        'duplicate_features': duplicate_features,
+        'stored_count_matches': stored_count_matches,
+        'final_count_matches': final_count_matches,
+        'names_match': names_match,
+        'order_matches': order_matches,
+        'missing_features_empty': missing_features_empty,
+        'extra_features_empty': extra_features_empty,
+        'duplicate_features_empty': duplicate_features_empty,
+        'model_n_features_matches': model_n_features_matches,
+        'expected_feature_count_matches': expected_feature_count_matches,
+        'expected_feature_count_matches_stored': expected_feature_count_matches_stored,
+        'feature_hash_matches': feature_hash_matches,
+        'metadata_version_matches': metadata_version_matches,
+        'contains_nan': contains_nan,
+        'contains_infinity': contains_infinity,
+        'dtype_check_passes': dtype_check_passes,
+        'genuine_contract_matches': genuine_contract_matches,
+        'failure_expression': "not (final_count_matches and names_match and order_matches and model_n_features_matches and expected_feature_count_matches)",
+        'legacy_failure_expression': legacy_failure_expression,
+        'legacy_stored_matches_code': stored_features == FEATURE_NAMES,
+    }
+
+
 def _log_live_feature_audit(model, meeting_id, race, feature_rows, raw_X, final_X):
     """
     Compare live scoring features against the active Champion model contract.
@@ -469,44 +564,66 @@ def _log_live_feature_audit(model, meeting_id, race, feature_rows, raw_X, final_
     same named columns in the same order and only default missing/null values.
     """
     model_id = getattr(model, '_form_analyst_model_id', None)
-    stored_features = _model_feature_names(model)
-    expected_count = 146
+    contract = _live_feature_contract_predicates(model, raw_X, final_X)
 
-    if stored_features is None:
+    if not contract['stored_features']:
         log.error(
-            "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=failed reason=missing_model_feature_names expected_model_id=62 expected_features=%s",
-            meeting_id, getattr(race, 'race_number', None), model_id, expected_count,
+            "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=failed reason=missing_model_feature_names expected_features=%s",
+            meeting_id, getattr(race, 'race_number', None), model_id, contract['expected_feature_count'],
         )
         raise RuntimeError("ML feature contract failed: model artifact has no persisted feature list")
 
-    generated_features = list(raw_X.columns)
-    missing_from_live = [name for name in stored_features if name not in raw_X.columns]
-    extra_live = [name for name in generated_features if name not in stored_features]
-    order_matches = list(final_X.columns) == stored_features
-    stored_matches_code = stored_features == FEATURE_NAMES
-    live_count_matches = len(stored_features) == expected_count and final_X.shape[1] == expected_count
+    log.info(
+        "ML_FEATURE_CONTRACT_PREDICATES meeting=%s race=%s model_id=%s "
+        "stored_count_matches=%s final_count_matches=%s names_match=%s order_matches=%s "
+        "missing_features_empty=%s extra_features_empty=%s duplicate_features_empty=%s "
+        "model_n_features_matches=%s expected_feature_count_matches=%s feature_hash_matches=%s "
+        "metadata_version_matches=%s contains_nan=%s contains_infinity=%s dtype_check_passes=%s "
+        "model_n_features_in=%s expected_feature_count=%s failure_expression=%s legacy_failure_expression=%s "
+        "legacy_stored_matches_code=%s stored_features=%s final_features=%s",
+        meeting_id, getattr(race, 'race_number', None), model_id,
+        contract['stored_count_matches'], contract['final_count_matches'], contract['names_match'], contract['order_matches'],
+        contract['missing_features_empty'], contract['extra_features_empty'], contract['duplicate_features_empty'],
+        contract['model_n_features_matches'], contract['expected_feature_count_matches'], contract['feature_hash_matches'],
+        contract['metadata_version_matches'], contract['contains_nan'], contract['contains_infinity'], contract['dtype_check_passes'],
+        contract['model_n_features_in'], contract['expected_feature_count'], contract['failure_expression'], contract['legacy_failure_expression'],
+        contract['legacy_stored_matches_code'], contract['stored_features'], contract['final_features'],
+    )
 
-    if not live_count_matches or not order_matches or missing_from_live or extra_live or not stored_matches_code:
+    if not contract['genuine_contract_matches']:
+        failed_predicates = [
+            name for name in (
+                'stored_count_matches', 'final_count_matches', 'names_match', 'order_matches',
+                'missing_features_empty', 'extra_features_empty', 'duplicate_features_empty',
+                'model_n_features_matches', 'expected_feature_count_matches', 'feature_hash_matches',
+                'metadata_version_matches', 'dtype_check_passes',
+            )
+            if not contract[name]
+        ]
+        failed_predicates.extend(
+            name for name in ('contains_nan', 'contains_infinity') if contract[name]
+        )
         log.error(
-            "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=failed expected_features=%s stored_features=%s final_features=%s order_matches=%s stored_matches_code=%s missing_from_live=%s extra_live=%s",
-            meeting_id, getattr(race, 'race_number', None), model_id, expected_count,
-            len(stored_features), final_X.shape[1], order_matches, stored_matches_code,
-            missing_from_live, extra_live,
+            "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=failed failed_predicates=%s missing_features=%s extra_features=%s duplicate_features=%s",
+            meeting_id, getattr(race, 'race_number', None), model_id, failed_predicates,
+            contract['missing_features'], contract['extra_features'], contract['duplicate_features'],
         )
         raise RuntimeError(
             f"ML feature contract failed for meeting={meeting_id} race={getattr(race, 'race_number', None)}: "
-            f"stored={len(stored_features)} final={final_X.shape[1]} order_matches={order_matches} "
-            f"missing={missing_from_live} extra={extra_live}"
-        )
-    else:
-        log.info(
-            "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=passed feature_count=%s order_matches=%s preprocessing=training_fillna_median live_fillna_zero scaling=none stored_names_match_code=%s",
-            meeting_id, getattr(race, 'race_number', None), model_id, final_X.shape[1],
-            order_matches, stored_matches_code,
+            f"failed_predicates={failed_predicates} stored={len(contract['stored_features'])} final={len(contract['final_features'])} "
+            f"order_matches={contract['order_matches']} names_match={contract['names_match']} "
+            f"model_n_features_matches={contract['model_n_features_matches']} "
+            f"expected_feature_count_matches={contract['expected_feature_count_matches']} "
+            f"missing={contract['missing_features']} extra={contract['extra_features']} duplicate={contract['duplicate_features']}"
         )
 
-    defaulted_columns = Counter(missing_from_live)
-    null_defaulted = raw_X.reindex(columns=stored_features).isna().sum()
+    log.info(
+        "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=passed feature_count=%s order_matches=%s preprocessing=training_fillna_median live_fillna_zero scaling=none",
+        meeting_id, getattr(race, 'race_number', None), model_id, final_X.shape[1], contract['order_matches'],
+    )
+
+    defaulted_columns = Counter(contract['missing_features'])
+    null_defaulted = raw_X.reindex(columns=contract['stored_features']).isna().sum()
     for col, count in null_defaulted.items():
         if count:
             defaulted_columns[col] += int(count)
