@@ -3540,6 +3540,18 @@ def _assert_staking_replay_invariants(result, starting_bankroll):
             cap = {'quarter_kelly_cap_2': 0.02, 'half_kelly_cap_2': 0.02, 'full_kelly_cap_5': 0.05}.get(key)
             if cap is not None and pre > 0 and stake - (pre * cap) > 0.015:
                 raise ValueError(f"Staking invariant failed for {key}: capped Kelly stake exceeds cap")
+        stake_history = [float(stake or 0.0) for stake in (strategy.get('stake_history') or [])]
+        expected_total_staked = round(sum(stake_history), 2)
+        expected_largest_stake = round(max(stake_history) if stake_history else 0.0, 2)
+        expected_average_stake = round((sum(stake_history) / len(stake_history)) if stake_history else 0.0, 2)
+        if abs(float(strategy.get('total_staked') or 0.0) - expected_total_staked) > 0.005:
+            raise ValueError(f"Staking invariant failed for {key}: total staked does not match replay stake history")
+        if abs(float(strategy.get('largest_individual_stake') or 0.0) - expected_largest_stake) > 0.005:
+            raise ValueError(f"Staking invariant failed for {key}: largest stake does not match replay stake history")
+        if abs(float(strategy.get('average_stake') or 0.0) - expected_average_stake) > 0.005:
+            raise ValueError(f"Staking invariant failed for {key}: average stake does not match replay stake history")
+        if float(strategy.get('average_stake') or 0.0) - float(strategy.get('largest_individual_stake') or 0.0) > 0.005:
+            raise ValueError(f"Staking invariant failed for {key}: average stake exceeds largest stake")
         if float(strategy.get('largest_individual_stake') or 0.0) - max_pre_race_bankroll > 0.005:
             raise ValueError(f"Staking invariant failed for {key}: largest stake exceeds max pre-race bankroll")
         expected_profit = float(strategy.get('final_bankroll') or 0.0) - float(starting_bankroll or 0.0)
@@ -3563,7 +3575,7 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
         bankroll = float(starting_bankroll)
         peak = bankroll
         max_dd = 0.0
-        stakes=[]; returns=[]; curve=[]; wins=0; bets=0; losing=winning=max_losing=max_winning=0; turnover=0.0; largest_stakes=[]
+        stake_history=[]; realised_profit_history=[]; curve=[]; wins=0; bets=0; losing=winning=max_losing=max_winning=0; largest_stakes=[]
         for i, sel in enumerate(ordered, start=1):
             bankroll_before = max(0.0, bankroll)
             stake, kelly_fraction = _staking_stake(strat, bankroll_before, sel, minimum_stake, maximum_stake)
@@ -3575,11 +3587,9 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
                 post_race_bankroll = bankroll_before - stake
             bankroll = max(0.0, post_race_bankroll)
             profit = bankroll - bankroll_before
-            turnover += stake
-            stakes.append(stake)
             if stake > 0:
-                returns.append(profit)
-            if stake > 0:
+                stake_history.append(stake)
+                realised_profit_history.append(profit)
                 bets += 1
                 largest_stakes.append({
                     'bet': i,
@@ -3603,20 +3613,23 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
             max_dd=max(max_dd, dd)
             curve.append({'bet': i, 'bankroll': round(bankroll, 2), 'bankroll_before': round(bankroll_before, 2), 'stake': round(stake, 2), 'profit': round(profit, 2)})
         n=bets; final=bankroll; total_profit=final-float(starting_bankroll)
+        total_staked = sum(stake_history)
+        largest_individual_stake = max(stake_history) if stake_history else 0.0
+        average_stake = (total_staked / n) if n else 0.0
         largest_stakes = sorted(largest_stakes, key=lambda r: r['stake'], reverse=True)[:5]
-        avg_profit = sum(returns)/len(returns) if returns else 0.0
-        variance = sum((x-avg_profit)**2 for x in returns)/len(returns) if returns else 0.0
+        avg_profit = sum(realised_profit_history)/len(realised_profit_history) if realised_profit_history else 0.0
+        variance = sum((x-avg_profit)**2 for x in realised_profit_history)/len(realised_profit_history) if realised_profit_history else 0.0
         volatility = math.sqrt(variance)
         cagr = ((final/starting_bankroll)**(365.25/days)-1)*100 if days > 0 and final > 0 and starting_bankroll > 0 else 0.0
         risk_adjusted = (total_profit / max_dd) if max_dd > 0 else (total_profit if total_profit > 0 else 0.0)
         results.append({
             'key': strat['key'], 'name': strat['name'], 'final_bankroll': round(final,2), 'total_profit': round(total_profit,2),
-            'roi': round((total_profit/turnover*100) if turnover else 0.0,2), 'cagr': round(cagr,2), 'maximum_drawdown': round(max_dd,2),
-            'largest_losing_streak': max_losing, 'largest_winning_streak': max_winning, 'largest_individual_stake': round(max(stakes) if stakes else 0,2),
-            'average_stake': round((turnover/n) if n else 0,2), 'number_of_bets': n, 'number_of_winning_bets': wins,
-            'strike_rate': round((wins/n*100) if n else 0.0,2), 'return_on_turnover': round((total_profit/turnover*100) if turnover else 0.0,2),
+            'roi': round((total_profit/total_staked*100) if total_staked else 0.0,2), 'cagr': round(cagr,2), 'maximum_drawdown': round(max_dd,2),
+            'largest_losing_streak': max_losing, 'largest_winning_streak': max_winning, 'largest_individual_stake': round(largest_individual_stake,2),
+            'average_stake': round(average_stake,2), 'number_of_bets': n, 'number_of_winning_bets': wins,
+            'strike_rate': round((wins/n*100) if n else 0.0,2), 'return_on_turnover': round((total_profit/total_staked*100) if total_staked else 0.0,2),
             'volatility': round(volatility,2), 'bankroll_growth_multiple': round((final/starting_bankroll) if starting_bankroll else 0.0,4),
-            'total_staked': round(turnover,2), 'risk_adjusted_return': round(risk_adjusted,4), 'largest_stakes': largest_stakes, 'curve': curve,
+            'total_staked': round(total_staked,2), 'risk_adjusted_return': round(risk_adjusted,4), 'largest_stakes': largest_stakes, 'stake_history': stake_history, 'curve': curve,
         })
     winners = {
         'highest_final_bankroll': max(results, key=lambda r: r['final_bankroll']) if results else None,

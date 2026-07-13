@@ -87,6 +87,33 @@ def test_bankroll_audit_invariants_and_largest_stakes():
     assert quarter_kelly['number_of_bets'] < len(sels)
 
 
+def test_summary_metrics_are_derived_from_actual_replay_stakes():
+    sels = [
+        _sel(2.0, .6, False, '2024-01-01'),
+        _sel(2.0, .6, False, '2024-01-02'),
+        _sel(2.0, .6, True, '2024-01-03'),
+    ]
+    data = replay_staking_strategies(sels, 10000)
+    for strategy in data['strategies']:
+        stake_history = strategy['stake_history']
+        realised_profits = [point['profit'] for point in strategy['curve'] if point['stake'] > 0]
+
+        assert strategy['total_staked'] == round(sum(stake_history), 2)
+        assert strategy['average_stake'] == round(sum(stake_history) / strategy['number_of_bets'], 2)
+        assert strategy['largest_individual_stake'] == round(max(stake_history), 2)
+        assert strategy['average_stake'] <= strategy['largest_individual_stake']
+        assert strategy['largest_individual_stake'] <= max(point['bankroll_before'] for point in strategy['curve'])
+
+        avg_profit = sum(realised_profits) / len(realised_profits)
+        expected_volatility = math.sqrt(sum((profit - avg_profit) ** 2 for profit in realised_profits) / len(realised_profits))
+        assert strategy['volatility'] == round(expected_volatility, 2)
+
+    flat_1 = next(r for r in data['strategies'] if r['key'] == 'flat_1_pct')
+    flat_2 = next(r for r in data['strategies'] if r['key'] == 'flat_2_pct')
+    assert flat_1['largest_individual_stake'] <= 100
+    assert flat_2['largest_individual_stake'] <= 200
+
+
 def test_probability_source_contracts_are_documented_in_source():
     from pathlib import Path
     source = Path('app.py').read_text()
