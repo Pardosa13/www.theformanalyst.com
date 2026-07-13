@@ -728,12 +728,23 @@
 {% endif %}
 
 <!-- Chart.js CDN — UNCHANGED -->
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#stakingStrategyAnalysis" aria-expanded="false">
+    <h5>💰 Staking Strategy Analysis</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="stakingStrategyAnalysis" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and compare staking strategies...</p></div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <!-- ALL JS 100% IDENTICAL TO SOURCE except renderScoreAnalysis chart
      colours updated to dark-visible purple/green palette -->
 <script>
 const loadedSections = new Set();
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[char]));
 
 const filterParams = new URLSearchParams({
     track: '{{ filters.track }}',
@@ -782,6 +793,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (raceConfidence) { raceConfidence.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('race-confidence')) { loadRaceConfidence(); } }); }
     const raceTempoAnalysis = document.getElementById('raceTempoAnalysis');
     if (raceTempoAnalysis) { raceTempoAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('race-tempo')) { loadRaceTempo(); } }); }
+    const stakingStrategyAnalysis = document.getElementById('stakingStrategyAnalysis');
+    if (stakingStrategyAnalysis) { stakingStrategyAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('staking-strategy')) { loadStakingStrategy(); } }); }
     const pfaiAnalysis = document.getElementById('pfaiAnalysis');
     if (pfaiAnalysis) { 
         pfaiAnalysis.addEventListener('show.bs.collapse', function() { 
@@ -795,6 +808,32 @@ document.addEventListener('DOMContentLoaded', function() {
         }); 
     }
 });
+
+function loadStakingStrategy() {
+    const container = document.getElementById('stakingStrategyAnalysis');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Replaying historical selections through staking strategies...</p></div>';
+    fetch(`/api/data/staking-strategy-analysis?${filterParams}`)
+        .then(response => response.json())
+        .then(data => { renderStakingStrategy(data); loadedSections.add('staking-strategy'); })
+        .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading staking strategy analysis.</div>'; console.error('Error:', error); });
+}
+function renderStakingStrategy(data) {
+    const container = document.getElementById('stakingStrategyAnalysis');
+    if (data.error) { container.innerHTML = `<div class="card-body text-danger">${data.error}</div>`; return; }
+    const money = v => '$' + Number(v || 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    const pct = v => Number(v || 0).toFixed(2) + '%';
+    const winnerKeys = new Map(Object.entries(data.winners || {}).map(([k,v]) => [v.key, (k.replaceAll('_',' '))]));
+    const recommended = (data.winners || {}).highest_final_bankroll || {};
+    let rows = (data.strategies || []).map(r => `<tr class="${winnerKeys.has(r.key) ? 'table-success' : ''}"><td><strong>${escapeHtml ? escapeHtml(r.name) : r.name}</strong><br><small>${winnerKeys.get(r.key) || ''}</small>${recommended.key === r.key ? '<br><span class="badge bg-success mt-1">Recommended Historical Strategy</span>' : ''}</td><td>${money(r.final_bankroll)}</td><td class="${r.total_profit>=0?'text-success':'text-danger'}">${money(r.total_profit)}</td><td class="${r.roi>=0?'text-success':'text-danger'}">${r.roi>=0?'+':''}${pct(r.roi)}</td><td>${pct(r.cagr)}</td><td>${pct(r.maximum_drawdown)}</td><td>${r.largest_losing_streak}</td><td>${r.largest_winning_streak}</td><td>${money(r.largest_individual_stake)}</td><td>${money(r.average_stake)}</td><td>${r.number_of_bets}</td><td>${r.number_of_winning_bets}</td><td>${pct(r.strike_rate)}</td><td>${pct(r.return_on_turnover)}</td><td>${money(r.volatility)}</td><td>${Number(r.bankroll_growth_multiple || 0).toFixed(4)}x</td></tr>`).join('');
+    let settings = data.settings || {};
+    const sourceCounts = settings.probability_source_counts ? ` · Stored probabilities: ${settings.probability_source_counts.stored || 0} · Derived probabilities: ${settings.probability_source_counts.derived || 0}` : '';
+    const recommendedBadge = recommended.name ? `<div class="alert alert-success"><strong>Recommended Historical Strategy:</strong> ${escapeHtml(recommended.name)} based on highest final bankroll (${money(recommended.value)}).</div>` : '';
+    const derivedNote = String(settings.probability_source_field || '').includes('derived') ? '<div class="alert alert-warning mt-2"><strong>Probability derivation:</strong> ML staking used stored canonical ML probabilities where available. Missing ML probabilities fall back to the same derived ML 110% market probabilities used by the ML meeting view.</div>' : '';
+    container.innerHTML = `<div class="card-body">${recommendedBadge}<p class="text-muted">${data.summary || ''}</p><div class="table-responsive"><table class="table table-sm table-hover sortable"><thead class="table-dark"><tr><th>Strategy</th><th>Final Bankroll</th><th>Total Profit</th><th>ROI</th><th>CAGR</th><th>Max DD</th><th>Lose Streak</th><th>Win Streak</th><th>Largest Stake</th><th>Avg Stake</th><th>Bets</th><th>Wins</th><th>Strike</th><th>ROT</th><th>Volatility</th><th>Growth</th></tr></thead><tbody>${rows}</tbody></table></div><canvas id="stakingChart" height="120"></canvas><div class="alert alert-info mt-3"><strong>Kelly settings used:</strong> Probability source: ${settings.probability_source} · Probability Source field: ${settings.probability_source_field || settings.probability_source}${sourceCounts} · Odds source: ${settings.odds_source} · Formula: ${settings.kelly_formula} · Bankroll: ${money(settings.bankroll)} · Kelly cap: ${settings.kelly_cap} · Minimum stake: ${money(settings.minimum_stake)} · Maximum stake: ${settings.maximum_stake == null ? 'None' : money(settings.maximum_stake)}</div>${derivedNote}</div>`;
+    const colors = ['#60a5fa','#34d399','#fbbf24','#f87171','#a78bfa','#fb7185','#22d3ee','#c084fc','#f97316','#10b981','#e879f9'];
+    new Chart(document.getElementById('stakingChart'), { type:'line', data: { datasets: (data.strategies || []).map((r,i)=>({label:r.name, data:(r.curve||[]).map(p=>({x:p.bet,y:p.bankroll})), borderColor:colors[i%colors.length], backgroundColor:colors[i%colors.length], pointRadius:0, tension:.15})) }, options: { responsive:true, parsing:false, scales: { x: { type:'linear', ticks:{color:'#9090a8'}, grid:{color:'rgba(255,255,255,.05)'} }, y: { ticks:{color:'#9090a8', callback:v=>'$'+Number(v).toLocaleString()}, grid:{color:'rgba(255,255,255,.05)'} } }, plugins: { legend: { labels: { color:'#9090a8' } } } } });
+}
+
 function loadScoreAnalysis() {
     const container = document.getElementById('scoreAnalysis');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading score analysis...</p></div>';
