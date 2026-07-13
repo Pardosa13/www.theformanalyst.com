@@ -5377,6 +5377,49 @@ def data_analytics():
     )
 
 
+
+def latest_ml_challenger_summary():
+    """Return the newest completed run's overall winner and champion comparison."""
+    try:
+        row = db.session.execute(text("""
+            SELECT bm.id, bm.run_id, bm.model_type, bm.model_name, bm.combined_score,
+                   bm.validation_roi, bm.validation_strike_rate, bm.validation_bets,
+                   bm.selection_metrics, bm.promotion_reason, bm.is_active, br.completed_at
+            FROM backtest_best_model bm
+            JOIN backtest_runs br ON br.id = bm.run_id
+            WHERE br.status = 'complete'
+            ORDER BY br.completed_at DESC NULLS LAST, bm.created_at DESC, bm.id DESC
+            LIMIT 1
+        """)).fetchone()
+        if not row:
+            return None
+        metrics = {}
+        if row.selection_metrics:
+            try:
+                metrics = json.loads(row.selection_metrics)
+            except Exception:
+                metrics = {}
+        return {
+            'model_id': row.id,
+            'run_id': row.run_id,
+            'model_type': row.model_type,
+            'model_name': row.model_name,
+            'selection_score': row.combined_score,
+            'roi': row.validation_roi,
+            'strike_rate': row.validation_strike_rate,
+            'bets': row.validation_bets,
+            'log_loss': metrics.get('log_loss'),
+            'brier_score': metrics.get('brier_score'),
+            'calibration': metrics.get('calibration') or {},
+            'validation_period': metrics.get('validation_period') or {},
+            'promotion_reason': row.promotion_reason,
+            'beat_champion': bool(row.is_active) or str(row.promotion_reason or '').lower().startswith('promoted:'),
+            'completed_at': row.completed_at,
+        }
+    except Exception as exc:
+        logger.warning("Unable to load latest ML challenger summary: %s", exc)
+        return {'error': str(exc)}
+
 @app.route("/ml-data")
 @login_required
 def ml_data_analytics():
@@ -5395,6 +5438,7 @@ def ml_data_analytics():
 
     active_model_metadata = None
     active_model_metadata_error = None
+    latest_challenger = latest_ml_challenger_summary()
     try:
         from ml_predict import active_production_model_metadata
         active_model_metadata = active_production_model_metadata()
@@ -5417,6 +5461,7 @@ def ml_data_analytics():
         ml_performance_stats=ml_performance_stats,
         active_model_metadata=active_model_metadata,
         active_model_metadata_error=active_model_metadata_error,
+        latest_challenger=latest_challenger,
         track_list=track_list,
         filters={
             'track': track_filter,
