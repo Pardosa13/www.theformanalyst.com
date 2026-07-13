@@ -3540,16 +3540,22 @@ def _assert_staking_replay_invariants(result, starting_bankroll):
             cap = {'quarter_kelly_cap_2': 0.02, 'half_kelly_cap_2': 0.02, 'full_kelly_cap_5': 0.05}.get(key)
             if cap is not None and pre > 0 and stake - (pre * cap) > 0.015:
                 raise ValueError(f"Staking invariant failed for {key}: capped Kelly stake exceeds cap")
-        stake_history = [float(stake or 0.0) for stake in (strategy.get('stake_history') or [])]
-        expected_total_staked = round(sum(stake_history), 2)
-        expected_largest_stake = round(max(stake_history) if stake_history else 0.0, 2)
-        expected_average_stake = round((sum(stake_history) / len(stake_history)) if stake_history else 0.0, 2)
+        stake_history = strategy.get('stake_history') or []
+        stake_values = [float(row.get('stake') or 0.0) for row in stake_history]
+        profit_values = [float(row.get('profit_loss') or 0.0) for row in stake_history]
+        expected_total_staked = round(sum(stake_values), 2)
+        expected_largest_stake = round(max(stake_values) if stake_values else 0.0, 2)
+        expected_average_stake = round((sum(stake_values) / len(stake_values)) if stake_values else 0.0, 2)
+        avg_profit = sum(profit_values) / len(profit_values) if profit_values else 0.0
+        expected_volatility = round(math.sqrt(sum((profit - avg_profit) ** 2 for profit in profit_values) / len(profit_values)) if profit_values else 0.0, 2)
         if abs(float(strategy.get('total_staked') or 0.0) - expected_total_staked) > 0.005:
             raise ValueError(f"Staking invariant failed for {key}: total staked does not match replay stake history")
         if abs(float(strategy.get('largest_individual_stake') or 0.0) - expected_largest_stake) > 0.005:
             raise ValueError(f"Staking invariant failed for {key}: largest stake does not match replay stake history")
         if abs(float(strategy.get('average_stake') or 0.0) - expected_average_stake) > 0.005:
             raise ValueError(f"Staking invariant failed for {key}: average stake does not match replay stake history")
+        if abs(float(strategy.get('volatility') or 0.0) - expected_volatility) > 0.005:
+            raise ValueError(f"Staking invariant failed for {key}: volatility does not match replay profit/loss history")
         if float(strategy.get('average_stake') or 0.0) - float(strategy.get('largest_individual_stake') or 0.0) > 0.005:
             raise ValueError(f"Staking invariant failed for {key}: average stake exceeds largest stake")
         if float(strategy.get('largest_individual_stake') or 0.0) - max_pre_race_bankroll > 0.005:
@@ -3575,7 +3581,7 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
         bankroll = float(starting_bankroll)
         peak = bankroll
         max_dd = 0.0
-        stake_history=[]; realised_profit_history=[]; curve=[]; wins=0; bets=0; losing=winning=max_losing=max_winning=0; largest_stakes=[]
+        stake_history=[]; curve=[]; wins=0; bets=0; losing=winning=max_losing=max_winning=0; largest_stakes=[]
         for i, sel in enumerate(ordered, start=1):
             bankroll_before = max(0.0, bankroll)
             stake, kelly_fraction = _staking_stake(strat, bankroll_before, sel, minimum_stake, maximum_stake)
@@ -3588,8 +3594,12 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
             bankroll = max(0.0, post_race_bankroll)
             profit = bankroll - bankroll_before
             if stake > 0:
-                stake_history.append(stake)
-                realised_profit_history.append(profit)
+                stake_history.append({
+                    'stake': stake,
+                    'profit_loss': profit,
+                    'bankroll_before': bankroll_before,
+                    'bankroll_after': bankroll,
+                })
                 bets += 1
                 largest_stakes.append({
                     'bet': i,
@@ -3613,12 +3623,14 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
             max_dd=max(max_dd, dd)
             curve.append({'bet': i, 'bankroll': round(bankroll, 2), 'bankroll_before': round(bankroll_before, 2), 'stake': round(stake, 2), 'profit': round(profit, 2)})
         n=bets; final=bankroll; total_profit=final-float(starting_bankroll)
-        total_staked = sum(stake_history)
-        largest_individual_stake = max(stake_history) if stake_history else 0.0
-        average_stake = (total_staked / n) if n else 0.0
+        stake_values = [row['stake'] for row in stake_history]
+        profit_values = [row['profit_loss'] for row in stake_history]
+        total_staked = sum(stake_values)
+        largest_individual_stake = max(stake_values) if stake_values else 0.0
+        average_stake = (total_staked / len(stake_values)) if stake_values else 0.0
         largest_stakes = sorted(largest_stakes, key=lambda r: r['stake'], reverse=True)[:5]
-        avg_profit = sum(realised_profit_history)/len(realised_profit_history) if realised_profit_history else 0.0
-        variance = sum((x-avg_profit)**2 for x in realised_profit_history)/len(realised_profit_history) if realised_profit_history else 0.0
+        avg_profit = sum(profit_values)/len(profit_values) if profit_values else 0.0
+        variance = sum((x-avg_profit)**2 for x in profit_values)/len(profit_values) if profit_values else 0.0
         volatility = math.sqrt(variance)
         cagr = ((final/starting_bankroll)**(365.25/days)-1)*100 if days > 0 and final > 0 and starting_bankroll > 0 else 0.0
         risk_adjusted = (total_profit / max_dd) if max_dd > 0 else (total_profit if total_profit > 0 else 0.0)
@@ -8476,6 +8488,33 @@ def api_external_factors():
         'class_drops':       class_drops_filtered,
     })
 
+
+
+def _log_staking_response_metrics(analysis, endpoint_name):
+    """Log replay-derived stake summary metrics immediately before JSON responses."""
+    for strategy in analysis.get('strategies', []):
+        stake_history = strategy.get('stake_history') or []
+        stakes = [float(row.get('stake') or 0.0) for row in stake_history]
+        expected_largest = round(max(stakes) if stakes else 0.0, 2)
+        expected_average = round((sum(stakes) / len(stakes)) if stakes else 0.0, 2)
+        expected_total = round(sum(stakes), 2)
+        actual_largest = round(float(strategy.get('largest_individual_stake') or 0.0), 2)
+        actual_average = round(float(strategy.get('average_stake') or 0.0), 2)
+        actual_total = round(float(strategy.get('total_staked') or 0.0), 2)
+        logger.info(
+            "%s staking metrics key=%s largest_stake=%s average_stake=%s total_staked=%s stake_history_largest=%s stake_history_average=%s stake_history_total=%s",
+            endpoint_name,
+            strategy.get('key'),
+            actual_largest,
+            actual_average,
+            actual_total,
+            expected_largest,
+            expected_average,
+            expected_total,
+        )
+        if (actual_largest, actual_average, actual_total) != (expected_largest, expected_average, expected_total):
+            raise ValueError(f"Staking response metrics diverged from replay stake_history for {strategy.get('key')}")
+
 @app.route("/api/data/staking-strategy-analysis")
 @login_required
 def api_analyzer_staking_strategy_analysis():
@@ -8489,7 +8528,9 @@ def api_analyzer_staking_strategy_analysis():
         limit_param=request.args.get('limit', 'all'),
     )
     bankroll = request.args.get('bankroll', default=10000.0, type=float)
-    return jsonify(replay_staking_strategies(selections, bankroll, probability_source='Analyzer assessed win probability', probability_source_field='predictions.win_probability'))
+    analysis = replay_staking_strategies(selections, bankroll, probability_source='Analyzer assessed win probability', probability_source_field='predictions.win_probability')
+    _log_staking_response_metrics(analysis, 'api/data/staking-strategy-analysis')
+    return jsonify(analysis)
 
 
 @app.route("/api/ml-data/staking-strategy-analysis")
@@ -8506,6 +8547,7 @@ def api_ml_staking_strategy_analysis():
     bankroll = request.args.get('bankroll', default=10000.0, type=float)
     analysis = replay_staking_strategies(selections, bankroll, probability_source='ML calibrated assessed win probability', probability_source_field=probability_source_field)
     analysis['settings']['probability_source_counts'] = source_counts
+    _log_staking_response_metrics(analysis, 'api/ml-data/staking-strategy-analysis')
     return jsonify(analysis)
 
 @app.route("/api/data/probability-calibration")
