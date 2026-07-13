@@ -3484,29 +3484,67 @@ def calculate_kelly_fraction(probability, decimal_odds):
     return ((b * p) - (1.0 - p)) / b
 
 
-def _staking_stake(strategy, bankroll, selection, minimum_stake=0.0, maximum_stake=None):
+def _staking_stake(strategy, pre_race_bankroll, selection, minimum_stake=0.0, maximum_stake=None):
+    """Calculate the final capped stake from one local pre-race bankroll.
+
+    All strategy calculations intentionally use ``pre_race_bankroll`` and the
+    returned value is the actual stake placed after every cap has been applied.
+    """
     sp = float(selection.get('sp') or 0)
+    bankroll = max(0.0, float(pre_race_bankroll or 0.0))
     if bankroll <= 0 or sp <= 1:
-        return 0.0
+        return 0.0, None
+
+    full_kelly_fraction = None
     if strategy['type'] == 'flat':
-        stake = strategy['amount']
+        stake = min(10.0, bankroll)
     elif strategy['type'] == 'target_profit':
-        stake = strategy['profit'] / (sp - 1.0)
+        stake = min(10.0 / (sp - 1.0), bankroll)
     elif strategy['type'] == 'bankroll_pct':
         stake = bankroll * strategy['pct']
     else:
-        kelly = calculate_kelly_fraction(selection.get('probability'), sp)
-        if kelly <= 0:
-            return 0.0
-        stake = bankroll * kelly * strategy.get('fraction', 1.0)
+        full_kelly_fraction = max(0.0, calculate_kelly_fraction(selection.get('probability'), sp))
+        if full_kelly_fraction == 0:
+            return 0.0, full_kelly_fraction
+        fraction = full_kelly_fraction * strategy.get('fraction', 1.0)
         if strategy.get('cap_pct') is not None:
-            stake = min(stake, bankroll * strategy['cap_pct'])
+            fraction = min(fraction, strategy['cap_pct'])
+        stake = bankroll * fraction
+
     if maximum_stake is not None:
         stake = min(stake, float(maximum_stake))
     if stake < minimum_stake:
-        return 0.0
-    return min(stake, bankroll)
+        return 0.0, full_kelly_fraction
+    stake = max(0.0, min(stake, bankroll))
+    return stake, full_kelly_fraction
 
+
+def _assert_staking_replay_invariants(result, starting_bankroll):
+    """Fail fast rather than return impossible staking summaries."""
+    for strategy in result.get('strategies', []):
+        key = strategy.get('key')
+        curve = strategy.get('curve') or []
+        max_pre_race_bankroll = float(starting_bankroll or 0.0)
+        for point in curve:
+            pre = float(point.get('bankroll_before') or 0.0)
+            stake = float(point.get('stake') or 0.0)
+            max_pre_race_bankroll = max(max_pre_race_bankroll, pre)
+            if stake < -0.005 or stake - pre > 0.005:
+                raise ValueError(f"Staking invariant failed for {key}: stake {stake} outside 0..{pre}")
+            if float(point.get('bankroll') or 0.0) < -0.005:
+                raise ValueError(f"Staking invariant failed for {key}: bankroll below zero")
+            if key == 'flat_1_pct' and abs(stake - (pre * 0.01)) > 0.015:
+                raise ValueError(f"Staking invariant failed for {key}: stake is not 1% of pre-race bankroll")
+            if key == 'flat_2_pct' and abs(stake - (pre * 0.02)) > 0.015:
+                raise ValueError(f"Staking invariant failed for {key}: stake is not 2% of pre-race bankroll")
+            cap = {'quarter_kelly_cap_2': 0.02, 'half_kelly_cap_2': 0.02, 'full_kelly_cap_5': 0.05}.get(key)
+            if cap is not None and pre > 0 and stake - (pre * cap) > 0.015:
+                raise ValueError(f"Staking invariant failed for {key}: capped Kelly stake exceeds cap")
+        if float(strategy.get('largest_individual_stake') or 0.0) - max_pre_race_bankroll > 0.005:
+            raise ValueError(f"Staking invariant failed for {key}: largest stake exceeds max pre-race bankroll")
+        expected_profit = float(strategy.get('final_bankroll') or 0.0) - float(starting_bankroll or 0.0)
+        if abs(float(strategy.get('total_profit') or 0.0) - expected_profit) > 0.015:
+            raise ValueError(f"Staking invariant failed for {key}: total profit does not reconcile to bankroll")
 
 def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_stake=0.0, maximum_stake=None, probability_source='Assessed win probability', probability_source_field=None):
     """Replay chronological selections through every canonical staking strategy."""
@@ -3528,14 +3566,19 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
         stakes=[]; returns=[]; curve=[]; wins=0; bets=0; losing=winning=max_losing=max_winning=0; turnover=0.0; largest_stakes=[]
         for i, sel in enumerate(ordered, start=1):
             bankroll_before = max(0.0, bankroll)
-            kelly_fraction = calculate_kelly_fraction(sel.get('probability'), sel.get('sp')) if strat['type'] == 'kelly' else None
-            stake = _staking_stake(strat, bankroll_before, sel, minimum_stake, maximum_stake)
+            stake, kelly_fraction = _staking_stake(strat, bankroll_before, sel, minimum_stake, maximum_stake)
             won = sel.get('finish_position') == 1
-            ret = stake * float(sel.get('sp') or 0) if won and stake > 0 else 0.0
-            profit = ret - stake
-            bankroll = max(0.0, bankroll_before + profit)
+            sp = float(sel.get('sp') or 0)
+            if won:
+                post_race_bankroll = bankroll_before - stake + stake * sp
+            else:
+                post_race_bankroll = bankroll_before - stake
+            bankroll = max(0.0, post_race_bankroll)
+            profit = bankroll - bankroll_before
             turnover += stake
-            stakes.append(stake); returns.append(profit)
+            stakes.append(stake)
+            if stake > 0:
+                returns.append(profit)
             if stake > 0:
                 bets += 1
                 largest_stakes.append({
@@ -3571,7 +3614,7 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
             'roi': round((total_profit/turnover*100) if turnover else 0.0,2), 'cagr': round(cagr,2), 'maximum_drawdown': round(max_dd,2),
             'largest_losing_streak': max_losing, 'largest_winning_streak': max_winning, 'largest_individual_stake': round(max(stakes) if stakes else 0,2),
             'average_stake': round((turnover/n) if n else 0,2), 'number_of_bets': n, 'number_of_winning_bets': wins,
-            'strike_rate': round((wins/n*100) if n else 0.0,2), 'return_on_turnover': round((sum(r + s for r,s in zip(returns, stakes))/turnover*100) if turnover else 0.0,2),
+            'strike_rate': round((wins/n*100) if n else 0.0,2), 'return_on_turnover': round((total_profit/turnover*100) if turnover else 0.0,2),
             'volatility': round(volatility,2), 'bankroll_growth_multiple': round((final/starting_bankroll) if starting_bankroll else 0.0,4),
             'total_staked': round(turnover,2), 'risk_adjusted_return': round(risk_adjusted,4), 'largest_stakes': largest_stakes, 'curve': curve,
         })
@@ -3590,10 +3633,12 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
             summary = 'Flat $10 staking outperformed all Kelly methods.'
         else:
             summary = f"Based on all historical selections, {fb} produced the highest ending bankroll while {dd} produced the lowest drawdown."
-    return {
+    payload = {
         'starting_bankroll': starting_bankroll, 'settings': {'probability_source': probability_source, 'probability_source_field': probability_source_field or probability_source, 'odds_source': 'Historical SP', 'kelly_formula': 'f = ((decimal_odds - 1) * p - (1 - p)) / (decimal_odds - 1)', 'bankroll': starting_bankroll, 'kelly_cap': 'Per strategy: uncapped, 2%, or 5%', 'minimum_stake': minimum_stake, 'maximum_stake': maximum_stake},
         'strategies': results, 'winners': {k: {'key': v['key'], 'name': v['name'], 'value': v.get({'highest_final_bankroll':'final_bankroll','highest_profit':'total_profit','best_risk_adjusted_return':'risk_adjusted_return','smallest_maximum_drawdown':'maximum_drawdown'}[k])} for k,v in winners.items() if v}, 'summary': summary,
     }
+    _assert_staking_replay_invariants(payload, starting_bankroll)
+    return payload
 
 
 def _build_analyzer_staking_selections(track_filter='', min_score_filter=None, date_from='', date_to='', limit_param='all'):
