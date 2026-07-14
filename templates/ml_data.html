@@ -376,19 +376,19 @@
         <div class="active-model-value">{{ latest_challenger.model_name or latest_challenger.model_type or 'Unknown' }}</div>
       </div>
       <div class="active-model-field">
-        <div class="active-model-label">Beat Champion?</div>
-        <div class="active-model-value">{% if latest_challenger.beat_champion %}Yes{% else %}No{% endif %}</div>
+        <div class="active-model-label">Promotion Decision</div>
+        <div class="active-model-value">{% if latest_challenger.beat_champion %}Promoted{% else %}Not promoted{% endif %}</div>
       </div>
       <div class="active-model-field">
-        <div class="active-model-label">Selection Score</div>
-        <div class="active-model-value">{{ '%.3f'|format(latest_challenger.selection_score) if latest_challenger.selection_score is not none else 'Unknown' }}</div>
+        <div class="active-model-label">Champion Score</div>
+        <div class="active-model-value">{{ '%.3f'|format(latest_challenger.champion_score) if latest_challenger.champion_score is not none else 'Unknown' }}</div>
       </div>
       <div class="active-model-field">
         <div class="active-model-label">ROI / Strike Rate</div>
         <div class="active-model-value">{{ '%.1f%%'|format(latest_challenger.roi) if latest_challenger.roi is not none else 'Unknown' }} / {{ '%.1f%%'|format(latest_challenger.strike_rate) if latest_challenger.strike_rate is not none else 'Unknown' }}</div>
       </div>
       <div class="active-model-field">
-        <div class="active-model-label">Promoted or Rejected Reason</div>
+        <div class="active-model-label">Decision Reason</div>
         <div class="active-model-value">{{ latest_challenger.promotion_reason or 'Unknown' }}</div>
       </div>
     </div>

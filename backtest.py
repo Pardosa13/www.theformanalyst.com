@@ -1709,9 +1709,8 @@ def generate_feature_recommendations(importance_sorted):
 
 MIN_VALIDATION_BETS = int(os.environ.get('ML_MIN_VALIDATION_BETS', '100'))
 PROMOTION_SELECTION_SCORE_EDGE = float(os.environ.get('ML_PROMOTION_SELECTION_SCORE_EDGE', '0.0'))
-PROMOTION_ROI_EDGE_PCT = 3.0  # Legacy display only; promotion is selection-score based.
+PROMOTION_ROI_EDGE_PCT = 3.0  # Legacy display only; promotion is Champion Score based.
 PROMOTION_SR_TOLERANCE_PCT = 2.0
-MIN_CHAMPION_AGE_DAYS = int(os.environ.get('ML_MIN_CHAMPION_AGE_DAYS', '7'))
 LARGE_PROMOTION_ROI_EDGE_PCT = float(os.environ.get('ML_LARGE_PROMOTION_ROI_EDGE_PCT', '10.0'))
 CHAMPION_ROLLBACK_RETENTION_DAYS = int(os.environ.get('ML_CHAMPION_ROLLBACK_RETENTION_DAYS', '30'))
 MIN_PROMOTION_STRIKE_RATE_PCT = float(os.environ.get('ML_MIN_PROMOTION_STRIKE_RATE_PCT', '1.0'))
@@ -1719,7 +1718,7 @@ MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%
 
 
 def _selection_score_from_metrics(metrics):
-    """Defined out-of-sample champion score; ROI alone must never promote."""
+    """Defined out-of-sample Champion Score; ROI alone must never promote."""
     if not metrics:
         return None
     if metrics.get('selection_score') is not None:
@@ -1736,9 +1735,9 @@ def _selection_score_from_metrics(metrics):
 def _promotion_rule_text():
     return (
         f"Promote only if the completed run's overall winner has at least {MIN_VALIDATION_BETS} validation bets, "
-        f"positive validation ROI, strike rate >= {MIN_PROMOTION_STRIKE_RATE_PCT:.1f}%, and selection_score "
-        f"> active champion selection_score + {PROMOTION_SELECTION_SCORE_EDGE:.3f}. "
-        "The selection_score is ROI + 0.5*strike_rate - calibration penalties "
+        f"positive validation ROI, strike rate >= {MIN_PROMOTION_STRIKE_RATE_PCT:.1f}%, and Champion Score "
+        f"> active Champion Score + {PROMOTION_SELECTION_SCORE_EDGE:.3f}. "
+        "Champion Score is stored internally as selection_score and equals ROI + 0.5*strike_rate - calibration penalties "
         "(log loss, Brier score, expected calibration error) - stability penalty; ROI alone is never sufficient."
     )
 RF_BEST_ARTIFACT_NAME = 'form_analyst_best_random_forest.pkl'
@@ -2246,7 +2245,7 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
 
     with engine.connect() as conn:
         champion = conn.execute(text("""
-            SELECT id, validation_roi, validation_strike_rate, promoted_at,
+            SELECT id, validation_roi, validation_strike_rate,
                    validation_profit_units, validation_bets, validation_drawdown,
                    validation_longest_losing_streak, validation_bankroll_growth, validation_volatility,
                    combined_score, selection_metrics
@@ -2290,20 +2289,16 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
         reason = "Rejected: validation sample too small"
         champion_roi = float(champion[1]) if champion and champion[1] is not None else None
         champion_sr = float(champion[2]) if champion and champion[2] is not None else None
-        champion_promoted_at = champion[3] if champion else None
-        champion_score = float(champion[10]) if champion and champion[10] is not None else None
+        champion_score = float(champion[9]) if champion and champion[9] is not None else None
         champion_metrics = {}
-        if champion and champion[11]:
+        if champion and champion[10]:
             try:
-                champion_metrics = json.loads(champion[11])
+                champion_metrics = json.loads(champion[10])
             except Exception:
                 champion_metrics = {}
         if champion_score is None:
             champion_score = _selection_score_from_metrics(champion_metrics)
         challenger_score = _selection_score_from_metrics(validation_metrics or {})
-        champion_age_days = None
-        if champion_promoted_at:
-            champion_age_days = (datetime.utcnow() - champion_promoted_at).total_seconds() / 86400.0
         challenger_roi = float(val_roi) if val_roi is not None else None
         challenger_sr = float(val_sr) if val_sr is not None else None
         challenger_sample_ok = int(val_bets or 0) >= MIN_VALIDATION_BETS
@@ -2311,7 +2306,7 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
         challenger_sr_acceptable = challenger_sr is not None and challenger_sr >= MIN_PROMOTION_STRIKE_RATE_PCT
 
         if challenger_roi is None or challenger_sr is None or challenger_score is None:
-            reason = "Rejected: challenger validation metrics or selection score missing"
+            reason = "Rejected: challenger validation metrics or Champion Score missing"
         elif not challenger_roi_positive:
             reason = "Rejected: challenger validation ROI is not positive"
         elif not challenger_sample_ok:
@@ -2324,17 +2319,14 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
                 reason = "Promoted: no active champion existed and challenger passed out-of-sample selection gates"
             elif champion_score is None:
                 promote = True
-                reason = "Promoted: active Champion selection score missing, but challenger passed out-of-sample selection gates"
+                reason = "Promoted: active Champion Score missing, but challenger passed out-of-sample selection gates"
             elif challenger_score > champion_score + PROMOTION_SELECTION_SCORE_EDGE:
-                if champion_age_days is not None and champion_age_days < MIN_CHAMPION_AGE_DAYS:
-                    reason = f"Rejected: Champion age {champion_age_days:.1f}d is below {MIN_CHAMPION_AGE_DAYS}d minimum"
-                else:
-                    promote = True
-                    reason = (f"Promoted: challenger selection_score {challenger_score:.3f} beat "
-                              f"Champion selection_score {champion_score:.3f} under out-of-sample rule")
+                promote = True
+                reason = (f"Promoted: challenger Champion Score {challenger_score:.3f} beat "
+                          f"Champion Score {champion_score:.3f} under out-of-sample rule")
             else:
-                reason = (f"Rejected: challenger selection_score {challenger_score:.3f} did not beat "
-                          f"Champion selection_score {champion_score:.3f}")
+                reason = (f"Rejected: challenger Champion Score {challenger_score:.3f} did not beat "
+                          f"Champion Score {champion_score:.3f}")
 
         if promote:
             old_champion_id = champion[0] if champion else None
@@ -2365,12 +2357,12 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
                 'old_metrics': json.dumps({
                     'roi': champion_roi,
                     'strike_rate': champion_sr,
-                    'profit_units': float(champion[4]) if champion and champion[4] is not None else None,
-                    'number_of_bets': int(champion[5]) if champion and champion[5] is not None else None,
-                    'drawdown': float(champion[6]) if champion and champion[6] is not None else None,
-                    'longest_losing_streak': int(champion[7]) if champion and champion[7] is not None else None,
-                    'bankroll_growth': float(champion[8]) if champion and champion[8] is not None else None,
-                    'volatility': float(champion[9]) if champion and champion[9] is not None else None,
+                    'profit_units': float(champion[3]) if champion and champion[3] is not None else None,
+                    'number_of_bets': int(champion[4]) if champion and champion[4] is not None else None,
+                    'drawdown': float(champion[5]) if champion and champion[5] is not None else None,
+                    'longest_losing_streak': int(champion[6]) if champion and champion[6] is not None else None,
+                    'bankroll_growth': float(champion[7]) if champion and champion[7] is not None else None,
+                    'volatility': float(champion[8]) if champion and champion[8] is not None else None,
                 }),
                 'new_metrics': json.dumps({**(validation_metrics or {}), 'promotion_rule': _promotion_rule_text()}),
             })
