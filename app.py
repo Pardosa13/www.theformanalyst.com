@@ -5901,7 +5901,8 @@ def latest_ml_challenger_summary():
             'run_id': row.run_id,
             'model_type': row.model_type,
             'model_name': row.model_name,
-            'selection_score': row.combined_score,
+            'champion_score': row.combined_score,
+            'selection_score': row.combined_score,  # Backward-compatible alias for templates or clients.
             'roi': row.validation_roi,
             'strike_rate': row.validation_strike_rate,
             'bets': row.validation_bets,
