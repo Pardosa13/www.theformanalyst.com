@@ -49,6 +49,9 @@ if "sklearn" not in sys.modules:
     metrics.log_loss = lambda *args, **kwargs: 0.0
     metrics.brier_score_loss = lambda *args, **kwargs: 0.0
     sys.modules["sklearn.metrics"] = metrics
+    calibration = types.ModuleType("sklearn.calibration")
+    calibration.CalibratedClassifierCV = type("CalibratedClassifierCV", (), {})
+    sys.modules["sklearn.calibration"] = calibration
 
 import backtest
 

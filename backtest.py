@@ -38,10 +38,12 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 # ML
+from collections import Counter
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.base import BaseEstimator, RegressorMixin, clone
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import LabelEncoder
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import mean_squared_error, log_loss, brier_score_loss
 import joblib
 import warnings
@@ -378,6 +380,7 @@ def load_historical_data():
             rc.race_class,
             rc.meeting_id,
             m.date AS meeting_date,
+            m.track AS meeting_track,
             p.score AS analyzer_score,
             p.notes AS analyzer_notes,
             p.predicted_odds
@@ -1825,26 +1828,51 @@ MIN_PROMOTION_STRIKE_RATE_PCT = float(os.environ.get('ML_MIN_PROMOTION_STRIKE_RA
 MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
 
 
-def _selection_score_from_metrics(metrics):
-    """Defined out-of-sample Champion Score; ROI alone must never promote."""
+def _selection_score_from_metrics(metrics, force_recompute=False):
+    """Defined out-of-sample Champion Score; ROI alone must never promote.
+
+    force_recompute=True skips the cached metrics['selection_score'] shortcut
+    and rebuilds the score from its raw components under the CURRENT formula.
+    Needed when comparing a stored champion (whose selection_score was frozen
+    at promotion time, possibly under an older formula version) against a
+    freshly-scored challenger — otherwise the champion keeps whatever number
+    it was promoted with forever, even after the scoring rule changes.
+    """
     if not metrics:
         return None
-    if metrics.get('selection_score') is not None:
+    # A recompute is only meaningful if we actually have the raw components
+    # (roi, etc.) to rebuild from — some old/minimal records only ever stored
+    # the final selection_score with nothing underneath it. In that case
+    # "recomputing" would just zero everything out, which is worse than
+    # trusting the one number we do have.
+    can_recompute = 'roi' in metrics
+    if metrics.get('selection_score') is not None and (not force_recompute or not can_recompute):
         return float(metrics['selection_score'])
     stability = metrics.get('stability') or {}
     calibration = metrics.get('calibration') or {}
     walk_forward = metrics.get('walk_forward') or {}
-    roi = float(metrics.get('roi', 0.0) or 0.0)
+    holdout_roi = float(metrics.get('roi', 0.0) or 0.0)
     strike_rate = float(metrics.get('strike_rate', 0.0) or 0.0)
-    stability_penalty = abs(float(stability.get('roi_last_100', roi) or roi) - roi) + abs(float(stability.get('roi_last_250', roi) or roi) - roi)
-    # Cross-fold ROI std from _walk_forward_metrics_for_model: how much a
-    # model's edge swings across several independent chronological folds,
-    # rather than trusting the single 80/20 holdout in isolation. Missing for
-    # champions promoted before this metric existed, in which case it's a
-    # no-op (0.0) rather than unfairly penalising old stored scores.
+    stability_penalty = abs(float(stability.get('roi_last_100', holdout_roi) or holdout_roi) - holdout_roi) + abs(float(stability.get('roi_last_250', holdout_roi) or holdout_roi) - holdout_roi)
+    # A single 80/20 chronological holdout is a thin, high-variance sample: a
+    # real production run found every candidate showing +30-38% ROI on its
+    # holdout while EVERY walk-forward fold on nearly the same tail-end data
+    # (93% overlapping rows) was negative, because a handful of long-priced
+    # winners near the split boundary can flip the whole holdout's sign. Trust
+    # the average of several independent out-of-sample folds far more than the
+    # single holdout number. When walk-forward data is missing entirely (e.g. a
+    # champion promoted before this metric existed), do NOT fall back to the
+    # holdout ROI as a stand-in — that would let an unvalidated model keep the
+    # benefit of the one number we know is unreliable on its own. Assume no
+    # demonstrated out-of-sample edge (0.0) instead, which is the conservative
+    # prior for "we have no walk-forward evidence this holds up."
+    fold_rois = [float(f.get('roi', 0.0) or 0.0) for f in (walk_forward.get('folds') or []) if f.get('bets', 0)]
+    has_walk_forward = len(fold_rois) > 0
+    walk_forward_mean_roi = float(np.mean(fold_rois)) if has_walk_forward else 0.0
+    blended_roi = (0.3 * holdout_roi) + (0.7 * walk_forward_mean_roi) if has_walk_forward else (0.3 * holdout_roi)
     walk_forward_penalty = float(walk_forward.get('roi_std', 0.0) or 0.0)
     calibration_penalty = (float(metrics.get('log_loss', 0.0) or 0.0) * 10.0) + (float(metrics.get('brier_score', 0.0) or 0.0) * 25.0) + (float(calibration.get('expected_calibration_error', 0.0) or 0.0) * 100.0)
-    return float(roi + (0.5 * strike_rate) - calibration_penalty - (0.05 * stability_penalty) - (0.05 * walk_forward_penalty))
+    return float(blended_roi + (0.5 * strike_rate) - calibration_penalty - (0.05 * stability_penalty) - (1.0 * walk_forward_penalty))
 
 
 def _promotion_rule_text():
@@ -1852,8 +1880,10 @@ def _promotion_rule_text():
         f"Promote only if the completed run's overall winner has at least {MIN_VALIDATION_BETS} validation bets, "
         f"positive validation ROI, strike rate >= {MIN_PROMOTION_STRIKE_RATE_PCT:.1f}%, and Champion Score "
         f"> active Champion Score + {PROMOTION_SELECTION_SCORE_EDGE:.3f}. "
-        "Champion Score is stored internally as selection_score and equals ROI + 0.5*strike_rate - calibration penalties "
+        "Champion Score is stored internally as selection_score and equals "
+        "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI) + 0.5*strike_rate - calibration penalties "
         "(log loss, Brier score, expected calibration error) - stability penalty - walk-forward cross-fold ROI-std penalty; "
+        "a model with no walk-forward evidence gets no credit for its holdout ROI beyond a 0.3x weight. "
         "ROI alone is never sufficient."
     )
 RF_BEST_ARTIFACT_NAME = 'form_analyst_best_random_forest.pkl'
@@ -2080,6 +2110,32 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
     }
 
 
+def _log_walk_forward_fold_composition(dates_all, tracks_all, n_splits=3):
+    """Log one compact line describing what each walk-forward test fold actually
+    contains (date range + top tracks), so a fold that looks bad in the ROI/
+    strike-rate numbers can be traced back to a specific period/venue mix
+    without needing a DB query. Shared across all candidates (fold boundaries
+    are identical for every model), so this runs once per Track E run rather
+    than once per candidate, to keep log volume the same as before.
+    """
+    n = len(dates_all)
+    if n < (n_splits + 1) * 20:
+        return
+    dates_all = pd.to_datetime(pd.Series(dates_all).reset_index(drop=True), errors='coerce')
+    tracks_all = pd.Series(tracks_all).reset_index(drop=True) if tracks_all is not None else pd.Series([None] * n)
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+    summaries = []
+    for fold_idx, (_, test_idx) in enumerate(tscv.split(np.arange(n))):
+        fold_dates = dates_all.iloc[test_idx].dropna()
+        fold_tracks = tracks_all.iloc[test_idx].dropna()
+        date_range = (
+            f"{fold_dates.min().date()}..{fold_dates.max().date()}" if len(fold_dates) else "unknown"
+        )
+        top_tracks = ",".join(f"{t}x{c}" for t, c in Counter(fold_tracks).most_common(3)) or "unknown"
+        summaries.append(f"fold{fold_idx}=[{date_range} rows={len(test_idx)} top_tracks={top_tracks}]")
+    log.info("Walk-forward fold composition (shared by all candidates): %s", " ".join(summaries))
+
+
 def _optional_classifier(model_type, trial=None):
     if model_type == 'xgboost':
         from xgboost import XGBClassifier
@@ -2221,6 +2277,11 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     y_roi = y_roi.iloc[order].reset_index(drop=True)
     y_won = y_won.iloc[order].reset_index(drop=True)
     race_ids = [race_ids[i] for i in order]
+    dates_ordered = dates.iloc[order].reset_index(drop=True)
+    track_by_race_id = {}
+    if 'meeting_track' in df.columns:
+        track_by_race_id = df.drop_duplicates(subset=['race_id']).set_index('race_id')['meeting_track'].to_dict()
+    tracks_ordered = [track_by_race_id.get(rid) for rid in race_ids]
     cutoff = dates.iloc[order].quantile(0.8)
     train_mask = dates.iloc[order].reset_index(drop=True) <= cutoff
     val_mask = ~train_mask
@@ -2257,7 +2318,21 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     log.info("Track E random_forest hyperparameters source=%s params=%s", rf_params_source, rf_params)
 
     candidates = {
-        'random_forest': RandomForestClassifier(random_state=42, n_jobs=-1, class_weight='balanced_subsample', **rf_params)
+        # Isotonic-calibrated: class_weight='balanced_subsample' (needed so the
+        # forest actually splits on the ~12% winner class instead of always
+        # predicting "loses") skews predict_proba far from true win frequency
+        # — e.g. observed averaging ~0.63 on selected picks vs ~0.27-0.32 for
+        # every boosted candidate on the same races. Ranking (ROI/strike rate)
+        # is unaffected since that only needs relative order within a race, but
+        # the raw probabilities are unusable wherever an absolute probability
+        # matters (log-loss/Brier/ECE, ensemble averaging, EV-vs-market checks).
+        # CalibratedClassifierCV rescales the output without touching what the
+        # forest itself learned or how it ranks runners.
+        'random_forest': CalibratedClassifierCV(
+            RandomForestClassifier(random_state=42, n_jobs=-1, class_weight='balanced_subsample', **rf_params),
+            method='isotonic',
+            cv=TimeSeriesSplit(n_splits=3),
+        )
     }
     log.info(
         "Track E split for random_forest: total_candidate_rows=%s train_rows=%s validation_rows=%s "
@@ -2325,6 +2400,31 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
                 raise
             log.warning(f"Skipping {mt} challenger; final fit/evaluation failed: {e}")
 
+    # Walk-forward stability for each base candidate is computed here (before the
+    # ensemble is built) so it can both (a) inform ensemble member weights below
+    # and (b) avoid a second, redundant walk-forward pass over the same models later.
+    try:
+        _log_walk_forward_fold_composition(dates_ordered, tracks_ordered, n_splits=3)
+    except Exception as e:
+        log.warning(f"Walk-forward fold composition logging failed (non-fatal): {e}")
+
+    walk_forward_by_model = {}
+    for result in results:
+        try:
+            walk_forward = _walk_forward_metrics_for_model(
+                result['model'], X, y_won, sp_values, race_ids, n_splits=3
+            )
+        except Exception as e:
+            log.warning(f"Walk-forward stability check failed for {result['model_type']}: {e}")
+            walk_forward = {'n_splits': 0, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0}
+        result['metrics']['walk_forward'] = walk_forward
+        walk_forward_by_model[result['model_type']] = walk_forward
+        log.info(
+            "Walk-forward stability for %s: folds=%s roi_std=%.2f strike_rate_std=%.2f fold_rois=%s",
+            result['model_type'], walk_forward['n_splits'], walk_forward['roi_std'], walk_forward['strike_rate_std'],
+            [round(f['roi'], 1) for f in walk_forward['folds']],
+        )
+
     if len(fitted) > 1:
         ensemble_members = list(fitted.items())
         ensemble_weights = []
@@ -2332,7 +2432,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
             X_tune_train is not None and X_tune_eval is not None
             and len(X_tune_train) > 0 and len(X_tune_eval) > 0
         )
-        for _, model in ensemble_members:
+        for mt, model in ensemble_members:
             try:
                 if have_oos_tune_split:
                     # Weight members by OUT-OF-SAMPLE error on a held-out slice of
@@ -2345,17 +2445,28 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
                     oos_model.fit(X_tune_train, y_tune_train)
                     oos_preds = _predict_win_scores(oos_model, X_tune_eval)
                     oos_mse = float(mean_squared_error(y_tune_eval, oos_preds))
-                    ensemble_weights.append(1.0 / max(oos_mse, 0.0001))
+                    base_weight = 1.0 / max(oos_mse, 0.0001)
                 else:
-                    ensemble_weights.append(1.0)
+                    base_weight = 1.0
             except Exception:
-                ensemble_weights.append(1.0)
+                base_weight = 1.0
+            # Second factor: cross-fold walk-forward stability. Linear (not squared)
+            # inverse-variance and floored at +1.0 on purpose — an earlier analysis
+            # of real run data found the single lowest-variance base model here also
+            # had the worst mean walk-forward ROI, so a naive 1/roi_std^2 weighting
+            # would have swung the ensemble hard toward "stable but worst"; this
+            # softer factor nudges toward stability without letting it dominate the
+            # OOS-error signal above, which still does most of the work.
+            roi_std = float((walk_forward_by_model.get(mt) or {}).get('roi_std', 0.0) or 0.0)
+            stability_factor = 1.0 / (roi_std + 1.0)
+            ensemble_weights.append(base_weight * stability_factor)
         ensemble = ConsensusRegressor(ensemble_members, weights=ensemble_weights)
         ensemble.fit(X_train, y_won[train_mask])
         metrics = evaluate_model_on_validation(ensemble, X_val, y_won_val, race_ids_val, sp_val)
         metrics['ensemble_weights'] = dict(zip([name for name, _ in ensemble_members], ensemble.weights_.tolist()))
         selection_frames['ensemble'] = _top_selection_rows(ensemble, X_val, y_won_val, race_ids_val, sp_val)
         results.append({'model_type': 'ensemble', 'model_name': 'Ensemble / Consensus', 'model': ensemble, 'metrics': metrics})
+        log.info("Ensemble member weights (OOS-error x stability): %s", metrics['ensemble_weights'])
 
     # Persist the exact training-split median used above on every candidate so
     # live inference (ml_predict.py) can fill missing/unseen features with the
@@ -2364,11 +2475,12 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     for result in results:
         result['model']._form_analyst_feature_medians = train_median_dict
 
-    # Walk-forward stability check: the headline validation numbers above come
-    # from one 80/20 chronological holdout. Re-score every candidate across
-    # multiple chronological folds spanning the whole dataset so the Champion
-    # Score (below) can penalise a model that only looks good in that one window.
+    # Walk-forward stability for the base candidates was already computed above
+    # (before ensemble construction, so it could feed ensemble weighting too).
+    # The ensemble itself didn't exist yet at that point, so score it now.
     for result in results:
+        if 'walk_forward' in result['metrics']:
+            continue
         try:
             walk_forward = _walk_forward_metrics_for_model(
                 result['model'], X, y_won, sp_values, race_ids, n_splits=3
@@ -2539,15 +2651,36 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
         reason = "Rejected: validation sample too small"
         champion_roi = float(champion[1]) if champion and champion[1] is not None else None
         champion_sr = float(champion[2]) if champion and champion[2] is not None else None
-        champion_score = float(champion[9]) if champion and champion[9] is not None else None
         champion_metrics = {}
         if champion and champion[10]:
             try:
                 champion_metrics = json.loads(champion[10])
             except Exception:
                 champion_metrics = {}
-        if champion_score is None:
-            champion_score = _selection_score_from_metrics(champion_metrics)
+        # Always recompute both scores from their raw metric components under
+        # the CURRENT formula rather than trusting a stored/cached number —
+        # otherwise a champion promoted under an older formula version (e.g.
+        # before walk-forward scoring existed) keeps an artificial advantage
+        # forever, since its frozen score would never reflect a later, harder
+        # bar. Only fall back to the stored raw column if we have no metrics
+        # at all to recompute from (very old rows with no selection_metrics).
+        if champion_metrics:
+            champion_score = _selection_score_from_metrics(champion_metrics, force_recompute=True)
+            if not (champion_metrics.get('walk_forward') or {}).get('folds'):
+                log.warning(
+                    "Active champion (id=%s) has NO walk-forward stability data — it was promoted before this "
+                    "check existed and has never been evaluated the way current challengers are. Its recomputed "
+                    "Champion Score %.3f reflects only a 0.3x-weighted holdout ROI with zero walk-forward credit; "
+                    "recommend manually re-validating this model or triggering a rollback review.",
+                    champion[0] if champion else None, champion_score if champion_score is not None else -1.0,
+                )
+        else:
+            champion_score = float(champion[9]) if champion and champion[9] is not None else None
+        # No force_recompute here: validation_metrics was just produced by this
+        # same run's run_model_competition, under the current formula — no
+        # staleness risk. The champion (below) is the one loaded from a stored
+        # DB row that may predate a scoring-rule change, which is why that side
+        # needs the forced recompute.
         challenger_score = _selection_score_from_metrics(validation_metrics or {})
         challenger_roi = float(val_roi) if val_roi is not None else None
         challenger_sr = float(val_sr) if val_sr is not None else None
