@@ -2378,32 +2378,6 @@ def get_player_last_n_games(player_stats: list[dict], n: int = 5) -> list[dict]:
     return sorted_games[:n]
 
 
-def calculate_disposal_edge(
-    player_avg: float,
-    book_line: float,
-    vs_opp_avg: float = None,
-    last5_avg: float = None,
-) -> dict:
-    model_pred = player_avg
-
-    if vs_opp_avg and vs_opp_avg > 0:
-        model_pred = player_avg * 0.50 + vs_opp_avg * 0.30 + model_pred * 0.20
-
-    if last5_avg and last5_avg > 0:
-        model_pred = model_pred * 0.80 + last5_avg * 0.20
-
-    edge = round(model_pred - book_line, 1)
-
-    return {
-        "model_prediction": round(model_pred, 1),
-        "book_line": book_line,
-        "edge": edge,
-        "edge_positive": edge > 0,
-        "edge_pct": round(abs(edge) / book_line * 100, 1) if book_line else 0,
-        "recommendation": "value" if edge >= 2.0 else "skip",
-    }
-
-
 def calculate_market_edge(
     player_avg: float,
     book_line: float,
