@@ -245,6 +245,59 @@ class PuntingFormService:
             database_url = database_url.replace('postgres://', 'postgresql://', 1)
         return database_url
 
+    def _ensure_strike_rate_snapshot_table(self, conn):
+        """Append-only history of daily strike-rate snapshots.
+
+        `strike_rates` is upserted in place (see below), so it only ever holds
+        the *current* L100 win rate per jockey/trainer — there is no way to
+        recover what a jockey's strike rate actually was on some date in the
+        past. This table starts keeping one dated row per entity per day going
+        forward, so backtest.py can look up the strike rate as it stood on (or
+        just before) each historical race's own date instead of applying
+        today's snapshot to races run months or years ago.
+        """
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS strike_rate_snapshots (
+                id SERIAL PRIMARY KEY,
+                snapshot_date DATE NOT NULL,
+                type VARCHAR(20) NOT NULL,
+                jurisdiction INTEGER NOT NULL DEFAULT 2,
+                normalised_name VARCHAR(255) NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                l100_wins INTEGER DEFAULT 0,
+                l100_runs INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE (snapshot_date, type, jurisdiction, normalised_name)
+            )
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_strike_rate_snapshots_lookup
+            ON strike_rate_snapshots (type, jurisdiction, normalised_name, snapshot_date)
+        """))
+
+    def _append_strike_rate_snapshot_rows(self, conn, mapped_rows, snapshot_date):
+        appended = 0
+        for data in mapped_rows:
+            if not data['name'] or not data['normalised_name']:
+                continue
+            conn.execute(text("""
+                INSERT INTO strike_rate_snapshots
+                    (snapshot_date, type, jurisdiction, normalised_name, name, l100_wins, l100_runs)
+                VALUES (:snapshot_date, :type, :jurisdiction, :normalised_name, :name, :l100_wins, :l100_runs)
+                ON CONFLICT (snapshot_date, type, jurisdiction, normalised_name)
+                DO UPDATE SET name = EXCLUDED.name, l100_wins = EXCLUDED.l100_wins, l100_runs = EXCLUDED.l100_runs
+            """), {
+                'snapshot_date': snapshot_date,
+                'type': data['type'],
+                'jurisdiction': data['jurisdiction'],
+                'normalised_name': data['normalised_name'],
+                'name': data['name'],
+                'l100_wins': data['l100_wins'],
+                'l100_runs': data['l100_runs'],
+            })
+            appended += 1
+        return appended
+
     def _upsert_strike_rate_rows(self, mapped_rows):
         if not mapped_rows:
             log.warning("Zero strike-rate rows inserted because no mapped rows were supplied to upsert.")
@@ -257,6 +310,9 @@ class PuntingFormService:
         now = datetime.utcnow()
 
         with engine.begin() as conn:
+            self._ensure_strike_rate_snapshot_table(conn)
+            snapshot_appended = self._append_strike_rate_snapshot_rows(conn, mapped_rows, now.date())
+            log.info("Appended %s dated strike-rate snapshot rows for %s.", snapshot_appended, now.date())
             for data in mapped_rows:
                 if not data['name']:
                     skipped += 1

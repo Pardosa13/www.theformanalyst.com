@@ -118,7 +118,7 @@ def calculate_class_score(class_string, prize_string):
         return {1: 130, 2: 122, 3: 115}.get(int(gm.group(1)), 100)
     if re.search(r'Listed', s, re.IGNORECASE):
         return 108.0
-    bm = re.search(r'(?:Benchmark|Bench.?|BM)\s*(\d+)', s, re.IGNORECASE)
+    bm = re.search(r'(?:Benchmark|Bench\.?|BM)\s*(\d+)', s, re.IGNORECASE)
     if bm:
         return min(100, max(1, int(bm.group(1))))
     cm = re.search(r'(?:Class|Cls)\s*(\d+)', s, re.IGNORECASE)
@@ -398,6 +398,25 @@ def _model_feature_names(model):
     return [str(name) for name in list(names)]
 
 
+def _fill_missing_features(model, X):
+    """Fill missing/null feature values the same way training did.
+
+    Training (backtest.py) imputes NaNs with each feature's training-split
+    median and persists that exact median dict on the model as
+    _form_analyst_feature_medians. Previously live scoring filled every gap
+    with a hardcoded 0 regardless of what training did, which is a real
+    train/serve skew: 0 is rarely close to the median for features like
+    last_sp, jockey_sr, or days_since_run, so any horse missing one of those
+    fields got fed an out-of-distribution value the model never saw zero-filled
+    at train time. Falls back to 0 only for models saved before this fix (no
+    stored medians) or for a feature the stored medians don't cover.
+    """
+    feature_medians = getattr(model, '_form_analyst_feature_medians', None) or {}
+    if feature_medians:
+        X = X.fillna(pd.Series(feature_medians))
+    return X.fillna(0)
+
+
 def _feature_defaulted_to_zero_summary(expected_features, raw_X):
     """Return feature names/counts that live scoring will fill with zero."""
     if not expected_features:
@@ -561,7 +580,8 @@ def _log_live_feature_audit(model, meeting_id, race, feature_rows, raw_X, final_
 
     Training builds the same raw/race-relative feature columns and applies only
     pandas median imputation before fitting; live scoring must therefore pass the
-    same named columns in the same order and only default missing/null values.
+    same named columns in the same order and default missing/null values using
+    the same stored training medians (see _fill_missing_features), not 0.
     """
     model_id = getattr(model, '_form_analyst_model_id', None)
     contract = _live_feature_contract_predicates(model, raw_X, final_X)
@@ -617,9 +637,12 @@ def _log_live_feature_audit(model, meeting_id, race, feature_rows, raw_X, final_
             f"missing={contract['missing_features']} extra={contract['extra_features']} duplicate={contract['duplicate_features']}"
         )
 
+    has_stored_medians = bool(getattr(model, '_form_analyst_feature_medians', None))
     log.info(
-        "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=passed feature_count=%s order_matches=%s preprocessing=training_fillna_median live_fillna_zero scaling=none",
+        "ML_FEATURE_AUDIT meeting=%s race=%s model_id=%s status=passed feature_count=%s order_matches=%s "
+        "preprocessing=training_fillna_median live_fillna=%s scaling=none",
         meeting_id, getattr(race, 'race_number', None), model_id, final_X.shape[1], contract['order_matches'],
+        'stored_training_median_fallback_zero' if has_stored_medians else 'zero_no_stored_medians_on_this_artifact',
     )
 
     defaulted_columns = Counter(contract['missing_features'])
@@ -878,9 +901,12 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
 
         feature_rows = add_race_relative_features(feature_rows)
         X_raw = pd.DataFrame(feature_rows)
-        X = X_raw.reindex(columns=model_features, fill_value=0)
+        # Leave gaps as NaN here (no fill_value) so the median-based fill below
+        # applies uniformly to columns X_raw is missing entirely *and* individual
+        # null cells in columns it does have.
+        X = X_raw.reindex(columns=model_features)
         _log_live_feature_audit(model, meeting_id, race, feature_rows, X_raw, X)
-        X = X.fillna(0)
+        X = _fill_missing_features(model, X)
 
         try:
             _log_prediction_feature_diagnostics(model, meeting_id, race, X_raw)
