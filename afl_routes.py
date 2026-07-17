@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import re
 import time
 import unicodedata
 import json
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import requests as _requests
@@ -38,7 +39,6 @@ from afl_data import (
     _normalise_prop_market,
     _normalise_team_name,
     afl_player_headshot_url,
-    calculate_disposal_edge,
     calculate_market_edge,
     fetch_afl_player_props,
     fetch_afl_h2h_spread_odds,
@@ -114,6 +114,25 @@ _MARKET_WEIGHTING_OVERRIDES: dict[str, dict[str, float]] = {
     "player_kicks": {"season_weight": 0.50, "opp_weight": 0.50, "last5_weight": 0.00, "edge_cutoff": 1.0},
     "player_tackles": {"season_weight": 0.50, "opp_weight": 0.50, "last5_weight": 0.00, "edge_cutoff": 0.0},
 }
+
+# Minimum gap between paid Odds API syncs for the same source, so repeat
+# button clicks (or overlapping cron + manual triggers) don't burn API
+# quota re-fetching data that's already fresh. Override via env var.
+AFL_ODDS_SYNC_COOLDOWN_SECONDS = int(os.environ.get("AFL_ODDS_SYNC_COOLDOWN_SECONDS", 600))
+
+
+def _seconds_since_last_sync(db, source: str) -> float | None:
+    """Seconds since the last successful afl_sync_log row for `source`, or None if never synced."""
+    row = db.session.execute(
+        db.text("SELECT MAX(synced_at) AS last_synced FROM afl_sync_log WHERE source = :source AND status = 'ok'"),
+        {"source": source},
+    ).mappings().first()
+    last = row["last_synced"] if row else None
+    if not last:
+        return None
+    if getattr(last, "tzinfo", None) is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - last).total_seconds()
 
 
 def register_afl_routes(app, db):
@@ -418,28 +437,6 @@ def register_afl_routes(app, db):
             all_games = sorted(player["games"], key=_sort_date_key, reverse=True)
             season_games = [g for g in all_games if g.get("season") == effective_season] or all_games
 
-        if _canonical_player_name(player.get("name", "")) == "patrickcripps":
-            logger.info(
-                "AFL Player Props frontend->backend call Patrick Cripps: route=/api/afl/player-detail "
-                "args player_id=%s name=%s team=%s season=%s",
-                player_id,
-                name,
-                team,
-                requested_season,
-            )
-            logger.info(
-                "AFL Player Props backend resolver Patrick Cripps: function=_resolve_player_profile_for_market -> "
-                "_resolve_player_rows -> _db_player_search SQL DISTINCT ON(player_id, match_date, match_home_team, match_away_team)"
-            )
-            logger.info(
-                "AFL Player Props source rows Patrick Cripps: player_id=%s rows=%s rounds=%s disposals=%s match_ids=%s",
-                player.get("player_id"),
-                len(season_games),
-                [g.get("match_round") for g in season_games],
-                [g.get("disposals") for g in season_games],
-                [g.get("match_id") for g in season_games],
-            )
-
         # "Season avg" cards should reflect the requested season (e.g. 2026),
         # while history tabs still use the broader multi-season sample.
         averages = get_player_season_averages(season_games)
@@ -689,15 +686,6 @@ def register_afl_routes(app, db):
 
             home_games = [g for g in games if g.get("match_home_team") == player["team"]]
             away_games = [g for g in games if g.get("match_away_team") == player["team"]]
-
-            if _canonical_player_name(player.get("name", "")) == "patrickcripps":
-                logger.info(
-                    "AFL Player Props source rows Patrick Cripps: player_id=%s rows=%s rounds=%s disposals=%s",
-                    player.get("player_id"),
-                    len([g for g in games if g.get("season") == effective_season]),
-                    [g.get("match_round") for g in games if g.get("season") == effective_season],
-                    [g.get("disposals") for g in games if g.get("season") == effective_season],
-                )
 
             players.append(
                 {
@@ -994,58 +982,10 @@ def register_afl_routes(app, db):
                 else (prop_away_team or prop_home_team)
             )
 
-            season_avg = _safe_avg(season_games, stat_name)
+            season_avg = _safe_avg(_filter_model_input_games(season_games), stat_name)
             opp_rows_filtered = _filter_meaningful_tog_games(_games_vs_opponent(games, opponent))
             vs_opp_avg = _safe_avg(opp_rows_filtered, stat_name) if opp_rows_filtered else None
             last5_avg = _safe_avg(season_games[:5], stat_name) if season_games else None
-
-            if _canonical_player_name(meta.get("player_name", "")) == "patrickcripps":
-                logger.info(
-                    "AFL Value Finder source rows Patrick Cripps: player_id=%s rows=%s rounds=%s disposals=%s",
-                    player.get("player_id"),
-                    len(season_games),
-                    [g.get("match_round") for g in season_games],
-                    [g.get("disposals") for g in season_games],
-                )
-
-            if meta.get("canonical_full_name") == "finnosullivan":
-                logger.info(
-                    "AFL Value Finder Finn O'Sullivan match: player_id=%s name=%s team=%s "
-                    "season=%s row_count=%s rounds=%s %s_values=%s season_avg=%s last5_avg=%s vs_opp_avg=%s",
-                    player.get("player_id"),
-                    player.get("name"),
-                    team_name,
-                    effective_season,
-                    len(season_games),
-                    [g.get("match_round") for g in season_games],
-                    stat_name,
-                    [g.get(stat_name) for g in season_games],
-                    season_avg,
-                    last5_avg,
-                    vs_opp_avg,
-                )
-                detail_rows = _resolve_player_rows(
-                    db=db,
-                    player_id=player.get("player_id"),
-                    name=player.get("name", meta["player_name"]),
-                    team=team_name,
-                    seasons=effective_seasons,
-                    limit=300,
-                )
-                detail_grouped = _group_players(detail_rows)
-                detail_player = detail_grouped.get(player.get("player_id")) if detail_grouped else None
-                detail_games = sorted((detail_player or {}).get("games", []), key=_sort_date_key, reverse=True)
-                detail_season_games = [g for g in detail_games if g.get("season") == effective_season]
-                logger.info(
-                    "AFL Player Detail comparison Finn O'Sullivan: player_id=%s row_count=%s rounds=%s "
-                    "%s_values=%s season_avg=%s",
-                    player.get("player_id"),
-                    len(detail_season_games),
-                    [g.get("match_round") for g in detail_season_games],
-                    stat_name,
-                    [g.get(stat_name) for g in detail_season_games],
-                    _safe_avg(detail_season_games, stat_name),
-                )
 
             edge_data = calculate_market_edge(
                 player_avg=season_avg,
@@ -1071,6 +1011,12 @@ def register_afl_routes(app, db):
                 hits = sum(1 for r in season_games if (r.get(stat_name, 0) or 0) < book_line)
                 pushes = sum(1 for r in season_games if (r.get(stat_name, 0) or 0) == book_line)
             hist_pct = round(hits / max(len(season_games) - pushes, 1) * 100, 1)
+            # Deliberately independent of `edge`: confidence should say how much to
+            # trust the pick (sample size, matchup data, and how consistently the
+            # player has actually cleared this exact line historically), not restate
+            # the model's own edge number. Mixing edge back in here would make the
+            # edge >= threshold and confidence >= threshold gates downstream largely
+            # the same check counted twice.
             confidence_score = round(
                 max(
                     0.0,
@@ -1078,7 +1024,7 @@ def register_afl_routes(app, db):
                         100.0,
                         35
                         + min(len(season_games), 25) * 1.7
-                        + min(max(edge, 0.0), 12.0) * 2.5
+                        + min(abs(hist_pct - 50.0), 50.0) * 0.6
                         + (8 if len(opp_rows_filtered) >= 3 else 0),
                     ),
                 ),
@@ -1854,7 +1800,7 @@ def register_afl_routes(app, db):
             season_games = profile["season_games"] or games
 
             stat_name = MARKET_STAT.get(prop["market"], "disposals")
-            season_avg = _safe_avg(season_games, stat_name)
+            season_avg = _safe_avg(_filter_model_input_games(season_games), stat_name)
             last5_avg = _safe_avg(season_games[:5], stat_name)
 
             player_team = _normalise_team_name(player.get("team", ""))
@@ -2171,6 +2117,20 @@ def register_afl_routes(app, db):
         body = request.json or {}
         load_all = body.get("all_markets", True)
         market = body.get("market")
+        force = bool(body.get("force"))
+
+        if not force:
+            age = _seconds_since_last_sync(db, "odds_api")
+            if age is not None and age < AFL_ODDS_SYNC_COOLDOWN_SECONDS:
+                return jsonify({
+                    "status": "skipped",
+                    "message": (
+                        f"Props were refreshed {int(age)}s ago — skipping to protect Odds API quota "
+                        f"(cooldown is {AFL_ODDS_SYNC_COOLDOWN_SECONDS}s). Pass \"force\": true to override."
+                    ),
+                    "seconds_since_last_sync": int(age),
+                    "cooldown_seconds": AFL_ODDS_SYNC_COOLDOWN_SECONDS,
+                })
 
         # When all_markets=True (the default) fetch every supported market in
         # one batch — this is the same number of Odds API calls as fetching one
@@ -2203,6 +2163,21 @@ def register_afl_routes(app, db):
         api_key = get_odds_api_key()
         if not api_key:
             return jsonify({"status": "error", "message": "ODDS_API_KEY not configured"}), 400
+
+        force = bool((request.json or {}).get("force"))
+        if not force:
+            age = _seconds_since_last_sync(db, "odds_api_match_markets")
+            if age is not None and age < AFL_ODDS_SYNC_COOLDOWN_SECONDS:
+                return jsonify({
+                    "status": "skipped",
+                    "message": (
+                        f"Match markets were refreshed {int(age)}s ago — skipping to protect Odds API quota "
+                        f"(cooldown is {AFL_ODDS_SYNC_COOLDOWN_SECONDS}s). Pass \"force\": true to override."
+                    ),
+                    "seconds_since_last_sync": int(age),
+                    "cooldown_seconds": AFL_ODDS_SYNC_COOLDOWN_SECONDS,
+                })
+
         rows = fetch_afl_h2h_spread_odds(api_key=api_key)
         count = upsert_match_markets(db, rows)
         log_sync(db, "odds_api_match_markets", season=CURRENT_YEAR, rows=count)
@@ -3806,6 +3781,24 @@ def _filter_meaningful_tog_games(games: list[dict], min_tog: float = 50) -> list
         for game in games
         if (game.get("time_on_ground_percentage") or 0) >= min_tog
     ]
+
+
+def _filter_model_input_games(games: list[dict], min_tog: float = 50) -> list[dict]:
+    """Same inclusion rule calculate_market_edge() uses internally when it
+    recomputes player_avg from player_stats: keep rows with unknown TOG (don't
+    let missing data drop a whole game), drop only rows with a known low TOG.
+    Falls back to the full list if that leaves nothing, matching
+    calculate_market_edge()'s own fallback. Used so a displayed season average
+    always matches the number the edge calculation actually used, instead of
+    silently diverging for players with a rotation/low-minute game in-sample.
+    """
+    usable = [
+        game
+        for game in games
+        if game.get("time_on_ground_percentage") is None
+        or float(game.get("time_on_ground_percentage") or 0) >= min_tog
+    ]
+    return usable if usable else list(games)
 
 
 def _safe_avg(rows: list[dict], stat: str) -> float:

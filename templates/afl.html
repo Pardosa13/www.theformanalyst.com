@@ -1724,11 +1724,16 @@ function loadBettingEdges() {
       const fmtPct = v => v == null ? '—' : safeNum(v).toFixed(1) + '%';
       const fmtOdds = v => v == null ? '—' : safeNum(v).toFixed(2);
       const fmtMargin = v => v == null ? '—' : Math.abs(safeNum(v)).toFixed(1);
-      el.innerHTML = `<div class="scroll-x"><table class="ladder-table"><thead><tr>
+      el.innerHTML = `<p style="margin:0 0 10px;font-size:12px;color:var(--text-muted,#888);max-width:70ch;">
+        <strong>Book Edge %</strong> ranks by how much this bookmaker's price disagrees with the market
+        consensus (best odds vs. average odds) — it is <em>not</em> sorted by our prediction model.
+        For the model's own view, see <strong>Model Edge</strong> (h2h markets only), which compares our
+        predicted win probability to the market-implied one.
+      </p><div class="scroll-x"><table class="ladder-table"><thead><tr>
         <th>Match</th><th>Market</th><th>Selection</th><th>Bookmaker</th>
-        <th>Best Odds</th><th>Consensus</th><th>Edge %</th>
+        <th>Best Odds</th><th>Consensus</th><th>Book Edge %</th>
         <th>Pred Margin</th><th>Line Edge</th>
-        <th>Model%</th><th>Mkt%</th><th>Prob Edge</th>
+        <th>Model Win%</th><th>Market Win%</th><th>Model Edge</th>
       </tr></thead><tbody>${
         rows.slice(0, 120).map(r => {
           const leClass = r.line_edge == null ? '' : r.line_edge > 0 ? ' style="color:var(--accent-green,#4caf50);font-weight:600"' : ' style="color:var(--accent-red,#e57373)"';
@@ -2089,9 +2094,6 @@ function selectPlayer(id) {
   let url = `/api/afl/player-detail?player_id=${id}&season=${_SEASON}`;
   if (_selPlayer?.team) {
     url += `&team=${encodeURIComponent(_selPlayer.team)}`;
-  }
-  if ((_selPlayer?.name || '').toLowerCase() === 'patrick cripps') {
-    console.info('[AFL Player Props] frontend API call', { url, player: _selPlayer?.name, team: _selPlayer?.team });
   }
 
   fetch(url)
@@ -2850,6 +2852,9 @@ function loadOddsProps() {
         const n = data.rows_synced || 0;
         if (statusEl) statusEl.textContent = `✓ ${n} lines loaded`;
         loadValueFinder();
+      } else if (data.status === 'skipped') {
+        if (statusEl) statusEl.textContent = `↻ Already fresh (${data.seconds_since_last_sync}s ago)`;
+        loadValueFinder();
       } else {
         if (statusEl) statusEl.textContent = '✗ Failed';
         alert(data.message || 'Failed to load props. Ensure ODDS_API_KEY is set in Railway environment.');
@@ -3144,9 +3149,6 @@ function loadValueFinder() {
   // value-finder returns all recently-synced props instead of an empty result set.
   const roundParam = apiGames.length ? `&round=${_round}` : '';
   const vfUrl = `/api/afl/value-finder?market=${encodeURIComponent(market)}&min_edge=0&year={{ year }}${roundParam}`;
-  if ((window._selPlayer?.name || '').toLowerCase() === 'patrick cripps') {
-    console.info('[AFL Value Finder] frontend API call', { url: vfUrl, player: window._selPlayer?.name });
-  }
   return fetch(vfUrl)
         .then(r => { if (!r.ok) throw new Error(); return r.json(); })
         .then(data => {

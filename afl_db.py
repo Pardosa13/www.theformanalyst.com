@@ -1351,7 +1351,17 @@ def get_team_logo_map(db) -> dict:
 
 
 def upsert_model_selections(db, selections: list[dict]) -> int:
-    """Insert/update tracked AFL model selections idempotently."""
+    """Insert tracked AFL model selections idempotently.
+
+    A selection is locked in the first time it qualifies: once a row exists
+    for a given snapshot_key, later calls (repeat page loads, odds moving
+    before kickoff) leave the original odds/edge/model_prediction/etc.
+    untouched rather than overwriting them. This keeps the public track
+    record — and the features the ML meta-model trains on — a true record
+    of what was first flagged, not whatever a later page load happened to
+    see. Settlement (result/profit_units) is written separately by
+    settle_model_selections() and is unaffected by this.
+    """
     if not selections:
         return 0
 
@@ -1370,31 +1380,15 @@ def upsert_model_selections(db, selections: list[dict]) -> int:
             :implied_prob, :edge, :edge_pct, :season_avg, :last5_avg, :vs_opp_avg, :hist_pct,
             :confidence_score, :recommendation, :result
         )
-        ON CONFLICT (snapshot_key) DO UPDATE SET
-            odds = EXCLUDED.odds,
-            bookmaker = EXCLUDED.bookmaker,
-            edge = EXCLUDED.edge,
-            edge_pct = EXCLUDED.edge_pct,
-            model_prediction = EXCLUDED.model_prediction,
-            model_prob = EXCLUDED.model_prob,
-            implied_prob = EXCLUDED.implied_prob,
-            season_avg = EXCLUDED.season_avg,
-            last5_avg = EXCLUDED.last5_avg,
-            vs_opp_avg = EXCLUDED.vs_opp_avg,
-            hist_pct = EXCLUDED.hist_pct,
-            confidence_score = EXCLUDED.confidence_score,
-            recommendation = EXCLUDED.recommendation,
-            commence_time = EXCLUDED.commence_time
+        ON CONFLICT (snapshot_key) DO NOTHING
     """)
 
-    count = 0
-    skipped_missing_match = 0
-    skipped_missing_match_samples: list[str] = []
+    inserted = 0
     with db.engine.begin() as conn:
         for row in selections:
-            conn.execute(sql, row)
-            count += 1
-    return count
+            result = conn.execute(sql, row)
+            inserted += result.rowcount or 0
+    return inserted
 
 
 def snapshot_model_selections_from_props(
