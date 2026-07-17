@@ -405,6 +405,28 @@ with app.app_context():
     except Exception as e:
         print(f"Best Bet migration check: {e}")
 
+    # Persist live Ladbrokes badge snapshots so they can be settled later.
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        predictions_columns = {col['name'] for col in inspector.get_columns('predictions')}
+        signal_columns = {
+            'ladbrokes_signal_mask': 'INTEGER NOT NULL DEFAULT 0',
+            'ladbrokes_signal_price': 'FLOAT',
+            'ladbrokes_signals_captured_at': 'TIMESTAMP',
+        }
+        with db.engine.connect() as conn:
+            changed = False
+            for column_name, column_type in signal_columns.items():
+                if column_name not in predictions_columns:
+                    conn.execute(text(f'ALTER TABLE predictions ADD COLUMN {column_name} {column_type}'))
+                    changed = True
+            if changed:
+                conn.commit()
+                print("Added Ladbrokes signal snapshot columns to predictions table")
+    except Exception as e:
+        print(f"Ladbrokes signal migration check: {e}")
+
     try:
         from sqlalchemy import inspect, text
         inspector = inspect(db.engine)
@@ -3813,6 +3835,60 @@ def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", li
     return _summarise_ml_performance_races(race_results)
 
 
+LADBROKES_SIGNAL_COHORTS = (
+    ('elite', 'Elite Consensus Best Bet', 7, True),
+    ('sweet_spot', '★★★★★ ML Market Sweet Spot', 1, False),
+    ('full_consensus', '★★★★ Full Model + Market Consensus', 2, False),
+    ('gap_20', '★★★★ ML Market Agreement + 20 Gap', 4, False),
+)
+
+
+def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_to="", limit_param="all", stake=10.0):
+    """Settle captured pre-race Ladbrokes badge cohorts at a flat win stake."""
+    query = db.session.query(Prediction, Result).join(Horse, Prediction.horse_id == Horse.id).join(
+        Race, Horse.race_id == Race.id
+    ).join(Meeting, Race.meeting_id == Meeting.id).join(Result, Result.horse_id == Horse.id).filter(
+        Prediction.ladbrokes_signal_mask > 0,
+        Result.finish_position > 0,
+        Result.sp.isnot(None),
+    )
+    if track_filter:
+        query = query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        query = query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        query = query.filter(Meeting.uploaded_at <= date_to)
+    rows = query.order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        rows = rows[:limit]
+
+    performance = []
+    for key, label, required_mask, exact in LADBROKES_SIGNAL_COHORTS:
+        selections = [
+            result for prediction, result in rows
+            if ((prediction.ladbrokes_signal_mask or 0) == required_mask if exact else
+                (prediction.ladbrokes_signal_mask or 0) & required_mask)
+        ]
+        bets = len(selections)
+        wins = sum(result.finish_position == 1 for result in selections)
+        total_staked = bets * stake
+        total_return = sum(stake * float(result.sp) for result in selections if result.finish_position == 1)
+        profit = total_return - total_staked
+        performance.append({
+            'key': key,
+            'label': label,
+            'bets': bets,
+            'wins': wins,
+            'strike_rate': wins / bets * 100 if bets else 0.0,
+            'total_staked': total_staked,
+            'total_return': total_return,
+            'profit': profit,
+            'roi': profit / total_staked * 100 if total_staked else 0.0,
+        })
+    return performance
+
+
 # ----- PuntingForm API Routes -----
 
 @app.route("/api/meetings/today")
@@ -5945,6 +6021,7 @@ def ml_data_analytics():
         logger.warning("Unable to inspect active production ML model for ML Data page: %s", e)
 
     ml_performance_stats = None
+    ladbrokes_signal_performance = []
     try:
         ml_performance_stats = calculate_ml_performance_stats(
             track_filter=track_filter,
@@ -5955,8 +6032,16 @@ def ml_data_analytics():
     except Exception as e:
         print(f"Error calculating ML performance stats: {e}")
 
+    try:
+        ladbrokes_signal_performance = calculate_ladbrokes_signal_performance(
+            track_filter=track_filter, date_from=date_from, date_to=date_to, limit_param=limit_param
+        )
+    except Exception as e:
+        logger.warning("Error calculating Ladbrokes signal performance: %s", e)
+
     return render_template("ml_data.html",
         ml_performance_stats=ml_performance_stats,
+        ladbrokes_signal_performance=ladbrokes_signal_performance,
         active_model_metadata=active_model_metadata,
         active_model_metadata_error=active_model_metadata_error,
         latest_challenger=latest_challenger,
@@ -12091,6 +12176,18 @@ def best_bets():
                 signal_agreement = signals_all_agree_top(horse.id, signal_top_ids)
                 lb_fields = ladbrokes_signal_fields.get(horse.id, {})
                 ladbrokes_signal_count = int(lb_fields.get('best_bet_signal_count') or 0)
+                signal_mask = (
+                    (1 if lb_fields.get('is_ml_market_sweet_spot') else 0)
+                    | (2 if lb_fields.get('is_full_model_market_consensus') else 0)
+                    | (4 if lb_fields.get('is_ml_market_gap_20') else 0)
+                )
+                # Keep the strongest coherent badge snapshot observed before the
+                # race; never reconstruct live market signals from closing SP.
+                old_mask = int(horse.prediction.ladbrokes_signal_mask or 0)
+                if signal_mask and signal_mask.bit_count() > old_mask.bit_count():
+                    horse.prediction.ladbrokes_signal_mask = signal_mask
+                    horse.prediction.ladbrokes_signal_price = lb_fields.get('ladbrokes_fixed_win_price')
+                    horse.prediction.ladbrokes_signals_captured_at = datetime.utcnow()
 
                 # Parse win probability for high confidence flag
                 try:
@@ -12164,6 +12261,7 @@ def best_bets():
                         **lb_fields,
                     })
 
+    db.session.commit()
     best_bets.sort(key=lambda x: x['score'], reverse=True)
 
     meetings_with_bets = {}

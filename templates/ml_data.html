@@ -487,6 +487,34 @@
 </div>
 {% endif %}
 
+<!-- Historical performance of the live Ladbrokes badges shown on Best Bets. -->
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlLadbrokesSignals" aria-expanded="true">
+    <h5>🏅 Elite Consensus &amp; ML Market Best Bets ($10 Win)</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="mlLadbrokesSignals" class="collapse show">
+    <div class="card-body">
+      <p class="text-muted mb-3">Each row treats every qualifying pre-race badge as a $10 win bet and settles it at the recorded result SP. Signals begin accumulating after this tracker was enabled.</p>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead><tr><th>Best Bet Signal</th><th>Bets</th><th>Wins</th><th>Strike Rate</th><th>Staked</th><th>Return</th><th>Profit</th><th>ROI</th></tr></thead>
+          <tbody>
+          {% for signal in ladbrokes_signal_performance %}
+            <tr>
+              <td><strong>{{ signal.label }}</strong></td>
+              <td>{{ signal.bets }}</td><td>{{ signal.wins }}</td><td>{{ "%.1f"|format(signal.strike_rate) }}%</td>
+              <td>${{ "%.2f"|format(signal.total_staked) }}</td><td>${{ "%.2f"|format(signal.total_return) }}</td>
+              <td class="{% if signal.profit >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(signal.profit) }}</td>
+              <td class="{% if signal.roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(signal.roi) }}%</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Accordion sections — all use source=ml -->
 
 <div class="section-card">

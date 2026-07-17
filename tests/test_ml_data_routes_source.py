@@ -104,6 +104,31 @@ def test_ml_data_page_passes_filters_to_overview_stats():
     assert 'limit_param=limit_param' in source
 
 
+def test_ml_data_page_includes_flat_stake_ladbrokes_signal_performance():
+    route_source = _function_source('ml_data_analytics')
+    stats_source = _function_source('calculate_ladbrokes_signal_performance')
+    template = Path('templates/ml_data.html').read_text()
+
+    assert 'calculate_ladbrokes_signal_performance(' in route_source
+    assert "stake=10.0" in stats_source
+    assert "'Elite Consensus Best Bet', 7, True" in APP_SOURCE
+    assert "'★★★★★ ML Market Sweet Spot', 1, False" in APP_SOURCE
+    assert "'★★★★ Full Model + Market Consensus', 2, False" in APP_SOURCE
+    assert "'★★★★ ML Market Agreement + 20 Gap', 4, False" in APP_SOURCE
+    assert 'Elite Consensus &amp; ML Market Best Bets ($10 Win)' in template
+    assert 'Strike Rate' in template
+    assert 'ROI' in template
+
+
+def test_best_bets_persists_pre_race_ladbrokes_signal_snapshot():
+    source = _function_source('best_bets')
+
+    assert 'ladbrokes_signal_mask' in source
+    assert 'ladbrokes_signal_price' in source
+    assert 'ladbrokes_signals_captured_at' in source
+    assert 'never reconstruct live market signals from closing SP' in source
+
+
 
 def test_ml_signal_agreement_dashboard_includes_average_winner_price():
     route_source = _function_source('api_ml_signal_agreement')
