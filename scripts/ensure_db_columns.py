@@ -81,6 +81,12 @@ def main():
         "headshot_url": "VARCHAR(500)",
     }
 
+    predictions_columns = {
+        "ladbrokes_signal_mask": "INTEGER NOT NULL DEFAULT 0",
+        "ladbrokes_signal_price": "FLOAT",
+        "ladbrokes_signals_captured_at": "TIMESTAMP",
+    }
+
     with engine.begin() as conn:
         # Add races.market_id
         if "races" in table_names:
@@ -120,6 +126,16 @@ def main():
                     print(f"  ✓ Column '{col_name}' already exists.")
                 else:
                     ensure_column(conn, "mma_fighters", col_name, col_type)
+                    print(f"  ✓ Added column '{col_name}'.")
+
+        if "predictions" in table_names:
+            print("\nProcessing 'predictions' table:")
+            existing_cols = [c["name"] for c in inspector.get_columns("predictions")]
+            for col_name, col_type in predictions_columns.items():
+                if col_name in existing_cols:
+                    print(f"  ✓ Column '{col_name}' already exists.")
+                else:
+                    ensure_column(conn, "predictions", col_name, col_type)
                     print(f"  ✓ Added column '{col_name}'.")
 
     print("\n" + "=" * 60)

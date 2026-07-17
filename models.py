@@ -117,6 +117,11 @@ class Prediction(db.Model):
     calculated_at = db.Column(db.DateTime, default=datetime.utcnow)
     best_bet_flagged_at = db.Column(db.DateTime, nullable=True)  # NEW: Track when this appeared on Best Bets
     ml_score = db.Column(db.Float, nullable=True)
+    # Snapshot of the live, pre-race Ladbrokes badges shown on Best Bets.  The
+    # bit mask is 1=sweet spot, 2=full consensus and 4=20+ ML gap.
+    ladbrokes_signal_mask = db.Column(db.Integer, nullable=False, default=0)
+    ladbrokes_signal_price = db.Column(db.Float, nullable=True)
+    ladbrokes_signals_captured_at = db.Column(db.DateTime, nullable=True)
 
     def __repr__(self):
         return f'<Prediction {self.horse_id}: {self.score}>'
