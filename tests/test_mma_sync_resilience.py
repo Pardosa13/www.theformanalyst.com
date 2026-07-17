@@ -653,7 +653,7 @@ def test_prediction_uses_persisted_mma_fighter_features_when_history_unavailable
             "FEATURE_SOURCE fighter=%s source=%s total_fights=%s usable=%s",
             "Tracy Cortez", src["source"], src["total_fights"], str(src["usable"]).lower(),
         )
-        prob = mma_sync.predict_fight(
+        prob, used_fallback = mma_sync.predict_fight(
             model, st1, st2, fighter_bio["tracy"], fighter_bio["wang"],
             {"rating": fighter_bio["tracy"]["glicko"], "rd": fighter_bio["tracy"]["glicko_rd"]},
             {"rating": fighter_bio["wang"]["glicko"], "rd": fighter_bio["wang"]["glicko_rd"]},
@@ -662,6 +662,7 @@ def test_prediction_uses_persisted_mma_fighter_features_when_history_unavailable
 
     assert gate == []
     assert prob == 0.63
+    assert used_fallback is False
     assert len(model.seen) == 30
     assert model.seen["slpm_diff"] == 4.1 - 5.0
     assert "FEATURE_SOURCE fighter=Tracy Cortez source=mma_fighters total_fights=8 usable=true" in caplog.text

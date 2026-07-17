@@ -13,11 +13,17 @@ from __future__ import annotations
 import logging
 import os
 import time
-import unicodedata
-import re
 from typing import Optional, Union
 
 import requests
+
+from mma_name_utils import (
+    normalize_name as _normalise_name,
+    normalized_name_aliases as name_aliases,
+    names_match,
+    unordered_pair_key,
+    pairs_match,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,60 +71,12 @@ def get_odds_api_key() -> str:
     return key
 
 
-# ─── Name normalisation (same as mma_sync.normalize_name) ────────────────────
-
-_NAME_ALIASES = {"king green": "bobby green", "robert green": "bobby green", "zach reese": "zachary reese"}
-_SUFFIX_TOKENS = {"jr", "sr", "ii", "iii", "iv", "v"}
-
-def _normalise_name(name: str) -> str:
-    """Lowercase, strip accents/suffix punctuation and collapse common aliases."""
-    if not name:
-        return ""
-    name = str(name).replace("’", "'")
-    nfkd = unicodedata.normalize("NFKD", name)
-    name = "".join(c for c in nfkd if not unicodedata.combining(c))
-    name = name.lower().replace("-", " ")
-    name = re.sub(r"[^a-z0-9\s]", "", name)
-    name = name.replace(" saint ", " st ").replace(" saint", " st").replace("saint ", "st ")
-    norm = " ".join(name.split())
-    return _NAME_ALIASES.get(norm, norm)
-
-def name_aliases(name: str) -> set[str]:
-    norm = _normalise_name(name)
-    aliases = {norm} if norm else set()
-    parts = norm.split()
-    if parts and parts[-1] in _SUFFIX_TOKENS:
-        aliases.add(" ".join(parts[:-1]))
-    if norm.replace(" ", "") == "loneerkavanagh":
-        aliases.update({"loneer kavanagh", "lone er kavanagh"})
-    if norm == "benoit st denis":
-        aliases.update({"benoit saint denis", "benoit saintdenis"})
-    return {a for a in aliases if a}
-
-def unordered_pair_key(a: str, b: str) -> str:
-    ca = sorted(name_aliases(a) or {_normalise_name(a)})[0]
-    cb = sorted(name_aliases(b) or {_normalise_name(b)})[0]
-    return "|".join(sorted([ca, cb]))
-
+# ─── Name normalisation ───────────────────────────────────────────────────────
+# Canonical implementation lives in mma_name_utils.py (imported above) and is
+# shared with mma_sync.py so the two modules can't silently drift apart.
 
 # Public alias (imported by mma_routes.py)
 normalise_name = _normalise_name
-
-
-def names_match(a: str, b: str) -> bool:
-    """True when two fighter names refer to the same person using safe aliases."""
-    aa, bb = name_aliases(a), name_aliases(b)
-    if aa & bb:
-        return True
-    for na in aa:
-        for nb in bb:
-            if na and nb and (na in nb or nb in na):
-                return True
-    return False
-
-def pairs_match(a1: str, a2: str, b1: str, b2: str) -> bool:
-    return ((names_match(a1, b1) and names_match(a2, b2)) or
-            (names_match(a1, b2) and names_match(a2, b1)))
 
 
 # ─── Odds API fetch ───────────────────────────────────────────────────────────
@@ -226,23 +184,49 @@ def fetch_mma_fight_odds(
 
 # ─── Edge calculation ─────────────────────────────────────────────────────────
 
+# Minimum |edge| (percentage points) for a bet to be flagged "value" by default.
+# Mirrors the front-end's default Edge Finder slider value (efMinEdge in mma.html).
+DEFAULT_VALUE_EDGE_THRESHOLD_PCT = 2.0
+
+
 def calculate_mma_edge(
     model_prob: float,
     odds: float,
+    opponent_odds: Optional[float] = None,
 ) -> dict:
     """
     Probability-based edge for an MMA fight outcome (fighter win).
 
-    model_prob  – model's estimated win probability (0-1).
-    odds        – bookmaker's decimal odds for that fighter.
+    model_prob     – model's estimated win probability (0-1).
+    odds           – bookmaker's decimal odds for that fighter.
+    opponent_odds  – the SAME bookmaker's decimal odds for the opponent, if
+                      known. A two-way moneyline's raw 1/odds prices sum to
+                      more than 100% (the bookmaker's overround/vig), so
+                      without this the "implied probability" overstates the
+                      market's true view and understates the model's real
+                      edge by roughly half the vig. When both prices come
+                      from the same book, the two are normalised so they sum
+                      to 100% ("devigged") before computing edge. Passing
+                      odds/opponent_odds from *different* bookmakers would
+                      not share a common overround, so callers should only
+                      pass a same-book pair here.
 
     Returns a dict matching the AFL calculate_market_edge() return shape so
-    the front-end can share the same rendering logic.
+    the front-end can share the same rendering logic, plus a `devigged` flag.
     """
     if not odds or odds <= 1.0:
-        implied_prob = 0.5
+        raw_implied = 0.5
     else:
-        implied_prob = 1.0 / float(odds)
+        raw_implied = 1.0 / float(odds)
+
+    devigged = False
+    implied_prob = raw_implied
+    if opponent_odds and float(opponent_odds) > 1.0:
+        opponent_implied = 1.0 / float(opponent_odds)
+        overround = raw_implied + opponent_implied
+        if overround > 0:
+            implied_prob = raw_implied / overround
+            devigged = True
 
     implied_prob = max(0.001, min(0.999, implied_prob))
     model_prob = max(0.001, min(0.999, float(model_prob)))
@@ -253,7 +237,8 @@ def calculate_mma_edge(
         "model_prob": round(model_prob * 100.0, 1),
         "implied_prob": round(implied_prob * 100.0, 1),
         "odds": round(odds, 2),
+        "devigged": devigged,
         "edge": round(edge_pct, 1),
         "edge_pct": round(abs(edge_pct), 1),
-        "recommendation": "value" if edge_pct >= 2.0 else "skip",
+        "recommendation": "value" if edge_pct >= DEFAULT_VALUE_EDGE_THRESHOLD_PCT else "skip",
     }

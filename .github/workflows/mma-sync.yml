@@ -30,4 +30,15 @@ jobs:
       - name: Run MMA sync
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: python mma_sync.py
+
+      # Read-only accuracy report over completed fights that had a real
+      # (non-fallback) prediction — no model training happens here. Never
+      # blocks the sync job; a failure here shouldn't fail the whole run.
+      - name: Log MMA prediction accuracy
+        if: always()
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python mma_backtest.py --report --save
