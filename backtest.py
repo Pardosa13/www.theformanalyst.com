@@ -41,7 +41,7 @@ from sqlalchemy.orm import sessionmaker
 from collections import Counter
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.base import BaseEstimator, RegressorMixin, clone
-from sklearn.model_selection import TimeSeriesSplit
+from sklearn.model_selection import TimeSeriesSplit, StratifiedKFold
 from sklearn.preprocessing import LabelEncoder
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import mean_squared_error, log_loss, brier_score_loss
@@ -2052,6 +2052,30 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
     }
 
 
+MIN_PER_CLASS_FOR_FOLD = 2
+
+
+def _clone_for_fold_fit(model, fold_y_train, n_calib_splits=3):
+    """Clone `model` for a single walk-forward fold fit.
+
+    CalibratedClassifierCV's default `cv=TimeSeriesSplit(...)` re-splits the
+    fold's own (already small) training prefix into further expanding-window
+    slices for calibration. On a small/imbalanced fold, an early internal
+    slice can end up with only one class, which makes the calibrated
+    estimator's predict_proba return a single column later
+    (`Got predict_proba of shape (n, 1), but need classifier with two
+    classes`). Rebuilding the internal cv as a StratifiedKFold sized to this
+    fold's minority-class count guarantees every internal split sees both
+    classes.
+    """
+    cloned = clone(model)
+    if isinstance(cloned, CalibratedClassifierCV):
+        minority_count = int(pd.Series(fold_y_train).value_counts().min())
+        k = max(2, min(n_calib_splits, minority_count))
+        cloned.set_params(cv=StratifiedKFold(n_splits=k, shuffle=False))
+    return cloned
+
+
 def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_all, n_splits=3):
     """Score ROI/strike-rate stability across chronological expanding-window folds.
 
@@ -2066,7 +2090,7 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
     """
     n = len(X_all)
     if n < (n_splits + 1) * 20:
-        return {'n_splits': 0, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0}
+        return {'n_splits': 0, 'n_splits_requested': n_splits, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0}
 
     X_all = X_all.reset_index(drop=True)
     y_won_all = pd.Series(y_won_all).reset_index(drop=True)
@@ -2075,9 +2099,20 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
 
     tscv = TimeSeriesSplit(n_splits=n_splits)
     folds = []
-    for train_idx, test_idx in tscv.split(X_all):
+    for fold_idx, (train_idx, test_idx) in enumerate(tscv.split(X_all)):
         if len(test_idx) < 10 or len(train_idx) < 20:
             continue
+
+        fold_y_train = y_won_all.iloc[train_idx]
+        class_counts = fold_y_train.value_counts()
+        if len(class_counts) < 2 or class_counts.min() < MIN_PER_CLASS_FOR_FOLD:
+            log.warning(
+                "Walk-forward fold %s skipped for %s: training slice has class counts %s "
+                "(need both classes with >=%s rows each)",
+                fold_idx, type(model).__name__, class_counts.to_dict(), MIN_PER_CLASS_FOR_FOLD,
+            )
+            continue
+
         try:
             # Impute with this fold's own training-prefix median only, matching
             # the same never-use-future-rows rule as the main train/val split.
@@ -2086,8 +2121,8 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
             fold_X_train = fold_X_train.fillna(fold_median)
             fold_X_test = X_all.iloc[test_idx].fillna(fold_median)
 
-            fold_model = clone(model)
-            fold_model.fit(fold_X_train, y_won_all.iloc[train_idx])
+            fold_model = _clone_for_fold_fit(model, fold_y_train)
+            fold_model.fit(fold_X_train, fold_y_train)
             fold_race_ids = [race_ids_list[i] for i in test_idx]
             fold_sp = sp_array[test_idx]
             fold_y = y_won_all.iloc[test_idx]
@@ -2098,12 +2133,13 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
                 'strike_rate': fold_metrics['strike_rate'],
             })
         except Exception as e:
-            log.warning(f"Walk-forward fold failed for {type(model).__name__}: {e}")
+            log.warning(f"Walk-forward fold {fold_idx} failed for {type(model).__name__}: {e}")
 
     roi_values = [f['roi'] for f in folds if f['bets'] > 0]
     sr_values = [f['strike_rate'] for f in folds if f['bets'] > 0]
     return {
         'n_splits': len(folds),
+        'n_splits_requested': n_splits,
         'folds': folds,
         'roi_std': float(np.std(roi_values, ddof=0)) if len(roi_values) > 1 else 0.0,
         'strike_rate_std': float(np.std(sr_values, ddof=0)) if len(sr_values) > 1 else 0.0,
@@ -2261,7 +2297,7 @@ def _audit_validation_betting_pipeline(selection_frames, race_ids_val, sp_val):
             one_bet_per_race, len(selections), expected_race_count, len(missing), len(extra), duplicate_bets
         )
 
-def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, df, grid_search_best_rf_params=None):
+def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, df, grid_search_best_rf_params=None, baseline_roi=0.0):
     """Train RF, boosted candidates and consensus on one shared unseen validation set.
 
     grid_search_best_rf_params: optional hyperparams dict (n_estimators, max_depth,
@@ -2432,6 +2468,14 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
             X_tune_train is not None and X_tune_eval is not None
             and len(X_tune_train) > 0 and len(X_tune_eval) > 0
         )
+        # Used for the fold-completion factor below: a member that completed
+        # fewer walk-forward folds than the best-covered member in this run
+        # (e.g. one fold skipped for a single-class training slice) is less
+        # proven and gets discounted relative to that maximum.
+        max_completed_folds = max(
+            (int((walk_forward_by_model.get(mt) or {}).get('n_splits', 0) or 0) for mt, _ in ensemble_members),
+            default=0,
+        )
         for mt, model in ensemble_members:
             try:
                 if have_oos_tune_split:
@@ -2450,23 +2494,52 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
                     base_weight = 1.0
             except Exception:
                 base_weight = 1.0
-            # Second factor: cross-fold walk-forward stability. Linear (not squared)
-            # inverse-variance and floored at +1.0 on purpose — an earlier analysis
-            # of real run data found the single lowest-variance base model here also
-            # had the worst mean walk-forward ROI, so a naive 1/roi_std^2 weighting
-            # would have swung the ensemble hard toward "stable but worst"; this
-            # softer factor nudges toward stability without letting it dominate the
-            # OOS-error signal above, which still does most of the work.
-            roi_std = float((walk_forward_by_model.get(mt) or {}).get('roi_std', 0.0) or 0.0)
+
+            walk_forward = walk_forward_by_model.get(mt) or {}
+            # Cross-fold walk-forward stability. Linear (not squared)
+            # inverse-variance on purpose, so it nudges toward consistency
+            # without letting it dominate the OOS-error signal above.
+            roi_std = float(walk_forward.get('roi_std', 0.0) or 0.0)
             stability_factor = 1.0 / (roi_std + 1.0)
-            ensemble_weights.append(base_weight * stability_factor)
+
+            # Performance factor: reward the *level* of walk-forward ROI, not
+            # just its variance. Rewarding low roi_std alone lets a model that
+            # is "consistently bad" (every fold worse than the market
+            # baseline) out-score one that is "consistently good" simply for
+            # having lower variance — that's exactly what happened to
+            # random_forest in run #137 (folds -16.7%/-17.9% ROI, both worse
+            # than the -13.6% baseline, yet it received the largest weight).
+            fold_rois = [float(f.get('roi', 0.0) or 0.0) for f in (walk_forward.get('folds') or []) if f.get('bets', 0)]
+            if not fold_rois:
+                # No walk-forward data available for this member (e.g. dataset
+                # too small) — stay neutral rather than penalising it.
+                performance_factor = 1.0
+            else:
+                margin = float(np.mean(fold_rois)) - baseline_roi
+                if margin > 0:
+                    performance_factor = 1.0 + (margin / 100.0)
+                else:
+                    # Heavily discount (not zero — a bad-market run where every
+                    # member trails baseline shouldn't collapse every weight
+                    # to nothing) members that don't beat the market baseline.
+                    performance_factor = 0.05
+
+            # Fold-count-aware: discount members proportionally to how many
+            # walk-forward folds they actually completed versus the
+            # best-covered member, so a model that silently ran on fewer
+            # folds isn't treated as equally reliable as one that ran on all
+            # of them.
+            completed_folds = int(walk_forward.get('n_splits', 0) or 0)
+            fold_completion_factor = (completed_folds / max_completed_folds) if max_completed_folds > 0 else 1.0
+
+            ensemble_weights.append(base_weight * stability_factor * performance_factor * fold_completion_factor)
         ensemble = ConsensusRegressor(ensemble_members, weights=ensemble_weights)
         ensemble.fit(X_train, y_won[train_mask])
         metrics = evaluate_model_on_validation(ensemble, X_val, y_won_val, race_ids_val, sp_val)
         metrics['ensemble_weights'] = dict(zip([name for name, _ in ensemble_members], ensemble.weights_.tolist()))
         selection_frames['ensemble'] = _top_selection_rows(ensemble, X_val, y_won_val, race_ids_val, sp_val)
         results.append({'model_type': 'ensemble', 'model_name': 'Ensemble / Consensus', 'model': ensemble, 'metrics': metrics})
-        log.info("Ensemble member weights (OOS-error x stability): %s", metrics['ensemble_weights'])
+        log.info("Ensemble member weights (OOS-error x stability x performance x fold-completion): %s", metrics['ensemble_weights'])
 
     # Persist the exact training-split median used above on every candidate so
     # live inference (ml_predict.py) can fill missing/unseen features with the
@@ -3066,6 +3139,7 @@ def main():
             best_competitor, competition_results = run_model_competition(
                 X, y_roi, y_won, sp_values, race_ids, meeting_dates, df,
                 grid_search_best_rf_params=grid_search_best_rf_params,
+                baseline_roi=baseline_roi,
             )
             output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
             os.makedirs(output_dir, exist_ok=True)
