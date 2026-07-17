@@ -131,7 +131,11 @@ def test_bankroll_audit_invariants_and_largest_stakes():
         assert strategy['peak_bankroll'] == round(max([1000] + [point['bankroll'] for point in strategy['curve']]), 2)
         for row in strategy['largest_stakes']:
             assert row['stake'] <= row['bankroll']
-            assert row['stake_bankroll_pct'] == round(row['stake'] / row['bankroll'] * 100, 4)
+            # stake_bankroll_pct is derived from the pre-rounding stake/bankroll
+            # values, while row['stake']/row['bankroll'] are independently rounded
+            # to cents, so re-deriving from the rounded fields can drift slightly.
+            # _assert_staking_replay_invariants tolerates the same 0.005 drift.
+            assert abs(row['stake_bankroll_pct'] - round(row['stake'] / row['bankroll'] * 100, 4)) <= 0.005
             if row['kelly_fraction'] is not None:
                 assert 0 <= row['kelly_fraction'] <= 1
             assert {'race_id', 'race_number', 'sort_key', 'sp', 'probability', 'finish_position'} <= set(row)
