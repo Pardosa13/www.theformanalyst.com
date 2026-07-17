@@ -3764,7 +3764,12 @@ def _build_ml_staking_selections(track_filter='', date_from='', date_to='', limi
         if idx is None or idx not in book:
             continue
         source_counts['derived'] += 1
-        out.append({**r, 'probability': book[idx]['ml_probability_110'], 'probability_source_field': 'derived from ML 110% market probabilities'})
+        out.append({
+            **r,
+            'probability': book[idx]['ml_probability_110'],
+            'kelly_probability': book[idx]['ml_fair_probability'],
+            'probability_source_field': 'derived from ML 110% market probabilities',
+        })
 
     if stored_probability_column and source_counts['derived']:
         source = f'predictions.{stored_probability_column} where populated; derived from ML 110% market probabilities otherwise'

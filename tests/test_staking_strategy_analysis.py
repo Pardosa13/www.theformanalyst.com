@@ -1,5 +1,7 @@
 import math
-from app import calculate_kelly_fraction, replay_staking_strategies
+from pathlib import Path
+
+from app import calculate_kelly_fraction, replay_staking_strategies, _derive_ml_race_book
 
 
 def _sel(sp, prob, won, key):
@@ -38,6 +40,40 @@ def test_kelly_uses_fair_probability_without_changing_flat_staking():
     assert full['largest_stakes'][0]['probability'] == .66
     assert full['largest_stakes'][0]['kelly_probability'] == .6
     assert flat['curve'][0]['stake'] == 10
+
+
+def test_ml_derived_probability_book_separates_fair_and_110pct_values():
+    book = _derive_ml_race_book(
+        [{'ml_score': 60}, {'ml_score': 40}],
+        lambda h: h['ml_score'],
+    )
+    assert round(book[0]['ml_fair_probability'], 6) == 0.6
+    assert round(book[0]['ml_probability_110'], 6) == 0.66
+
+    sel_fair = _sel(2.0, .66, True, '2024-01-01')
+    sel_fair['kelly_probability'] = book[0]['ml_fair_probability']
+    fair_stake = next(
+        r for r in replay_staking_strategies([sel_fair], 1000)['strategies']
+        if r['key'] == 'full_kelly'
+    )['curve'][0]['stake']
+
+    sel_inflated = _sel(2.0, .66, True, '2024-01-01')
+    inflated_stake = next(
+        r for r in replay_staking_strategies([sel_inflated], 1000)['strategies']
+        if r['key'] == 'full_kelly'
+    )['curve'][0]['stake']
+
+    assert fair_stake < inflated_stake
+    assert fair_stake == 200
+
+
+def test_ml_staking_selections_wire_derived_probability_to_fair_kelly_input():
+    source = Path('app.py').read_text()
+    start = source.index('def _build_ml_staking_selections(')
+    end = source.index('\ndef ', start + 1)
+    function_source = source[start:end]
+    assert "'kelly_probability': book[idx]['ml_fair_probability']" in function_source
+    assert "'probability': book[idx]['ml_probability_110']" in function_source
 
 
 def test_capped_kelly_never_exceeds_cap():
