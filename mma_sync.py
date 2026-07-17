@@ -77,6 +77,29 @@ MIN_COMPLETE_CARD_RATIO = 0.75
 CANONICAL_CARD_SOURCES = {'espn_scoreboard_json', 'espn_summary_json', 'espn_embedded_json'}
 ESPN_SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard'
 
+# ── Tunable model constants ───────────────────────────────────────────────────
+# These are reasonable-default heuristics, not values fit/validated against
+# held-out data in this repo (there is no in-repo training or backtesting
+# pipeline for the CatBoost model — see mma_backtest.py for read-only
+# accuracy reporting on completed fights). Revisit if/when that changes.
+
+# Exponential-moving-average smoothing factor used by FighterStats.update()
+# for rolling striking/grappling stats. Higher = more weight on recent fights.
+EMA_SMOOTHING_ALPHA = 0.3
+
+# Glicko-2 rating-diff feature is clipped to +/-250 before being handed to the
+# model, since Octagon-AI's training data rarely has ratings further apart
+# than this and unclipped outliers could push predictions outside the range
+# the model was actually trained on.
+GLICKO_DIFF_CLIP = 250
+
+# Fight cities considered "high altitude" for the is_altitude feature — UFC
+# events here are anecdotally associated with faster cardio fade.
+HIGH_ALTITUDE_CITIES = [
+    'salt lake city', 'mexico city', 'denver', 'albuquerque', 'bogota',
+    'quito', 'johannesburg',
+]
+
 
 HEADERS = {
     'User-Agent': (
@@ -90,59 +113,15 @@ HEADERS = {
 }
 
 # ── Name normalisation (matches Octagon-AI predict_model.py) ─────────────────
-
-_NAME_ALIASES = {
-    'king green': 'bobby green',
-    'robert green': 'bobby green',
-    'zach reese': 'zachary reese',
-    'zachary reese': 'zachary reese',
-}
-_SUFFIX_TOKENS = {'jr', 'sr', 'ii', 'iii', 'iv', 'v'}
-
-
-def normalize_name(name):
-    if not name:
-        return ''
-    name = str(name).replace('’', "'").replace('`', "'")
-    nfkd = unicodedata.normalize('NFKD', name)
-    name = ''.join(c for c in nfkd if not unicodedata.combining(c))
-    name = name.lower().replace('-', ' ')
-    name = re.sub(r"[^a-zA-Z0-9\s]", '', name)
-    name = name.replace(' saint ', ' st ').replace(' saint', ' st').replace('saint ', 'st ')
-    norm = ' '.join(name.split())
-    return _NAME_ALIASES.get(norm, norm)
-
-
-def normalized_name_aliases(name):
-    """Safe aliases for matching ESPN/Odds display names to existing CSV rows."""
-    norm = normalize_name(name)
-    aliases = {norm} if norm else set()
-    parts = norm.split()
-    if parts and parts[-1] in _SUFFIX_TOKENS:
-        aliases.add(' '.join(parts[:-1]))
-    # Saint/St and hyphen/accent variants collapse above; add known apostrophe-free variants.
-    if norm.replace(' ', '') == 'loneerkavanagh':
-        aliases.update({'loneer kavanagh', 'lone er kavanagh'})
-    if norm == 'benoit st denis':
-        aliases.update({'benoit saint denis', 'benoit saintdenis', 'benoit st denis'})
-    return {a for a in aliases if a}
-
-
-def names_match(a, b):
-    aa = normalized_name_aliases(a)
-    bb = normalized_name_aliases(b)
-    if aa & bb:
-        return True
-    for x in aa:
-        for y in bb:
-            if x and y and (x in y or y in x):
-                return True
-    return False
-
-
-def unordered_pair_key(a, b):
-    return '|'.join(sorted([next(iter(sorted(normalized_name_aliases(a))), normalize_name(a)),
-                            next(iter(sorted(normalized_name_aliases(b))), normalize_name(b))]))
+# Canonical implementation lives in mma_name_utils.py and is shared with
+# mma_data.py so the two modules can't silently drift apart on alias tables.
+from mma_name_utils import (
+    normalize_name,
+    normalized_name_aliases,
+    names_match,
+    unordered_pair_key,
+    pairs_match,
+)
 
 
 def is_placeholder_fighter_name(name):
@@ -449,7 +428,6 @@ def _log_established_fighter_history_assertion(conn, stats_tracker):
 
 
 def diagnose_odds_match(fight, event, odds_fights_by_date):
-    from mma_data import pairs_match
     event_date = event.get('date')
     try:
         event_date = pd.to_datetime(event_date).date()
@@ -534,7 +512,7 @@ class FighterStats:
         f_sub = (sub / t_min) * 15.0
         f_ctrl = (ctrl / f_time) * 100.0 if f_time > 0 else 0
 
-        alpha = 0.3
+        alpha = EMA_SMOOTHING_ALPHA
         if self.total_fights == 1:
             self.ema_slpm = f_slpm
             self.ema_sapm = f_sapm
@@ -2035,7 +2013,8 @@ def build_feature_row(st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0,
     """Build a feature dict matching the CatBoost model's expected columns."""
     ath_age1 = st1.get('ath_age', 0)
     ath_age2 = st2.get('ath_age', 0)
-    g_diff = float(np.clip(g1.get('rating', 1500) - g2.get('rating', 1500), -250, 250))
+    g_diff = float(np.clip(g1.get('rating', 1500) - g2.get('rating', 1500),
+                            -GLICKO_DIFF_CLIP, GLICKO_DIFF_CLIP))
 
     return {
         'glicko_diff': g_diff,
@@ -2071,31 +2050,35 @@ def build_feature_row(st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0,
     }
 
 
+MODEL_VERSION_CATBOOST = 'catboost_v1'
+# Written when the real model is unavailable/errors and predict_fight() has to
+# return a bare coin-flip. Kept distinct from MODEL_VERSION_CATBOOST so a
+# broken model can't silently masquerade as a real prediction downstream (the
+# UI and the edge-finder both need to be able to tell the two apart).
+MODEL_VERSION_FALLBACK = 'fallback_5050'
+
+
 def predict_fight(model, st1, st2, b1, b2, g1, g2, is_apex=0, is_altitude=0,
                   weight_class=''):
-    """Returns probability that fighter 1 wins."""
+    """Returns (probability that fighter 1 wins, used_fallback)."""
     if model is None:
-        return 0.5
+        return 0.5, True
     try:
         features = build_feature_row(st1, st2, b1, b2, g1, g2, is_apex, is_altitude,
                                      weight_class=weight_class)
         df = pd.DataFrame([features])
         prob = model.predict_proba(df)[0][1]
-        return float(prob)
+        return float(prob), False
     except Exception as e:
         log.warning(f"Prediction error: {e}")
-        return 0.5
-
-
-HIGH_ALT_CITIES = ['salt lake city', 'mexico city', 'denver', 'albuquerque',
-                    'bogota', 'quito', 'johannesburg']
+        return 0.5, True
 
 
 def is_altitude(location):
     if not location:
         return 0
     loc = str(location).lower()
-    return 1 if any(c in loc for c in HIGH_ALT_CITIES) else 0
+    return 1 if any(c in loc for c in HIGH_ALTITUDE_CITIES) else 0
 
 
 def is_apex_event(name, location):
@@ -2530,14 +2513,15 @@ def upsert_prediction(conn, fight_id, pred, commit=True):
     sql = """
         INSERT INTO mma_predictions
             (fight_id, predicted_winner, f1_win_probability, f2_win_probability,
-             confidence, factors_json, generated_at)
-        VALUES (%s,%s,%s,%s,%s,%s,NOW())
+             confidence, factors_json, model_version, generated_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,NOW())
         ON CONFLICT (fight_id) DO UPDATE SET
             predicted_winner   = EXCLUDED.predicted_winner,
             f1_win_probability = EXCLUDED.f1_win_probability,
             f2_win_probability = EXCLUDED.f2_win_probability,
             confidence         = EXCLUDED.confidence,
             factors_json       = EXCLUDED.factors_json,
+            model_version      = EXCLUDED.model_version,
             generated_at       = NOW()
     """
     # Add unique constraint on fight_id to mma_predictions if not present
@@ -2560,6 +2544,7 @@ def upsert_prediction(conn, fight_id, pred, commit=True):
             pred['f2_prob'],
             pred['confidence'],
             json.dumps(pred['factors']),
+            pred.get('model_version', MODEL_VERSION_CATBOOST),
         ))
     if commit:
         conn.commit()
@@ -2774,8 +2759,11 @@ def main():
                 apex = is_apex_event(event['event_name'], event['location'])
                 alt = is_altitude(event['location'])
 
-                prob = predict_fight(model, st1, st2, b1, b2, g1, g2, apex, alt,
+                prob, used_fallback = predict_fight(model, st1, st2, b1, b2, g1, g2, apex, alt,
                                     weight_class=fight.get('weight_class', ''))
+                if used_fallback:
+                    log.warning("PREDICTION_FALLBACK fight=%s vs %s — model unavailable/errored, writing 50/50",
+                                fight['fighter_1'], fight['fighter_2'])
 
                 winner = fight['fighter_1'] if prob > 0.5 else fight['fighter_2']
                 confidence = f"{max(prob, 1 - prob) * 100:.1f}%"
@@ -2785,6 +2773,7 @@ def main():
                     'f1_prob': prob,
                     'f2_prob': 1.0 - prob,
                     'confidence': confidence,
+                    'model_version': MODEL_VERSION_FALLBACK if used_fallback else MODEL_VERSION_CATBOOST,
                     'factors': {
                         fight['fighter_1']: {
                             'slpm': round(st1['slpm'], 2),

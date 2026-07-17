@@ -555,6 +555,7 @@
       </div>
 
       <div class="edge-finder-bar">
+        <!-- Keep this default in sync with DEFAULT_VALUE_EDGE_THRESHOLD_PCT in mma_data.py -->
         <input type="number" class="form-control" id="efMinEdge" value="2" step="0.5"
                style="max-width:130px;" placeholder="Min edge %"
                aria-label="Minimum edge percentage"
@@ -698,7 +699,9 @@ function fightCardHTML(fight) {
   const f2Rec = fight.f2_stats?.Record || '';
 
   let predHTML = '';
-  if (pred) {
+  if (pred && pred.is_fallback) {
+    predHTML = `<div class="pred-winner-label" style="margin-top:10px">⚠️ Prediction unavailable (model error)</div>`;
+  } else if (pred) {
     const p1 = (pred.f1_prob * 100).toFixed(1);
     const p2 = (pred.f2_prob * 100).toFixed(1);
     const winnerLabel = pred.winner === f1 ? `${f1} favoured` : `${f2} favoured`;
@@ -790,7 +793,13 @@ async function openFighterModal(f1Name, f2Name, fightId) {
   ]);
 
   let predSection = '';
-  if (pred) {
+  if (pred && pred.is_fallback) {
+    predSection = `
+      <hr style="border-color:var(--border-subtle);margin:20px 0">
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px;color:var(--text-primary)">🤖 AI Prediction</div>
+      <div class="pred-winner-label">⚠️ Prediction unavailable (model error)</div>
+    `;
+  } else if (pred) {
     const f1 = pred.factors?.[f1Name] || {};
     const f2 = pred.factors?.[f2Name] || {};
     const p1 = (pred.f1_prob * 100).toFixed(1);
@@ -1046,7 +1055,7 @@ function efCardHTML(bet) {
       ${badges ? `<div class="ef-badges" style="margin-bottom:10px;">${badges}</div>` : ''}
       <div class="ef-prob-row">
         <span class="ef-prob-item">Model <strong>${(bet.model_prob || 0).toFixed(1)}%</strong></span>
-        <span class="ef-prob-item">Implied <strong>${(bet.implied_prob || 0).toFixed(1)}%</strong></span>
+        <span class="ef-prob-item">Implied <strong>${(bet.implied_prob || 0).toFixed(1)}%</strong>${bet.devigged ? '' : ' <span title="Opponent price from this bookmaker was unavailable, so this is the raw 1/odds price (includes the bookmaker\'s vig) rather than a devigged estimate.">⚠️</span>'}</span>
         <span class="ef-prob-item">Opponent <strong>${(bet.opponent_model_prob || 0).toFixed(1)}%</strong></span>
         <span class="ef-prob-item">Confidence <strong>${escHtml(bet.confidence || '')}</strong></span>
       </div>

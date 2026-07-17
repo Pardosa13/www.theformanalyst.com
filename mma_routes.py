@@ -14,7 +14,7 @@ import json
 import logging
 from datetime import datetime, date
 
-from flask import Blueprint, render_template, jsonify, request, current_app
+from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
 from mma_data import normalise_name
 
@@ -118,7 +118,7 @@ def register_mma_routes(app, db):
                         f.f1_height, f.f1_reach, f.f1_stance, f.f1_record,
                         f.f2_height, f.f2_reach, f.f2_stance, f.f2_record,
                         p.predicted_winner, p.f1_win_probability,
-                        p.f2_win_probability, p.confidence, p.factors_json,
+                        p.f2_win_probability, p.confidence, p.factors_json, p.model_version,
                         COALESCE(
                             mf1.headshot_url,
                             (SELECT headshot_url FROM mma_fighters
@@ -160,7 +160,7 @@ def register_mma_routes(app, db):
                      winner, method, rnd, t_end,
                      f1h, f1r, f1s, f1rec,
                      f2h, f2r, f2s, f2rec,
-                     pred_winner, f1_prob, f2_prob, conf, factors_json,
+                     pred_winner, f1_prob, f2_prob, conf, factors_json, model_version,
                      f1_headshot_url, f2_headshot_url) = fr
 
                     f1_headshot_url = resolve_headshot(f1, f1_headshot_url, f1_id)
@@ -206,6 +206,8 @@ def register_mma_routes(app, db):
                             'f2_prob': float(f2_prob),
                             'confidence': conf or '50.0%',
                             'factors': factors,
+                            'model_version': model_version or 'catboost_v1',
+                            'is_fallback': model_version == 'fallback_5050',
                         } if pred_winner else None,
                     })
 
@@ -298,9 +300,14 @@ def register_mma_routes(app, db):
         """
         Returns edge bets for upcoming UFC fights.
 
-        For each fight that has a model prediction AND bookmaker odds in
+        For each fight that has a real model prediction AND bookmaker odds in
         mma_fight_odds, calculates:
-            edge = (model_win_prob − bookmaker_implied_prob) × 100
+            edge = (model_win_prob − devigged_bookmaker_implied_prob) × 100
+
+        The implied probability is devigged (normalised against the same
+        bookmaker's two-way overround) whenever that bookmaker also quotes
+        the opponent; otherwise it falls back to the raw 1/odds price and
+        `devigged` is reported as false so the UI can flag it.
 
         Query params:
             min_edge  float  minimum |edge| to include (default 2.0)
@@ -312,7 +319,11 @@ def register_mma_routes(app, db):
             # Clamp min_edge to a sensible range
             min_edge = max(0.0, min(100.0, request.args.get('min_edge', 2.0, type=float)))
 
-            # ── 1. Fetch upcoming fights with predictions ─────────────────────
+            # ── 1. Fetch upcoming fights with real (non-fallback) predictions ──
+            # model_version = 'fallback_5050' means the CatBoost model was
+            # unavailable and predict_fight() wrote a bare coin-flip — any
+            # "edge" computed against that would just reflect the bookmaker's
+            # own skew/vig, not genuine model insight, so it's excluded here.
             fights_sql = text("""
                 SELECT
                     f.id, f.fighter_1_name, f.fighter_2_name,
@@ -330,6 +341,7 @@ def register_mma_routes(app, db):
                   AND p.predicted_winner IS NOT NULL
                   AND p.f1_win_probability IS NOT NULL
                   AND p.f2_win_probability IS NOT NULL
+                  AND COALESCE(p.model_version, 'catboost_v1') <> 'fallback_5050'
                 ORDER BY
                     e.date ASC,
                     CASE COALESCE(f.card_section, CASE WHEN f.is_main_card THEN 'main_card' ELSE 'prelims' END)
@@ -352,12 +364,22 @@ def register_mma_routes(app, db):
                     ),
                 })
 
-            # ── 2. Fetch all stored h2h odds ──────────────────────────────────
+            # ── 2. Fetch recent h2h odds ────────────────────────────────────────
+            # A bookmaker that stops quoting a fight leaves its last-known row
+            # in place (upsert only updates rows it sees again), so without a
+            # recency filter a stale line from weeks ago could still win
+            # "best odds" and dominate the edge calculation. Anchor the
+            # window to the most recent successful fetch rather than to
+            # wall-clock time, since odds only refresh on the weekly cron or
+            # a manual "Refresh Odds" click.
             odds_sql = text("""
-                SELECT event_key, fighter_1_name, fighter_2_name,
-                       commence_time, bookmaker, fighter_name, odds
-                FROM mma_fight_odds
-                ORDER BY fetched_at DESC
+                WITH latest AS (SELECT MAX(fetched_at) AS ts FROM mma_fight_odds)
+                SELECT o.event_key, o.fighter_1_name, o.fighter_2_name,
+                       o.commence_time, o.bookmaker, o.fighter_name, o.odds
+                FROM mma_fight_odds o, latest
+                WHERE latest.ts IS NOT NULL
+                  AND o.fetched_at >= latest.ts - INTERVAL '24 hours'
+                ORDER BY o.fetched_at DESC
             """)
             odds_rows = db.session.execute(odds_sql).fetchall()
 
@@ -378,39 +400,68 @@ def register_mma_routes(app, db):
                 if f1_prob is None or f2_prob is None:
                     continue
 
-                for fighter_name, model_prob in [(f1, float(f1_prob)), (f2, float(f2_prob))]:
-                    # Find matching odds rows for this fighter
-                    best_odds = None
-                    best_bookmaker = None
-                    for norm_key, odds_list in odds_by_fighter.items():
-                        if names_match(fighter_name, norm_key):
-                            for orow in odds_list:
-                                matched_pair = pairs_match(f1, f2, orow.fighter_1_name, orow.fighter_2_name)
-                                current_app.logger.info(
-                                    "ODDS_MATCH event_id=%s espn_pair=%s|%s matched=%s odds_pair=%s|%s reason=%s",
-                                    event_id, f1, f2, matched_pair, orow.fighter_1_name, orow.fighter_2_name,
-                                    "normalized_unordered_pair" if matched_pair else "pair_mismatch",
-                                )
-                                if not matched_pair:
-                                    continue
-                                if best_odds is None or (orow.odds or 0) > best_odds:
-                                    best_odds = orow.odds
-                                    best_bookmaker = orow.bookmaker
+                # Gather every odds row whose (fighter_1, fighter_2) pair matches
+                # this fight once, rather than re-scanning + re-logging per
+                # fighter — the old version logged an INFO line per
+                # fighter × odds-key × row combination on every request.
+                fight_odds_rows = []
+                logged_keys = set()
+                for norm_key, odds_list in odds_by_fighter.items():
+                    if not (names_match(f1, norm_key) or names_match(f2, norm_key)):
+                        continue
+                    for orow in odds_list:
+                        if not pairs_match(f1, f2, orow.fighter_1_name, orow.fighter_2_name):
+                            continue
+                        fight_odds_rows.append(orow)
+                        log_key = (orow.bookmaker, orow.fighter_name)
+                        if log_key not in logged_keys:
+                            logged_keys.add(log_key)
+                            logger.debug(
+                                "ODDS_MATCH event_id=%s espn_pair=%s|%s bookmaker=%s fighter=%s odds=%s",
+                                event_id, f1, f2, orow.bookmaker, orow.fighter_name, orow.odds,
+                            )
+
+                if not fight_odds_rows:
+                    continue
+
+                # (bookmaker, normalised fighter) → best odds that bookmaker
+                # offers for that fighter, used to devig against the SAME
+                # book's opposite-side price (cross-book prices don't share a
+                # common overround, so they can't be used to devig each other).
+                odds_by_bookmaker_fighter: dict[tuple, float] = {}
+                for orow in fight_odds_rows:
+                    key = (orow.bookmaker, normalise_name(orow.fighter_name))
+                    if key not in odds_by_bookmaker_fighter or (orow.odds or 0) > odds_by_bookmaker_fighter[key]:
+                        odds_by_bookmaker_fighter[key] = orow.odds
+
+                for fighter_name, model_prob, opponent_name, opponent_prob in [
+                    (f1, float(f1_prob), f2, float(f2_prob)),
+                    (f2, float(f2_prob), f1, float(f1_prob)),
+                ]:
+                    candidates = [orow for orow in fight_odds_rows if names_match(fighter_name, orow.fighter_name)]
+                    if not candidates:
+                        continue
+
+                    best_row = max(candidates, key=lambda r: r.odds or 0)
+                    best_odds = best_row.odds
+                    best_bookmaker = best_row.bookmaker
 
                     if not best_odds or best_odds <= 1.0:
                         continue
 
+                    opponent_odds = odds_by_bookmaker_fighter.get(
+                        (best_bookmaker, normalise_name(opponent_name))
+                    )
+
                     edge_data = calculate_mma_edge(
                         model_prob=model_prob,
                         odds=best_odds,
+                        opponent_odds=opponent_odds,
                     )
                     edge = edge_data['edge']
 
                     if abs(edge) < min_edge:
                         continue
-
-                    opponent = f2 if fighter_name == f1 else f1
-                    opponent_prob = float(f2_prob) if fighter_name == f1 else float(f1_prob)
 
                     bets.append({
                         'fight_id': fight_id,
@@ -418,7 +469,7 @@ def register_mma_routes(app, db):
                         'event_name': event_name,
                         'event_date': event_date.isoformat() if event_date else None,
                         'fighter': fighter_name,
-                        'opponent': opponent,
+                        'opponent': opponent_name,
                         'weight_class': wc or '',
                         'is_main_card': bool(is_main),
                         'card_section': card_section or ('main_card' if is_main else 'prelims'),
@@ -431,6 +482,7 @@ def register_mma_routes(app, db):
                         'implied_prob': edge_data['implied_prob'],
                         'odds': edge_data['odds'],
                         'bookmaker': best_bookmaker or '',
+                        'devigged': edge_data['devigged'],
                         'edge': edge_data['edge'],
                         'edge_pct': edge_data['edge_pct'],
                         'recommendation': edge_data['recommendation'],
