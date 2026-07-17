@@ -3671,7 +3671,15 @@ def replay_staking_strategies(selections, starting_bankroll=10000.0, minimum_sta
         avg_profit = sum(profit_values)/len(profit_values) if profit_values else 0.0
         variance = sum((x-avg_profit)**2 for x in profit_values)/len(profit_values) if profit_values else 0.0
         volatility = math.sqrt(variance)
-        cagr = ((final/starting_bankroll)**(365.25/days)-1)*100 if days > 0 and final > 0 and starting_bankroll > 0 else 0.0
+        cagr = 0.0
+        if days > 0 and final > 0 and starting_bankroll > 0:
+            # Annualising a short-window return can raise the growth multiple to an
+            # enormous exponent (e.g. an 80x return over 2 days -> exponent ~183),
+            # which overflows a float via **.  Compute via log/exp instead and clamp
+            # the exponent so extreme short backtests degrade to a large finite
+            # percentage rather than crashing.
+            scaled_log_growth = math.log(final / starting_bankroll) * (365.25 / days)
+            cagr = (math.exp(min(scaled_log_growth, 700.0)) - 1) * 100
         risk_adjusted = (total_profit / max_dd) if max_dd > 0 else (total_profit if total_profit > 0 else 0.0)
         results.append({
             'key': strat['key'], 'name': strat['name'], 'final_bankroll': round(final,2), 'peak_bankroll': round(peak,2), 'total_profit': round(total_profit,2),
@@ -3764,7 +3772,12 @@ def _build_ml_staking_selections(track_filter='', date_from='', date_to='', limi
         if idx is None or idx not in book:
             continue
         source_counts['derived'] += 1
-        out.append({**r, 'probability': book[idx]['ml_probability_110'], 'probability_source_field': 'derived from ML 110% market probabilities'})
+        out.append({
+            **r,
+            'probability': book[idx]['ml_probability_110'],
+            'kelly_probability': book[idx]['ml_fair_probability'],
+            'probability_source_field': 'derived from ML 110% market probabilities',
+        })
 
     if stored_probability_column and source_counts['derived']:
         source = f'predictions.{stored_probability_column} where populated; derived from ML 110% market probabilities otherwise'
