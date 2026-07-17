@@ -27,7 +27,10 @@ import logging
 import pickle
 from datetime import datetime, timedelta
 from itertools import product
-from strike_rate_matching import build_strike_rate_lookup, get_sr_win_pct, log_match_stats, normalize_name
+from strike_rate_matching import (
+    build_strike_rate_lookup, build_strike_rate_history_lookup,
+    get_sr_win_pct, get_sr_win_pct_asof, log_match_stats, normalize_name,
+)
 
 import numpy as np
 import pandas as pd
@@ -213,6 +216,7 @@ def ensure_tables():
                 brier_score FLOAT,
                 calibration TEXT,
                 stability TEXT,
+                walk_forward TEXT,
                 selection_score FLOAT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
@@ -246,6 +250,7 @@ def ensure_tables():
             "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS brier_score FLOAT",
             "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS calibration TEXT",
             "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS stability TEXT",
+            "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS walk_forward TEXT",
             "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS selection_score FLOAT",
         ]:
             conn.execute(text(ddl))
@@ -414,11 +419,18 @@ def load_historical_data():
 
 def load_strike_rate_data():
     """
-    Load the most recent jockey and trainer strike rate data from the DB.
-    Returns dict: {'jockeys': {name: {L100Wins, L100Runs}}, 'trainers': {...}}
+    Load the most recent jockey and trainer strike rate data from the DB, plus
+    the dated snapshot history used for point-in-time training features.
+
+    Returns dict: {
+        'jockeys': {...current snapshot lookup, used for LIVE scoring...},
+        'trainers': {...current snapshot lookup...},
+        'jockeys_history': {...dated snapshot lookup, used for TRAINING...},
+        'trainers_history': {...dated snapshot lookup...},
+    }
     """
     log.info("Loading strike rate data...")
-    sr_data = {'jockeys': {}, 'trainers': {}}
+    sr_data = {'jockeys': {}, 'trainers': {}, 'jockeys_history': {}, 'trainers_history': {}}
 
     try:
         with engine.connect() as conn:
@@ -447,6 +459,39 @@ def load_strike_rate_data():
                 log.info(f"Loaded {len(rows)} trainer SR records.")
             except Exception:
                 log.warning("No strike_rates table or trainer data — trainer_sr feature will be 0.")
+
+            # Point-in-time history for TRAINING only (live scoring correctly
+            # keeps using the current snapshot above — a live race genuinely
+            # wants "today's" jockey form). Applying today's snapshot to every
+            # historical training row instead leaks each jockey/trainer's
+            # future form into races run long before that form existed. This
+            # table only starts accumulating snapshots once this fix ships, so
+            # coverage grows over time rather than being retroactive.
+            try:
+                result = conn.execute(text("""
+                    SELECT name, l100_wins, l100_runs, snapshot_date
+                    FROM strike_rate_snapshots
+                    WHERE type = 'jockey'
+                    ORDER BY snapshot_date ASC
+                """))
+                rows = result.fetchall()
+                sr_data['jockeys_history'] = build_strike_rate_history_lookup(rows)
+                log.info(f"Loaded {len(rows)} dated jockey SR snapshot rows for point-in-time training.")
+            except Exception:
+                log.warning("No strike_rate_snapshots table or jockey history yet — jockey_sr will use the current snapshot for training too, until history accumulates.")
+
+            try:
+                result = conn.execute(text("""
+                    SELECT name, l100_wins, l100_runs, snapshot_date
+                    FROM strike_rate_snapshots
+                    WHERE type = 'trainer'
+                    ORDER BY snapshot_date ASC
+                """))
+                rows = result.fetchall()
+                sr_data['trainers_history'] = build_strike_rate_history_lookup(rows)
+                log.info(f"Loaded {len(rows)} dated trainer SR snapshot rows for point-in-time training.")
+            except Exception:
+                log.warning("No strike_rate_snapshots table or trainer history yet — trainer_sr will use the current snapshot for training too, until history accumulates.")
 
     except Exception as e:
         log.warning(f"Could not load strike rate data: {e}")
@@ -602,10 +647,18 @@ def calculate_class_score(class_string, prize_string):
 
 
 
-def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None):
+def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
+                      jockey_sr_history=None, trainer_sr_history=None, as_of_date=None):
     """
     Extract ML features from a horse's csv_data dict.
     Returns a flat dict of ~45 features covering everything scored in analyzer.js.
+
+    jockey_sr_history/trainer_sr_history + as_of_date (optional): when supplied,
+    jockey_sr/trainer_sr are looked up as they stood on as_of_date (point-in-time)
+    instead of the current snapshot in jockey_sr_lookup/trainer_sr_lookup, to
+    avoid leaking a jockey/trainer's future form into older training rows. Falls
+    back to the current snapshot when no dated entry exists yet for that
+    name/date (this only self-heals as snapshot history accumulates over time).
     """
     cd = row.get('csv_data') or {}
     if isinstance(cd, str):
@@ -780,11 +833,24 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None):
     features['backmarker_staying'] = 1.0 if (run_pos == 'BACKMARKER' and is_staying) else 0.0
 
     # ── Jockey & Trainer L100 SR ──
+    # Point-in-time lookup when history + a race date are available (training);
+    # -1.0 means "no dated snapshot exists yet for this name/date" rather than
+    # "unknown jockey", so fall back to the current snapshot in that case only
+    # — this keeps behaviour unchanged for rows the snapshot history doesn't
+    # cover yet (i.e. all pre-fix history) while point-in-time data phases in.
     jockey_name = str(cd.get('horse jockey', '') or '').strip()
-    features['jockey_sr'] = get_sr_win_pct(jockey_name, jockey_sr_lookup or {})
+    features['jockey_sr'] = -1.0
+    if jockey_sr_history and as_of_date:
+        features['jockey_sr'] = get_sr_win_pct_asof(jockey_name, jockey_sr_history, as_of_date)
+    if features['jockey_sr'] == -1.0:
+        features['jockey_sr'] = get_sr_win_pct(jockey_name, jockey_sr_lookup or {})
 
     trainer_name = str(cd.get('horse trainer', '') or '').strip()
-    features['trainer_sr'] = get_sr_win_pct(trainer_name, trainer_sr_lookup or {})
+    features['trainer_sr'] = -1.0
+    if trainer_sr_history and as_of_date:
+        features['trainer_sr'] = get_sr_win_pct_asof(trainer_name, trainer_sr_history, as_of_date)
+    if features['trainer_sr'] == -1.0:
+        features['trainer_sr'] = get_sr_win_pct(trainer_name, trainer_sr_lookup or {})
 
     # ── Barrier (gate draw) ──
     try:
@@ -905,6 +971,8 @@ def build_training_set(df, strike_rate_data=None):
 
     jockey_sr = (strike_rate_data or {}).get('jockeys', {})
     trainer_sr = (strike_rate_data or {}).get('trainers', {})
+    jockey_sr_history = (strike_rate_data or {}).get('jockeys_history', {})
+    trainer_sr_history = (strike_rate_data or {}).get('trainers_history', {})
 
     df_unique = df.sort_values('horse_id').drop_duplicates(
         subset=['race_id', 'horse_name'], keep='last'
@@ -939,7 +1007,11 @@ def build_training_set(df, strike_rate_data=None):
 
     for _, row in df_unique.iterrows():
         try:
-            features = extract_features(row, jockey_sr, trainer_sr)
+            features = extract_features(
+                row, jockey_sr, trainer_sr,
+                jockey_sr_history=jockey_sr_history, trainer_sr_history=trainer_sr_history,
+                as_of_date=row.get('meeting_date'),
+            )
             finish = int(row['finish_position'])
             sp = float(row['sp']) if row['sp'] else None
 
@@ -979,7 +1051,14 @@ def build_training_set(df, strike_rate_data=None):
     y_roi = pd.Series(targets_roi)
     y_won = pd.Series(targets_won)
 
-    X = X.fillna(X.median())
+    # NOTE: deliberately NOT calling X.fillna(X.median()) here. extract_features()
+    # already defaults every raw field to a concrete number, so genuine NaNs are
+    # rare/edge-case, but filling them with a median computed across the *whole*
+    # dataset (including rows that fall on the future side of whatever train/val
+    # split a given track uses) leaks a little future information into the past.
+    # Each track below computes its own median from its own training-only rows
+    # and persists it on the resulting model artifact so live scoring can reuse
+    # the exact same fill values instead of a hardcoded 0 (see ml_predict.py).
 
     log.info(f"Training set: {len(X)} horses, {X.shape[1]} features, "
              f"{y_won.sum()} winners ({y_won.mean()*100:.1f}% win rate), "
@@ -1034,6 +1113,12 @@ def run_random_forest(X, y_roi, y_won, meeting_dates):
     y_roi_train = y_roi[train_mask]
     y_won_train = y_won[train_mask]
 
+    # Impute with the TRAINING split's own median only, then apply that same
+    # value to the test split — never let X_test rows influence the fill value.
+    train_median = X_train.median()
+    X_train = X_train.fillna(train_median)
+    X_test = X_test.fillna(train_median)
+
     log.info(f"Train set: {len(X_train)} horses | Test set: {len(X_test)} horses")
 
     rf_roi.fit(X_train, y_roi_train)
@@ -1073,6 +1158,14 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
     y_roi = y_roi.iloc[order].reset_index(drop=True)
     y_won = y_won.iloc[order].reset_index(drop=True)
     meeting_dates = [meeting_dates[i] for i in order]
+
+    # Track D's final artifacts are always refit on 100% of X (no held-out split
+    # of its own), so imputing with the median of this same X isn't a leak under
+    # Track D's own methodology. Compute it once and persist it on every saved
+    # model so live scoring (ml_predict.py) can reuse these exact fill values
+    # instead of defaulting missing features to 0.
+    grid_search_feature_medians = X.median().to_dict()
+    X = X.fillna(X.median())
 
     feature_names = X.columns.tolist()
     log.info(f"Total grid features available: {len(feature_names)}")
@@ -1212,6 +1305,9 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
         rf_final._form_analyst_model_name = 'Random Forest grid-search'
         rf_final._form_analyst_model_version = MODEL_VERSION
         rf_final._form_analyst_training_run_id = None
+        rf_final._form_analyst_feature_medians = {
+            col: grid_search_feature_medians.get(col, 0.0) for col in X_final.columns
+        }
         rf_final._form_analyst_selection_metrics = {
             'cv_roi_score': float(row['roi_score']),
             'cv_win_score': float(row['win_score']),
@@ -1226,7 +1322,11 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
             'score': row['combined_score'],
             'roi_score': row['roi_score'],
             'win_score': row['win_score'],
-            'pkl_file': pkl_file
+            'pkl_file': pkl_file,
+            'n_estimators': int(row['n_estimators']),
+            'max_depth': int(row['max_depth']),
+            'min_samples_leaf': int(row['min_samples_leaf']),
+            'max_features': row['max_features'],
         })
 
     # Save rank #1 model with a stable filename for easy loading
@@ -1708,12 +1808,20 @@ def generate_feature_recommendations(importance_sorted):
 
 
 MIN_VALIDATION_BETS = int(os.environ.get('ML_MIN_VALIDATION_BETS', '100'))
-PROMOTION_SELECTION_SCORE_EDGE = float(os.environ.get('ML_PROMOTION_SELECTION_SCORE_EDGE', '0.0'))
+# A near-zero edge lets a challenger take the Champion seat on essentially any
+# positive noise in a single validation window. Champion Score is on the order
+# of single-to-double digits (roi_pct + 0.5*strike_rate_pct - penalties), so
+# require a real, non-trivial improvement before swapping the production model.
+PROMOTION_SELECTION_SCORE_EDGE = float(os.environ.get('ML_PROMOTION_SELECTION_SCORE_EDGE', '1.0'))
 PROMOTION_ROI_EDGE_PCT = 3.0  # Legacy display only; promotion is Champion Score based.
 PROMOTION_SR_TOLERANCE_PCT = 2.0
 LARGE_PROMOTION_ROI_EDGE_PCT = float(os.environ.get('ML_LARGE_PROMOTION_ROI_EDGE_PCT', '10.0'))
 CHAMPION_ROLLBACK_RETENTION_DAYS = int(os.environ.get('ML_CHAMPION_ROLLBACK_RETENTION_DAYS', '30'))
-MIN_PROMOTION_STRIKE_RATE_PCT = float(os.environ.get('ML_MIN_PROMOTION_STRIKE_RATE_PCT', '1.0'))
+# 1.0% is below what even a random top-pick in a typical field would score, so it
+# only ever rejected a totally broken model. Raised to a floor that's still well
+# below normal top-pick strike rates (so genuine value/longshot-leaning models
+# aren't blocked) but actually screens out degenerate models.
+MIN_PROMOTION_STRIKE_RATE_PCT = float(os.environ.get('ML_MIN_PROMOTION_STRIKE_RATE_PCT', '15.0'))
 MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
 
 
@@ -1725,11 +1833,18 @@ def _selection_score_from_metrics(metrics):
         return float(metrics['selection_score'])
     stability = metrics.get('stability') or {}
     calibration = metrics.get('calibration') or {}
+    walk_forward = metrics.get('walk_forward') or {}
     roi = float(metrics.get('roi', 0.0) or 0.0)
     strike_rate = float(metrics.get('strike_rate', 0.0) or 0.0)
     stability_penalty = abs(float(stability.get('roi_last_100', roi) or roi) - roi) + abs(float(stability.get('roi_last_250', roi) or roi) - roi)
+    # Cross-fold ROI std from _walk_forward_metrics_for_model: how much a
+    # model's edge swings across several independent chronological folds,
+    # rather than trusting the single 80/20 holdout in isolation. Missing for
+    # champions promoted before this metric existed, in which case it's a
+    # no-op (0.0) rather than unfairly penalising old stored scores.
+    walk_forward_penalty = float(walk_forward.get('roi_std', 0.0) or 0.0)
     calibration_penalty = (float(metrics.get('log_loss', 0.0) or 0.0) * 10.0) + (float(metrics.get('brier_score', 0.0) or 0.0) * 25.0) + (float(calibration.get('expected_calibration_error', 0.0) or 0.0) * 100.0)
-    return float(roi + (0.5 * strike_rate) - calibration_penalty - (0.05 * stability_penalty))
+    return float(roi + (0.5 * strike_rate) - calibration_penalty - (0.05 * stability_penalty) - (0.05 * walk_forward_penalty))
 
 
 def _promotion_rule_text():
@@ -1738,7 +1853,8 @@ def _promotion_rule_text():
         f"positive validation ROI, strike rate >= {MIN_PROMOTION_STRIKE_RATE_PCT:.1f}%, and Champion Score "
         f"> active Champion Score + {PROMOTION_SELECTION_SCORE_EDGE:.3f}. "
         "Champion Score is stored internally as selection_score and equals ROI + 0.5*strike_rate - calibration penalties "
-        "(log loss, Brier score, expected calibration error) - stability penalty; ROI alone is never sufficient."
+        "(log loss, Brier score, expected calibration error) - stability penalty - walk-forward cross-fold ROI-std penalty; "
+        "ROI alone is never sufficient."
     )
 RF_BEST_ARTIFACT_NAME = 'form_analyst_best_random_forest.pkl'
 LEGACY_RF_BEST_ARTIFACT_NAME = 'form_analyst_best.pkl'
@@ -1906,6 +2022,64 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
     }
 
 
+def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_all, n_splits=3):
+    """Score ROI/strike-rate stability across chronological expanding-window folds.
+
+    The headline validation metrics above come from a single 80/20 time-ordered
+    holdout, which is a single noisy sample of a high-variance domain. This
+    re-fits a fresh clone of `model` on each TimeSeriesSplit fold (train prefix
+    only, never leaking a fold's own test rows) and scores it on that fold's
+    test slice with the same one-bet-per-race rule, so a model that only looks
+    good in one lucky/unlucky window (rather than consistently) can be
+    penalised in the Champion Score instead of silently winning promotion.
+    X_all/y_won_all/sp_all/race_ids_all must already be time-ordered.
+    """
+    n = len(X_all)
+    if n < (n_splits + 1) * 20:
+        return {'n_splits': 0, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0}
+
+    X_all = X_all.reset_index(drop=True)
+    y_won_all = pd.Series(y_won_all).reset_index(drop=True)
+    sp_array = np.asarray(sp_all, dtype=float)
+    race_ids_list = list(race_ids_all)
+
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+    folds = []
+    for train_idx, test_idx in tscv.split(X_all):
+        if len(test_idx) < 10 or len(train_idx) < 20:
+            continue
+        try:
+            # Impute with this fold's own training-prefix median only, matching
+            # the same never-use-future-rows rule as the main train/val split.
+            fold_X_train = X_all.iloc[train_idx]
+            fold_median = fold_X_train.median()
+            fold_X_train = fold_X_train.fillna(fold_median)
+            fold_X_test = X_all.iloc[test_idx].fillna(fold_median)
+
+            fold_model = clone(model)
+            fold_model.fit(fold_X_train, y_won_all.iloc[train_idx])
+            fold_race_ids = [race_ids_list[i] for i in test_idx]
+            fold_sp = sp_array[test_idx]
+            fold_y = y_won_all.iloc[test_idx]
+            fold_metrics = evaluate_model_on_validation(fold_model, fold_X_test, fold_y, fold_race_ids, fold_sp)
+            folds.append({
+                'bets': fold_metrics['number_of_bets'],
+                'roi': fold_metrics['roi'],
+                'strike_rate': fold_metrics['strike_rate'],
+            })
+        except Exception as e:
+            log.warning(f"Walk-forward fold failed for {type(model).__name__}: {e}")
+
+    roi_values = [f['roi'] for f in folds if f['bets'] > 0]
+    sr_values = [f['strike_rate'] for f in folds if f['bets'] > 0]
+    return {
+        'n_splits': len(folds),
+        'folds': folds,
+        'roi_std': float(np.std(roi_values, ddof=0)) if len(roi_values) > 1 else 0.0,
+        'strike_rate_std': float(np.std(sr_values, ddof=0)) if len(sr_values) > 1 else 0.0,
+    }
+
+
 def _optional_classifier(model_type, trial=None):
     if model_type == 'xgboost':
         from xgboost import XGBClassifier
@@ -2031,8 +2205,16 @@ def _audit_validation_betting_pipeline(selection_frames, race_ids_val, sp_val):
             one_bet_per_race, len(selections), expected_race_count, len(missing), len(extra), duplicate_bets
         )
 
-def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, df):
-    """Train RF, boosted candidates and consensus on one shared unseen validation set."""
+def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, df, grid_search_best_rf_params=None):
+    """Train RF, boosted candidates and consensus on one shared unseen validation set.
+
+    grid_search_best_rf_params: optional hyperparams dict (n_estimators, max_depth,
+    min_samples_leaf, max_features) from Track D's grid search. When provided, the
+    random_forest candidate here — the one that actually competes for Champion —
+    uses those tuned hyperparameters instead of a fixed guess, so the 1000+ models
+    trained nightly in Track D actually influence the deployed model instead of
+    being discarded.
+    """
     dates = pd.to_datetime(pd.Series(meeting_dates), errors='coerce')
     order = dates.argsort().values
     X = X.iloc[order].reset_index(drop=True)
@@ -2048,14 +2230,41 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     y_train, y_won_val = y_roi[train_mask], y_won[val_mask]
     race_ids_val = [r for r, keep in zip(race_ids, val_mask) if keep]
 
+    # Impute with the TRAINING split's own median only — X_val must never
+    # influence a fill value used to train or score against it. The same
+    # median dict is persisted on every candidate below (_form_analyst_feature_medians)
+    # so live scoring (ml_predict.py) reuses it instead of defaulting to 0.
+    train_median = X_train.median()
+    X_train = X_train.fillna(train_median)
+    X_val = X_val.fillna(train_median)
+
+    rf_params = {
+        'n_estimators': 250, 'max_depth': 10, 'min_samples_leaf': 15, 'max_features': 'sqrt',
+    }
+    rf_params_source = 'fixed_default'
+    if grid_search_best_rf_params:
+        try:
+            rf_params = {
+                'n_estimators': int(grid_search_best_rf_params['n_estimators']),
+                'max_depth': int(grid_search_best_rf_params['max_depth']),
+                'min_samples_leaf': int(grid_search_best_rf_params['min_samples_leaf']),
+                'max_features': grid_search_best_rf_params['max_features'],
+            }
+            rf_params_source = 'track_d_grid_search'
+        except (KeyError, TypeError, ValueError) as e:
+            log.warning(f"Ignoring malformed grid_search_best_rf_params {grid_search_best_rf_params}: {e}")
+
+    log.info("Track E random_forest hyperparameters source=%s params=%s", rf_params_source, rf_params)
+
     candidates = {
-        'random_forest': RandomForestClassifier(n_estimators=250, max_depth=10, min_samples_leaf=15, max_features='sqrt', random_state=42, n_jobs=-1, class_weight='balanced_subsample')
+        'random_forest': RandomForestClassifier(random_state=42, n_jobs=-1, class_weight='balanced_subsample', **rf_params)
     }
     log.info(
         "Track E split for random_forest: total_candidate_rows=%s train_rows=%s validation_rows=%s "
         "internal_tuning_train_rows=%s internal_tuning_eval_rows=%s",
         len(X), len(X_train), len(X_val), 0, 0
     )
+    X_tune_train = X_tune_eval = y_tune_train = y_tune_eval = None
     try:
         import optuna
         optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -2119,11 +2328,26 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     if len(fitted) > 1:
         ensemble_members = list(fitted.items())
         ensemble_weights = []
+        have_oos_tune_split = (
+            X_tune_train is not None and X_tune_eval is not None
+            and len(X_tune_train) > 0 and len(X_tune_eval) > 0
+        )
         for _, model in ensemble_members:
             try:
-                train_preds = _predict_win_scores(model, X_train)
-                train_mse = float(mean_squared_error(y_won[train_mask], train_preds))
-                ensemble_weights.append(1.0 / max(train_mse, 0.0001))
+                if have_oos_tune_split:
+                    # Weight members by OUT-OF-SAMPLE error on a held-out slice of
+                    # the training window (a shadow refit on X_tune_train, scored
+                    # on X_tune_eval), never on the data the member was actually
+                    # fit on. Weighting by in-sample/training error rewards
+                    # overfitting: a member that just memorised X_train would
+                    # look artificially good and dominate the ensemble.
+                    oos_model = clone(model)
+                    oos_model.fit(X_tune_train, y_tune_train)
+                    oos_preds = _predict_win_scores(oos_model, X_tune_eval)
+                    oos_mse = float(mean_squared_error(y_tune_eval, oos_preds))
+                    ensemble_weights.append(1.0 / max(oos_mse, 0.0001))
+                else:
+                    ensemble_weights.append(1.0)
             except Exception:
                 ensemble_weights.append(1.0)
         ensemble = ConsensusRegressor(ensemble_members, weights=ensemble_weights)
@@ -2132,6 +2356,32 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         metrics['ensemble_weights'] = dict(zip([name for name, _ in ensemble_members], ensemble.weights_.tolist()))
         selection_frames['ensemble'] = _top_selection_rows(ensemble, X_val, y_won_val, race_ids_val, sp_val)
         results.append({'model_type': 'ensemble', 'model_name': 'Ensemble / Consensus', 'model': ensemble, 'metrics': metrics})
+
+    # Persist the exact training-split median used above on every candidate so
+    # live inference (ml_predict.py) can fill missing/unseen features with the
+    # same values the model was actually trained against, instead of 0.
+    train_median_dict = train_median.to_dict()
+    for result in results:
+        result['model']._form_analyst_feature_medians = train_median_dict
+
+    # Walk-forward stability check: the headline validation numbers above come
+    # from one 80/20 chronological holdout. Re-score every candidate across
+    # multiple chronological folds spanning the whole dataset so the Champion
+    # Score (below) can penalise a model that only looks good in that one window.
+    for result in results:
+        try:
+            walk_forward = _walk_forward_metrics_for_model(
+                result['model'], X, y_won, sp_values, race_ids, n_splits=3
+            )
+        except Exception as e:
+            log.warning(f"Walk-forward stability check failed for {result['model_type']}: {e}")
+            walk_forward = {'n_splits': 0, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0}
+        result['metrics']['walk_forward'] = walk_forward
+        log.info(
+            "Walk-forward stability for %s: folds=%s roi_std=%.2f strike_rate_std=%.2f fold_rois=%s",
+            result['model_type'], walk_forward['n_splits'], walk_forward['roi_std'], walk_forward['strike_rate_std'],
+            [round(f['roi'], 1) for f in walk_forward['folds']],
+        )
 
     agreement_summary = {'4_of_4': 0, '3_of_4': 0, '2_of_4': 0, '1_of_4': 0}
     if fitted:
@@ -2544,12 +2794,12 @@ def write_results(run_id, feature_recommendations, component_results,
                      validation_strike_rate, validation_bets, validation_drawdown,
                      validation_longest_losing_streak, validation_bankroll_growth,
                      validation_volatility, last_100, last_250, last_500, agreement_summary,
-                     log_loss, brier_score, calibration, stability, selection_score)
+                     log_loss, brier_score, calibration, stability, walk_forward, selection_score)
                     VALUES (:run_id, :model_type, :model_name, :roi, :profit_units,
                             :strike_rate, :bets, :drawdown, :longest_losing_streak,
                             :bankroll_growth, :volatility, :last_100, :last_250,
                             :last_500, :agreement_summary, :log_loss, :brier_score,
-                            :calibration, :stability, :selection_score)
+                            :calibration, :stability, :walk_forward, :selection_score)
                 """), {
                     'run_id': run_id,
                     'model_type': result['model_type'],
@@ -2570,6 +2820,7 @@ def write_results(run_id, feature_recommendations, component_results,
                     'brier_score': metrics.get('brier_score'),
                     'calibration': json.dumps(metrics.get('calibration', {})),
                     'stability': json.dumps(metrics.get('stability', {})),
+                    'walk_forward': json.dumps(metrics.get('walk_forward', {})),
                     'selection_score': result.get('selection_score'),
                 })
 
@@ -2588,40 +2839,24 @@ def write_results(run_id, feature_recommendations, component_results,
         except Exception as e:
             log.warning(f"Could not save challenger model to DB: {e}")
     elif top_10_models:
+        # Track E (the actual champion-selection stage) failed outright, so there
+        # are no out-of-sample validation metrics for this Track D model. It's
+        # registered as a challenger for visibility/debugging only — with
+        # validation_metrics=None, save_best_model_to_db's promotion gate always
+        # rejects it (0 validation bets < MIN_VALIDATION_BETS), by design: we
+        # never want to promote a model nobody has evaluated out-of-sample.
         best = top_10_models[0]
         try:
             save_best_model_to_db(best['pkl_file'], best['score'], run_id)
         except Exception as e:
             log.warning(f"Could not save best model to DB: {e}")
 
-    # Auto-commit .pkl files to git so they persist beyond Railway's ephemeral filesystem
-    try:
-        import subprocess
-        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
-        repo_dir = os.path.dirname(os.path.abspath(__file__))
-
-        subprocess.run(['git', 'add', f'{output_dir}/*.pkl'],
-                       cwd=repo_dir, timeout=30, check=False)
-
-        commit_result = subprocess.run(
-            ['git', 'commit', '-m', f'[AUTO] Grid search models from run {run_id}'],
-            cwd=repo_dir, timeout=30, check=False,
-            capture_output=True, text=True
-        )
-        if commit_result.returncode == 0:
-            push_result = subprocess.run(
-                ['git', 'push', '-u', 'origin', 'HEAD'],
-                cwd=repo_dir, timeout=60, check=False,
-                capture_output=True, text=True
-            )
-            if push_result.returncode == 0:
-                log.info("Models committed and pushed to git successfully.")
-            else:
-                log.warning(f"Git push failed: {push_result.stderr.strip()}")
-        else:
-            log.warning(f"Git commit failed (nothing to commit?): {commit_result.stderr.strip()}")
-    except Exception as e:
-        log.warning(f"Could not auto-commit models to git: {e}")
+    # NOTE: model artifacts are no longer auto-committed/pushed to git from this
+    # runtime job. The champion .pkl is already durably persisted in Postgres
+    # (see save_best_model_to_db above), which is the source of truth ml_predict.py
+    # reads from. Pushing binaries to git from a live process added an unnecessary
+    # dependency on runtime git credentials and permanently bloated repo history
+    # for artifacts that were already safe.
 
     log.info("Results written successfully.")
 
@@ -2686,9 +2921,18 @@ def main():
         # This is additive only: if any challenger path breaks, the original RF grid-search
         # above has already completed and the cron continues with that RF artifact.
         best_challenger = None
+        grid_search_best_rf_params = None
+        if top_10_models:
+            grid_search_best_rf_params = {
+                'n_estimators': top_10_models[0]['n_estimators'],
+                'max_depth': top_10_models[0]['max_depth'],
+                'min_samples_leaf': top_10_models[0]['min_samples_leaf'],
+                'max_features': top_10_models[0]['max_features'],
+            }
         try:
             best_competitor, competition_results = run_model_competition(
-                X, y_roi, y_won, sp_values, race_ids, meeting_dates, df
+                X, y_roi, y_won, sp_values, race_ids, meeting_dates, df,
+                grid_search_best_rf_params=grid_search_best_rf_params,
             )
             output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
             os.makedirs(output_dir, exist_ok=True)

@@ -170,14 +170,34 @@ def save_model_with_fake_db(monkeypatch, tmp_path, conn, validation_metrics):
 def test_better_challenger_promotes_immediately_when_champion_is_under_seven_days_old(monkeypatch, tmp_path):
     conn = FakeConnection(champion=champion_row(10.0))
 
-    save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=11.0))
+    # Margin (13.0 - 10.0 = 3.0) clears PROMOTION_SELECTION_SCORE_EDGE (1.0) —
+    # promotion requires a real improvement, not just any positive delta.
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=13.0))
 
     assert conn.champion_promoted_at > datetime.utcnow() - timedelta(days=7)
     assert conn.deactivated_champions is True
     assert conn.activated_challenger["id"] == conn.challenger_id
-    assert "Promoted: challenger Champion Score 11.000 beat Champion Score 10.000" in conn.activated_challenger["reason"]
+    assert "Promoted: challenger Champion Score 13.000 beat Champion Score 10.000" in conn.activated_challenger["reason"]
     assert conn.rejected_challenger is None
     assert conn.committed is True
+
+
+def test_marginal_challenger_within_score_edge_does_not_promote(monkeypatch, tmp_path):
+    """A challenger that only barely beats the champion (less than
+    PROMOTION_SELECTION_SCORE_EDGE) must NOT be promoted — otherwise the
+    champion could be swapped on noise from a single validation window rather
+    than a real, repeatable improvement."""
+    conn = FakeConnection(champion=champion_row(10.0))
+
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=10.5))
+
+    assert conn.activated_challenger is None
+    assert conn.deactivated_champions is False
+    assert conn.promotion_history is None
+    assert conn.rejected_challenger["id"] == conn.challenger_id
+    assert conn.rejected_challenger["reason"] == (
+        "Rejected: challenger Champion Score 10.500 did not beat Champion Score 10.000"
+    )
 
 
 def test_worse_challenger_remains_rejected(monkeypatch, tmp_path):

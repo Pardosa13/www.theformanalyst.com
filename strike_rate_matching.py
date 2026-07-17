@@ -1,7 +1,28 @@
 import re
 from collections import Counter, defaultdict
+from datetime import date, datetime
 
 _TITLES = {"mr", "mrs", "ms", "miss"}
+
+
+def _coerce_date(value):
+    """Normalise a date/datetime/pandas Timestamp/string into a plain date, or None."""
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if hasattr(value, "date") and callable(getattr(value, "date")):
+        try:
+            return value.date()
+        except Exception:
+            pass
+    if isinstance(value, str):
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"):
+            try:
+                return datetime.strptime(value.split(" ")[0], fmt).date()
+            except ValueError:
+                continue
+    return None
 
 
 def normalize_name(name):
@@ -102,6 +123,93 @@ def get_sr_win_pct(name, sr_lookup):
     if runs < 10:
         return -1.0
     return (wins / runs) * 100.0
+
+
+def build_strike_rate_history_lookup(rows):
+    """
+    Build a point-in-time lookup from dated strike-rate snapshot rows.
+
+    Unlike build_strike_rate_lookup (one row per entity = "current" snapshot),
+    each row here is (name, wins, runs, snapshot_date); an entity can have many
+    dated snapshots. Returns the same multi-key matching structure as
+    build_strike_rate_lookup, but each matched entry is a list of
+    (snapshot_date, data) tuples sorted ascending by date, so callers can pick
+    the snapshot that actually existed as of a given race date instead of
+    always using the latest one.
+    """
+    grouped = defaultdict(list)
+    surname_keys = defaultdict(set)
+    for row in rows:
+        if isinstance(row, dict):
+            name = row.get("name") or row.get("Name")
+            wins = row.get("l100_wins", row.get("L100Wins", 0))
+            runs = row.get("l100_runs", row.get("L100Runs", 0))
+            snapshot_date = row.get("snapshot_date")
+        else:
+            name, wins, runs, snapshot_date = row[0], row[1], row[2], row[3]
+        keys = name_key_parts(name)
+        snapshot_date = _coerce_date(snapshot_date)
+        if not keys["exact"] or snapshot_date is None:
+            continue
+        data = {
+            "L100Wins": int(wins or 0),
+            "L100Runs": int(runs or 0),
+            "l100_wins": int(wins or 0),
+            "l100_runs": int(runs or 0),
+            "name": str(name or "").strip(),
+        }
+        for kind in ("exact", "all_initials", "first_initial"):
+            grouped[(kind, keys[kind])].append((snapshot_date, data))
+        surname_keys[keys["surname"]].add(keys["exact"])
+
+    maps = {"exact": {}, "all_initials": {}, "first_initial": {}, "surname": {}}
+    for (kind, key), entries in grouped.items():
+        maps[kind][key] = sorted(entries, key=lambda item: item[0])
+    for surname, exact_keys in surname_keys.items():
+        if len(exact_keys) == 1:
+            maps["surname"][surname] = maps["exact"][next(iter(exact_keys))]
+
+    legacy = {"_lookup_meta": {"maps": maps}, "_match_stats": defaultdict(int)}
+    return legacy
+
+
+def get_sr_win_pct_asof(name, history_lookup, as_of_date):
+    """
+    Point-in-time counterpart to get_sr_win_pct: strike rate as it stood on (or
+    just before) as_of_date, using history built by build_strike_rate_history_lookup.
+
+    Returns -1.0 (the same "unknown/insufficient data" sentinel get_sr_win_pct
+    uses) rather than falling back to a later snapshot — using a snapshot from
+    after the race would reintroduce the exact look-ahead leak this exists to
+    remove.
+    """
+    as_of_date = _coerce_date(as_of_date)
+    if not name or not history_lookup or not as_of_date:
+        return -1.0
+    meta = history_lookup.get("_lookup_meta", {}) if isinstance(history_lookup, dict) else {}
+    maps = meta.get("maps") or {}
+    keys = name_key_parts(name)
+    stats = history_lookup.get("_match_stats") if isinstance(history_lookup, dict) else None
+
+    for kind in ("exact", "all_initials", "first_initial", "surname"):
+        entries = maps.get(kind, {}).get(keys[kind])
+        if not entries:
+            continue
+        eligible = [data for snapshot_date, data in entries if snapshot_date <= as_of_date]
+        if not eligible:
+            continue
+        data = eligible[-1]
+        if stats is not None:
+            stats["initials" if kind in {"all_initials", "first_initial"} else "surname_unique" if kind == "surname" else "exact"] += 1
+        runs = data.get("L100Runs", 0)
+        wins = data.get("L100Wins", 0)
+        if runs < 10:
+            return -1.0
+        return (wins / runs) * 100.0
+
+    if stats is not None:
+        stats["unmatched"] += 1
+    return -1.0
 
 
 def log_match_stats(log, jockey_lookup, trainer_lookup):
