@@ -21,7 +21,6 @@ import sys
 import json
 import time
 import re
-import tempfile
 import unicodedata
 import math
 import logging
@@ -52,23 +51,16 @@ if DATABASE_URL.startswith('postgres://'):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'models', 'catboost_ufc_model.pkl')
 
-# Octagon-AI source-of-truth CSVs (the model was trained on these).
-# Keep the GitHub blob/raw endpoint as a fallback because raw.githubusercontent.com
-# can return 404 while the files are still present in the repository tree.
-_OCTAGON_CSV_PATHS = {
-    'Fights.csv': 'newdata/Fights.csv',
-    'Fighters.csv': 'newdata/Fighters.csv',
-    'Events.csv': 'newdata/Events.csv',
-    'current_glicko.csv': 'newdata/current_glicko.csv',
-}
-_OCTAGON_RAW_BASES = [
-    'https://raw.githubusercontent.com/sbalagan22/Octagon-AI/main',
-    'https://github.com/sbalagan22/Octagon-AI/raw/refs/heads/main',
-    'https://github.com/sbalagan22/Octagon-AI/raw/main',
-    'https://cdn.jsdelivr.net/gh/sbalagan22/Octagon-AI@main',
-]
-MIN_HISTORICAL_CSV_FIGHTS = 1000
-MIN_HISTORICAL_CSV_FIGHTERS = 500
+# Historical fight data source of truth.
+#
+# The model was originally trained on sbalagan22/Octagon-AI's newdata/*.csv
+# files, and that dataset was one-time seeded into Postgres via mma_seed.py
+# (see mma_fights / mma_fighters / mma_events). The upstream GitHub repo has
+# since been taken down (confirmed 404, not a transient CDN issue), so it can
+# no longer be re-pulled on every sync run. Postgres is now the sole source
+# of historical fight data: it holds the original seed and is kept current
+# automatically, since this script writes each newly-completed fight back to
+# mma_fights as part of its normal sync flow (see rebuild_stats_from_db()).
 MIN_COMPLETE_DB_FIGHTS_FOR_PRIMARY_HISTORY = 1000
 MIN_DB_FIGHTERS_FOR_PRIMARY_HISTORY = 500
 
@@ -1646,52 +1638,6 @@ def rebuild_stats_from_db(conn):
     return stats_tracker, name_to_id, espn_to_id
 
 
-# ── Octagon-AI CSV stat builder ───────────────────────────────────────────────
-
-def octagon_csv_urls():
-    """Return every candidate URL for each required Octagon-AI CSV."""
-    return {
-        fname: [f"{base}/{path}" for base in _OCTAGON_RAW_BASES]
-        for fname, path in _OCTAGON_CSV_PATHS.items()
-    }
-
-
-def download_octagon_data(tmpdir):
-    """Download Octagon-AI CSV files into *tmpdir* for stat computation.
-
-    The trained CatBoost artifact expects the original Octagon-AI feature
-    schema, so CSV history is the primary data source.  Postgres is only a
-    fallback when a sufficiently complete historical seed has already been
-    loaded there.
-    """
-    downloaded = {}
-    for fname, urls in octagon_csv_urls().items():
-        dest = os.path.join(tmpdir, fname)
-        last_error = None
-        for url in urls:
-            log.info("  Downloading %s from %s", fname, url)
-            try:
-                r = requests.get(url, headers=HEADERS, timeout=60)
-                if r.status_code == 404:
-                    last_error = f"404 Not Found: {url}"
-                    continue
-                r.raise_for_status()
-                if not r.content or b'404: Not Found' in r.content[:80]:
-                    last_error = f"empty/not-found response: {url}"
-                    continue
-                with open(dest, 'wb') as fh:
-                    fh.write(r.content)
-                downloaded[fname] = url
-                log.info("  %s: %,d bytes source=%s", fname, len(r.content), url)
-                break
-            except Exception as exc:
-                last_error = f"{url}: {exc}"
-        if fname not in downloaded:
-            raise RuntimeError(f"Could not download required Octagon-AI CSV {fname}; last_error={last_error}")
-    log.info("OCTAGON_CSV_URLS %s", json.dumps(downloaded, sort_keys=True))
-    return downloaded
-
-
 def postgres_history_is_complete_enough(conn):
     """Return True only when Postgres has a full historical MMA seed."""
     with conn.cursor() as cur:
@@ -1716,243 +1662,6 @@ def postgres_history_is_complete_enough(conn):
         MIN_DB_FIGHTERS_FOR_PRIMARY_HISTORY, str(complete).lower(),
     )
     return complete
-
-
-def _parse_height_cm(val):
-    """Convert height string (e.g. \"5' 11\\\"\") to centimetres."""
-    try:
-        if pd.isnull(val):
-            return 175.0
-        s = str(val)
-        if "'" in s:
-            parts = s.split("'")
-            feet = int(parts[0].strip())
-            inches = int(parts[1].replace('"', '').strip()) if len(parts) > 1 and parts[1].strip() else 0
-            return round(feet * 30.48 + inches * 2.54, 1)
-        v = float(s)
-        return v if v > 100 else 175.0
-    except Exception:
-        return 175.0
-
-
-def _parse_reach_cm(val):
-    """Convert reach in inches to centimetres."""
-    try:
-        return 175.0 if pd.isnull(val) else round(float(val) * 2.54, 1)
-    except Exception:
-        return 175.0
-
-
-def _parse_ctrl_sec(val):
-    """Convert control-time string \"M:SS\" to seconds."""
-    s = str(val).strip()
-    if not s or s in ('nan', '--'):
-        return 0
-    try:
-        if ':' in s:
-            m, sec = map(int, s.split(':'))
-            return m * 60 + sec
-        return int(float(s))
-    except Exception:
-        return 0
-
-
-def _sync_fighters_to_db(conn, fighters_df, glicko_df, stats_tracker, today):
-    """Write CSV fighters into mma_fighters so ESPN headshots can be linked by name."""
-    glicko_map = {}
-    for _, row in glicko_df.iterrows():
-        fid = str(row['Fighter_Id'])
-        glicko_map[fid] = {
-            'rating': float(row.get('Rating', 1500) or 1500),
-            'rd':     float(row.get('RD', 350)     or 350),
-            'vol':    float(row.get('Vol', 0.06)    or 0.06),
-        }
-
-    count = 0
-    with conn.cursor() as cur:
-        for _, row in fighters_df.iterrows():
-            fid  = str(row.get('Fighter_Id') or '').strip()
-            name = str(row.get('Full Name') or '').strip()
-            if not fid or not name:
-                continue
-            g  = glicko_map.get(fid, {'rating': 1500.0, 'rd': 350.0, 'vol': 0.06})
-            st = stats_tracker.get(fid)
-            sv = st.get_stat_vector(today) if st else {}
-            cur.execute("""
-                INSERT INTO mma_fighters (
-                    id, full_name, height_cm, weight_lbs, reach_cm, stance,
-                    wins, losses, draws,
-                    glicko_rating, glicko_rd, glicko_vol,
-                    ema_slpm, ema_sapm, ema_td_acc, ema_td_avg, ema_td_def,
-                    ema_kd_rate, ema_sub_rate, ema_ctrl_pct, ema_sig_str_acc,
-                    streak, win_rate, total_fights, recent_form,
-                    created_at, updated_at
-                ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, NOW(), NOW()
-                )
-                ON CONFLICT (id) DO UPDATE SET
-                    full_name       = EXCLUDED.full_name,
-                    wins            = EXCLUDED.wins,
-                    losses          = EXCLUDED.losses,
-                    draws           = EXCLUDED.draws,
-                    glicko_rating   = EXCLUDED.glicko_rating,
-                    glicko_rd       = EXCLUDED.glicko_rd,
-                    glicko_vol      = EXCLUDED.glicko_vol,
-                    ema_slpm        = EXCLUDED.ema_slpm,
-                    ema_sapm        = EXCLUDED.ema_sapm,
-                    ema_td_acc      = EXCLUDED.ema_td_acc,
-                    ema_td_avg      = EXCLUDED.ema_td_avg,
-                    ema_td_def      = EXCLUDED.ema_td_def,
-                    ema_kd_rate     = EXCLUDED.ema_kd_rate,
-                    ema_sub_rate    = EXCLUDED.ema_sub_rate,
-                    ema_ctrl_pct    = EXCLUDED.ema_ctrl_pct,
-                    ema_sig_str_acc = EXCLUDED.ema_sig_str_acc,
-                    streak          = EXCLUDED.streak,
-                    win_rate        = EXCLUDED.win_rate,
-                    total_fights    = EXCLUDED.total_fights,
-                    recent_form     = EXCLUDED.recent_form,
-                    updated_at      = NOW()
-            """, (
-                fid, name,
-                _parse_height_cm(row.get('Height')),
-                float(row.get('Weight', 0) or 0) or None,
-                _parse_reach_cm(row.get('Reach')),
-                str(row.get('Stance') or 'Orthodox'),
-                int(row.get('W', 0) or 0),
-                int(row.get('L', 0) or 0),
-                int(row.get('D', 0) or 0),
-                g['rating'], g['rd'], g['vol'],
-                sv.get('slpm', 0.0), sv.get('sapm', 0.0),
-                sv.get('td_acc', 0.4), sv.get('td_avg', 1.0),
-                sv.get('td_def', 0.5), sv.get('kd_rate', 0.2),
-                sv.get('sub_rate', 0.2), sv.get('ctrl_rate', 10.0),
-                sv.get('sig_str_acc', 0.45),
-                sv.get('streak', 0), sv.get('win_rate', 0.5),
-                sv.get('wins', 0) + sv.get('losses', 0),
-                sv.get('recent_form', 'N/A'),
-            ))
-            count += 1
-    conn.commit()
-    log.info(f"  Synced {count:,} fighters to DB")
-
-
-def rebuild_stats_from_csv(data_dir, conn=None):
-    """
-    Build EMA stats tracker, name→ID map, and fighter bio dict from
-    Octagon-AI CSV files in *data_dir*.  Mirrors the stat-building logic
-    in Octagon-AI's predict_model.py so feature vectors are consistent
-    with the CatBoost model's training distribution.
-
-    Returns (stats_tracker, name_to_id, fighter_bio).
-    """
-    log.info("Building fighter stats from Octagon-AI CSV files…")
-
-    fights_df   = pd.read_csv(os.path.join(data_dir, 'Fights.csv'))
-    fighters_df = pd.read_csv(os.path.join(data_dir, 'Fighters.csv'))
-    events_df   = pd.read_csv(os.path.join(data_dir, 'Events.csv'))
-    glicko_df   = pd.read_csv(os.path.join(data_dir, 'current_glicko.csv'))
-
-    # ── Name → Fighter_Id + bio ───────────────────────────────
-    name_to_id, fighter_exp, fighter_bio = {}, {}, {}
-    for _, row in fighters_df.iterrows():
-        name = normalize_name(str(row.get('Full Name') or ''))
-        fid  = str(row['Fighter_Id'])
-        exp  = int(row.get('W', 0) or 0) + int(row.get('L', 0) or 0)
-        if name and (name not in name_to_id or exp > fighter_exp.get(name, -1)):
-            name_to_id[name] = fid
-            fighter_exp[name] = exp
-        if fid not in fighter_bio:
-            fighter_bio[fid] = {
-                'height':    _parse_height_cm(row.get('Height')),
-                'reach':     _parse_reach_cm(row.get('Reach')),
-                'stance':    str(row.get('Stance') or 'Orthodox'),
-                'glicko':    1500.0,
-                'glicko_rd': 350.0,
-            }
-
-    # ── Glicko-2 ratings from pre-computed CSV ────────────────
-    for _, row in glicko_df.iterrows():
-        fid = str(row['Fighter_Id'])
-        if fid in fighter_bio:
-            fighter_bio[fid]['glicko']    = float(row.get('Rating', 1500) or 1500)
-            fighter_bio[fid]['glicko_rd'] = float(row.get('RD',     350)  or 350)
-
-    # ── Build EMA stats chronologically ──────────────────────
-    fights_df = fights_df.merge(
-        events_df[['Event_Id', 'Date']], on='Event_Id', how='left'
-    )
-    fights_df['Date'] = pd.to_datetime(fights_df['Date'])
-    fights_df = fights_df.sort_values('Date').reset_index(drop=True)
-
-    stats_tracker = {}
-
-    def _f(row, col, default=0.0):
-        v = row.get(col)
-        return float(v) if pd.notnull(v) else default
-
-    def _t(t_str, rnd):
-        try:
-            m, s = map(int, str(t_str).split(':'))
-            return (int(rnd) - 1) * 300 + m * 60 + s
-        except Exception:
-            return 300
-
-    if len(fights_df) < MIN_HISTORICAL_CSV_FIGHTS or len(fighters_df) < MIN_HISTORICAL_CSV_FIGHTERS:
-        raise RuntimeError(
-            f"Octagon CSV dataset is incomplete: fights={len(fights_df)} fighters={len(fighters_df)}"
-        )
-
-    log.info(f"  Processing {len(fights_df):,} historical fights…")
-    for _, row in fights_df.iterrows():
-        fid1 = str(row.get('Fighter_Id_1', '') or '')
-        fid2 = str(row.get('Fighter_Id_2', '') or '')
-        if not fid1 or not fid2 or fid1 == 'nan' or fid2 == 'nan':
-            continue
-        res1 = str(row.get('Result_1', ''))
-        if res1 not in ('W', 'L', 'D'):
-            continue
-
-        fight_date = row['Date']
-        time_sec   = _t(row.get('Fight_Time', '5:00'), row.get('Round', 3))
-        res2       = 'L' if res1 == 'W' else ('W' if res1 == 'L' else 'D')
-
-        str1 = _f(row, 'STR_1');  str2 = _f(row, 'STR_2')
-        pct1 = max(_f(row, 'Sig. Str. %_1', 0.5), 0.01)  # guard division-by-zero
-        pct2 = max(_f(row, 'Sig. Str. %_2', 0.5), 0.01)
-        td1  = _f(row, 'TD_1');   td2  = _f(row, 'TD_2')
-        kd1  = _f(row, 'KD_1');   kd2  = _f(row, 'KD_2')
-        sub1 = _f(row, 'SUB_1');  sub2 = _f(row, 'SUB_2')
-        ctrl1 = _parse_ctrl_sec(row.get('Ctrl_1'))
-        ctrl2 = _parse_ctrl_sec(row.get('Ctrl_2'))
-
-        for fid, res, s_l, s_a, td_l, td_a, o_td_a, o_td_l, kd, sub, ctrl, sig, hd, bd, lg, dt, cl, gr in [
-            (fid1, res1, str1, str2, td1, td1/0.4 if td1 > 0 else 0, td2/0.4 if td2 > 0 else 0, td2,
-             kd1, sub1, ctrl1,
-             _f(row,'Sig. Str. %_1',0.45), _f(row,'Head_%_1',0.7), _f(row,'Body_%_1',0.15),
-             _f(row,'Leg_%_1',0.15), _f(row,'Distance_%_1',0.8), _f(row,'Clinch_%_1',0.1), _f(row,'Ground_%_1',0.1)),
-            (fid2, res2, str2, str1, td2, td2/0.4 if td2 > 0 else 0, td1/0.4 if td1 > 0 else 0, td1,
-             kd2, sub2, ctrl2,
-             _f(row,'Sig. Str. %_2',0.45), _f(row,'Head_%_2',0.7), _f(row,'Body_%_2',0.15),
-             _f(row,'Leg_%_2',0.15), _f(row,'Distance_%_2',0.8), _f(row,'Clinch_%_2',0.1), _f(row,'Ground_%_2',0.1)),
-        ]:
-            if fid not in stats_tracker:
-                stats_tracker[fid] = FighterStats()
-            stats_tracker[fid].update(
-                res, fight_date, time_sec,
-                s_l, s_a, td_l, td_a, o_td_a, o_td_l,
-                kd, sub, ctrl, sig, hd, bd, lg, dt, cl, gr,
-            )
-
-    log.info("HISTORICAL_SOURCE source=octagon_csv completed_fights=%s fighters=%s",
-             len(fights_df), len(stats_tracker))
-    log.info(f"  Stats built for {len(stats_tracker):,} fighters")
-
-    if conn is not None:
-        _sync_fighters_to_db(conn, fighters_df, glicko_df, stats_tracker, datetime.utcnow())
-
-    return stats_tracker, name_to_id, fighter_bio
 
 
 # ── Prediction model ──────────────────────────────────────────────────────────
@@ -2566,17 +2275,18 @@ def main():
     # Load model
     model = load_model()
 
-    # Build stats from Octagon-AI CSV data when available.  If the CSV source is
-    # unavailable, keep the cron non-fatal and use the engineered fighter
-    # features already persisted on mma_fighters for prediction.
+    # Build stats from Postgres fight history (mma_fights / mma_fighters), which
+    # holds the original Octagon-AI seed plus every fight this cron has synced
+    # since. If history is too thin (e.g. a fresh DB not yet seeded), keep the
+    # cron non-fatal and use the engineered fighter features already persisted
+    # on mma_fighters for prediction.
+    postgres_history_is_complete_enough(conn)
     try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            download_octagon_data(tmpdir)
-            stats_tracker, name_to_id, fighter_bio = rebuild_stats_from_csv(tmpdir, conn)
-            espn_to_id = build_espn_to_fighter_id(conn, stats_tracker)
+        stats_tracker, name_to_id, espn_to_id = rebuild_stats_from_db(conn)
+        fighter_bio = load_fighters_bio(conn)
     except Exception as e:
         log.warning(
-            "Octagon-AI CSV history is unavailable (%s); continuing with persisted mma_fighters features.",
+            "Postgres fight history is unavailable (%s); continuing with persisted mma_fighters features.",
             e,
         )
         stats_tracker = {}

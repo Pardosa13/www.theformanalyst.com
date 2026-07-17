@@ -1,8 +1,13 @@
 """
 mma_seed.py - ONE-TIME script to import Octagon-AI CSV data into Postgres.
 
-Run LOCALLY (not on Railway) after copying the newdata/ CSVs from the
-Octagon-AI repo into a local folder.
+This was originally run LOCALLY (not on Railway) after copying the newdata/
+CSVs from sbalagan22/Octagon-AI into a local folder. That upstream repo has
+since been taken down, so this script is no longer runnable against it —
+Postgres (already seeded) is now the sole source of historical fight data,
+kept current by mma_sync.py's normal writes to mma_fights on every run (see
+rebuild_stats_from_db() there). Keep this script only for restoring from a
+local archived copy of the original CSVs, if one ever needs to be re-seeded.
 
 Usage:
     python mma_seed.py --data-dir ./newdata
