@@ -780,7 +780,7 @@
                   <div style="margin-top:4px;"><span class="badge bg-warning text-dark">{{ badge }}</span></div>
                   {% endfor %}
                   <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
-                    Analyzer #{{ bet.analyzer_rank or '—' }} · PFAI #{{ bet.pfai_rank or '—' }} · ML #{{ bet.ml_rank or '—' }}{% if bet.ml_score is not none %} · ML {{ bet.ml_score|round(1) }}{% endif %}{% if bet.ml_score_gap is not none %} · Gap {{ bet.ml_score_gap|round(1) }}{% endif %}
+                    Analyzer #{{ bet.analyzer_rank or '—' }} · PFAI #{{ bet.pfai_rank or '—' }} · ML #{{ bet.ml_rank or '—' }}{% if bet.ml_score is defined and bet.ml_score is not none %} · ML {{ bet.ml_score|round(1) }}{% endif %}{% if bet.ml_score_gap is defined and bet.ml_score_gap is not none %} · Gap {{ bet.ml_score_gap|round(1) }}{% endif %}
                   </div>
                   {% for reason in bet.best_bet_reasons or [] %}
                   <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">{{ reason }}</div>
