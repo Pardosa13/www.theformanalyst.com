@@ -162,8 +162,8 @@ def champion_row(champion_score=10.0):
     ]
 
 
-def metrics(selection_score=11.0, roi=5.0, strike_rate=20.0, bets=150):
-    return {
+def metrics(selection_score=11.0, roi=5.0, strike_rate=20.0, bets=150, walk_forward_folds=2):
+    data = {
         "selection_score": selection_score,
         "roi": roi,
         "strike_rate": strike_rate,
@@ -174,6 +174,15 @@ def metrics(selection_score=11.0, roi=5.0, strike_rate=20.0, bets=150):
         "bankroll_growth": 1.1,
         "volatility": 0.7,
     }
+    if walk_forward_folds is not None:
+        data["walk_forward"] = {
+            "folds": [
+                {"roi": 5.0 + i, "strike_rate": 20.0 + i, "bets": 50}
+                for i in range(walk_forward_folds)
+            ],
+            "roi_std": 0.5,
+        }
+    return data
 
 
 def save_model_with_fake_db(monkeypatch, tmp_path, conn, validation_metrics):
@@ -210,6 +219,23 @@ def test_better_challenger_promotes_immediately_when_champion_is_under_seven_day
     assert conn.committed is True
 
 
+def test_otherwise_qualified_challenger_without_walk_forward_folds_cannot_promote(monkeypatch, tmp_path):
+    conn = FakeConnection(champion=champion_row(10.0))
+
+    save_model_with_fake_db(
+        monkeypatch,
+        tmp_path,
+        conn,
+        metrics(selection_score=13.0, walk_forward_folds=None),
+    )
+
+    assert conn.activated_challenger is None
+    assert conn.deactivated_champions is False
+    assert conn.promotion_history is None
+    assert conn.rejected_challenger["id"] == conn.challenger_id
+    assert "Cannot promote: model has 0 walk-forward fold(s)" in conn.rejected_challenger["reason"]
+
+
 def test_marginal_challenger_within_score_edge_does_not_promote(monkeypatch, tmp_path):
     """A challenger that only barely beats the champion (less than
     PROMOTION_SELECTION_SCORE_EDGE) must NOT be promoted — otherwise the
@@ -217,7 +243,7 @@ def test_marginal_challenger_within_score_edge_does_not_promote(monkeypatch, tmp
     than a real, repeatable improvement."""
     conn = FakeConnection(champion=champion_row(10.0))
 
-    save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=10.5))
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=10.5, walk_forward_folds=None))
 
     assert conn.activated_challenger is None
     assert conn.deactivated_champions is False
