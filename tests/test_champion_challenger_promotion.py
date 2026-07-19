@@ -348,3 +348,51 @@ def test_bootstrap_significance_gate_passes_consistent_improvement():
 def test_bootstrap_significance_gate_skipped_with_fewer_than_two_folds():
     assert backtest._paired_bootstrap_p_value([5.0], [-5.0]) is None
     assert backtest._paired_bootstrap_p_value([], []) is None
+
+
+def test_validation_windows_overlap_note_flags_disjoint_windows():
+    challenger_window = {'start': '2026-06-01', 'end': '2026-06-30'}
+    champion_window = {'start': '2026-01-01', 'end': '2026-01-31'}
+    comparable, note = backtest._validation_windows_overlap_note(challenger_window, champion_window)
+    assert comparable is False
+    assert '2026-06-01' in note and '2026-01-31' in note
+
+
+def test_validation_windows_overlap_note_passes_overlapping_windows():
+    challenger_window = {'start': '2026-06-01', 'end': '2026-06-30'}
+    champion_window = {'start': '2026-06-15', 'end': '2026-07-15'}
+    comparable, note = backtest._validation_windows_overlap_note(challenger_window, champion_window)
+    assert comparable is True
+    assert note == ""
+
+
+def test_validation_windows_overlap_note_treats_missing_window_as_comparable():
+    # An old champion row saved before validation_period existed has no
+    # window to compare against — this must not manufacture a false alarm.
+    comparable, note = backtest._validation_windows_overlap_note({'start': '2026-06-01', 'end': '2026-06-30'}, {})
+    assert comparable is True
+    assert note == ""
+    comparable, note = backtest._validation_windows_overlap_note(None, None)
+    assert comparable is True
+
+
+def test_value_edge_backtest_filters_out_low_edge_selections():
+    # Two races: race 1's top pick has a big edge over the market and wins;
+    # race 2's top pick has almost no edge (pred barely above 1/sp) and loses.
+    # A min_edge filter should drop race 2 and keep race 1, raising ROI.
+    selections = pandas.DataFrame({
+        'pred': [0.60, 0.21],
+        'won': [1, 0],
+        'sp': [3.0, 5.0],  # market-implied prob: 0.333, 0.20
+    })
+    analysis = backtest._value_edge_backtest(selections)
+    thresholds = {row['min_edge']: row for row in analysis['thresholds']}
+    assert thresholds[0.0]['bets'] == 2
+    # 0.60 - 0.333 = 0.267 edge on race 1; 0.21 - 0.20 = 0.01 edge on race 2.
+    assert thresholds[0.05]['bets'] == 1
+    assert thresholds[0.05]['roi_pct'] > thresholds[0.0]['roi_pct']
+
+
+def test_value_edge_backtest_handles_empty_selections():
+    analysis = backtest._value_edge_backtest(pandas.DataFrame(columns=['pred', 'won', 'sp']))
+    assert analysis == {'thresholds': [], 'best_threshold': None}
