@@ -64,19 +64,29 @@ def _load_model_row(conn, champion_id=None):
     return row
 
 
-def _best_rejected_challenger(conn, exclude_id):
+def _best_rejected_challenger(conn, exclude_id, expected_features=None):
     """Best-scoring previously-rejected challenger, rescored under the CURRENT
     formula (mirrors save_best_model_to_db's force_recompute treatment of a
     stored champion) so this is a fair, up-to-date comparison rather than
-    trusting whatever combined_score each row happened to be saved with."""
+    trusting whatever combined_score each row happened to be saved with.
+
+    This only recomputes the SCORING FORMULA from each row's own stored
+    walk_forward — it does not regenerate walk_forward itself (that would mean
+    re-fitting every candidate, which is out of scope here). A candidate whose
+    stored feature contract no longer matches today's feature set is skipped
+    rather than trusted at face value: its walk_forward folds were computed
+    against a feature set that predates changes since made, which is exactly
+    the kind of staleness this rollback comparison must not silently rely on.
+    """
     rows = conn.execute(backtest.text("""
-        SELECT id, model_type, model_name, combined_score, selection_metrics
+        SELECT id, model_type, model_name, combined_score, selection_metrics, pkl_data
         FROM backtest_best_model
         WHERE is_active = FALSE AND id != :exclude_id AND pkl_data IS NOT NULL
         ORDER BY combined_score DESC
         LIMIT 20
     """), {'exclude_id': exclude_id}).fetchall()
     best = None
+    skipped_stale_features = []
     for row in rows:
         metrics = {}
         if row[4]:
@@ -84,6 +94,15 @@ def _best_rejected_challenger(conn, exclude_id):
                 metrics = json.loads(row[4])
             except Exception:
                 metrics = {}
+        if expected_features is not None and row[5]:
+            try:
+                candidate_model = joblib.load(io.BytesIO(row[5]))
+            except Exception:
+                candidate_model = None
+            candidate_features = getattr(candidate_model, 'feature_names_in_', None) if candidate_model else None
+            if candidate_features is not None and list(candidate_features) != list(expected_features):
+                skipped_stale_features.append(row[0])
+                continue
         score = backtest._selection_score_from_metrics(metrics, force_recompute=True) if metrics else row[3]
         if score is None:
             continue
@@ -92,6 +111,13 @@ def _best_rejected_challenger(conn, exclude_id):
                 'id': row[0], 'model_type': row[1], 'model_name': row[2], 'score': score,
                 'fold_count': backtest._walk_forward_fold_count(metrics),
             }
+    if skipped_stale_features:
+        log.warning(
+            "Excluded %s rejected-challenger row(s) from the rollback comparison because their stored feature "
+            "contract predates the current feature set (walk_forward folds computed on old columns can't be "
+            "trusted at face value): ids=%s",
+            len(skipped_stale_features), skipped_stale_features,
+        )
     return best
 
 
@@ -181,7 +207,7 @@ def main():
         old_score = backtest._selection_score_from_metrics(champion_metrics, force_recompute=True)
         new_score = backtest._selection_score_from_metrics(updated_metrics, force_recompute=True)
 
-        best_challenger = _best_rejected_challenger(conn, exclude_id=champion_id)
+        best_challenger = _best_rejected_challenger(conn, exclude_id=champion_id, expected_features=list(X.columns))
 
         print("=" * 78)
         print(f"Backfill report for model id={champion_id} ({model_type} / {model_name})")

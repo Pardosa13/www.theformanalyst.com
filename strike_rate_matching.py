@@ -75,11 +75,55 @@ def name_key_parts(name):
 # as apprentice claim suffixes ("J Smith (a3)"), middle initials, hyphenated or
 # abbreviated first names, and diacritics that survive normalisation
 # differently on each side (internal DB vs PuntingForm's EntityName field).
-# This tier is a last-resort fallback, restricted to a candidate's own
-# surname-prefix bucket (not a full scan) so a fuzzy match can only ever fire
-# between genuinely similar surnames, and gated by a high similarity
-# threshold so it only closes the gap on near-misses, not lookalikes.
-FUZZY_MATCH_THRESHOLD = 0.90
+# This tier is a last-resort fallback, gated by a high similarity threshold so
+# it only closes the gap on near-misses, not lookalikes.
+#
+# Scoring the whole "given-name surname" string as one blob was found to merge
+# DIFFERENT people who happen to share one component: e.g. "Daniel Bowman" vs
+# "Daniel Bowen" (surname differs, given name identical) scored 0.9526 as a
+# single string, and "S J Richards" vs "P S Richards" (surname identical,
+# initials differ) scored 0.9141 — both above the old 0.90 bar, both wrong.
+# Racing has real father/son and sibling combinations sharing a surname, so a
+# surname match alone can't be trusted either, and a shared surname with a
+# genuinely different first initial (S vs P) is exactly the case that must
+# NOT be force-matched.
+#
+# Surname and initials are now scored on separate axes instead of one blended
+# string: initials must be "compatible" (identical, or one is a prefix of the
+# other — e.g. "d" vs "dj" covers a middle initial present on only one side,
+# which both still refer to the same first name) and, only once that gate
+# passes, the surname is fuzzy-scored against FUZZY_MATCH_THRESHOLD. There is
+# deliberately no reverse path (exact surname + fuzzy initials): fuzzing the
+# initials themselves is indistinguishable from the father/son-sharing-a-
+# surname case above, so a mismatched initial always falls through to
+# "unmatched" rather than being force-matched.
+FUZZY_MATCH_THRESHOLD = 0.93
+
+
+def _split_surname_initials(exact_key):
+    """exact_key is a normalised, space-joined 'given ... surname' string (see
+    name_key_parts). Returns (surname, initials) where initials is the
+    first-letter-of-each-token abbreviation of everything before the surname,
+    e.g. "daniel bowman" -> ("bowman", "d"), "s j richards" -> ("richards", "sj")."""
+    parts = exact_key.split()
+    if not parts:
+        return "", ""
+    surname = parts[-1]
+    initials = "".join(p[0] for p in parts[:-1])
+    return surname, initials
+
+
+def _initials_compatible(a, b):
+    """True if two initials strings could plausibly belong to the same person:
+    identical, or one is a non-empty prefix of the other (a middle initial
+    present on only one side). A completely different first initial (e.g.
+    "s" vs "p") is never compatible — that's the father/son/sibling collision
+    this tier must not force-match."""
+    if a == b:
+        return True
+    if not a or not b:
+        return False
+    return a.startswith(b) or b.startswith(a)
 
 
 def _jaro_similarity(s1, s2):
@@ -136,28 +180,37 @@ def _jaro_winkler_similarity(s1, s2, prefix_weight=0.1, max_prefix=4):
 
 
 def _surname_prefix_index(exact_map):
-    """Bucket exact-key candidates by surname (last token) for cheap fuzzy scans."""
+    """Bucket exact-key candidates by the first letter of their surname — a
+    cheap prefilter so a fuzzy scan only ever compares candidates whose
+    surnames could plausibly be near-misses of each other, not a full scan of
+    every name on the roster."""
     index = defaultdict(list)
     for exact_key in exact_map:
-        parts = exact_key.split()
-        if parts:
-            index[parts[-1][:1]].append(exact_key)
+        surname, _ = _split_surname_initials(exact_key)
+        if surname:
+            index[surname[:1]].append(exact_key)
     return index
 
 
 def _fuzzy_match_exact_key(query_exact_key, exact_map, surname_index):
-    """Best fuzzy candidate for query_exact_key, restricted to its surname-prefix
-    bucket. Returns (matched_key, score) or (None, 0.0) if nothing clears
-    FUZZY_MATCH_THRESHOLD."""
-    parts = query_exact_key.split()
-    if not parts:
+    """Best fuzzy candidate for query_exact_key, restricted to its surname's
+    first-letter bucket. A candidate only qualifies if its initials are
+    "compatible" with the query's (see _initials_compatible — this rules out
+    a genuinely different first initial sharing a surname, e.g. father/son or
+    sibling trainers) AND its surname clears FUZZY_MATCH_THRESHOLD against the
+    query's. Returns (matched_key, score) or (None, 0.0)."""
+    query_surname, query_initials = _split_surname_initials(query_exact_key)
+    if not query_surname:
         return None, 0.0
-    bucket = surname_index.get(parts[-1][:1], [])
+    bucket = surname_index.get(query_surname[:1], [])
     best_key, best_score = None, 0.0
     for candidate in bucket:
         if candidate == query_exact_key:
             continue
-        score = _jaro_winkler_similarity(query_exact_key, candidate)
+        candidate_surname, candidate_initials = _split_surname_initials(candidate)
+        if not _initials_compatible(query_initials, candidate_initials):
+            continue
+        score = _jaro_winkler_similarity(query_surname, candidate_surname)
         if score > best_score:
             best_key, best_score = candidate, score
     if best_key and best_score >= FUZZY_MATCH_THRESHOLD:
@@ -388,13 +441,27 @@ def log_match_stats(log, jockey_lookup, trainer_lookup):
     jockey_fuzzy_audit = jockey_lookup.get("_fuzzy_audit", []) if isinstance(jockey_lookup, dict) else []
     trainer_fuzzy_audit = trainer_lookup.get("_fuzzy_audit", []) if isinstance(trainer_lookup, dict) else []
     for label, audit in (("jockey", jockey_fuzzy_audit), ("trainer", trainer_fuzzy_audit)):
-        for entry in audit[:50]:
+        # audit has one entry per horse-ROW that hit a fuzzy match, so the same
+        # (query, matched_name) pair can appear dozens of times per run at the
+        # same timestamp. Log each unique pair once with an occurrence count
+        # instead of repeating the line per row.
+        counts = Counter()
+        best_score = {}
+        for entry in audit:
+            key = (entry["query"], entry["matched_name"])
+            counts[key] += 1
+            best_score[key] = max(best_score.get(key, 0.0), entry["similarity"])
+        unique_pairs = counts.most_common()
+        for (query, matched_name), count in unique_pairs[:50]:
             log.info(
-                "Fuzzy %s match (tier 4, audit): query=%r matched_name=%r similarity=%.4f",
-                label, entry["query"], entry["matched_name"], entry["similarity"],
+                "Fuzzy %s match (tier 4, audit): query=%r matched_name=%r similarity=%.4f matched %s time(s) this run",
+                label, query, matched_name, best_score[(query, matched_name)], count,
             )
-        if len(audit) > 50:
-            log.info("Fuzzy %s match audit truncated: %s more fuzzy matches not logged individually.", label, len(audit) - 50)
+        if len(unique_pairs) > 50:
+            log.info(
+                "Fuzzy %s match audit truncated: %s more unique fuzzy match pair(s) not logged individually.",
+                label, len(unique_pairs) - 50,
+            )
 
     return {
         'total_horse_rows_checked': horse_rows,
