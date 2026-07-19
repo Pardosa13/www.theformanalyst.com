@@ -972,6 +972,7 @@ def add_race_relative_features(feature_rows, race_ids):
         'weight_vs_avg', 'jockey_sr', 'trainer_sr', 'last200_rank',
         'last400_rank', 'last600_rank', 'running_position',
         'horse_career_prize', 'prizemoney_won', 'barrier_change',
+        'market_implied_prob',
     ]
 
     lower_is_better = {
@@ -1084,6 +1085,22 @@ def build_training_set(df, strike_rate_data=None):
 
         except Exception:
             continue
+
+    # Market-relative feature (run 141 item 8): the market's own overround-
+    # adjusted implied win probability for this exact race, from each
+    # runner's historical starting price. This is a genuine same-race,
+    # contemporaneous signal (comparing the model to the market on the SAME
+    # race), not a leak of a future race's outcome — but it IS only known at
+    # jump time, so it can't be computed this way for a race that hasn't run
+    # yet. Live scoring (ml_predict.py) has no equivalent source wired up yet
+    # (it would need live pre-race odds, e.g. via ladbrokes.py, as the
+    # analogous pre-race proxy) and defaults this column to its training
+    # median via the existing missing-feature fallback until that's built, so
+    # this trains a model that can measure the market-relative signal's value
+    # offline without unsafely leaking into or breaking live predictions.
+    market_implied = _market_implied_prob(pd.Series(sp_values), pd.Series(race_ids))
+    for row, implied in zip(feature_rows, market_implied):
+        row['market_implied_prob'] = float(implied)
 
     feature_count_before = len(feature_rows[0]) if feature_rows else 0
     log.info(f"Features before race-relative features: {feature_count_before}")
@@ -2158,7 +2175,10 @@ def _promotion_rule_text():
         "walk-forward cross-fold Kelly-growth-std penalty - 0.02*holdout Kelly max-drawdown% - a flat 10-point "
         "penalty if capped fractional-Kelly staking would have hit bankroll ruin on the holdout; "
         "a model with no walk-forward evidence gets no credit for its holdout numbers beyond a 0.3x weight. "
-        "ROI alone is never sufficient."
+        "ROI alone is never sufficient. All of the above ROI/strike-rate/Kelly figures are computed only over "
+        f"races where the model's win probability exceeds the field's own overround-adjusted implied "
+        f"probability by more than MIN_VALUE_EDGE ({MIN_VALUE_EDGE:.3f}); a race where even the model's top "
+        "pick offers no edge over the market contributes no bet at all."
     )
 RF_BEST_ARTIFACT_NAME = 'form_analyst_best_random_forest.pkl'
 LEGACY_RF_BEST_ARTIFACT_NAME = 'form_analyst_best.pkl'
@@ -2258,6 +2278,26 @@ def _artifact_feature_contract_ok(model, feature_names):
 KELLY_FRACTION_MULTIPLIER = float(os.environ.get('ML_KELLY_FRACTION_MULTIPLIER', '0.5'))
 KELLY_MAX_STAKE_PCT = float(os.environ.get('ML_KELLY_MAX_STAKE_PCT', '0.05'))
 
+# Run 141 item 5: the system's own diagnostics independently recommended
+# odds/value-aware bet filtering, and a rule-tuning pass that filtered *which*
+# bets to take (not just which horse to pick) nearly closed the whole ROI gap
+# on its own. MIN_VALUE_EDGE is the minimum amount the model's win probability
+# must exceed the market's own implied probability (both on a 0-1 scale) for a
+# race to be bet at all; 0.0 means "any positive edge", a small positive value
+# additionally filters out edges too thin to survive estimation noise.
+MIN_VALUE_EDGE = float(os.environ.get('ML_MIN_VALUE_EDGE', '0.0'))
+
+
+def _market_implied_prob(sp_series, race_id_series):
+    """Overround-adjusted market-implied win probability for every row, using
+    the field's OWN starting prices for that race. Raw 1/sp values across a
+    full field sum to more than 1.0 (the bookmaker's overround/vig); dividing
+    each runner's raw implied probability by the field's total removes that
+    margin, so this is comparable to a model's own predict_proba output."""
+    raw = 1.0 / sp_series.astype(float)
+    race_total = raw.groupby(race_id_series).transform('sum').replace(0, np.nan)
+    return (raw / race_total).fillna(0.0)
+
 
 def _simulate_kelly_staking(selections, kelly_fraction_multiplier=KELLY_FRACTION_MULTIPLIER, max_stake_pct=KELLY_MAX_STAKE_PCT):
     """Simulate fractional-Kelly bet sizing (bankroll compounds bet-by-bet)
@@ -2308,7 +2348,15 @@ def _simulate_kelly_staking(selections, kelly_fraction_multiplier=KELLY_FRACTION
 
 
 def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
-    """Evaluate top model selection in every validation race with betting metrics."""
+    """Evaluate top model selection in every validation race with betting metrics.
+
+    Item 5 (run 141): the top-scored horse in a race isn't backed unless the
+    model's win probability clears the market's own implied probability by at
+    least MIN_VALUE_EDGE — a race where even the model's favourite offers no
+    edge over the market is skipped entirely (no bet), rather than always
+    betting *a* horse every race regardless of whether there's any value in
+    doing so.
+    """
     pred = np.clip(_predict_win_scores(model, X_val), 1e-6, 1 - 1e-6)
     eval_df = pd.DataFrame({
         'race_id': list(race_ids_val),
@@ -2316,7 +2364,13 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
         'won': np.asarray(y_won_val, dtype=int),
         'sp': np.asarray(sp_val, dtype=float),
     })
-    selections = eval_df.loc[eval_df.groupby('race_id')['pred'].idxmax()].copy()
+    eval_df['market_implied_prob'] = _market_implied_prob(eval_df['sp'], eval_df['race_id'])
+    eval_df['value_edge'] = eval_df['pred'] - eval_df['market_implied_prob']
+    races_considered = eval_df['race_id'].nunique()
+    top_picks = eval_df.loc[eval_df.groupby('race_id')['pred'].idxmax()].copy()
+    selections = top_picks[top_picks['value_edge'] > MIN_VALUE_EDGE].copy()
+    races_skipped_no_value = int(races_considered - len(selections))
+    average_value_edge = float(selections['value_edge'].mean()) if len(selections) else 0.0
     profits = np.where(selections['won'] == 1, selections['sp'] - 1.0, -1.0)
     bets = int(len(selections))
     wins = int(selections['won'].sum())
@@ -2361,6 +2415,9 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
         'longest_losing_streak': int(longest_losing_streak),
         'bankroll_growth': bankroll_growth,
         'volatility': volatility,
+        'races_considered': int(races_considered),
+        'races_skipped_no_value': races_skipped_no_value,
+        'average_value_edge': average_value_edge,
         'last_100': window_metrics(100),
         'last_250': window_metrics(250),
         'last_500': window_metrics(500),
