@@ -1,4 +1,8 @@
-from strike_rate_matching import build_strike_rate_lookup, get_sr_win_pct, lookup_strike_rate, normalize_name
+import logging
+
+from strike_rate_matching import (
+    build_strike_rate_lookup, get_sr_win_pct, lookup_strike_rate, log_match_stats, normalize_name,
+)
 
 
 def test_normalize_strips_titles_punctuation_and_collapses_spaces():
@@ -59,6 +63,47 @@ def test_fuzzy_tier_matches_close_typo_above_threshold():
 def test_fuzzy_tier_does_not_match_unrelated_name():
     lookup = build_strike_rate_lookup([("Damien Oliver", 18, 100)])
     assert lookup_strike_rate("Zoe Nobody", lookup) == (None, "unmatched")
+
+
+def test_fuzzy_tier_does_not_merge_different_surname_sharing_given_name():
+    # Regression: "Daniel Bowman" vs "Daniel Bowen" scored 0.9526 as a single
+    # blended string under the old whole-name Jaro-Winkler comparison and was
+    # wrongly force-matched. These are different people who happen to share a
+    # first name; the surname itself isn't a close enough match to trust.
+    lookup = build_strike_rate_lookup([
+        ("Daniel Bowen", 15, 100),
+        ("Craig Williams", 15, 100),
+    ])
+    assert lookup_strike_rate("Daniel Bowman", lookup) == (None, "unmatched")
+
+
+def test_fuzzy_tier_does_not_merge_different_initials_sharing_surname():
+    # Regression: "S J Richards" vs "P S Richards" scored 0.9141 as a single
+    # blended string and was wrongly force-matched — a real pattern in racing
+    # (father/son or sibling trainers/jockeys sharing a surname). A shared
+    # surname must not be enough on its own when the first initial differs.
+    lookup = build_strike_rate_lookup([
+        ("S J Richards", 12, 100),
+        ("P S Richards", 30, 100),
+    ])
+    assert lookup_strike_rate("A J Richards", lookup) == (None, "unmatched")
+
+
+def test_log_match_stats_dedupes_repeated_fuzzy_pairs(caplog):
+    # Regression: the same (query, matched_name) fuzzy pair was being logged
+    # once per horse-row (50+ times at an identical timestamp) instead of once
+    # per unique pair with an occurrence count.
+    jockey_lookup = build_strike_rate_lookup([("Damien Oliver", 18, 100)])
+    for _ in range(52):
+        lookup_strike_rate("Damien J Olliver", jockey_lookup)
+    trainer_lookup = build_strike_rate_lookup([])
+
+    with caplog.at_level(logging.INFO):
+        log_match_stats(logging.getLogger("test"), jockey_lookup, trainer_lookup)
+
+    fuzzy_lines = [r.getMessage() for r in caplog.records if "Fuzzy jockey match" in r.message]
+    assert len(fuzzy_lines) == 1
+    assert "matched 52 time(s) this run" in fuzzy_lines[0]
 
 
 def test_puntingform_entity_type_mapping_labels():
