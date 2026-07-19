@@ -2035,6 +2035,21 @@ def _walk_forward_fold_count(metrics):
     return len([f for f in folds if f.get('bets', 0)])
 
 
+def can_become_champion(model_metrics: dict) -> tuple[bool, str]:
+    """A model may only become active champion if it already has enough
+    walk-forward fold data on record. This makes the champion invariant a
+    promotion-time gate rather than a warning discovered after activation.
+    """
+    fold_count = _walk_forward_fold_count(model_metrics)
+    if fold_count < MIN_WALK_FORWARD_FOLDS:
+        return False, (
+            f"Cannot promote: model has {fold_count} walk-forward fold(s), "
+            f"needs >= {MIN_WALK_FORWARD_FOLDS}. Run walk-forward evaluation "
+            f"on this model before it can become champion."
+        )
+    return True, ""
+
+
 def _validation_windows_overlap_note(challenger_window, champion_window):
     """Compare two models' stored validation_period ({'start','end','cutoff'}
     date-ISO-string dicts, as attached by run_model_competition) and report
@@ -3388,6 +3403,13 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
                           f"Champion Score {champion_score:.3f}{comparability_note}")
 
         if promote:
+            ok, guard_reason = can_become_champion(validation_metrics or {})
+            if not ok:
+                log.warning("Challenger %s otherwise qualified but rejected: %s", challenger_id, guard_reason)
+                promote = False
+                reason = f"Rejected: {guard_reason}"
+
+        if promote:
             old_champion_id = champion[0] if champion else None
             if champion_is_stale:
                 # The stale champion is being replaced; only leave the alert
@@ -3453,7 +3475,7 @@ def rollback_to_champion(model_id, reason='Manual Champion rollback'):
     """Instantly reactivate a retained previous Champion without retraining."""
     with engine.connect() as conn:
         target = conn.execute(text("""
-            SELECT id, retained_until
+            SELECT id, retained_until, selection_metrics
             FROM backtest_best_model
             WHERE id = :id
               AND pkl_data IS NOT NULL
@@ -3461,6 +3483,15 @@ def rollback_to_champion(model_id, reason='Manual Champion rollback'):
         """), {'id': model_id}).fetchone()
         if not target:
             raise ValueError(f"Model {model_id} is not available for rollback or retention has expired")
+        target_metrics = {}
+        if target[2]:
+            try:
+                target_metrics = json.loads(target[2])
+            except Exception:
+                target_metrics = {}
+        ok, guard_reason = can_become_champion(target_metrics)
+        if not ok:
+            raise ValueError(f"Model {model_id} is not eligible for rollback champion activation: {guard_reason}")
         current = conn.execute(text("""
             SELECT id FROM backtest_best_model
             WHERE is_active = TRUE

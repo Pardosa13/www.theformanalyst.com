@@ -106,6 +106,13 @@ def _best_rejected_challenger(conn, exclude_id, expected_features=None):
         score = backtest._selection_score_from_metrics(metrics, force_recompute=True) if metrics else row[3]
         if score is None:
             continue
+        ok, guard_reason = backtest.can_become_champion(metrics)
+        if not ok:
+            log.warning(
+                "Rejected-challenger row id=%s otherwise scored well but is ineligible for rollback: %s",
+                row[0], guard_reason,
+            )
+            continue
         if best is None or score > best['score']:
             best = {
                 'id': row[0], 'model_type': row[1], 'model_name': row[2], 'score': score,
