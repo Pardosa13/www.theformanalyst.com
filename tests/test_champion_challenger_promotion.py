@@ -422,3 +422,192 @@ def test_value_edge_backtest_filters_out_low_edge_selections():
 def test_value_edge_backtest_handles_empty_selections():
     analysis = backtest._value_edge_backtest(pandas.DataFrame(columns=['pred', 'won', 'sp']))
     assert analysis == {'thresholds': [], 'best_threshold': None}
+
+
+# ── check_active_champion_staleness / _heal_stale_champion ──────────────────
+# These cover Change 1: a champion missing walk-forward folds must be
+# re-tested and repaired automatically in the same nightly run, instead of
+# only logging a warning that waits for someone to run the backfill script
+# by hand.
+
+class FakeHealConnection:
+    """Fakes just the SQL surface _heal_stale_champion / check_active_champion_staleness touch."""
+
+    def __init__(self, champion_row, pkl_bytes, is_active=True, rejected_rows=None):
+        self.champion_row = champion_row  # (id, selection_metrics_json)
+        self.pkl_bytes = pkl_bytes
+        self.is_active = is_active
+        self.rejected_rows = rejected_rows or []
+        self.updated_champion = None
+        self.pipeline_alerts = []
+        self.resolved_alert_keys = []
+        self.committed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, statement, params=None):
+        sql = str(statement)
+        params = params or {}
+        if "SELECT id, selection_metrics FROM backtest_best_model" in sql:
+            return FetchResult(self.champion_row)
+        if "SELECT pkl_data, is_active FROM backtest_best_model" in sql:
+            return FetchResult((self.pkl_bytes, self.is_active))
+        if "FROM backtest_best_model\n        WHERE is_active = FALSE" in sql:
+            return FetchResultAll(self.rejected_rows)
+        if "UPDATE backtest_best_model" in sql and "SET selection_metrics" in sql:
+            self.updated_champion = params
+            return FetchResult(None)
+        if "SELECT id FROM ml_pipeline_alerts" in sql:
+            return FetchResult(None)
+        if "INSERT INTO ml_pipeline_alerts" in sql:
+            self.pipeline_alerts.append(params)
+            return FetchResult(None)
+        if "UPDATE ml_pipeline_alerts SET message" in sql:
+            self.pipeline_alerts.append(params)
+            return FetchResult(None)
+        if "UPDATE ml_pipeline_alerts SET resolved_at" in sql:
+            self.resolved_alert_keys.append(params.get("key"))
+            return FetchResult(None)
+        raise AssertionError(f"Unhandled SQL in fake heal connection: {sql}")
+
+    def commit(self):
+        self.committed = True
+
+
+class FetchResultAll:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def fetchall(self):
+        return self.rows
+
+
+def _pkl_bytes(obj):
+    import io as _io
+    buf = _io.BytesIO()
+    pickle.dump(obj, buf)
+    return buf.getvalue()
+
+
+def _setup_heal_env(monkeypatch, conn, meeting_dates=None, walk_forward_result=None):
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+    monkeypatch.setattr(
+        backtest.joblib, "load",
+        lambda f: pickle.load(f) if hasattr(f, "read") else pickle.load(open(f, "rb")),
+    )
+    monkeypatch.setattr(backtest, "load_historical_data", lambda: (None, None))
+
+    X = pandas.DataFrame({"speed": [1.0, 2.0, 3.0, 4.0], "class": [1.0, 1.0, 2.0, 2.0]})
+    y_won = pandas.Series([1, 0, 1, 0])
+    sp_values = [3.0, 4.0, 5.0, 6.0]
+    race_ids = [1, 2, 3, 4]
+    horse_ids = [10, 11, 12, 13]
+    dates = meeting_dates or ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"]
+    monkeypatch.setattr(
+        backtest, "build_training_set",
+        lambda df, srd: (X, None, y_won, sp_values, race_ids, horse_ids, dates),
+    )
+
+    wf = walk_forward_result or {
+        "n_splits": 2, "roi_std": 0.5,
+        "folds": [{"roi": 6.0, "strike_rate": 22.0, "bets": 50}, {"roi": 7.0, "strike_rate": 23.0, "bets": 50}],
+    }
+    monkeypatch.setattr(backtest, "_walk_forward_metrics_for_model", lambda model, X_, yw, sp, rids: wf)
+    return wf
+
+
+def test_check_active_champion_staleness_self_heals_without_rollback(monkeypatch):
+    champion_metrics = {"selection_score": 10.0, "roi": 4.0, "strike_rate": 18.0}
+    conn = FakeHealConnection(
+        champion_row=(101, json.dumps(champion_metrics)),
+        pkl_bytes=_pkl_bytes(DummySavedModel()),
+        is_active=True,
+        rejected_rows=[],  # nothing to roll back to
+    )
+    _setup_heal_env(monkeypatch, conn)
+
+    backtest.check_active_champion_staleness(run_id=42)
+
+    assert conn.updated_champion is not None
+    assert conn.updated_champion["id"] == 101
+    updated_metrics = json.loads(conn.updated_champion["metrics"])
+    assert backtest._walk_forward_fold_count(updated_metrics) == 2
+    # No rejected challenger beat it, so the champion stays active and the
+    # durable alert is resolved rather than left open for a human to act on.
+    assert "champion_missing_walk_forward_validation" in conn.resolved_alert_keys
+    assert conn.pipeline_alerts == []
+
+
+def test_check_active_champion_staleness_self_heals_and_rolls_back(monkeypatch):
+    champion_metrics = {"selection_score": 10.0, "roi": 4.0, "strike_rate": 18.0}
+    rejected_metrics = {
+        "roi": 50.0, "strike_rate": 40.0,
+        "walk_forward": {"folds": [{"roi": 50.0, "bets": 50}, {"roi": 55.0, "bets": 50}], "roi_std": 0.1},
+    }
+    rejected_row = (555, "random_forest", "RF Challenger", 5.0, json.dumps(rejected_metrics), _pkl_bytes(DummySavedModel()))
+    conn = FakeHealConnection(
+        champion_row=(101, json.dumps(champion_metrics)),
+        pkl_bytes=_pkl_bytes(DummySavedModel()),
+        is_active=True,
+        rejected_rows=[rejected_row],
+    )
+    _setup_heal_env(monkeypatch, conn)
+
+    rollback_calls = []
+    monkeypatch.setattr(
+        backtest, "rollback_to_champion",
+        lambda model_id, reason='': rollback_calls.append((model_id, reason)),
+    )
+
+    backtest.check_active_champion_staleness(run_id=42)
+
+    assert conn.updated_champion is not None  # champion's real score still gets persisted
+    assert len(rollback_calls) == 1
+    assert rollback_calls[0][0] == 555
+    assert "Self-heal rollback" in rollback_calls[0][1]
+    assert "champion_missing_walk_forward_validation" in conn.resolved_alert_keys
+
+
+def test_check_active_champion_staleness_records_blocking_alert_when_heal_impossible(monkeypatch):
+    # No 'roi' component stored — same situation as a champion promoted
+    # before selection_metrics carried raw components. Nothing can be safely
+    # recomputed, so this must stay a visible, honest blocking alert rather
+    # than pretending to have healed it.
+    champion_metrics = {"selection_score": 10.0}
+    conn = FakeHealConnection(
+        champion_row=(101, json.dumps(champion_metrics)),
+        pkl_bytes=_pkl_bytes(DummySavedModel()),
+        is_active=True,
+    )
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+
+    backtest.check_active_champion_staleness(run_id=42)
+
+    assert conn.updated_champion is None
+    assert len(conn.pipeline_alerts) == 1
+    alert = conn.pipeline_alerts[0]
+    assert alert["key"] == "champion_missing_walk_forward_validation"
+    assert alert["severity"] == "blocking"
+    assert "Automatic self-heal could not complete" in alert["message"]
+
+
+def test_check_active_champion_staleness_skips_healthy_champion(monkeypatch):
+    healthy_metrics = {
+        "selection_score": 10.0,
+        "walk_forward": {"folds": [{"roi": 4.0, "bets": 50}, {"roi": 5.0, "bets": 50}], "roi_std": 0.3},
+    }
+    conn = FakeHealConnection(champion_row=(101, json.dumps(healthy_metrics)), pkl_bytes=None)
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("_heal_stale_champion should not run for a non-stale champion")
+    monkeypatch.setattr(backtest, "_heal_stale_champion", _fail_if_called)
+
+    backtest.check_active_champion_staleness(run_id=42)
+
+    assert "champion_missing_walk_forward_validation" in conn.resolved_alert_keys
+    assert conn.pipeline_alerts == []
