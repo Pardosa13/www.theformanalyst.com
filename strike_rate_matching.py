@@ -1,8 +1,15 @@
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from datetime import date, datetime
 
 _TITLES = {"mr", "mrs", "ms", "miss"}
+# Apprentice claim suffix, e.g. "J Smith (a3)" or "J Smith a1.5" — matched
+# before punctuation stripping (parenthesised form) and again as a trailing
+# bare token (unparenthesised form some feeds use), otherwise it survives
+# normalisation as a fake extra "surname" token and breaks every tier.
+_APPRENTICE_CLAIM_PAREN_RE = re.compile(r"\(\s*a\d+(?:\.\d+)?\s*\)", re.IGNORECASE)
+_APPRENTICE_CLAIM_TOKEN_RE = re.compile(r"^a\d+(?:\.\d+)?$", re.IGNORECASE)
 
 
 def _coerce_date(value):
@@ -31,10 +38,19 @@ def normalize_name(name):
         return ""
     value = str(name).lower().strip()
     value = re.sub(r"[’‘`´]", "'", value)
+    value = _APPRENTICE_CLAIM_PAREN_RE.sub(" ", value)
+    # Fold diacritics to their base ASCII letter (e.g. "é" -> "e") instead of
+    # letting the character-class strip below drop them entirely (e.g.
+    # "José" -> "jos", silently losing the final letter and any chance of an
+    # exact match against an un-accented "jose" on the other side).
+    value = unicodedata.normalize('NFKD', value)
+    value = ''.join(c for c in value if not unicodedata.combining(c))
     value = re.sub(r"[^a-z0-9\s]", " ", value)
     parts = [p for p in re.sub(r"\s+", " ", value).strip().split(" ") if p]
     while parts and parts[0] in _TITLES:
         parts.pop(0)
+    if len(parts) > 1 and _APPRENTICE_CLAIM_TOKEN_RE.match(parts[-1]):
+        parts.pop()
     return " ".join(parts)
 
 
@@ -52,6 +68,101 @@ def name_key_parts(name):
         "first_initial": f"{initials[:1]} {surname}".strip() if initials else normalised,
         "surname": surname,
     }
+
+
+# ── Tier 4: fuzzy matching ──────────────────────────────────────────────────
+# Exact/initials/surname-unique tiers above miss real-world name variants such
+# as apprentice claim suffixes ("J Smith (a3)"), middle initials, hyphenated or
+# abbreviated first names, and diacritics that survive normalisation
+# differently on each side (internal DB vs PuntingForm's EntityName field).
+# This tier is a last-resort fallback, restricted to a candidate's own
+# surname-prefix bucket (not a full scan) so a fuzzy match can only ever fire
+# between genuinely similar surnames, and gated by a high similarity
+# threshold so it only closes the gap on near-misses, not lookalikes.
+FUZZY_MATCH_THRESHOLD = 0.90
+
+
+def _jaro_similarity(s1, s2):
+    if s1 == s2:
+        return 1.0
+    len1, len2 = len(s1), len(s2)
+    if len1 == 0 or len2 == 0:
+        return 0.0
+    match_distance = max(len1, len2) // 2 - 1
+    match_distance = max(match_distance, 0)
+
+    s1_matches = [False] * len1
+    s2_matches = [False] * len2
+    matches = 0
+    transpositions = 0
+
+    for i in range(len1):
+        start = max(0, i - match_distance)
+        end = min(i + match_distance + 1, len2)
+        for j in range(start, end):
+            if s2_matches[j] or s1[i] != s2[j]:
+                continue
+            s1_matches[i] = True
+            s2_matches[j] = True
+            matches += 1
+            break
+
+    if matches == 0:
+        return 0.0
+
+    k = 0
+    for i in range(len1):
+        if not s1_matches[i]:
+            continue
+        while not s2_matches[k]:
+            k += 1
+        if s1[i] != s2[k]:
+            transpositions += 1
+        k += 1
+
+    transpositions //= 2
+    return ((matches / len1) + (matches / len2) + ((matches - transpositions) / matches)) / 3.0
+
+
+def _jaro_winkler_similarity(s1, s2, prefix_weight=0.1, max_prefix=4):
+    """Jaro-Winkler similarity in [0.0, 1.0]; pure Python, no extra dependency."""
+    jaro = _jaro_similarity(s1, s2)
+    prefix_len = 0
+    for a, b in zip(s1[:max_prefix], s2[:max_prefix]):
+        if a != b:
+            break
+        prefix_len += 1
+    return jaro + (prefix_len * prefix_weight * (1.0 - jaro))
+
+
+def _surname_prefix_index(exact_map):
+    """Bucket exact-key candidates by surname (last token) for cheap fuzzy scans."""
+    index = defaultdict(list)
+    for exact_key in exact_map:
+        parts = exact_key.split()
+        if parts:
+            index[parts[-1][:1]].append(exact_key)
+    return index
+
+
+def _fuzzy_match_exact_key(query_exact_key, exact_map, surname_index):
+    """Best fuzzy candidate for query_exact_key, restricted to its surname-prefix
+    bucket. Returns (matched_key, score) or (None, 0.0) if nothing clears
+    FUZZY_MATCH_THRESHOLD."""
+    parts = query_exact_key.split()
+    if not parts:
+        return None, 0.0
+    bucket = surname_index.get(parts[-1][:1], [])
+    best_key, best_score = None, 0.0
+    for candidate in bucket:
+        if candidate == query_exact_key:
+            continue
+        score = _jaro_winkler_similarity(query_exact_key, candidate)
+        if score > best_score:
+            best_key, best_score = candidate, score
+    if best_key and best_score >= FUZZY_MATCH_THRESHOLD:
+        return best_key, best_score
+    return None, 0.0
 
 
 def build_strike_rate_lookup(rows):
@@ -89,10 +200,12 @@ def build_strike_rate_lookup(rows):
         maps["first_initial"].setdefault(keys["first_initial"], data)
         if surname_counts[keys["surname"]] == 1:
             maps["surname"].setdefault(keys["surname"], data)
+    maps["_surname_prefix_index"] = _surname_prefix_index(maps["exact"])
 
     legacy = dict(maps["exact"])
     legacy["_lookup_meta"] = {"maps": maps}
     legacy["_match_stats"] = defaultdict(int)
+    legacy["_fuzzy_audit"] = []
     return legacy
 
 
@@ -107,6 +220,18 @@ def lookup_strike_rate(name, sr_lookup):
             data = maps.get(kind, {}).get(keys[kind])
             if data:
                 return data, ("initials" if kind in {"all_initials", "first_initial"} else "surname_unique" if kind == "surname" else "exact")
+        exact_map = maps.get("exact", {})
+        surname_index = maps.get("_surname_prefix_index", {})
+        if keys["exact"] and exact_map:
+            matched_key, score = _fuzzy_match_exact_key(keys["exact"], exact_map, surname_index)
+            if matched_key:
+                data = exact_map[matched_key]
+                audit = sr_lookup.get("_fuzzy_audit") if isinstance(sr_lookup, dict) else None
+                if audit is not None:
+                    audit.append({
+                        "query": name, "matched_name": data.get("name"), "similarity": round(score, 4),
+                    })
+                return data, "fuzzy"
     data = sr_lookup.get(keys["exact"])
     return (data, "exact") if data else (None, "unmatched")
 
@@ -168,8 +293,9 @@ def build_strike_rate_history_lookup(rows):
     for surname, exact_keys in surname_keys.items():
         if len(exact_keys) == 1:
             maps["surname"][surname] = maps["exact"][next(iter(exact_keys))]
+    maps["_surname_prefix_index"] = _surname_prefix_index(maps["exact"])
 
-    legacy = {"_lookup_meta": {"maps": maps}, "_match_stats": defaultdict(int)}
+    legacy = {"_lookup_meta": {"maps": maps}, "_match_stats": defaultdict(int), "_fuzzy_audit": []}
     return legacy
 
 
@@ -207,18 +333,71 @@ def get_sr_win_pct_asof(name, history_lookup, as_of_date):
             return -1.0
         return (wins / runs) * 100.0
 
+    exact_map = maps.get("exact", {})
+    surname_index = maps.get("_surname_prefix_index", {})
+    if keys["exact"] and exact_map:
+        matched_key, score = _fuzzy_match_exact_key(keys["exact"], exact_map, surname_index)
+        if matched_key:
+            eligible = [data for snapshot_date, data in exact_map[matched_key] if snapshot_date <= as_of_date]
+            if eligible:
+                data = eligible[-1]
+                if stats is not None:
+                    stats["fuzzy"] += 1
+                audit = history_lookup.get("_fuzzy_audit") if isinstance(history_lookup, dict) else None
+                if audit is not None:
+                    audit.append({
+                        "query": name, "matched_name": data.get("name"), "similarity": round(score, 4),
+                    })
+                runs = data.get("L100Runs", 0)
+                wins = data.get("L100Wins", 0)
+                if runs < 10:
+                    return -1.0
+                return (wins / runs) * 100.0
+
     if stats is not None:
         stats["unmatched"] += 1
     return -1.0
 
 
+MATCH_TIERS = ("exact", "initials", "surname_unique", "fuzzy", "unmatched")
+
+
 def log_match_stats(log, jockey_lookup, trainer_lookup):
+    """Log a per-run match-rate summary and return it as a plain dict so callers
+    can persist it (e.g. backtest.py writes it to the DB) and compare
+    unmatched-row percentage run over run to catch matching regressions."""
     j = jockey_lookup.get("_match_stats", {}) if isinstance(jockey_lookup, dict) else {}
     t = trainer_lookup.get("_match_stats", {}) if isinstance(trainer_lookup, dict) else {}
-    horse_rows = sum(j.get(k, 0) for k in ("exact", "initials", "surname_unique", "unmatched"))
+    horse_rows = sum(j.get(k, 0) for k in MATCH_TIERS)
+    trainer_rows = sum(t.get(k, 0) for k in MATCH_TIERS)
+    jockey_unmatched_pct = (j.get("unmatched", 0) / horse_rows * 100.0) if horse_rows else 0.0
+    trainer_unmatched_pct = (t.get("unmatched", 0) / trainer_rows * 100.0) if trainer_rows else 0.0
     log.info(
-        "Strike-rate matching summary: total_horse_rows_checked=%s jockey_exact_matches=%s jockey_initials_matches=%s jockey_surname_unique_matches=%s jockey_unmatched=%s trainer_exact_matches=%s trainer_initials_matches=%s trainer_surname_unique_matches=%s trainer_unmatched=%s",
+        "Strike-rate matching summary: total_horse_rows_checked=%s "
+        "jockey_exact_matches=%s jockey_initials_matches=%s jockey_surname_unique_matches=%s "
+        "jockey_fuzzy_matches=%s jockey_unmatched=%s jockey_unmatched_pct=%.2f "
+        "trainer_exact_matches=%s trainer_initials_matches=%s trainer_surname_unique_matches=%s "
+        "trainer_fuzzy_matches=%s trainer_unmatched=%s trainer_unmatched_pct=%.2f",
         horse_rows,
-        j.get("exact", 0), j.get("initials", 0), j.get("surname_unique", 0), j.get("unmatched", 0),
-        t.get("exact", 0), t.get("initials", 0), t.get("surname_unique", 0), t.get("unmatched", 0),
+        j.get("exact", 0), j.get("initials", 0), j.get("surname_unique", 0),
+        j.get("fuzzy", 0), j.get("unmatched", 0), jockey_unmatched_pct,
+        t.get("exact", 0), t.get("initials", 0), t.get("surname_unique", 0),
+        t.get("fuzzy", 0), t.get("unmatched", 0), trainer_unmatched_pct,
     )
+
+    jockey_fuzzy_audit = jockey_lookup.get("_fuzzy_audit", []) if isinstance(jockey_lookup, dict) else []
+    trainer_fuzzy_audit = trainer_lookup.get("_fuzzy_audit", []) if isinstance(trainer_lookup, dict) else []
+    for label, audit in (("jockey", jockey_fuzzy_audit), ("trainer", trainer_fuzzy_audit)):
+        for entry in audit[:50]:
+            log.info(
+                "Fuzzy %s match (tier 4, audit): query=%r matched_name=%r similarity=%.4f",
+                label, entry["query"], entry["matched_name"], entry["similarity"],
+            )
+        if len(audit) > 50:
+            log.info("Fuzzy %s match audit truncated: %s more fuzzy matches not logged individually.", label, len(audit) - 50)
+
+    return {
+        'total_horse_rows_checked': horse_rows,
+        'jockey': {**{k: j.get(k, 0) for k in MATCH_TIERS}, 'unmatched_pct': jockey_unmatched_pct},
+        'trainer': {**{k: t.get(k, 0) for k in MATCH_TIERS}, 'unmatched_pct': trainer_unmatched_pct},
+    }

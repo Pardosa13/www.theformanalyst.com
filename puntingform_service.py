@@ -274,6 +274,47 @@ class PuntingFormService:
             CREATE INDEX IF NOT EXISTS ix_strike_rate_snapshots_lookup
             ON strike_rate_snapshots (type, jurisdiction, normalised_name, snapshot_date)
         """))
+        self._verify_snapshot_upsert_key_includes_date(conn)
+
+    def _verify_snapshot_upsert_key_includes_date(self, conn):
+        """Fail loudly if the strike_rate_snapshots unique constraint ever
+        stops including snapshot_date.
+
+        _append_strike_rate_snapshot_rows below upserts ON CONFLICT
+        (snapshot_date, type, jurisdiction, normalised_name) — as long as
+        snapshot_date is genuinely part of that constraint, a same-day
+        re-run is the only thing that can ever hit the DO UPDATE branch
+        (benign: it just re-upserts today's row), and a prior day's snapshot
+        can never be silently overwritten. That's a schema-level guarantee,
+        not something this code re-checks per row, but a future migration
+        that narrows the constraint would silently reintroduce exactly the
+        "upsert key missing a date component" bug this table was built to
+        avoid — without this check, that would only show up much later as
+        quietly-wrong point-in-time training data. Only runs the check when
+        the DB actually exposes information_schema (Postgres in production);
+        skips silently on dialects that don't (e.g. sqlite in tests), since
+        that's an environment limitation, not evidence of the bug.
+        """
+        try:
+            columns = [
+                row[0] for row in conn.execute(text("""
+                    SELECT kcu.column_name
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu
+                        ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+                    WHERE tc.table_name = 'strike_rate_snapshots' AND tc.constraint_type = 'UNIQUE'
+                    ORDER BY kcu.ordinal_position
+                """)).fetchall()
+            ]
+        except Exception as e:
+            log.debug("Skipping strike_rate_snapshots key-shape check (dialect doesn't support information_schema): %s", e)
+            return
+        if columns and 'snapshot_date' not in columns:
+            raise RuntimeError(
+                f"strike_rate_snapshots unique constraint no longer includes snapshot_date (columns={columns}); "
+                "a dated-snapshot upsert could now silently overwrite a different day's row instead of appending "
+                "a new one. Refusing to ingest until the schema is fixed."
+            )
 
     def _append_strike_rate_snapshot_rows(self, conn, mapped_rows, snapshot_date):
         appended = 0
