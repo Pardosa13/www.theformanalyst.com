@@ -25,7 +25,7 @@ import json
 import re
 import logging
 import pickle
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from itertools import product
 from strike_rate_matching import (
     build_strike_rate_lookup, build_strike_rate_history_lookup,
@@ -2035,6 +2035,45 @@ def _walk_forward_fold_count(metrics):
     return len([f for f in folds if f.get('bets', 0)])
 
 
+def _validation_windows_overlap_note(challenger_window, champion_window):
+    """Compare two models' stored validation_period ({'start','end','cutoff'}
+    date-ISO-string dicts, as attached by run_model_competition) and report
+    whether they cover overlapping date ranges.
+
+    Returns (True, "") when comparable (either window is missing/unparseable,
+    which just means "can't tell — assume comparable" rather than manufacture
+    a false alarm; or the ranges genuinely overlap). Returns (False, note)
+    when both windows are present, parseable, and provably disjoint — the
+    Champion Score comparison is judging two models against non-overlapping
+    slices of history, which the fixed Champion Score margin and bootstrap
+    significance gate don't account for.
+    """
+    def _parse(window):
+        if not window:
+            return None
+        start, end = window.get('start'), window.get('end')
+        if not start or not end:
+            return None
+        try:
+            return date.fromisoformat(start), date.fromisoformat(end)
+        except (TypeError, ValueError):
+            return None
+
+    c = _parse(challenger_window)
+    h = _parse(champion_window)
+    if c is None or h is None:
+        return True, ""
+    c_start, c_end = c
+    h_start, h_end = h
+    if c_start > h_end or h_start > c_end:
+        return False, (
+            f"validation windows do not overlap: challenger={c_start.isoformat()}..{c_end.isoformat()} "
+            f"champion={h_start.isoformat()}..{h_end.isoformat()} — scores were computed on non-comparable "
+            "out-of-sample periods"
+        )
+    return True, ""
+
+
 def _paired_bootstrap_p_value(challenger_fold_rois, champion_fold_rois, n_resamples=2000, seed=42):
     """One-sided paired bootstrap p-value for "challenger's per-fold ROI is
     really higher than champion's", used as a statistical-significance gate
@@ -2569,6 +2608,54 @@ def _profit_from_selection_rows(rows):
     return float(np.where(rows['won'] == 1, rows['sp'] - 1.0, -1.0).sum())
 
 
+# Candidate minimum-edge thresholds for the value/odds-aware filtering
+# diagnostic below: "edge" = model's predicted win probability minus the
+# market-implied probability (1/SP) of that same selection. 0.0 is the
+# current no-filter baseline (kept first so callers can read it as the
+# reference row); the rest span from a small edge to a fairly demanding one.
+VALUE_EDGE_THRESHOLDS = (0.0, 0.02, 0.03, 0.05, 0.08)
+
+
+def _value_edge_backtest(selections):
+    """Diagnostic-only: how would this model's own validation-set ROI change
+    if a race were only bet when the top pick's edge over the market (model
+    probability minus 1/SP) clears a threshold, instead of always betting the
+    single highest-probability runner in every race?
+
+    Does NOT change `selections`, the model's selection_score, or which
+    candidate wins the competition — this exists purely to quantify the
+    "add value/odds-aware bet filtering" lever the diagnostic log below has
+    been pointing at for several runs, so that decision can be made from
+    numbers instead of eyeballing baseline vs grid-search ROI.
+    """
+    if selections is None or selections.empty:
+        return {'thresholds': [], 'best_threshold': None}
+    market_implied_prob = 1.0 / selections['sp'].clip(lower=1.0001)
+    edge = selections['pred'] - market_implied_prob
+    rows = []
+    for threshold in VALUE_EDGE_THRESHOLDS:
+        kept = selections[edge >= threshold]
+        bets = int(len(kept))
+        if bets == 0:
+            rows.append({
+                'min_edge': threshold, 'bets': 0, 'roi_pct': 0.0, 'strike_rate_pct': 0.0, 'profit_units': 0.0,
+            })
+            continue
+        profit = np.where(kept['won'] == 1, kept['sp'] - 1.0, -1.0)
+        rows.append({
+            'min_edge': threshold,
+            'bets': bets,
+            'roi_pct': float(np.mean(profit) * 100.0),
+            'strike_rate_pct': float(kept['won'].mean() * 100.0),
+            'profit_units': float(np.sum(profit)),
+        })
+    # Best non-baseline threshold by ROI, requiring a minimum sample so a
+    # threshold that only clears 3 lucky bets can't look like the standout.
+    candidates = [r for r in rows if r['min_edge'] > 0.0 and r['bets'] >= MIN_VALIDATION_BETS]
+    best_threshold = max(candidates, key=lambda r: r['roi_pct'])['min_edge'] if candidates else None
+    return {'thresholds': rows, 'best_threshold': best_threshold}
+
+
 def _compare_model_selections(reference_name, challenger_name, reference_selections, challenger_selections):
     """Compare two models' top picks on the same validation races."""
     joined = reference_selections[['row_id', 'won', 'sp']].join(
@@ -2652,8 +2739,19 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     dates_ordered = dates.iloc[order].reset_index(drop=True)
     track_by_race_id = {}
     if 'meeting_track' in df.columns:
-        track_by_race_id = df.drop_duplicates(subset=['race_id']).set_index('race_id')['meeting_track'].to_dict()
-    tracks_ordered = [track_by_race_id.get(rid) for rid in race_ids]
+        # Key on str(race_id) rather than the raw column dtype: df['race_id']
+        # and race_ids (threaded through build_training_set's row-by-row
+        # feature-extraction loop above) are normally the same dtype since
+        # both trace back to this same df, but a dict keyed on a numpy/py
+        # scalar mismatch (e.g. numpy.int64 vs Python int after an
+        # intervening pandas op) fails the lookup silently — every race_id
+        # simply misses and every fold's tracks show "unknown" with no error.
+        # Normalising both sides to str removes that failure mode entirely.
+        track_by_race_id = {
+            str(k): v for k, v in
+            df.drop_duplicates(subset=['race_id']).set_index('race_id')['meeting_track'].to_dict().items()
+        }
+    tracks_ordered = [track_by_race_id.get(str(rid)) for rid in race_ids]
     # Fold-composition logging (top_tracks=unknown) has no way to distinguish
     # "this fold genuinely has no track data" from "track lookup is broken for
     # every fold" — the latter previously showed up identically and silently.
@@ -3059,6 +3157,27 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     for result in results:
         result['metrics']['selection_score'] = result['selection_score']
         result['metrics']['validation_period'] = validation_period
+        try:
+            result['metrics']['value_edge_analysis'] = _value_edge_backtest(
+                selection_frames.get(result['model_type'])
+            )
+        except Exception as e:
+            log.warning(f"Value-edge diagnostic failed for {result['model_type']} (non-fatal): {e}")
+
+    best_analysis = (best['metrics'].get('value_edge_analysis') or {})
+    baseline_row = next((r for r in best_analysis.get('thresholds', []) if r['min_edge'] == 0.0), None)
+    best_threshold = best_analysis.get('best_threshold')
+    best_threshold_row = next(
+        (r for r in best_analysis.get('thresholds', []) if r['min_edge'] == best_threshold), None
+    ) if best_threshold is not None else None
+    if baseline_row and best_threshold_row:
+        log.info(
+            "Value/odds-aware bet filtering diagnostic for %s (no promotion/selection-score effect — audit only): "
+            "no_filter roi=%.1f%% bets=%s vs min_edge=%.2f roi=%.1f%% bets=%s strike_rate=%.1f%%",
+            best['model_type'], baseline_row['roi_pct'], baseline_row['bets'],
+            best_threshold_row['min_edge'], best_threshold_row['roi_pct'], best_threshold_row['bets'],
+            best_threshold_row['strike_rate_pct'],
+        )
     return best, results
 
 
@@ -3212,6 +3331,26 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
         ]
         bootstrap_p_value = _paired_bootstrap_p_value(challenger_fold_rois, champion_fold_rois)
 
+        # Auditability: both sides' validation_period (start/end of the
+        # out-of-sample date range each Champion Score was computed on) is
+        # already persisted in selection_metrics by run_model_competition.
+        # This run's challenger and the stored champion are each scored on
+        # whatever the trailing 20%-by-date slice looked like AT THE TIME they
+        # were produced — for a champion promoted a while ago, that window can
+        # have fully rolled past by now, so a raw score comparison would be
+        # judging the two models on non-comparable races without any visible
+        # sign of it. This doesn't block promotion (the bootstrap significance
+        # gate above already guards against noise) — it only makes a
+        # non-overlapping comparison visible instead of silent.
+        windows_comparable, window_note = _validation_windows_overlap_note(
+            challenger_window=(validation_metrics or {}).get('validation_period'),
+            champion_window=champion_metrics.get('validation_period'),
+        )
+        if not windows_comparable:
+            log.warning(
+                "Challenger %s vs champion %s: %s", challenger_id, champion[0] if champion else None, window_note,
+            )
+
         if challenger_roi is None or challenger_sr is None or challenger_score is None:
             reason = "Rejected: challenger validation metrics or Champion Score missing"
         elif not challenger_roi_positive:
@@ -3239,11 +3378,14 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
                     promote = True
                     stale_note = " (active champion was stale: rollback review — see ml_pipeline_alerts)" if champion_is_stale else ""
                     significance_note = f", bootstrap p={bootstrap_p_value:.3f}" if bootstrap_p_value is not None else ""
+                    comparability_note = "" if windows_comparable else f" [{window_note}]"
                     reason = (f"Promoted: challenger Champion Score {challenger_score:.3f} beat "
-                              f"Champion Score {champion_score:.3f} under out-of-sample rule{significance_note}{stale_note}")
+                              f"Champion Score {champion_score:.3f} under out-of-sample rule{significance_note}"
+                              f"{stale_note}{comparability_note}")
             else:
+                comparability_note = "" if windows_comparable else f" [{window_note}]"
                 reason = (f"Rejected: challenger Champion Score {challenger_score:.3f} did not beat "
-                          f"Champion Score {champion_score:.3f}")
+                          f"Champion Score {champion_score:.3f}{comparability_note}")
 
         if promote:
             old_champion_id = champion[0] if champion else None
