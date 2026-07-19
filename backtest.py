@@ -2107,7 +2107,43 @@ def _selection_score_from_metrics(metrics, force_recompute=False):
     blended_roi = (0.3 * holdout_roi) + (0.7 * walk_forward_mean_roi) if has_walk_forward else (0.3 * holdout_roi)
     walk_forward_penalty = float(walk_forward.get('roi_std', 0.0) or 0.0)
     calibration_penalty = (float(metrics.get('log_loss', 0.0) or 0.0) * 10.0) + (float(metrics.get('brier_score', 0.0) or 0.0) * 25.0) + (float(calibration.get('expected_calibration_error', 0.0) or 0.0) * 100.0)
-    return float(blended_roi + (0.5 * strike_rate) - calibration_penalty - (0.05 * stability_penalty) - (1.0 * walk_forward_penalty))
+
+    # Realistic-staking signal (run 141 item 10): flat-stake ROI assumes every
+    # bet is the same uniform unit, which flatters a model whose "wins" arrive
+    # on bets a real bankroll couldn't safely size the same way. kelly_staking
+    # simulates capped fractional-Kelly sizing off the model's own predicted
+    # probabilities and compounds bet-by-bet; growth_rate_per_bet is its
+    # geometric per-bet rate (what Kelly actually optimises for), comparable
+    # across models the same way mean-per-bet ROI already is. This is blended
+    # in on the same 0.3 holdout / 0.7 walk-forward split as ROI above, and a
+    # model whose realistic-staking growth is unstable fold-to-fold or would
+    # have hit ruin under this sizing is penalised, not just one with volatile
+    # flat-stake ROI.
+    holdout_kelly = metrics.get('kelly_staking') or {}
+    holdout_kelly_growth_pct = float(holdout_kelly.get('growth_rate_per_bet', 0.0) or 0.0) * 100.0
+    fold_kelly_growth = [float(f.get('kelly_growth_rate', 0.0) or 0.0) * 100.0
+                          for f in (walk_forward.get('folds') or []) if f.get('bets', 0)]
+    has_kelly_walk_forward = len(fold_kelly_growth) > 0
+    walk_forward_mean_kelly_growth = float(np.mean(fold_kelly_growth)) if has_kelly_walk_forward else 0.0
+    blended_kelly_growth = (
+        (0.3 * holdout_kelly_growth_pct) + (0.7 * walk_forward_mean_kelly_growth)
+        if has_kelly_walk_forward else (0.3 * holdout_kelly_growth_pct)
+    )
+    kelly_growth_penalty = float(walk_forward.get('kelly_growth_std', 0.0) or 0.0)
+    kelly_drawdown_penalty = float(holdout_kelly.get('max_drawdown_pct', 0.0) or 0.0) * 0.02
+    kelly_ruin_penalty = 10.0 if holdout_kelly.get('ruined') else 0.0
+
+    return float(
+        blended_roi
+        + blended_kelly_growth
+        + (0.5 * strike_rate)
+        - calibration_penalty
+        - (0.05 * stability_penalty)
+        - (1.0 * walk_forward_penalty)
+        - (1.0 * kelly_growth_penalty)
+        - kelly_drawdown_penalty
+        - kelly_ruin_penalty
+    )
 
 
 def _promotion_rule_text():
@@ -2116,9 +2152,12 @@ def _promotion_rule_text():
         f"positive validation ROI, strike rate >= {MIN_PROMOTION_STRIKE_RATE_PCT:.1f}%, and Champion Score "
         f"> active Champion Score + {PROMOTION_SELECTION_SCORE_EDGE:.3f}. "
         "Champion Score is stored internally as selection_score and equals "
-        "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI) + 0.5*strike_rate - calibration penalties "
-        "(log loss, Brier score, expected calibration error) - stability penalty - walk-forward cross-fold ROI-std penalty; "
-        "a model with no walk-forward evidence gets no credit for its holdout ROI beyond a 0.3x weight. "
+        "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI) + (0.3*holdout Kelly per-bet growth% + 0.7*mean "
+        "walk-forward-fold Kelly per-bet growth%) + 0.5*strike_rate - calibration penalties (log loss, Brier "
+        "score, expected calibration error) - stability penalty - walk-forward cross-fold ROI-std penalty - "
+        "walk-forward cross-fold Kelly-growth-std penalty - 0.02*holdout Kelly max-drawdown% - a flat 10-point "
+        "penalty if capped fractional-Kelly staking would have hit bankroll ruin on the holdout; "
+        "a model with no walk-forward evidence gets no credit for its holdout numbers beyond a 0.3x weight. "
         "ROI alone is never sufficient."
     )
 RF_BEST_ARTIFACT_NAME = 'form_analyst_best_random_forest.pkl'
@@ -2232,7 +2271,8 @@ def _simulate_kelly_staking(selections, kelly_fraction_multiplier=KELLY_FRACTION
     practice without changing model ranking.
     """
     if selections.empty:
-        return {'bankroll_growth': 0.0, 'final_bankroll': 1.0, 'max_drawdown_pct': 0.0, 'ruined': False}
+        return {'bankroll_growth': 0.0, 'final_bankroll': 1.0, 'max_drawdown_pct': 0.0, 'ruined': False,
+                'growth_rate_per_bet': 0.0}
     bankroll = 1.0
     peak = 1.0
     max_drawdown_pct = 0.0
@@ -2251,11 +2291,19 @@ def _simulate_kelly_staking(selections, kelly_fraction_multiplier=KELLY_FRACTION
         peak = max(peak, bankroll)
         if peak > 0:
             max_drawdown_pct = max(max_drawdown_pct, (peak - bankroll) / peak)
+    bets_placed = int(len(selections))
+    # Geometric mean per-bet multiplier, i.e. the compounding growth rate the
+    # Kelly criterion actually optimises for — unlike total bankroll_growth,
+    # this is comparable across models that placed different numbers of bets
+    # over the same holdout/fold, the same way flat-stake ROI (a per-bet mean)
+    # already is.
+    growth_rate_per_bet = float(bankroll ** (1.0 / bets_placed) - 1.0) if bets_placed and bankroll > 0 else 0.0
     return {
         'bankroll_growth': float(bankroll - 1.0),
         'final_bankroll': float(bankroll),
         'max_drawdown_pct': float(max_drawdown_pct * 100.0),
         'ruined': bool(ruined),
+        'growth_rate_per_bet': growth_rate_per_bet,
     }
 
 
@@ -2395,7 +2443,7 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
     n = len(X_all)
     empty_result = {
         'n_splits': 0, 'n_splits_requested': n_splits, 'folds': [],
-        'roi_std': 0.0, 'strike_rate_std': 0.0, 'embargo_rows': embargo_rows,
+        'roi_std': 0.0, 'strike_rate_std': 0.0, 'kelly_growth_std': 0.0, 'embargo_rows': embargo_rows,
     }
     if n < (n_splits + 1) * 20:
         return empty_result
@@ -2441,18 +2489,21 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
                 'bets': fold_metrics['number_of_bets'],
                 'roi': fold_metrics['roi'],
                 'strike_rate': fold_metrics['strike_rate'],
+                'kelly_growth_rate': fold_metrics['kelly_staking']['growth_rate_per_bet'],
             })
         except Exception as e:
             log.warning(f"Walk-forward fold {fold_idx} failed for {type(model).__name__}: {e}")
 
     roi_values = [f['roi'] for f in folds if f['bets'] > 0]
     sr_values = [f['strike_rate'] for f in folds if f['bets'] > 0]
+    kelly_growth_values = [f['kelly_growth_rate'] for f in folds if f['bets'] > 0]
     return {
         'n_splits': len(folds),
         'n_splits_requested': n_splits,
         'folds': folds,
         'roi_std': float(np.std(roi_values, ddof=0)) if len(roi_values) > 1 else 0.0,
         'strike_rate_std': float(np.std(sr_values, ddof=0)) if len(sr_values) > 1 else 0.0,
+        'kelly_growth_std': float(np.std(kelly_growth_values, ddof=0)) if len(kelly_growth_values) > 1 else 0.0,
         'embargo_rows': embargo_rows,
     }
 
@@ -2806,7 +2857,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
             )
         except Exception as e:
             log.warning(f"Walk-forward stability check failed for {result['model_type']}: {e}")
-            walk_forward = {'n_splits': 0, 'n_splits_requested': WALK_FORWARD_N_SPLITS, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0, 'embargo_rows': WALK_FORWARD_EMBARGO_ROWS}
+            walk_forward = {'n_splits': 0, 'n_splits_requested': WALK_FORWARD_N_SPLITS, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0, 'kelly_growth_std': 0.0, 'embargo_rows': WALK_FORWARD_EMBARGO_ROWS}
         walk_forward['fold_boundaries'] = fold_boundaries
         result['metrics']['walk_forward'] = walk_forward
         walk_forward_by_model[result['model_type']] = walk_forward
@@ -2945,7 +2996,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
             )
         except Exception as e:
             log.warning(f"Walk-forward stability check failed for {result['model_type']}: {e}")
-            walk_forward = {'n_splits': 0, 'n_splits_requested': WALK_FORWARD_N_SPLITS, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0, 'embargo_rows': WALK_FORWARD_EMBARGO_ROWS}
+            walk_forward = {'n_splits': 0, 'n_splits_requested': WALK_FORWARD_N_SPLITS, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0, 'kelly_growth_std': 0.0, 'embargo_rows': WALK_FORWARD_EMBARGO_ROWS}
         walk_forward['fold_boundaries'] = fold_boundaries
         result['metrics']['walk_forward'] = walk_forward
         log.info(

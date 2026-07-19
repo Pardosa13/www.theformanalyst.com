@@ -45,7 +45,8 @@ def test_kelly_staking_never_stakes_more_than_the_configured_cap():
 
 def test_kelly_staking_handles_empty_selections():
     result = backtest._simulate_kelly_staking(_selections([]))
-    assert result == {"bankroll_growth": 0.0, "final_bankroll": 1.0, "max_drawdown_pct": 0.0, "ruined": False}
+    assert result == {"bankroll_growth": 0.0, "final_bankroll": 1.0, "max_drawdown_pct": 0.0, "ruined": False,
+                       "growth_rate_per_bet": 0.0}
 
 
 def test_evaluate_model_on_validation_includes_kelly_staking_metric():
@@ -65,4 +66,6 @@ def test_evaluate_model_on_validation_includes_kelly_staking_metric():
     metrics = backtest.evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val)
 
     assert "kelly_staking" in metrics
-    assert set(metrics["kelly_staking"].keys()) == {"bankroll_growth", "final_bankroll", "max_drawdown_pct", "ruined"}
+    assert set(metrics["kelly_staking"].keys()) == {
+        "bankroll_growth", "final_bankroll", "max_drawdown_pct", "ruined", "growth_rate_per_bet",
+    }

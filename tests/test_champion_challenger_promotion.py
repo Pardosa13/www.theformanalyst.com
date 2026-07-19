@@ -348,3 +348,70 @@ def test_bootstrap_significance_gate_passes_consistent_improvement():
 def test_bootstrap_significance_gate_skipped_with_fewer_than_two_folds():
     assert backtest._paired_bootstrap_p_value([5.0], [-5.0]) is None
     assert backtest._paired_bootstrap_p_value([], []) is None
+
+
+def _base_recompute_metrics(**overrides):
+    base = {
+        "roi": 10.0,
+        "strike_rate": 20.0,
+        "kelly_staking": {"growth_rate_per_bet": 0.01, "max_drawdown_pct": 5.0, "ruined": False},
+        "walk_forward": {
+            "folds": [
+                {"roi": 8.0, "strike_rate": 19.0, "bets": 50, "kelly_growth_rate": 0.008},
+                {"roi": 9.0, "strike_rate": 21.0, "bets": 50, "kelly_growth_rate": 0.009},
+            ],
+            "roi_std": 0.5,
+            "kelly_growth_std": 0.0005,
+        },
+    }
+    base.update(overrides)
+    return base
+
+
+def test_selection_score_rewards_positive_kelly_growth(monkeypatch):
+    """Item 10 (run 141): realistic Kelly-staking growth should positively
+    contribute to the Champion Score, not just be a reported side metric."""
+    with_kelly = backtest._selection_score_from_metrics(_base_recompute_metrics(), force_recompute=True)
+    without_kelly = backtest._selection_score_from_metrics(
+        _base_recompute_metrics(kelly_staking={"growth_rate_per_bet": 0.0, "max_drawdown_pct": 0.0, "ruined": False}),
+        force_recompute=True,
+    )
+    assert with_kelly > without_kelly
+
+
+def test_selection_score_heavily_penalises_kelly_ruin(monkeypatch):
+    """A model whose capped fractional-Kelly staking would have blown the
+    bankroll on the holdout must score noticeably worse, even if its flat-
+    stake ROI looks fine — the whole point of item 10 is that flat-stake ROI
+    alone can hide an unplayable staking profile."""
+    ruined_score = backtest._selection_score_from_metrics(
+        _base_recompute_metrics(kelly_staking={"growth_rate_per_bet": 0.01, "max_drawdown_pct": 5.0, "ruined": True}),
+        force_recompute=True,
+    )
+    healthy_score = backtest._selection_score_from_metrics(_base_recompute_metrics(), force_recompute=True)
+    assert healthy_score - ruined_score >= 10.0
+
+
+def test_selection_score_penalises_unstable_kelly_growth_across_folds():
+    """Two models with the same mean walk-forward Kelly growth but different
+    fold-to-fold variance should not score the same — the less stable one
+    (higher kelly_growth_std) must score lower, mirroring the existing
+    roi_std stability penalty."""
+    stable = backtest._selection_score_from_metrics(_base_recompute_metrics(), force_recompute=True)
+    unstable_metrics = _base_recompute_metrics()
+    unstable_metrics["walk_forward"]["kelly_growth_std"] = 5.0
+    unstable = backtest._selection_score_from_metrics(unstable_metrics, force_recompute=True)
+    assert stable > unstable
+
+
+def test_selection_score_backward_compatible_with_pre_kelly_records():
+    """Old rows saved before Kelly staking existed have no 'kelly_staking' key
+    at all — recomputing their score must not crash and must be unaffected
+    (0.0 contribution) rather than treating missing data as a penalty or bonus."""
+    legacy_metrics = {
+        "roi": 10.0,
+        "strike_rate": 20.0,
+        "walk_forward": {"folds": [{"roi": 8.0, "strike_rate": 19.0, "bets": 50}], "roi_std": 0.5},
+    }
+    score = backtest._selection_score_from_metrics(legacy_metrics, force_recompute=True)
+    assert isinstance(score, float)
