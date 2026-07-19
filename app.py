@@ -6154,6 +6154,7 @@ def ml_view_meeting(meeting_id):
         for idx, horse in enumerate(race['horses']):
             horse['ml_assessed_odds'] = ''
             horse['ml_win_probability'] = ''
+            horse['ml_fair_probability_pct'] = None
 
             book_entry = ml_book.get(idx)
             if not book_entry:
@@ -6161,6 +6162,11 @@ def ml_view_meeting(meeting_id):
 
             horse['ml_win_probability'] = f"{book_entry['ml_probability_110_pct']:.1f}%"
             horse['ml_assessed_odds'] = f"${book_entry['ml_assessed_odds']:.2f}"
+            # Raw (non-overround) fair win probability, used client-side to
+            # compute this horse's edge over the live market once Ladbrokes
+            # odds are polled in — kept separate from ml_win_probability
+            # above, which is inflated by the 110% book for odds display.
+            horse['ml_fair_probability_pct'] = round(book_entry['ml_fair_probability'] * 100.0, 2)
 
     return render_template(
         "MLRaceMeetings.html",

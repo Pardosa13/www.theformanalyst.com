@@ -324,6 +324,28 @@
 .vm-race-card tbody tr.ml-agreement-highlight:hover {
   filter: brightness(1.16);
 }
+/* Value-edge column — display-only, opt-in highlight, never hides a row */
+.edge-value.edge-positive { color: #34d399; }
+.edge-value.edge-negative { color: #f87171; }
+.edge-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #22d3ee 0%, #0e7490 100%);
+  color: #04252b;
+}
+.vm-race-card tbody tr.edge-highlight {
+  background: rgba(34, 211, 238, 0.14) !important;
+  border-left: 5px solid #22d3ee !important;
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.30), 0 0 16px rgba(34, 211, 238, 0.16);
+}
+.vm-race-card tbody tr.edge-highlight:hover { filter: brightness(1.16); }
+
 .vm-ml-shadow-badge,
 .vm-ml-agreement-badge {
   display: inline-flex;
@@ -1513,6 +1535,18 @@ function updateScratchings(meetingId) {
   {% endfor %}
 </div>
 
+<!-- Edge sort/highlight controls — display-only, never removes or hides a horse -->
+<div class="vm-nav-card">
+  <span class="vm-nav-label">Value Edge:</span>
+  <button type="button" id="edge-sort-toggle" class="vm-nav-pill" style="background:linear-gradient(135deg,#00e5b0 0%,#006b5e 100%); cursor:pointer; border:none;" onclick="toggleEdgeSort()">
+    ⚡ Sort each race by Edge
+  </button>
+  <button type="button" id="edge-highlight-toggle" class="vm-nav-pill" style="background:linear-gradient(135deg,#22d3ee 0%,#0e7490 100%); cursor:pointer; border:none;" onclick="toggleEdgeHighlight()">
+    ✨ Highlight high-edge horses
+  </button>
+  <span style="font-size:11px; color:var(--text-muted);">Every horse stays visible either way — this only changes order/emphasis.</span>
+</div>
+
 <!-- Filter bar placeholder — JS appends here -->
 <div id="filter-bar-placeholder"></div>
 
@@ -1573,6 +1607,7 @@ function updateScratchings(meetingId) {
           <th style="padding:12px; text-align:center;">Assessed Odds</th>
           <th style="padding:12px; text-align:center;">Ladbrokes Price</th>
           <th style="padding:12px; text-align:center;">Win %</th>
+          <th style="padding:12px; text-align:center;" title="Model's fair win probability minus the market's implied probability from the live Ladbrokes price. A bigger positive edge means the model likes this horse more than the market does.">Edge</th>
           {% if current_user.is_admin %}
           <th style="padding:12px; text-align:left;">Notes</th>
           {% endif %}
@@ -1584,6 +1619,7 @@ function updateScratchings(meetingId) {
         <tr data-selection-id="{{ horse.betfair_selection_id or '' }}"
             data-horse-id="{{ horse.horse_id }}"
             data-active-components="{{ horse.matched_component_keys|join(',') }}"
+            data-ml-win-prob-pct="{{ horse.ml_fair_probability_pct if horse.ml_fair_probability_pct is not none else '' }}"
             class="{% if horse.is_scratched %}horse-scratched{% endif %}{% if is_ml_top %} ml-agreement-highlight{% endif %}">
 
           <td style="padding:12px; text-align:center; font-weight:bold; border-bottom:1px solid #e2e8f0;">
@@ -1623,6 +1659,10 @@ function updateScratchings(meetingId) {
           </td>
           <td style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0;">
             {% if horse.ml_win_probability %}{{ horse.ml_win_probability }}{% else %}<span style="color:#666;font-size:13px">N/A</span>{% endif %}
+          </td>
+          <td class="edge-cell" style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0; font-weight:700;">
+            <!-- Populated once Ladbrokes price arrives: model fair win% minus market implied% -->
+            <span class="edge-value" style="color:#666;font-size:13px;">—</span>
           </td>
           {% if current_user.is_admin %}
 <td style="padding:12px; border-bottom:1px solid #e2e8f0; font-size:11px; max-width:300px;">
@@ -2809,6 +2849,87 @@ document.addEventListener('DOMContentLoaded', function() {
     highlightBiasButton(currentBias);
 });
 // ══════════════════════════════════════════
+//  VALUE EDGE — model fair win probability vs. market implied probability
+//  Additional information only: every horse in every race is always shown
+//  with its score/win% as before. This never filters or hides a selection.
+// ══════════════════════════════════════════
+var EDGE_HIGHLIGHT_THRESHOLD_PCT = 5; // matches backtest.py's VALUE_EDGE_THRESHOLDS "meaningful" bucket
+var edgeHighlightEnabled = false;
+var edgeSortEnabled = false;
+var _edgeOriginalOrder = {}; // raceNumber -> array of <tr> in server (score) order
+
+function updateEdgeCell(row, horseOdds) {
+    var edgeCell = row.querySelector('.edge-cell .edge-value');
+    if (!edgeCell) return;
+
+    var mlProbPct = parseFloat(row.dataset.mlWinProbPct);
+    var price = horseOdds && horseOdds.win ? parseFloat(horseOdds.win) : NaN;
+
+    if (isNaN(mlProbPct) || isNaN(price) || price <= 0) {
+        delete row.dataset.edge;
+        edgeCell.className = 'edge-value';
+        edgeCell.style.color = '#666';
+        edgeCell.style.fontSize = '13px';
+        edgeCell.textContent = '—';
+        row.classList.remove('edge-highlight');
+        return;
+    }
+
+    var impliedPct = 100 / price;
+    var edge = mlProbPct - impliedPct;
+    row.dataset.edge = edge;
+
+    var sign = edge > 0 ? '+' : '';
+    edgeCell.className = 'edge-value ' + (edge >= 0 ? 'edge-positive' : 'edge-negative');
+    edgeCell.style.color = '';
+    edgeCell.style.fontSize = '';
+    edgeCell.title = 'Model ' + mlProbPct.toFixed(1) + '% vs market ' + impliedPct.toFixed(1) + '% (from $' + price.toFixed(2) + ')';
+    edgeCell.textContent = sign + edge.toFixed(1) + 'pp';
+    if (edge >= EDGE_HIGHLIGHT_THRESHOLD_PCT) {
+        edgeCell.innerHTML = sign + edge.toFixed(1) + 'pp<span class="edge-badge">value</span>';
+    }
+
+    row.classList.toggle('edge-highlight', edgeHighlightEnabled && edge >= EDGE_HIGHLIGHT_THRESHOLD_PCT);
+}
+
+function toggleEdgeHighlight() {
+    edgeHighlightEnabled = !edgeHighlightEnabled;
+    var btn = document.getElementById('edge-highlight-toggle');
+    if (btn) btn.style.opacity = edgeHighlightEnabled ? '1' : '0.6';
+    document.querySelectorAll('tr[data-edge]').forEach(function(row) {
+        var edge = parseFloat(row.dataset.edge);
+        row.classList.toggle('edge-highlight', edgeHighlightEnabled && edge >= EDGE_HIGHLIGHT_THRESHOLD_PCT);
+    });
+}
+
+function applyEdgeOrderToRace(tbody) {
+    var raceNumber = tbody.closest('.vm-race-card').dataset.raceNumber;
+    if (!_edgeOriginalOrder[raceNumber]) {
+        _edgeOriginalOrder[raceNumber] = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    }
+
+    if (!edgeSortEnabled) {
+        _edgeOriginalOrder[raceNumber].forEach(function(row) { tbody.appendChild(row); });
+        return;
+    }
+
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+        var edgeA = a.dataset.edge !== undefined ? parseFloat(a.dataset.edge) : -Infinity;
+        var edgeB = b.dataset.edge !== undefined ? parseFloat(b.dataset.edge) : -Infinity;
+        return edgeB - edgeA;
+    });
+    rows.forEach(function(row) { tbody.appendChild(row); });
+}
+
+function toggleEdgeSort() {
+    edgeSortEnabled = !edgeSortEnabled;
+    var btn = document.getElementById('edge-sort-toggle');
+    if (btn) btn.textContent = edgeSortEnabled ? '⚡ Sorted by Edge (click to reset)' : '⚡ Sort each race by Edge';
+    document.querySelectorAll('.vm-race-card tbody').forEach(applyEdgeOrderToRace);
+}
+
+// ══════════════════════════════════════════
 //  LADBROKES LIVE ODDS
 //  Polls /api/odds/ladbrokes/<uuid> every 45s
 //  Injects:
@@ -2880,6 +3001,12 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!normName) return;
 
             var horseOdds = odds[normName];
+
+            // ── 0. VALUE EDGE — model fair win% minus market implied% ──
+            // Display-only: every row keeps its edge cell updated (or reset
+            // to "—" when the market price isn't available yet); nothing is
+            // ever hidden or filtered out based on this value.
+            updateEdgeCell(row, horseOdds);
 
             // ── 1. SILK ───────────────────────────────────────────────
             var existingSilk = nameCell.querySelector('.lb-silk');
@@ -2961,6 +3088,11 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         syncVisibleSpeedMapSilks(raceNumber);
+
+        if (edgeSortEnabled) {
+            var tbodyEl = raceCard.querySelector('tbody');
+            if (tbodyEl) applyEdgeOrderToRace(tbodyEl);
+        }
 
         // Stop polling once race is settled
         if (['Closed','Final','Abandoned','Interim'].indexOf(status) !== -1) {

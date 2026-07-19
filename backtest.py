@@ -21,6 +21,7 @@ CHANGELOG - 2026-05-11:
 
 import os
 import sys
+import io
 import json
 import re
 import logging
@@ -3529,6 +3530,188 @@ def rollback_to_champion(model_id, reason='Manual Champion rollback'):
              current_id, model_id, reason)
 
 
+def _best_rejected_challenger(conn, exclude_id, expected_features=None):
+    """Best-scoring previously-rejected challenger, rescored under the CURRENT
+    formula (mirrors save_best_model_to_db's force_recompute treatment of a
+    stored champion) so this is a fair, up-to-date comparison rather than
+    trusting whatever combined_score each row happened to be saved with.
+
+    This only recomputes the SCORING FORMULA from each row's own stored
+    walk_forward — it does not regenerate walk_forward itself (that would mean
+    re-fitting every candidate, which is out of scope here). A candidate whose
+    stored feature contract no longer matches today's feature set is skipped
+    rather than trusted at face value: its walk_forward folds were computed
+    against a feature set that predates changes since made, which is exactly
+    the kind of staleness this rollback comparison must not silently rely on.
+    """
+    rows = conn.execute(text("""
+        SELECT id, model_type, model_name, combined_score, selection_metrics, pkl_data
+        FROM backtest_best_model
+        WHERE is_active = FALSE AND id != :exclude_id AND pkl_data IS NOT NULL
+        ORDER BY combined_score DESC
+        LIMIT 20
+    """), {'exclude_id': exclude_id}).fetchall()
+    best = None
+    skipped_stale_features = []
+    for row in rows:
+        metrics = {}
+        if row[4]:
+            try:
+                metrics = json.loads(row[4])
+            except Exception:
+                metrics = {}
+        if expected_features is not None and row[5]:
+            try:
+                candidate_model = joblib.load(io.BytesIO(row[5]))
+            except Exception:
+                candidate_model = None
+            candidate_features = getattr(candidate_model, 'feature_names_in_', None) if candidate_model else None
+            if candidate_features is not None and list(candidate_features) != list(expected_features):
+                skipped_stale_features.append(row[0])
+                continue
+        score = _selection_score_from_metrics(metrics, force_recompute=True) if metrics else row[3]
+        if score is None:
+            continue
+        ok, guard_reason = can_become_champion(metrics)
+        if not ok:
+            log.warning(
+                "Rejected-challenger row id=%s otherwise scored well but is ineligible for rollback: %s",
+                row[0], guard_reason,
+            )
+            continue
+        if best is None or score > best['score']:
+            best = {
+                'id': row[0], 'model_type': row[1], 'model_name': row[2], 'score': score,
+                'fold_count': _walk_forward_fold_count(metrics),
+            }
+    if skipped_stale_features:
+        log.warning(
+            "Excluded %s rejected-challenger row(s) from the rollback comparison because their stored feature "
+            "contract predates the current feature set (walk_forward folds computed on old columns can't be "
+            "trusted at face value): ids=%s",
+            len(skipped_stale_features), skipped_stale_features,
+        )
+    return best
+
+
+def _heal_stale_champion(champion_id, champion_metrics, run_id=None):
+    """Re-test a champion that's missing walk-forward validation the same way
+    a challenger is tested, persist its real Champion Score, and roll back to
+    a previously-rejected challenger if that score no longer holds up.
+
+    This is the automated equivalent of running
+    scripts/backfill_champion_walk_forward.py --apply by hand — folded
+    directly into the nightly job so the condition can't sit unresolved
+    waiting for a human to notice a log line and run the script themselves.
+
+    Returns a dict describing what happened, always including 'healed' (bool)
+    and 'detail' (str) for logging/alerting. 'healed' is only False when the
+    champion's stored data doesn't contain enough to safely re-fit it (no raw
+    metric components, no stored artifact, or a feature contract that
+    predates the current feature set) — those genuinely need a fresh model
+    trained from scratch, not a walk-forward re-test.
+    """
+    if 'roi' not in champion_metrics:
+        return {
+            'healed': False,
+            'detail': (
+                f"champion id={champion_id} has no raw metric components (roi, strike_rate, etc.) stored in "
+                "selection_metrics — only a frozen final score, if that. Its Champion Score can't be recomputed "
+                "here; it needs a full re-validation run, not a walk-forward re-test."
+            ),
+        }
+
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT pkl_data, is_active FROM backtest_best_model WHERE id = :id
+        """), {'id': champion_id}).fetchone()
+        if not row or not row[0]:
+            return {
+                'healed': False,
+                'detail': f"champion id={champion_id} has no stored pkl_data to re-fit for walk-forward folds.",
+            }
+        pkl_bytes, is_active = row[0], row[1]
+
+        try:
+            model = joblib.load(io.BytesIO(pkl_bytes))
+        except Exception as e:
+            return {'healed': False, 'detail': f"champion id={champion_id} artifact failed to load: {e}"}
+
+        log.info("Self-heal: loading historical data to re-test champion id=%s...", champion_id)
+        df, strike_rate_data = load_historical_data()
+        X, y_roi, y_won, sp_values, race_ids, horse_ids, meeting_dates = build_training_set(
+            df, strike_rate_data
+        )
+        dates = pd.to_datetime(pd.Series(meeting_dates), errors='coerce')
+        order = dates.argsort().values
+        X = X.iloc[order].reset_index(drop=True)
+        y_won = y_won.iloc[order].reset_index(drop=True)
+        sp_values = pd.Series(sp_values).iloc[order].reset_index(drop=True)
+        race_ids = [race_ids[i] for i in order]
+
+        expected_features = getattr(model, 'feature_names_in_', None)
+        if expected_features is not None and list(expected_features) != list(X.columns):
+            return {
+                'healed': False,
+                'detail': (
+                    f"champion id={champion_id}'s stored feature contract does not match the current feature "
+                    "set — it predates one or more feature-engineering changes and can't be safely re-fit on "
+                    "today's columns. This needs a fresh model, not a walk-forward re-test."
+                ),
+            }
+
+        log.info(
+            "Self-heal: running walk-forward evaluation (n_splits=%s, embargo_rows=%s) on champion id=%s...",
+            WALK_FORWARD_N_SPLITS, WALK_FORWARD_EMBARGO_ROWS, champion_id,
+        )
+        walk_forward = _walk_forward_metrics_for_model(model, X, y_won, sp_values, race_ids)
+
+        updated_metrics = {**champion_metrics, 'walk_forward': walk_forward}
+        old_score = _selection_score_from_metrics(champion_metrics, force_recompute=True)
+        new_score = _selection_score_from_metrics(updated_metrics, force_recompute=True)
+        new_fold_count = _walk_forward_fold_count(updated_metrics)
+
+        best_challenger = _best_rejected_challenger(conn, exclude_id=champion_id, expected_features=list(X.columns))
+
+        conn.execute(text("""
+            UPDATE backtest_best_model
+            SET selection_metrics = :metrics, combined_score = :score, updated_at = NOW()
+            WHERE id = :id
+        """), {'metrics': json.dumps(updated_metrics), 'score': new_score, 'id': champion_id})
+
+        rolled_back_to = None
+        if is_active and best_challenger and best_challenger['score'] > new_score + PROMOTION_SELECTION_SCORE_EDGE:
+            conn.commit()
+            reason = (
+                f"Self-heal rollback: champion {champion_id}'s re-tested Champion Score {new_score:.3f} "
+                f"(now including {walk_forward['n_splits']} walk-forward fold(s)) no longer beats "
+                f"previously-rejected challenger {best_challenger['id']}'s Champion Score "
+                f"{best_challenger['score']:.3f}."
+            )
+            log.info(reason)
+            rollback_to_champion(best_challenger['id'], reason=reason)
+            rolled_back_to = best_challenger['id']
+            if best_challenger['fold_count'] >= MIN_WALK_FORWARD_FOLDS:
+                with engine.connect() as conn2:
+                    resolve_pipeline_alert(conn2, 'champion_missing_walk_forward_validation')
+                    conn2.commit()
+        else:
+            if is_active and new_fold_count >= MIN_WALK_FORWARD_FOLDS:
+                resolve_pipeline_alert(conn, 'champion_missing_walk_forward_validation')
+            conn.commit()
+
+    detail = (
+        f"champion id={champion_id} re-tested: Champion Score {old_score:.3f} -> {new_score:.3f} "
+        f"({walk_forward['n_splits']} walk-forward fold(s))."
+    )
+    if rolled_back_to is not None:
+        detail += f" Rolled back to previously-rejected challenger id={rolled_back_to}."
+    return {
+        'healed': True, 'detail': detail, 'old_score': old_score, 'new_score': new_score,
+        'fold_count': new_fold_count, 'rolled_back_to': rolled_back_to,
+    }
+
+
 def check_active_champion_staleness(run_id=None):
     """Automated recurring (nightly) re-validation that the active champion
     isn't stale. save_best_model_to_db only re-checks this invariant when a
@@ -3536,6 +3719,13 @@ def check_active_champion_staleness(run_id=None):
     the start of every nightly run so a quiet night (e.g. every challenger
     path failed, or Track E was skipped) can't let a stale champion go
     unnoticed indefinitely between promotion attempts.
+
+    Unlike a plain warning, a stale champion found here is repaired in the
+    same run: it's re-tested with the same walk-forward procedure every
+    challenger goes through, its record is updated with the real score, and
+    if a previously-rejected challenger now scores better it's promoted in
+    its place — all without anyone needing to notice a log line and run
+    scripts/backfill_champion_walk_forward.py by hand.
     """
     with engine.connect() as conn:
         champion = conn.execute(text("""
@@ -3554,22 +3744,46 @@ def check_active_champion_staleness(run_id=None):
             except Exception:
                 champion_metrics = {}
         fold_count = _walk_forward_fold_count(champion_metrics)
-        if fold_count < MIN_WALK_FORWARD_FOLDS:
+        champion_id = champion[0]
+        is_stale = fold_count < MIN_WALK_FORWARD_FOLDS
+        if is_stale:
             log.warning(
                 "Nightly staleness check: active champion (id=%s) has only %s walk-forward fold(s) "
-                "(< MIN_WALK_FORWARD_FOLDS=%s). Run scripts/backfill_champion_walk_forward.py.",
-                champion[0], fold_count, MIN_WALK_FORWARD_FOLDS,
+                "(< MIN_WALK_FORWARD_FOLDS=%s). Self-healing now instead of waiting on a manual backfill run.",
+                champion_id, fold_count, MIN_WALK_FORWARD_FOLDS,
             )
+        conn.commit()
+
+    if not is_stale:
+        with engine.connect() as conn:
+            resolve_pipeline_alert(conn, 'champion_missing_walk_forward_validation')
+            conn.commit()
+        return
+
+    try:
+        result = _heal_stale_champion(champion_id, champion_metrics, run_id=run_id)
+    except Exception as e:
+        log.error("Self-heal of stale champion id=%s failed with an exception: %s", champion_id, e, exc_info=True)
+        result = {'healed': False, 'detail': f"self-heal raised an exception: {e}"}
+
+    with engine.connect() as conn:
+        if result['healed']:
+            # _heal_stale_champion already resolved (or deliberately left
+            # open, if the re-test still came up short on folds) the
+            # champion_missing_walk_forward_validation alert itself. This log
+            # line is the durable record of what the self-heal actually did.
+            log.info("Nightly staleness check: self-healed — %s", result['detail'])
+        else:
+            log.warning("Nightly staleness check: could not self-heal champion id=%s: %s", champion_id, result['detail'])
             record_pipeline_alert(
                 conn, 'champion_missing_walk_forward_validation',
                 message=(
-                    f"Nightly check: active champion id={champion[0]} has {fold_count} walk-forward fold(s), "
-                    f"below MIN_WALK_FORWARD_FOLDS={MIN_WALK_FORWARD_FOLDS}."
+                    f"Nightly check: active champion id={champion_id} has {fold_count} walk-forward fold(s), "
+                    f"below MIN_WALK_FORWARD_FOLDS={MIN_WALK_FORWARD_FOLDS}. Automatic self-heal could not "
+                    f"complete: {result['detail']}"
                 ),
                 severity='blocking', run_id=run_id,
             )
-        else:
-            resolve_pipeline_alert(conn, 'champion_missing_walk_forward_validation')
         conn.commit()
 
 
