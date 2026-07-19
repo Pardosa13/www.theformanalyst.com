@@ -92,12 +92,47 @@ def name_key_parts(name):
 # string: initials must be "compatible" (identical, or one is a prefix of the
 # other — e.g. "d" vs "dj" covers a middle initial present on only one side,
 # which both still refer to the same first name) and, only once that gate
-# passes, the surname is fuzzy-scored against FUZZY_MATCH_THRESHOLD. There is
+# passes, the surname is fuzzy-scored against a threshold. There is
 # deliberately no reverse path (exact surname + fuzzy initials): fuzzing the
 # initials themselves is indistinguishable from the father/son-sharing-a-
 # surname case above, so a mismatched initial always falls through to
 # "unmatched" rather than being force-matched.
+#
+# Initials-compatibility alone is still too weak: it only looks at first
+# letters, so "Jackson" and "John" are "compatible" (both start with "j")
+# even though they are unrelated names, and the same is true of "Melissa"/
+# "Matthew" and "Ella"/"Eloise". Two full given names being merely
+# initial-compatible was letting the surname score alone decide the match —
+# and surname typos/variants ("Kelly"/"Kelley", "Morris"/"Morrison",
+# "Drew"/"Drews", "Thomson"/"Thompson") routinely score in the 0.95-0.975
+# range, overlapping with genuine typos like "Olliver"/"Oliver" (0.9619).
+# No single surname-score cutoff separates those two groups.
+#
+# So when BOTH sides carry a full given-name word (not just an initial), that
+# given name must match exactly — only the surname gets fuzzed
+# (FUZZY_MATCH_THRESHOLD). When either side has only an initial to go on
+# (e.g. "Ms A Thomson", or "A & S Freedman" once its ampersand is stripped),
+# there is no given name to corroborate the match, so a stricter bar applies
+# (FUZZY_MATCH_THRESHOLD_INITIALS_ONLY) since the surname score is carrying
+# the entire decision alone.
 FUZZY_MATCH_THRESHOLD = 0.93
+FUZZY_MATCH_THRESHOLD_INITIALS_ONLY = 0.98
+
+# Multi-person partnership/team entries (e.g. "A & S Freedman", "J and K
+# Smith" — a real pattern for training partnerships) have their "&"/"and"
+# conjunction stripped as punctuation during normalisation, which collapses
+# them into what looks like one person with two initials. Fuzzy-matching that
+# combined entry to a single individual silently attaches a partnership's
+# stats to one person's row — "A & S Freedman" wrongly matched "Anthony
+# Freeman" 288 times in a single run this way. These must never reach the
+# fuzzy tier at all; they fall through to "unmatched" instead.
+_PARTNERSHIP_RE = re.compile(r"(?:^|\s)(?:&|and)(?:\s|$)", re.IGNORECASE)
+
+
+def _is_partnership_name(name):
+    if not name:
+        return False
+    return bool(_PARTNERSHIP_RE.search(str(name)))
 
 
 def _split_surname_initials(exact_key):
@@ -192,16 +227,33 @@ def _surname_prefix_index(exact_map):
     return index
 
 
+def _first_given_name(exact_key):
+    """First given-name token of a normalised 'given ... surname' string, or
+    "" if there isn't one (surname-only) or it's just a single-letter
+    initial (e.g. the "a" in "a s freedman" / "a thomson") — a single letter
+    carries no information to corroborate a match against, so callers should
+    treat that the same as "no given name available"."""
+    parts = exact_key.split()
+    if len(parts) <= 1:
+        return ""
+    first = parts[0]
+    return first if len(first) > 1 else ""
+
+
 def _fuzzy_match_exact_key(query_exact_key, exact_map, surname_index):
     """Best fuzzy candidate for query_exact_key, restricted to its surname's
     first-letter bucket. A candidate only qualifies if its initials are
     "compatible" with the query's (see _initials_compatible — this rules out
     a genuinely different first initial sharing a surname, e.g. father/son or
-    sibling trainers) AND its surname clears FUZZY_MATCH_THRESHOLD against the
-    query's. Returns (matched_key, score) or (None, 0.0)."""
+    sibling trainers). If both sides also carry a full given-name word, that
+    given name must match exactly and the surname is fuzzed against
+    FUZZY_MATCH_THRESHOLD; otherwise (either side is initials-only) the
+    surname alone must clear the stricter FUZZY_MATCH_THRESHOLD_INITIALS_ONLY.
+    Returns (matched_key, score) or (None, 0.0)."""
     query_surname, query_initials = _split_surname_initials(query_exact_key)
     if not query_surname:
         return None, 0.0
+    query_given = _first_given_name(query_exact_key)
     bucket = surname_index.get(query_surname[:1], [])
     best_key, best_score = None, 0.0
     for candidate in bucket:
@@ -210,10 +262,17 @@ def _fuzzy_match_exact_key(query_exact_key, exact_map, surname_index):
         candidate_surname, candidate_initials = _split_surname_initials(candidate)
         if not _initials_compatible(query_initials, candidate_initials):
             continue
+        candidate_given = _first_given_name(candidate)
+        if query_given and candidate_given:
+            if query_given != candidate_given:
+                continue
+            threshold = FUZZY_MATCH_THRESHOLD
+        else:
+            threshold = FUZZY_MATCH_THRESHOLD_INITIALS_ONLY
         score = _jaro_winkler_similarity(query_surname, candidate_surname)
-        if score > best_score:
+        if score >= threshold and score > best_score:
             best_key, best_score = candidate, score
-    if best_key and best_score >= FUZZY_MATCH_THRESHOLD:
+    if best_key:
         return best_key, best_score
     return None, 0.0
 
@@ -275,7 +334,7 @@ def lookup_strike_rate(name, sr_lookup):
                 return data, ("initials" if kind in {"all_initials", "first_initial"} else "surname_unique" if kind == "surname" else "exact")
         exact_map = maps.get("exact", {})
         surname_index = maps.get("_surname_prefix_index", {})
-        if keys["exact"] and exact_map:
+        if keys["exact"] and exact_map and not _is_partnership_name(name):
             matched_key, score = _fuzzy_match_exact_key(keys["exact"], exact_map, surname_index)
             if matched_key:
                 data = exact_map[matched_key]
@@ -388,7 +447,7 @@ def get_sr_win_pct_asof(name, history_lookup, as_of_date):
 
     exact_map = maps.get("exact", {})
     surname_index = maps.get("_surname_prefix_index", {})
-    if keys["exact"] and exact_map:
+    if keys["exact"] and exact_map and not _is_partnership_name(name):
         matched_key, score = _fuzzy_match_exact_key(keys["exact"], exact_map, surname_index)
         if matched_key:
             eligible = [data for snapshot_date, data in exact_map[matched_key] if snapshot_date <= as_of_date]

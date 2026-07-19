@@ -2654,6 +2654,22 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     if 'meeting_track' in df.columns:
         track_by_race_id = df.drop_duplicates(subset=['race_id']).set_index('race_id')['meeting_track'].to_dict()
     tracks_ordered = [track_by_race_id.get(rid) for rid in race_ids]
+    # Fold-composition logging (top_tracks=unknown) has no way to distinguish
+    # "this fold genuinely has no track data" from "track lookup is broken for
+    # every fold" — the latter previously showed up identically and silently.
+    # Report the lookup's own health once per run so a systemic failure (e.g.
+    # 'meeting_track' missing from df, or a race_id key mismatch) is visible
+    # in the log instead of only ever manifesting as "unknown".
+    non_null_tracks = sum(1 for t in tracks_ordered if t is not None and str(t).strip())
+    if non_null_tracks == 0 and race_ids:
+        log.warning(
+            "Track lookup produced zero non-null tracks for %s race_id(s) "
+            "('meeting_track' in df.columns=%s, track_by_race_id entries=%s) — "
+            "walk-forward fold composition will show top_tracks=unknown for "
+            "every fold. Check that df still carries 'meeting_track' and that "
+            "its race_id dtype matches race_ids.",
+            len(race_ids), 'meeting_track' in df.columns, len(track_by_race_id),
+        )
     cutoff = dates.iloc[order].quantile(0.8)
     train_mask = dates.iloc[order].reset_index(drop=True) <= cutoff
     val_mask = ~train_mask

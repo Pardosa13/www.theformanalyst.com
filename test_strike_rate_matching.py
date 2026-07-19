@@ -89,6 +89,46 @@ def test_fuzzy_tier_does_not_merge_different_initials_sharing_surname():
     assert lookup_strike_rate("A J Richards", lookup) == (None, "unmatched")
 
 
+def test_fuzzy_tier_does_not_merge_different_given_names_sharing_initial_and_close_surname():
+    # Regression (run 142): initials-compatible + a close surname score was
+    # not enough to prevent merging unrelated people whose full given names
+    # are quite different but happen to share a first letter. All of these
+    # surname pairs score in the 0.95-0.9667 range under Jaro-Winkler —
+    # overlapping with (and in some cases exceeding) genuine typos like
+    # "Olliver"/"Oliver" (0.9619) — so the given name itself must also line
+    # up before the surname fuzz is trusted.
+    lookup = build_strike_rate_lookup([
+        ("Matthew Kelley", 15, 100),
+        ("John Morrison", 12, 100),
+        ("Eloise Drews", 10, 100),
+    ])
+    assert lookup_strike_rate("Melissa Kelly", lookup) == (None, "unmatched")
+    assert lookup_strike_rate("Jackson Morris", lookup) == (None, "unmatched")
+    assert lookup_strike_rate("Ella Drew", lookup) == (None, "unmatched")
+
+
+def test_fuzzy_tier_applies_stricter_bar_when_only_initials_available():
+    # Regression (run 142): "Ms A Thomson" has no full given name to
+    # corroborate a match (just the initial "A"), so the surname score alone
+    # ("Thomson" vs "Thompson" = 0.975) must clear a stricter bar than the
+    # full-given-name-match case, not just FUZZY_MATCH_THRESHOLD.
+    lookup = build_strike_rate_lookup([("Adin Thompson", 20, 100)])
+    assert lookup_strike_rate("Ms A Thomson", lookup) == (None, "unmatched")
+
+
+def test_fuzzy_tier_never_matches_partnership_name_to_an_individual():
+    # Regression (run 142): "A & S Freedman" is a training partnership (two
+    # people). Punctuation-stripping normalisation collapses the "&" away,
+    # so without an explicit guard this looks like a single person with two
+    # initials and fuzzy-matches "Anthony Freeman" at 0.975 similarity — this
+    # wrongly attached one individual's stats to a partnership's horses 288
+    # times in a single run. Partnership names must always fall through to
+    # "unmatched" rather than being force-matched to either partner.
+    lookup = build_strike_rate_lookup([("Anthony Freeman", 8, 50)])
+    assert lookup_strike_rate("A & S Freedman", lookup) == (None, "unmatched")
+    assert lookup_strike_rate("J and K Smith", lookup) == (None, "unmatched")
+
+
 def test_log_match_stats_dedupes_repeated_fuzzy_pairs(caplog):
     # Regression: the same (query, matched_name) fuzzy pair was being logged
     # once per horse-row (50+ times at an identical timestamp) instead of once
