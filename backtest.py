@@ -254,6 +254,7 @@ def ensure_tables():
             "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS stability TEXT",
             "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS walk_forward TEXT",
             "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS selection_score FLOAT",
+            "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS kelly_staking TEXT",
         ]:
             conn.execute(text(ddl))
 
@@ -275,6 +276,47 @@ def ensure_tables():
                 repair_key VARCHAR(120) PRIMARY KEY,
                 applied_at TIMESTAMP DEFAULT NOW(),
                 notes TEXT
+            )
+        """))
+
+        # Durable, queryable flags for pipeline invariants that must not be
+        # silently swallowed by a log line that scrolls off (e.g. an active
+        # champion missing walk-forward validation, or a strike-rate match-rate
+        # regression). record_pipeline_alert()/resolve_pipeline_alert() below
+        # write to this table; an open (resolved_at IS NULL) row for a given
+        # alert_key means the condition is still true as of the last check.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS ml_pipeline_alerts (
+                id SERIAL PRIMARY KEY,
+                alert_key VARCHAR(120) NOT NULL,
+                severity VARCHAR(20) NOT NULL DEFAULT 'warning',
+                message TEXT,
+                run_id INTEGER,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                resolved_at TIMESTAMP
+            )
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_ml_pipeline_alerts_open
+            ON ml_pipeline_alerts (alert_key)
+            WHERE resolved_at IS NULL
+        """))
+
+        # Per-run jockey/trainer strike-rate match-rate history, so
+        # check_match_rate_regression() can compare unmatched-row percentage
+        # run over run and flag a regression instead of it only showing up in
+        # a log line nobody is watching.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS backtest_match_rate_history (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER REFERENCES backtest_runs(id),
+                total_horse_rows_checked INTEGER,
+                jockey_unmatched_pct FLOAT,
+                trainer_unmatched_pct FLOAT,
+                jockey_stats TEXT,
+                trainer_stats TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
             )
         """))
 
@@ -1066,9 +1108,68 @@ def build_training_set(df, strike_rate_data=None):
     log.info(f"Training set: {len(X)} horses, {X.shape[1]} features, "
              f"{y_won.sum()} winners ({y_won.mean()*100:.1f}% win rate), "
              f"avg ROI: {y_roi.mean():.3f}")
-    log_match_stats(log, jockey_sr, trainer_sr)
+    # Stashed on the function itself (rather than widening the return tuple,
+    # which every caller would need to update) so main() can persist it and
+    # raise a regression alert if unmatched-row percentage increases run over
+    # run — see check_match_rate_regression() below.
+    build_training_set.last_match_stats = log_match_stats(log, jockey_sr, trainer_sr)
 
     return X, y_roi, y_won, sp_values, race_ids, horse_ids, meeting_dates
+
+
+# Regression alert fires if unmatched% rises by more than this many percentage
+# points versus the previous run — small run-to-run noise (a handful of new
+# jockey/trainer names) shouldn't page anyone; a real regression (e.g. a
+# PuntingForm feed/schema change breaking matching) should.
+MATCH_RATE_REGRESSION_TOLERANCE_PCT = float(os.environ.get('ML_MATCH_RATE_REGRESSION_TOLERANCE_PCT', '2.0'))
+
+
+def check_match_rate_regression(run_id, match_stats):
+    """Persist this run's jockey/trainer match-rate stats and raise a durable
+    alert if unmatched-row percentage increased run over run (Section 2's
+    "regression alert if unmatched-row percentage increases run over run").
+    """
+    if not match_stats:
+        return
+    jockey_unmatched_pct = match_stats.get('jockey', {}).get('unmatched_pct', 0.0)
+    trainer_unmatched_pct = match_stats.get('trainer', {}).get('unmatched_pct', 0.0)
+
+    with engine.connect() as conn:
+        previous = conn.execute(text("""
+            SELECT jockey_unmatched_pct, trainer_unmatched_pct
+            FROM backtest_match_rate_history
+            ORDER BY id DESC LIMIT 1
+        """)).fetchone()
+
+        conn.execute(text("""
+            INSERT INTO backtest_match_rate_history
+            (run_id, total_horse_rows_checked, jockey_unmatched_pct, trainer_unmatched_pct, jockey_stats, trainer_stats)
+            VALUES (:run_id, :total, :jockey_pct, :trainer_pct, :jockey_stats, :trainer_stats)
+        """), {
+            'run_id': run_id,
+            'total': match_stats.get('total_horse_rows_checked', 0),
+            'jockey_pct': jockey_unmatched_pct,
+            'trainer_pct': trainer_unmatched_pct,
+            'jockey_stats': json.dumps(match_stats.get('jockey', {})),
+            'trainer_stats': json.dumps(match_stats.get('trainer', {})),
+        })
+
+        regressed = []
+        if previous:
+            prev_jockey_pct, prev_trainer_pct = previous
+            if prev_jockey_pct is not None and jockey_unmatched_pct > prev_jockey_pct + MATCH_RATE_REGRESSION_TOLERANCE_PCT:
+                regressed.append(f"jockey unmatched% {prev_jockey_pct:.1f} -> {jockey_unmatched_pct:.1f}")
+            if prev_trainer_pct is not None and trainer_unmatched_pct > prev_trainer_pct + MATCH_RATE_REGRESSION_TOLERANCE_PCT:
+                regressed.append(f"trainer unmatched% {prev_trainer_pct:.1f} -> {trainer_unmatched_pct:.1f}")
+
+        if regressed:
+            message = f"Strike-rate match-rate regression run over run: {'; '.join(regressed)}"
+            log.warning(message)
+            record_pipeline_alert(conn, 'strike_rate_match_rate_regression', message=message, severity='warning', run_id=run_id)
+        else:
+            resolve_pipeline_alert(conn, 'strike_rate_match_rate_regression')
+
+        conn.commit()
 
 
 # ─────────────────────────────────────────────
@@ -1144,16 +1245,39 @@ def run_random_forest(X, y_roi, y_won, meeting_dates):
 # ─────────────────────────────────────────────
 # TRACK D — GRID SEARCH (NEW)
 # ─────────────────────────────────────────────
+# Track D's original 384-combo grid (4 n_estimators × 4 max_depth × 3
+# min_samples_leaf × 2 max_features × 4 feature subsets) moved the best
+# combined score from 0.2913 to 0.2920 — effectively noise. RF has plateaued
+# on the current feature set, so this defaults to a much smaller "reduced"
+# grid and reallocates the saved compute budget to CatBoost/ensemble tuning
+# (see the expanded CatBoost search space in _optional_classifier and
+# ML_OPTUNA_TRIALS). Set ML_TRACK_D_GRID_SEARCH_MODE=full to restore the
+# original grid, or =paused to skip Track D entirely.
+TRACK_D_GRID_SEARCH_MODE = os.environ.get('ML_TRACK_D_GRID_SEARCH_MODE', 'reduced').strip().lower()
+
+
 def run_grid_search(X, y_roi, y_won, meeting_dates):
     """
-    Track D: Grid search across 1000+ hyperparameter combinations.
-    Tests 4 n_estimators × 4 max_depth × 3 min_samples_leaf × 2 max_features × 4 feature subsets.
+    Track D: Grid search across Random Forest hyperparameter combinations.
     Trains models with time-series CV (no future leakage).
-    Returns: (results_df, best_roi, best_win, top_10_models)
+    Returns: (results_df, top_10_models)
     """
     log.info("=" * 80)
-    log.info("GRID SEARCH: Training 1000+ Random Forest models")
+    log.info("GRID SEARCH: Training Random Forest models (mode=%s)", TRACK_D_GRID_SEARCH_MODE)
     log.info("=" * 80)
+
+    empty_results_df = pd.DataFrame(columns=[
+        'rank', 'combined_score', 'roi_score', 'win_score', 'n_estimators', 'max_depth',
+        'min_samples_leaf', 'max_features', 'subset', 'n_features', 'features', 'importance',
+    ])
+    if TRACK_D_GRID_SEARCH_MODE == 'paused':
+        log.info(
+            "Track D grid search is PAUSED (ML_TRACK_D_GRID_SEARCH_MODE=paused). RF plateaued on the current "
+            "feature set (a 384-combo search previously moved the best combined score by only 0.0007); Track E's "
+            "random_forest candidate falls back to its fixed default hyperparameters. Compute is reallocated to "
+            "the CatBoost/ensemble search instead."
+        )
+        return empty_results_df, []
 
     dates = pd.to_datetime(pd.Series(meeting_dates), errors='coerce')
     order = dates.argsort().values
@@ -1173,11 +1297,19 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
     feature_names = X.columns.tolist()
     log.info(f"Total grid features available: {len(feature_names)}")
 
-    # Hyperparameter grids
-    n_estimators_opts = [100, 150, 200, 250]
-    max_depth_opts = [6, 8, 10, 12]
-    min_samples_leaf_opts = [10, 15, 20]
-    max_features_opts = ['sqrt', 'log2']
+    # Hyperparameter grids. 'reduced' (default) trades grid resolution for
+    # compute reallocated to CatBoost/ensemble tuning, since RF has plateaued;
+    # 'full' restores the original exhaustive search for occasional audits.
+    if TRACK_D_GRID_SEARCH_MODE == 'full':
+        n_estimators_opts = [100, 150, 200, 250]
+        max_depth_opts = [6, 8, 10, 12]
+        min_samples_leaf_opts = [10, 15, 20]
+        max_features_opts = ['sqrt', 'log2']
+    else:
+        n_estimators_opts = [150, 250]
+        max_depth_opts = [8, 12]
+        min_samples_leaf_opts = [15, 20]
+        max_features_opts = ['sqrt', 'log2']
 
     # Feature subsets
     feature_subsets = {
@@ -1190,8 +1322,20 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
     results = []
     model_count = 0
 
-    # Time-series split for CV
-    tscv = TimeSeriesSplit(n_splits=3)
+    # Time-series split for CV. Same fold count/embargo constants as Track E's
+    # walk-forward evaluation (see WALK_FORWARD_N_SPLITS/WALK_FORWARD_EMBARGO_ROWS)
+    # so Track D and Track E results stay comparable rather than each track
+    # silently using its own fold methodology.
+    n_grid_rows = len(X)
+    try:
+        list(TimeSeriesSplit(n_splits=WALK_FORWARD_N_SPLITS, gap=WALK_FORWARD_EMBARGO_ROWS).split(np.arange(n_grid_rows)))
+        tscv = TimeSeriesSplit(n_splits=WALK_FORWARD_N_SPLITS, gap=WALK_FORWARD_EMBARGO_ROWS)
+    except Exception as e:
+        log.warning(
+            "Grid search embargo_rows=%s incompatible with dataset size (%s rows): %s; falling back to no embargo.",
+            WALK_FORWARD_EMBARGO_ROWS, n_grid_rows, e,
+        )
+        tscv = TimeSeriesSplit(n_splits=WALK_FORWARD_N_SPLITS)
 
     log.info(f"Grid: {len(n_estimators_opts)} × {len(max_depth_opts)} × {len(min_samples_leaf_opts)} × {len(max_features_opts)} × {len(feature_subsets)} = {len(n_estimators_opts) * len(max_depth_opts) * len(min_samples_leaf_opts) * len(max_features_opts) * len(feature_subsets)} total combinations")
 
@@ -1825,7 +1969,98 @@ CHAMPION_ROLLBACK_RETENTION_DAYS = int(os.environ.get('ML_CHAMPION_ROLLBACK_RETE
 # below normal top-pick strike rates (so genuine value/longshot-leaning models
 # aren't blocked) but actually screens out degenerate models.
 MIN_PROMOTION_STRIKE_RATE_PCT = float(os.environ.get('ML_MIN_PROMOTION_STRIKE_RATE_PCT', '15.0'))
+
+# ── Walk-forward methodology constants (pipeline-wide, not per-run) ────────
+# Every model compared against every other model (RF/XGBoost/LightGBM/CatBoost,
+# the ensemble, and grid-search Track D) must use the SAME fold count and the
+# same embargo, or roi_std / Champion Score comparisons across runs/models are
+# not apples-to-apples. Fix these as constants instead of literals scattered
+# across call sites so a future change to methodology can't silently apply to
+# only some candidates in a run.
+WALK_FORWARD_N_SPLITS = int(os.environ.get('ML_WALK_FORWARD_N_SPLITS', '3'))
+# Row-count gap purged between a fold's training prefix and its test slice
+# (sklearn TimeSeriesSplit's `gap`). Data is chronologically sorted one row
+# per horse-per-race, so this approximates a purge/embargo window that keeps
+# the same horse/trainer/jockey's adjacent-day form from leaking across the
+# train/validation boundary within a fold.
+WALK_FORWARD_EMBARGO_ROWS = int(os.environ.get('ML_WALK_FORWARD_EMBARGO_ROWS', '50'))
+# A champion promoted before walk-forward scoring existed (or one whose
+# history is missing folds for some other reason) must not keep "active
+# champion" status indefinitely with an un-penalised score — see the
+# walk_forward_fold_count invariant enforced in save_best_model_to_db.
+MIN_WALK_FORWARD_FOLDS = int(os.environ.get('ML_MIN_WALK_FORWARD_FOLDS', '2'))
+# Walk-forward gives only WALK_FORWARD_N_SPLITS (few, noisy) fold-level ROI
+# samples, so a strict p<0.05 significance bar would reject almost every
+# challenger on sample-size grounds alone. This is a deliberately permissive
+# but real floor: it still blocks promotions whose fold-level improvement is
+# statistically indistinguishable from noise, layered on top of (not instead
+# of) the fixed Champion Score edge above.
+PROMOTION_MAX_BOOTSTRAP_P_VALUE = float(os.environ.get('ML_PROMOTION_MAX_P_VALUE', '0.25'))
 MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
+
+
+def record_pipeline_alert(conn, alert_key, message, severity='warning', run_id=None):
+    """Open (or refresh) a durable pipeline alert. Idempotent: an already-open
+    alert with the same alert_key just gets its message/timestamp refreshed
+    rather than spawning a duplicate row, so a condition that persists across
+    many nightly runs shows up as one ongoing alert, not one row per run."""
+    existing = conn.execute(text("""
+        SELECT id FROM ml_pipeline_alerts WHERE alert_key = :key AND resolved_at IS NULL LIMIT 1
+    """), {'key': alert_key}).fetchone()
+    if existing:
+        conn.execute(text("""
+            UPDATE ml_pipeline_alerts SET message = :message, severity = :severity, run_id = :run_id, updated_at = NOW()
+            WHERE id = :id
+        """), {'id': existing[0], 'message': message, 'severity': severity, 'run_id': run_id})
+    else:
+        conn.execute(text("""
+            INSERT INTO ml_pipeline_alerts (alert_key, severity, message, run_id)
+            VALUES (:key, :severity, :message, :run_id)
+        """), {'key': alert_key, 'severity': severity, 'message': message, 'run_id': run_id})
+
+
+def resolve_pipeline_alert(conn, alert_key):
+    """Close any open alert for alert_key (no-op if none is open)."""
+    conn.execute(text("""
+        UPDATE ml_pipeline_alerts SET resolved_at = NOW(), updated_at = NOW()
+        WHERE alert_key = :key AND resolved_at IS NULL
+    """), {'key': alert_key})
+
+
+def _walk_forward_fold_count(metrics):
+    """Number of completed walk-forward folds recorded in a metrics dict, 0 if none."""
+    if not metrics:
+        return 0
+    folds = (metrics.get('walk_forward') or {}).get('folds') or []
+    return len([f for f in folds if f.get('bets', 0)])
+
+
+def _paired_bootstrap_p_value(challenger_fold_rois, champion_fold_rois, n_resamples=2000, seed=42):
+    """One-sided paired bootstrap p-value for "challenger's per-fold ROI is
+    really higher than champion's", used as a statistical-significance gate
+    alongside the fixed Champion Score margin (PROMOTION_SELECTION_SCORE_EDGE).
+
+    Only meaningful when both fold-ROI series come from the SAME fold
+    boundaries (guaranteed by WALK_FORWARD_N_SPLITS/WALK_FORWARD_EMBARGO_ROWS
+    being pipeline-wide constants rather than per-run choices) and there are
+    at least 2 paired folds; returns None otherwise, meaning "can't be
+    computed" rather than "definitely not significant" — callers should treat
+    None as "skip this gate", not as a rejection.
+    """
+    n = min(len(challenger_fold_rois or []), len(champion_fold_rois or []))
+    if n < 2:
+        return None
+    a = np.asarray(challenger_fold_rois, dtype=float)
+    b = np.asarray(champion_fold_rois, dtype=float)
+    diff = a[:n] - b[:n]
+    rng = np.random.default_rng(seed)
+    resample_idx = rng.integers(0, n, size=(n_resamples, n))
+    resampled_means = diff[resample_idx].mean(axis=1)
+    # Fraction of bootstrap resamples where the mean improvement is <= 0 —
+    # i.e. how often resampling the observed fold-level differences fails to
+    # show any real improvement at all. Lower = more confident the challenger
+    # genuinely beats the champion rather than winning on 1-2 lucky folds.
+    return float(np.mean(resampled_means <= 0.0))
 
 
 def _selection_score_from_metrics(metrics, force_recompute=False):
@@ -1981,6 +2216,49 @@ def _artifact_feature_contract_ok(model, feature_names):
         return False
     return [str(x) for x in list(stored)] == [str(x) for x in list(feature_names)]
 
+KELLY_FRACTION_MULTIPLIER = float(os.environ.get('ML_KELLY_FRACTION_MULTIPLIER', '0.5'))
+KELLY_MAX_STAKE_PCT = float(os.environ.get('ML_KELLY_MAX_STAKE_PCT', '0.05'))
+
+
+def _simulate_kelly_staking(selections, kelly_fraction_multiplier=KELLY_FRACTION_MULTIPLIER, max_stake_pct=KELLY_MAX_STAKE_PCT):
+    """Simulate fractional-Kelly bet sizing (bankroll compounds bet-by-bet)
+    using the model's own predicted win probability, instead of only ever
+    reporting ROI on a hypothetical flat uniform-unit stake. Uses half-Kelly
+    by default, capped at max_stake_pct of bankroll per bet — full Kelly is
+    high-variance and can be ruinous on a noisy probability estimate; a
+    capped half-Kelly is the standard practical compromise. This runs
+    alongside (not instead of) the flat-stake ROI metrics above, since a
+    staking plan changes what the walk-forward numbers would mean in
+    practice without changing model ranking.
+    """
+    if selections.empty:
+        return {'bankroll_growth': 0.0, 'final_bankroll': 1.0, 'max_drawdown_pct': 0.0, 'ruined': False}
+    bankroll = 1.0
+    peak = 1.0
+    max_drawdown_pct = 0.0
+    ruined = False
+    for pred, sp, won in zip(selections['pred'], selections['sp'], selections['won']):
+        if bankroll <= 0.0:
+            ruined = True
+            break
+        b = float(sp) - 1.0
+        if b <= 0:
+            continue
+        kelly = ((b * float(pred)) - (1.0 - float(pred))) / b
+        stake_pct = max(0.0, min(kelly * kelly_fraction_multiplier, max_stake_pct))
+        stake = bankroll * stake_pct
+        bankroll += (stake * b) if won == 1 else -stake
+        peak = max(peak, bankroll)
+        if peak > 0:
+            max_drawdown_pct = max(max_drawdown_pct, (peak - bankroll) / peak)
+    return {
+        'bankroll_growth': float(bankroll - 1.0),
+        'final_bankroll': float(bankroll),
+        'max_drawdown_pct': float(max_drawdown_pct * 100.0),
+        'ruined': bool(ruined),
+    }
+
+
 def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
     """Evaluate top model selection in every validation race with betting metrics."""
     pred = np.clip(_predict_win_scores(model, X_val), 1e-6, 1 - 1e-6)
@@ -2038,6 +2316,7 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
         'last_100': window_metrics(100),
         'last_250': window_metrics(250),
         'last_500': window_metrics(500),
+        'kelly_staking': _simulate_kelly_staking(selections),
         'log_loss': float(log_loss(np.asarray(y_won_val, dtype=int), pred, labels=[0, 1])),
         'brier_score': float(brier_score_loss(np.asarray(y_won_val, dtype=int), pred)),
         'calibration': _calibration_summary(y_won_val, pred),
@@ -2076,7 +2355,26 @@ def _clone_for_fold_fit(model, fold_y_train, n_calib_splits=3):
     return cloned
 
 
-def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_all, n_splits=3):
+def _safe_time_series_splits(n_rows, n_splits, gap):
+    """TimeSeriesSplit(gap=...) raises if the embargo leaves too few rows for
+    the requested fold count. Fall back to gap=0 rather than letting a
+    dataset-size edge case crash the whole walk-forward evaluation."""
+    try:
+        return list(TimeSeriesSplit(n_splits=n_splits, gap=gap).split(np.arange(n_rows)))
+    except Exception as e:
+        log.warning(
+            "Walk-forward split with embargo_rows=%s, n_splits=%s failed (%s); falling back to no embargo.",
+            gap, n_splits, e,
+        )
+        try:
+            return list(TimeSeriesSplit(n_splits=n_splits).split(np.arange(n_rows)))
+        except Exception as e2:
+            log.warning("Walk-forward split fallback (no embargo) also failed: %s", e2)
+            return []
+
+
+def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_all,
+                                     n_splits=WALK_FORWARD_N_SPLITS, embargo_rows=WALK_FORWARD_EMBARGO_ROWS):
     """Score ROI/strike-rate stability across chronological expanding-window folds.
 
     The headline validation metrics above come from a single 80/20 time-ordered
@@ -2087,19 +2385,31 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
     good in one lucky/unlucky window (rather than consistently) can be
     penalised in the Champion Score instead of silently winning promotion.
     X_all/y_won_all/sp_all/race_ids_all must already be time-ordered.
+
+    n_splits/embargo_rows default to the pipeline-wide WALK_FORWARD_N_SPLITS /
+    WALK_FORWARD_EMBARGO_ROWS constants so every model in a run — and every
+    run compared against another — uses identical fold boundaries. Both are
+    also stored on the returned dict so it travels with each model's
+    persisted metadata for cross-run auditing.
     """
     n = len(X_all)
+    empty_result = {
+        'n_splits': 0, 'n_splits_requested': n_splits, 'folds': [],
+        'roi_std': 0.0, 'strike_rate_std': 0.0, 'embargo_rows': embargo_rows,
+    }
     if n < (n_splits + 1) * 20:
-        return {'n_splits': 0, 'n_splits_requested': n_splits, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0}
+        return empty_result
 
     X_all = X_all.reset_index(drop=True)
     y_won_all = pd.Series(y_won_all).reset_index(drop=True)
     sp_array = np.asarray(sp_all, dtype=float)
     race_ids_list = list(race_ids_all)
 
-    tscv = TimeSeriesSplit(n_splits=n_splits)
+    splits = _safe_time_series_splits(n, n_splits, embargo_rows)
+    if not splits:
+        return empty_result
     folds = []
-    for fold_idx, (train_idx, test_idx) in enumerate(tscv.split(X_all)):
+    for fold_idx, (train_idx, test_idx) in enumerate(splits):
         if len(test_idx) < 10 or len(train_idx) < 20:
             continue
 
@@ -2143,33 +2453,50 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
         'folds': folds,
         'roi_std': float(np.std(roi_values, ddof=0)) if len(roi_values) > 1 else 0.0,
         'strike_rate_std': float(np.std(sr_values, ddof=0)) if len(sr_values) > 1 else 0.0,
+        'embargo_rows': embargo_rows,
     }
 
 
-def _log_walk_forward_fold_composition(dates_all, tracks_all, n_splits=3):
+def _log_walk_forward_fold_composition(dates_all, tracks_all, n_splits=WALK_FORWARD_N_SPLITS,
+                                        embargo_rows=WALK_FORWARD_EMBARGO_ROWS):
     """Log one compact line describing what each walk-forward test fold actually
     contains (date range + top tracks), so a fold that looks bad in the ROI/
     strike-rate numbers can be traced back to a specific period/venue mix
     without needing a DB query. Shared across all candidates (fold boundaries
     are identical for every model), so this runs once per Track E run rather
     than once per candidate, to keep log volume the same as before.
+
+    Returns the same per-fold boundary summaries as a list of dicts so callers
+    can attach them to every model's persisted walk_forward metadata — proof
+    that any two models being compared used identical fold boundaries, not
+    just a shared log line.
     """
     n = len(dates_all)
     if n < (n_splits + 1) * 20:
-        return
+        return []
     dates_all = pd.to_datetime(pd.Series(dates_all).reset_index(drop=True), errors='coerce')
     tracks_all = pd.Series(tracks_all).reset_index(drop=True) if tracks_all is not None else pd.Series([None] * n)
-    tscv = TimeSeriesSplit(n_splits=n_splits)
+    splits = _safe_time_series_splits(n, n_splits, embargo_rows)
     summaries = []
-    for fold_idx, (_, test_idx) in enumerate(tscv.split(np.arange(n))):
+    boundaries = []
+    for fold_idx, (_, test_idx) in enumerate(splits):
         fold_dates = dates_all.iloc[test_idx].dropna()
         fold_tracks = tracks_all.iloc[test_idx].dropna()
-        date_range = (
-            f"{fold_dates.min().date()}..{fold_dates.max().date()}" if len(fold_dates) else "unknown"
-        )
-        top_tracks = ",".join(f"{t}x{c}" for t, c in Counter(fold_tracks).most_common(3)) or "unknown"
+        date_start = fold_dates.min().date().isoformat() if len(fold_dates) else None
+        date_end = fold_dates.max().date().isoformat() if len(fold_dates) else None
+        date_range = f"{date_start}..{date_end}" if date_start else "unknown"
+        top_tracks_counts = Counter(fold_tracks).most_common(3)
+        top_tracks = ",".join(f"{t}x{c}" for t, c in top_tracks_counts) or "unknown"
         summaries.append(f"fold{fold_idx}=[{date_range} rows={len(test_idx)} top_tracks={top_tracks}]")
-    log.info("Walk-forward fold composition (shared by all candidates): %s", " ".join(summaries))
+        boundaries.append({
+            'fold': fold_idx, 'date_start': date_start, 'date_end': date_end,
+            'rows': len(test_idx), 'top_tracks': [{'track': t, 'count': c} for t, c in top_tracks_counts],
+        })
+    log.info(
+        "Walk-forward fold composition (shared by all candidates, n_splits=%s embargo_rows=%s): %s",
+        n_splits, embargo_rows, " ".join(summaries),
+    )
+    return boundaries
 
 
 def _optional_classifier(model_type, trial=None):
@@ -2202,11 +2529,20 @@ def _optional_classifier(model_type, trial=None):
         }
         return LGBMClassifier(**params)
     if model_type == 'catboost':
+        # CatBoost showed by far the best walk-forward stability of any
+        # candidate (roi_std=0.45 vs 2.85-4.01 for RF/XGBoost/LightGBM), so its
+        # search space is deliberately wider than the other two: a bigger
+        # iterations/depth/learning_rate range plus l2_leaf_reg and
+        # bagging_temperature (regularisation/row-sampling controls neither
+        # xgboost nor lightgbm are tuned on here), reallocating the compute
+        # freed up by reducing Track D's RF grid search.
         from catboost import CatBoostClassifier
         return CatBoostClassifier(
-            iterations=trial.suggest_int('iterations', 80, 250) if trial else 160,
-            depth=trial.suggest_int('depth', 3, 8) if trial else 5,
-            learning_rate=trial.suggest_float('learning_rate', 0.02, 0.2, log=True) if trial else 0.06,
+            iterations=trial.suggest_int('iterations', 80, 400) if trial else 200,
+            depth=trial.suggest_int('depth', 3, 10) if trial else 6,
+            learning_rate=trial.suggest_float('learning_rate', 0.01, 0.3, log=True) if trial else 0.06,
+            l2_leaf_reg=trial.suggest_float('l2_leaf_reg', 1.0, 10.0, log=True) if trial else 3.0,
+            bagging_temperature=trial.suggest_float('bagging_temperature', 0.0, 1.0) if trial else 1.0,
             loss_function='Logloss',
             random_seed=42,
             verbose=False,
@@ -2367,7 +2703,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         'random_forest': CalibratedClassifierCV(
             RandomForestClassifier(random_state=42, n_jobs=-1, class_weight='balanced_subsample', **rf_params),
             method='isotonic',
-            cv=TimeSeriesSplit(n_splits=3),
+            cv=TimeSeriesSplit(n_splits=WALK_FORWARD_N_SPLITS),
         )
     }
     log.info(
@@ -2408,14 +2744,31 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
                     scores = np.clip(_predict_win_scores(model, X_tune_eval), 1e-6, 1 - 1e-6)
                     return -float(log_loss(y_tune_eval, scores, labels=[0, 1]))
 
+                # CatBoost gets a bigger trial budget by default (see the wider
+                # search space in _optional_classifier above) — compute freed
+                # up by reducing Track D's RF grid search is spent here rather
+                # than split evenly across all three boosted candidates.
+                default_trials = {'catboost': '24'}.get(mt, '12')
                 study = optuna.create_study(direction='maximize')
                 study.optimize(
                     objective,
-                    n_trials=int(os.environ.get('ML_OPTUNA_TRIALS', '12')),
+                    n_trials=int(os.environ.get(f'ML_OPTUNA_TRIALS_{mt.upper()}', os.environ.get('ML_OPTUNA_TRIALS', default_trials))),
                     timeout=int(os.environ.get('ML_OPTUNA_TIMEOUT_SECONDS', '180')),
                     show_progress_bar=False
                 )
-                candidates[mt] = _optional_classifier(mt, study.best_trial)
+                # Calibrate the tuned model itself, not just penalise its raw
+                # log loss/Brier/ECE after the fact in the Champion Score.
+                # Previously only random_forest above got isotonic calibration
+                # via CalibratedClassifierCV — every boosted challenger trained
+                # and shipped raw predict_proba output, so their probabilities
+                # were never actually corrected, only scored down for being
+                # uncalibrated. Same treatment as random_forest: calibration is
+                # part of fitting the candidate, not a post-hoc score penalty.
+                candidates[mt] = CalibratedClassifierCV(
+                    _optional_classifier(mt, study.best_trial),
+                    method='isotonic',
+                    cv=TimeSeriesSplit(n_splits=WALK_FORWARD_N_SPLITS),
+                )
             except Exception as e:
                 log.warning(f"Skipping {mt} challenger; training/tuning failed: {e}")
     except Exception as e:
@@ -2439,8 +2792,9 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     # Walk-forward stability for each base candidate is computed here (before the
     # ensemble is built) so it can both (a) inform ensemble member weights below
     # and (b) avoid a second, redundant walk-forward pass over the same models later.
+    fold_boundaries = []
     try:
-        _log_walk_forward_fold_composition(dates_ordered, tracks_ordered, n_splits=3)
+        fold_boundaries = _log_walk_forward_fold_composition(dates_ordered, tracks_ordered)
     except Exception as e:
         log.warning(f"Walk-forward fold composition logging failed (non-fatal): {e}")
 
@@ -2448,11 +2802,12 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     for result in results:
         try:
             walk_forward = _walk_forward_metrics_for_model(
-                result['model'], X, y_won, sp_values, race_ids, n_splits=3
+                result['model'], X, y_won, sp_values, race_ids
             )
         except Exception as e:
             log.warning(f"Walk-forward stability check failed for {result['model_type']}: {e}")
-            walk_forward = {'n_splits': 0, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0}
+            walk_forward = {'n_splits': 0, 'n_splits_requested': WALK_FORWARD_N_SPLITS, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0, 'embargo_rows': WALK_FORWARD_EMBARGO_ROWS}
+        walk_forward['fold_boundaries'] = fold_boundaries
         result['metrics']['walk_forward'] = walk_forward
         walk_forward_by_model[result['model_type']] = walk_forward
         log.info(
@@ -2541,6 +2896,36 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         results.append({'model_type': 'ensemble', 'model_name': 'Ensemble / Consensus', 'model': ensemble, 'metrics': metrics})
         log.info("Ensemble member weights (OOS-error x stability x performance x fold-completion): %s", metrics['ensemble_weights'])
 
+        # Expand the ensemble configuration search beyond the single heuristic
+        # weighting above: try alternative weighting schemes and let them
+        # compete for Champion Score on the exact same validation races,
+        # rather than assuming the heuristic weights are already optimal.
+        # 'equal_weight' is the simple-averaging baseline the heuristic scheme
+        # is meant to beat; 'catboost_weighted' emphasises CatBoost, which
+        # showed by far the best walk-forward stability of any base candidate.
+        ensemble_variants = {
+            'ensemble_equal_weight': [1.0 for _ in ensemble_members],
+        }
+        if any(mt == 'catboost' for mt, _ in ensemble_members):
+            ensemble_variants['ensemble_catboost_weighted'] = [
+                (3.0 if mt == 'catboost' else 1.0) for mt, _ in ensemble_members
+            ]
+        for variant_name, variant_weights in ensemble_variants.items():
+            try:
+                variant = ConsensusRegressor(ensemble_members, weights=variant_weights)
+                variant.fit(X_train, y_won[train_mask])
+                variant_metrics = evaluate_model_on_validation(variant, X_val, y_won_val, race_ids_val, sp_val)
+                variant_metrics['ensemble_weights'] = dict(zip([name for name, _ in ensemble_members], variant.weights_.tolist()))
+                selection_frames[variant_name] = _top_selection_rows(variant, X_val, y_won_val, race_ids_val, sp_val)
+                results.append({
+                    'model_type': variant_name,
+                    'model_name': f"Ensemble ({variant_name.replace('ensemble_', '').replace('_', ' ').title()})",
+                    'model': variant, 'metrics': variant_metrics,
+                })
+                log.info("Ensemble variant %s weights: %s", variant_name, variant_metrics['ensemble_weights'])
+            except Exception as e:
+                log.warning(f"Skipping ensemble variant {variant_name}: {e}")
+
     # Persist the exact training-split median used above on every candidate so
     # live inference (ml_predict.py) can fill missing/unseen features with the
     # same values the model was actually trained against, instead of 0.
@@ -2556,11 +2941,12 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
             continue
         try:
             walk_forward = _walk_forward_metrics_for_model(
-                result['model'], X, y_won, sp_values, race_ids, n_splits=3
+                result['model'], X, y_won, sp_values, race_ids
             )
         except Exception as e:
             log.warning(f"Walk-forward stability check failed for {result['model_type']}: {e}")
-            walk_forward = {'n_splits': 0, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0}
+            walk_forward = {'n_splits': 0, 'n_splits_requested': WALK_FORWARD_N_SPLITS, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0, 'embargo_rows': WALK_FORWARD_EMBARGO_ROWS}
+        walk_forward['fold_boundaries'] = fold_boundaries
         result['metrics']['walk_forward'] = walk_forward
         log.info(
             "Walk-forward stability for %s: folds=%s roi_std=%.2f strike_rate_std=%.2f fold_rois=%s",
@@ -2739,16 +3125,42 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
         # at all to recompute from (very old rows with no selection_metrics).
         if champion_metrics:
             champion_score = _selection_score_from_metrics(champion_metrics, force_recompute=True)
-            if not (champion_metrics.get('walk_forward') or {}).get('folds'):
-                log.warning(
-                    "Active champion (id=%s) has NO walk-forward stability data — it was promoted before this "
-                    "check existed and has never been evaluated the way current challengers are. Its recomputed "
-                    "Champion Score %.3f reflects only a 0.3x-weighted holdout ROI with zero walk-forward credit; "
-                    "recommend manually re-validating this model or triggering a rollback review.",
-                    champion[0] if champion else None, champion_score if champion_score is not None else -1.0,
-                )
         else:
             champion_score = float(champion[9]) if champion and champion[9] is not None else None
+
+        # Hard invariant: an active champion must carry >= MIN_WALK_FORWARD_FOLDS
+        # of walk-forward validation in its stored metadata (see Champion 74,
+        # promoted before walk-forward evaluation existed, whose un-penalised
+        # score was blocking every properly-validated challenger). A missing
+        # WARNING log is easy to miss; this durably flags the condition in
+        # ml_pipeline_alerts so it can't silently persist unnoticed, on top of
+        # (not instead of) the existing 0.3x-weight/no-credit scoring penalty
+        # that already lets a better-tested challenger outscore a stale champion.
+        champion_fold_count = _walk_forward_fold_count(champion_metrics) if champion else None
+        champion_is_stale = champion is not None and champion_fold_count < MIN_WALK_FORWARD_FOLDS
+        if champion_is_stale:
+            log.warning(
+                "Active champion (id=%s) has only %s walk-forward fold(s) (< MIN_WALK_FORWARD_FOLDS=%s) — it was "
+                "promoted before this check existed and has never been evaluated the way current challengers are. "
+                "Its recomputed Champion Score %.3f reflects only a 0.3x-weighted holdout ROI with zero/partial "
+                "walk-forward credit; recommend manually re-validating this model or triggering a rollback review.",
+                champion[0], champion_fold_count, MIN_WALK_FORWARD_FOLDS,
+                champion_score if champion_score is not None else -1.0,
+            )
+            champion_score_display = f"{champion_score:.3f}" if champion_score is not None else "n/a"
+            record_pipeline_alert(
+                conn, 'champion_missing_walk_forward_validation',
+                message=(
+                    f"Active champion id={champion[0]} has {champion_fold_count} walk-forward fold(s), below "
+                    f"MIN_WALK_FORWARD_FOLDS={MIN_WALK_FORWARD_FOLDS}. Recomputed Champion Score under the current "
+                    f"formula is {champion_score_display}. Run scripts/backfill_champion_walk_forward.py to backfill "
+                    "its walk-forward metrics and, if a rejected challenger scores higher once the champion is "
+                    "fairly evaluated, promote it."
+                ),
+                severity='blocking', run_id=run_id,
+            )
+        elif champion is not None:
+            resolve_pipeline_alert(conn, 'champion_missing_walk_forward_validation')
         # No force_recompute here: validation_metrics was just produced by this
         # same run's run_model_competition, under the current formula — no
         # staleness risk. The champion (below) is the one loaded from a stored
@@ -2760,6 +3172,29 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
         challenger_sample_ok = int(val_bets or 0) >= MIN_VALIDATION_BETS
         challenger_roi_positive = challenger_roi is not None and challenger_roi > 0.0
         challenger_sr_acceptable = challenger_sr is not None and challenger_sr >= MIN_PROMOTION_STRIKE_RATE_PCT
+
+        # Statistical-significance gate, layered on top of the fixed Champion
+        # Score margin: a challenger that only clears PROMOTION_SELECTION_SCORE_EDGE
+        # because of one strong walk-forward fold out of WALK_FORWARD_N_SPLITS
+        # shouldn't automatically win promotion — bootstrap the paired per-fold
+        # ROI differences (challenger vs champion, same fold boundaries) and
+        # require the improvement to be more than noise. None means "can't be
+        # computed" (fewer than 2 comparable folds on either side) and is
+        # treated as a pass-through, not a rejection, so this can't block
+        # promotion when the champion has too little walk-forward history to
+        # compare against in the first place (that case is already handled by
+        # the stale-champion score penalty above).
+        challenger_fold_rois = [
+            float(f.get('roi', 0.0) or 0.0)
+            for f in ((validation_metrics or {}).get('walk_forward') or {}).get('folds', [])
+            if f.get('bets', 0)
+        ]
+        champion_fold_rois = [
+            float(f.get('roi', 0.0) or 0.0)
+            for f in (champion_metrics.get('walk_forward') or {}).get('folds', [])
+            if f.get('bets', 0)
+        ]
+        bootstrap_p_value = _paired_bootstrap_p_value(challenger_fold_rois, champion_fold_rois)
 
         if challenger_roi is None or challenger_sr is None or challenger_score is None:
             reason = "Rejected: challenger validation metrics or Champion Score missing"
@@ -2777,15 +3212,32 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
                 promote = True
                 reason = "Promoted: active Champion Score missing, but challenger passed out-of-sample selection gates"
             elif challenger_score > champion_score + PROMOTION_SELECTION_SCORE_EDGE:
-                promote = True
-                reason = (f"Promoted: challenger Champion Score {challenger_score:.3f} beat "
-                          f"Champion Score {champion_score:.3f} under out-of-sample rule")
+                if bootstrap_p_value is not None and bootstrap_p_value > PROMOTION_MAX_BOOTSTRAP_P_VALUE:
+                    reason = (
+                        f"Rejected: challenger Champion Score {challenger_score:.3f} beat Champion Score "
+                        f"{champion_score:.3f}, but the walk-forward fold-level improvement is not statistically "
+                        f"distinguishable from noise (paired bootstrap p={bootstrap_p_value:.3f} > "
+                        f"{PROMOTION_MAX_BOOTSTRAP_P_VALUE:.3f})"
+                    )
+                else:
+                    promote = True
+                    stale_note = " (active champion was stale: rollback review — see ml_pipeline_alerts)" if champion_is_stale else ""
+                    significance_note = f", bootstrap p={bootstrap_p_value:.3f}" if bootstrap_p_value is not None else ""
+                    reason = (f"Promoted: challenger Champion Score {challenger_score:.3f} beat "
+                              f"Champion Score {champion_score:.3f} under out-of-sample rule{significance_note}{stale_note}")
             else:
                 reason = (f"Rejected: challenger Champion Score {challenger_score:.3f} did not beat "
                           f"Champion Score {champion_score:.3f}")
 
         if promote:
             old_champion_id = champion[0] if champion else None
+            if champion_is_stale:
+                # The stale champion is being replaced; only leave the alert
+                # open if the incoming champion is ITSELF under-validated
+                # (e.g. missing walk-forward data for some other reason) —
+                # otherwise this promotion IS the rollback the alert asked for.
+                if _walk_forward_fold_count(validation_metrics or {}) >= MIN_WALK_FORWARD_FOLDS:
+                    resolve_pipeline_alert(conn, 'champion_missing_walk_forward_validation')
             conn.execute(text("""
                 UPDATE backtest_best_model
                 SET is_active = FALSE,
@@ -2886,6 +3338,50 @@ def rollback_to_champion(model_id, reason='Manual Champion rollback'):
         conn.commit()
     log.info("Champion rollback complete: old_champion_id=%s new_champion_id=%s reason=%s",
              current_id, model_id, reason)
+
+
+def check_active_champion_staleness(run_id=None):
+    """Automated recurring (nightly) re-validation that the active champion
+    isn't stale. save_best_model_to_db only re-checks this invariant when a
+    new challenger is actually saved that run; this runs unconditionally at
+    the start of every nightly run so a quiet night (e.g. every challenger
+    path failed, or Track E was skipped) can't let a stale champion go
+    unnoticed indefinitely between promotion attempts.
+    """
+    with engine.connect() as conn:
+        champion = conn.execute(text("""
+            SELECT id, selection_metrics FROM backtest_best_model
+            WHERE is_active = TRUE
+            ORDER BY promoted_at DESC NULLS LAST, updated_at DESC, id DESC
+            LIMIT 1
+        """)).fetchone()
+        if not champion:
+            conn.commit()
+            return
+        champion_metrics = {}
+        if champion[1]:
+            try:
+                champion_metrics = json.loads(champion[1])
+            except Exception:
+                champion_metrics = {}
+        fold_count = _walk_forward_fold_count(champion_metrics)
+        if fold_count < MIN_WALK_FORWARD_FOLDS:
+            log.warning(
+                "Nightly staleness check: active champion (id=%s) has only %s walk-forward fold(s) "
+                "(< MIN_WALK_FORWARD_FOLDS=%s). Run scripts/backfill_champion_walk_forward.py.",
+                champion[0], fold_count, MIN_WALK_FORWARD_FOLDS,
+            )
+            record_pipeline_alert(
+                conn, 'champion_missing_walk_forward_validation',
+                message=(
+                    f"Nightly check: active champion id={champion[0]} has {fold_count} walk-forward fold(s), "
+                    f"below MIN_WALK_FORWARD_FOLDS={MIN_WALK_FORWARD_FOLDS}."
+                ),
+                severity='blocking', run_id=run_id,
+            )
+        else:
+            resolve_pipeline_alert(conn, 'champion_missing_walk_forward_validation')
+        conn.commit()
 
 
 # ─────────────────────────────────────────────
@@ -3000,12 +3496,14 @@ def write_results(run_id, feature_recommendations, component_results,
                      validation_strike_rate, validation_bets, validation_drawdown,
                      validation_longest_losing_streak, validation_bankroll_growth,
                      validation_volatility, last_100, last_250, last_500, agreement_summary,
-                     log_loss, brier_score, calibration, stability, walk_forward, selection_score)
+                     log_loss, brier_score, calibration, stability, walk_forward, selection_score,
+                     kelly_staking)
                     VALUES (:run_id, :model_type, :model_name, :roi, :profit_units,
                             :strike_rate, :bets, :drawdown, :longest_losing_streak,
                             :bankroll_growth, :volatility, :last_100, :last_250,
                             :last_500, :agreement_summary, :log_loss, :brier_score,
-                            :calibration, :stability, :walk_forward, :selection_score)
+                            :calibration, :stability, :walk_forward, :selection_score,
+                            :kelly_staking)
                 """), {
                     'run_id': run_id,
                     'model_type': result['model_type'],
@@ -3028,6 +3526,7 @@ def write_results(run_id, feature_recommendations, component_results,
                     'stability': json.dumps(metrics.get('stability', {})),
                     'walk_forward': json.dumps(metrics.get('walk_forward', {})),
                     'selection_score': result.get('selection_score'),
+                    'kelly_staking': json.dumps(metrics.get('kelly_staking', {})),
                 })
 
         conn.commit()
@@ -3095,6 +3594,11 @@ def main():
     log.info(f"Backtest run ID: {run_id}")
 
     try:
+        check_active_champion_staleness(run_id=run_id)
+    except Exception as e:
+        log.warning(f"Nightly champion staleness check failed (non-fatal): {e}")
+
+    try:
         df, strike_rate_data = load_historical_data()
 
         if len(df) < 50:
@@ -3109,6 +3613,10 @@ def main():
         X, y_roi, y_won, sp_values, race_ids, horse_ids, meeting_dates = build_training_set(
             df, strike_rate_data
         )
+        try:
+            check_match_rate_regression(run_id, getattr(build_training_set, 'last_match_stats', None))
+        except Exception as e:
+            log.warning(f"Match-rate regression check failed (non-fatal): {e}")
 
         # Track A: Baseline RF feature importance
         importance_sorted = run_random_forest(X, y_roi, y_won, meeting_dates)

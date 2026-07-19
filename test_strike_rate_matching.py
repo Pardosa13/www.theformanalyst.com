@@ -34,6 +34,33 @@ def test_ambiguous_surname_only_does_not_match():
     assert lookup_strike_rate("Smith", lookup) == (None, "unmatched")
 
 
+def test_apprentice_claim_suffix_strips_to_exact_match():
+    assert normalize_name("Jamie Kah (a3)") == "jamie kah"
+    lookup = build_strike_rate_lookup([("Jamie Kah", 20, 100)])
+    assert lookup_strike_rate("Jamie Kah (a3)", lookup)[1] == "exact"
+
+
+def test_diacritics_fold_to_ascii_for_exact_match():
+    assert normalize_name("José García") == "jose garcia"
+    lookup = build_strike_rate_lookup([("Jose Garcia", 12, 100)])
+    assert lookup_strike_rate("José García", lookup)[1] == "exact"
+
+
+def test_fuzzy_tier_matches_close_typo_above_threshold():
+    lookup = build_strike_rate_lookup([
+        ("Damien Oliver", 18, 100),
+        ("Craig Williams", 15, 100),
+    ])
+    data, method = lookup_strike_rate("Damien J Olliver", lookup)
+    assert method == "fuzzy"
+    assert data["name"] == "Damien Oliver"
+
+
+def test_fuzzy_tier_does_not_match_unrelated_name():
+    lookup = build_strike_rate_lookup([("Damien Oliver", 18, 100)])
+    assert lookup_strike_rate("Zoe Nobody", lookup) == (None, "unmatched")
+
+
 def test_puntingform_entity_type_mapping_labels():
     import pytest
     pytest.importorskip("requests")

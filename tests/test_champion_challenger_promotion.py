@@ -1,3 +1,4 @@
+import json
 import os
 import pickle
 import sys
@@ -5,6 +6,16 @@ import types
 from datetime import datetime, timedelta
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+
+# numpy/pandas are core, always-installed dependencies (unlike sklearn/
+# xgboost/etc below, which this file stubs out to stay runnable without the
+# heavier ML stack). Import them for real up front so backtest.py's own
+# `import numpy as np` / `import pandas as pd` — and every other test module
+# that imports backtest.py after this one via the shared sys.modules cache —
+# never bind to a bare stub module regardless of import order across the
+# whole test session.
+import numpy  # noqa: F401
+import pandas  # noqa: F401
 
 if "sqlalchemy" not in sys.modules:
     sqlalchemy = types.ModuleType("sqlalchemy")
@@ -40,6 +51,7 @@ if "sklearn" not in sys.modules:
     sys.modules["sklearn.base"] = base
     model_selection = types.ModuleType("sklearn.model_selection")
     model_selection.TimeSeriesSplit = type("TimeSeriesSplit", (), {})
+    model_selection.StratifiedKFold = type("StratifiedKFold", (), {})
     sys.modules["sklearn.model_selection"] = model_selection
     preprocessing = types.ModuleType("sklearn.preprocessing")
     preprocessing.LabelEncoder = type("LabelEncoder", (), {})
@@ -79,6 +91,8 @@ class FakeConnection:
         self.promotion_history = None
         self.committed = False
         self.champion_promoted_at = datetime.utcnow() - timedelta(days=1)
+        self.pipeline_alerts = []
+        self.resolved_alert_keys = []
 
     def __enter__(self):
         return self
@@ -106,6 +120,17 @@ class FakeConnection:
             return FetchResult(None)
         if "UPDATE backtest_best_model SET promotion_reason" in sql:
             self.rejected_challenger = params
+            return FetchResult(None)
+        if "SELECT id FROM ml_pipeline_alerts" in sql:
+            return FetchResult(None)
+        if "INSERT INTO ml_pipeline_alerts" in sql:
+            self.pipeline_alerts.append(params)
+            return FetchResult(None)
+        if "UPDATE ml_pipeline_alerts SET message" in sql:
+            self.pipeline_alerts.append(params)
+            return FetchResult(None)
+        if "UPDATE ml_pipeline_alerts SET resolved_at" in sql:
+            self.resolved_alert_keys.append(params.get("key"))
             return FetchResult(None)
         raise AssertionError(f"Unhandled SQL in fake connection: {sql}")
 
@@ -245,3 +270,81 @@ def test_promotion_preserves_model_history_and_rollback_records(monkeypatch, tmp
     assert conn.promotion_history["run_id"] == 321
     assert conn.promotion_history["model_type"] == "xgboost"
     assert "Champion Score 12.000 beat Champion Score 10.000" in conn.promotion_history["reason"]
+
+
+def test_champion_without_walk_forward_folds_records_durable_alert(monkeypatch, tmp_path):
+    """champion_row() never carries walk_forward.folds — the same situation as
+    Champion 74, promoted before walk-forward evaluation existed. This must
+    open a durable ml_pipeline_alerts row (not just a log line) per the
+    walk_forward_fold_count invariant."""
+    conn = FakeConnection(champion=champion_row(10.0))
+
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=10.5))
+
+    assert len(conn.pipeline_alerts) == 1
+    alert = conn.pipeline_alerts[0]
+    assert alert["key"] == "champion_missing_walk_forward_validation"
+    assert alert["severity"] == "blocking"
+    assert "id=101" in alert["message"]
+
+
+def test_promoting_a_validated_challenger_over_stale_champion_resolves_alert(monkeypatch, tmp_path):
+    """When a stale champion is finally replaced by a challenger that DOES
+    carry enough walk-forward folds, the open alert should be resolved — the
+    promotion is itself the rollback review the alert was asking for."""
+    conn = FakeConnection(champion=champion_row(10.0))
+    challenger_metrics = metrics(selection_score=13.0)
+    challenger_metrics["walk_forward"] = {
+        "folds": [{"roi": 5.0, "strike_rate": 20.0, "bets": 50}, {"roi": 6.0, "strike_rate": 21.0, "bets": 50}],
+        "roi_std": 0.5,
+    }
+
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, challenger_metrics)
+
+    assert conn.activated_challenger is not None
+    assert "champion_missing_walk_forward_validation" in conn.resolved_alert_keys
+
+
+def test_non_stale_champion_resolves_any_previously_open_alert(monkeypatch, tmp_path):
+    """A champion carrying enough walk-forward folds must not be flagged as
+    stale, and any previously-open alert for it should be cleared."""
+    walk_forward = {
+        "folds": [{"roi": 4.0, "strike_rate": 18.0, "bets": 60}, {"roi": 5.0, "strike_rate": 19.0, "bets": 60}],
+        "roi_std": 0.5,
+    }
+    champion_metrics_blob = {"selection_score": 10.0, "walk_forward": walk_forward}
+    champion = champion_row(10.0)
+    champion[10] = json.dumps(champion_metrics_blob)
+    conn = FakeConnection(champion=champion)
+
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=10.5))
+
+    assert conn.pipeline_alerts == []
+    assert "champion_missing_walk_forward_validation" in conn.resolved_alert_keys
+
+
+def test_bootstrap_significance_gate_blocks_noisy_score_edge_win():
+    """A challenger that clears PROMOTION_SELECTION_SCORE_EDGE on the headline
+    Champion Score but whose walk-forward fold-level ROI is not consistently
+    better than the champion's (here: one big win, one loss, vs a steady
+    champion) should fail the paired-bootstrap significance gate."""
+    challenger_folds = [1.0, -50.0]
+    champion_folds = [-2.0, -3.0]
+    p_value = backtest._paired_bootstrap_p_value(challenger_folds, champion_folds)
+    assert p_value is not None
+    assert p_value > backtest.PROMOTION_MAX_BOOTSTRAP_P_VALUE
+
+
+def test_bootstrap_significance_gate_passes_consistent_improvement():
+    """A challenger that beats the champion on every walk-forward fold should
+    clear the significance gate (low bootstrap p-value)."""
+    challenger_folds = [10.0, 12.0, 11.0]
+    champion_folds = [-5.0, -4.0, -6.0]
+    p_value = backtest._paired_bootstrap_p_value(challenger_folds, champion_folds)
+    assert p_value is not None
+    assert p_value <= backtest.PROMOTION_MAX_BOOTSTRAP_P_VALUE
+
+
+def test_bootstrap_significance_gate_skipped_with_fewer_than_two_folds():
+    assert backtest._paired_bootstrap_p_value([5.0], [-5.0]) is None
+    assert backtest._paired_bootstrap_p_value([], []) is None
