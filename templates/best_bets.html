@@ -643,6 +643,55 @@
   </div>
 </div>
 
+<!-- ML Value Edge Bets — additive section; does not replace or filter any existing signal above -->
+<div class="components-card">
+  <div class="components-card-header">
+    <h5>💎 ML Value Edge Bets</h5>
+    <span class="components-count-badge">{{ value_edge_bets|length }}</span>
+  </div>
+  <div style="padding:14px 18px;">
+    <p class="text-muted" style="font-size:12px;margin-bottom:12px;">
+      Horses where the model's fair win probability clears the market's Ladbrokes-implied probability by at least
+      {{ '%.1f'|format(value_edge_min_threshold_pct) }} percentage points. Every qualifying horse here is logged as
+      its own tracked bet type — see the ML Data page for real-world results.
+    </p>
+    {% if value_edge_bets %}
+    <div class="table-responsive">
+      <table class="bets-table">
+        <thead>
+          <tr>
+            <th>Horse</th><th>Race</th><th>Track</th><th>Time</th><th>Ladbrokes</th><th>Model Win %</th><th>Edge</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for bet in value_edge_bets %}
+          <tr class="row-signal">
+            <td>
+              <div class="horse-name">{{ bet.horse_name }}</div>
+            </td>
+            <td><span class="race-pill">Race {{ bet.race_number }}</span></td>
+            <td>{{ bet.track or bet.meeting_name }}</td>
+            <td>{{ bet.uploaded_at.strftime('%I:%M %p') if bet.uploaded_at else '—' }}</td>
+            <td>
+              {% if bet.ladbrokes_fixed_win_price %}
+                ${{ '%.2f'|format(bet.ladbrokes_fixed_win_price) }}
+              {% else %}
+                <span class="text-muted">Unavailable</span>
+              {% endif %}
+            </td>
+            <td>{% if bet.ml_fair_probability_pct is not none %}{{ '%.1f'|format(bet.ml_fair_probability_pct) }}%{% else %}—{% endif %}</td>
+            <td><span class="badge bg-success">+{{ '%.1f'|format(bet.value_edge_pct) }}pp</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted" style="font-size:13px;margin:0;">No horses in this window currently clear the value-edge threshold.</p>
+    {% endif %}
+  </div>
+</div>
+
 <!-- Best bets / empty state -->
 {% if total_bets == 0 %}
 <div class="no-bets-alert">

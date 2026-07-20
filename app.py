@@ -86,6 +86,15 @@ BEST_BETS_LADBROKES_STALE_SECONDS = max(90, ODDS_CACHE_TTL * 3)
 LADBROKES_CLOSED_MARKET_STATUSES = {"closed", "final", "finalised", "abandoned", "resulted", "interim", "live", "jumped", "error"}
 LADBROKES_UNAVAILABLE_RUNNER_STATUSES = {"scratched", "closed", "inactive", "unavailable", "late scratching"}
 
+# Minimum edge (model fair win probability minus the market-implied probability
+# from the live Ladbrokes price, in percentage points) required for a horse to
+# qualify as an "ML Value Edge" bet. 8.0pp matches the 0.08 threshold that
+# backtest.py's VALUE_EDGE_THRESHOLDS diagnostic found to be the strongest-
+# performing cutoff. Single source of truth for the Best Bets page section,
+# the pre-race tracking capture, and the ML Data page — change this one value
+# to re-calibrate all three.
+VALUE_EDGE_MIN_THRESHOLD_PCT = 8.0
+
 
 def _coerce_price(value):
     try:
@@ -150,8 +159,16 @@ def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_
     ml_rank = {h.id: i + 1 for i, h in enumerate(ml_ranked)}
     ml_gap = (ml_ranked[0].prediction.ml_score - ml_ranked[1].prediction.ml_score) if len(ml_ranked) > 1 else None
     market, market_state = _rank_active_ladbrokes_market(odds_payload, horses)
+    # ML-only fair win probability book (normalised ml_score share of the race),
+    # used solely to compute each horse's Value Edge over the live market below.
+    # Independent of the qualitative sweet-spot/consensus/gap badges above —
+    # never added to `badges`/`cnt` so it can't change their combination logic.
+    ml_book = _derive_ml_race_book(
+        horses,
+        lambda h: None if getattr(h, 'is_scratched', False) or not getattr(h, 'prediction', None) else h.prediction.ml_score,
+    )
     out = {}
-    for h in horses:
+    for idx, h in enumerate(horses):
         m = market.get(h.id, {})
         is_ml_top_fav = ml_rank.get(h.id) == 1 and m.get('is_favourite') and market_state.get('available')
         full = analyzer_rank.get(h.id) == pfai_rank.get(h.id) == ml_rank.get(h.id) == 1 and m.get('is_favourite') and market_state.get('available')
@@ -165,6 +182,17 @@ def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_
         if gap20:
             badges.append('★★★★ ML Market Agreement + 20 Gap'); reasons.append(f"Qualified because the ML top pick is the Ladbrokes favourite with a {ml_gap:.1f}-point ML gap.")
         cnt=len(badges)
+
+        # ── Value Edge: model fair win probability minus market-implied probability ──
+        book_entry = ml_book.get(idx)
+        market_implied_pct = (100.0 / m.get('price')) if (market_state.get('available') and m.get('price')) else None
+        ml_fair_probability_pct = round(book_entry['ml_fair_probability'] * 100.0, 2) if book_entry else None
+        value_edge_pct = (
+            round(ml_fair_probability_pct - market_implied_pct, 2)
+            if ml_fair_probability_pct is not None and market_implied_pct is not None else None
+        )
+        is_value_edge_bet = bool(value_edge_pct is not None and value_edge_pct >= VALUE_EDGE_MIN_THRESHOLD_PCT)
+
         out[h.id]={
             'ladbrokes_fixed_win_price': m.get('price'), 'ladbrokes_market_rank': m.get('market_rank'),
             'is_ladbrokes_favourite': bool(m.get('is_favourite')), 'is_joint_ladbrokes_favourite': bool(m.get('is_joint_favourite')),
@@ -176,6 +204,10 @@ def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_
             'best_bet_confidence_level': 'Elite Consensus Best Bet' if cnt==3 else ('Strong Consensus Best Bet' if cnt==2 else (badges[0] if cnt==1 else None)),
             'best_bet_reasons': reasons if reasons else ([market_state.get('reason')] if not market_state.get('available') else []),
             'best_bet_badges': badges,
+            'ml_fair_probability_pct': ml_fair_probability_pct,
+            'market_implied_probability_pct': round(market_implied_pct, 2) if market_implied_pct is not None else None,
+            'value_edge_pct': value_edge_pct,
+            'is_value_edge_bet': is_value_edge_bet,
         }
     return out
 
@@ -426,6 +458,30 @@ with app.app_context():
                 print("Added Ladbrokes signal snapshot columns to predictions table")
     except Exception as e:
         print(f"Ladbrokes signal migration check: {e}")
+
+    # Persist live ML Value Edge bet snapshots so they can be settled later,
+    # same pattern as the Ladbrokes badge snapshot columns above.
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        predictions_columns = {col['name'] for col in inspector.get_columns('predictions')}
+        value_edge_columns = {
+            'value_edge_pct': 'FLOAT',
+            'value_edge_ml_win_prob_pct': 'FLOAT',
+            'value_edge_price': 'FLOAT',
+            'value_edge_captured_at': 'TIMESTAMP',
+        }
+        with db.engine.connect() as conn:
+            changed = False
+            for column_name, column_type in value_edge_columns.items():
+                if column_name not in predictions_columns:
+                    conn.execute(text(f'ALTER TABLE predictions ADD COLUMN {column_name} {column_type}'))
+                    changed = True
+            if changed:
+                conn.commit()
+                print("Added ML Value Edge snapshot columns to predictions table")
+    except Exception as e:
+        print(f"ML Value Edge migration check: {e}")
 
     try:
         from sqlalchemy import inspect, text
@@ -3902,6 +3958,71 @@ def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_t
     return performance
 
 
+# Edge-size buckets for the ML Value Edge cohort breakdown: lower bound inclusive,
+# upper bound exclusive (None = unbounded). Lower bound of the first bucket is
+# VALUE_EDGE_MIN_THRESHOLD_PCT itself, so every tracked value-edge bet falls into
+# exactly one bucket.
+VALUE_EDGE_BUCKETS = (
+    ('8_12', '8–12pp', VALUE_EDGE_MIN_THRESHOLD_PCT, 12.0),
+    ('12_20', '12–20pp', 12.0, 20.0),
+    ('20_plus', '20pp+', 20.0, None),
+)
+
+
+def calculate_value_edge_performance(track_filter="", date_from="", date_to="", limit_param="all", stake=10.0):
+    """Settle captured pre-race ML Value Edge bets at a flat win stake.
+
+    Mirrors calculate_ladbrokes_signal_performance's cohort pattern above, but
+    tracked independently via Prediction.value_edge_captured_at rather than
+    the qualitative ladbrokes_signal_mask badges.
+    """
+    query = db.session.query(Prediction, Result).join(Horse, Prediction.horse_id == Horse.id).join(
+        Race, Horse.race_id == Race.id
+    ).join(Meeting, Race.meeting_id == Meeting.id).join(Result, Result.horse_id == Horse.id).filter(
+        Prediction.value_edge_captured_at.isnot(None),
+        Result.finish_position > 0,
+        Result.sp.isnot(None),
+    )
+    if track_filter:
+        query = query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        query = query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        query = query.filter(Meeting.uploaded_at <= date_to)
+    rows = query.order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
+    if limit_param != 'all':
+        limit = int(limit_param) if str(limit_param).isdigit() else 200
+        rows = rows[:limit]
+
+    def summarise(selections):
+        bets = len(selections)
+        wins = sum(result.finish_position == 1 for _, result in selections)
+        total_staked = bets * stake
+        total_return = sum(stake * float(result.sp) for _, result in selections if result.finish_position == 1)
+        profit = total_return - total_staked
+        avg_edge_pct = sum(float(prediction.value_edge_pct or 0) for prediction, _ in selections) / bets if bets else 0.0
+        return {
+            'bets': bets,
+            'wins': wins,
+            'strike_rate': wins / bets * 100 if bets else 0.0,
+            'total_staked': total_staked,
+            'total_return': total_return,
+            'profit': profit,
+            'roi': profit / total_staked * 100 if total_staked else 0.0,
+            'avg_edge_pct': avg_edge_pct,
+        }
+
+    buckets = []
+    for key, label, lower, upper in VALUE_EDGE_BUCKETS:
+        bucket_rows = [
+            (prediction, result) for prediction, result in rows
+            if (prediction.value_edge_pct or 0) >= lower and (upper is None or (prediction.value_edge_pct or 0) < upper)
+        ]
+        buckets.append({'key': key, 'label': label, **summarise(bucket_rows)})
+
+    return {'overall': summarise(rows), 'buckets': buckets}
+
+
 # ----- PuntingForm API Routes -----
 
 @app.route("/api/meetings/today")
@@ -6052,9 +6173,19 @@ def ml_data_analytics():
     except Exception as e:
         logger.warning("Error calculating Ladbrokes signal performance: %s", e)
 
+    value_edge_performance = None
+    try:
+        value_edge_performance = calculate_value_edge_performance(
+            track_filter=track_filter, date_from=date_from, date_to=date_to, limit_param=limit_param
+        )
+    except Exception as e:
+        logger.warning("Error calculating ML Value Edge performance: %s", e)
+
     return render_template("ml_data.html",
         ml_performance_stats=ml_performance_stats,
         ladbrokes_signal_performance=ladbrokes_signal_performance,
+        value_edge_performance=value_edge_performance,
+        value_edge_min_threshold_pct=VALUE_EDGE_MIN_THRESHOLD_PCT,
         active_model_metadata=active_model_metadata,
         active_model_metadata_error=active_model_metadata_error,
         latest_challenger=latest_challenger,
@@ -12132,6 +12263,7 @@ def best_bets():
     )
 
     best_bets = []
+    value_edge_bets = []
     total_horses_scanned = 0
 
     for meeting in recent_meetings:
@@ -12167,6 +12299,35 @@ def best_bets():
                         'horse': horse,
                         'score': horse.prediction.score
                     })
+
+                    # ── ML Value Edge Bets: independent of mode/min_score/min_gap so
+                    # every qualifying horse gets tracked and shown, not just whichever
+                    # ones this admin visit's filters happen to keep. ──
+                    edge_fields = ladbrokes_signal_fields.get(horse.id, {})
+                    if edge_fields.get('is_value_edge_bet'):
+                        if horse.prediction.value_edge_captured_at is None:
+                            horse.prediction.value_edge_pct = edge_fields.get('value_edge_pct')
+                            horse.prediction.value_edge_ml_win_prob_pct = edge_fields.get('ml_fair_probability_pct')
+                            horse.prediction.value_edge_price = edge_fields.get('ladbrokes_fixed_win_price')
+                            horse.prediction.value_edge_captured_at = datetime.utcnow()
+                        value_edge_bets.append({
+                            'meeting_id': meeting.id,
+                            'meeting_name': meeting.meeting_name,
+                            'track': track_name,
+                            'uploaded_at': meeting.uploaded_at,
+                            'race_id': race.id,
+                            'race_number': race.race_number,
+                            'distance': race.distance,
+                            'horse_id': horse.id,
+                            'horse_name': horse.horse_name,
+                            'jockey': horse.jockey,
+                            'trainer': horse.trainer,
+                            'barrier': horse.barrier,
+                            'ladbrokes_fixed_win_price': edge_fields.get('ladbrokes_fixed_win_price'),
+                            'ml_fair_probability_pct': edge_fields.get('ml_fair_probability_pct'),
+                            'market_implied_probability_pct': edge_fields.get('market_implied_probability_pct'),
+                            'value_edge_pct': edge_fields.get('value_edge_pct'),
+                        })
             horses_in_race.sort(key=lambda x: x['score'], reverse=True)
             if not horses_in_race:
                 continue
@@ -12282,6 +12443,7 @@ def best_bets():
 
     db.session.commit()
     best_bets.sort(key=lambda x: x['score'], reverse=True)
+    value_edge_bets.sort(key=lambda x: x['value_edge_pct'] or 0, reverse=True)
 
     meetings_with_bets = {}
     for bet in best_bets:
@@ -12316,6 +12478,8 @@ def best_bets():
         min_score=min_score,
         min_gap=min_gap,
         mode=mode,
+        value_edge_bets=value_edge_bets,
+        value_edge_min_threshold_pct=VALUE_EDGE_MIN_THRESHOLD_PCT,
     )
 @app.route("/best-bets/post", methods=["POST"])
 @login_required
