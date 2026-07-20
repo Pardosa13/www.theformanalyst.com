@@ -122,6 +122,14 @@ class Prediction(db.Model):
     ladbrokes_signal_mask = db.Column(db.Integer, nullable=False, default=0)
     ladbrokes_signal_price = db.Column(db.Float, nullable=True)
     ladbrokes_signals_captured_at = db.Column(db.DateTime, nullable=True)
+    # ML Value Edge tracking: captured once, pre-race, the first time this horse's
+    # model-vs-market edge cleared VALUE_EDGE_MIN_THRESHOLD_PCT (app.py). Never
+    # overwritten afterwards, so this is an honest pre-race snapshot rather than
+    # something reconstructed from the closing price/result.
+    value_edge_pct = db.Column(db.Float, nullable=True)
+    value_edge_ml_win_prob_pct = db.Column(db.Float, nullable=True)
+    value_edge_price = db.Column(db.Float, nullable=True)
+    value_edge_captured_at = db.Column(db.DateTime, nullable=True)
 
     def __repr__(self):
         return f'<Prediction {self.horse_id}: {self.score}>'
