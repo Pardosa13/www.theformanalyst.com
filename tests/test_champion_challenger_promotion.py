@@ -55,7 +55,14 @@ if "sklearn" not in sys.modules:
     sys.modules["sklearn.model_selection"] = model_selection
     preprocessing = types.ModuleType("sklearn.preprocessing")
     preprocessing.LabelEncoder = type("LabelEncoder", (), {})
+    preprocessing.StandardScaler = type("StandardScaler", (), {})
     sys.modules["sklearn.preprocessing"] = preprocessing
+    pipeline = types.ModuleType("sklearn.pipeline")
+    pipeline.Pipeline = type("Pipeline", (), {})
+    sys.modules["sklearn.pipeline"] = pipeline
+    neural_network = types.ModuleType("sklearn.neural_network")
+    neural_network.MLPClassifier = type("MLPClassifier", (), {})
+    sys.modules["sklearn.neural_network"] = neural_network
     metrics = types.ModuleType("sklearn.metrics")
     metrics.mean_squared_error = lambda *args, **kwargs: 0.0
     metrics.log_loss = lambda *args, **kwargs: 0.0
