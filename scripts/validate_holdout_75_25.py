@@ -90,6 +90,7 @@ def load_data_via_postgrest():
     horses = horses[~horses['is_scratched'].fillna(False)]
 
     df = (horses.merge(results, left_on='id', right_on='horse_id', how='inner')
+                .drop(columns=['horse_id'])
                 .merge(races.rename(columns={'id': '_race_pk', 'distance': 'race_distance'}),
                        left_on='race_id', right_on='_race_pk', how='inner')
                 .merge(meetings.rename(columns={'id': '_meeting_pk', 'date': 'meeting_date',
