@@ -44,3 +44,4 @@ npm-debug.log
 
 # AFL ML generated artifacts (created on Railway)
 models/afl_current_selection_scores.json
+catboost_info/
