@@ -53,8 +53,22 @@ DEFAULT_FAMILIES = 'rf,mlp,xgboost,lightgbm,catboost'
 
 # ── PostgREST data loading (mirrors backtest.load_historical_data's SQL) ─────
 
-def _postgrest_fetch(table, select, order=None, page_size=10000):
+def _postgrest_fetch(table, select, order=None, page_size=10000, cache_key=None, retries=4):
+    """Paginated PostgREST fetch with retries and an optional local pickle
+    cache — the horses fetch alone moves ~0.5GB, so a mid-run network blip
+    must not force refetching everything from scratch."""
+    import pickle
+    import time
+
     import requests
+
+    cache_dir = os.environ.get('VALIDATE_CACHE_DIR')
+    cache_file = os.path.join(cache_dir, f"{cache_key or table}.pkl") if cache_dir else None
+    if cache_file and os.path.exists(cache_file):
+        with open(cache_file, 'rb') as f:
+            frame = pickle.load(f)
+        log.info("PostgREST: loaded %s rows for %s from cache %s", len(frame), table, cache_file)
+        return frame
 
     base = os.environ.get('POSTGREST_URL').rstrip('/')
     headers = {'Accept': 'application/json'}
@@ -69,20 +83,40 @@ def _postgrest_fetch(table, select, order=None, page_size=10000):
         params = {'select': select, 'limit': page_size, 'offset': offset}
         if order:
             params['order'] = order
-        response = requests.get(f'{base}/{table}', headers=headers, params=params, timeout=120)
-        response.raise_for_status()
-        page = response.json()
+        page = None
+        for attempt in range(retries):
+            try:
+                response = requests.get(f'{base}/{table}', headers=headers, params=params, timeout=300)
+                response.raise_for_status()
+                page = response.json()
+                break
+            except Exception as e:
+                if attempt == retries - 1:
+                    raise
+                wait = 2 ** (attempt + 1)
+                log.warning("PostgREST %s offset=%s attempt %s failed (%s); retrying in %ss",
+                            table, offset, attempt + 1, e, wait)
+                time.sleep(wait)
         rows.extend(page)
         if len(page) < page_size:
             break
         offset += page_size
     log.info("PostgREST: fetched %s rows from %s", len(rows), table)
-    return pd.DataFrame(rows)
+    frame = pd.DataFrame(rows)
+    if cache_file:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(cache_file, 'wb') as f:
+            pickle.dump(frame, f)
+    return frame
 
 
 def load_data_via_postgrest():
-    horses = _postgrest_fetch('horses', 'id,race_id,horse_name,csv_data,is_scratched')
-    races = _postgrest_fetch('races', 'id,meeting_id,track_condition,distance,race_class,ratings_json,speed_maps_json')
+    horses = _postgrest_fetch('horses', 'id,race_id,horse_name,csv_data,is_scratched',
+                              page_size=5000)
+    # races carry multi-MB ratings_json/speed_maps_json blobs per row — a big
+    # page here breaks the connection mid-stream, so page small.
+    races = _postgrest_fetch('races', 'id,meeting_id,track_condition,distance,race_class,ratings_json,speed_maps_json',
+                             page_size=200)
     meetings = _postgrest_fetch('meetings', 'id,date,track,meeting_name,rail_position')
     results = _postgrest_fetch('results', 'horse_id,finish_position,sp')
 
