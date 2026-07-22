@@ -14,9 +14,9 @@ import os
 import json
 import re
 import logging
-from collections import Counter
+from collections import Counter, defaultdict
 import numpy as np
-from strike_rate_matching import get_sr_win_pct, normalize_name
+from strike_rate_matching import build_strike_rate_lookup, get_sr_win_pct, normalize_name
 import pandas as pd
 from datetime import datetime
 
@@ -43,13 +43,12 @@ def podium_rate(record_str):
     return (wins + seconds + thirds) / runs if runs > 0 else 0.0
 
 def parse_last10(last10_str):
+    # Mirror backtest.parse_last10 exactly: a MISSING last10 string returns {}
+    # so the l10_*/l5_* features are simply absent from that horse's row and
+    # get the training-median fill downstream — the same treatment training
+    # rows get — rather than hardcoded zeros the model never saw at fit time.
     if not last10_str:
-        return {
-            'l10_runs': 0, 'l10_wins': 0, 'l10_win_rate': 0,
-            'l10_places': 0, 'l10_place_rate': 0, 'l5_win_rate': 0,
-            'l5_place_rate': 0, 'is_first_up': 0, 'is_second_up': 0,
-            'last_position': 9, 'form_trend': 0
-        }
+        return {}
     s = str(last10_str).strip()
     runs = [c for c in s if c.lower() != 'x' and c.isdigit()]
     if not runs:
@@ -139,11 +138,67 @@ def calculate_class_score(class_string, prize_string):
     return 50.0
 
 
-def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_lookup=None):
+# ── Helpers for the 2026-07 audit features (mirror backtest.py exactly) ──────
+# PuntingForm uses 900/25 as "no data" sentinels for prices/ranks.
+PF_SENTINEL_PRICE = 900.0
+PF_SENTINEL_RANK = 25.0
+# runStyle strings in ratings_json, mapped front-runner-high like the existing
+# running_position feature ('ldr' leader ... 'bm' backmarker).
+PF_RUN_STYLE_MAP = {'ldr': 5.0, 'ld': 5.0, 'onp': 4.0, 'mid': 3.0, 'off': 2.0, 'bm': 1.0}
+
+# A sire/dam needs at least this many prior runs before its win rate is used.
+MIN_BREEDING_RUNS_FOR_RATE = 3
+
+
+def _pf_price(value):
+    """PuntingForm price, or NaN for the 900 'no data' sentinel/invalid."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return np.nan
+    return np.nan if (v <= 0 or v >= PF_SENTINEL_PRICE) else v
+
+
+def _pf_rank(value):
+    """PuntingForm rank, or NaN for the 25 'no data' sentinel/invalid."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return np.nan
+    return np.nan if (v <= 0 or v >= PF_SENTINEL_RANK) else v
+
+
+def parse_form_time_seconds(value):
+    """Parse a race time like '01:23.45' into seconds. None when unusable."""
+    if not value:
+        return None
+    m = re.match(r'(\d+):(\d+(?:\.\d+)?)', str(value).strip())
+    if not m:
+        return None
+    seconds = int(m.group(1)) * 60 + float(m.group(2))
+    return seconds if seconds > 10 else None
+
+
+def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_lookup=None,
+                     rail_position=None, pf_ratings_lookup=None, pf_speedmaps_lookup=None,
+                     jockey_extra_lookup=None, trainer_extra_lookup=None,
+                     sire_rates=None, dam_rates=None):
     """
-    Extract the 61 features the pkl was trained on.
+    Extract the same raw features backtest.py trains on.
     cd = horse.csv_data dict
     track_condition = race.track_condition string
+    rail_position = meetings.rail_position for this meeting (metres out, 0 = true)
+    pf_ratings_lookup / pf_speedmaps_lookup = per-runner dicts keyed by
+        (PuntingForm raceId, tabNo), parsed from races.ratings_json /
+        races.speed_maps_json
+    jockey_extra_lookup / trainer_extra_lookup = normalised-name dicts of
+        career/L100 actual-vs-expected extras from strike_rates
+    sire_rates / dam_rates = normalised-name -> historical progeny win rate
+        (only names with >= MIN_BREEDING_RUNS_FOR_RATE prior runs are present)
+
+    The 2026-07 audit features default to NaN — not 0 — when their source is
+    missing; _fill_missing_features() then imputes them with the training-split
+    medians persisted on the model artifact, matching training behaviour.
     """
     features = {}
 
@@ -162,7 +217,9 @@ def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_look
     try:
         lw = float(cd.get('form weight', 0) or 0)
         cw = features['horse_weight']
-        features['weight_change'] = (cw - lw) if (49 <= lw <= 65 and 49 <= cw <= 65) else 0.0
+        # Same guard as backtest.extract_features (no upper bound on current
+        # weight) so training and live values match on heavy-weight carriers.
+        features['weight_change'] = (cw - lw) if (49 <= lw <= 65 and cw >= 49) else 0.0
     except:
         features['weight_change'] = 0.0
 
@@ -306,7 +363,151 @@ def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_look
     can_claim_raw = str(cd.get('jockeys can claim', '') or '').strip().lower()
     features['jockeys_can_claim'] = 1.0 if can_claim_raw in ('yes', 'true', '1', 'y') else 0.0
 
+    # ═══ 2026-07 audit features (mirrors backtest.py extract_features) ═══
+
+    # ── Last-start speed from 'form time' + 'form distance' ──
+    form_seconds = parse_form_time_seconds(cd.get('form time'))
+    try:
+        form_dist = float(cd.get('form distance', 0) or 0)
+    except Exception:
+        form_dist = 0.0
+    features['form_speed_mps'] = np.nan
+    if form_seconds and 400 <= form_dist <= 4000:
+        metres_per_second = form_dist / form_seconds
+        if 12 <= metres_per_second <= 22:
+            features['form_speed_mps'] = metres_per_second
+
+    # ── Race-card context (race number, start hour, weight type) ──
+    try:
+        features['race_number'] = float(cd.get('race number') or np.nan)
+    except Exception:
+        features['race_number'] = np.nan
+    start_time_match = re.search(r'(\d{1,2}):(\d{2})', str(cd.get('start time') or ''))
+    features['start_hour'] = (
+        float(start_time_match.group(1)) + float(start_time_match.group(2)) / 60.0
+        if start_time_match else np.nan
+    )
+    features['is_handicap'] = 1.0 if 'handicap' in str(cd.get('weight type', '')).lower() else 0.0
+
+    # ── Race restrictions (age/sex) ──
+    age_restriction = str(cd.get('age restrictions') or '')
+    age_match = re.match(r'(\d+)', age_restriction)
+    features['race_min_age'] = float(age_match.group(1)) if age_match else np.nan
+    features['race_age_open'] = 1.0 if '+' in age_restriction else 0.0
+    sex_restriction = str(cd.get('sex restrictions') or '').strip().lower()
+    features['race_sex_restricted'] = 1.0 if sex_restriction and sex_restriction not in ('no', 'none', 'nan') else 0.0
+
+    # ── Per-condition records regardless of today's condition ──
+    for cond_name in ('good', 'soft', 'heavy'):
+        features[f'rec_{cond_name}_win_rate'] = win_rate(cd.get(f'horse record {cond_name}', ''))
+    soft_runs, _, _, _ = parse_record(cd.get('horse record soft', ''))
+    heavy_runs, _, _, _ = parse_record(cd.get('horse record heavy', ''))
+    features['wet_track_runs'] = float(soft_runs + heavy_runs)
+
+    # ── Tab number ──
+    try:
+        features['tab_number'] = float(cd.get('horse number') or np.nan)
+    except Exception:
+        features['tab_number'] = np.nan
+
+    # ── Rail position (meetings.rail_position) ──
+    try:
+        features['rail_position'] = float(rail_position) if rail_position is not None else np.nan
+    except Exception:
+        features['rail_position'] = np.nan
+
+    # ── Sectional time PRICES (ranks are used above; prices are separate) ──
+    for n in (200, 400, 600):
+        features[f'last{n}_price'] = _pf_price(cd.get(f'last{n}timeprice', cd.get(f'last{n}TimePrice')))
+
+    # ── PuntingForm ratings_json per-runner features ──
+    pf_race_id = None
+    tab_no = None
+    try:
+        pf_race_id = int(cd.get('race id'))
+        tab_no = int(cd.get('horse number'))
+    except Exception:
+        pass
+    rating = (pf_ratings_lookup or {}).get((pf_race_id, tab_no)) if pf_race_id else None
+    if rating:
+        features['pf_time_rank'] = _pf_rank(rating.get('timeRank'))
+        features['pf_time_price'] = _pf_price(rating.get('timePrice'))
+        features['pf_early_time_rank'] = _pf_rank(rating.get('earlyTimeRank'))
+        features['pf_weight_class_rank'] = _pf_rank(rating.get('weightClassRank'))
+        features['pf_adj_weight_class_rank'] = _pf_rank(rating.get('timeAdjustedWeightClassRank'))
+        features['pf_class_change'] = float(rating.get('classChange') or 0)
+        predicted_settle = rating.get('predictedSettlePostion')
+        features['pf_predicted_settle'] = float(predicted_settle) if predicted_settle not in (None, 0, 25) else np.nan
+        avg_settle = rating.get('averageHistoricalSettlePosition')
+        features['pf_avg_hist_settle'] = float(avg_settle) if avg_settle not in (None, 0, 101) else np.nan
+        features['pf_run_style'] = PF_RUN_STYLE_MAP.get(str(rating.get('runStyle') or '').strip().lower(), np.nan)
+        features['pf_is_reliable'] = 1.0 if rating.get('isReliable') else 0.0
+        features['pfai_price'] = _pf_price(rating.get('pfaiPrice'))
+        features['pfai_rank'] = _pf_rank(rating.get('pfaiRank'))
+    else:
+        for key in ('pf_time_rank', 'pf_time_price', 'pf_early_time_rank', 'pf_weight_class_rank',
+                    'pf_adj_weight_class_rank', 'pf_class_change', 'pf_predicted_settle',
+                    'pf_avg_hist_settle', 'pf_run_style'):
+            features[key] = np.nan
+        features['pf_is_reliable'] = 0.0
+        features['pfai_price'] = np.nan
+        features['pfai_rank'] = np.nan
+
+    # ── PuntingForm speed_maps_json per-runner features ──
+    speedmap = (pf_speedmaps_lookup or {}).get((pf_race_id, tab_no)) if pf_race_id else None
+    if speedmap:
+        features['sm_assessed_price'] = _pf_price(speedmap.get('assessedPrice'))
+        features['sm_speed'] = float(speedmap.get('speed') or 0)
+        settle = speedmap.get('settle')
+        features['sm_settle'] = float(settle) if settle not in (None, 25) else np.nan
+        features['sm_map_a2e'] = float(speedmap.get('mapA2E') or 0) or np.nan
+        jockey_a2e = speedmap.get('jockeyA2E')
+        features['sm_jockey_a2e'] = float(jockey_a2e) if jockey_a2e not in (None, 0) else np.nan
+        features['sm_rated_run_style'] = float(speedmap.get('ratedRunStyle') or 0)
+        features['sm_rated_settle'] = float(speedmap.get('ratedSettle') or 0) or np.nan
+    else:
+        for key in ('sm_assessed_price', 'sm_speed', 'sm_settle', 'sm_map_a2e',
+                    'sm_jockey_a2e', 'sm_rated_run_style', 'sm_rated_settle'):
+            features[key] = np.nan
+    assessed = features.get('sm_assessed_price')
+    features['sm_assessed_prob'] = (1.0 / assessed) if (assessed and np.isfinite(assessed) and assessed > 1) else np.nan
+
+    # ── Jockey/trainer career & L100 actual-vs-expected (strike_rates extras) ──
+    jockey_name_norm = normalize_name(str(cd.get('horse jockey', '') or '').strip())
+    trainer_name_norm = normalize_name(str(cd.get('horse trainer', '') or '').strip())
+    jockey_extra = (jockey_extra_lookup or {}).get(jockey_name_norm)
+    trainer_extra = (trainer_extra_lookup or {}).get(trainer_name_norm)
+    for prefix, extra in (('jockey', jockey_extra), ('trainer', trainer_extra)):
+        features[f'{prefix}_career_a2e'] = float(extra['career_a2e']) if extra and extra.get('career_a2e') is not None else np.nan
+        features[f'{prefix}_l100_a2e'] = float(extra['l100_a2e']) if extra and extra.get('l100_a2e') is not None else np.nan
+        features[f'{prefix}_career_runs'] = float(extra['career_runs']) if extra and extra.get('career_runs') else np.nan
+
+    # ── Sire/dam historical progeny win rates ──
+    # At live-scoring time every recorded result is strictly earlier than the
+    # race being scored, so a plain aggregate over recorded results matches the
+    # strictly-earlier point-in-time accumulation used in training.
+    sire_name = normalize_name(str(cd.get('horse sire') or ''))
+    dam_name = normalize_name(str(cd.get('horse dam') or ''))
+    sire_rate = (sire_rates or {}).get(sire_name) if sire_name else None
+    dam_rate = (dam_rates or {}).get(dam_name) if dam_name else None
+    features['sire_win_rate'] = float(sire_rate) if sire_rate is not None else np.nan
+    features['dam_win_rate'] = float(dam_rate) if dam_rate is not None else np.nan
+
     return features
+
+# Race-relative derivatives (rank within race + delta vs race average) for the
+# 2026-07 audit features. Only rank/vs_avg are generated for these — exactly
+# the derivative set that was holdout-validated — unlike relative_cols below
+# which also get vs_best/percentile. Mirrors backtest.py.
+NEW_RELATIVE_COLS = [
+    'form_speed_mps', 'pf_time_rank', 'pf_weight_class_rank', 'pfai_price',
+    'sm_assessed_prob', 'sm_settle', 'pf_early_time_rank',
+]
+NEW_RELATIVE_LOWER_IS_BETTER = {
+    'pf_time_rank', 'pf_weight_class_rank', 'pfai_price', 'sm_settle',
+    'pf_early_time_rank',
+}
+
 
 def add_race_relative_features(feature_rows):
     temp = pd.DataFrame(feature_rows)
@@ -345,6 +546,13 @@ def add_race_relative_features(feature_rows):
         temp[f'{col}_race_percentile'] = 1.0 - ((temp[f'{col}_race_rank'] - 1) / denom)
         temp[f'{col}_race_percentile'] = temp[f'{col}_race_percentile'].fillna(1.0)
 
+    for col in NEW_RELATIVE_COLS:
+        if col not in temp.columns:
+            continue
+        ascending = col in NEW_RELATIVE_LOWER_IS_BETTER
+        temp[f'{col}_race_rank'] = temp[col].rank(method='min', ascending=ascending)
+        temp[f'{col}_vs_race_avg'] = temp[col] - temp[col].mean()
+
     return temp.to_dict('records')
 
 # ── Expected feature order (must match pkl training order) ────────────────────
@@ -364,7 +572,21 @@ FEATURE_NAMES = [
     'jockey_sr', 'trainer_sr', 'horse_barrier', 'form_barrier', 'barrier_change',
     'horse_career_prize', 'prizemoney_won', 'form_track_condition',
     'track_condition_change', 'form_field_size', 'same_jockey', 'same_track',
-    'jockeys_can_claim'
+    'jockeys_can_claim',
+    # 2026-07 audit features (same insertion order as backtest.extract_features)
+    'form_speed_mps', 'race_number', 'start_hour', 'is_handicap',
+    'race_min_age', 'race_age_open', 'race_sex_restricted',
+    'rec_good_win_rate', 'rec_soft_win_rate', 'rec_heavy_win_rate',
+    'wet_track_runs', 'tab_number', 'rail_position',
+    'last200_price', 'last400_price', 'last600_price',
+    'pf_time_rank', 'pf_time_price', 'pf_early_time_rank', 'pf_weight_class_rank',
+    'pf_adj_weight_class_rank', 'pf_class_change', 'pf_predicted_settle',
+    'pf_avg_hist_settle', 'pf_run_style', 'pf_is_reliable', 'pfai_price', 'pfai_rank',
+    'sm_assessed_price', 'sm_speed', 'sm_settle', 'sm_map_a2e',
+    'sm_jockey_a2e', 'sm_rated_run_style', 'sm_rated_settle', 'sm_assessed_prob',
+    'jockey_career_a2e', 'jockey_l100_a2e', 'jockey_career_runs',
+    'trainer_career_a2e', 'trainer_l100_a2e', 'trainer_career_runs',
+    'sire_win_rate', 'dam_win_rate',
 ]
 
 RACE_RELATIVE_BASE_COLS = [
@@ -385,7 +607,14 @@ for col in RACE_RELATIVE_BASE_COLS:
         f'{col}_race_percentile',
     ])
 
-FEATURE_NAMES = FEATURE_NAMES + RACE_RELATIVE_FEATURES + ['field_size']
+NEW_RELATIVE_FEATURES = []
+for col in NEW_RELATIVE_COLS:
+    NEW_RELATIVE_FEATURES.extend([f'{col}_race_rank', f'{col}_vs_race_avg'])
+
+# field_size sits between the raw features and the race-relative derivatives —
+# the same column order build_training_set()/add_race_relative_features()
+# produce in backtest.py, so this list can stand in for a training contract.
+FEATURE_NAMES = FEATURE_NAMES + ['field_size'] + RACE_RELATIVE_FEATURES + NEW_RELATIVE_FEATURES
 
 
 def _model_feature_names(model):
@@ -514,8 +743,15 @@ def _live_feature_contract_predicates(model, raw_X, final_X):
     else:
         stored_features = [str(name) for name in stored_features]
         missing_features = [name for name in stored_features if name not in raw_X.columns]
+        # Live extraction may generate a SUPERSET of an older artifact's stored
+        # contract (e.g. the 204-feature generator scoring a 146-feature
+        # champion): extra generated columns are simply dropped by the reindex
+        # to the stored contract, so they are reported (extra_features /
+        # extra_features_empty) but do NOT fail the contract. What must still
+        # hold exactly: every stored feature is generated, and the final matrix
+        # equals the stored contract in names and order.
         extra_features = [name for name in raw_features if name not in stored_features]
-        names_match = not missing_features and not extra_features and set(final_features) == set(stored_features)
+        names_match = not missing_features and set(final_features) == set(stored_features)
         order_matches = final_features == stored_features
 
     duplicate_features = [name for name, count in Counter(final_features).items() if count > 1]
@@ -813,6 +1049,124 @@ def _predict_raw_scores(model, X):
     return model.predict(X), 'predict'
 
 
+# ── Live lookups for the 2026-07 audit features ──────────────────────────────
+
+def _load_live_strike_rate_lookups(db_session):
+    """Load jockey/trainer strike-rate lookups + A2E extras from strike_rates.
+
+    Mirrors backtest.load_strike_rate_data()'s live-scoring (current snapshot)
+    path: at prediction time "today's" snapshot is the correct point-in-time
+    value, unlike training where dated history is needed.
+    Returns {'jockeys': ..., 'trainers': ..., 'jockeys_extra': ..., 'trainers_extra': ...}
+    with empty dicts for anything that fails to load.
+    """
+    from sqlalchemy import text
+
+    lookups = {'jockeys': {}, 'trainers': {}, 'jockeys_extra': {}, 'trainers_extra': {}}
+    for sr_type, lookup_key, extra_key in (('jockey', 'jockeys', 'jockeys_extra'),
+                                           ('trainer', 'trainers', 'trainers_extra')):
+        try:
+            rows = db_session.execute(text("""
+                SELECT name, l100_wins, l100_runs,
+                       career_actual_to_expected, last100_actual_to_expected, career_runs
+                FROM strike_rates
+                WHERE type = :sr_type
+                ORDER BY updated_at DESC
+            """), {'sr_type': sr_type}).fetchall()
+        except Exception as e:
+            log.warning("Could not load %s strike-rate data for live scoring (%s_sr and "
+                        "%s A2E features will use their unmatched/median fallbacks): %s",
+                        sr_type, sr_type, sr_type, e)
+            continue
+        lookups[lookup_key] = build_strike_rate_lookup([(r[0], r[1], r[2]) for r in rows])
+        extra = {}
+        for name, _wins, _runs, career_a2e, l100_a2e, career_runs in rows:
+            norm = normalize_name(str(name or ''))
+            if norm and norm not in extra:
+                extra[norm] = {'career_a2e': career_a2e, 'l100_a2e': l100_a2e,
+                               'career_runs': career_runs}
+        lookups[extra_key] = extra
+        log.info("Live scoring loaded %s %s strike-rate records (with A2E extras).",
+                 len(rows), sr_type)
+    return lookups
+
+
+def _load_pf_race_lookups_for_meeting(races):
+    """Parse ratings_json/speed_maps_json off this meeting's race rows into
+    per-runner lookups keyed by (PuntingForm raceId, tabNo) — the same ids
+    csv_data carries as 'race id' / 'horse number'. Mirrors
+    backtest.load_pf_race_lookups() but scoped to one meeting's races.
+    """
+    ratings_lookup = {}
+    speedmaps_lookup = {}
+    for race in races:
+        try:
+            d = getattr(race, 'ratings_json', None)
+            while isinstance(d, str):
+                d = json.loads(d)
+            for item in ((d or {}).get('payLoad') or []):
+                ratings_lookup[(item.get('raceId'), item.get('tabNo'))] = item
+        except Exception:
+            pass
+        try:
+            d = getattr(race, 'speed_maps_json', None)
+            while isinstance(d, str):
+                d = json.loads(d)
+            for pf_race in ((d or {}).get('payLoad') or []):
+                rid = pf_race.get('raceId')
+                for item in (pf_race.get('items') or []):
+                    speedmaps_lookup[(rid, item.get('tabNo'))] = item
+        except Exception:
+            pass
+    return ratings_lookup, speedmaps_lookup
+
+
+def _load_breeding_win_rates(db_session):
+    """Historical sire/dam progeny win rates from recorded results.
+
+    Aggregates over the same row population training uses (unscratched runners
+    with a recorded finish and a real SP > 1.0). Every recorded result is
+    strictly earlier than the race being scored, so this matches the
+    strictly-earlier accumulation in backtest._fill_point_in_time_breeding_rates.
+    Names with fewer than MIN_BREEDING_RUNS_FOR_RATE runs are omitted (feature
+    stays NaN -> training-median fill). Returns (sire_rates, dam_rates).
+    """
+    from sqlalchemy import text
+
+    rates = []
+    for key in ('horse sire', 'horse dam'):
+        merged = defaultdict(lambda: [0, 0])  # norm name -> [runs, wins]
+        try:
+            rows = db_session.execute(text(f"""
+                SELECT h.csv_data->>'{key}' AS name,
+                       COUNT(*) AS runs,
+                       SUM(CASE WHEN r.finish_position = 1 THEN 1 ELSE 0 END) AS wins
+                FROM horses h
+                JOIN results r ON r.horse_id = h.id
+                WHERE r.finish_position > 0
+                  AND r.sp IS NOT NULL AND r.sp > 1.0
+                  AND COALESCE(h.is_scratched, FALSE) = FALSE
+                  AND h.csv_data->>'{key}' IS NOT NULL
+                GROUP BY 1
+            """)).fetchall()
+        except Exception as e:
+            log.warning("Could not load %s progeny win rates for live scoring "
+                        "(feature stays NaN -> training-median fill): %s", key, e)
+            rates.append({})
+            continue
+        for name, runs, wins in rows:
+            norm = normalize_name(str(name or ''))
+            if norm:
+                merged[norm][0] += int(runs or 0)
+                merged[norm][1] += int(wins or 0)
+        rates.append({
+            norm: wins / runs
+            for norm, (runs, wins) in merged.items()
+            if runs >= MIN_BREEDING_RUNS_FOR_RATE
+        })
+    return rates[0], rates[1]
+
+
 def predict_meeting(meeting_id, db_session, strike_rate_data=None):
     """
     Generate ML scores for all non-scratched horses in a meeting.
@@ -855,13 +1209,37 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         getattr(model, '_form_analyst_selection_metrics', {}),
     )
 
-    jockey_sr  = (strike_rate_data or {}).get('jockeys', {})
-    trainer_sr = (strike_rate_data or {}).get('trainers', {})
+    strike_rate_data = dict(strike_rate_data or {})
+    # Anything the caller didn't supply is loaded from the DB directly, so the
+    # jockey_sr/trainer_sr features and the strike_rates A2E extras are always
+    # computed from real current-snapshot data instead of silently defaulting.
+    if not all(strike_rate_data.get(key) for key in
+               ('jockeys', 'trainers', 'jockeys_extra', 'trainers_extra')):
+        for key, value in _load_live_strike_rate_lookups(db_session).items():
+            if not strike_rate_data.get(key):
+                strike_rate_data[key] = value
+    jockey_sr  = strike_rate_data.get('jockeys', {})
+    trainer_sr = strike_rate_data.get('trainers', {})
+    jockey_extra  = strike_rate_data.get('jockeys_extra', {})
+    trainer_extra = strike_rate_data.get('trainers_extra', {})
+
+    rail_position = getattr(meeting, 'rail_position', None)
+    sire_rates, dam_rates = _load_breeding_win_rates(db_session)
 
     all_scores   = {}   # horse_id -> ml_score
     by_race      = {}   # race_id  -> {horse_id: ml_score}
 
     races = db_session.query(Race).filter_by(meeting_id=meeting_id).all()
+
+    pf_ratings_lookup, pf_speedmaps_lookup = _load_pf_race_lookups_for_meeting(races)
+    log.info(
+        "ML_PREDICTION_LIVE_LOOKUPS meeting=%s rail_position=%s pf_ratings_entries=%s "
+        "pf_speedmap_entries=%s jockey_sr_loaded=%s trainer_sr_loaded=%s "
+        "jockey_extras=%s trainer_extras=%s sire_rates=%s dam_rates=%s",
+        meeting_id, rail_position, len(pf_ratings_lookup), len(pf_speedmaps_lookup),
+        bool(jockey_sr), bool(trainer_sr), len(jockey_extra), len(trainer_extra),
+        len(sire_rates), len(dam_rates),
+    )
 
     for race in races:
         active_horses = [h for h in race.horses if not h.is_scratched]
@@ -885,7 +1263,16 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         for horse in active_horses:
             cd = horse.csv_data or {}
             try:
-                feats = extract_features(cd, race.track_condition, jockey_sr, trainer_sr)
+                feats = extract_features(
+                    cd, race.track_condition, jockey_sr, trainer_sr,
+                    rail_position=rail_position,
+                    pf_ratings_lookup=pf_ratings_lookup,
+                    pf_speedmaps_lookup=pf_speedmaps_lookup,
+                    jockey_extra_lookup=jockey_extra,
+                    trainer_extra_lookup=trainer_extra,
+                    sire_rates=sire_rates,
+                    dam_rates=dam_rates,
+                )
 
                 curr_w = feats['horse_weight']
                 feats['weight_vs_avg'] = (race_avg_weight - curr_w) if 49 <= curr_w <= 65 else 0.0
