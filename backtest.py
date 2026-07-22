@@ -17,6 +17,36 @@ CHANGELOG - 2026-05-11:
   * Saves top 10 .pkl models
   * Compares grid search best model vs baseline analyzer.js performance
   * Keeps all existing Tracks A, B, C unchanged
+
+CHANGELOG - 2026-07-21 (data audit + holdout-validated improvements):
+  * Repair NULL meeting dates from the 'YYMMDD_Track' meeting_name prefix (185
+    manually-uploaded meetings / 1,419 races). Their rows previously sorted as
+    NaT into every date-quantile VALIDATION split and walk-forward tail fold,
+    and their partial SP coverage (~3.9 priced runners/race, overround 0.74)
+    inflated validation ROI for every candidate. Undated rows that cannot be
+    repaired are now excluded from Track E entirely.
+  * New features from previously unused columns, validated on a 75/25
+    chronological holdout (dev walk-forward: lgbm -11.2%%->-6.0%%, catboost
+    -14.8%%->-9.1%% mean fold ROI; untouched holdout: xgb -5.3%%->-1.2%%,
+    lgbm -7.1%%->-4.7%% ROI, catboost/rf ~flat):
+      - races.ratings_json / speed_maps_json (PuntingForm per-runner ratings:
+        time/early-time/weight-class ranks, assessed price, predicted settle,
+        run style, map/jockey actual-vs-expected)
+      - meetings.rail_position
+      - csv_data keys: 'form time' (last-start speed m/s), race number, start
+        hour, weight type, age/sex restrictions, per-condition records,
+        tab number, sectional time prices
+      - sire/dam point-in-time win rates (computed strictly from earlier races)
+      - strike_rates career/L100 actual-vs-expected + career runs (current
+        snapshot only — no dated history exists for these yet)
+  * New 'mlp' candidate in the Track E competition (StandardScaler + MLP
+    64x32): best dev walk-forward mean ROI (-1.7%% vs -9.1%% catboost) and
+    2nd-best untouched-holdout ROI (-3.5%%). Kept OUT of the consensus
+    ensemble (only the standalone candidate was validated).
+  * Tested and REJECTED on the same holdout methodology (not integrated):
+    place/top-3 blending (win-bet ROI worse), importance pruning (single-window
+    gain did not replicate across walk-forward folds), segment-specific models
+    (0 of 17 tests survived Benjamini-Hochberg at q=0.10).
 """
 
 import os
@@ -43,9 +73,11 @@ from collections import Counter
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.base import BaseEstimator, RegressorMixin, clone
 from sklearn.model_selection import TimeSeriesSplit, StratifiedKFold
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import mean_squared_error, log_loss, brier_score_loss
+from sklearn.pipeline import Pipeline
+from sklearn.neural_network import MLPClassifier
 import joblib
 import warnings
 warnings.filterwarnings('ignore')
@@ -424,6 +456,8 @@ def load_historical_data():
             rc.meeting_id,
             m.date AS meeting_date,
             m.track AS meeting_track,
+            m.meeting_name,
+            m.rail_position,
             p.score AS analyzer_score,
             p.notes AS analyzer_notes,
             p.predicted_odds
@@ -446,6 +480,8 @@ def load_historical_data():
     df = pd.DataFrame(rows, columns=columns)
     log.info(f"Loaded {len(df)} horse-race records across {df['race_id'].nunique()} races.")
 
+    df = repair_missing_meeting_dates(df)
+
     # Ingest fresh PuntingForm strike-rate data before loading jockey/trainer SR features.
     try:
         from puntingform_service import PuntingFormService
@@ -460,7 +496,107 @@ def load_historical_data():
     # Load strike rate data for jockey/trainer SR features
     strike_rate_data = load_strike_rate_data()
 
+    # PuntingForm per-runner ratings/speed-map lookups (races.ratings_json /
+    # races.speed_maps_json — previously unused columns). Carried inside
+    # strike_rate_data so load_historical_data()'s public signature stays
+    # (df, strike_rate_data) for existing callers.
+    pf_ratings_lookup, pf_speedmaps_lookup = load_pf_race_lookups()
+    strike_rate_data['pf_ratings'] = pf_ratings_lookup
+    strike_rate_data['pf_speedmaps'] = pf_speedmaps_lookup
+
     return df, strike_rate_data
+
+
+# Manually-uploaded meetings carry their date only in the meeting_name prefix
+# ('251128_Mt Gambier' = 2025-11-28) and have meetings.date = NULL. Left
+# unrepaired, those rows sort as NaT past every date-quantile cutoff, so they
+# all land in the VALIDATION side of Track A/D/E splits and in the newest
+# walk-forward folds — and because their SP coverage is fragmentary (~3.9
+# priced runners per race, overround ~0.74), "betting" them fabricates profit
+# and inflates every candidate's validation ROI.
+_MEETING_NAME_DATE_RE = re.compile(r'^(\d{6})_')
+
+
+def _meeting_date_from_name(meeting_name):
+    m = _MEETING_NAME_DATE_RE.match(str(meeting_name or ''))
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), '%y%m%d').date()
+    except ValueError:
+        return None
+
+
+def repair_missing_meeting_dates(df):
+    """Fill NULL meeting_date values from the meeting_name 'YYMMDD_' prefix."""
+    if 'meeting_date' not in df.columns or df.empty:
+        return df
+    missing = df['meeting_date'].isna()
+    if not missing.any():
+        return df
+    if 'meeting_name' in df.columns:
+        repaired = df.loc[missing, 'meeting_name'].map(_meeting_date_from_name)
+        # A typed (datetime64/arrow-string) column can reject date objects;
+        # downstream consumers all coerce via pd.to_datetime anyway.
+        if df['meeting_date'].dtype != object:
+            df['meeting_date'] = df['meeting_date'].astype(object)
+        df.loc[missing, 'meeting_date'] = repaired
+    still_missing = int(df['meeting_date'].isna().sum())
+    log.info(
+        "Meeting-date repair: %s rows had NULL meeting_date; %s repaired from "
+        "meeting_name prefix, %s still undated (undated rows are excluded from "
+        "the Track E competition).",
+        int(missing.sum()), int(missing.sum()) - still_missing, still_missing,
+    )
+    return df
+
+
+def load_pf_race_lookups():
+    """Parse races.ratings_json and races.speed_maps_json into per-runner
+    lookups keyed by (PuntingForm raceId, tabNo) — the same ids csv_data
+    carries as 'race id' / 'horse number'.
+
+    ratings_json: weight-class/time/early-time/last-N ranks+prices, predicted
+    settle position, run style, pfai score/price/rank per runner.
+    speed_maps_json: assessed price, speed/settle map position, map & jockey
+    actual-vs-expected, rated run style per runner.
+    (races.sectionals_json is a byte-identical duplicate of ratings_json in
+    every race that has both, so it is deliberately not parsed.)
+    """
+    ratings_lookup = {}
+    speedmaps_lookup = {}
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text(
+                "SELECT ratings_json, speed_maps_json FROM races "
+                "WHERE ratings_json IS NOT NULL OR speed_maps_json IS NOT NULL"
+            ))
+            for ratings_blob, speedmaps_blob in result:
+                try:
+                    d = ratings_blob
+                    while isinstance(d, str):
+                        d = json.loads(d)
+                    for item in ((d or {}).get('payLoad') or []):
+                        ratings_lookup[(item.get('raceId'), item.get('tabNo'))] = item
+                except Exception:
+                    pass
+                try:
+                    d = speedmaps_blob
+                    while isinstance(d, str):
+                        d = json.loads(d)
+                    for race in ((d or {}).get('payLoad') or []):
+                        rid = race.get('raceId')
+                        for item in (race.get('items') or []):
+                            speedmaps_lookup[(rid, item.get('tabNo'))] = item
+                except Exception:
+                    pass
+        log.info(
+            "Loaded PuntingForm race lookups: %s ratings entries, %s speed-map entries.",
+            len(ratings_lookup), len(speedmaps_lookup),
+        )
+    except Exception as e:
+        log.warning(f"Could not load PuntingForm race lookups (pf_* features will be NaN): {e}")
+    return ratings_lookup, speedmaps_lookup
 
 
 def load_strike_rate_data():
@@ -476,7 +612,8 @@ def load_strike_rate_data():
     }
     """
     log.info("Loading strike rate data...")
-    sr_data = {'jockeys': {}, 'trainers': {}, 'jockeys_history': {}, 'trainers_history': {}}
+    sr_data = {'jockeys': {}, 'trainers': {}, 'jockeys_history': {}, 'trainers_history': {},
+               'jockeys_extra': {}, 'trainers_extra': {}}
 
     try:
         with engine.connect() as conn:
@@ -538,6 +675,34 @@ def load_strike_rate_data():
                 log.info(f"Loaded {len(rows)} dated trainer SR snapshot rows for point-in-time training.")
             except Exception:
                 log.warning("No strike_rate_snapshots table or trainer history yet — trainer_sr will use the current snapshot for training too, until history accumulates.")
+
+            # Previously unused strike_rates columns: career/L100 actual-vs-
+            # expected ratios and career run counts. CURRENT snapshot only —
+            # strike_rate_snapshots has no dated history for these, so
+            # training rows see today's ratio (career-level A2E moves slowly,
+            # but treat historical backtest numbers for these features with
+            # that caveat in mind; live scoring is unaffected since "current"
+            # is correct at prediction time).
+            for sr_type, key in (('jockey', 'jockeys_extra'), ('trainer', 'trainers_extra')):
+                try:
+                    result = conn.execute(text("""
+                        SELECT name, career_actual_to_expected, last100_actual_to_expected, career_runs
+                        FROM strike_rates
+                        WHERE type = :sr_type
+                        ORDER BY updated_at DESC
+                    """), {'sr_type': sr_type})
+                    lookup = {}
+                    for name, career_a2e, l100_a2e, career_runs in result.fetchall():
+                        norm = normalize_name(str(name or ''))
+                        if norm and norm not in lookup:
+                            lookup[norm] = {
+                                'career_a2e': career_a2e, 'l100_a2e': l100_a2e,
+                                'career_runs': career_runs,
+                            }
+                    sr_data[key] = lookup
+                    log.info(f"Loaded {len(lookup)} {sr_type} A2E/career extra records.")
+                except Exception:
+                    log.warning(f"No {sr_type} A2E extras in strike_rates — those features will be NaN.")
 
     except Exception as e:
         log.warning(f"Could not load strike rate data: {e}")
@@ -693,11 +858,55 @@ def calculate_class_score(class_string, prize_string):
 
 
 
+# ── Helpers for the 2026-07 audit features (unused-column extraction) ────────
+# PuntingForm uses 900/25 as "no data" sentinels for prices/ranks.
+PF_SENTINEL_PRICE = 900.0
+PF_SENTINEL_RANK = 25.0
+# runStyle strings in ratings_json, mapped front-runner-high like the existing
+# running_position feature ('ldr' leader ... 'bm' backmarker).
+PF_RUN_STYLE_MAP = {'ldr': 5.0, 'ld': 5.0, 'onp': 4.0, 'mid': 3.0, 'off': 2.0, 'bm': 1.0}
+
+
+def _pf_price(value):
+    """PuntingForm price, or NaN for the 900 'no data' sentinel/invalid."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return np.nan
+    return np.nan if (v <= 0 or v >= PF_SENTINEL_PRICE) else v
+
+
+def _pf_rank(value):
+    """PuntingForm rank, or NaN for the 25 'no data' sentinel/invalid."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return np.nan
+    return np.nan if (v <= 0 or v >= PF_SENTINEL_RANK) else v
+
+
+def parse_form_time_seconds(value):
+    """Parse a race time like '01:23.45' into seconds. None when unusable."""
+    if not value:
+        return None
+    m = re.match(r'(\d+):(\d+(?:\.\d+)?)', str(value).strip())
+    if not m:
+        return None
+    seconds = int(m.group(1)) * 60 + float(m.group(2))
+    return seconds if seconds > 10 else None
+
+
 def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
-                      jockey_sr_history=None, trainer_sr_history=None, as_of_date=None):
+                      jockey_sr_history=None, trainer_sr_history=None, as_of_date=None,
+                      pf_ratings_lookup=None, pf_speedmaps_lookup=None,
+                      jockey_extra_lookup=None, trainer_extra_lookup=None):
     """
     Extract ML features from a horse's csv_data dict.
-    Returns a flat dict of ~45 features covering everything scored in analyzer.js.
+    Returns a flat dict of ~45 features covering everything scored in analyzer.js,
+    plus the 2026-07 audit features from previously unused columns (those default
+    to NaN — not 0 — when their source is missing; every training track imputes
+    NaNs with its own training-split median and persists that median on the model
+    artifact, so live scoring fills them consistently).
 
     jockey_sr_history/trainer_sr_history + as_of_date (optional): when supplied,
     jockey_sr/trainer_sr are looked up as they stood on as_of_date (point-in-time)
@@ -956,10 +1165,155 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
     features['same_track'] = 1.0 if (today_track and today_track == form_track) else 0.0
 
     # ── Apprentice/claim allowed ──
+    # NOTE (2026-07 audit): the real values are 'Apprentices Can Claim' /
+    # 'Apprentices Cannot Claim' etc., so this check never matches and the
+    # feature is constant 0. A corrected parser was tested on the dev
+    # walk-forward and did NOT hold up (lgbm +3.3pp / catboost -5.1pp mean
+    # fold ROI — inconsistent), so the behaviour is deliberately left
+    # unchanged to preserve the live feature contract.
     can_claim_raw = str(cd.get('jockeys can claim', '') or '').strip().lower()
     features['jockeys_can_claim'] = 1.0 if can_claim_raw in ('yes', 'true', '1', 'y') else 0.0
 
+    # ═══ 2026-07 audit features from previously unused columns ═══
+    # (holdout-validated as a set; see module CHANGELOG)
+
+    # ── Last-start speed from unused 'form time' + 'form distance' ──
+    form_seconds = parse_form_time_seconds(cd.get('form time'))
+    try:
+        form_dist = float(cd.get('form distance', 0) or 0)
+    except Exception:
+        form_dist = 0.0
+    features['form_speed_mps'] = np.nan
+    if form_seconds and 400 <= form_dist <= 4000:
+        metres_per_second = form_dist / form_seconds
+        if 12 <= metres_per_second <= 22:
+            features['form_speed_mps'] = metres_per_second
+
+    # ── Race-card context (race number, start hour, weight type) ──
+    try:
+        features['race_number'] = float(cd.get('race number') or np.nan)
+    except Exception:
+        features['race_number'] = np.nan
+    start_time_match = re.search(r'(\d{1,2}):(\d{2})', str(cd.get('start time') or ''))
+    features['start_hour'] = (
+        float(start_time_match.group(1)) + float(start_time_match.group(2)) / 60.0
+        if start_time_match else np.nan
+    )
+    features['is_handicap'] = 1.0 if 'handicap' in str(cd.get('weight type', '')).lower() else 0.0
+
+    # ── Race restrictions (age/sex) ──
+    age_restriction = str(cd.get('age restrictions') or '')
+    age_match = re.match(r'(\d+)', age_restriction)
+    features['race_min_age'] = float(age_match.group(1)) if age_match else np.nan
+    features['race_age_open'] = 1.0 if '+' in age_restriction else 0.0
+    sex_restriction = str(cd.get('sex restrictions') or '').strip().lower()
+    features['race_sex_restricted'] = 1.0 if sex_restriction and sex_restriction not in ('no', 'none', 'nan') else 0.0
+
+    # ── Per-condition records regardless of today's condition ──
+    for cond_name in ('good', 'soft', 'heavy'):
+        features[f'rec_{cond_name}_win_rate'] = win_rate(cd.get(f'horse record {cond_name}', ''))
+    soft_runs, _, _, _ = parse_record(cd.get('horse record soft', ''))
+    heavy_runs, _, _, _ = parse_record(cd.get('horse record heavy', ''))
+    features['wet_track_runs'] = float(soft_runs + heavy_runs)
+
+    # ── Tab number ──
+    try:
+        features['tab_number'] = float(cd.get('horse number') or np.nan)
+    except Exception:
+        features['tab_number'] = np.nan
+
+    # ── Rail position (meetings.rail_position, previously unused) ──
+    try:
+        rail = row.get('rail_position')
+        features['rail_position'] = float(rail) if rail is not None else np.nan
+    except Exception:
+        features['rail_position'] = np.nan
+
+    # ── Sectional time PRICES (ranks were already used; prices were not) ──
+    for n in (200, 400, 600):
+        features[f'last{n}_price'] = _pf_price(cd.get(f'last{n}timeprice', cd.get(f'last{n}TimePrice')))
+
+    # ── PuntingForm ratings_json per-runner features ──
+    pf_race_id = None
+    tab_no = None
+    try:
+        pf_race_id = int(cd.get('race id'))
+        tab_no = int(cd.get('horse number'))
+    except Exception:
+        pass
+    rating = (pf_ratings_lookup or {}).get((pf_race_id, tab_no)) if pf_race_id else None
+    if rating:
+        features['pf_time_rank'] = _pf_rank(rating.get('timeRank'))
+        features['pf_time_price'] = _pf_price(rating.get('timePrice'))
+        features['pf_early_time_rank'] = _pf_rank(rating.get('earlyTimeRank'))
+        features['pf_weight_class_rank'] = _pf_rank(rating.get('weightClassRank'))
+        features['pf_adj_weight_class_rank'] = _pf_rank(rating.get('timeAdjustedWeightClassRank'))
+        features['pf_class_change'] = float(rating.get('classChange') or 0)
+        predicted_settle = rating.get('predictedSettlePostion')
+        features['pf_predicted_settle'] = float(predicted_settle) if predicted_settle not in (None, 0, 25) else np.nan
+        avg_settle = rating.get('averageHistoricalSettlePosition')
+        features['pf_avg_hist_settle'] = float(avg_settle) if avg_settle not in (None, 0, 101) else np.nan
+        features['pf_run_style'] = PF_RUN_STYLE_MAP.get(str(rating.get('runStyle') or '').strip().lower(), np.nan)
+        features['pf_is_reliable'] = 1.0 if rating.get('isReliable') else 0.0
+        features['pfai_price'] = _pf_price(rating.get('pfaiPrice'))
+        features['pfai_rank'] = _pf_rank(rating.get('pfaiRank'))
+    else:
+        for key in ('pf_time_rank', 'pf_time_price', 'pf_early_time_rank', 'pf_weight_class_rank',
+                    'pf_adj_weight_class_rank', 'pf_class_change', 'pf_predicted_settle',
+                    'pf_avg_hist_settle', 'pf_run_style', 'pfai_price', 'pfai_rank'):
+            features[key] = np.nan
+        features['pf_is_reliable'] = 0.0
+
+    # ── PuntingForm speed_maps_json per-runner features ──
+    speedmap = (pf_speedmaps_lookup or {}).get((pf_race_id, tab_no)) if pf_race_id else None
+    if speedmap:
+        features['sm_assessed_price'] = _pf_price(speedmap.get('assessedPrice'))
+        features['sm_speed'] = float(speedmap.get('speed') or 0)
+        settle = speedmap.get('settle')
+        features['sm_settle'] = float(settle) if settle not in (None, 25) else np.nan
+        features['sm_map_a2e'] = float(speedmap.get('mapA2E') or 0) or np.nan
+        jockey_a2e = speedmap.get('jockeyA2E')
+        features['sm_jockey_a2e'] = float(jockey_a2e) if jockey_a2e not in (None, 0) else np.nan
+        features['sm_rated_run_style'] = float(speedmap.get('ratedRunStyle') or 0)
+        features['sm_rated_settle'] = float(speedmap.get('ratedSettle') or 0) or np.nan
+    else:
+        for key in ('sm_assessed_price', 'sm_speed', 'sm_settle', 'sm_map_a2e',
+                    'sm_jockey_a2e', 'sm_rated_run_style', 'sm_rated_settle'):
+            features[key] = np.nan
+    assessed = features.get('sm_assessed_price')
+    features['sm_assessed_prob'] = (1.0 / assessed) if (assessed and np.isfinite(assessed) and assessed > 1) else np.nan
+
+    # ── Jockey/trainer career & L100 actual-vs-expected (strike_rates extras) ──
+    jockey_extra = (jockey_extra_lookup or {}).get(normalize_name(jockey_name))
+    trainer_extra = (trainer_extra_lookup or {}).get(normalize_name(trainer_name))
+    for prefix, extra in (('jockey', jockey_extra), ('trainer', trainer_extra)):
+        features[f'{prefix}_career_a2e'] = float(extra['career_a2e']) if extra and extra.get('career_a2e') is not None else np.nan
+        features[f'{prefix}_l100_a2e'] = float(extra['l100_a2e']) if extra and extra.get('l100_a2e') is not None else np.nan
+        features[f'{prefix}_career_runs'] = float(extra['career_runs']) if extra and extra.get('career_runs') else np.nan
+
+    # ── Sire/dam point-in-time win rates ──
+    # Placeholders: build_training_set() fills these after its row loop from
+    # strictly-earlier races only (no future information); at live-scoring
+    # time they are median-filled like every other NaN.
+    features['sire_win_rate'] = np.nan
+    features['dam_win_rate'] = np.nan
+
     return features
+
+
+
+# Race-relative derivatives (rank within race + delta vs race average) for the
+# 2026-07 audit features. Only rank/vs_avg are generated for these — exactly
+# the derivative set that was holdout-validated — unlike relative_cols below
+# which also get vs_best/percentile.
+NEW_RELATIVE_COLS = [
+    'form_speed_mps', 'pf_time_rank', 'pf_weight_class_rank', 'pfai_price',
+    'sm_assessed_prob', 'sm_settle', 'pf_early_time_rank',
+]
+NEW_RELATIVE_LOWER_IS_BETTER = {
+    'pf_time_rank', 'pf_weight_class_rank', 'pfai_price', 'sm_settle',
+    'pf_early_time_rank',
+}
 
 
 def add_race_relative_features(feature_rows, race_ids):
@@ -1001,7 +1355,55 @@ def add_race_relative_features(feature_rows, race_ids):
         temp[f'{col}_race_percentile'] = 1.0 - ((temp[f'{col}_race_rank'] - 1) / denom)
         temp[f'{col}_race_percentile'] = temp[f'{col}_race_percentile'].fillna(1.0)
 
+    for col in NEW_RELATIVE_COLS:
+        if col not in temp.columns:
+            continue
+        grouped = temp.groupby('race_id')[col]
+        ascending = col in NEW_RELATIVE_LOWER_IS_BETTER
+        temp[f'{col}_race_rank'] = grouped.rank(method='min', ascending=ascending)
+        temp[f'{col}_vs_race_avg'] = temp[col] - grouped.transform('mean')
+
     return temp.drop(columns=['race_id']).to_dict('records')
+
+
+MIN_BREEDING_RUNS_FOR_RATE = 3
+
+
+def _fill_point_in_time_breeding_rates(feature_rows, sire_names, dam_names,
+                                       meeting_dates, targets_won):
+    """Fill sire_win_rate/dam_win_rate placeholders from strictly-earlier races.
+
+    For each row, the sire/dam win rate is computed over that sire/dam's
+    progeny runs on strictly earlier meeting dates ONLY (same-day runs are
+    excluded from the accumulator until the date rolls over), so no future or
+    same-race information leaks into the feature. Rows whose sire/dam has
+    fewer than MIN_BREEDING_RUNS_FOR_RATE prior runs stay NaN.
+    """
+    from collections import defaultdict
+
+    if not feature_rows:
+        return
+    norm_dates = pd.to_datetime(pd.Series(meeting_dates), errors='coerce')
+    norm_dates = norm_dates.fillna(pd.Timestamp.min)
+    order = sorted(range(len(feature_rows)), key=lambda i: norm_dates.iloc[i])
+    for name_list, feature_key in ((sire_names, 'sire_win_rate'), (dam_names, 'dam_win_rate')):
+        runs = defaultdict(int)
+        wins = defaultdict(int)
+        pending = []
+        last_date = None
+        for i in order:
+            date = norm_dates.iloc[i]
+            if last_date is not None and date != last_date:
+                for pending_name, pending_won in pending:
+                    runs[pending_name] += 1
+                    wins[pending_name] += pending_won
+                pending = []
+            last_date = date
+            name = name_list[i]
+            if name and runs[name] >= MIN_BREEDING_RUNS_FOR_RATE:
+                feature_rows[i][feature_key] = wins[name] / runs[name]
+            if name:
+                pending.append((name, targets_won[i]))
 
 
 # ─────────────────────────────────────────────
@@ -1019,6 +1421,10 @@ def build_training_set(df, strike_rate_data=None):
     trainer_sr = (strike_rate_data or {}).get('trainers', {})
     jockey_sr_history = (strike_rate_data or {}).get('jockeys_history', {})
     trainer_sr_history = (strike_rate_data or {}).get('trainers_history', {})
+    pf_ratings_lookup = (strike_rate_data or {}).get('pf_ratings', {})
+    pf_speedmaps_lookup = (strike_rate_data or {}).get('pf_speedmaps', {})
+    jockey_extra_lookup = (strike_rate_data or {}).get('jockeys_extra', {})
+    trainer_extra_lookup = (strike_rate_data or {}).get('trainers_extra', {})
 
     df_unique = df.sort_values('horse_id').drop_duplicates(
         subset=['race_id', 'horse_name'], keep='last'
@@ -1050,6 +1456,8 @@ def build_training_set(df, strike_rate_data=None):
     race_ids = []
     horse_ids = []
     meeting_dates = []
+    sire_names = []
+    dam_names = []
 
     for _, row in df_unique.iterrows():
         try:
@@ -1057,6 +1465,8 @@ def build_training_set(df, strike_rate_data=None):
                 row, jockey_sr, trainer_sr,
                 jockey_sr_history=jockey_sr_history, trainer_sr_history=trainer_sr_history,
                 as_of_date=row.get('meeting_date'),
+                pf_ratings_lookup=pf_ratings_lookup, pf_speedmaps_lookup=pf_speedmaps_lookup,
+                jockey_extra_lookup=jockey_extra_lookup, trainer_extra_lookup=trainer_extra_lookup,
             )
             finish = int(row['finish_position'])
             sp = float(row['sp']) if row['sp'] else None
@@ -1075,6 +1485,15 @@ def build_training_set(df, strike_rate_data=None):
             roi = (sp - 1.0) if finish == 1 else -1.0
             won = 1 if finish == 1 else 0
 
+            cd_row = row.get('csv_data') or {}
+            if isinstance(cd_row, str):
+                try:
+                    cd_row = json.loads(cd_row)
+                except Exception:
+                    cd_row = {}
+            sire_names.append(normalize_name(str(cd_row.get('horse sire') or '')))
+            dam_names.append(normalize_name(str(cd_row.get('horse dam') or '')))
+
             feature_rows.append(features)
             targets_roi.append(roi)
             targets_won.append(won)
@@ -1085,6 +1504,8 @@ def build_training_set(df, strike_rate_data=None):
 
         except Exception:
             continue
+
+    _fill_point_in_time_breeding_rates(feature_rows, sire_names, dam_names, meeting_dates, targets_won)
 
     feature_count_before = len(feature_rows[0]) if feature_rows else 0
     log.info(f"Features before race-relative features: {feature_count_before}")
@@ -1097,11 +1518,13 @@ def build_training_set(df, strike_rate_data=None):
     y_roi = pd.Series(targets_roi)
     y_won = pd.Series(targets_won)
 
-    # NOTE: deliberately NOT calling X.fillna(X.median()) here. extract_features()
-    # already defaults every raw field to a concrete number, so genuine NaNs are
-    # rare/edge-case, but filling them with a median computed across the *whole*
-    # dataset (including rows that fall on the future side of whatever train/val
-    # split a given track uses) leaks a little future information into the past.
+    # NOTE: deliberately NOT calling X.fillna(X.median()) here. The original
+    # feature set defaults every raw field to a concrete number, and the
+    # 2026-07 audit features deliberately use NaN for "source data absent"
+    # (e.g. no PuntingForm ratings entry for that runner) — but filling NaNs
+    # with a median computed across the *whole* dataset (including rows that
+    # fall on the future side of whatever train/val split a given track uses)
+    # leaks a little future information into the past.
     # Each track below computes its own median from its own training-only rows
     # and persists it on the resulting model artifact so live scoring can reuse
     # the exact same fill values instead of a hardcoded 0 (see ml_predict.py).
@@ -2747,6 +3170,27 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     being discarded.
     """
     dates = pd.to_datetime(pd.Series(meeting_dates), errors='coerce')
+    # Rows whose meeting date is unknown even after repair_missing_meeting_dates()
+    # cannot be placed chronologically: argsort puts NaT LAST and `dates <=
+    # cutoff` is False for NaT, so they would all silently land in the
+    # validation split (and the newest walk-forward folds) regardless of when
+    # the races actually ran. Exclude them from Track E entirely.
+    undated_mask = dates.isna()
+    if undated_mask.any():
+        log.warning(
+            "Track E: excluding %s rows with undated meetings from the model "
+            "competition (they cannot be split chronologically and would all "
+            "fall into the validation set).",
+            int(undated_mask.sum()),
+        )
+        keep_idx = np.where(~undated_mask.values)[0]
+        X = X.iloc[keep_idx].reset_index(drop=True)
+        y_roi = y_roi.iloc[keep_idx].reset_index(drop=True)
+        y_won = y_won.iloc[keep_idx].reset_index(drop=True)
+        sp_values = [sp_values[i] for i in keep_idx]
+        race_ids = [race_ids[i] for i in keep_idx]
+        meeting_dates = [meeting_dates[i] for i in keep_idx]
+        dates = pd.to_datetime(pd.Series(meeting_dates), errors='coerce')
     order = dates.argsort().values
     X = X.iloc[order].reset_index(drop=True)
     y_roi = y_roi.iloc[order].reset_index(drop=True)
@@ -2904,6 +3348,28 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     except Exception as e:
         log.warning(f"Skipping boosted challengers; Optuna unavailable or failed to initialise: {e}")
 
+    # Neural-net candidate (2026-07 audit): StandardScaler + MLP(64,32), the
+    # exact configuration validated on the 75/25 holdout methodology (best dev
+    # walk-forward mean ROI of any candidate: -1.7% vs -9.1% for tuned
+    # CatBoost; 2nd-best untouched-holdout ROI at -3.5%). Left uncalibrated:
+    # MLPClassifier trains directly on log-loss so its probabilities are not
+    # skewed the way the class-weighted RF's are, and only this exact
+    # configuration was validated. Not added to the consensus ensemble below —
+    # only the standalone candidate was tested.
+    candidates['mlp'] = Pipeline([
+        ('scaler', StandardScaler()),
+        ('mlp', MLPClassifier(
+            hidden_layer_sizes=(64, 32), alpha=1e-3, batch_size=512,
+            learning_rate_init=1e-3, max_iter=200, early_stopping=True,
+            n_iter_no_change=10, validation_fraction=0.15, random_state=42,
+        )),
+    ])
+    log.info(
+        "Track E split for mlp: total_candidate_rows=%s train_rows=%s validation_rows=%s "
+        "internal_tuning_train_rows=%s internal_tuning_eval_rows=%s",
+        len(X), len(X_train), len(X_val), 0, 0
+    )
+
     fitted = {}
     results = []
     selection_frames = {}
@@ -2946,8 +3412,12 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
             [round(f['roi'], 1) for f in walk_forward['folds']],
         )
 
-    if len(fitted) > 1:
-        ensemble_members = list(fitted.items())
+    # Consensus ensemble is built from the RF/boosted members only. The mlp
+    # candidate competes standalone: only the standalone configuration was
+    # holdout-validated, so it must not silently change ensemble behaviour.
+    ensemble_eligible = {mt: model for mt, model in fitted.items() if mt != 'mlp'}
+    if len(ensemble_eligible) > 1:
+        ensemble_members = list(ensemble_eligible.items())
         ensemble_weights = []
         have_oos_tune_split = (
             X_tune_train is not None and X_tune_eval is not None
@@ -3084,7 +3554,8 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
             [round(f['roi'], 1) for f in walk_forward['folds']],
         )
 
-    agreement_summary = {'4_of_4': 0, '3_of_4': 0, '2_of_4': 0, '1_of_4': 0}
+    n_candidates = len(fitted)
+    agreement_summary = {f'{n}_of_{n_candidates}': 0 for n in range(n_candidates, 0, -1)}
     if fitted:
         val_frame = pd.DataFrame({'race_id': race_ids_val, 'row_id': range(len(race_ids_val))})
         selections_by_model = {}
@@ -3095,7 +3566,8 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         for race_id in val_frame['race_id'].unique():
             chosen = [sel.get(race_id) for sel in selections_by_model.values()]
             max_agreement = max(chosen.count(row_id) for row_id in set(chosen))
-            agreement_summary[f'{max_agreement}_of_4'] = agreement_summary.get(f'{max_agreement}_of_4', 0) + 1
+            key = f'{max_agreement}_of_{n_candidates}'
+            agreement_summary[key] = agreement_summary.get(key, 0) + 1
     for result in results:
         result['agreement_summary'] = agreement_summary
 
