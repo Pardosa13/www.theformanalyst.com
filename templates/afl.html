@@ -96,12 +96,12 @@
 
   /* ── Main tabs ───────────────────────────────────────────────── */
   .afl-tabs {
-    display:flex; gap:3px; background:var(--bg-surface);
-    border:1px solid var(--border-subtle); border-radius:12px;
-    padding:4px; margin-bottom:20px; overflow-x:auto;
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(135px,1fr)); gap:6px; background:var(--bg-surface);
+    border:1px solid var(--border-subtle); border-radius:14px;
+    padding:6px; margin-bottom:20px; overflow:visible;
   }
   .afl-tab {
-    flex:1; min-width:110px; padding:9px 12px; border-radius:8px;
+    min-width:0; padding:10px 12px; border-radius:10px;
     font-size:11px; font-weight:700; text-align:center; cursor:pointer;
     border:none; background:transparent; color:var(--text-secondary);
     transition:all .15s; display:flex; align-items:center;
@@ -561,6 +561,24 @@
   .vf-cards-grid {
     display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:12px;
   }
+  .vf-section-heading {
+    display:flex; align-items:flex-start; justify-content:space-between; gap:10px;
+    margin:14px 0 10px; padding:10px 12px; border-radius:12px;
+    background:var(--bg-elevated); border:1px solid var(--border-subtle);
+  }
+  .vf-section-heading:first-of-type { margin-top:0; }
+  .vf-section-title { font-size:12px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:7px; }
+  .vf-section-copy { margin-top:3px; font-size:11px; color:var(--text-muted); line-height:1.4; }
+  .vf-section-count { font-family:'DM Mono',monospace; font-size:11px; color:var(--text-secondary); white-space:nowrap; }
+  .vf-why {
+    margin-top:8px; padding:8px 10px; border-radius:8px;
+    background:rgba(102,126,234,.08); border:1px solid rgba(102,126,234,.22);
+    color:var(--text-secondary); font-size:11px; line-height:1.45;
+  }
+  .vf-card-ml .vf-why { background:rgba(245,158,11,.1); border-color:rgba(245,158,11,.28); }
+  .vf-why strong { color:var(--text-primary); }
+  .vf-card-ml .vf-stat-label { color:#b99335; }
+  .vf-card-ml .vf-stat-val { color:#f8fafc; }
   .vf-card {
     background:var(--bg-surface); border:1px solid var(--border-subtle);
     border-radius:12px; overflow:hidden;
@@ -616,7 +634,7 @@
     background:var(--bg-elevated); border:1px solid var(--border-mid); color:var(--text-muted);
   }
   .vf-card.vf-card-ml {
-    border-color:rgba(245,158,11,.55); box-shadow:0 0 0 1px rgba(245,158,11,.14), 0 8px 26px rgba(245,158,11,.08);
+    border-color:rgba(245,158,11,.7); box-shadow:0 0 0 2px rgba(245,158,11,.18), 0 8px 26px rgba(245,158,11,.08);
   }
   .vf-card.vf-card-ml:hover {
     border-color:rgba(251,191,36,.85); box-shadow:0 6px 24px rgba(245,158,11,.18);
@@ -659,6 +677,10 @@
   }
   @media (max-width:480px) {
     .afl-wrap { padding-bottom:40px; }
+    .afl-tabs { grid-template-columns:1fr 1fr; gap:7px; border-radius:16px; padding:8px; }
+    .afl-tab { justify-content:flex-start; padding:11px 10px; font-size:10px; line-height:1.15; }
+    .afl-tab i { width:16px; text-align:center; flex-shrink:0; }
+    .vf-section-heading { flex-direction:column; gap:4px; }
     .afl-header h2 { font-size:1.2rem; }
     .stat-row { grid-template-columns:1fr 1fr; gap:8px; }
     .stat-tile { padding:12px 14px; }
@@ -689,8 +711,7 @@
     .player-hdr-top { padding:10px 12px; gap:10px; }
     .player-avatar { width:40px; height:40px; font-size:13px; }
     .player-hdr-name { font-size:14px; }
-    .afl-tabs { padding:3px; gap:2px; }
-    .afl-tab { min-width:0; padding:8px 6px; font-size:10px; }
+
     .afl-card-body { padding:12px; }
   }
   @media (max-width:390px) {
@@ -702,8 +723,8 @@
     .value-finder-bar { gap:6px; }
     .prop-selector-bar { gap:6px; padding:8px 10px; }
     .afl-card-body { padding:10px; }
-    .afl-tabs { gap:1px; }
-    .afl-tab { padding:7px 4px; font-size:10px; }
+    .afl-tabs { grid-template-columns:1fr; }
+    .afl-tab { justify-content:center; }
     .fixture-row { flex-direction:column; align-items:flex-start; gap:6px; }
     .fixture-teams { min-width:0; width:100%; }
   }
@@ -2879,7 +2900,19 @@ function _vfRenderTable(rows, data) {
   const mktLabel = market.replace('player_', '').replace(/_/g, ' ');
   const season = (data && data.season) || _SEASON;
 
-  const cards = rows.map(bet => {
+  const buildWhy = bet => {
+    if (bet.why || bet.reason || bet.explanation || bet.rationale) return esc(bet.why || bet.reason || bet.explanation || bet.rationale);
+    if (bet.is_ml_pick) {
+      const bits = [];
+      if (bet.ml_bet_probability != null || bet.model_prob != null) bits.push(`ML probability ${bet.model_prob != null ? safeNum(bet.model_prob, 0).toFixed(1) + '%' : fmtPctFromUnit(bet.ml_bet_probability)}`);
+      if (bet.edge != null) bits.push(`${safeNum(bet.edge, 0) > 0 ? '+' : ''}${safeNum(bet.edge, 0).toFixed(1)}% edge`);
+      if (bet.ml_expected_value_score != null) bits.push(`EV score ${fmtMlScore(bet.ml_expected_value_score)}`);
+      if (bet.confidence_score != null) bits.push(`confidence ${safeNum(bet.confidence_score, 0).toFixed(1)}`);
+      return bits.length ? `Picked because the AFL ML model ranked this as a BET using ${esc(bits.join(', '))}.` : 'Picked because the AFL ML model marked this selection as a BET.';
+    }
+    return `Value model probability is above the market implied probability by ${safeNum(bet.edge, 0).toFixed(1)}%.`;
+  };
+  const renderCards = groupRows => groupRows.map(bet => {
     const isMlPick = !!bet.is_ml_pick;
     const edge = safeNum(bet.edge, 0);
     const edgeCls = edge >= 4 ? 'pos' : edge >= 2 ? 'neu' : edge <= -2 ? 'neg' : 'neu';
@@ -2898,6 +2931,14 @@ function _vfRenderTable(rows, data) {
 
     const modelProb = bet.model_prob != null ? safeNum(bet.model_prob, 0).toFixed(1) + '%' : '—';
     const impliedProb = bet.implied_prob != null ? safeNum(bet.implied_prob, 0).toFixed(1) + '%' : '—';
+    const statOneLabel = isMlPick ? 'ML EV' : 'Season Avg';
+    const statOneVal = isMlPick ? fmtMlScore(bet.ml_expected_value_score) : (bet.season_avg != null ? safeNum(bet.season_avg, 0).toFixed(1) : '—');
+    const statTwoLabel = isMlPick ? 'Confidence' : 'Last 5';
+    const statTwoVal = isMlPick ? (bet.confidence_score != null ? safeNum(bet.confidence_score, 0).toFixed(1) : '—') : (bet.last5_avg != null ? safeNum(bet.last5_avg, 0).toFixed(1) : '—');
+    const statThreeLabel = isMlPick ? 'Threshold' : 'vs Opp';
+    const statThreeVal = isMlPick ? fmtMlScore(bet.threshold_used) : (bet.vs_opp_avg != null ? safeNum(bet.vs_opp_avg, 0).toFixed(1) : '—');
+    const statFourLabel = isMlPick ? 'ML Hit' : 'Hit Rate';
+    const statFourVal = `${safeNum(bet.hist_pct, 0)}%`;
 
     return `
       <div class="vf-card${isMlPick ? ' vf-card-ml' : ''}">
@@ -2928,17 +2969,25 @@ function _vfRenderTable(rows, data) {
             <span class="vf-prob-sep">·</span>
             <span class="vf-prob-item">Edge <strong><span class="edge-chip ${edgeCls}" style="min-width:auto;padding:2px 6px;">${edge > 0 ? '+' : ''}${edge.toFixed(1)}%</span></strong></span>
           </div>
+          <div class="vf-why"><strong>Why:</strong> ${buildWhy(bet)}</div>
         </div>
         <div class="vf-card-stats">
-          <div class="vf-stat-item"><span class="vf-stat-label">Season Avg</span><span class="vf-stat-val">${bet.season_avg != null ? safeNum(bet.season_avg, 0).toFixed(1) : '—'}</span></div>
-          <div class="vf-stat-item"><span class="vf-stat-label">Last 5</span><span class="vf-stat-val">${bet.last5_avg != null ? safeNum(bet.last5_avg, 0).toFixed(1) : '—'}</span></div>
-          <div class="vf-stat-item"><span class="vf-stat-label">vs Opp</span><span class="vf-stat-val">${bet.vs_opp_avg != null ? safeNum(bet.vs_opp_avg, 0).toFixed(1) : '—'}</span></div>
-          <div class="vf-stat-item"><span class="vf-stat-label">Hit Rate</span><span class="vf-stat-val">${safeNum(bet.hist_pct, 0)}%</span></div>
+          <div class="vf-stat-item"><span class="vf-stat-label">${statOneLabel}</span><span class="vf-stat-val">${statOneVal}</span></div>
+          <div class="vf-stat-item"><span class="vf-stat-label">${statTwoLabel}</span><span class="vf-stat-val">${statTwoVal}</span></div>
+          <div class="vf-stat-item"><span class="vf-stat-label">${statThreeLabel}</span><span class="vf-stat-val">${statThreeVal}</span></div>
+          <div class="vf-stat-item"><span class="vf-stat-label">${statFourLabel}</span><span class="vf-stat-val">${statFourVal}</span></div>
           <div class="vf-stat-item vf-stat-rec">${recBadge}</div>
         </div>
       </div>
     `;
   }).join('');
+
+  const mlRows = rows.filter(b => b.is_ml_pick);
+  const valueRows = rows.filter(b => !b.is_ml_pick);
+  const cards = `
+    ${mlRows.length ? `<div class="vf-section-heading"><div><div class="vf-section-title"><i class="bi bi-cpu-fill"></i> AFL Machine Learning Picks</div><div class="vf-section-copy">Separate gold cards from the ML model, with EV/confidence stats and a reason for each pick.</div></div><span class="vf-section-count">${mlRows.length} pick(s)</span></div><div class="vf-cards-grid">${renderCards(mlRows)}</div>` : ''}
+    ${valueRows.length ? `<div class="vf-section-heading"><div><div class="vf-section-title"><i class="bi bi-lightning-charge-fill"></i> Standard Value Picks</div><div class="vf-section-copy">Normal model-vs-market value selections, kept separate so they do not overlap with ML picks.</div></div><span class="vf-section-count">${valueRows.length} pick(s)</span></div><div class="vf-cards-grid">${renderCards(valueRows)}</div>` : ''}
+  `;
 
   const perf = data?.model_performance || {};
   const perfLine = perf.total_bets
@@ -2948,7 +2997,7 @@ function _vfRenderTable(rows, data) {
     <div class="vf-results-meta">
       ${esc(String(rows.length))} result(s) · <strong>${esc(mktLabel)}</strong> · min edge: ${esc(String(minEdge))}% · season: ${esc(String(season))} · gold cards are AFL Machine Learning picks${perfLine}
     </div>
-    <div class="vf-cards-grid">${cards}</div>
+    ${cards}
   `;
 }
 
@@ -2981,6 +3030,11 @@ function _vfMlRowsToValueBets(rows) {
         implied_prob: r.implied_prob != null ? safeNum(r.implied_prob, 0) : (r.market_prob != null ? safeNum(r.market_prob, 0) * 100 : null),
         edge: safeNum(originalEdge, 0),
         hist_pct: r.ml_bet_probability != null ? Math.round(safeNum(r.ml_bet_probability, 0) * 100) : null,
+        ml_bet_probability: r.ml_bet_probability,
+        ml_expected_value_score: r.ml_expected_value_score,
+        confidence_score: r.confidence_score,
+        threshold_used: r.threshold_used,
+        why: r.reason || r.rationale || r.explanation || r.why,
         recommendation: 'ml',
       };
     });
