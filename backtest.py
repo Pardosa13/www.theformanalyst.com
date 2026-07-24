@@ -4445,7 +4445,7 @@ def check_active_champion_staleness(run_id=None):
             # line is the durable record of what the self-heal actually did.
             log.info("Nightly staleness check: self-healed — %s", result['detail'])
         else:
-            else:
+            
             log.error("Nightly champion validation check: could not re-validate champion id=%s: %s", champion_id, result['detail'])
             record_pipeline_alert(
                 conn, 'champion_missing_walk_forward_validation',
