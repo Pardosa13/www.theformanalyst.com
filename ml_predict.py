@@ -928,15 +928,20 @@ def load_model():
             )).fetchone()
             if row and row[5]:
                 model = joblib.load(io.BytesIO(bytes(row[5])))
+                build_metadata = getattr(model, '_form_analyst_build_metadata', {}) or {}
                 model._form_analyst_model_id = row[0]
                 model._form_analyst_run_id = row[1]
                 model._form_analyst_model_type = row[6]
                 model._form_analyst_model_name = row[7]
                 model._form_analyst_training_date = row[2]
                 model._form_analyst_is_active = row[8]
-                model._form_analyst_model_version = row[9] or getattr(model, '_form_analyst_model_version', None)
+                model._form_analyst_model_version = (
+                    row[9] or build_metadata.get('model_version') or getattr(model, '_form_analyst_model_version', None)
+                )
                 model._form_analyst_artifact_path = f"db://backtest_best_model/{row[0]}"
-                model._form_analyst_artifact_filename = row[10] or getattr(model, '_form_analyst_artifact_filename', None)
+                model._form_analyst_artifact_filename = (
+                    row[10] or build_metadata.get('artifact_filename') or getattr(model, '_form_analyst_artifact_filename', None)
+                )
                 model._form_analyst_expected_feature_count = row[11]
                 try:
                     model._form_analyst_selection_metrics = json.loads(row[12]) if row[12] else getattr(model, '_form_analyst_selection_metrics', {})

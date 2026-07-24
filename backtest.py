@@ -225,6 +225,7 @@ def ensure_tables():
                 model_version VARCHAR(80),
                 artifact_filename VARCHAR(255),
                 expected_feature_count INTEGER,
+                scoring_formula_version VARCHAR(80),
                 selection_metrics TEXT
             )
         """))
@@ -277,6 +278,7 @@ def ensure_tables():
             "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS model_version VARCHAR(80)",
             "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS artifact_filename VARCHAR(255)",
             "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS expected_feature_count INTEGER",
+            "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS scoring_formula_version VARCHAR(80)",
             "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS selection_metrics TEXT",
             "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS validation_longest_losing_streak INTEGER",
             "ALTER TABLE backtest_model_competition ADD COLUMN IF NOT EXISTS validation_bankroll_growth FLOAT",
@@ -2428,6 +2430,59 @@ MIN_WALK_FORWARD_FOLDS = int(os.environ.get('ML_MIN_WALK_FORWARD_FOLDS', '2'))
 # of) the fixed Champion Score edge above.
 PROMOTION_MAX_BOOTSTRAP_P_VALUE = float(os.environ.get('ML_PROMOTION_MAX_P_VALUE', '0.25'))
 MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
+SCORING_FORMULA_VERSION = 'champion_score_v2_walk_forward_calibrated'
+REQUIRED_SELECTION_METRIC_COMPONENTS = (
+    'roi',
+    'strike_rate',
+    'log_loss',
+    'brier_score',
+    'calibration',
+    'stability',
+    'walk_forward',
+)
+
+
+class ChampionComparisonBlocked(RuntimeError):
+    """Raised when a stored champion cannot be compared to current challengers."""
+
+
+def _stamp_selection_metrics(metrics):
+    stamped = dict(metrics or {})
+    stamped['scoring_formula_version'] = SCORING_FORMULA_VERSION
+    if stamped.get('selection_score') is None:
+        score = _selection_score_from_metrics(stamped, force_recompute=True)
+        if score is not None:
+            stamped['selection_score'] = score
+    return stamped
+
+
+def _missing_selection_metric_components(metrics):
+    return [key for key in REQUIRED_SELECTION_METRIC_COMPONENTS if key not in (metrics or {})]
+
+
+def _assert_champion_comparable(champion_id, champion_metrics, run_id=None, conn=None):
+    missing = _missing_selection_metric_components(champion_metrics)
+    stored_version = (champion_metrics or {}).get('scoring_formula_version')
+    errors = []
+    if missing:
+        errors.append(f"missing raw metric component(s): {', '.join(missing)}")
+    if stored_version != SCORING_FORMULA_VERSION:
+        errors.append(
+            f"scoring_formula_version={stored_version or 'missing'} does not match current "
+            f"{SCORING_FORMULA_VERSION}"
+        )
+    if errors:
+        message = (
+            f"Active champion id={champion_id} is not comparable to current challengers: "
+            f"{'; '.join(errors)}. Run a full champion re-validation before making promotion decisions."
+        )
+        log.error(message)
+        if conn is not None:
+            record_pipeline_alert(
+                conn, 'champion_scoring_formula_mismatch',
+                message=message, severity='blocking', run_id=run_id,
+            )
+        raise ChampionComparisonBlocked(message)
 
 
 def record_pipeline_alert(conn, alert_key, message, severity='warning', run_id=None):
@@ -2680,14 +2735,22 @@ def _calibration_summary(y_true, pred, bins=10):
 
 
 def _attach_model_metadata(model, model_type, model_name, run_id, artifact_filename, feature_names, metrics):
+    stamped_metrics = _stamp_selection_metrics(metrics or {})
     model._form_analyst_algorithm = model_type
     model._form_analyst_model_type = model_type
     model._form_analyst_model_name = model_name
     model._form_analyst_training_run_id = run_id
     model._form_analyst_artifact_filename = artifact_filename
     model._form_analyst_model_version = MODEL_VERSION
+    model._form_analyst_build_metadata = {
+        'artifact_filename': artifact_filename,
+        'model_version': MODEL_VERSION,
+        'scoring_formula_version': SCORING_FORMULA_VERSION,
+        'training_run_id': run_id,
+        'built_at': datetime.utcnow().isoformat(),
+    }
     model._form_analyst_expected_features = list(feature_names)
-    model._form_analyst_selection_metrics = metrics or {}
+    model._form_analyst_selection_metrics = stamped_metrics
     if getattr(model, 'feature_names_in_', None) is None:
         model.feature_names_in_ = np.asarray(list(feature_names))
     return model
@@ -3271,13 +3334,16 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     # in the log instead of only ever manifesting as "unknown".
     non_null_tracks = sum(1 for t in tracks_ordered if t is not None and str(t).strip())
     if non_null_tracks == 0 and race_ids:
-        log.warning(
+        message = (
             "Track lookup produced zero non-null tracks for %s race_id(s) "
             "('meeting_track' in df.columns=%s, track_by_race_id entries=%s) — "
             "walk-forward fold composition will show top_tracks=unknown for "
             "every fold. Check that df still carries 'meeting_track' and that "
-            "its race_id dtype matches race_ids.",
-            len(race_ids), 'meeting_track' in df.columns, len(track_by_race_id),
+            "its race_id dtype matches race_ids."
+        )
+        log.error(message, len(race_ids), 'meeting_track' in df.columns, len(track_by_race_id))
+        raise RuntimeError(
+            message % (len(race_ids), 'meeting_track' in df.columns, len(track_by_race_id))
         )
     cutoff = dates.iloc[order].quantile(0.8)
     train_mask = dates.iloc[order].reset_index(drop=True) <= cutoff
@@ -3696,6 +3762,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     for result in results:
         result['metrics']['selection_score'] = result['selection_score']
         result['metrics']['validation_period'] = validation_period
+        result['metrics'] = _stamp_selection_metrics(result['metrics'])
         try:
             result['metrics']['value_edge_analysis'] = _value_edge_backtest(
                 selection_frames.get(result['model_type'])
@@ -3729,6 +3796,8 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
     Store Challenger .pkl in the database and only activate it if it beats Champion.
     """
     today = datetime.utcnow().date()
+    if validation_metrics:
+        validation_metrics = _stamp_selection_metrics(validation_metrics)
     with open(pkl_file, 'rb') as f:
         pkl_bytes = f.read()
 
@@ -3775,12 +3844,12 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
             (run_date, combined_score, pkl_data, run_id, is_active, validation_roi,
              validation_strike_rate, validation_profit_units, validation_bets, validation_drawdown,
              validation_longest_losing_streak, validation_bankroll_growth, validation_volatility,
-             model_type, model_name, model_version, artifact_filename, expected_feature_count,
+             model_type, model_name, model_version, artifact_filename, expected_feature_count, scoring_formula_version,
              selection_metrics, promotion_reason)
             VALUES (:d, :score, :data, :run_id, FALSE, :val_roi, :val_sr, :val_profit, :val_bets,
                     :val_drawdown, :val_losing_streak, :val_bankroll_growth, :val_volatility,
                     :model_type, :model_name, :model_version, :artifact_filename,
-                    :expected_feature_count, :selection_metrics,
+                    :expected_feature_count, :scoring_formula_version, :selection_metrics,
                     'Saved as challenger pending champion comparison')
             RETURNING id
         """), {'d': today, 'score': combined_score, 'data': pkl_bytes, 'run_id': run_id,
@@ -3791,6 +3860,7 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
                'model_version': MODEL_VERSION,
                'artifact_filename': os.path.basename(pkl_file),
                'expected_feature_count': expected_feature_count,
+               'scoring_formula_version': (validation_metrics or {}).get('scoring_formula_version'),
                'selection_metrics': json.dumps(validation_metrics or {})}).fetchone()[0]
 
         promote = False
@@ -3803,6 +3873,9 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
                 champion_metrics = json.loads(champion[10])
             except Exception:
                 champion_metrics = {}
+        if champion is not None:
+            _assert_champion_comparable(champion[0], champion_metrics, run_id=run_id, conn=conn)
+            resolve_pipeline_alert(conn, 'champion_scoring_formula_mismatch')
         # Always recompute both scores from their raw metric components under
         # the CURRENT formula rather than trusting a stored/cached number —
         # otherwise a champion promoted under an older formula version (e.g.
@@ -4035,6 +4108,7 @@ def rollback_to_champion(model_id, reason='Manual Champion rollback'):
         ok, guard_reason = can_become_champion(target_metrics)
         if not ok:
             raise ValueError(f"Model {model_id} is not eligible for rollback champion activation: {guard_reason}")
+        _assert_champion_comparable(model_id, target_metrics, conn=conn)
         current = conn.execute(text("""
             SELECT id FROM backtest_best_model
             WHERE is_active = TRUE
@@ -4208,7 +4282,7 @@ def _heal_stale_champion(champion_id, champion_metrics, run_id=None):
         )
         walk_forward = _walk_forward_metrics_for_model(model, X, y_won, sp_values, race_ids)
 
-        updated_metrics = {**champion_metrics, 'walk_forward': walk_forward}
+        updated_metrics = _stamp_selection_metrics({**champion_metrics, 'walk_forward': walk_forward})
         old_score = _selection_score_from_metrics(champion_metrics, force_recompute=True)
         new_score = _selection_score_from_metrics(updated_metrics, force_recompute=True)
         new_fold_count = _walk_forward_fold_count(updated_metrics)
@@ -4217,9 +4291,13 @@ def _heal_stale_champion(champion_id, champion_metrics, run_id=None):
 
         conn.execute(text("""
             UPDATE backtest_best_model
-            SET selection_metrics = :metrics, combined_score = :score, updated_at = NOW()
+            SET selection_metrics = :metrics, combined_score = :score,
+                scoring_formula_version = :scoring_formula_version, updated_at = NOW()
             WHERE id = :id
-        """), {'metrics': json.dumps(updated_metrics), 'score': new_score, 'id': champion_id})
+        """), {
+            'metrics': json.dumps(updated_metrics), 'score': new_score,
+            'scoring_formula_version': SCORING_FORMULA_VERSION, 'id': champion_id,
+        })
 
         rolled_back_to = None
         if is_active and best_challenger and best_challenger['score'] > new_score + PROMOTION_SELECTION_SCORE_EDGE:
@@ -4287,12 +4365,16 @@ def check_active_champion_staleness(run_id=None):
                 champion_metrics = {}
         fold_count = _walk_forward_fold_count(champion_metrics)
         champion_id = champion[0]
-        is_stale = fold_count < MIN_WALK_FORWARD_FOLDS
+        missing_components = _missing_selection_metric_components(champion_metrics)
+        version_mismatch = champion_metrics.get('scoring_formula_version') != SCORING_FORMULA_VERSION
+        is_stale = fold_count < MIN_WALK_FORWARD_FOLDS or version_mismatch or bool(missing_components)
         if is_stale:
-            log.warning(
-                "Nightly staleness check: active champion (id=%s) has only %s walk-forward fold(s) "
-                "(< MIN_WALK_FORWARD_FOLDS=%s). Self-healing now instead of waiting on a manual backfill run.",
+            log.error(
+                "Nightly champion validation check: active champion id=%s is not comparable "
+                "(folds=%s, required_folds=%s, scoring_formula_version=%s, current_formula=%s, missing_components=%s). "
+                "Attempting full re-validation before any promotion decisions.",
                 champion_id, fold_count, MIN_WALK_FORWARD_FOLDS,
+                champion_metrics.get('scoring_formula_version'), SCORING_FORMULA_VERSION, missing_components,
             )
         conn.commit()
 
@@ -4316,7 +4398,7 @@ def check_active_champion_staleness(run_id=None):
             # line is the durable record of what the self-heal actually did.
             log.info("Nightly staleness check: self-healed — %s", result['detail'])
         else:
-            log.warning("Nightly staleness check: could not self-heal champion id=%s: %s", champion_id, result['detail'])
+            log.error("Nightly champion validation check: could not re-validate champion id=%s: %s", champion_id, result['detail'])
             record_pipeline_alert(
                 conn, 'champion_missing_walk_forward_validation',
                 message=(
@@ -4327,6 +4409,11 @@ def check_active_champion_staleness(run_id=None):
                 severity='blocking', run_id=run_id,
             )
         conn.commit()
+        if not result['healed']:
+            raise ChampionComparisonBlocked(
+                f"Active champion id={champion_id} is not comparable and automatic full re-validation failed: "
+                f"{result['detail']}"
+            )
 
 
 # ─────────────────────────────────────────────
@@ -4541,7 +4628,13 @@ def main():
     try:
         check_active_champion_staleness(run_id=run_id)
     except Exception as e:
-        log.warning(f"Nightly champion staleness check failed (non-fatal): {e}")
+        log.error("Nightly champion validation check failed; blocking promotion-capable backtest run: %s", e, exc_info=True)
+        with engine.connect() as conn:
+            conn.execute(text(
+                "UPDATE backtest_runs SET status='failed', notes=:notes WHERE id=:id"
+            ), {'id': run_id, 'notes': f'Champion validation check failed: {e}'})
+            conn.commit()
+        raise
 
     try:
         df, strike_rate_data = load_historical_data()

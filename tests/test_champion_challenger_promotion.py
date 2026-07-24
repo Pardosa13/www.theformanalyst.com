@@ -157,6 +157,20 @@ class FakeEngine:
 
 
 def champion_row(champion_score=10.0):
+    champion_metrics = {
+        "selection_score": champion_score,
+        "scoring_formula_version": backtest.SCORING_FORMULA_VERSION,
+        "roi": 4.0,
+        "strike_rate": 22.0,
+        "log_loss": 0.6,
+        "brier_score": 0.2,
+        "calibration": {"expected_calibration_error": 0.01},
+        "stability": {"roi_last_100": 4.0, "roi_last_250": 4.0},
+        "walk_forward": {
+            "folds": [{"roi": 4.0, "strike_rate": 22.0, "bets": 50} for _ in range(backtest.MIN_WALK_FORWARD_FOLDS)],
+            "roi_std": 0.5,
+        },
+    }
     return [
         101,  # id
         12.0,  # validation_roi
@@ -168,7 +182,7 @@ def champion_row(champion_score=10.0):
         1.2,  # validation_bankroll_growth
         0.8,  # validation_volatility
         champion_score,  # combined_score / Champion Score
-        '{"selection_score": %.3f}' % champion_score,
+        json.dumps(champion_metrics),
     ]
 
 
@@ -183,6 +197,11 @@ def metrics(selection_score=11.0, roi=5.0, strike_rate=20.0, bets=150, walk_forw
         "longest_losing_streak": 4,
         "bankroll_growth": 1.1,
         "volatility": 0.7,
+        "log_loss": 0.6,
+        "brier_score": 0.2,
+        "calibration": {"expected_calibration_error": 0.01},
+        "stability": {"roi_last_100": roi, "roi_last_250": roi},
+        "scoring_formula_version": backtest.SCORING_FORMULA_VERSION,
     }
     if walk_forward_folds is not None:
         data["walk_forward"] = {
