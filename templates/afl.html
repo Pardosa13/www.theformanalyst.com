@@ -3008,7 +3008,7 @@ function _vfMlRowsToValueBets(rows) {
         ml_expected_value_score: r.ml_expected_value_score,
         confidence_score: r.confidence_score,
         threshold_used: r.threshold_used,
-        headshot_url: r.headshot_url || r.player_headshot_url || r.player_photo_url || r.photo_url || r.image_url || r.headshot || r.photo || r.player_image,
+        headshot_url: r.headshot_url || r.player_headshot_url || r.player_photo_url || r.photo_url || r.image_url || r.headshot || r.photo || r.player_image || (r.player_id ? `/api/afl/player-headshot/${encodeURIComponent(r.player_id)}${r.player_name && r.player_name.includes(' ') ? `?first_name=${encodeURIComponent(r.player_name.split(' ')[0])}&last_name=${encodeURIComponent(r.player_name.split(' ').slice(1).join(' '))}` : ''}` : ''),
         why: r.reason || r.rationale || r.explanation || r.why,
         recommendation: 'ml',
       };
