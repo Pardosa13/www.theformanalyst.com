@@ -4222,21 +4222,11 @@ def _heal_stale_champion(champion_id, champion_metrics, run_id=None):
 
     Returns a dict describing what happened, always including 'healed' (bool)
     and 'detail' (str) for logging/alerting. 'healed' is only False when the
-    champion's stored data doesn't contain enough to safely re-fit it (no raw
-    metric components, no stored artifact, or a feature contract that
-    predates the current feature set) — those genuinely need a fresh model
-    trained from scratch, not a walk-forward re-test.
+    champion's stored data doesn't contain enough to safely re-fit it (no
+    stored artifact, or a feature contract that predates the current feature
+    set) — those genuinely need a fresh model trained from scratch, not a
+    re-validation of the existing artifact.
     """
-    if 'roi' not in champion_metrics:
-        return {
-            'healed': False,
-            'detail': (
-                f"champion id={champion_id} has no raw metric components (roi, strike_rate, etc.) stored in "
-                "selection_metrics — only a frozen final score, if that. Its Champion Score can't be recomputed "
-                "here; it needs a full re-validation run, not a walk-forward re-test."
-            ),
-        }
-
     with engine.connect() as conn:
         row = conn.execute(text("""
             SELECT pkl_data, is_active FROM backtest_best_model WHERE id = :id
@@ -4264,6 +4254,7 @@ def _heal_stale_champion(champion_id, champion_metrics, run_id=None):
         y_won = y_won.iloc[order].reset_index(drop=True)
         sp_values = pd.Series(sp_values).iloc[order].reset_index(drop=True)
         race_ids = [race_ids[i] for i in order]
+        dates_ordered = dates.iloc[order].reset_index(drop=True)
 
         expected_features = getattr(model, 'feature_names_in_', None)
         if expected_features is not None and list(expected_features) != list(X.columns):
@@ -4275,6 +4266,45 @@ def _heal_stale_champion(champion_id, champion_metrics, run_id=None):
                     "today's columns. This needs a fresh model, not a walk-forward re-test."
                 ),
             }
+
+        # A champion with no raw metric components (roi, strike_rate, etc.) —
+        # e.g. one promoted before selection_metrics existed, or that only
+        # ever stored a frozen final score — can't have those numbers healed
+        # by adding walk-forward folds alone. Score it exactly the way a
+        # challenger is scored: the same chronological 80/20 holdout every
+        # Track E candidate uses, via evaluate_model_on_validation. This is
+        # the actual "full re-validation run" the earlier self-heal attempts
+        # only ever logged as needed but never performed.
+        if 'roi' not in champion_metrics:
+            log.info(
+                "Self-heal: champion id=%s has no raw metric components — running a full "
+                "out-of-sample re-validation (not just a walk-forward re-test) on the same "
+                "chronological holdout Track E challengers use...", champion_id,
+            )
+            cutoff = dates_ordered.quantile(0.8)
+            train_mask = dates_ordered <= cutoff
+            val_mask = ~train_mask
+            X_val = X[val_mask]
+            y_won_val = y_won[val_mask]
+            sp_val = sp_values[val_mask].values
+            race_ids_val = [r for r, keep in zip(race_ids, val_mask) if keep]
+
+            feature_medians = getattr(model, '_form_analyst_feature_medians', None) or {}
+            if feature_medians:
+                X_val = X_val.fillna(pd.Series(feature_medians))
+            X_val = X_val.fillna(0)
+
+            try:
+                full_metrics = evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val)
+            except Exception as e:
+                return {
+                    'healed': False,
+                    'detail': f"champion id={champion_id} full re-validation failed: {e}",
+                }
+            # Merge the real components in; anything champion_metrics already
+            # had (e.g. an old frozen selection_score) gets overwritten by
+            # the freshly-computed numbers.
+            champion_metrics = {**champion_metrics, **full_metrics}
 
         log.info(
             "Self-heal: running walk-forward evaluation (n_splits=%s, embargo_rows=%s) on champion id=%s...",
@@ -4409,11 +4439,13 @@ def check_active_champion_staleness(run_id=None):
                 severity='blocking', run_id=run_id,
             )
         conn.commit()
-        if not result['healed']:
-            raise ChampionComparisonBlocked(
-                f"Active champion id={champion_id} is not comparable and automatic full re-validation failed: "
-                f"{result['detail']}"
-            )
+        # Deliberately does not raise: a stale/unhealable champion is already
+        # durably flagged in ml_pipeline_alerts above, and the actual
+        # promotion path (_assert_champion_comparable in save_best_model_to_db
+        # and rollback_to_champion) independently refuses to compare against
+        # it. Raising here used to kill the entire nightly run — ingestion,
+        # training, and grid search never got to run — over a condition that
+        # only needs to block promotion, not the whole job.
 
 
 # ─────────────────────────────────────────────
