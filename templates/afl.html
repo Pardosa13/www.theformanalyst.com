@@ -911,6 +911,7 @@
           <option value="player_tackles">Player Tackles</option>
           <option value="player_goals">Player Goals</option>
           <option value="player_kicks">Player Kicks</option>
+          <option value="player_handballs">Player Handballs</option>
         </select>
         <select class="form-select" id="valueMatch" style="width:220px;" onchange="_vfRawData ? _vfApplyFilters(_vfRawData) : loadValueFinder()">
           <option value="">All Matches</option>
@@ -1260,7 +1261,27 @@
       </button>
     </div>
     <div class="afl-card-body">
-      <div id="aflMlSummary" class="vf-results-meta">All Machine Learning selections · display only from the AFL ML backend endpoint.</div>
+      <div class="value-finder-bar">
+        <select class="form-select" id="mlMarket" style="width:200px;" onchange="_aflApplyMlFilters()">
+          <option value="">All Stats</option>
+          <option value="player_disposals">Player Disposals</option>
+          <option value="player_marks">Player Marks</option>
+          <option value="player_tackles">Player Tackles</option>
+          <option value="player_goals">Player Goals</option>
+          <option value="player_kicks">Player Kicks</option>
+          <option value="player_handballs">Player Handballs</option>
+        </select>
+        <select class="form-select" id="mlMatch" style="width:220px;" onchange="_aflApplyMlFilters()">
+          <option value="">All Matches</option>
+        </select>
+        <input type="number" class="form-control" id="mlMinLine" placeholder="Min line" step="0.5" style="max-width:100px;" onchange="_aflApplyMlFilters()">
+        <input type="number" class="form-control" id="mlMaxLine" placeholder="Max line" step="0.5" style="max-width:100px;" onchange="_aflApplyMlFilters()">
+        <input type="number" class="form-control" id="mlMinEdge" value="0" step="0.5" style="max-width:120px;" placeholder="Min edge" onchange="_aflApplyMlFilters()">
+        <button class="btn btn-primary" onclick="loadAflMachineLearningSelections()">
+          <i class="bi bi-search"></i> Find ML Picks
+        </button>
+      </div>
+      <div id="aflMlSummary" class="vf-results-meta">All Machine Learning selections · filter by stat, match, line and edge.</div>
       <div id="aflMlSelectionsWrap">
         <div class="prop-empty">
           <i class="bi bi-cpu"></i>
@@ -1858,17 +1879,9 @@ function loadAflMachineLearningSelections() {
         return;
       }
 
-      const betSelections = rows
-        .filter(r => String(r.recommendation || r.status || r.decision || r.ml_recommendation || '').toUpperCase() === 'BET')
-        .sort(compareAflMlBetQuality);
-      const betCount = betSelections.length;
-      if (summary) summary.textContent = `AFL Machine Learning BET selections · ${betCount} ranked best to worst by ML EV Score${rows.length !== betCount ? ` · ${rows.length - betCount} PASS hidden` : ''}.`;
-      if (!betSelections.length) {
-        wrap.innerHTML = '<div class="prop-empty"><i class="bi bi-cpu"></i><p>No AFL ML bet selections currently available.</p></div>';
-        return;
-      }
-
-      wrap.innerHTML = _aflRenderMlSelectionCards(betSelections);
+      _aflMlRawRows = rows;
+      _aflPopulateMlMatchSelector(_vfMlRowsToValueBets(rows));
+      _aflApplyMlFilters();
     })
     .catch(err => {
       if (summary) summary.textContent = 'AFL Machine Learning selections could not be loaded.';
@@ -2854,6 +2867,7 @@ function loadOddsProps() {
 
 // ── Value finder ─────────────────────────────────────────────────
 let _vfRawData = null; // cached result for client-side re-filtering
+let _aflMlRawRows = null; // cached ML endpoint rows for client-side filtering
 
 // Render value finder results as polished cards matching Player Props quality.
 // Returns an HTML string ready to assign to el.innerHTML.
@@ -2994,14 +3008,77 @@ function _vfMlRowsToValueBets(rows) {
         ml_expected_value_score: r.ml_expected_value_score,
         confidence_score: r.confidence_score,
         threshold_used: r.threshold_used,
+        headshot_url: r.headshot_url || r.player_headshot_url || r.player_photo_url || r.photo_url || r.image_url || r.headshot || r.photo || r.player_image,
         why: r.reason || r.rationale || r.explanation || r.why,
         recommendation: 'ml',
       };
     });
 }
 
+function _aflPopulateMlMatchSelector(mlBets) {
+  const sel = document.getElementById('mlMatch');
+  if (!sel) return;
+  const prev = sel.value || '';
+  const options = new Map();
+  const addMatch = (home, away) => {
+    home = _vfNormaliseTeamName(home);
+    away = _vfNormaliseTeamName(away);
+    if (!home || !away) return;
+    const value = _vfMatchValue(home, away);
+    if (!options.has(value)) options.set(value, `${home} vs ${away}`);
+  };
+  (mlBets || []).forEach(b => addMatch(b.home_team, b.away_team));
+  sel.innerHTML = '<option value="">All Matches</option>';
+  [...options.entries()].sort((a, b) => a[1].localeCompare(b[1])).forEach(([value, label]) => {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  });
+  if (prev && options.has(prev)) sel.value = prev;
+}
+
+function _aflApplyMlFilters() {
+  const wrap = document.getElementById('aflMlSelectionsWrap');
+  const summary = document.getElementById('aflMlSummary');
+  if (!wrap || !_aflMlRawRows) return;
+  let bets = _vfMlRowsToValueBets(_aflMlRawRows)
+    .filter(b => String(b.recommendation || '').toLowerCase() === 'ml')
+    .sort(compareAflMlBetQuality);
+  const totalBets = bets.length;
+  const market = document.getElementById('mlMarket')?.value || '';
+  const matchVal = document.getElementById('mlMatch')?.value || '';
+  const minLine = parseFloat(document.getElementById('mlMinLine')?.value) || null;
+  const maxLine = parseFloat(document.getElementById('mlMaxLine')?.value) || null;
+  const minEdge = parseFloat(document.getElementById('mlMinEdge')?.value) || 0;
+
+  if (market) bets = bets.filter(b => String(b.market || '') === market);
+  if (matchVal) {
+    const [ht, at] = matchVal.split('||');
+    const fht = _vfNormaliseTeamName(ht).toLowerCase();
+    const fat = _vfNormaliseTeamName(at).toLowerCase();
+    bets = bets.filter(b => {
+      const bht = _vfNormaliseTeamName(b.home_team || '').toLowerCase();
+      const bat = _vfNormaliseTeamName(b.away_team || '').toLowerCase();
+      const bt = _vfNormaliseTeamName(b.team || '').toLowerCase();
+      return (bht === fht && bat === fat) || bt === fht || bt === fat;
+    });
+  }
+  if (minLine !== null) bets = bets.filter(b => safeNum(b.book_line, 0) >= minLine);
+  if (maxLine !== null) bets = bets.filter(b => safeNum(b.book_line, 0) <= maxLine);
+  bets = bets.filter(b => safeNum(b.edge, 0) >= minEdge);
+
+  const marketLabel = market ? market.replace('player_', '').replace(/_/g, ' ') : 'all stats';
+  if (summary) summary.textContent = `AFL Machine Learning BET selections · ${bets.length}/${totalBets} shown · ${marketLabel} · min edge: ${minEdge}% · ranked best to worst by ML EV Score.`;
+  if (!bets.length) {
+    wrap.innerHTML = '<div class="prop-empty"><i class="bi bi-cpu"></i><p>No AFL ML bet selections match these filters.</p></div>';
+    return;
+  }
+  wrap.innerHTML = _aflRenderMlSelectionCards(bets);
+}
+
 function _aflRenderMlSelectionCards(rows) {
-  const mlBets = _vfMlRowsToValueBets(rows);
+  const mlBets = (Array.isArray(rows) && rows.some(r => r?.is_ml_pick)) ? rows : _vfMlRowsToValueBets(rows);
   const cards = mlBets.map(bet => {
     const edge = safeNum(bet.edge, 0);
     const edgeCls = edge >= 4 ? 'pos' : edge >= 2 ? 'neu' : edge <= -2 ? 'neg' : 'neu';
