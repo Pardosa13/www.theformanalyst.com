@@ -815,7 +815,7 @@
     <i class="bi bi-bar-chart-fill"></i> Match Predictions
   </button>
   <button class="afl-tab" data-tab="ml" onclick="switchTab('ml',this)">
-    <i class="bi bi-cpu-fill"></i> AFL Machine Learning
+    <i class="bi bi-cpu-fill"></i> Machine Learning Selections
   </button>
   <button class="afl-tab" data-tab="fixtures" onclick="switchTab('fixtures',this)">
     <i class="bi bi-calculator"></i> SGM Calculator
@@ -1249,12 +1249,12 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════
-     TAB: AFL MACHINE LEARNING
+     TAB: MACHINE LEARNING SELECTIONS
      ════════════════════════════════════════════════════════════════ -->
 <div id="tab-ml" class="tab-panel">
   <div class="afl-card">
     <div class="afl-card-header">
-      <h4><i class="bi bi-cpu-fill"></i> AFL Machine Learning Selections</h4>
+      <h4><i class="bi bi-cpu-fill"></i> Machine Learning Selections</h4>
       <button class="btn btn-primary btn-sm" onclick="loadAflMachineLearningSelections()">
         <i class="bi bi-arrow-repeat"></i> Refresh ML Selections
       </button>
@@ -1868,43 +1868,7 @@ function loadAflMachineLearningSelections() {
         return;
       }
 
-      wrap.innerHTML = `<div class="scroll-x"><table class="value-table">
-        <thead>
-          <tr>
-            <th>Match</th><th>Commence</th><th>Market</th><th>Line Type</th><th>Line</th>
-            <th>Team / Player</th><th>Opponent</th><th>Bookmaker</th><th>Odds</th>
-            <th>Existing Rec</th><th>Original Model Prob</th><th>Original Edge</th><th>Original Confidence</th>
-            <th>ML Bet Probability</th><th>ML EV Score</th><th>ML Recommendation</th><th>Threshold Used</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${betSelections.map(r => {
-            const rec = String(r.recommendation || r.status || r.decision || r.ml_recommendation || 'PASS').toUpperCase();
-            const isBet = rec === 'BET';
-            const match = r.match || ((r.home_team || r.away_team) ? `${r.home_team || '—'} vs ${r.away_team || '—'}` : '—');
-            const teamPlayer = r.player_name || r.team || r.selection_name || '—';
-            return `<tr class="${isBet ? 'ml-row-bet' : 'ml-row-pass'}">
-              <td><strong>${esc(match)}</strong></td>
-              <td class="mono">${esc(fmtDateTime(r.commence_time))}</td>
-              <td>${esc(r.market || '—')}</td>
-              <td>${esc(r.line_type || '—')}</td>
-              <td class="mono">${r.line == null ? '—' : esc(r.line)}</td>
-              <td>${esc(teamPlayer)}</td>
-              <td>${esc(r.opponent || '—')}</td>
-              <td>${esc(r.bookmaker || '—')}</td>
-              <td class="mono">${r.odds == null ? '—' : safeNum(r.odds).toFixed(2)}</td>
-              <td>${esc(r.existing_recommendation || r.recommendation || '—')}</td>
-              <td class="mono">${(r.original_model_prob ?? r.model_prob) == null ? '—' : safeNum(r.original_model_prob ?? r.model_prob).toFixed(1) + '%'}</td>
-              <td class="mono">${r.original_edge == null && r.edge == null ? '—' : safeNum(r.original_edge ?? r.edge).toFixed(2)}</td>
-              <td class="mono">${r.confidence_score == null ? '—' : safeNum(r.confidence_score).toFixed(1)}</td>
-              <td class="mono"><strong>${fmtPctFromUnit(r.ml_bet_probability)}</strong></td>
-              <td class="mono">${fmtMlScore(r.ml_expected_value_score)}</td>
-              <td><span class="ml-rec-chip ${isBet ? 'bet' : 'pass'}">${esc(rec)}</span></td>
-              <td class="mono">${fmtMlScore(r.threshold_used)}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table></div>`;
+      wrap.innerHTML = _aflRenderMlSelectionCards(betSelections);
     })
     .catch(err => {
       if (summary) summary.textContent = 'AFL Machine Learning selections could not be loaded.';
@@ -2890,7 +2854,6 @@ function loadOddsProps() {
 
 // ── Value finder ─────────────────────────────────────────────────
 let _vfRawData = null; // cached result for client-side re-filtering
-let _vfMlData = null; // cached AFL Machine Learning selections shown in Value Finder
 
 // Render value finder results as polished cards matching Player Props quality.
 // Returns an HTML string ready to assign to el.innerHTML.
@@ -2982,11 +2945,8 @@ function _vfRenderTable(rows, data) {
     `;
   }).join('');
 
-  const mlRows = rows.filter(b => b.is_ml_pick);
-  const valueRows = rows.filter(b => !b.is_ml_pick);
   const cards = `
-    ${mlRows.length ? `<div class="vf-section-heading"><div><div class="vf-section-title"><i class="bi bi-cpu-fill"></i> AFL Machine Learning Picks</div><div class="vf-section-copy">Separate gold cards from the ML model, with EV/confidence stats and a reason for each pick.</div></div><span class="vf-section-count">${mlRows.length} pick(s)</span></div><div class="vf-cards-grid">${renderCards(mlRows)}</div>` : ''}
-    ${valueRows.length ? `<div class="vf-section-heading"><div><div class="vf-section-title"><i class="bi bi-lightning-charge-fill"></i> Standard Value Picks</div><div class="vf-section-copy">Normal model-vs-market value selections, kept separate so they do not overlap with ML picks.</div></div><span class="vf-section-count">${valueRows.length} pick(s)</span></div><div class="vf-cards-grid">${renderCards(valueRows)}</div>` : ''}
+    <div class="vf-section-heading"><div><div class="vf-section-title"><i class="bi bi-lightning-charge-fill"></i> Value Finder Selections</div><div class="vf-section-copy">Model-vs-market value selections only.</div></div><span class="vf-section-count">${rows.length} pick(s)</span></div><div class="vf-cards-grid">${renderCards(rows)}</div>
   `;
 
   const perf = data?.model_performance || {};
@@ -2995,7 +2955,7 @@ function _vfRenderTable(rows, data) {
     : '';
   return `
     <div class="vf-results-meta">
-      ${esc(String(rows.length))} result(s) · <strong>${esc(mktLabel)}</strong> · min edge: ${esc(String(minEdge))}% · season: ${esc(String(season))} · gold cards are AFL Machine Learning picks${perfLine}
+      ${esc(String(rows.length))} result(s) · <strong>${esc(mktLabel)}</strong> · min edge: ${esc(String(minEdge))}% · season: ${esc(String(season))}${perfLine}
     </div>
     ${cards}
   `;
@@ -3040,9 +3000,62 @@ function _vfMlRowsToValueBets(rows) {
     });
 }
 
-function _vfGetMlBets() {
-  const rows = Array.isArray(_vfMlData?.selections) ? _vfMlData.selections : (Array.isArray(_vfMlData?.rows) ? _vfMlData.rows : []);
-  return _vfMlRowsToValueBets(rows);
+function _aflRenderMlSelectionCards(rows) {
+  const mlBets = _vfMlRowsToValueBets(rows);
+  const cards = mlBets.map(bet => {
+    const edge = safeNum(bet.edge, 0);
+    const edgeCls = edge >= 4 ? 'pos' : edge >= 2 ? 'neu' : edge <= -2 ? 'neg' : 'neu';
+    const ltCls = (bet.line_type || '') === 'Over' ? 'lt-over' : 'lt-under';
+    const odds = safeNum(bet.odds, 0);
+    const initials = (bet.player || '').split(' ').map(w => w[0] || '').join('').substring(0, 2).toUpperCase();
+    const photo = bet.headshot_url
+      ? `<img src="${esc(bet.headshot_url)}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border-subtle);" loading="lazy" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div style="display:none;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));align-items:center;justify-content:center;font-size:12px;font-weight:800;color:white;flex-shrink:0;">${initials}</div>`
+      : `<div style="display:flex;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));align-items:center;justify-content:center;font-size:12px;font-weight:800;color:white;flex-shrink:0;">${initials}</div>`;
+    const modelProb = bet.model_prob != null ? safeNum(bet.model_prob, 0).toFixed(1) + '%' : '—';
+    const impliedProb = bet.implied_prob != null ? safeNum(bet.implied_prob, 0).toFixed(1) + '%' : '—';
+    const why = bet.why || `Picked because the AFL ML model ranked this as a BET using ML probability ${modelProb}, ${edge > 0 ? '+' : ''}${edge.toFixed(1)}% edge, EV score ${fmtMlScore(bet.ml_expected_value_score)}, and confidence ${bet.confidence_score != null ? safeNum(bet.confidence_score, 0).toFixed(1) : '—'}.`;
+    const marketLabel = (bet.market || 'selection').replace('player_', '').replace(/_/g, ' ');
+    return `
+      <div class="vf-card vf-card-ml">
+        <div class="vf-card-header">
+          ${photo}
+          <div class="vf-player-info">
+            <span class="vf-player-name">${esc(bet.player || '')}</span>
+            <span class="vf-player-team">${esc(bet.team || '')}</span>
+            <span class="vf-ml-source-chip"><i class="bi bi-cpu-fill"></i> Machine Learning</span>
+          </div>
+          <div class="vf-match-info">
+            <span>vs ${esc(bet.opponent || '—')}</span>
+            <span style="font-size:10px;color:var(--text-muted);">${esc(bet.bookmaker || '')}</span>
+          </div>
+        </div>
+        <div class="vf-card-body">
+          <div class="vf-bet-line">
+            <span class="vf-market-label">${esc(marketLabel)}</span>
+            <span class="${ltCls}">${esc(bet.line_type || '')}</span>
+            <span class="vf-line-num">${safeNum(bet.book_line, 0)}</span>
+            <span style="color:var(--text-muted);font-size:11px;">@</span>
+            <span class="vf-odds">${odds > 0 ? odds.toFixed(2) : '—'}</span>
+          </div>
+          <div class="vf-prob-row">
+            <span class="vf-prob-item">ML Prob <strong>${esc(modelProb)}</strong></span>
+            <span class="vf-prob-sep">·</span>
+            <span class="vf-prob-item">Implied <strong>${esc(impliedProb)}</strong></span>
+            <span class="vf-prob-sep">·</span>
+            <span class="vf-prob-item">Edge <strong><span class="edge-chip ${edgeCls}" style="min-width:auto;padding:2px 6px;">${edge > 0 ? '+' : ''}${edge.toFixed(1)}%</span></strong></span>
+          </div>
+          <div class="vf-why"><strong>Why:</strong> ${esc(why)}</div>
+        </div>
+        <div class="vf-card-stats">
+          <div class="vf-stat-item"><span class="vf-stat-label">ML EV</span><span class="vf-stat-val">${fmtMlScore(bet.ml_expected_value_score)}</span></div>
+          <div class="vf-stat-item"><span class="vf-stat-label">Confidence</span><span class="vf-stat-val">${bet.confidence_score != null ? safeNum(bet.confidence_score, 0).toFixed(1) : '—'}</span></div>
+          <div class="vf-stat-item"><span class="vf-stat-label">Threshold</span><span class="vf-stat-val">${fmtMlScore(bet.threshold_used)}</span></div>
+          <div class="vf-stat-item"><span class="vf-stat-label">ML Hit</span><span class="vf-stat-val">${bet.hist_pct == null ? '—' : esc(String(bet.hist_pct)) + '%'}</span></div>
+          <div class="vf-stat-item vf-stat-rec"><span class="vf-rec-badge vf-rec-ml"><i class="bi bi-stars"></i> ML PICK</span></div>
+        </div>
+      </div>`;
+  }).join('');
+  return `<div class="vf-cards-grid">${cards}</div>`;
 }
 
 function _vfApplyFilters(data) {
@@ -3062,9 +3075,8 @@ function _vfApplyFilters(data) {
     return;
   }
 
-  // Value bets mode (specific market with edge calculation) plus AFL ML BET selections.
+  // Value bets mode (specific market with edge calculation).
   let bets = _vfGetBets(data);
-  let mlBets = _vfGetMlBets().filter(b => !market || b.market === market);
   if (matchVal) {
     const [ht, at] = matchVal.split('||');
     const fht = _vfNormaliseTeamName(ht).toLowerCase();
@@ -3077,26 +3089,21 @@ function _vfApplyFilters(data) {
              bt === fht || bt === fat;
     };
     bets = bets.filter(matchFilter);
-    mlBets = mlBets.filter(matchFilter);
   }
   if (minLine !== null) {
     bets = bets.filter(b => (b.book_line || 0) >= minLine);
-    mlBets = mlBets.filter(b => (b.book_line || 0) >= minLine);
   }
   if (maxLine !== null) {
     bets = bets.filter(b => (b.book_line || 0) <= maxLine);
-    mlBets = mlBets.filter(b => (b.book_line || 0) <= maxLine);
   }
   bets = bets.filter(b => safeNum(b.edge, 0) >= minEdge);
   bets = bets.filter(b => (b.recommendation || '') === 'value');
-  bets = bets.concat(mlBets);
-  bets.sort((a, b) => Number(!!b.is_ml_pick) - Number(!!a.is_ml_pick) || safeNum(b.edge, 0) - safeNum(a.edge, 0));
+  bets.sort((a, b) => safeNum(b.edge, 0) - safeNum(a.edge, 0));
 
   console.debug('[ValueFinder] applying filters', {
     market,
     total: _vfGetBets(data).length,
     shown: bets.length,
-    mlShown: mlBets.length,
     round: _round,
     match: matchVal || 'all',
     minEdge,
@@ -3213,13 +3220,7 @@ function loadValueFinder() {
             round: _round,
             count: _vfGetBets(data).length,
           });
-          return fetch('/api/afl/ml-current-selections')
-            .then(r => r.json())
-            .catch(() => null)
-            .then(mlData => {
-              _vfMlData = mlData;
-              _vfApplyFilters(data);
-            });
+          _vfApplyFilters(data);
         })
         .then(() => {
           loadModelTracker();
