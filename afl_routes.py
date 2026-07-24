@@ -1270,6 +1270,47 @@ def register_afl_routes(app, db):
             return safe_json_response({"ok": False, "status": "error", "message": str(exc), "selections": [], "summary": {}}, 500)
 
         rows = df_to_safe_records(scored) if hasattr(scored, "empty") else []
+
+        # The ML scorer starts from afl_model_selections, while Value Finder
+        # resolves each row against the player stats table before rendering.
+        # Mirror that enrichment here so ML cards receive the same proxied
+        # headshot URL payload shape as Value Finder cards.
+        seasons = [s for s in range(CURRENT_YEAR, max(CURRENT_YEAR - 3, 2019) - 1, -1)]
+        for row in rows:
+            player_id = row.get("player_id")
+            first_name = ""
+            last_name = ""
+            if not player_id:
+                name = _normalize_whitespace(row.get("player_name") or "")
+                if name:
+                    resolved = _resolve_player_profile_for_market(
+                        db,
+                        full_name=name,
+                        team_hint=row.get("team") or "",
+                        prop_home_team=row.get("home_team") or "",
+                        prop_away_team=row.get("away_team") or "",
+                        effective_season=CURRENT_YEAR,
+                        effective_seasons=seasons,
+                        limit=300,
+                    )
+                    if resolved and resolved.get("player"):
+                        player = resolved["player"]
+                        player_id = player.get("player_id")
+                        first_name = player.get("first_name") or ""
+                        last_name = player.get("last_name") or ""
+                        row["player_id"] = player_id
+                        row["team"] = row.get("team") or player.get("team")
+            elif row.get("player_name"):
+                parts = _normalize_whitespace(row.get("player_name")).split(" ", 1)
+                first_name = parts[0] if parts else ""
+                last_name = parts[1] if len(parts) > 1 else ""
+
+            row["headshot_url"] = row.get("headshot_url") or afl_player_headshot_url(
+                player_id,
+                first_name,
+                last_name,
+            )
+
         if not rows:
             return safe_json_response({
                 "ok": True,
