@@ -3313,6 +3313,15 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     dates_ordered = dates.iloc[order].reset_index(drop=True)
     track_by_race_id = {}
     if 'meeting_track' in df.columns:
+        sample_df_race_id = df['race_id'].iloc[0] if len(df) else None
+        sample_lookup_race_id = race_ids[0] if race_ids else None
+        log.info(
+            "Track lookup diagnostic: df['race_id'] dtype=%s sample=%r (%s) | "
+            "race_ids sample=%r (%s) | df rows=%s race_ids length=%s",
+            df['race_id'].dtype, sample_df_race_id, type(sample_df_race_id).__name__,
+            sample_lookup_race_id, type(sample_lookup_race_id).__name__,
+            len(df), len(race_ids),
+        )
         # Key on str(race_id) rather than the raw column dtype: df['race_id']
         # and race_ids (threaded through build_training_set's row-by-row
         # feature-extraction loop above) are normally the same dtype since
@@ -3873,9 +3882,16 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
                 champion_metrics = json.loads(champion[10])
             except Exception:
                 champion_metrics = {}
-        if champion is not None:
+        champion_permanently_broken = bool(champion_metrics.get('permanently_incompatible'))
+        if champion is not None and not champion_permanently_broken:
             _assert_champion_comparable(champion[0], champion_metrics, run_id=run_id, conn=conn)
             resolve_pipeline_alert(conn, 'champion_scoring_formula_mismatch')
+        elif champion_permanently_broken:
+            log.warning(
+                "Active champion id=%s is permanently incompatible (feature contract predates the current "
+                "feature set) — treating as no active champion so a validated challenger can be promoted "
+                "on its own merits.", champion[0],
+            )
         # Always recompute both scores from their raw metric components under
         # the CURRENT formula rather than trusting a stored/cached number —
         # otherwise a champion promoted under an older formula version (e.g.
@@ -3991,9 +4007,9 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
         elif not challenger_sr_acceptable:
             reason = "Rejected: challenger validation strike rate is below promotion gate"
         else:
-            if champion is None:
+            if champion is None or champion_permanently_broken:
                 promote = True
-                reason = "Promoted: no active champion existed and challenger passed out-of-sample selection gates"
+                reason = "Promoted: no comparable active champion existed and challenger passed out-of-sample selection gates"
             elif champion_score is None:
                 promote = True
                 reason = "Promoted: active Champion Score missing, but challenger passed out-of-sample selection gates"
@@ -4260,6 +4276,7 @@ def _heal_stale_champion(champion_id, champion_metrics, run_id=None):
         if expected_features is not None and list(expected_features) != list(X.columns):
             return {
                 'healed': False,
+                'permanent': True,
                 'detail': (
                     f"champion id={champion_id}'s stored feature contract does not match the current feature "
                     "set — it predates one or more feature-engineering changes and can't be safely re-fit on "
@@ -4428,6 +4445,7 @@ def check_active_champion_staleness(run_id=None):
             # line is the durable record of what the self-heal actually did.
             log.info("Nightly staleness check: self-healed — %s", result['detail'])
         else:
+            else:
             log.error("Nightly champion validation check: could not re-validate champion id=%s: %s", champion_id, result['detail'])
             record_pipeline_alert(
                 conn, 'champion_missing_walk_forward_validation',
@@ -4438,6 +4456,20 @@ def check_active_champion_staleness(run_id=None):
                 ),
                 severity='blocking', run_id=run_id,
             )
+            if result.get('permanent'):
+                # This champion can never be healed (e.g. its feature contract
+                # predates the current feature set) — no future nightly run
+                # will succeed here either. Persist an explicit, durable flag
+                # on the champion's own row so save_best_model_to_db can treat
+                # it as equivalent to "no active champion" instead of raising
+                # ChampionComparisonBlocked forever on a condition that will
+                # never resolve on its own.
+                permanently_flagged_metrics = {**champion_metrics, 'permanently_incompatible': True}
+                conn.execute(text("""
+                    UPDATE backtest_best_model
+                    SET selection_metrics = :metrics, updated_at = NOW()
+                    WHERE id = :id
+                """), {'metrics': json.dumps(permanently_flagged_metrics), 'id': champion_id})
         conn.commit()
         # Deliberately does not raise: a stale/unhealable champion is already
         # durably flagged in ml_pipeline_alerts above, and the actual
