@@ -529,6 +529,20 @@ def _meeting_date_from_name(meeting_name):
         return None
 
 
+def _meeting_track_from_name(meeting_name):
+    """Extract the track name from the meeting_name 'YYMMDD_Track' prefix
+    (e.g. '251128_Mt Gambier' -> 'Mt Gambier'). meetings.track is empty for
+    every row in the database, so this is the only reliable source for track
+    name — mirrors _meeting_date_from_name's approach for the date half of
+    the same string.
+    """
+    m = _MEETING_NAME_DATE_RE.match(str(meeting_name or ''))
+    if not m:
+        return None
+    track = str(meeting_name or '')[m.end():].strip()
+    return track or None
+
+
 def repair_missing_meeting_dates(df):
     """Fill NULL meeting_date values from the meeting_name 'YYMMDD_' prefix."""
     if 'meeting_date' not in df.columns or df.empty:
@@ -3312,35 +3326,17 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     race_ids = [race_ids[i] for i in order]
     dates_ordered = dates.iloc[order].reset_index(drop=True)
     track_by_race_id = {}
-    if 'meeting_track' in df.columns:
-        sample_df_race_id = df['race_id'].iloc[0] if len(df) else None
-        sample_lookup_race_id = race_ids[0] if race_ids else None
-        log.info(
-            "Track lookup diagnostic: df['race_id'] dtype=%s sample=%r (%s) | "
-            "race_ids sample=%r (%s) | df rows=%s race_ids length=%s",
-            df['race_id'].dtype, sample_df_race_id, type(sample_df_race_id).__name__,
-            sample_lookup_race_id, type(sample_lookup_race_id).__name__,
-            len(df), len(race_ids),
+    if 'meeting_name' in df.columns:
+        # meetings.track is empty for every row in the database (confirmed:
+        # SELECT track, COUNT(*) FROM meetings GROUP BY track returns only
+        # NULL, 987) — so meeting_track is never usable as a track source.
+        # meeting_name reliably carries the track after its 'YYMMDD_' date
+        # prefix (e.g. '251128_Mt Gambier'), the same string the date repair
+        # above already parses; reuse that same source here instead.
+        df_tracks = df.drop_duplicates(subset=['race_id']).set_index('race_id')['meeting_name'].map(
+            _meeting_track_from_name
         )
-        overlap_count = len(set(str(x) for x in df['race_id']) & set(str(x) for x in race_ids))
-        non_null_meeting_track_count = int(df['meeting_track'].notna().sum())
-        log.info(
-            "Track lookup diagnostic 2: id_overlap_count=%s (of race_ids_length=%s) | "
-            "non_null_meeting_track_rows_in_df=%s (of df_rows=%s)",
-            overlap_count, len(race_ids), non_null_meeting_track_count, len(df),
-        )
-        # Key on str(race_id) rather than the raw column dtype: df['race_id']
-        # and race_ids (threaded through build_training_set's row-by-row
-        # feature-extraction loop above) are normally the same dtype since
-        # both trace back to this same df, but a dict keyed on a numpy/py
-        # scalar mismatch (e.g. numpy.int64 vs Python int after an
-        # intervening pandas op) fails the lookup silently — every race_id
-        # simply misses and every fold's tracks show "unknown" with no error.
-        # Normalising both sides to str removes that failure mode entirely.
-        track_by_race_id = {
-            str(k): v for k, v in
-            df.drop_duplicates(subset=['race_id']).set_index('race_id')['meeting_track'].to_dict().items()
-        }
+        track_by_race_id = {str(k): v for k, v in df_tracks.to_dict().items()}
     tracks_ordered = [track_by_race_id.get(str(rid)) for rid in race_ids]
     # Fold-composition logging (top_tracks=unknown) has no way to distinguish
     # "this fold genuinely has no track data" from "track lookup is broken for
