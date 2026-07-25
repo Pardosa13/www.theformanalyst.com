@@ -3322,6 +3322,13 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
             sample_lookup_race_id, type(sample_lookup_race_id).__name__,
             len(df), len(race_ids),
         )
+        overlap_count = len(set(str(x) for x in df['race_id']) & set(str(x) for x in race_ids))
+        non_null_meeting_track_count = int(df['meeting_track'].notna().sum())
+        log.info(
+            "Track lookup diagnostic 2: id_overlap_count=%s (of race_ids_length=%s) | "
+            "non_null_meeting_track_rows_in_df=%s (of df_rows=%s)",
+            overlap_count, len(race_ids), non_null_meeting_track_count, len(df),
+        )
         # Key on str(race_id) rather than the raw column dtype: df['race_id']
         # and race_ids (threaded through build_training_set's row-by-row
         # feature-extraction loop above) are normally the same dtype since
