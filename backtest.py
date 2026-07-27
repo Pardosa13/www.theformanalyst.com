@@ -4387,6 +4387,34 @@ def _heal_stale_champion(champion_id, champion_metrics, run_id=None):
                 f"{best_challenger['score']:.3f}."
             )
             log.info(reason)
+            # _best_rejected_challenger only recomputed this candidate's score
+            # in memory to compare it — its stored row still carries whatever
+            # (possibly missing) scoring_formula_version it was saved with.
+            # rollback_to_champion re-checks comparability and would reject
+            # the very candidate we just confirmed is the best one. Persist
+            # the stamped, current-formula metrics before rolling back to it.
+            target_row = conn.execute(text("""
+                SELECT selection_metrics FROM backtest_best_model WHERE id = :id
+            """), {'id': best_challenger['id']}).fetchone()
+            target_metrics = {}
+            if target_row and target_row[0]:
+                try:
+                    target_metrics = json.loads(target_row[0])
+                except Exception:
+                    target_metrics = {}
+            stamped_target_metrics = _stamp_selection_metrics(target_metrics)
+            conn.execute(text("""
+                UPDATE backtest_best_model
+                SET selection_metrics = :metrics, combined_score = :score,
+                    scoring_formula_version = :scoring_formula_version, updated_at = NOW()
+                WHERE id = :id
+            """), {
+                'metrics': json.dumps(stamped_target_metrics),
+                'score': stamped_target_metrics.get('selection_score', best_challenger['score']),
+                'scoring_formula_version': SCORING_FORMULA_VERSION,
+                'id': best_challenger['id'],
+            })
+            conn.commit()
             rollback_to_champion(best_challenger['id'], reason=reason)
             rolled_back_to = best_challenger['id']
             if best_challenger['fold_count'] >= MIN_WALK_FORWARD_FOLDS:
