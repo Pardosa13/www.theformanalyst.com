@@ -2444,7 +2444,7 @@ MIN_WALK_FORWARD_FOLDS = int(os.environ.get('ML_MIN_WALK_FORWARD_FOLDS', '2'))
 # of) the fixed Champion Score edge above.
 PROMOTION_MAX_BOOTSTRAP_P_VALUE = float(os.environ.get('ML_PROMOTION_MAX_P_VALUE', '0.25'))
 MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
-SCORING_FORMULA_VERSION = 'champion_score_v3_ae_ratio'
+SCORING_FORMULA_VERSION = 'champion_score_v4_ae_ratio'
 REQUIRED_SELECTION_METRIC_COMPONENTS = (
     'roi',
     'strike_rate',
