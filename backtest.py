@@ -2677,7 +2677,7 @@ def _promotion_rule_text():
         f"positive validation ROI, strike rate >= {MIN_PROMOTION_STRIKE_RATE_PCT:.1f}%, and Champion Score "
         f"> active Champion Score + {PROMOTION_SELECTION_SCORE_EDGE:.3f}. "
         "Champion Score is stored internally as selection_score and equals "
-        "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI) + 0.5*strike_rate - calibration penalties "
+        "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI) + 10*(A/E ratio - 1.0) - calibration penalties "
         "(log loss, Brier score, expected calibration error) - stability penalty - walk-forward cross-fold ROI-std penalty; "
         "a model with no walk-forward evidence gets no credit for its holdout ROI beyond a 0.3x weight. "
         "ROI alone is never sufficient."
