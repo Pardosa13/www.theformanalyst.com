@@ -2641,7 +2641,14 @@ def _selection_score_from_metrics(metrics, force_recompute=False):
     calibration = metrics.get('calibration') or {}
     walk_forward = metrics.get('walk_forward') or {}
     holdout_roi = float(metrics.get('roi', 0.0) or 0.0)
-    strike_rate = float(metrics.get('strike_rate', 0.0) or 0.0)
+    # A/E ratio replaces strike_rate in the score. Strike rate on its own
+    # rewards hitting lots of short-priced winners regardless of whether
+    # they were profitable. A/E (actual wins / expected wins from the
+    # market's own odds) measures real edge instead. Neutral value is 1.0;
+    # scaled by 10 so it sits on the same order of magnitude as ROI rather
+    # than dominating it the way strike_rate (a 0-100 number) used to.
+    a_e_ratio = metrics.get('a_e_ratio')
+    a_e_component = ((float(a_e_ratio) - 1.0) * 10.0) if a_e_ratio is not None else 0.0
     stability_penalty = abs(float(stability.get('roi_last_100', holdout_roi) or holdout_roi) - holdout_roi) + abs(float(stability.get('roi_last_250', holdout_roi) or holdout_roi) - holdout_roi)
     # A single 80/20 chronological holdout is a thin, high-variance sample: a
     # real production run found every candidate showing +30-38% ROI on its
@@ -2661,7 +2668,7 @@ def _selection_score_from_metrics(metrics, force_recompute=False):
     blended_roi = (0.3 * holdout_roi) + (0.7 * walk_forward_mean_roi) if has_walk_forward else (0.3 * holdout_roi)
     walk_forward_penalty = float(walk_forward.get('roi_std', 0.0) or 0.0)
     calibration_penalty = (float(metrics.get('log_loss', 0.0) or 0.0) * 10.0) + (float(metrics.get('brier_score', 0.0) or 0.0) * 25.0) + (float(calibration.get('expected_calibration_error', 0.0) or 0.0) * 100.0)
-    return float(blended_roi + (0.5 * strike_rate) - calibration_penalty - (0.05 * stability_penalty) - (1.0 * walk_forward_penalty))
+    return float(blended_roi + a_e_component - calibration_penalty - (0.05 * stability_penalty) - (1.0 * walk_forward_penalty))
 
 
 def _promotion_rule_text():
@@ -2904,10 +2911,20 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
             'profit_units': float(np.sum(p)),
         }
 
+    # A/E ratio: actual wins vs expected wins implied by the market (1/SP).
+    # This is what edge actually looks like — a model can win often on short
+    # prices (strike rate high) with zero edge, or win rarely on overlays
+    # (strike rate low) with real edge. A/E > 1.0 means the model's picks win
+    # more than the market says they should.
+    implied_probs = 1.0 / selections['sp'].clip(lower=1.0001)
+    expected_wins = float(implied_probs.sum()) if bets else 0.0
+    a_e_ratio = (wins / expected_wins) if expected_wins > 0 else None
+
     return {
         'roi': float(np.mean(profits) * 100.0) if bets else 0.0,
         'profit_units': float(np.sum(profits)) if bets else 0.0,
         'strike_rate': float(wins / bets * 100.0) if bets else 0.0,
+        'a_e_ratio': a_e_ratio,
         'number_of_bets': bets,
         'winners': wins,
         'average_winner_sp': float(selections.loc[selections['won'] == 1, 'sp'].mean()) if wins else 0.0,
@@ -3974,6 +3991,12 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
             if f.get('bets', 0)
         ]
         bootstrap_p_value = _paired_bootstrap_p_value(challenger_fold_rois, champion_fold_rois)
+        # Hard veto: every walk-forward fold negative means the honest
+        # out-of-sample test found no edge at all, no matter how good the
+        # single holdout number looks. This overrides the Champion Score
+        # comparison entirely — a model can't buy its way past this with a
+        # lucky holdout slice.
+        all_folds_negative = bool(challenger_fold_rois) and all(r <= 0.0 for r in challenger_fold_rois)
 
         # Auditability: both sides' validation_period (start/end of the
         # out-of-sample date range each Champion Score was computed on) is
@@ -4009,6 +4032,11 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
             reason = "Rejected: validation sample too small"
         elif not challenger_sr_acceptable:
             reason = "Rejected: challenger validation strike rate is below promotion gate"
+        elif all_folds_negative:
+            reason = (
+                f"Rejected: every walk-forward fold was negative ({challenger_fold_rois}) — "
+                "no genuine out-of-sample edge, regardless of holdout Champion Score"
+            )
         else:
             if champion is None or champion_permanently_broken:
                 promote = True
