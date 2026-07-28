@@ -2444,7 +2444,7 @@ MIN_WALK_FORWARD_FOLDS = int(os.environ.get('ML_MIN_WALK_FORWARD_FOLDS', '2'))
 # of) the fixed Champion Score edge above.
 PROMOTION_MAX_BOOTSTRAP_P_VALUE = float(os.environ.get('ML_PROMOTION_MAX_P_VALUE', '0.25'))
 MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
-SCORING_FORMULA_VERSION = 'champion_score_v4_ae_ratio'
+SCORING_FORMULA_VERSION = 'champion_score_v5_ae_ratio'
 REQUIRED_SELECTION_METRIC_COMPONENTS = (
     'roi',
     'strike_rate',
@@ -4473,7 +4473,27 @@ def check_active_champion_staleness(run_id=None):
         champion_id = champion[0]
         missing_components = _missing_selection_metric_components(champion_metrics)
         version_mismatch = champion_metrics.get('scoring_formula_version') != SCORING_FORMULA_VERSION
-        is_stale = fold_count < MIN_WALK_FORWARD_FOLDS or version_mismatch or bool(missing_components)
+        missing_feature_list = False
+        champion_row = conn.execute(text("""
+            SELECT pkl_data FROM backtest_best_model WHERE id = :id
+        """), {'id': champion_id}).fetchone()
+        if champion_row and champion_row[0]:
+            try:
+                champion_model = joblib.load(io.BytesIO(champion_row[0]))
+                champion_features = getattr(champion_model, 'feature_names_in_', None)
+                missing_feature_list = champion_features is None or len(list(champion_features)) == 0
+            except Exception as e:
+                log.warning("Could not load champion id=%s artifact to check feature list: %s", champion_id, e)
+                missing_feature_list = True
+        else:
+            missing_feature_list = True
+
+        is_stale = (
+            fold_count < MIN_WALK_FORWARD_FOLDS
+            or version_mismatch
+            or bool(missing_components)
+            or missing_feature_list
+        )
         if is_stale:
             log.error(
                 "Nightly champion validation check: active champion id=%s is not comparable "
