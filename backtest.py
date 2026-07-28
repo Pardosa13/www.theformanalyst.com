@@ -4229,7 +4229,7 @@ def _best_rejected_challenger(conn, exclude_id, expected_features=None):
             except Exception:
                 candidate_model = None
             candidate_features = getattr(candidate_model, 'feature_names_in_', None) if candidate_model else None
-            if candidate_features is not None and list(candidate_features) != list(expected_features):
+            if candidate_features is None or list(candidate_features) != list(expected_features):
                 skipped_stale_features.append(row[0])
                 continue
         score = _selection_score_from_metrics(metrics, force_recompute=True) if metrics else row[3]
