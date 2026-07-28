@@ -20,6 +20,14 @@ from strike_rate_matching import build_strike_rate_lookup, get_sr_win_pct, norma
 import pandas as pd
 from datetime import datetime
 
+# Importing this registers ConsensusRegressor (and any future shared custom
+# estimator classes) on this process's __main__ module, so joblib.load()
+# below can unpickle both new artifacts (module path 'model_classes') and
+# artifacts saved before this class moved out of backtest.py's __main__
+# (module path '__main__') — see model_classes.py for why. Must happen
+# before load_model() is ever called.
+import model_classes  # noqa: F401
+
 log = logging.getLogger(__name__)
 
 # ── Feature extraction (mirrors backtest.py exactly) ──────────────────────────

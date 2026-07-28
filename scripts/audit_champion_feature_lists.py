@@ -20,8 +20,17 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import joblib
 from sqlalchemy import create_engine, text
+
+# Registers ConsensusRegressor on this script's __main__ module so joblib.load
+# below can unpickle ensemble/ensemble_equal_weight/ensemble_catboost_weighted
+# artifacts, both new (module path 'model_classes') and old (module path
+# '__main__', from before that class moved out of backtest.py). See
+# model_classes.py for why this is needed.
+import model_classes  # noqa: F401,E402
 
 
 def stored_feature_list(model):
