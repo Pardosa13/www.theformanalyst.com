@@ -62,6 +62,7 @@ from strike_rate_matching import (
     build_strike_rate_lookup, build_strike_rate_history_lookup,
     get_sr_win_pct, get_sr_win_pct_asof, log_match_stats, normalize_name,
 )
+from model_classes import ConsensusRegressor
 
 import numpy as np
 import pandas as pd
@@ -71,7 +72,7 @@ from sqlalchemy.orm import sessionmaker
 # ML
 from collections import Counter
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.base import BaseEstimator, RegressorMixin, clone
+from sklearn.base import clone
 from sklearn.model_selection import TimeSeriesSplit, StratifiedKFold
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
@@ -2684,40 +2685,6 @@ def _promotion_rule_text():
     )
 RF_BEST_ARTIFACT_NAME = 'form_analyst_best_random_forest.pkl'
 LEGACY_RF_BEST_ARTIFACT_NAME = 'form_analyst_best.pkl'
-
-
-class ConsensusRegressor(BaseEstimator, RegressorMixin):
-    """Weighted consensus of model win-likelihood scores."""
-
-    def __init__(self, estimators, weights=None):
-        self.estimators = estimators
-        self.weights = weights
-
-    def fit(self, X, y):
-        self.feature_names_in_ = np.asarray(list(X.columns)) if hasattr(X, 'columns') else None
-        self.estimators_ = []
-        for _, estimator in self.estimators:
-            fitted = clone(estimator)
-            fitted.fit(X, y)
-            self.estimators_.append(fitted)
-        if self.weights is None:
-            self.weights_ = np.ones(len(self.estimators_), dtype=float)
-        else:
-            self.weights_ = np.asarray(self.weights, dtype=float)
-            if len(self.weights_) != len(self.estimators_) or np.sum(self.weights_) <= 0:
-                self.weights_ = np.ones(len(self.estimators_), dtype=float)
-        self.weights_ = self.weights_ / np.sum(self.weights_)
-        return self
-
-    def predict(self, X):
-        preds = []
-        for est in self.estimators_:
-            if hasattr(est, 'predict_proba'):
-                proba = np.asarray(est.predict_proba(X), dtype=float)
-                preds.append(proba[:, 1] if proba.ndim == 2 and proba.shape[1] > 1 else proba.ravel())
-            else:
-                preds.append(np.asarray(est.predict(X), dtype=float))
-        return np.average(np.column_stack(preds), axis=1, weights=self.weights_)
 
 
 def _predict_win_scores(model, X):
