@@ -171,6 +171,23 @@ def champion_row(champion_score=10.0):
             "roi_std": 0.5,
         },
     }
+    # save_best_model_to_db always recomputes the CHAMPION's score from raw
+    # components (force_recompute=True) while taking the challenger's stored
+    # selection_score at face value. So the champion's stored selection_score
+    # above is ignored, and these tests only mean what their names say if the
+    # RECOMPUTED champion score actually equals `champion_score`.
+    #
+    # Under the v5 A/E formula the a_e_ratio term is what closes that gap
+    # (a missing a_e_ratio contributes 0.0, which is why every fixture here
+    # silently recomputed to -8.5 and inverted the intended comparisons).
+    # Solve for the a_e_ratio that lands the recomputed score on the value
+    # each test asked for, rather than hardcoding a number that breaks again
+    # the next time an unrelated term in the formula is retuned.
+    base_score = backtest._selection_score_from_metrics(
+        {k: v for k, v in champion_metrics.items() if k != "selection_score"},
+        force_recompute=True,
+    )
+    champion_metrics["a_e_ratio"] = 1.0 + ((champion_score - base_score) / 10.0)
     return [
         101,  # id
         12.0,  # validation_roi
@@ -361,11 +378,22 @@ def test_promotion_preserves_model_history_and_rollback_records(monkeypatch, tmp
 
 
 def test_champion_without_walk_forward_folds_records_durable_alert(monkeypatch, tmp_path):
-    """champion_row() never carries walk_forward.folds — the same situation as
-    Champion 74, promoted before walk-forward evaluation existed. This must
-    open a durable ml_pipeline_alerts row (not just a log line) per the
-    walk_forward_fold_count invariant."""
-    conn = FakeConnection(champion=champion_row(10.0))
+    """A champion with no walk_forward.folds — the same situation as Champion
+    74, promoted before walk-forward evaluation existed. This must open a
+    durable ml_pipeline_alerts row (not just a log line) per the
+    walk_forward_fold_count invariant.
+
+    The fold-less state is built explicitly here: champion_row() itself now
+    carries MIN_WALK_FORWARD_FOLDS folds, so relying on the fixture to supply
+    the defect (as this test used to) silently stopped exercising it. Only the
+    folds are emptied — every other raw component and the current
+    scoring_formula_version stay intact, so this asserts the walk-forward
+    invariant rather than tripping the separate comparability guard first."""
+    champion = champion_row(10.0)
+    fold_less_metrics = json.loads(champion[10])
+    fold_less_metrics["walk_forward"] = {"folds": [], "roi_std": 0.0}
+    champion[10] = json.dumps(fold_less_metrics)
+    conn = FakeConnection(champion=champion)
 
     save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=10.5))
 
@@ -400,8 +428,13 @@ def test_non_stale_champion_resolves_any_previously_open_alert(monkeypatch, tmp_
         "folds": [{"roi": 4.0, "strike_rate": 18.0, "bets": 60}, {"roi": 5.0, "strike_rate": 19.0, "bets": 60}],
         "roi_std": 0.5,
     }
-    champion_metrics_blob = {"selection_score": 10.0, "walk_forward": walk_forward}
     champion = champion_row(10.0)
+    # Override only walk_forward. Replacing the whole blob (as this test used
+    # to) dropped every raw metric component and the scoring_formula_version,
+    # so _assert_champion_comparable raised before the staleness path this
+    # test is actually about could ever run.
+    champion_metrics_blob = json.loads(champion[10])
+    champion_metrics_blob["walk_forward"] = walk_forward
     champion[10] = json.dumps(champion_metrics_blob)
     conn = FakeConnection(champion=champion)
 
@@ -495,12 +528,14 @@ def test_value_edge_backtest_handles_empty_selections():
 class FakeHealConnection:
     """Fakes just the SQL surface _heal_stale_champion / check_active_champion_staleness touch."""
 
-    def __init__(self, champion_row, pkl_bytes, is_active=True, rejected_rows=None):
+    def __init__(self, champion_row, pkl_bytes, is_active=True, rejected_rows=None, row_metrics=None):
         self.champion_row = champion_row  # (id, selection_metrics_json)
         self.pkl_bytes = pkl_bytes
         self.is_active = is_active
         self.rejected_rows = rejected_rows or []
+        self.row_metrics = row_metrics or {}
         self.updated_champion = None
+        self.deactivated_champion = None
         self.pipeline_alerts = []
         self.resolved_alert_keys = []
         self.committed = False
@@ -518,6 +553,15 @@ class FakeHealConnection:
             return FetchResult(self.champion_row)
         if "SELECT pkl_data, is_active FROM backtest_best_model" in sql:
             return FetchResult((self.pkl_bytes, self.is_active))
+        if "SELECT pkl_data FROM backtest_best_model" in sql:
+            # check_active_champion_staleness re-opens the champion artifact to
+            # verify it still carries a usable feature list.
+            return FetchResult((self.pkl_bytes,) if self.pkl_bytes else None)
+        if "SELECT selection_metrics FROM backtest_best_model" in sql:
+            return FetchResult((json.dumps(self.row_metrics.get(params.get("id"), {})),))
+        if "UPDATE backtest_best_model" in sql and "SET is_active = FALSE" in sql:
+            self.deactivated_champion = params
+            return FetchResult(None)
         if "FROM backtest_best_model\n        WHERE is_active = FALSE" in sql:
             return FetchResultAll(self.rejected_rows)
         if "UPDATE backtest_best_model" in sql and "SET selection_metrics" in sql:
@@ -658,12 +702,25 @@ def test_check_active_champion_staleness_records_blocking_alert_when_heal_imposs
 
 
 def test_check_active_champion_staleness_skips_healthy_champion(monkeypatch):
-    healthy_metrics = {
-        "selection_score": 10.0,
-        "walk_forward": {"folds": [{"roi": 4.0, "bets": 50}, {"roi": 5.0, "bets": 50}], "roi_std": 0.3},
+    # "Healthy" has to satisfy every staleness predicate, not just the fold
+    # count: current scoring_formula_version, all required raw components, and
+    # an artifact with an intact feature list. Reuse the champion fixture so
+    # this test can't drift out of sync with the invariant list again.
+    healthy_metrics = json.loads(champion_row(10.0)[10])
+    healthy_metrics["walk_forward"] = {
+        "folds": [{"roi": 4.0, "bets": 50}, {"roi": 5.0, "bets": 50}], "roi_std": 0.3,
     }
-    conn = FakeHealConnection(champion_row=(101, json.dumps(healthy_metrics)), pkl_bytes=None)
+    # A real artifact with an intact feature list: the nightly check now also
+    # opens the champion's own pkl, so pkl_bytes=None would itself read as stale.
+    conn = FakeHealConnection(
+        champion_row=(101, json.dumps(healthy_metrics)),
+        pkl_bytes=_pkl_bytes(DummySavedModel()),
+    )
     monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+    monkeypatch.setattr(
+        backtest.joblib, "load",
+        lambda f: pickle.load(f) if hasattr(f, "read") else pickle.load(open(f, "rb")),
+    )
 
     def _fail_if_called(*args, **kwargs):
         raise AssertionError("_heal_stale_champion should not run for a non-stale champion")
@@ -673,3 +730,158 @@ def test_check_active_champion_staleness_skips_healthy_champion(monkeypatch):
 
     assert "champion_missing_walk_forward_validation" in conn.resolved_alert_keys
     assert conn.pipeline_alerts == []
+
+
+# ─────────────────────────────────────────────
+# HARD INVARIANT: a model with no persisted feature list can never be champion
+#
+# Regression cover for Champion 79 (CatBoost, trained 2026-07-18), which was
+# promoted through the self-heal rollback path with feature_names_in_ = None
+# and then sat active for days. ml_predict raises
+#   RuntimeError: ML feature contract failed: model artifact has no persisted
+#   feature list
+# before predict() for such an artifact, so it scores ZERO live races — yet the
+# self-heal logic only ever asked "does something else score higher?", never
+# "is the current champion even usable?", and re-stamped it as freshly
+# validated every night.
+# ─────────────────────────────────────────────
+class FeaturelessSavedModel:
+    """An artifact exactly like Champion 79: no persisted feature list."""
+    feature_names_in_ = None
+
+
+def test_featureless_challenger_cannot_promote_through_track_e(monkeypatch, tmp_path):
+    """Track E path. An empty feature list yields an empty not_live_computable
+    list, so before the explicit gate every downstream check read as 'passed'
+    for an artifact that cannot score a race at all."""
+    conn = FakeConnection(champion=champion_row(10.0))
+    pkl_file = tmp_path / "featureless.pkl"
+    with open(pkl_file, "wb") as model_file:
+        pickle.dump(FeaturelessSavedModel(), model_file)
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+    monkeypatch.setattr(backtest.joblib, "load", lambda filename: pickle.load(open(filename, "rb")))
+
+    # Scores far above the champion: this must be rejected on usability alone.
+    backtest.save_best_model_to_db(
+        str(pkl_file), combined_score=99.0, run_id=321,
+        model_type="catboost", model_name="CatBoost Challenger",
+        validation_metrics=metrics(selection_score=99.0),
+    )
+
+    assert conn.activated_challenger is None
+    assert conn.deactivated_champions is False
+    assert "no persisted feature list" in conn.rejected_challenger["reason"]
+
+
+def test_featureless_champion_is_replaced_even_by_lower_scoring_challenger(monkeypatch):
+    """Self-heal path, replacement available. The replacement scores WORSE than
+    the broken champion — it must still win, because a usable model beats an
+    unusable one regardless of Champion Score. Under the old score-gated logic
+    this is exactly the case that left Champion 79 active."""
+    champion_metrics = {"selection_score": 10.0, "roi": 4.0, "strike_rate": 18.0}
+    weak_rejected_metrics = {
+        "roi": 0.5, "strike_rate": 12.0,
+        "walk_forward": {"folds": [{"roi": 0.4, "bets": 50}, {"roi": 0.6, "bets": 50}], "roi_std": 0.1},
+    }
+    weak_score = backtest._selection_score_from_metrics(weak_rejected_metrics, force_recompute=True)
+    assert weak_score < 10.0, "fixture must score below the champion for this test to mean anything"
+
+    rejected_row = (
+        555, "random_forest", "Weak RF Challenger", weak_score,
+        json.dumps(weak_rejected_metrics), _pkl_bytes(DummySavedModel()),
+    )
+    conn = FakeHealConnection(
+        champion_row=(79, json.dumps(champion_metrics)),
+        pkl_bytes=_pkl_bytes(FeaturelessSavedModel()),
+        is_active=True,
+        rejected_rows=[rejected_row],
+        row_metrics={555: weak_rejected_metrics},
+    )
+    _setup_heal_env(monkeypatch, conn)
+
+    rollback_calls = []
+    monkeypatch.setattr(
+        backtest, "rollback_to_champion",
+        lambda model_id, reason='': rollback_calls.append((model_id, reason)),
+    )
+
+    backtest.check_active_champion_staleness(run_id=172)
+
+    assert len(rollback_calls) == 1
+    assert rollback_calls[0][0] == 555
+    assert "no persisted feature list" in rollback_calls[0][1]
+    # The broken champion must never be re-stamped as freshly validated.
+    assert conn.deactivated_champion is None  # rollback_to_champion handles deactivation
+
+
+def test_featureless_champion_is_deactivated_when_no_usable_replacement(monkeypatch):
+    """Self-heal path, nothing usable to fall back to. The champion must be
+    deactivated and flagged permanently_incompatible rather than left active,
+    leaving no active champion so the next validated challenger promotes on
+    its own merits with no comparison bar."""
+    champion_metrics = {"selection_score": 10.0, "roi": 4.0, "strike_rate": 18.0}
+    conn = FakeHealConnection(
+        champion_row=(79, json.dumps(champion_metrics)),
+        pkl_bytes=_pkl_bytes(FeaturelessSavedModel()),
+        is_active=True,
+        rejected_rows=[],  # nothing to fall back to
+        row_metrics={79: champion_metrics},
+    )
+    _setup_heal_env(monkeypatch, conn)
+
+    def _fail_if_called(model_id, reason=''):
+        raise AssertionError("must not activate any model when none is usable")
+    monkeypatch.setattr(backtest, "rollback_to_champion", _fail_if_called)
+
+    backtest.check_active_champion_staleness(run_id=172)
+
+    assert conn.deactivated_champion is not None, "broken champion must not stay active"
+    assert conn.deactivated_champion["id"] == 79
+    flagged = json.loads(conn.deactivated_champion["metrics"])
+    assert flagged["permanently_incompatible"] is True
+    assert flagged["unusable_missing_feature_list"] is True
+    # And it must be reported honestly, not logged as a successful self-heal.
+    assert any(
+        a.get("key") == "champion_missing_walk_forward_validation" and a.get("severity") == "blocking"
+        for a in conn.pipeline_alerts
+    )
+
+
+def test_featureless_model_cannot_be_activated_by_direct_rollback(monkeypatch):
+    """Manual/direct rollback path. can_become_champion and
+    _assert_champion_comparable both read selection_metrics only and never open
+    the artifact, so without an explicit artifact check this path could still
+    activate an unusable model."""
+    eligible_metrics = {
+        "roi": 5.0, "strike_rate": 20.0, "log_loss": 0.6, "brier_score": 0.2,
+        "calibration": {"expected_calibration_error": 0.01},
+        "stability": {"roi_last_100": 5.0, "roi_last_250": 5.0},
+        "scoring_formula_version": backtest.SCORING_FORMULA_VERSION,
+        "walk_forward": {"folds": [{"roi": 5.0, "bets": 50}, {"roi": 6.0, "bets": 50}], "roi_std": 0.2},
+    }
+
+    class RollbackConn(FakeHealConnection):
+        def execute(self, statement, params=None):
+            sql = str(statement)
+            params = params or {}
+            if "SELECT id, retained_until, selection_metrics" in sql:
+                return FetchResult((79, None, json.dumps(eligible_metrics)))
+            if "SELECT pkl_data FROM backtest_best_model" in sql:
+                return FetchResult((_pkl_bytes(FeaturelessSavedModel()),))
+            if "SET is_active = TRUE" in sql:
+                raise AssertionError("a featureless model must never be activated")
+            return super().execute(statement, params)
+
+    conn = RollbackConn(champion_row=(79, "{}"), pkl_bytes=None)
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+    monkeypatch.setattr(
+        backtest.joblib, "load",
+        lambda f: pickle.load(f) if hasattr(f, "read") else pickle.load(open(f, "rb")),
+    )
+
+    try:
+        backtest.rollback_to_champion(79, reason="manual rollback attempt")
+    except ValueError as exc:
+        assert "no persisted feature list" in str(exc)
+    else:
+        raise AssertionError("rollback_to_champion must refuse a featureless artifact")
