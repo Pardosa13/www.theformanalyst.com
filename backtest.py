@@ -4757,6 +4757,138 @@ def check_active_champion_staleness(run_id=None):
         # only needs to block promotion, not the whole job.
 
 
+def ensure_champion_exists_after_run(run_id=None):
+    """Guarantee this run never finishes with zero active champions.
+
+    Every ordinary promotion gate in this module (positive ROI, walk-forward
+    not all negative, the Champion Score edge over the incumbent, statistical
+    significance, "no comparable champion existed") is correct for ordinary
+    promotion decisions. None of them is allowed to be the reason a night
+    ends with NO active champion: check_active_champion_staleness may have
+    just evicted an unusable incumbent (e.g. no persisted feature list) with
+    no rejected challenger available to replace it, and then every fresh
+    challenger trained this run can independently fail the strict bar above
+    — leaving live scoring returning zero predictions with nobody notified
+    beyond a log line.
+
+    Call this once, at the very end of a run, after every ordinary promotion
+    decision (check_active_champion_staleness, save_best_model_to_db) has
+    already run. If a usable active champion exists, this is a no-op. If not,
+    it promotes the best Champion Score among every valid, feature-complete
+    candidate on record — this run's rejected fresh challenger(s) included —
+    WITHOUT requiring it to clear the normal strict promotion bar. This is a
+    fallback of last resort, not a substitute for real validation, so it is
+    always logged and durably alerted as a distinct event: a model promoted
+    this way must never be mistaken for one that earned promotion under the
+    normal edge threshold.
+    """
+    with engine.connect() as conn:
+        active = conn.execute(text("""
+            SELECT id, selection_metrics FROM backtest_best_model
+            WHERE is_active = TRUE
+            ORDER BY promoted_at DESC NULLS LAST, updated_at DESC, id DESC
+            LIMIT 1
+        """)).fetchone()
+        if active:
+            active_metrics = {}
+            if active[1]:
+                try:
+                    active_metrics = json.loads(active[1])
+                except Exception:
+                    active_metrics = {}
+            if not active_metrics.get('permanently_incompatible'):
+                return  # a usable champion is already active — nothing to do
+
+        log.error(
+            "End-of-run check (run_id=%s): there is NO usable active champion. Live scoring would return "
+            "zero predictions for every race. Searching for the best-scoring valid, feature-complete "
+            "candidate to promote under the fallback rule.", run_id,
+        )
+
+        live_feature_names = _live_scoring_feature_names()
+        rows = conn.execute(text("""
+            SELECT id, model_type, model_name, selection_metrics, pkl_data
+            FROM backtest_best_model
+            WHERE is_active = FALSE AND pkl_data IS NOT NULL AND selection_metrics IS NOT NULL
+            ORDER BY id DESC
+            LIMIT 200
+        """)).fetchall()
+
+        best = None
+        for row_id, model_type, model_name, metrics_json, pkl_bytes in rows:
+            try:
+                row_metrics = json.loads(metrics_json) if metrics_json else {}
+            except Exception:
+                continue
+            if not row_metrics:
+                continue
+            ok, _ = can_become_champion(row_metrics)
+            if not ok:
+                continue
+            try:
+                candidate_model = joblib.load(io.BytesIO(pkl_bytes))
+            except Exception:
+                continue
+            candidate_features = _stored_feature_list(candidate_model)
+            if candidate_features is None:
+                continue
+            if live_feature_names is not None:
+                live_set = set(live_feature_names)
+                if any(str(f) not in live_set for f in candidate_features):
+                    continue
+            score = _selection_score_from_metrics(row_metrics, force_recompute=True)
+            if score is None:
+                continue
+            if best is None or score > best['score']:
+                best = {
+                    'id': row_id, 'model_type': model_type, 'model_name': model_name,
+                    'score': score, 'metrics': row_metrics,
+                }
+
+        if best is None:
+            message = (
+                f"Run {run_id}: no active champion and no valid, feature-complete fallback candidate exists "
+                "anywhere on record. Live scoring is returning zero predictions. Manual intervention required."
+            )
+            log.error(message)
+            record_pipeline_alert(conn, 'no_active_champion', message=message, severity='blocking', run_id=run_id)
+            conn.commit()
+            return
+
+        reason = (
+            f"FALLBACK PROMOTION (not the normal edge-threshold rule): no usable active champion existed at "
+            f"the end of run {run_id}, so model {best['id']} (Champion Score {best['score']:.3f}) was promoted "
+            "as the best Champion Score among valid, feature-complete candidates on record, WITHOUT clearing "
+            "the normal strict promotion bar (positive ROI / walk-forward not all negative / Champion Score "
+            "edge over the incumbent / statistical significance). Flagged for manual review."
+        )
+        # rollback_to_champion re-checks comparability via _assert_champion_comparable,
+        # which would reject the very candidate just chosen if its stored row still
+        # carries a stale/missing scoring_formula_version (the same reason
+        # _replace_unusable_champion and _heal_stale_champion re-stamp before rolling
+        # back). Persist the stamped, current-formula metrics first.
+        stamped_metrics = _stamp_selection_metrics(best['metrics'])
+        conn.execute(text("""
+            UPDATE backtest_best_model
+            SET selection_metrics = :metrics, combined_score = :score,
+                scoring_formula_version = :scoring_formula_version, updated_at = NOW()
+            WHERE id = :id
+        """), {
+            'metrics': json.dumps(stamped_metrics),
+            'score': stamped_metrics.get('selection_score', best['score']),
+            'scoring_formula_version': SCORING_FORMULA_VERSION,
+            'id': best['id'],
+        })
+        conn.commit()
+
+    log.error(reason)
+    rollback_to_champion(best['id'], reason=reason)
+
+    with engine.connect() as conn:
+        record_pipeline_alert(conn, 'fallback_champion_promotion', message=reason, severity='blocking', run_id=run_id)
+        conn.commit()
+
+
 # ─────────────────────────────────────────────
 # STEP 6: WRITE RESULTS TO DB
 # ─────────────────────────────────────────────
@@ -5076,6 +5208,13 @@ def main():
             top_10_models,
             best_challenger
         )
+
+        # Guarantee this run never finishes with zero active champions: none
+        # of the ordinary promotion gates evaluated above (positive ROI,
+        # walk-forward not all negative, "no comparable champion existed",
+        # etc.) are allowed to be the reason live scoring ends the night with
+        # nothing to serve.
+        ensure_champion_exists_after_run(run_id=run_id)
 
         # Final summary
         log.info("=" * 80)

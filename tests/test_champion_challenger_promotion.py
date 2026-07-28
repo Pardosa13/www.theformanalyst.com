@@ -885,3 +885,174 @@ def test_featureless_model_cannot_be_activated_by_direct_rollback(monkeypatch):
         assert "no persisted feature list" in str(exc)
     else:
         raise AssertionError("rollback_to_champion must refuse a featureless artifact")
+
+
+# ─────────────────────────────────────────────
+# ensure_champion_exists_after_run
+#
+# The end-of-run safety net: none of the strict promotion gates in
+# save_best_model_to_db ("no comparable champion existed", "walk-forward all
+# negative", positive ROI, etc.) may be the reason a night ends with zero
+# active champions. If check_active_champion_staleness evicted an unusable
+# incumbent with nothing to fall back to, and every fresh challenger this run
+# then failed the strict bar, this function must still find and promote the
+# best Champion Score among valid, feature-complete candidates on record —
+# under an explicitly logged/alerted fallback rule, never silently.
+# ─────────────────────────────────────────────
+
+class FakeEnsureConnection:
+    """Fakes the SQL surface ensure_champion_exists_after_run touches."""
+
+    def __init__(self, active_row=None, candidate_rows=None):
+        self.active_row = active_row  # (id, selection_metrics_json) or None
+        self.candidate_rows = candidate_rows or []
+        self.stamped_updates = []
+        self.pipeline_alerts = []
+        self.resolved_alert_keys = []
+        self.committed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, statement, params=None):
+        sql = str(statement)
+        params = params or {}
+        if "SELECT id, selection_metrics FROM backtest_best_model" in sql and "WHERE is_active = TRUE" in sql:
+            return FetchResult(self.active_row)
+        if "SELECT id, model_type, model_name, selection_metrics, pkl_data" in sql:
+            return FetchResultAll(self.candidate_rows)
+        if "SET selection_metrics = :metrics, combined_score" in sql:
+            self.stamped_updates.append(params)
+            return FetchResult(None)
+        if "SELECT id FROM ml_pipeline_alerts" in sql:
+            return FetchResult(None)
+        if "INSERT INTO ml_pipeline_alerts" in sql:
+            self.pipeline_alerts.append(params)
+            return FetchResult(None)
+        if "UPDATE ml_pipeline_alerts SET message" in sql:
+            self.pipeline_alerts.append(params)
+            return FetchResult(None)
+        if "UPDATE ml_pipeline_alerts SET resolved_at" in sql:
+            self.resolved_alert_keys.append(params.get("key"))
+            return FetchResult(None)
+        raise AssertionError(f"Unhandled SQL in fake ensure-champion connection: {sql}")
+
+    def commit(self):
+        self.committed = True
+
+
+def test_ensure_champion_exists_after_run_noop_when_champion_healthy(monkeypatch):
+    conn = FakeEnsureConnection(active_row=(101, json.dumps({"roi": 4.0})))
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+
+    def _fail_if_called(model_id, reason=''):
+        raise AssertionError("must not touch rollback when a usable champion is already active")
+    monkeypatch.setattr(backtest, "rollback_to_champion", _fail_if_called)
+
+    backtest.ensure_champion_exists_after_run(run_id=99)
+
+    assert conn.pipeline_alerts == []
+    assert conn.stamped_updates == []
+
+
+def test_ensure_champion_exists_after_run_promotes_best_valid_feature_complete_candidate(monkeypatch):
+    """No usable active champion (e.g. evicted earlier in the same run for
+    missing feature list, with nothing to fall back to at the time). Several
+    rejected candidates are on record: one with no persisted feature list, one
+    trained on a feature live scoring can't generate, one with too few
+    walk-forward folds — all must be skipped regardless of score — leaving two
+    genuinely valid candidates, of which the higher Champion Score must win,
+    tagged as a fallback promotion rather than a normal one."""
+    featureless_row = (
+        201, "random_forest", "RF Featureless",
+        json.dumps(metrics(roi=99.0)), _pkl_bytes(FeaturelessSavedModel()),
+    )
+    not_live_row = (
+        202, "xgboost", "XGB NotLive",
+        json.dumps(metrics(roi=98.0)), _pkl_bytes(NotLiveScorableSavedModel()),
+    )
+    no_folds_row = (
+        203, "xgboost", "XGB NoFolds",
+        json.dumps(metrics(roi=50.0, walk_forward_folds=None)), _pkl_bytes(DummySavedModel()),
+    )
+    weak_valid_row = (
+        204, "random_forest", "RF Weak", json.dumps(metrics(roi=1.0)), _pkl_bytes(DummySavedModel()),
+    )
+    strong_valid_row = (
+        205, "xgboost", "XGB Strong", json.dumps(metrics(roi=20.0)), _pkl_bytes(DummySavedModel()),
+    )
+    conn = FakeEnsureConnection(
+        active_row=None,
+        candidate_rows=[featureless_row, not_live_row, no_folds_row, weak_valid_row, strong_valid_row],
+    )
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+    monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+
+    rollback_calls = []
+    monkeypatch.setattr(
+        backtest, "rollback_to_champion",
+        lambda model_id, reason='': rollback_calls.append((model_id, reason)),
+    )
+
+    backtest.ensure_champion_exists_after_run(run_id=77)
+
+    assert len(rollback_calls) == 1
+    assert rollback_calls[0][0] == 205, "must pick the higher-scoring of the two genuinely valid candidates"
+    assert "FALLBACK PROMOTION" in rollback_calls[0][1]
+    assert "no usable active champion existed" in rollback_calls[0][1]
+    assert conn.stamped_updates and conn.stamped_updates[-1]["id"] == 205
+    assert any(a.get("key") == "fallback_champion_promotion" and a.get("severity") == "blocking" for a in conn.pipeline_alerts)
+
+
+def test_ensure_champion_exists_after_run_promotes_even_when_all_folds_negative(monkeypatch):
+    """The one candidate on record failed the normal 'walk-forward all
+    negative' gate — that gate must not be the reason the night ends with zero
+    champions when there is nothing else to promote."""
+    negative_metrics = metrics(roi=-3.0)
+    negative_metrics["walk_forward"] = {
+        "folds": [{"roi": -1.0, "bets": 50}, {"roi": -2.0, "bets": 50}], "roi_std": 0.3,
+    }
+    only_row = (301, "random_forest", "RF AllNegative", json.dumps(negative_metrics), _pkl_bytes(DummySavedModel()))
+    conn = FakeEnsureConnection(active_row=None, candidate_rows=[only_row])
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+    monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+
+    rollback_calls = []
+    monkeypatch.setattr(
+        backtest, "rollback_to_champion",
+        lambda model_id, reason='': rollback_calls.append((model_id, reason)),
+    )
+
+    backtest.ensure_champion_exists_after_run(run_id=88)
+
+    assert len(rollback_calls) == 1
+    assert rollback_calls[0][0] == 301
+    assert "FALLBACK PROMOTION" in rollback_calls[0][1]
+
+
+def test_ensure_champion_exists_after_run_records_blocking_alert_when_nothing_valid(monkeypatch):
+    """Nothing usable exists anywhere on record. There is genuinely nothing
+    that can be promoted — this must be a loud, durable blocking alert, not a
+    silent no-op that looks identical to 'everything is fine'."""
+    featureless_row = (
+        201, "random_forest", "RF Featureless",
+        json.dumps(metrics(roi=99.0)), _pkl_bytes(FeaturelessSavedModel()),
+    )
+    conn = FakeEnsureConnection(active_row=None, candidate_rows=[featureless_row])
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+    monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+
+    def _fail_if_called(model_id, reason=''):
+        raise AssertionError("must not promote anything when nothing valid exists")
+    monkeypatch.setattr(backtest, "rollback_to_champion", _fail_if_called)
+
+    backtest.ensure_champion_exists_after_run(run_id=55)
+
+    assert any(
+        a.get("key") == "no_active_champion" and a.get("severity") == "blocking"
+        for a in conn.pipeline_alerts
+    )
+    assert conn.stamped_updates == []
