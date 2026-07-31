@@ -652,8 +652,10 @@
   <div style="padding:14px 18px;">
     <p class="text-muted" style="font-size:12px;margin-bottom:12px;">
       Horses where the model's fair win probability clears the market's Ladbrokes-implied probability by at least
-      {{ '%.1f'|format(value_edge_min_threshold_pct) }} percentage points. Every qualifying horse here is logged as
-      its own tracked bet type — see the ML Data page for real-world results.
+      {{ '%.1f'|format(value_edge_min_threshold_pct) }} percentage points are shown here and are also promoted into
+      the normal best bets list below, eligible for Telegram &amp; Twitter. Every horse at
+      {{ '%.1f'|format(value_edge_track_min_threshold_pct) }}pp or better is still logged as its own tracked bet
+      type — see the ML Data page for real-world results across all edge bets.
     </p>
     {% if value_edge_bets %}
     <div class="table-responsive">

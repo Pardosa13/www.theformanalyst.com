@@ -12001,8 +12001,12 @@ def best_bets():
                     })
 
                     # ── ML Value Edge Bets: independent of mode/min_score/min_gap so
-                    # every qualifying horse gets tracked and shown, not just whichever
-                    # ones this admin visit's filters happen to keep. ──
+                    # every qualifying horse gets tracked, not just whichever ones this
+                    # admin visit's filters happen to keep. All horses at/above
+                    # VALUE_EDGE_MIN_THRESHOLD_PCT (8.0pp) are captured for the ML Data
+                    # page's bucketed reporting, but only horses at/above
+                    # VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT (20.0pp) are shown in
+                    # this page's ML Value Edge Bets panel. ──
                     edge_fields = ladbrokes_signal_fields.get(horse.id, {})
                     if edge_fields.get('is_value_edge_bet'):
                         if horse.prediction.value_edge_captured_at is None:
@@ -12010,6 +12014,7 @@ def best_bets():
                             horse.prediction.value_edge_ml_win_prob_pct = edge_fields.get('ml_fair_probability_pct')
                             horse.prediction.value_edge_price = edge_fields.get('ladbrokes_fixed_win_price')
                             horse.prediction.value_edge_captured_at = datetime.utcnow()
+                    if edge_fields.get('is_value_edge_promoted'):
                         value_edge_bets.append({
                             'meeting_id': meeting.id,
                             'meeting_name': meeting.meeting_name,
@@ -12181,7 +12186,8 @@ def best_bets():
         min_gap=min_gap,
         mode=mode,
         value_edge_bets=value_edge_bets,
-        value_edge_min_threshold_pct=VALUE_EDGE_MIN_THRESHOLD_PCT,
+        value_edge_min_threshold_pct=VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT,
+        value_edge_track_min_threshold_pct=VALUE_EDGE_MIN_THRESHOLD_PCT,
     )
 @app.route("/best-bets/post", methods=["POST"])
 @login_required

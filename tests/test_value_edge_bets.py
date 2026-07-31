@@ -184,3 +184,22 @@ def test_best_bets_route_includes_promoted_value_edge_bets_in_normal_section():
     source = source[:source.index('\n@app.route(', 1)]
     assert "value_edge_promoted = bool(lb_fields.get('is_value_edge_promoted'))" in source
     assert 'or value_edge_promoted:' in source
+
+
+def test_best_bets_route_only_displays_promoted_edge_bets_but_tracks_all():
+    # The ML Value Edge Bets panel on the Best Bets page should only list
+    # horses that clear the 20pp promotion threshold, while the DB snapshot
+    # capture (used by the ML Data page's 8-12/12-20/20+ buckets) still fires
+    # for every horse at/above the lower 8pp threshold.
+    source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
+    source = source[:source.index('\n@app.route(', 1)]
+    assert "if edge_fields.get('is_value_edge_bet'):" in source
+    assert "if edge_fields.get('is_value_edge_promoted'):\n                        value_edge_bets.append(" in source
+    assert 'value_edge_min_threshold_pct=VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT' in source
+    assert 'value_edge_track_min_threshold_pct=VALUE_EDGE_MIN_THRESHOLD_PCT' in source
+
+
+def test_best_bets_template_shows_both_thresholds():
+    template = Path('templates/best_bets.html').read_text()
+    assert 'value_edge_min_threshold_pct' in template
+    assert 'value_edge_track_min_threshold_pct' in template
