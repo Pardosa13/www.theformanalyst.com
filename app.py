@@ -95,6 +95,12 @@ LADBROKES_UNAVAILABLE_RUNNER_STATUSES = {"scratched", "closed", "inactive", "una
 # to re-calibrate all three.
 VALUE_EDGE_MIN_THRESHOLD_PCT = 8.0
 
+# ML Value Edge bets at or above this edge are strong enough to also be
+# promoted into the normal Best Bets section for a meeting/race — making them
+# checkbox-selectable and eligible for the Telegram/Twitter "Post Selected
+# Bets" flow alongside the Analyzer/PFAI/ML-driven picks.
+VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT = 20.0
+
 
 def _coerce_price(value):
     try:
@@ -192,6 +198,9 @@ def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_
             if ml_fair_probability_pct is not None and market_implied_pct is not None else None
         )
         is_value_edge_bet = bool(value_edge_pct is not None and value_edge_pct >= VALUE_EDGE_MIN_THRESHOLD_PCT)
+        is_value_edge_promoted = bool(value_edge_pct is not None and value_edge_pct >= VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT)
+        if is_value_edge_promoted:
+            badges.append(f'💎 ML Value Edge +{value_edge_pct:.1f}pp'); reasons.append(f"Qualified because the model's fair win probability clears the market by {value_edge_pct:.1f} percentage points.")
 
         out[h.id]={
             'ladbrokes_fixed_win_price': m.get('price'), 'ladbrokes_market_rank': m.get('market_rank'),
@@ -208,6 +217,7 @@ def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_
             'market_implied_probability_pct': round(market_implied_pct, 2) if market_implied_pct is not None else None,
             'value_edge_pct': value_edge_pct,
             'is_value_edge_bet': is_value_edge_bet,
+            'is_value_edge_promoted': is_value_edge_promoted,
         }
     return out
 
@@ -12097,9 +12107,11 @@ def best_bets():
                 )
 
                 # Include if matched components, ≥80% win probability, jockey sole ride,
-                # or Analyzer/PFAI/ML all agree on the top selection.
+                # Analyzer/PFAI/ML all agree on the top selection, or the horse is an
+                # ML Value Edge bet of at least VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT.
                 jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
-                if matched_components or wp >= 80 or jockey_sole or signal_agreement or ladbrokes_signal_count:
+                value_edge_promoted = bool(lb_fields.get('is_value_edge_promoted'))
+                if matched_components or wp >= 80 or jockey_sole or signal_agreement or ladbrokes_signal_count or value_edge_promoted:
                     matched_components.sort(key=lambda x: x['roi'], reverse=True)
                     best_bets.append({
                         'meeting_id': meeting.id,
