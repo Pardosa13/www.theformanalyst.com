@@ -140,3 +140,66 @@ def test_best_bets_template_has_value_edge_section():
     template = Path('templates/best_bets.html').read_text()
     assert 'ML Value Edge Bets' in template
     assert 'value_edge_bets' in template
+
+
+def test_promote_threshold_boundary():
+    threshold = appmod.VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT
+    # market implied = 100/4 = 25%; want fair - 25 == threshold -> fair = 25+threshold
+    fair_needed = 25.0 + threshold
+    out = evaluate_pair(price_a=4.0, price_b=100.0, ml_a=fair_needed, ml_b=100.0 - fair_needed)
+    alpha = out[1]
+    assert alpha['is_value_edge_promoted'] is True
+    assert any('ML Value Edge' in badge for badge in alpha['best_bet_badges'])
+    below = evaluate_pair(price_a=4.0, price_b=100.0, ml_a=fair_needed - 0.5, ml_b=100.0 - (fair_needed - 0.5))[1]
+    assert below['is_value_edge_promoted'] is False
+    assert not any('ML Value Edge' in badge for badge in below['best_bet_badges'])
+
+
+def test_promote_does_not_change_qualitative_badge_counting():
+    # A promoted horse alongside existing sweet-spot/consensus/gap signals must
+    # not push best_bet_signal_count or best_bet_confidence_level beyond what
+    # the pre-existing three qualitative badges produce.
+    a = horse(1, 'Alpha', 100, 95)
+    a.csv_data = {'pfaiScore': 100}  # also ranks #1 on PFAI so Full Consensus fires
+    b = horse(2, 'Beta', 90, 5)  # 90-point ml gap, both favour Alpha as ML top pick
+    b.csv_data = {'pfaiScore': 90}
+    race = SimpleNamespace(horses=[a, b])
+    odds = {'status': 'Open', 'fetched_at': 't', 'age_seconds': 0, 'odds': {
+        appmod.normalize_runner_name('Alpha'): {'name': 'Alpha', 'win': 3.0, 'is_scratched': False, 'is_available': True},
+        appmod.normalize_runner_name('Beta'): {'name': 'Beta', 'win': 5.0, 'is_scratched': False, 'is_available': True},
+    }}
+    out = appmod.evaluate_ladbrokes_best_bet_signals(race, SimpleNamespace(), odds)
+    alpha = out[1]
+    assert alpha['is_value_edge_promoted'] is True
+    assert alpha['best_bet_signal_count'] == 3
+    assert alpha['best_bet_confidence_level'] == 'Elite Consensus Best Bet'
+
+
+def test_promote_threshold_is_a_single_module_constant():
+    assert APP_SOURCE.count('VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT = 20.0') == 1
+
+
+def test_best_bets_route_includes_promoted_value_edge_bets_in_normal_section():
+    source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
+    source = source[:source.index('\n@app.route(', 1)]
+    assert "value_edge_promoted = bool(lb_fields.get('is_value_edge_promoted'))" in source
+    assert 'or value_edge_promoted:' in source
+
+
+def test_best_bets_route_only_displays_promoted_edge_bets_but_tracks_all():
+    # The ML Value Edge Bets panel on the Best Bets page should only list
+    # horses that clear the 20pp promotion threshold, while the DB snapshot
+    # capture (used by the ML Data page's 8-12/12-20/20+ buckets) still fires
+    # for every horse at/above the lower 8pp threshold.
+    source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
+    source = source[:source.index('\n@app.route(', 1)]
+    assert "if edge_fields.get('is_value_edge_bet'):" in source
+    assert "if edge_fields.get('is_value_edge_promoted'):\n                        value_edge_bets.append(" in source
+    assert 'value_edge_min_threshold_pct=VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT' in source
+    assert 'value_edge_track_min_threshold_pct=VALUE_EDGE_MIN_THRESHOLD_PCT' in source
+
+
+def test_best_bets_template_shows_both_thresholds():
+    template = Path('templates/best_bets.html').read_text()
+    assert 'value_edge_min_threshold_pct' in template
+    assert 'value_edge_track_min_threshold_pct' in template
