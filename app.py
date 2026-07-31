@@ -331,7 +331,7 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
     app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
 # Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8533463194:AAGHWamzq_Atz9cxjejKsm-hQlzwpYPSBh0')
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHANNEL = os.environ.get('TELEGRAM_CHANNEL', '-1003602052698')
 
 # Twitter API Configuration
