@@ -107,12 +107,21 @@ def safe_json_response(payload, status_code: int = 200):
     return jsonify(safe_payload), status_code
 
 
+# Manual (non-ML) weighted-average scoring config that powers /api/afl/value-finder.
+# These blend season / vs-opponent / last-5 averages into a single predicted stat line,
+# then compare it to the bookmaker's line to produce an edge %. They are distinct from
+# the trained Machine Learning model used by the "Machine Learning Selections" tab.
+#
+# Kept in sync with the Results tab's "Recommended Weight Updates (Best ROI)" backtest
+# (best ROI setup per market, >=40 qualifying bets after edge cutoff). Last synced 2026-08-03
+# from live backtest output — see afl_routes.py `_db_best_prop_weightings` / afl.html Results tab.
 _MARKET_WEIGHTING_OVERRIDES: dict[str, dict[str, float]] = {
-    "player_disposals": {"season_weight": 1.00, "opp_weight": 0.00, "last5_weight": 0.30, "edge_cutoff": 2.5},
-    "player_goals": {"season_weight": 1.00, "opp_weight": 0.00, "last5_weight": 0.00, "edge_cutoff": 0.0},
-    "player_marks": {"season_weight": 0.50, "opp_weight": 0.50, "last5_weight": 0.00, "edge_cutoff": 0.0},
-    "player_kicks": {"season_weight": 0.50, "opp_weight": 0.50, "last5_weight": 0.00, "edge_cutoff": 1.0},
-    "player_tackles": {"season_weight": 0.50, "opp_weight": 0.50, "last5_weight": 0.00, "edge_cutoff": 0.0},
+    "player_disposals": {"season_weight": 1.00, "opp_weight": 0.00, "last5_weight": 0.50, "edge_cutoff": 4.0},
+    "player_tackles":   {"season_weight": 0.50, "opp_weight": 0.50, "last5_weight": 0.40, "edge_cutoff": 0.0},
+    "player_marks":     {"season_weight": 0.60, "opp_weight": 0.40, "last5_weight": 0.10, "edge_cutoff": 1.0},
+    "player_goals":     {"season_weight": 0.50, "opp_weight": 0.50, "last5_weight": 0.20, "edge_cutoff": 0.0},
+    "player_kicks":     {"season_weight": 0.50, "opp_weight": 0.50, "last5_weight": 0.10, "edge_cutoff": 1.0},
+    "player_handballs": {"season_weight": 0.60, "opp_weight": 0.40, "last5_weight": 0.00, "edge_cutoff": 0.0},
 }
 
 # Minimum gap between paid Odds API syncs for the same source, so repeat
@@ -251,6 +260,7 @@ def register_afl_routes(app, db):
             db_diagnostics=db_diagnostics,
             db_warning=db_warning,
             weighting_backtest=weighting_backtest,
+            live_market_weights=_MARKET_WEIGHTING_OVERRIDES,
         )
 
     @app.route("/api/afl/player-stats")

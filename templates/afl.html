@@ -900,8 +900,10 @@
 <div id="tab-value" class="tab-panel">
   <div class="afl-card">
     <div class="afl-card-header">
-      <h4><i class="bi bi-lightning-charge-fill"></i> Value Finder</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Props from database · Over &amp; Under · all prop markets</span>
+      <h4><i class="bi bi-lightning-charge-fill"></i> Value Finder
+        <span class="afl-badge" style="margin-left:4px;">MANUAL SCORING MODEL</span>
+      </h4>
+      <span style="font-size:11px;color:var(--text-muted);">Props from database · Over &amp; Under · all prop markets · weighted-average formula, tuned on the Results tab</span>
     </div>
     <div class="afl-card-body">
       <div class="value-finder-bar">
@@ -926,6 +928,9 @@
           title="Manually fetch ALL prop markets from Odds API (requires ODDS_API_KEY)">
           <i class="bi bi-cloud-download"></i> Refresh from API
         </button>
+        <button class="btn btn-secondary" onclick="downloadValueFinderCsv()" title="Download the currently shown Value Finder results as CSV">
+          <i class="bi bi-download"></i> Download CSV
+        </button>
         <span id="propsStatus" style="font-size:11px;color:var(--text-muted);"></span>
       </div>
       <div id="valueResults">
@@ -939,7 +944,13 @@
   <div class="afl-card" style="margin-top:16px;">
     <div class="afl-card-header">
       <h4><i class="bi bi-activity"></i> Model Tracker &amp; Results</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Forward-tracked official selections · settled automatically from player stats</span>
+      <span style="font-size:11px;color:var(--text-muted);">
+        Forward-tracked official selections · settled automatically from player stats
+        &nbsp;·&nbsp;
+        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportTableToCsv('vfTrackerRows','afl-model-tracker-results.csv')">
+          <i class="bi bi-download"></i> Download CSV
+        </button>
+      </span>
     </div>
     <div class="afl-card-body">
       <div id="vfPerfSummary" class="vf-results-meta">Loading tracked performance…</div>
@@ -1018,12 +1029,27 @@
 
   <div class="afl-card">
     <div class="afl-card-header">
-      <h4><i class="bi bi-sliders"></i> Recommended Weight Updates (Best ROI)</h4>
+      <h4><i class="bi bi-sliders"></i> Recommended Weight Updates (Best ROI)
+        <span class="afl-badge" style="margin-left:4px;">MANUAL SCORING MODEL</span>
+      </h4>
       <span style="font-size:11px;color:var(--text-muted);">
         {{ weighting_backtest.settled_rows if weighting_backtest else 0 }} graded bets (incl. pushes)
+        &nbsp;·&nbsp;
+        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportTableToCsv('resultsWeightRecoRows','afl-manual-scoring-weight-recommendations.csv')">
+          <i class="bi bi-download"></i> Download CSV
+        </button>
       </span>
     </div>
     <div class="afl-card-body" style="padding-top:12px;">
+      <div class="vf-why" style="margin-top:0;margin-bottom:12px;">
+        <strong>What this section is:</strong> this is the backtest optimizer for the site's
+        <strong>manual weighted-average scoring model</strong> — the formula behind the <strong>Value Finder</strong> tab
+        (blends season avg / vs-opponent avg / last-5 avg into a predicted stat line, then compares it to the
+        bookmaker's line). It is grid-searched from every settled selection in the database to find, per market,
+        the weight mix and edge cutoff with the best real ROI. It is <strong>not</strong> the trained Machine Learning
+        model — that lives on the separate <strong>Machine Learning Selections</strong> tab and is scored independently.
+        The <strong>Live Setting Now</strong> column below shows what's actually configured in the app today.
+      </div>
       {% if weighting_backtest and weighting_backtest.rows %}
       {% set top = weighting_backtest.best_overall %}
       <div style="margin-bottom:6px;font-size:13px;">
@@ -1045,6 +1071,8 @@
               <th>Market</th>
               <th>Set weights to (season/opp/last5)</th>
               <th>Set edge cutoff to</th>
+              <th>Live Setting Now</th>
+              <th>Status</th>
               <th>Qualified Bets</th>
               <th>Hit Rate</th>
               <th>ROI / Bet</th>
@@ -1052,12 +1080,28 @@
               <th>All Settled Bets</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody id="resultsWeightRecoRows">
             {% for r in weighting_backtest.rows %}
+            {% set live = (live_market_weights or {}).get(r.market) %}
+            {% set in_sync = live and (live.season_weight|round(2) == r.w_season|round(2)) and (live.opp_weight|round(2) == r.w_opp|round(2)) and (live.last5_weight|round(2) == r.w_l5|round(2)) and (live.edge_cutoff|round(1) == r.edge_cut|round(1)) %}
             <tr>
               <td><strong>{{ (r.market or '').replace('player_', '').replace('_', ' ')|title }}</strong></td>
               <td><span class="mono">{{ '%.2f'|format(r.w_season) }} / {{ '%.2f'|format(r.w_opp) }} / {{ '%.2f'|format(r.w_l5) }}</span></td>
               <td><span class="mono">{{ '%.1f'|format(r.edge_cut) }}</span></td>
+              <td>
+                {% if live %}
+                <span class="mono">{{ '%.2f'|format(live.season_weight) }} / {{ '%.2f'|format(live.opp_weight) }} / {{ '%.2f'|format(live.last5_weight) }} · edge {{ '%.1f'|format(live.edge_cutoff) }}</span>
+                {% else %}
+                <span class="mono">default 0.50 / 0.50 / 0.00 · edge 2.0</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if in_sync %}
+                <span class="edge-chip pos"><i class="bi bi-check-circle-fill"></i>&nbsp;Synced</span>
+                {% else %}
+                <span class="edge-chip neg"><i class="bi bi-exclamation-triangle-fill"></i>&nbsp;Needs update</span>
+                {% endif %}
+              </td>
               <td>{{ r.bets }}</td>
               <td>{{ '%.2f'|format(r.hit_rate_pct) }}%</td>
               <td class="{{ 'text-success' if r.roi_pct >= 0 else 'text-danger' }}">{{ '%.2f'|format(r.roi_pct) }}%</td>
@@ -1081,7 +1125,13 @@
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-bar-chart-line"></i> Market Performance</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Settled picks by market</span>
+      <span style="font-size:11px;color:var(--text-muted);">
+        Settled picks by market
+        &nbsp;·&nbsp;
+        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportTableToCsv('resultsMarketRows','afl-results-market-performance.csv')">
+          <i class="bi bi-download"></i> Download CSV
+        </button>
+      </span>
     </div>
     <div class="afl-card-body">
       <div class="scroll-x">
@@ -1103,7 +1153,13 @@
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-arrow-left-right"></i> Over / Under Performance by Market</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Kicks · Tackles · Marks · Disposals · Goals · Handballs</span>
+      <span style="font-size:11px;color:var(--text-muted);">
+        Kicks · Tackles · Marks · Disposals · Goals · Handballs
+        &nbsp;·&nbsp;
+        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportTableToCsv('resultsMarketLineTypeRows','afl-results-over-under-by-market.csv')">
+          <i class="bi bi-download"></i> Download CSV
+        </button>
+      </span>
     </div>
     <div class="afl-card-body">
       <div class="scroll-x">
@@ -1125,7 +1181,13 @@
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-search"></i> Disposals Deep Dive</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Odds bands · Edge bands · Over/Under splits</span>
+      <span style="font-size:11px;color:var(--text-muted);">
+        Odds bands · Edge bands · Over/Under splits
+        &nbsp;·&nbsp;
+        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportDisposalsDeepDiveCsv()">
+          <i class="bi bi-download"></i> Download all as CSV
+        </button>
+      </span>
     </div>
     <div class="afl-card-body">
       <!-- Row 1: simple band tables -->
@@ -1134,6 +1196,7 @@
         <div class="afl-card" style="border:1px solid var(--border-subtle);">
           <div class="afl-card-header" style="padding:10px 14px;">
             <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-currency-dollar"></i> By Odds Band</h5>
+            <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="aflExportTableToCsv('disposalsOddsBandRows','afl-disposals-by-odds-band.csv')" title="Download CSV"><i class="bi bi-download"></i></button>
           </div>
           <div class="afl-card-body" style="padding:0;">
             <div class="scroll-x">
@@ -1150,6 +1213,7 @@
         <div class="afl-card" style="border:1px solid var(--border-subtle);">
           <div class="afl-card-header" style="padding:10px 14px;">
             <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-percent"></i> By Edge Band</h5>
+            <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="aflExportTableToCsv('disposalsEdgeBandRows','afl-disposals-by-edge-band.csv')" title="Download CSV"><i class="bi bi-download"></i></button>
           </div>
           <div class="afl-card-body" style="padding:0;">
             <div class="scroll-x">
@@ -1170,6 +1234,7 @@
         <div class="afl-card" style="border:1px solid var(--border-subtle);">
           <div class="afl-card-header" style="padding:10px 14px;">
             <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-currency-dollar"></i> Over/Under by Odds Band</h5>
+            <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="aflExportTableToCsv('disposalsOddsBandLtRows','afl-disposals-over-under-by-odds-band.csv')" title="Download CSV"><i class="bi bi-download"></i></button>
           </div>
           <div class="afl-card-body" style="padding:0;">
             <div class="scroll-x">
@@ -1186,6 +1251,7 @@
         <div class="afl-card" style="border:1px solid var(--border-subtle);">
           <div class="afl-card-header" style="padding:10px 14px;">
             <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-percent"></i> Over/Under by Edge Band</h5>
+            <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="aflExportTableToCsv('disposalsEdgeBandLtRows','afl-disposals-over-under-by-edge-band.csv')" title="Download CSV"><i class="bi bi-download"></i></button>
           </div>
           <div class="afl-card-body" style="padding:0;">
             <div class="scroll-x">
@@ -1206,7 +1272,13 @@
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-check2-square"></i> Recently Settled Picks</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Latest analyzed selections</span>
+      <span style="font-size:11px;color:var(--text-muted);">
+        Latest analyzed selections
+        &nbsp;·&nbsp;
+        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportTableToCsv('resultsSettledRows','afl-results-recently-settled.csv')">
+          <i class="bi bi-download"></i> Download CSV
+        </button>
+      </span>
     </div>
     <div class="afl-card-body" style="padding:0;">
       <div class="scroll-x">
@@ -1228,7 +1300,13 @@
   <div class="afl-card">
     <div class="afl-card-header">
       <h4><i class="bi bi-hourglass-split"></i> Recent Pending Picks</h4>
-      <span style="font-size:11px;color:var(--text-muted);">Weekend selections awaiting settlement</span>
+      <span style="font-size:11px;color:var(--text-muted);">
+        Weekend selections awaiting settlement
+        &nbsp;·&nbsp;
+        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportTableToCsv('resultsPendingRows','afl-results-pending-picks.csv')">
+          <i class="bi bi-download"></i> Download CSV
+        </button>
+      </span>
     </div>
     <div class="afl-card-body" style="padding:0;">
       <div class="scroll-x">
@@ -1255,12 +1333,20 @@
 <div id="tab-ml" class="tab-panel">
   <div class="afl-card">
     <div class="afl-card-header">
-      <h4><i class="bi bi-cpu-fill"></i> Machine Learning Selections</h4>
+      <h4><i class="bi bi-cpu-fill"></i> Machine Learning Selections
+        <span class="afl-badge" style="margin-left:4px;background:linear-gradient(135deg,rgba(245,158,11,.22),rgba(217,119,6,.14));border-color:rgba(245,158,11,.4);color:#fbbf24;">TRAINED ML MODEL</span>
+      </h4>
       <button class="btn btn-primary btn-sm" onclick="loadAflMachineLearningSelections()">
         <i class="bi bi-arrow-repeat"></i> Refresh ML Selections
       </button>
     </div>
     <div class="afl-card-body">
+      <div class="vf-why" style="margin-top:0;margin-bottom:12px;background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.28);">
+        <strong>What this section is:</strong> selections here come from a separately <strong>trained machine learning
+        model</strong> (champion/challenger .pkl artifact scored via <code>/api/afl/ml-current-selections</code>) —
+        it is not the weighted-average formula used by the <strong>Value Finder</strong> tab. If it shows
+        "model has not been trained yet," the ML pipeline needs a training run before picks appear here.
+      </div>
       <div class="value-finder-bar">
         <select class="form-select" id="mlMarket" style="width:200px;" onchange="_aflApplyMlFilters()">
           <option value="">All Stats</option>
@@ -1279,6 +1365,9 @@
         <input type="number" class="form-control" id="mlMinEdge" value="0" step="0.5" style="max-width:120px;" placeholder="Min edge" onchange="_aflApplyMlFilters()">
         <button class="btn btn-primary" onclick="loadAflMachineLearningSelections()">
           <i class="bi bi-search"></i> Find ML Picks
+        </button>
+        <button class="btn btn-secondary" onclick="downloadMlSelectionsCsv()" title="Download the currently shown ML selections as CSV">
+          <i class="bi bi-download"></i> Download CSV
         </button>
       </div>
       <div id="aflMlSummary" class="vf-results-meta">All Machine Learning selections · filter by stat, match, line and edge.</div>
@@ -1563,6 +1652,120 @@ function esc(v) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+// ── CSV export ──────────────────────────────────────────────────
+// Triggers a browser download of `rows` (array of arrays) as a CSV file.
+function aflDownloadCsv(filename, rows) {
+  if (!rows || !rows.length) {
+    alert('No data to download yet — wait for this section to finish loading, then try again.');
+    return;
+  }
+  const csv = rows.map(row => row.map(cell => {
+    const s = String(cell ?? '');
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Scrapes a rendered <table> (found via one of its <tbody> ids) into a CSV download.
+// Works for any of the plain results tables since they're populated as real <table> markup.
+function aflExportTableToCsv(tbodyId, filename) {
+  const tbody = document.getElementById(tbodyId);
+  const table = tbody ? tbody.closest('table') : null;
+  if (!table) {
+    alert('No data to download yet — wait for this section to finish loading, then try again.');
+    return;
+  }
+  const rows = [];
+  const headerCells = table.querySelectorAll('thead th');
+  if (headerCells.length) rows.push(Array.from(headerCells).map(th => th.textContent.trim()));
+  table.querySelectorAll('tbody tr').forEach(tr => {
+    const cells = tr.querySelectorAll('td');
+    if (!cells.length || (cells.length === 1 && cells[0].hasAttribute('colspan'))) return;
+    rows.push(Array.from(cells).map(td => td.textContent.trim()));
+  });
+  if (rows.length <= 1) {
+    alert('No data to download yet — wait for this section to finish loading, then try again.');
+    return;
+  }
+  aflDownloadCsv(filename, rows);
+}
+
+// Downloads all four Disposals Deep Dive band tables as one combined CSV, with each
+// sub-table's rows grouped under its own labeled header row.
+function aflExportDisposalsDeepDiveCsv() {
+  const sections = [
+    ['By Odds Band', 'disposalsOddsBandRows'],
+    ['By Edge Band', 'disposalsEdgeBandRows'],
+    ['Over/Under by Odds Band', 'disposalsOddsBandLtRows'],
+    ['Over/Under by Edge Band', 'disposalsEdgeBandLtRows'],
+  ];
+  const rows = [];
+  let any = false;
+  sections.forEach(([label, tbodyId]) => {
+    const tbody = document.getElementById(tbodyId);
+    const table = tbody ? tbody.closest('table') : null;
+    if (!table) return;
+    const headerCells = table.querySelectorAll('thead th');
+    const bodyRows = Array.from(table.querySelectorAll('tbody tr')).filter(tr => {
+      const cells = tr.querySelectorAll('td');
+      return cells.length && !(cells.length === 1 && cells[0].hasAttribute('colspan'));
+    });
+    if (!bodyRows.length) return;
+    any = true;
+    rows.push([label]);
+    if (headerCells.length) rows.push(Array.from(headerCells).map(th => th.textContent.trim()));
+    bodyRows.forEach(tr => rows.push(Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim())));
+    rows.push([]);
+  });
+  if (!any) {
+    alert('No data to download yet — wait for this section to finish loading, then try again.');
+    return;
+  }
+  aflDownloadCsv('afl-disposals-deep-dive.csv', rows);
+}
+
+// Converts a list of Value Finder / ML "bet" objects into CSV rows for export.
+function _aflBetsToCsvRows(bets) {
+  const header = ['Player', 'Team', 'Opponent', 'Market', 'Line Type', 'Line', 'Odds', 'Model Prob %', 'Implied Prob %', 'Edge %', 'Recommendation', 'Historical Hit %'];
+  const dataRows = bets.map(b => [
+    b.player || '', b.team || '', b.opponent || '',
+    (b.market || '').replace('player_', '').replace(/_/g, ' '),
+    b.line_type || '', b.book_line ?? '', b.odds ?? '',
+    b.model_prob != null ? safeNum(b.model_prob, 0).toFixed(1) : '',
+    b.implied_prob != null ? safeNum(b.implied_prob, 0).toFixed(1) : '',
+    b.edge != null ? safeNum(b.edge, 0).toFixed(1) : '',
+    b.recommendation || '', b.hist_pct ?? '',
+  ]);
+  return [header, ...dataRows];
+}
+
+let _vfLastRenderedBets = [];
+let _aflMlLastRenderedBets = [];
+
+function downloadValueFinderCsv() {
+  if (!_vfLastRenderedBets.length) {
+    alert('No Value Finder results loaded yet — run a search first.');
+    return;
+  }
+  aflDownloadCsv(`afl-value-finder-${_SEASON}.csv`, _aflBetsToCsvRows(_vfLastRenderedBets));
+}
+
+function downloadMlSelectionsCsv() {
+  if (!_aflMlLastRenderedBets.length) {
+    alert('No ML selections loaded yet — click "Refresh ML Selections" first.');
+    return;
+  }
+  aflDownloadCsv(`afl-ml-selections-${_SEASON}.csv`, _aflBetsToCsvRows(_aflMlLastRenderedBets));
 }
 
 function norm(v) {
@@ -1862,11 +2065,13 @@ function loadAflMachineLearningSelections() {
     })
     .then(data => {
       if (data.status === 'missing_model') {
+        _aflMlLastRenderedBets = [];
         if (summary) summary.textContent = 'AFL Machine Learning model status: missing model.';
         wrap.innerHTML = `<div class="props-banner"><i class="bi bi-exclamation-triangle-fill"></i> ${esc(data.message || 'AFL Machine Learning model has not been trained yet. Run training on Railway first.')}</div>`;
         return;
       }
       if (data.status === 'error') {
+        _aflMlLastRenderedBets = [];
         if (summary) summary.textContent = 'AFL Machine Learning endpoint returned an error.';
         wrap.innerHTML = `<div class="props-banner"><i class="bi bi-exclamation-triangle-fill"></i> ${esc(data.message || 'AFL Machine Learning selections could not be loaded.')}</div>`;
         return;
@@ -1874,6 +2079,7 @@ function loadAflMachineLearningSelections() {
 
       const rows = Array.isArray(data.selections) ? data.selections : (Array.isArray(data.rows) ? data.rows : []);
       if (!rows.length) {
+        _aflMlLastRenderedBets = [];
         if (summary) summary.textContent = `All Machine Learning selections · 0 current rows · ${data.status || 'no_data'}.`;
         wrap.innerHTML = `<div class="prop-empty"><i class="bi bi-cpu"></i><p>${esc(data.message || 'No current AFL ML selections available.')}</p></div>`;
         return;
@@ -1884,6 +2090,7 @@ function loadAflMachineLearningSelections() {
       _aflApplyMlFilters();
     })
     .catch(err => {
+      _aflMlLastRenderedBets = [];
       if (summary) summary.textContent = 'AFL Machine Learning selections could not be loaded.';
       wrap.innerHTML = `<div class="props-banner"><i class="bi bi-exclamation-triangle-fill"></i> Failed to load AFL ML selections (${esc(err.message || 'unknown error')}).</div>`;
     });
@@ -3071,9 +3278,11 @@ function _aflApplyMlFilters() {
   const marketLabel = market ? market.replace('player_', '').replace(/_/g, ' ') : 'all stats';
   if (summary) summary.textContent = `AFL Machine Learning BET selections · ${bets.length}/${totalBets} shown · ${marketLabel} · min edge: ${minEdge}% · ranked best to worst by ML EV Score.`;
   if (!bets.length) {
+    _aflMlLastRenderedBets = [];
     wrap.innerHTML = '<div class="prop-empty"><i class="bi bi-cpu"></i><p>No AFL ML bet selections match these filters.</p></div>';
     return;
   }
+  _aflMlLastRenderedBets = bets;
   wrap.innerHTML = _aflRenderMlSelectionCards(bets);
 }
 
@@ -3187,10 +3396,12 @@ function _vfApplyFilters(data) {
   });
 
   if (data.message && !bets.length) {
+    _vfLastRenderedBets = [];
     el.innerHTML = `<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>${esc(data.message)}</p></div>`;
     return;
   }
   if (!bets.length) {
+    _vfLastRenderedBets = [];
     el.innerHTML = '<div class="prop-empty"><i class="bi bi-lightning-charge"></i><p>No value bets found for these filters. Try <strong>Refresh from API</strong> to reload from the Odds API, or lower the min edge.</p></div>';
     return;
   }
@@ -3204,6 +3415,7 @@ function _vfRender(bets, data) {
     console.warn('[ValueFinder] Missing #valueResults container');
     return;
   }
+  _vfLastRenderedBets = bets || [];
   el.innerHTML = _vfRenderTable(bets, data);
 }
 
