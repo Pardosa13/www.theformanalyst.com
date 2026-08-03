@@ -947,7 +947,7 @@
       <span style="font-size:11px;color:var(--text-muted);">
         Forward-tracked official selections · settled automatically from player stats
         &nbsp;·&nbsp;
-        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportTableToCsv('vfTrackerRows','afl-model-tracker-results.csv')">
+        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportRawRowsToCsv(() => _aflModelTrackerRawRows, 'afl-model-tracker-results.csv')">
           <i class="bi bi-download"></i> Download CSV
         </button>
       </span>
@@ -1128,7 +1128,7 @@
       <span style="font-size:11px;color:var(--text-muted);">
         Settled picks by market
         &nbsp;·&nbsp;
-        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportTableToCsv('resultsMarketRows','afl-results-market-performance.csv')">
+        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportRawRowsToCsv(() => _aflMarketPerfRawRows, 'afl-results-market-performance.csv')">
           <i class="bi bi-download"></i> Download CSV
         </button>
       </span>
@@ -1156,7 +1156,7 @@
       <span style="font-size:11px;color:var(--text-muted);">
         Kicks · Tackles · Marks · Disposals · Goals · Handballs
         &nbsp;·&nbsp;
-        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportTableToCsv('resultsMarketLineTypeRows','afl-results-over-under-by-market.csv')">
+        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportRawRowsToCsv(() => _aflMarketLtRawRows, 'afl-results-over-under-by-market.csv')">
           <i class="bi bi-download"></i> Download CSV
         </button>
       </span>
@@ -1196,7 +1196,7 @@
         <div class="afl-card" style="border:1px solid var(--border-subtle);">
           <div class="afl-card-header" style="padding:10px 14px;">
             <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-currency-dollar"></i> By Odds Band</h5>
-            <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="aflExportTableToCsv('disposalsOddsBandRows','afl-disposals-by-odds-band.csv')" title="Download CSV"><i class="bi bi-download"></i></button>
+            <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="aflExportRawRowsToCsv(() => _aflDispOddsBandRaw, 'afl-disposals-by-odds-band.csv')" title="Download CSV"><i class="bi bi-download"></i></button>
           </div>
           <div class="afl-card-body" style="padding:0;">
             <div class="scroll-x">
@@ -1213,7 +1213,7 @@
         <div class="afl-card" style="border:1px solid var(--border-subtle);">
           <div class="afl-card-header" style="padding:10px 14px;">
             <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-percent"></i> By Edge Band</h5>
-            <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="aflExportTableToCsv('disposalsEdgeBandRows','afl-disposals-by-edge-band.csv')" title="Download CSV"><i class="bi bi-download"></i></button>
+            <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="aflExportRawRowsToCsv(() => _aflDispEdgeBandRaw, 'afl-disposals-by-edge-band.csv')" title="Download CSV"><i class="bi bi-download"></i></button>
           </div>
           <div class="afl-card-body" style="padding:0;">
             <div class="scroll-x">
@@ -1234,7 +1234,7 @@
         <div class="afl-card" style="border:1px solid var(--border-subtle);">
           <div class="afl-card-header" style="padding:10px 14px;">
             <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-currency-dollar"></i> Over/Under by Odds Band</h5>
-            <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="aflExportTableToCsv('disposalsOddsBandLtRows','afl-disposals-over-under-by-odds-band.csv')" title="Download CSV"><i class="bi bi-download"></i></button>
+            <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="aflExportRawRowsToCsv(() => _aflDispOddsBandLtRaw, 'afl-disposals-over-under-by-odds-band.csv')" title="Download CSV"><i class="bi bi-download"></i></button>
           </div>
           <div class="afl-card-body" style="padding:0;">
             <div class="scroll-x">
@@ -1251,7 +1251,7 @@
         <div class="afl-card" style="border:1px solid var(--border-subtle);">
           <div class="afl-card-header" style="padding:10px 14px;">
             <h5 style="margin:0;font-size:13px;font-weight:700;"><i class="bi bi-percent"></i> Over/Under by Edge Band</h5>
-            <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="aflExportTableToCsv('disposalsEdgeBandLtRows','afl-disposals-over-under-by-edge-band.csv')" title="Download CSV"><i class="bi bi-download"></i></button>
+            <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px;" onclick="aflExportRawRowsToCsv(() => _aflDispEdgeBandLtRaw, 'afl-disposals-over-under-by-edge-band.csv')" title="Download CSV"><i class="bi bi-download"></i></button>
           </div>
           <div class="afl-card-body" style="padding:0;">
             <div class="scroll-x">
@@ -1275,7 +1275,7 @@
       <span style="font-size:11px;color:var(--text-muted);">
         Latest analyzed selections
         &nbsp;·&nbsp;
-        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportTableToCsv('resultsSettledRows','afl-results-recently-settled.csv')">
+        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportRawRowsToCsv(() => _aflSettledRawRows, 'afl-results-recently-settled.csv')">
           <i class="bi bi-download"></i> Download CSV
         </button>
       </span>
@@ -1303,7 +1303,7 @@
       <span style="font-size:11px;color:var(--text-muted);">
         Weekend selections awaiting settlement
         &nbsp;·&nbsp;
-        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportTableToCsv('resultsPendingRows','afl-results-pending-picks.csv')">
+        <button class="btn btn-secondary btn-sm" style="padding:2px 9px;font-size:10px;" onclick="aflExportRawRowsToCsv(() => _aflPendingRawRows, 'afl-results-pending-picks.csv')">
           <i class="bi bi-download"></i> Download CSV
         </button>
       </span>
@@ -1638,6 +1638,11 @@ let _chartFilter = 'season';
 const ISO_DATETIME_DISPLAY_LENGTH = 16;
 const RESULTS_MAX_MARKET_ROWS = 12;
 const RESULTS_MAX_SETTLED_ROWS = 80;
+// CSV downloads should contain the complete raw data behind a section, not just the
+// rows/columns rendered on screen — so fetches backing a CSV button request the API's
+// maximum page size, independent of how many rows are actually displayed in the table.
+const RESULTS_FETCH_LIMIT = 200; // hard cap on /api/afl/results-analysis
+const MODEL_TRACKER_FETCH_LIMIT = 500; // hard cap on /api/afl/model-selections
 
 // ── Shared utils ─────────────────────────────────────────────────
 function safeNum(v, fb = 0) {
@@ -1700,31 +1705,54 @@ function aflExportTableToCsv(tbodyId, filename) {
   aflDownloadCsv(filename, rows);
 }
 
+// Converts an array of raw API row objects into CSV rows using every field present
+// across all rows (not just the handful of columns a table renders), so exports carry
+// the complete underlying record rather than a formatted/rounded on-screen recap.
+function aflObjectsToCsvRows(rows) {
+  if (!rows || !rows.length) return [];
+  const keys = [];
+  const seen = new Set();
+  rows.forEach(row => Object.keys(row || {}).forEach(k => {
+    if (!seen.has(k)) { seen.add(k); keys.push(k); }
+  }));
+  const dataRows = rows.map(row => keys.map(k => {
+    const v = row[k];
+    if (v == null) return '';
+    if (typeof v === 'object') return JSON.stringify(v);
+    return v;
+  }));
+  return [keys, ...dataRows];
+}
+
+// Downloads the complete raw row data behind a section (as returned by the API,
+// before any display truncation/rounding) rather than scraping the rendered table.
+function aflExportRawRowsToCsv(getRows, filename) {
+  const rows = typeof getRows === 'function' ? getRows() : getRows;
+  if (!rows || !rows.length) {
+    alert('No data to download yet — wait for this section to finish loading, then try again.');
+    return;
+  }
+  aflDownloadCsv(filename, aflObjectsToCsvRows(rows));
+}
+
 // Downloads all four Disposals Deep Dive band tables as one combined CSV, with each
-// sub-table's rows grouped under its own labeled header row.
+// sub-table's rows grouped under its own labeled header row. Uses the raw breakdown
+// data (all bands, unrounded) rather than scraping the rendered tables.
 function aflExportDisposalsDeepDiveCsv() {
   const sections = [
-    ['By Odds Band', 'disposalsOddsBandRows'],
-    ['By Edge Band', 'disposalsEdgeBandRows'],
-    ['Over/Under by Odds Band', 'disposalsOddsBandLtRows'],
-    ['Over/Under by Edge Band', 'disposalsEdgeBandLtRows'],
+    ['By Odds Band', () => _aflDispOddsBandRaw],
+    ['By Edge Band', () => _aflDispEdgeBandRaw],
+    ['Over/Under by Odds Band', () => _aflDispOddsBandLtRaw],
+    ['Over/Under by Edge Band', () => _aflDispEdgeBandLtRaw],
   ];
   const rows = [];
   let any = false;
-  sections.forEach(([label, tbodyId]) => {
-    const tbody = document.getElementById(tbodyId);
-    const table = tbody ? tbody.closest('table') : null;
-    if (!table) return;
-    const headerCells = table.querySelectorAll('thead th');
-    const bodyRows = Array.from(table.querySelectorAll('tbody tr')).filter(tr => {
-      const cells = tr.querySelectorAll('td');
-      return cells.length && !(cells.length === 1 && cells[0].hasAttribute('colspan'));
-    });
+  sections.forEach(([label, getRows]) => {
+    const bodyRows = getRows() || [];
     if (!bodyRows.length) return;
     any = true;
     rows.push([label]);
-    if (headerCells.length) rows.push(Array.from(headerCells).map(th => th.textContent.trim()));
-    bodyRows.forEach(tr => rows.push(Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim())));
+    rows.push(...aflObjectsToCsvRows(bodyRows));
     rows.push([]);
   });
   if (!any) {
@@ -1735,22 +1763,27 @@ function aflExportDisposalsDeepDiveCsv() {
 }
 
 // Converts a list of Value Finder / ML "bet" objects into CSV rows for export.
+// Exports every field present on the bet objects (raw odds-API + model output data),
+// not just the handful of summary columns shown in the on-screen cards.
 function _aflBetsToCsvRows(bets) {
-  const header = ['Player', 'Team', 'Opponent', 'Market', 'Line Type', 'Line', 'Odds', 'Model Prob %', 'Implied Prob %', 'Edge %', 'Recommendation', 'Historical Hit %'];
-  const dataRows = bets.map(b => [
-    b.player || '', b.team || '', b.opponent || '',
-    (b.market || '').replace('player_', '').replace(/_/g, ' '),
-    b.line_type || '', b.book_line ?? '', b.odds ?? '',
-    b.model_prob != null ? safeNum(b.model_prob, 0).toFixed(1) : '',
-    b.implied_prob != null ? safeNum(b.implied_prob, 0).toFixed(1) : '',
-    b.edge != null ? safeNum(b.edge, 0).toFixed(1) : '',
-    b.recommendation || '', b.hist_pct ?? '',
-  ]);
-  return [header, ...dataRows];
+  return aflObjectsToCsvRows(bets);
 }
 
 let _vfLastRenderedBets = [];
 let _aflMlLastRenderedBets = [];
+
+// Raw (unsliced, unrounded) row data behind each Results Analysis / Model Tracker
+// table, captured at fetch time so CSV downloads can export the complete dataset
+// instead of the truncated/rounded rows actually rendered in the DOM table.
+let _aflModelTrackerRawRows = [];
+let _aflMarketPerfRawRows = [];
+let _aflMarketLtRawRows = [];
+let _aflDispOddsBandRaw = [];
+let _aflDispEdgeBandRaw = [];
+let _aflDispOddsBandLtRaw = [];
+let _aflDispEdgeBandLtRaw = [];
+let _aflSettledRawRows = [];
+let _aflPendingRawRows = [];
 
 function downloadValueFinderCsv() {
   if (!_vfLastRenderedBets.length) {
@@ -3542,10 +3575,11 @@ function loadModelTracker() {
     })
     .catch(() => { summaryEl.textContent = 'Performance unavailable.'; });
 
-  fetch(`/api/afl/model-selections?year={{ year }}&status=all&limit=120`)
+  fetch(`/api/afl/model-selections?year={{ year }}&status=all&limit=${MODEL_TRACKER_FETCH_LIMIT}`)
     .then(r => r.json())
     .then(data => {
       const rows = data.rows || [];
+      _aflModelTrackerRawRows = rows;
       if (!rows.length) {
         rowsEl.innerHTML = '<tr><td colspan="8" style="padding:14px;color:var(--text-muted);">No tracked selections yet.</td></tr>';
         return;
@@ -3679,7 +3713,7 @@ function loadAflResultsAnalysis() {
     console.warn('[AFL Results] One or more disposals deep-dive elements not found');
   }
 
-  fetch(`/api/afl/results-analysis?year={{ year }}&limit=${RESULTS_MAX_SETTLED_ROWS}`)
+  fetch(`/api/afl/results-analysis?year={{ year }}&limit=${RESULTS_FETCH_LIMIT}`)
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
     .then(data => {
       const summary    = data.summary || {};
@@ -3715,6 +3749,7 @@ function loadAflResultsAnalysis() {
 
       // ── Market performance table ───────────────────────────────
       const marketRows = breakdowns.market || [];
+      _aflMarketPerfRawRows = marketRows;
       marketRowsEl.innerHTML = marketRows.length ? marketRows.slice(0, RESULTS_MAX_MARKET_ROWS).map(r => {
         const roiC = safeNum(r.roi, 0) > 0 ? 'pos' : safeNum(r.roi, 0) < 0 ? 'neg' : '';
         return `<tr>
@@ -3738,6 +3773,7 @@ function loadAflResultsAnalysis() {
         if (ia !== ib) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
         return (a.sub_bucket || '').localeCompare(b.sub_bucket || '');
       });
+      _aflMarketLtRawRows = mktLtRows;
       if (mktLtRowsEl) {
         mktLtRowsEl.innerHTML = mktLtRows.length ? mktLtRows.map(r => {
           const roiC = safeNum(r.roi, 0) > 0 ? 'pos' : safeNum(r.roi, 0) < 0 ? 'neg' : '';
@@ -3756,6 +3792,10 @@ function loadAflResultsAnalysis() {
       }
 
       // ── Disposals deep-dive ────────────────────────────────────
+      _aflDispOddsBandRaw = breakdowns.disposals_odds_band || [];
+      _aflDispEdgeBandRaw = breakdowns.disposals_edge_band || [];
+      _aflDispOddsBandLtRaw = breakdowns.disposals_odds_band_line_type || [];
+      _aflDispEdgeBandLtRaw = breakdowns.disposals_edge_band_line_type || [];
       if (dispOddsBandEl) dispOddsBandEl.innerHTML = _renderBandRows(breakdowns.disposals_odds_band, 6);
       if (dispEdgeBandEl) dispEdgeBandEl.innerHTML = _renderBandRows(breakdowns.disposals_edge_band, 6);
       if (dispOddsBandLtEl) dispOddsBandLtEl.innerHTML = _renderBandLtRows(breakdowns.disposals_odds_band_line_type, 7);
@@ -3763,6 +3803,7 @@ function loadAflResultsAnalysis() {
 
       // ── Recent settled picks ───────────────────────────────────
       const settledRows = data.recent_settled || [];
+      _aflSettledRawRows = settledRows;
       settledRowsEl.innerHTML = settledRows.length ? settledRows.slice(0, RESULTS_MAX_SETTLED_ROWS).map(r => {
         const res = (r.result || 'pending').toLowerCase();
         const resCls = res === 'win' ? 'pos' : res === 'loss' ? 'neg' : 'neu';
@@ -3780,6 +3821,7 @@ function loadAflResultsAnalysis() {
 
       // ── Recent pending picks ───────────────────────────────────
       const pendingRows = data.recent_pending || [];
+      _aflPendingRawRows = pendingRows;
       pendingRowsEl.innerHTML = pendingRows.length ? pendingRows.slice(0, RESULTS_MAX_SETTLED_ROWS).map(r => {
         const dtText = fmtDateTime(r.commence_time || r.created_at);
         return `<tr>
