@@ -476,7 +476,7 @@
         return;
       }
       form.reset();
-      const modal = bootstrap.Modal.getInstance(document.getElementById('addBetModal'));
+      const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('addBetModal'));
       modal.hide();
       refresh(currentRange);
     }).catch(() => {
