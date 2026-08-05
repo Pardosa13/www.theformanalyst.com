@@ -811,7 +811,7 @@ body.modal-open .main-container {
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                <div class="alert flash-alert alert-{{ category }} alert-dismissible fade show" role="alert">
                     <i class="bi bi-{% if category == 'success' %}check-circle{% elif category == 'danger' %}exclamation-triangle{% else %}info-circle{% endif %}"></i>
                     {{ message }}
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
@@ -840,7 +840,7 @@ body.modal-open .main-container {
     <!-- Auto-hide alerts (unchanged) -->
     <script>
         setTimeout(function() {
-            let alerts = document.querySelectorAll('.alert');
+            let alerts = document.querySelectorAll('.flash-alert');
             alerts.forEach(function(alert) {
                 let bsAlert = new bootstrap.Alert(alert);
                 bsAlert.close();
