@@ -313,9 +313,9 @@
 </div>
 
 <script>
-(function () {
+document.addEventListener('DOMContentLoaded', function () {
   const editModalEl = document.getElementById('editBetModal');
-  const editModal = new bootstrap.Modal(editModalEl);
+  const editModal = bootstrap.Modal.getOrCreateInstance(editModalEl);
   const editForm = document.getElementById('editBetForm');
   const errBox = document.getElementById('editBetError');
   let activeRow = null;
@@ -375,7 +375,7 @@
       .then(r => r.json())
       .then(() => window.location.reload());
   });
-})();
+});
 </script>
 
 {% endblock %}
