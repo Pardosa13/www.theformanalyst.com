@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .bt-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 16px 60px;
+  }
+
+  .bt-header {
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .bt-header h1 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin: 0 0 4px 0;
+    color: var(--text-primary);
+  }
+
+  .bt-header p {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+  }
+
+  .bt-subnav { display: flex; gap: 8px; margin-bottom: 24px; }
+
+  .bt-subnav a {
+    padding: 8px 16px;
+    border-radius: 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .bt-subnav a:hover, .bt-subnav a.active {
+    border-color: var(--border-accent);
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+  }
+
+  .bt-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  @media (max-width: 640px) {
+    .bt-stat-grid { grid-template-columns: 1fr; }
+  }
+
+  .bt-stat-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+  }
+
+  .bt-stat-row .label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .bt-stat-row .value {
+    font-family: 'DM Mono', monospace;
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--text-primary);
+  }
+
+  .bt-stat-row .value.positive { color: var(--success); }
+  .bt-stat-row .value.negative { color: var(--danger); }
+
+  .bt-section-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin: 28px 0 10px;
+  }
+</style>
+
+<div class="bt-container">
+
+  <div class="bt-header">
+    <h1>Statistics</h1>
+    <p>Full performance breakdown, all-time.</p>
+  </div>
+
+  <div class="bt-subnav">
+    <a href="{{ url_for('bet_tracker') }}">Dashboard</a>
+    <a href="{{ url_for('bet_tracker_history') }}">History</a>
+    <a href="{{ url_for('bet_tracker_stats') }}" class="active">Stats</a>
+  </div>
+
+  <div class="bt-stat-grid">
+    <div class="bt-stat-row"><span class="label">Bets</span><span class="value">{{ stats.bets }}</span></div>
+    <div class="bt-stat-row"><span class="label">Profit</span><span class="value {{ 'positive' if stats.profit >= 0 else 'negative' }}">{{ '%.2f'|format(stats.profit) }} AU$</span></div>
+    <div class="bt-stat-row"><span class="label">ROI</span><span class="value {{ 'positive' if stats.roi >= 0 else 'negative' }}">{{ '%.2f'|format(stats.roi) }}%</span></div>
+    <div class="bt-stat-row"><span class="label">Progression</span><span class="value {{ 'positive' if stats.progression >= 0 else 'negative' }}">{{ '%.2f'|format(stats.progression) }}%</span></div>
+    <div class="bt-stat-row"><span class="label">Success %</span><span class="value">{{ '%.2f'|format(stats.win_pct) }}%</span></div>
+    <div class="bt-stat-row"><span class="label">Drawdown</span><span class="value negative">{{ '%.2f'|format(stats.drawdown) }} AU$</span></div>
+    <div class="bt-stat-row"><span class="label">Starting bankroll</span><span class="value">{{ '%.2f'|format(stats.starting_bankroll) }} AU$</span></div>
+    <div class="bt-stat-row"><span class="label">Current bankroll</span><span class="value">{{ '%.2f'|format(stats.current_bankroll) }} AU$</span></div>
+  </div>
+
+  <div class="bt-section-title">Results</div>
+  <div class="bt-stat-grid">
+    <div class="bt-stat-row"><span class="label">Winning bets</span><span class="value positive">{{ stats.won }}</span></div>
+    <div class="bt-stat-row"><span class="label">Losing bets</span><span class="value negative">{{ stats.lost }}</span></div>
+    <div class="bt-stat-row"><span class="label">Refunded bets</span><span class="value">{{ stats.refunded }}</span></div>
+    <div class="bt-stat-row"><span class="label">Pending bets</span><span class="value">{{ stats.pending }}</span></div>
+  </div>
+
+  <div class="bt-section-title">Staking</div>
+  <div class="bt-stat-grid">
+    <div class="bt-stat-row"><span class="label">Played stakes</span><span class="value">{{ '%.2f'|format(stats.total_staked) }} AU$</span></div>
+    <div class="bt-stat-row"><span class="label">Average stake</span><span class="value">{{ '%.2f'|format(stats.average_stake) }} AU$</span></div>
+    <div class="bt-stat-row"><span class="label">Max stake</span><span class="value">{{ '%.2f'|format(stats.max_stake) }} AU$</span></div>
+    <div class="bt-stat-row"><span class="label">Average odds</span><span class="value">{{ '%.3f'|format(stats.average_odds) }}</span></div>
+  </div>
+
+  <div class="bt-section-title">Streaks &amp; extremes</div>
+  <div class="bt-stat-grid">
+    <div class="bt-stat-row"><span class="label">Max winning streak</span><span class="value positive">{{ stats.longest_win_streak }}</span></div>
+    <div class="bt-stat-row"><span class="label">Max losing streak</span><span class="value negative">-{{ stats.longest_loss_streak }}</span></div>
+    <div class="bt-stat-row"><span class="label">Biggest win</span><span class="value positive">{{ '%.2f'|format(stats.biggest_win) }} AU$</span></div>
+    <div class="bt-stat-row"><span class="label">Biggest loss</span><span class="value negative">{{ '%.2f'|format(stats.biggest_loss) }} AU$</span></div>
+  </div>
+
+</div>
+
+{% endblock %}

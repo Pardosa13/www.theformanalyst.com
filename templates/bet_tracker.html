@@ -1,0 +1,492 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  /* ── Bet Tracker dashboard — dark theme, inherits base.html tokens ── */
+
+  .bt-container {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 0 16px 60px;
+  }
+
+  .bt-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .bt-header h1 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin: 0 0 4px 0;
+    color: var(--text-primary);
+  }
+
+  .bt-header p {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+  }
+
+  .bt-subnav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .bt-subnav a {
+    padding: 8px 16px;
+    border-radius: 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: all 0.15s ease;
+  }
+
+  .bt-subnav a:hover, .bt-subnav a.active {
+    border-color: var(--border-accent);
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+  }
+
+  .bt-bankroll {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+
+  .bt-bankroll input {
+    width: 100px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.8rem;
+  }
+
+  .bt-bankroll button {
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-accent);
+    background: transparent;
+    color: var(--accent);
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
+  /* ── Chart card ── */
+  .bt-chart-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .bt-chart-wrap {
+    position: relative;
+    height: 280px;
+  }
+
+  .bt-filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+  }
+
+  .bt-filter-btn {
+    padding: 6px 16px;
+    border-radius: 999px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .bt-filter-btn:hover {
+    border-color: var(--border-accent);
+    color: var(--text-primary);
+  }
+
+  .bt-filter-btn.active {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border-color: transparent;
+    color: #fff;
+  }
+
+  /* ── Stat tiles ── */
+  .bt-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .bt-tile {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    padding: 18px 20px;
+  }
+
+  .bt-tile-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+
+  .bt-tile-value {
+    font-family: 'DM Mono', monospace;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .bt-tile-value.positive { color: var(--success); }
+  .bt-tile-value.negative { color: var(--danger); }
+
+  .bt-add-bet-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff;
+    border: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+
+  .bt-add-bet-btn:hover {
+    box-shadow: 0 4px 16px var(--accent-glow);
+  }
+
+  /* ── Modal form ── */
+  .bt-modal .modal-content {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-mid);
+    color: var(--text-primary);
+  }
+
+  .bt-modal .modal-header, .bt-modal .modal-footer {
+    border-color: var(--border-subtle);
+  }
+
+  .bt-modal label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  .bt-modal .form-control, .bt-modal .form-select {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+  }
+
+  .bt-modal .form-control:focus, .bt-modal .form-select:focus {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border-color: var(--border-accent);
+    box-shadow: none;
+  }
+
+  .bt-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+</style>
+
+<div class="bt-container">
+
+  <div class="bt-header">
+    <div>
+      <h1>Bet Tracker</h1>
+      <p>Your personal staking log — profit, ROI and progression over time.</p>
+    </div>
+    <button type="button" class="bt-add-bet-btn" data-bs-toggle="modal" data-bs-target="#addBetModal">
+      <i class="bi bi-plus-circle"></i> Add Bet
+    </button>
+  </div>
+
+  <div class="bt-subnav">
+    <a href="{{ url_for('bet_tracker') }}" class="active">Dashboard</a>
+    <a href="{{ url_for('bet_tracker_history') }}">History</a>
+    <a href="{{ url_for('bet_tracker_stats') }}">Stats</a>
+  </div>
+
+  <div class="bt-chart-card">
+    <div class="bt-chart-wrap">
+      <canvas id="btChart"></canvas>
+    </div>
+    <div class="bt-filters">
+      <button class="bt-filter-btn" data-range="1d">1d</button>
+      <button class="bt-filter-btn" data-range="1w">1w</button>
+      <button class="bt-filter-btn" data-range="1m">1m</button>
+      <button class="bt-filter-btn" data-range="1y">1y</button>
+      <button class="bt-filter-btn active" data-range="all">All</button>
+    </div>
+  </div>
+
+  <div class="bt-tiles">
+    <div class="bt-tile">
+      <div class="bt-tile-label">Bets</div>
+      <div class="bt-tile-value" id="tileBets">0</div>
+    </div>
+    <div class="bt-tile">
+      <div class="bt-tile-label">Profit</div>
+      <div class="bt-tile-value" id="tileProfit">0.00 AU$</div>
+    </div>
+    <div class="bt-tile">
+      <div class="bt-tile-label">ROI</div>
+      <div class="bt-tile-value" id="tileRoi">0.00%</div>
+    </div>
+    <div class="bt-tile">
+      <div class="bt-tile-label">Progression</div>
+      <div class="bt-tile-value" id="tileProgression">0.00%</div>
+    </div>
+  </div>
+
+  <div class="bt-bankroll">
+    <span>Starting bankroll:</span>
+    <input type="number" step="0.01" id="bankrollInput" placeholder="0.00">
+    <button type="button" id="saveBankrollBtn">Save</button>
+    <span id="bankrollSaved" style="display:none; color: var(--success);">Saved</span>
+  </div>
+
+</div>
+
+<!-- Add Bet Modal -->
+<div class="modal fade bt-modal" id="addBetModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Add bet</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="addBetForm">
+        <div class="modal-body">
+          <div id="addBetError" class="alert alert-danger" style="display:none;"></div>
+          <div class="row g-3">
+            <div class="col-6">
+              <label>Sport</label>
+              <select class="form-select" name="sport">
+                {% for s in sports %}
+                <option value="{{ s }}">{{ s }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-6">
+              <label>Bookie</label>
+              <select class="form-select" name="bookie">
+                {% for b in bookies %}
+                <option value="{{ b }}">{{ b }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12">
+              <label>Event / Track</label>
+              <input type="text" class="form-control" name="event_track" placeholder="Ex: Flemington R4 / Real Madrid v Bayern">
+            </div>
+            <div class="col-12">
+              <label>Selection</label>
+              <input type="text" class="form-control" name="selection" placeholder="Ex: horse, team or player backed" required>
+            </div>
+            <div class="col-6">
+              <label>Stake (AU$)</label>
+              <input type="number" step="0.01" min="0.01" class="form-control" name="stake" placeholder="Ex: 50" required>
+            </div>
+            <div class="col-6">
+              <label>Odds</label>
+              <input type="number" step="0.01" min="1.01" class="form-control" name="odds" placeholder="Ex: 1.50" required>
+            </div>
+            <div class="col-6">
+              <label>Result</label>
+              <select class="form-select" name="result">
+                <option value="pending">Pending</option>
+                <option value="won">Won</option>
+                <option value="lost">Lost</option>
+                <option value="refunded">Refunded</option>
+              </select>
+            </div>
+            <div class="col-6">
+              <label>Date placed</label>
+              <input type="datetime-local" class="form-control" name="date_placed">
+            </div>
+            <div class="col-12">
+              <label>Notes (optional)</label>
+              <textarea class="form-control" name="notes" rows="2"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Add bet</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function () {
+  let currentRange = 'all';
+  let chart = null;
+
+  function fmtMoney(v) {
+    return (v >= 0 ? '' : '') + v.toFixed(2) + ' AU$';
+  }
+
+  function setTileValue(el, value, suffix, colorize) {
+    el.textContent = value.toFixed(2) + suffix;
+    el.classList.remove('positive', 'negative');
+    if (colorize) {
+      el.classList.add(value >= 0 ? 'positive' : 'negative');
+    }
+  }
+
+  function loadChart(range) {
+    fetch(`/api/bet-tracker/chart?range=${range}`)
+      .then(r => r.json())
+      .then(data => {
+        const points = data.points || [];
+        const labels = points.map(p => new Date(p.x).toLocaleDateString());
+        const values = points.map(p => p.y);
+        const ctx = document.getElementById('btChart').getContext('2d');
+
+        if (chart) {
+          chart.data.labels = labels;
+          chart.data.datasets[0].data = values;
+          chart.update();
+          return;
+        }
+
+        chart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Cumulative profit',
+              data: values,
+              borderColor: '#10b981',
+              backgroundColor: 'rgba(16,185,129,0.12)',
+              fill: true,
+              tension: 0.25,
+              pointRadius: 0,
+              borderWidth: 2,
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { color: '#9090a8', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+              y: { ticks: { color: '#9090a8', callback: v => v + ' AU$' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+            }
+          }
+        });
+      });
+  }
+
+  function loadSummary(range) {
+    fetch(`/api/bet-tracker/summary?range=${range}`)
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById('tileBets').textContent = data.bets;
+        setTileValue(document.getElementById('tileProfit'), data.profit, ' AU$', true);
+        setTileValue(document.getElementById('tileRoi'), data.roi, '%', true);
+        setTileValue(document.getElementById('tileProgression'), data.progression, '%', true);
+        document.getElementById('bankrollInput').value = data.starting_bankroll;
+      });
+  }
+
+  function refresh(range) {
+    currentRange = range;
+    loadChart(range);
+    loadSummary(range);
+  }
+
+  document.querySelectorAll('.bt-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.bt-filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      refresh(btn.dataset.range);
+    });
+  });
+
+  document.getElementById('saveBankrollBtn').addEventListener('click', () => {
+    const val = parseFloat(document.getElementById('bankrollInput').value) || 0;
+    fetch('/api/bet-tracker/bankroll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ starting_bankroll: val })
+    }).then(r => r.json()).then(() => {
+      const saved = document.getElementById('bankrollSaved');
+      saved.style.display = 'inline';
+      setTimeout(() => saved.style.display = 'none', 1500);
+      loadSummary(currentRange);
+    });
+  });
+
+  document.getElementById('addBetForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    const form = e.target;
+    const errBox = document.getElementById('addBetError');
+    errBox.style.display = 'none';
+
+    const fd = new FormData(form);
+    const payload = Object.fromEntries(fd.entries());
+    if (payload.date_placed) {
+      payload.date_placed = new Date(payload.date_placed).toISOString();
+    }
+
+    fetch('/api/bet-tracker/bets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(async r => {
+      const data = await r.json();
+      if (!r.ok) {
+        errBox.textContent = data.error || 'Something went wrong.';
+        errBox.style.display = 'block';
+        return;
+      }
+      form.reset();
+      const modal = bootstrap.Modal.getInstance(document.getElementById('addBetModal'));
+      modal.hide();
+      refresh(currentRange);
+    }).catch(() => {
+      errBox.textContent = 'Network error — please try again.';
+      errBox.style.display = 'block';
+    });
+  });
+
+  refresh('all');
+})();
+</script>
+
+{% endblock %}

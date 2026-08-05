@@ -18,13 +18,14 @@ from flask_limiter.util import get_remote_address
 from sqlalchemy import text, bindparam, inspect as sa_inspect
 import uuid
 
-from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component, StrikeRate
+from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component, StrikeRate, Bet
 from puntingform_service import PuntingFormService
 from scratchings import compute_is_scratched_final, extract_debug_scratch_fields, resolve_official_scratched_set
 from ladbrokes import match_race_uuid, match_race_info, fetch_race_odds, build_next_to_go_races, MELBOURNE_TZ, ODDS_CACHE_TTL
 from afl_routes import register_afl_routes, afl_nightly_sync
 from mma_routes import register_mma_routes
 from ml_shadow_routes import register_ml_shadow_routes
+from bet_tracker import register_bet_tracker_routes
 
 # Temporary ML performance verification filter. Remove this helper when a verified
 # prediction timestamp column is available; it must only affect performance stats.
@@ -369,6 +370,7 @@ register_afl_routes(app, db)
 print([r.rule for r in app.url_map.iter_rules() if 'headshot' in r.rule])
 register_mma_routes(app, db)
 register_ml_shadow_routes(app, db)
+register_bet_tracker_routes(app, db)
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -408,6 +410,20 @@ with app.app_context():
             
     except Exception as e:
         print(f"PuntingForm migration check: {e}")
+
+    # Migration: Add Bet Tracker starting bankroll column
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        users_columns = [col['name'] for col in inspector.get_columns('users')]
+
+        if 'bet_tracker_starting_bankroll' not in users_columns:
+            with db.engine.connect() as conn:
+                conn.execute(text('ALTER TABLE users ADD COLUMN bet_tracker_starting_bankroll FLOAT DEFAULT 0.0'))
+                conn.commit()
+            print("✓ Added bet_tracker_starting_bankroll column to users table")
+    except Exception as e:
+        print(f"Bet Tracker migration check: {e}")
     
    # Migration: Add V2 API JSON columns to races table
     print("DEBUG: Starting V2 API migration check...")
