@@ -14,6 +14,7 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     is_admin = db.Column(db.Boolean, default=False)
+    role = db.Column(db.String(20), nullable=False, default='user', server_default='user')
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_login = db.Column(db.DateTime)
@@ -25,11 +26,18 @@ class User(UserMixin, db.Model):
     def set_password(self, password):
         """Hash and set password"""
         self.password_hash = generate_password_hash(password)
-    
+
     def check_password(self, password):
         """Check if password matches"""
         return check_password_hash(self.password_hash, password)
-    
+
+    def set_role(self, role):
+        """Set role and keep the legacy is_admin flag in sync with it."""
+        if role not in ('admin', 'user'):
+            raise ValueError("role must be 'admin' or 'user'")
+        self.role = role
+        self.is_admin = (role == 'admin')
+
     def __repr__(self):
         return f'<User {self.username}>'
 

@@ -12,10 +12,11 @@ not touch, the PPE scoring engine.
 
 from __future__ import annotations
 
+from functools import wraps
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-from flask import jsonify, render_template, request, flash, redirect, url_for
+from flask import jsonify, render_template, request, redirect, url_for
 from flask_login import login_required, current_user
 
 from models import Bet
@@ -25,12 +26,21 @@ BOOKIES = ['Sportsbet', 'Betfair', 'Ladbrokes', 'Neds', 'Other']
 RESULTS = ['pending', 'won', 'lost', 'refunded']
 
 
-def _admin_gate():
-    """Return a redirect response if the current user isn't an admin, else None."""
-    if not current_user.is_admin:
-        flash("Access denied. Admin privileges required.", "danger")
-        return redirect(url_for("history"))
-    return None
+def bet_tracker_admin_required(view):
+    """Restrict a Bet Tracker route to admins only.
+
+    Non-admins get a plain 403 (JSON routes) or a silent redirect home
+    (page routes) — no flash message, no indication of why, so the gate
+    doesn't leak that the feature exists to accounts that shouldn't see it.
+    """
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not current_user.is_authenticated or current_user.role != 'admin':
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Forbidden'}), 403
+            return redirect(url_for('history'))
+        return view(*args, **kwargs)
+    return wrapped
 
 
 def _serialize(bet: Bet) -> dict:
@@ -136,19 +146,14 @@ def register_bet_tracker_routes(app, db):
 
     @app.route('/bet-tracker')
     @login_required
+    @bet_tracker_admin_required
     def bet_tracker():
-        gate = _admin_gate()
-        if gate:
-            return gate
         return render_template('bet_tracker.html', sports=SPORTS, bookies=BOOKIES, results=RESULTS)
 
     @app.route('/bet-tracker/history')
     @login_required
+    @bet_tracker_admin_required
     def bet_tracker_history():
-        gate = _admin_gate()
-        if gate:
-            return gate
-
         bets = Bet.query.filter_by(user_id=current_user.id).order_by(Bet.date_placed.desc()).all()
 
         grouped = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
@@ -169,11 +174,8 @@ def register_bet_tracker_routes(app, db):
 
     @app.route('/bet-tracker/stats')
     @login_required
+    @bet_tracker_admin_required
     def bet_tracker_stats():
-        gate = _admin_gate()
-        if gate:
-            return gate
-
         bets = Bet.query.filter_by(user_id=current_user.id).all()
         stats = _compute_stats(bets, starting_bankroll=current_user.bet_tracker_starting_bankroll or 0.0)
         return render_template('bet_tracker_stats.html', stats=stats)
@@ -184,10 +186,8 @@ def register_bet_tracker_routes(app, db):
 
     @app.route('/api/bet-tracker/bets', methods=['GET', 'POST'])
     @login_required
+    @bet_tracker_admin_required
     def api_bet_tracker_bets():
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin privileges required'}), 403
-
         if request.method == 'GET':
             bets = Bet.query.filter_by(user_id=current_user.id).order_by(Bet.date_placed.desc()).all()
             return jsonify([_serialize(b) for b in bets])
@@ -240,10 +240,8 @@ def register_bet_tracker_routes(app, db):
 
     @app.route('/api/bet-tracker/bets/<int:bet_id>', methods=['PUT', 'DELETE'])
     @login_required
+    @bet_tracker_admin_required
     def api_bet_tracker_bet_detail(bet_id):
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin privileges required'}), 403
-
         bet = Bet.query.filter_by(id=bet_id, user_id=current_user.id).first()
         if not bet:
             return jsonify({'error': 'Bet not found'}), 404
@@ -301,10 +299,8 @@ def register_bet_tracker_routes(app, db):
 
     @app.route('/api/bet-tracker/chart')
     @login_required
+    @bet_tracker_admin_required
     def api_bet_tracker_chart():
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin privileges required'}), 403
-
         range_key = request.args.get('range', 'all')
         cutoff = _range_cutoff(range_key)
 
@@ -323,10 +319,8 @@ def register_bet_tracker_routes(app, db):
 
     @app.route('/api/bet-tracker/summary')
     @login_required
+    @bet_tracker_admin_required
     def api_bet_tracker_summary():
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin privileges required'}), 403
-
         range_key = request.args.get('range', 'all')
         cutoff = _range_cutoff(range_key)
 
@@ -339,10 +333,8 @@ def register_bet_tracker_routes(app, db):
 
     @app.route('/api/bet-tracker/bankroll', methods=['POST'])
     @login_required
+    @bet_tracker_admin_required
     def api_bet_tracker_bankroll():
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin privileges required'}), 403
-
         data = request.get_json(silent=True) or {}
         try:
             starting_bankroll = float(data.get('starting_bankroll'))

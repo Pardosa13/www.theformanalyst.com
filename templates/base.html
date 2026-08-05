@@ -765,12 +765,14 @@ body.modal-open .main-container {
                                 🥊 UFC
                             </a>
                         </li>
-                        {% if current_user.is_admin %}
+                        {% if current_user.role == 'admin' %}
                         <li class="nav-item">
                             <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('bet_tracker') }}" href="{{ url_for('bet_tracker') }}">
                                 <i class="bi bi-clipboard-data"></i> Bet Tracker
                             </a>
                         </li>
+                        {% endif %}
+                        {% if current_user.is_admin %}
                         <li class="nav-item">
                             <a class="nav-link {{ 'active' if request.endpoint == 'ml_shadow' }}" href="{{ url_for('ml_shadow') }}">
                                 <i class="bi bi-cpu"></i> Horse Racing Machine Learning

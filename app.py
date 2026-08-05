@@ -662,17 +662,65 @@ with app.app_context():
         print("✓ MMA tables initialised")
     except Exception as e:
         print(f"MMA table init: {e}")
+    # Migration: Add role column to users table, backfill from is_admin
+    # (must run before any code below creates/updates a User with role= set,
+    # since db.create_all() only creates missing tables, not missing columns)
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        users_columns = [col['name'] for col in inspector.get_columns('users')]
+
+        if 'role' not in users_columns:
+            with db.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'user'"))
+                conn.execute(text("UPDATE users SET role = 'admin' WHERE is_admin = TRUE"))
+                conn.commit()
+            print("✓ Added role column to users table and backfilled from is_admin")
+        else:
+            # Keep role and is_admin consistent for any rows that drifted
+            mismatched = User.query.filter(
+                db.or_(
+                    db.and_(User.is_admin.is_(True), User.role != 'admin'),
+                    db.and_(User.is_admin.is_(False), User.role == 'admin'),
+                )
+            ).all()
+            for u in mismatched:
+                u.role = 'admin' if u.is_admin else 'user'
+            if mismatched:
+                db.session.commit()
+                print(f"✓ Reconciled role/is_admin for {len(mismatched)} user(s)")
+    except Exception as e:
+        print(f"Role column migration check: {e}")
+
     # Create default admin if doesn't exist
     admin = User.query.filter_by(username='admin').first()
     if not admin:
         admin = User(
             username='admin',
             email='admin@theformanalyst.com',
-            is_admin=True
         )
+        admin.set_role('admin')
         admin.set_password(os.environ.get('ADMIN_PASSWORD', 'changeme123'))
         db.session.add(admin)
         db.session.commit()
+
+    # Grant Pardo (j.partington13@hotmail.com) admin access to the Bet Tracker
+    try:
+        pardo = User.query.filter(
+            db.or_(
+                db.func.lower(User.username) == 'pardo',
+                db.func.lower(User.email) == 'j.partington13@hotmail.com',
+            )
+        ).first()
+        if pardo:
+            if pardo.role != 'admin':
+                pardo.set_role('admin')
+                db.session.commit()
+                print(f"✓ Granted admin role to '{pardo.username}'")
+        else:
+            print("Pardo account admin grant: no user found with username 'Pardo' or that email — skipped")
+    except Exception as e:
+        print(f"Pardo admin grant check: {e}")
 
 # ----- Analyzer Integration -----
 def run_analyzer(csv_data, track_condition, is_advanced=False, strike_rate_data=None):
@@ -5696,7 +5744,8 @@ def admin_panel():
             elif len(password) < 6:
                 flash("Password must be at least 6 characters", "danger")
             else:
-                new_user = User(username=username, email=email, is_admin=is_admin)
+                new_user = User(username=username, email=email)
+                new_user.set_role('admin' if is_admin else 'user')
                 new_user.set_password(password)
                 db.session.add(new_user)
                 db.session.commit()
@@ -5739,7 +5788,7 @@ def admin_panel():
             elif user.id == current_user.id:
                 flash("You cannot change your own admin status", "danger")
             else:
-                user.is_admin = not user.is_admin
+                user.set_role('user' if user.is_admin else 'admin')
                 db.session.commit()
                 status = "admin" if user.is_admin else "regular user"
                 flash(f"'{user.username}' is now a {status}", "success")
