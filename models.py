@@ -17,6 +17,7 @@ class User(UserMixin, db.Model):
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_login = db.Column(db.DateTime)
+    bet_tracker_starting_bankroll = db.Column(db.Float, default=0.0)  # Bet Tracker feature
     
     # Relationships
     meetings = db.relationship('Meeting', backref='user', lazy=True, cascade='all, delete-orphan')
@@ -234,6 +235,40 @@ class StrikeRate(db.Model):
 
     def __repr__(self):
         return f'<StrikeRate {self.type} {self.name}>'
+
+
+class Bet(db.Model):
+    """James's personal bet log across all sports (admin-only Bet Tracker feature)"""
+    __tablename__ = 'bets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    date_placed = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    sport = db.Column(db.String(30), nullable=False, default='Horse Racing')
+    event_track = db.Column(db.String(200))  # race/track/fixture/event name
+    selection = db.Column(db.String(200), nullable=False)  # horse/team/fighter/player backed
+    bookie = db.Column(db.String(50))
+    stake = db.Column(db.Float, nullable=False)
+    odds = db.Column(db.Float, nullable=False)
+    result = db.Column(db.String(20), nullable=False, default='pending')  # pending/won/lost/refunded
+    payout = db.Column(db.Float, default=0.0)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('bets', lazy=True, cascade='all, delete-orphan'))
+
+    @property
+    def profit(self):
+        """Net profit/loss for this bet. Pending bets don't affect profit yet."""
+        if self.result == 'won':
+            return round((self.payout or 0.0) - self.stake, 2)
+        if self.result == 'lost':
+            return round(-self.stake, 2)
+        return 0.0
+
+    def __repr__(self):
+        return f'<Bet {self.sport}: {self.selection} ({self.result})>'
 
 
 class ChatMessage(db.Model):
