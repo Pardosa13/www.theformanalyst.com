@@ -11,14 +11,30 @@ Bet Tracker module's patterns for auth gating and DB access.
 
 from __future__ import annotations
 
+import logging
 from collections import OrderedDict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import jsonify, render_template, request, flash, redirect, url_for
 from flask_login import login_required, current_user
 from sqlalchemy import func
 
 from models import BudgetCategory, BudgetFortnight, BudgetEntry, DebtConfig, DebtTracker
+
+logger = logging.getLogger(__name__)
+
+# Household is based in Melbourne — "today" for fortnight purposes always means
+# the Australia/Melbourne calendar date, regardless of what timezone the server runs in.
+try:
+    MELBOURNE_TZ = ZoneInfo("Australia/Melbourne")
+except ZoneInfoNotFoundError:
+    logger.warning("Timezone data for Australia/Melbourne is unavailable; falling back to UTC for Budget Tracker")
+    MELBOURNE_TZ = timezone.utc
+
+
+def melbourne_today() -> date:
+    return datetime.now(MELBOURNE_TZ).date()
 
 # ---------------------------------------------------------------------------
 # Access control
@@ -107,16 +123,43 @@ INCOME_SOURCES = [
 ]
 TOTAL_INCOME = round(sum(amount for _, amount in INCOME_SOURCES), 2)
 
-# First fortnight start (a Monday). Later fortnights extend forward from here in 14-day blocks.
-FORTNIGHT_ANCHOR_START = date(2026, 8, 3)
+# First fortnight start (a Thursday, aligned to pay day). Later fortnights extend
+# forward from here in 14-day blocks: #1 = Thu 30 Jul - Wed 12 Aug 2026, #2 = Thu 13 Aug -
+# Wed 26 Aug 2026, and so on.
+FORTNIGHT_ANCHOR_START = date(2026, 7, 30)
 
 # How many fortnights of debt schedule to compute past the point the balance is expected to hit $0.
 DEBT_SCHEDULE_MIN_HORIZON = 20
 DEBT_SCHEDULE_MAX_HORIZON = 60
 
 
+def _repair_fortnight_sequence(db):
+    """Realign stored fortnights to FORTNIGHT_ANCHOR_START if it changed.
+
+    Only deletes fortnights that have no logged spending against them — real
+    household data is never discarded. ensure_fortnight_for_date() regenerates
+    the sequence from the (possibly new) anchor on the next call.
+    """
+    fortnights = BudgetFortnight.query.order_by(BudgetFortnight.start_date.asc()).all()
+    if not fortnights or fortnights[0].start_date == FORTNIGHT_ANCHOR_START:
+        return
+
+    fortnight_ids = [f.id for f in fortnights]
+    has_data = db.session.query(BudgetEntry.id).filter(
+        BudgetEntry.fortnight_id.in_(fortnight_ids)
+    ).first() is not None
+    if has_data:
+        return
+
+    for f in fortnights:
+        db.session.delete(f)
+    db.session.commit()
+
+
 def seed_budget_tracker_defaults(db):
     """Idempotently create the default categories and debt config. Safe to call every startup."""
+    _repair_fortnight_sequence(db)
+
     if BudgetCategory.query.first() is None:
         for order, (group_name, category_name, allowance) in enumerate(DEFAULT_CATEGORIES, start=1):
             db.session.add(BudgetCategory(
@@ -168,7 +211,7 @@ def ensure_fortnight_for_date(db, target_date):
 
 
 def get_current_fortnight(db):
-    return ensure_fortnight_for_date(db, date.today())
+    return ensure_fortnight_for_date(db, melbourne_today())
 
 
 # ---------------------------------------------------------------------------
