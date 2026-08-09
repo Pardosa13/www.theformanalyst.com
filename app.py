@@ -26,6 +26,7 @@ from afl_routes import register_afl_routes, afl_nightly_sync
 from mma_routes import register_mma_routes
 from ml_shadow_routes import register_ml_shadow_routes
 from bet_tracker import register_bet_tracker_routes
+from budget_tracker import register_budget_tracker_routes, is_budget_tracker_allowed, is_julz
 
 # Temporary ML performance verification filter. Remove this helper when a verified
 # prediction timestamp column is available; it must only affect performance stats.
@@ -371,10 +372,18 @@ print([r.rule for r in app.url_map.iter_rules() if 'headshot' in r.rule])
 register_mma_routes(app, db)
 register_ml_shadow_routes(app, db)
 register_bet_tracker_routes(app, db)
+register_budget_tracker_routes(app, db)
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
-    
+
+@app.context_processor
+def inject_budget_tracker_context():
+    return {
+        'budget_tracker_allowed': is_budget_tracker_allowed(current_user),
+        'julz_restricted': is_julz(current_user),
+    }
+
 @app.teardown_appcontext
 def shutdown_session(exception=None):
     db.session.remove()
@@ -662,6 +671,15 @@ with app.app_context():
         print("✓ MMA tables initialised")
     except Exception as e:
         print(f"MMA table init: {e}")
+    # Budget Tracker: seed default categories/debt config and ensure the current fortnight exists
+    try:
+        from budget_tracker import seed_budget_tracker_defaults, get_current_fortnight
+        seed_budget_tracker_defaults(db)
+        get_current_fortnight(db)
+        print("✓ Budget Tracker defaults seeded")
+    except Exception as e:
+        print(f"Budget Tracker seed check: {e}")
+
     # Create default admin if doesn't exist
     admin = User.query.filter_by(username='admin').first()
     if not admin:

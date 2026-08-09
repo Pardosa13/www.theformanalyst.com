@@ -271,6 +271,87 @@ class Bet(db.Model):
         return f'<Bet {self.sport}: {self.selection} ({self.result})>'
 
 
+class BudgetCategory(db.Model):
+    """Budget Tracker fortnightly expense category. Shared between both accounts."""
+    __tablename__ = 'budget_categories'
+
+    id = db.Column(db.Integer, primary_key=True)
+    group_name = db.Column(db.String(100), nullable=False)
+    category_name = db.Column(db.String(100), nullable=False)
+    default_allowance = db.Column(db.Float, nullable=False, default=0.0)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    is_debt_payment = db.Column(db.Boolean, default=False)  # feeds the debt_tracker payoff schedule
+
+    def __repr__(self):
+        return f'<BudgetCategory {self.group_name}/{self.category_name}>'
+
+
+class BudgetFortnight(db.Model):
+    """One row per fortnight period tracked in the Budget Tracker."""
+    __tablename__ = 'budget_fortnights'
+
+    id = db.Column(db.Integer, primary_key=True)
+    fortnight_number = db.Column(db.Integer, unique=True, nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+
+    def __repr__(self):
+        return f'<BudgetFortnight #{self.fortnight_number} {self.start_date}–{self.end_date}>'
+
+
+class BudgetEntry(db.Model):
+    """Actual spend logged against a category for a given fortnight. Shared data — not per-user."""
+    __tablename__ = 'budget_entries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    fortnight_id = db.Column(db.Integer, db.ForeignKey('budget_fortnights.id'), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('budget_categories.id'), nullable=False)
+    actual_spend = db.Column(db.Float, nullable=False, default=0.0)
+    updated_by = db.Column(db.String(80))  # username of whoever last logged this entry
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    fortnight = db.relationship('BudgetFortnight', backref=db.backref('entries', lazy=True, cascade='all, delete-orphan'))
+    category = db.relationship('BudgetCategory', backref=db.backref('entries', lazy=True, cascade='all, delete-orphan'))
+
+    __table_args__ = (
+        db.UniqueConstraint('fortnight_id', 'category_id', name='uq_budget_entry_fortnight_category'),
+    )
+
+    def __repr__(self):
+        return f'<BudgetEntry fortnight={self.fortnight_id} category={self.category_id}: {self.actual_spend}>'
+
+
+class DebtConfig(db.Model):
+    """Editable assumptions for the credit card payoff tracker (single shared row)."""
+    __tablename__ = 'debt_tracker_config'
+
+    id = db.Column(db.Integer, primary_key=True)
+    starting_balance = db.Column(db.Float, nullable=False, default=23000.0)
+    annual_interest_rate = db.Column(db.Float, nullable=False, default=20.0)  # percent
+    planned_fortnightly_payment = db.Column(db.Float, nullable=False, default=1455.14)
+    updated_by = db.Column(db.String(80))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DebtTracker(db.Model):
+    """Auto-generated credit card payoff schedule — one row per fortnight, recalculated on write."""
+    __tablename__ = 'debt_tracker'
+
+    id = db.Column(db.Integer, primary_key=True)
+    fortnight_number = db.Column(db.Integer, unique=True, nullable=False)
+    starting_balance = db.Column(db.Float, nullable=False)
+    interest_rate = db.Column(db.Float, nullable=False)
+    balance_start = db.Column(db.Float, nullable=False)
+    interest = db.Column(db.Float, nullable=False)
+    planned_payment = db.Column(db.Float, nullable=False)
+    actual_paid = db.Column(db.Float, nullable=False)
+    balance_end = db.Column(db.Float, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<DebtTracker #{self.fortnight_number}: {self.balance_start} -> {self.balance_end}>'
+
+
 class ChatMessage(db.Model):
     """Chat messages between users and Claude AI assistant"""
     __tablename__ = 'chat_messages'
