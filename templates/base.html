@@ -703,8 +703,8 @@ body.modal-open .main-container {
     <!-- ═══ NAVIGATION ═══ (all links/logic identical to original) -->
     <nav class="navbar navbar-expand-xl fixed-top">
         <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('history') }}">
-                <img src="{{ url_for('static', filename='apple-touch-icon.png') }}"  
+            <a class="navbar-brand" href="{{ url_for('budget_tracker') if julz_restricted else url_for('history') }}">
+                <img src="{{ url_for('static', filename='apple-touch-icon.png') }}"
                      style="height: 32px; width: auto;">
                 The Form Analyst
             </a>
@@ -717,6 +717,7 @@ body.modal-open .main-container {
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto align-items-lg-center">
                     {% if current_user.is_authenticated %}
+                        {% if not julz_restricted %}
                         <li class="nav-item">
                             <a class="nav-link {{ 'active' if request.endpoint == 'dashboard' }}" href="{{ url_for('dashboard') }}">
                                 <i class="bi bi-speedometer2"></i> Dashboard
@@ -782,6 +783,14 @@ body.modal-open .main-container {
                             </a>
                         </li>
                         {% endif %}
+                        {% endif %}
+                        {% if budget_tracker_allowed %}
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('budget_tracker') }}" href="{{ url_for('budget_tracker') }}">
+                                <i class="bi bi-piggy-bank"></i> Budget Tracker
+                            </a>
+                        </li>
+                        {% endif %}
                         <li class="nav-item">
                             <span class="nav-link user-pill">
                                 <i class="bi bi-person-circle"></i> {{ current_user.username }}
@@ -826,7 +835,7 @@ body.modal-open .main-container {
     </div>
 
 
-    {% set show_next_to_go = current_user.is_authenticated and request.endpoint not in ['login', 'admin_panel', 'data_analytics', 'ml_data_analytics', 'results', 'results_entry', 'import_from_api'] %}
+    {% set show_next_to_go = current_user.is_authenticated and not julz_restricted and request.endpoint not in ['login', 'admin_panel', 'data_analytics', 'ml_data_analytics', 'results', 'results_entry', 'import_from_api'] %}
     {% if show_next_to_go %}
     <div id="next-to-go-ticker" class="next-to-go-ticker" role="region" aria-label="Next To Go racing ticker">
         <div class="ntg-label">NEXT TO GO</div>
@@ -890,7 +899,7 @@ body.modal-open .main-container {
     {% block extra_js %}{% endblock %}
 
     <!-- ═══ CHAT SYSTEM (100% unchanged - logic, endpoints, JS) ═══ -->
-    {% if current_user.is_authenticated %}
+    {% if current_user.is_authenticated and not julz_restricted %}
     <!-- Chat Toggle Button -->
     <div id="chat-toggle" title="Ask about racing form">
         <svg width="30" height="30" viewBox="0 0 24 24" fill="white">

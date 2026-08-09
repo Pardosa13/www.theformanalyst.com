@@ -1,0 +1,741 @@
+{% extends "base.html" %}
+{% block title %}James & Julz Budget{% endblock %}
+{% block content %}
+
+<style>
+  /* ── Budget Tracker — dark theme, inherits base.html tokens ── */
+
+  .bud-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 16px 60px;
+  }
+
+  .bud-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .bud-header h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0 0 4px 0;
+    color: var(--text-primary);
+  }
+
+  .bud-header p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .bud-fortnight-select {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .bud-fortnight-select select {
+    min-width: 240px;
+  }
+
+  /* ── Stat tiles ── */
+  .bud-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .bud-tile {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    padding: 16px 18px;
+  }
+
+  .bud-tile-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+
+  .bud-tile-value {
+    font-family: 'DM Mono', monospace;
+    font-size: 1.35rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .bud-tile-value.positive { color: var(--success); }
+  .bud-tile-value.negative { color: var(--danger); }
+
+  .bud-flag-note {
+    font-size: 0.75rem;
+    color: var(--warning);
+    margin: -14px 0 20px;
+  }
+
+  /* ── Bars ── */
+  .bud-bar-track {
+    position: relative;
+    width: 100%;
+    height: 22px;
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-subtle);
+  }
+
+  .bud-bar-fill {
+    height: 100%;
+    border-radius: 8px 0 0 8px;
+    transition: width 0.25s ease, background 0.25s ease;
+  }
+
+  .bud-bar-track.group-bar { height: 26px; }
+
+  .bud-bar-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    pointer-events: none;
+  }
+
+  /* ── Groups ── */
+  .bud-group {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 16px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+  }
+
+  .bud-group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .bud-group-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+  }
+
+  .bud-group-amounts {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+
+  .bud-categories {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .bud-category {
+    padding-top: 2px;
+  }
+
+  .bud-category-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 5px;
+    cursor: pointer;
+  }
+
+  .bud-category-name {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+
+  .bud-category-amounts {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .bud-bar-track.cat-bar {
+    cursor: pointer;
+  }
+
+  .bud-updated-by {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    margin-top: 3px;
+  }
+
+  .bud-edit-panel {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    align-items: center;
+  }
+
+  .bud-edit-panel input {
+    max-width: 130px;
+  }
+
+  .bud-edit-panel button {
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .bud-edit-panel .bud-save-btn {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff;
+  }
+
+  .bud-edit-panel .bud-cancel-btn {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-mid);
+    color: var(--text-secondary);
+  }
+
+  /* ── Chart cards ── */
+  .bud-chart-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 16px;
+    padding: 18px;
+    margin-bottom: 20px;
+  }
+
+  .bud-chart-card h3 {
+    font-size: 0.95rem;
+    margin: 0 0 14px;
+  }
+
+  .bud-chart-wrap {
+    position: relative;
+    height: 240px;
+  }
+
+  /* ── Debt tracker ── */
+  .bud-debt-config {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .bud-debt-config label {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  .bud-debt-save-btn {
+    padding: 9px 20px;
+    border-radius: 8px;
+    border: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  .bud-payoff-note {
+    font-size: 0.85rem;
+    color: var(--success);
+    margin: 14px 0;
+    font-weight: 600;
+  }
+
+  .bud-debt-table-wrap {
+    overflow-x: auto;
+  }
+
+  .bud-debt-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    font-family: 'DM Mono', monospace;
+    white-space: nowrap;
+  }
+
+  .bud-debt-table th, .bud-debt-table td {
+    padding: 8px 12px;
+    text-align: right;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+  }
+
+  .bud-debt-table th:first-child, .bud-debt-table td:first-child { text-align: left; }
+
+  .bud-debt-table th {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-size: 0.68rem;
+    letter-spacing: 0.05em;
+  }
+
+  .bud-debt-table tr.bud-row-current td { color: var(--text-primary); font-weight: 700; }
+
+  .bud-saved-flash {
+    display: none;
+    color: var(--success);
+    font-size: 0.78rem;
+    margin-left: 10px;
+  }
+</style>
+
+<div class="bud-container">
+
+  <div class="bud-header">
+    <div>
+      <h1>James & Julz Budget Tracker</h1>
+      <p>Shared fortnightly budget & credit card payoff — updates live for both of you.</p>
+    </div>
+    <div class="bud-fortnight-select">
+      <select id="fortnightSelect" class="form-select">
+        {% for f in fortnights %}
+        <option value="{{ f.id }}" {{ 'selected' if f.id == current_fortnight.id else '' }}>
+          #{{ f.fortnight_number }} — {{ f.start_date.strftime('%d %b') }} to {{ f.end_date.strftime('%d %b %Y') }}{{ ' (current)' if f.id == current_fortnight.id else '' }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="bud-tiles">
+    <div class="bud-tile">
+      <div class="bud-tile-label">Total income</div>
+      <div class="bud-tile-value" id="tileIncome">$0.00</div>
+    </div>
+    <div class="bud-tile">
+      <div class="bud-tile-label">Total allowance</div>
+      <div class="bud-tile-value" id="tileAllowance">$0.00</div>
+    </div>
+    <div class="bud-tile">
+      <div class="bud-tile-label">Actual spend</div>
+      <div class="bud-tile-value" id="tileActual">$0.00</div>
+    </div>
+    <div class="bud-tile">
+      <div class="bud-tile-label">Surplus / deficit</div>
+      <div class="bud-tile-value" id="tileSurplus">$0.00</div>
+    </div>
+  </div>
+  <div class="bud-flag-note" id="planFlagNote" style="display:none;"></div>
+
+  <div id="groupsContainer"></div>
+
+  <div class="bud-chart-card">
+    <h3>Spend by category — this fortnight</h3>
+    <div class="bud-chart-wrap"><canvas id="categoryChart"></canvas></div>
+  </div>
+
+  <div class="bud-chart-card">
+    <h3>Actual vs allowance — recent fortnights</h3>
+    <div class="bud-chart-wrap"><canvas id="trendChart"></canvas></div>
+  </div>
+
+  <div class="bud-chart-card">
+    <h3>Credit card payoff</h3>
+
+    <div class="bud-debt-config">
+      <div>
+        <label>Starting balance ($)</label>
+        <input type="number" step="0.01" min="0" class="form-control" id="debtStartingBalance">
+      </div>
+      <div>
+        <label>Annual interest rate (%)</label>
+        <input type="number" step="0.01" min="0" class="form-control" id="debtInterestRate">
+      </div>
+      <div>
+        <label>Planned fortnightly payment ($)</label>
+        <input type="number" step="0.01" min="0" class="form-control" id="debtPlannedPayment">
+      </div>
+      <div style="align-self:end;">
+        <button type="button" class="bud-debt-save-btn" id="debtSaveBtn">Save</button>
+        <span class="bud-saved-flash" id="debtSavedFlash">Saved</span>
+      </div>
+    </div>
+
+    <div class="bud-payoff-note" id="payoffNote"></div>
+
+    <div class="bud-chart-wrap"><canvas id="debtChart"></canvas></div>
+
+    <div class="bud-debt-table-wrap">
+      <table class="bud-debt-table">
+        <thead>
+          <tr>
+            <th>Fortnight</th>
+            <th>Balance start</th>
+            <th>Interest</th>
+            <th>Planned</th>
+            <th>Actual paid</th>
+            <th>Balance end</th>
+          </tr>
+        </thead>
+        <tbody id="debtTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function () {
+  const fortnightSelect = document.getElementById('fortnightSelect');
+  let currentFortnightId = {{ current_fortnight.id }};
+  let currentFortnightNumber = {{ current_fortnight.fortnight_number }};
+  let categoryChart = null, trendChart = null, debtChart = null;
+
+  function fmtMoney(v) {
+    const n = Number(v || 0);
+    return (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(2);
+  }
+
+  function barColor(actual, allowance) {
+    if (allowance <= 0) return actual > 0 ? '#ef4444' : '#10b981';
+    const ratio = actual / allowance;
+    if (ratio >= 1) return '#ef4444';
+    if (ratio >= 0.8) return '#f59e0b';
+    return '#10b981';
+  }
+
+  function barWidthPct(actual, allowance) {
+    if (allowance <= 0) return actual > 0 ? 100 : 0;
+    return Math.min(100, (actual / allowance) * 100);
+  }
+
+  function renderBar(track, actual, allowance) {
+    track.innerHTML = '';
+    const fill = document.createElement('div');
+    fill.className = 'bud-bar-fill';
+    fill.style.width = barWidthPct(actual, allowance) + '%';
+    fill.style.background = barColor(actual, allowance);
+    track.appendChild(fill);
+  }
+
+  function closeAllEditPanels() {
+    document.querySelectorAll('.bud-edit-panel').forEach(p => p.remove());
+  }
+
+  function openEditPanel(categoryEl, category) {
+    closeAllEditPanels();
+    const panel = document.createElement('div');
+    panel.className = 'bud-edit-panel';
+    panel.innerHTML = `
+      <input type="number" step="0.01" min="0" class="form-control" value="${category.actual}">
+      <button type="button" class="bud-save-btn">Save</button>
+      <button type="button" class="bud-cancel-btn">Cancel</button>
+    `;
+    categoryEl.appendChild(panel);
+    const input = panel.querySelector('input');
+    input.focus();
+    input.select();
+
+    panel.querySelector('.bud-cancel-btn').addEventListener('click', () => panel.remove());
+    panel.querySelector('.bud-save-btn').addEventListener('click', () => saveEntry(category.id, input.value, panel));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); saveEntry(category.id, input.value, panel); }
+      if (e.key === 'Escape') panel.remove();
+    });
+  }
+
+  function saveEntry(categoryId, value, panel) {
+    const actual = parseFloat(value);
+    if (isNaN(actual) || actual < 0) return;
+    fetch('/api/budget-tracker/entries', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category_id: categoryId, fortnight_id: currentFortnightId, actual_spend: actual })
+    }).then(r => r.json()).then(() => {
+      panel.remove();
+      loadSummary();
+      loadCategoryChart();
+      loadTrendChart();
+      loadDebtTracker();
+    });
+  }
+
+  function renderGroups(data) {
+    const container = document.getElementById('groupsContainer');
+    container.innerHTML = '';
+
+    data.groups.forEach(group => {
+      const groupEl = document.createElement('div');
+      groupEl.className = 'bud-group';
+
+      const header = document.createElement('div');
+      header.className = 'bud-group-header';
+      header.innerHTML = `
+        <div class="bud-group-title">${group.group_name}</div>
+        <div class="bud-group-amounts">${fmtMoney(group.actual)} / ${fmtMoney(group.allowance)}</div>
+      `;
+      groupEl.appendChild(header);
+
+      const groupBarTrack = document.createElement('div');
+      groupBarTrack.className = 'bud-bar-track group-bar';
+      renderBar(groupBarTrack, group.actual, group.allowance);
+      groupEl.appendChild(groupBarTrack);
+
+      const catsWrap = document.createElement('div');
+      catsWrap.className = 'bud-categories';
+
+      group.categories.forEach(cat => {
+        const catEl = document.createElement('div');
+        catEl.className = 'bud-category';
+
+        const row = document.createElement('div');
+        row.className = 'bud-category-row';
+        row.innerHTML = `
+          <span class="bud-category-name">${cat.category_name}</span>
+          <span class="bud-category-amounts">${fmtMoney(cat.actual)} / ${fmtMoney(cat.allowance)}</span>
+        `;
+        catEl.appendChild(row);
+
+        const barTrack = document.createElement('div');
+        barTrack.className = 'bud-bar-track cat-bar';
+        renderBar(barTrack, cat.actual, cat.allowance);
+        catEl.appendChild(barTrack);
+
+        if (cat.updated_by) {
+          const meta = document.createElement('div');
+          meta.className = 'bud-updated-by';
+          const when = cat.updated_at ? new Date(cat.updated_at).toLocaleString() : '';
+          meta.textContent = `Last logged by ${cat.updated_by}${when ? ' · ' + when : ''}`;
+          catEl.appendChild(meta);
+        }
+
+        const openEditor = () => openEditPanel(catEl, cat);
+        row.addEventListener('click', openEditor);
+        barTrack.addEventListener('click', openEditor);
+
+        catsWrap.appendChild(catEl);
+      });
+
+      groupEl.appendChild(catsWrap);
+      container.appendChild(groupEl);
+    });
+  }
+
+  function setTile(id, value, colorize) {
+    const el = document.getElementById(id);
+    el.textContent = fmtMoney(value);
+    el.classList.remove('positive', 'negative');
+    if (colorize) el.classList.add(value >= 0 ? 'positive' : 'negative');
+  }
+
+  function loadSummary() {
+    fetch(`/api/budget-tracker/summary?fortnight_id=${currentFortnightId}`)
+      .then(r => r.json())
+      .then(data => {
+        setTile('tileIncome', data.total_income, false);
+        setTile('tileAllowance', data.total_allowance, false);
+        setTile('tileActual', data.total_actual, false);
+        setTile('tileSurplus', data.surplus_actual, true);
+
+        const flagNote = document.getElementById('planFlagNote');
+        if (Math.abs(data.surplus_planned) > 0.001) {
+          flagNote.style.display = 'block';
+          const over = data.surplus_planned < 0;
+          flagNote.textContent = `Heads up: planned allowance is ${fmtMoney(Math.abs(data.surplus_planned))} ${over ? 'over' : 'under'} total income.`;
+        } else {
+          flagNote.style.display = 'none';
+        }
+
+        renderGroups(data);
+      });
+  }
+
+  function loadCategoryChart() {
+    fetch(`/api/budget-tracker/chart/category-spend?fortnight_id=${currentFortnightId}`)
+      .then(r => r.json())
+      .then(data => {
+        const points = data.points || [];
+        const labels = points.map(p => p.label);
+        const values = points.map(p => p.value);
+        const ctx = document.getElementById('categoryChart').getContext('2d');
+        const palette = ['#10b981', '#f59e0b', '#ef4444', '#667eea', '#764ba2', '#3b82f6', '#34d399', '#fbbf24', '#f87171', '#8ba4f5'];
+        const colors = values.map((_, i) => palette[i % palette.length]);
+
+        if (categoryChart) {
+          categoryChart.data.labels = labels;
+          categoryChart.data.datasets[0].data = values;
+          categoryChart.data.datasets[0].backgroundColor = colors;
+          categoryChart.update();
+          return;
+        }
+
+        categoryChart = new Chart(ctx, {
+          type: 'bar',
+          data: { labels: labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 6 }] },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { color: '#9090a8', callback: v => '$' + v }, grid: { color: 'rgba(255,255,255,0.05)' } },
+              y: { ticks: { color: '#9090a8' }, grid: { display: false } },
+            }
+          }
+        });
+      });
+  }
+
+  function loadTrendChart() {
+    fetch('/api/budget-tracker/chart/trend?count=6')
+      .then(r => r.json())
+      .then(data => {
+        const points = data.points || [];
+        const labels = points.map(p => p.label);
+        const allowance = points.map(p => p.allowance);
+        const actual = points.map(p => p.actual);
+        const ctx = document.getElementById('trendChart').getContext('2d');
+
+        if (trendChart) {
+          trendChart.data.labels = labels;
+          trendChart.data.datasets[0].data = allowance;
+          trendChart.data.datasets[1].data = actual;
+          trendChart.update();
+          return;
+        }
+
+        trendChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [
+              { label: 'Allowance', data: allowance, borderColor: '#9090a8', borderDash: [6, 4], pointRadius: 0, borderWidth: 2, tension: 0.2 },
+              { label: 'Actual', data: actual, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.12)', fill: true, pointRadius: 2, borderWidth: 2, tension: 0.2 },
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#9090a8' } } },
+            scales: {
+              x: { ticks: { color: '#9090a8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+              y: { ticks: { color: '#9090a8', callback: v => '$' + v }, grid: { color: 'rgba(255,255,255,0.05)' } },
+            }
+          }
+        });
+      });
+  }
+
+  function loadDebtTracker() {
+    fetch('/api/budget-tracker/debt-schedule')
+      .then(r => r.json())
+      .then(data => {
+        if (data.config) {
+          document.getElementById('debtStartingBalance').value = data.config.starting_balance;
+          document.getElementById('debtInterestRate').value = data.config.annual_interest_rate;
+          document.getElementById('debtPlannedPayment').value = data.config.planned_fortnightly_payment;
+        }
+
+        const payoffNote = document.getElementById('payoffNote');
+        payoffNote.textContent = data.payoff_fortnight
+          ? `On track to hit $0 around fortnight #${data.payoff_fortnight}.`
+          : `Balance won't reach $0 within the visible schedule — payments may need to increase.`;
+
+        const rows = data.rows || [];
+        const labels = rows.map(r => '#' + r.fortnight_number);
+        const balances = rows.map(r => r.balance_end);
+        const ctx = document.getElementById('debtChart').getContext('2d');
+
+        if (debtChart) {
+          debtChart.data.labels = labels;
+          debtChart.data.datasets[0].data = balances;
+          debtChart.update();
+        } else {
+          debtChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: labels,
+              datasets: [{ label: 'Balance', data: balances, borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.10)', fill: true, pointRadius: 0, borderWidth: 2, tension: 0.15 }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { ticks: { color: '#9090a8', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                y: { ticks: { color: '#9090a8', callback: v => '$' + v }, grid: { color: 'rgba(255,255,255,0.05)' } },
+              }
+            }
+          });
+        }
+
+        const tbody = document.getElementById('debtTableBody');
+        tbody.innerHTML = '';
+        rows.forEach(r => {
+          const tr = document.createElement('tr');
+          if (r.fortnight_number === currentFortnightNumber) tr.className = 'bud-row-current';
+          tr.innerHTML = `
+            <td>#${r.fortnight_number}</td>
+            <td>${fmtMoney(r.balance_start)}</td>
+            <td>${fmtMoney(r.interest)}</td>
+            <td>${fmtMoney(r.planned_payment)}</td>
+            <td>${fmtMoney(r.actual_paid)}</td>
+            <td>${fmtMoney(r.balance_end)}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      });
+  }
+
+  document.getElementById('debtSaveBtn').addEventListener('click', () => {
+    const payload = {
+      starting_balance: parseFloat(document.getElementById('debtStartingBalance').value) || 0,
+      annual_interest_rate: parseFloat(document.getElementById('debtInterestRate').value) || 0,
+      planned_fortnightly_payment: parseFloat(document.getElementById('debtPlannedPayment').value) || 0,
+    };
+    fetch('/api/budget-tracker/debt-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(r => r.json()).then(() => {
+      const flash = document.getElementById('debtSavedFlash');
+      flash.style.display = 'inline';
+      setTimeout(() => flash.style.display = 'none', 1500);
+      loadDebtTracker();
+      loadTrendChart();
+    });
+  });
+
+  fortnightSelect.addEventListener('change', () => {
+    window.location.href = `/budget-tracker?fortnight_id=${fortnightSelect.value}`;
+  });
+
+  loadSummary();
+  loadCategoryChart();
+  loadTrendChart();
+  loadDebtTracker();
+})();
+</script>
+
+{% endblock %}
