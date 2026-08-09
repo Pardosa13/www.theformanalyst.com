@@ -160,10 +160,9 @@
   .bud-category-row {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
     gap: 10px;
     margin-bottom: 5px;
-    cursor: pointer;
   }
 
   .bud-category-name {
@@ -171,11 +170,51 @@
     color: var(--text-secondary);
   }
 
+  .bud-category-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
   .bud-category-amounts {
     font-family: 'DM Mono', monospace;
     font-size: 0.78rem;
     color: var(--text-muted);
     white-space: nowrap;
+  }
+
+  .bud-row-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .bud-mini-btn {
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-mid);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .bud-mini-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--border-accent);
+  }
+
+  .bud-mini-btn.bud-mini-update {
+    color: var(--success);
+    border-color: rgba(16,185,129,0.35);
+  }
+
+  .bud-mini-btn.bud-mini-update:hover {
+    background: rgba(16,185,129,0.12);
   }
 
   .bud-bar-track.cat-bar {
@@ -197,6 +236,12 @@
 
   .bud-edit-panel input {
     max-width: 130px;
+  }
+
+  .bud-edit-panel-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    white-space: nowrap;
   }
 
   .bud-edit-panel button {
@@ -446,11 +491,13 @@
     document.querySelectorAll('.bud-edit-panel').forEach(p => p.remove());
   }
 
+  // "Edit" — directly overwrite the logged total. Use this to fix a mistake.
   function openEditPanel(categoryEl, category) {
     closeAllEditPanels();
     const panel = document.createElement('div');
     panel.className = 'bud-edit-panel';
     panel.innerHTML = `
+      <span class="bud-edit-panel-label">Set total to:</span>
       <input type="number" step="0.01" min="0" class="form-control" value="${category.actual}">
       <button type="button" class="bud-save-btn">Save</button>
       <button type="button" class="bud-cancel-btn">Cancel</button>
@@ -464,6 +511,36 @@
     panel.querySelector('.bud-save-btn').addEventListener('click', () => saveEntry(category.id, input.value, panel));
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); saveEntry(category.id, input.value, panel); }
+      if (e.key === 'Escape') panel.remove();
+    });
+  }
+
+  // "Update" — add (or subtract, e.g. a refund) an amount on top of what's already logged.
+  function openUpdatePanel(categoryEl, category) {
+    closeAllEditPanels();
+    const panel = document.createElement('div');
+    panel.className = 'bud-edit-panel';
+    panel.innerHTML = `
+      <span class="bud-edit-panel-label">Add to ${fmtMoney(category.actual)}:</span>
+      <input type="number" step="0.01" class="form-control" placeholder="Amount ($)">
+      <button type="button" class="bud-save-btn">Add</button>
+      <button type="button" class="bud-cancel-btn">Cancel</button>
+    `;
+    categoryEl.appendChild(panel);
+    const input = panel.querySelector('input');
+    input.focus();
+
+    const submit = () => {
+      const delta = parseFloat(input.value);
+      if (isNaN(delta)) return;
+      const newTotal = Math.max(0, category.actual + delta);
+      saveEntry(category.id, newTotal, panel);
+    };
+
+    panel.querySelector('.bud-cancel-btn').addEventListener('click', () => panel.remove());
+    panel.querySelector('.bud-save-btn').addEventListener('click', submit);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); submit(); }
       if (e.key === 'Escape') panel.remove();
     });
   }
@@ -516,7 +593,13 @@
         row.className = 'bud-category-row';
         row.innerHTML = `
           <span class="bud-category-name">${cat.category_name}</span>
-          <span class="bud-category-amounts">${fmtMoney(cat.actual)} / ${fmtMoney(cat.allowance)}</span>
+          <span class="bud-category-right">
+            <span class="bud-category-amounts">${fmtMoney(cat.actual)} / ${fmtMoney(cat.allowance)}</span>
+            <span class="bud-row-actions">
+              <button type="button" class="bud-mini-btn bud-mini-update" title="Add an amount to what's already logged">Update</button>
+              <button type="button" class="bud-mini-btn bud-mini-edit" title="Overwrite the total — use this to fix a mistake">Edit</button>
+            </span>
+          </span>
         `;
         catEl.appendChild(row);
 
@@ -533,9 +616,15 @@
           catEl.appendChild(meta);
         }
 
-        const openEditor = () => openEditPanel(catEl, cat);
-        row.addEventListener('click', openEditor);
-        barTrack.addEventListener('click', openEditor);
+        row.querySelector('.bud-mini-update').addEventListener('click', (e) => {
+          e.stopPropagation();
+          openUpdatePanel(catEl, cat);
+        });
+        row.querySelector('.bud-mini-edit').addEventListener('click', (e) => {
+          e.stopPropagation();
+          openEditPanel(catEl, cat);
+        });
+        barTrack.addEventListener('click', () => openEditPanel(catEl, cat));
 
         catsWrap.appendChild(catEl);
       });
