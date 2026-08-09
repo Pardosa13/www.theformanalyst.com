@@ -173,6 +173,54 @@
             border: 1px solid var(--border-accent) !important;
         }
 
+        /* Nav dropdowns (Racing / Sports / Tools) */
+        .navbar .dropdown-toggle::after {
+            margin-left: 6px;
+            vertical-align: 2px;
+        }
+
+        .navbar .nav-item.dropdown.has-active > .dropdown-toggle {
+            color: var(--text-primary) !important;
+            background: linear-gradient(135deg, rgba(102,126,234,0.18), rgba(118,75,162,0.12)) !important;
+            border: 1px solid var(--border-accent) !important;
+        }
+
+        .navbar .dropdown-menu {
+            background: var(--bg-elevated) !important;
+            border: 1px solid var(--border-subtle) !important;
+            border-radius: 10px !important;
+            padding: 6px !important;
+            margin-top: 8px !important;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.45) !important;
+            min-width: 210px;
+        }
+
+        .navbar .dropdown-item {
+            font-family: 'Outfit', sans-serif;
+            font-size: 13px !important;
+            font-weight: 600 !important;
+            color: var(--text-primary) !important;
+            padding: 8px 12px !important;
+            border-radius: 7px !important;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+
+        .navbar .dropdown-item i { font-size: 14px; }
+
+        .navbar .dropdown-item:hover,
+        .navbar .dropdown-item:focus {
+            background: var(--bg-hover) !important;
+            color: var(--text-primary) !important;
+        }
+
+        .navbar .dropdown-item.active {
+            background: linear-gradient(135deg, rgba(102,126,234,0.18), rgba(118,75,162,0.12)) !important;
+            border: 1px solid var(--border-accent) !important;
+        }
+
         /* Username display pill */
         .navbar .nav-link.user-pill {
             color: var(--text-muted) !important;
@@ -233,6 +281,14 @@
             .nav-link {
                 margin: 0 !important;
                 padding: 9px 12px !important;
+            }
+
+            .navbar-nav .dropdown-menu {
+                position: static !important;
+                float: none;
+                width: 100%;
+                margin: 4px 0 4px !important;
+                box-shadow: none !important;
             }
         }
 
@@ -718,65 +774,73 @@ body.modal-open .main-container {
                 <ul class="navbar-nav ms-auto align-items-lg-center">
                     {% if current_user.is_authenticated %}
                         {% if not julz_restricted %}
+                        {% set racing_active = request.endpoint in ['history', 'ml_meetings', 'results', 'results_entry', 'data_analytics', 'ml_data_analytics', 'backtest'] %}
+                        {% set sports_active = request.endpoint in ['afl_hub', 'mma.mma_hub'] %}
+                        {% set tools_active = request.endpoint == 'best_bets' or (request.endpoint and request.endpoint.startswith('bet_tracker')) or request.endpoint == 'ml_shadow' %}
                         <li class="nav-item">
                             <a class="nav-link {{ 'active' if request.endpoint == 'dashboard' }}" href="{{ url_for('dashboard') }}">
                                 <i class="bi bi-speedometer2"></i> Dashboard
                             </a>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link {{ 'active' if request.endpoint == 'history' }}" href="{{ url_for('history') }}">
-                                <i class="bi bi-clock-history"></i> Race Meetings
+                        <li class="nav-item dropdown{{ ' has-active' if racing_active }}">
+                            <a class="nav-link dropdown-toggle {{ 'active' if racing_active }}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                <i class="bi bi-clock-history"></i> Racing
                             </a>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item {{ 'active' if request.endpoint == 'history' }}" href="{{ url_for('history') }}">
+                                    <i class="bi bi-clock-history"></i> Race Meetings
+                                </a></li>
+                                <li><a class="dropdown-item {{ 'active' if request.endpoint == 'ml_meetings' }}" href="{{ url_for('ml_meetings') }}" title="ML Race Meetings — ranked by ML score">
+                                    <i class="bi bi-robot" style="color:#00e5b0"></i> ML Meetings
+                                </a></li>
+                                <li><a class="dropdown-item {{ 'active' if request.endpoint in ['results', 'results_entry'] }}" href="{{ url_for('results') }}">
+                                    <i class="bi bi-check2-square"></i> Results
+                                </a></li>
+                                <li><a class="dropdown-item {{ 'active' if request.endpoint == 'data_analytics' }}" href="{{ url_for('data_analytics') }}">
+                                    <i class="bi bi-bar-chart-line"></i> Data
+                                </a></li>
+                                <li><a class="dropdown-item {{ 'active' if request.endpoint == 'ml_data_analytics' }}" href="{{ url_for('ml_data_analytics') }}" title="ML Analytics — model performance using ML scores">
+                                    <i class="bi bi-robot" style="color:#00e5b0"></i> ML Data
+                                </a></li>
+                                <li><a class="dropdown-item {{ 'active' if request.endpoint == 'backtest' }}" href="{{ url_for('backtest') }}">
+                                    <i class="bi bi-cpu"></i> Backtest
+                                </a></li>
+                            </ul>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link {{ 'active' if request.endpoint == 'ml_meetings' }}" href="{{ url_for('ml_meetings') }}" style="{{ 'color:#00e5b0!important' if request.endpoint != 'ml_meetings' else '' }}" title="ML Race Meetings — ranked by ML score">
-                                <i class="bi bi-robot"></i> ML Meetings
+                        <li class="nav-item dropdown{{ ' has-active' if sports_active }}">
+                            <a class="nav-link dropdown-toggle {{ 'active' if sports_active }}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                🏆 Sports
                             </a>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item {{ 'active' if request.endpoint == 'afl_hub' }}" href="{{ url_for('afl_hub') }}">
+                                    🏉 AFL
+                                </a></li>
+                                <li><a class="dropdown-item {{ 'active' if request.endpoint in ['mma.mma_hub'] }}" href="{{ url_for('mma.mma_hub') }}">
+                                    🥊 UFC
+                                </a></li>
+                            </ul>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link {{ 'active' if request.endpoint in ['results', 'results_entry'] }}" href="{{ url_for('results') }}">
-                                <i class="bi bi-check2-square"></i> Results
+                        <li class="nav-item dropdown{{ ' has-active' if tools_active }}">
+                            <a class="nav-link dropdown-toggle {{ 'active' if tools_active }}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                <i class="bi bi-tools"></i> Tools
                             </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {{ 'active' if request.endpoint == 'data_analytics' }}" href="{{ url_for('data_analytics') }}">
-                                <i class="bi bi-bar-chart-line"></i> Data
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {{ 'active' if request.endpoint == 'ml_data_analytics' }}" href="{{ url_for('ml_data_analytics') }}" style="{{ 'color:#00e5b0!important' if request.endpoint != 'ml_data_analytics' else '' }}" title="ML Analytics — model performance using ML scores">
-                                <i class="bi bi-robot"></i> ML Data
-                            </a>
-                        </li>
-                        <li class="nav-item">
-    <a class="nav-link {{ 'active' if request.endpoint == 'backtest' }}" href="{{ url_for('backtest') }}">
-        <i class="bi bi-cpu"></i> Backtest
-    </a>
-</li>
-                        <li class="nav-item">
-                            <a class="nav-link {{ 'active' if request.endpoint == 'best_bets' }}" href="{{ url_for('best_bets') }}">
-                                <i class="bi bi-fire"></i> Best Bets
-                            </a>
-                        </li>
-                    <li class="nav-item">
-                            <a class="nav-link {{ 'active' if request.endpoint == 'afl_hub' }}" href="{{ url_for('afl_hub') }}">
-    🏉 AFL
-</a>
-                 <a class="nav-link {{ 'active' if request.endpoint in ['mma.mma_hub'] }}" href="{{ url_for('mma.mma_hub') }}">
-                                🥊 UFC
-                            </a>
+                            <ul class="dropdown-menu">
+                                {% if current_user.is_admin %}
+                                <li><a class="dropdown-item {{ 'active' if request.endpoint and request.endpoint.startswith('bet_tracker') }}" href="{{ url_for('bet_tracker') }}">
+                                    <i class="bi bi-clipboard-data"></i> Bet Tracker
+                                </a></li>
+                                {% endif %}
+                                <li><a class="dropdown-item {{ 'active' if request.endpoint == 'best_bets' }}" href="{{ url_for('best_bets') }}">
+                                    <i class="bi bi-fire"></i> Best Bets
+                                </a></li>
+                                {% if current_user.is_admin %}
+                                <li><a class="dropdown-item {{ 'active' if request.endpoint == 'ml_shadow' }}" href="{{ url_for('ml_shadow') }}">
+                                    <i class="bi bi-cpu"></i> Horse Racing ML
+                                </a></li>
+                                {% endif %}
+                            </ul>
                         </li>
                         {% if current_user.is_admin %}
-                        <li class="nav-item">
-                            <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('bet_tracker') }}" href="{{ url_for('bet_tracker') }}">
-                                <i class="bi bi-clipboard-data"></i> Bet Tracker
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {{ 'active' if request.endpoint == 'ml_shadow' }}" href="{{ url_for('ml_shadow') }}">
-                                <i class="bi bi-cpu"></i> Horse Racing Machine Learning
-                            </a>
-                        </li>
                         <li class="nav-item">
                             <a class="nav-link {{ 'active' if request.endpoint == 'admin_panel' }}" href="{{ url_for('admin_panel') }}">
                                 <i class="bi bi-shield-lock"></i> Admin
