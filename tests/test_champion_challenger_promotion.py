@@ -497,6 +497,56 @@ def test_validation_windows_overlap_note_treats_missing_window_as_comparable():
     assert comparable is True
 
 
+def test_snapshot_coverage_gap_note_flags_large_gap():
+    challenger_metrics = {'jockey_snapshot_coverage_pct': 60.0, 'trainer_snapshot_coverage_pct': 55.0}
+    champion_metrics = {'jockey_snapshot_coverage_pct': 20.0, 'trainer_snapshot_coverage_pct': 50.0}
+    comparable, note = backtest._snapshot_coverage_gap_note(challenger_metrics, champion_metrics)
+    assert comparable is False
+    # Jockey gap (40pp) exceeds the tolerance; trainer gap (5pp) doesn't.
+    assert 'jockey coverage champion=20.0% challenger=60.0%' in note
+    assert 'trainer coverage' not in note
+
+
+def test_snapshot_coverage_gap_note_passes_similar_coverage():
+    challenger_metrics = {'jockey_snapshot_coverage_pct': 42.0, 'trainer_snapshot_coverage_pct': 39.0}
+    champion_metrics = {'jockey_snapshot_coverage_pct': 38.0, 'trainer_snapshot_coverage_pct': 41.0}
+    comparable, note = backtest._snapshot_coverage_gap_note(challenger_metrics, champion_metrics)
+    assert comparable is True
+    assert note == ""
+
+
+def test_snapshot_coverage_gap_note_treats_missing_coverage_as_comparable():
+    # A champion row saved before this metric existed has no coverage to
+    # compare against — this must not manufacture a false alarm.
+    comparable, note = backtest._snapshot_coverage_gap_note({'jockey_snapshot_coverage_pct': 60.0}, {})
+    assert comparable is True
+    assert note == ""
+
+
+def test_promotion_reason_notes_large_snapshot_coverage_gap(monkeypatch, tmp_path):
+    """Visibility only, not a gate: a challenger trained with much higher
+    jockey/trainer snapshot coverage than the stored champion still promotes
+    when it otherwise qualifies, but the promotion reason must record the
+    gap so it isn't silently treated as an apples-to-apples comparison."""
+    champion = champion_row(10.0)
+    champion_metrics = json.loads(champion[10])
+    champion_metrics['jockey_snapshot_coverage_pct'] = 10.0
+    champion_metrics['trainer_snapshot_coverage_pct'] = 12.0
+    champion[10] = json.dumps(champion_metrics)
+    conn = FakeConnection(champion=champion)
+
+    challenger_metrics = metrics(selection_score=13.0)
+    challenger_metrics['jockey_snapshot_coverage_pct'] = 55.0
+    challenger_metrics['trainer_snapshot_coverage_pct'] = 50.0
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, challenger_metrics)
+
+    assert conn.activated_challenger["id"] == conn.challenger_id
+    reason = conn.activated_challenger["reason"]
+    assert "Promoted: challenger Champion Score 13.000 beat Champion Score 10.000" in reason
+    assert "snapshot coverage differs by more than" in reason
+    assert "jockey coverage champion=10.0% challenger=55.0%" in reason
+
+
 def test_value_edge_backtest_filters_out_low_edge_selections():
     # Two races: race 1's top pick has a big edge over the market and wins;
     # race 2's top pick has almost no edge (pred barely above 1/sp) and loses.

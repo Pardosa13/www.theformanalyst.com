@@ -320,3 +320,31 @@ def test_predict_meeting_reports_zero_missing_and_zero_defaulted_features(monkey
     # No ML_FEATURE_DEFAULTS warning should fire when every source is present
     assert not [r for r in caplog.records if 'ML_FEATURE_DEFAULTS' in r.getMessage()]
     assert not [r for r in caplog.records if 'ML_FEATURE_MISSING_SOURCE' in r.getMessage()]
+
+
+def test_extract_features_coverage_stats_tracks_dated_vs_fallback():
+    """backtest.extract_features's coverage_stats param (feeding
+    build_training_set's per-run "Snapshot coverage" log line) must count a
+    dated-snapshot hit only when get_sr_win_pct_asof actually finds an
+    eligible snapshot, and a fallback otherwise — one entity with history,
+    one without, to exercise both branches in a single call."""
+    import datetime as dt
+    from strike_rate_matching import build_strike_rate_history_lookup
+
+    jockey_history = build_strike_rate_history_lookup([
+        ('John Smith', 20, 100, dt.date(2026, 6, 1)),
+    ])
+    trainer_history = build_strike_rate_history_lookup([])  # no trainer snapshots yet
+
+    cd = full_csv_data(jockey="John Smith", trainer="Jane Doe")
+    coverage_stats = {'jockey_total': 0, 'jockey_dated': 0, 'trainer_total': 0, 'trainer_dated': 0}
+    backtest.extract_features(
+        backtest_row(cd), {}, {},
+        jockey_sr_history=jockey_history, trainer_sr_history=trainer_history,
+        as_of_date=dt.date(2026, 7, 12),
+        coverage_stats=coverage_stats,
+    )
+    assert coverage_stats == {
+        'jockey_total': 1, 'jockey_dated': 1,
+        'trainer_total': 1, 'trainer_dated': 0,
+    }

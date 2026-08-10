@@ -140,6 +140,21 @@ class PuntingFormService:
             return None
 
     def _fetch_v2_strike_rate_rows(self, entity_type, jurisdiction=2):
+        # 2026-08 investigation (see backtest.py's build_training_set "Snapshot
+        # coverage" logging / strike_rate_snapshots): this is a CURRENT-only
+        # endpoint. Its query string is exactly entityType/jurisdiction/apiKey
+        # (confirmed against https://docs.puntingform.com.au/reference/
+        # strikeratecsv) — there is no date/asOf parameter, and no other
+        # documented PuntingForm endpoint (Ratings, Form, Results, Sectionals,
+        # Benchmarks) returns a jockey/trainer L100 win-rate figure at all, let
+        # alone a historical one. So strike_rate_snapshots CANNOT be backfilled
+        # retroactively from PuntingForm's API — it can only keep accumulating
+        # one dated row per day going forward, same as today. The only way to
+        # get a genuinely historical jockey/trainer L100 win% would be deriving
+        # it from this app's OWN historical race/result rows (the same
+        # technique build_training_set._fill_point_in_time_breeding_rates
+        # already uses for sire_win_rate/dam_win_rate) — a separate, larger
+        # change, not a PuntingForm backfill script.
         entity_type_id = 1 if entity_type == 'jockey' else 2
         url = 'https://api.puntingform.com.au/v2/form/strikerate/csv'
         params = {

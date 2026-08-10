@@ -128,7 +128,9 @@ def ensure_tables():
                 grid_search_best_sr FLOAT,
                 grid_search_improvement FLOAT,
                 best_model_rank INTEGER,
-                notes TEXT
+                notes TEXT,
+                jockey_snapshot_coverage_pct FLOAT,
+                trainer_snapshot_coverage_pct FLOAT
             )
         """))
 
@@ -260,6 +262,8 @@ def ensure_tables():
         """))
 
         for ddl in [
+            "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS jockey_snapshot_coverage_pct FLOAT",
+            "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS trainer_snapshot_coverage_pct FLOAT",
             "ALTER TABLE backtest_best_model DROP CONSTRAINT IF EXISTS backtest_best_model_run_date_key",
             "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE",
             "ALTER TABLE backtest_best_model ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMP",
@@ -916,7 +920,8 @@ def parse_form_time_seconds(value):
 def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
                       jockey_sr_history=None, trainer_sr_history=None, as_of_date=None,
                       pf_ratings_lookup=None, pf_speedmaps_lookup=None,
-                      jockey_extra_lookup=None, trainer_extra_lookup=None):
+                      jockey_extra_lookup=None, trainer_extra_lookup=None,
+                      coverage_stats=None):
     """
     Extract ML features from a horse's csv_data dict.
     Returns a flat dict of ~45 features covering everything scored in analyzer.js,
@@ -931,6 +936,12 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
     avoid leaking a jockey/trainer's future form into older training rows. Falls
     back to the current snapshot when no dated entry exists yet for that
     name/date (this only self-heals as snapshot history accumulates over time).
+
+    coverage_stats (optional): mutable dict this call increments with
+    jockey_total/jockey_dated/trainer_total/trainer_dated counts, so callers
+    (build_training_set) can report what fraction of rows got a real dated
+    snapshot vs fell back to the current one — see log_match_stats-style
+    coverage logging.
     """
     cd = row.get('csv_data') or {}
     if isinstance(cd, str):
@@ -1114,15 +1125,25 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
     features['jockey_sr'] = -1.0
     if jockey_sr_history and as_of_date:
         features['jockey_sr'] = get_sr_win_pct_asof(jockey_name, jockey_sr_history, as_of_date)
-    if features['jockey_sr'] == -1.0:
+    jockey_used_dated_snapshot = features['jockey_sr'] != -1.0
+    if not jockey_used_dated_snapshot:
         features['jockey_sr'] = get_sr_win_pct(jockey_name, jockey_sr_lookup or {})
+    if coverage_stats is not None:
+        coverage_stats['jockey_total'] = coverage_stats.get('jockey_total', 0) + 1
+        if jockey_used_dated_snapshot:
+            coverage_stats['jockey_dated'] = coverage_stats.get('jockey_dated', 0) + 1
 
     trainer_name = str(cd.get('horse trainer', '') or '').strip()
     features['trainer_sr'] = -1.0
     if trainer_sr_history and as_of_date:
         features['trainer_sr'] = get_sr_win_pct_asof(trainer_name, trainer_sr_history, as_of_date)
-    if features['trainer_sr'] == -1.0:
+    trainer_used_dated_snapshot = features['trainer_sr'] != -1.0
+    if not trainer_used_dated_snapshot:
         features['trainer_sr'] = get_sr_win_pct(trainer_name, trainer_sr_lookup or {})
+    if coverage_stats is not None:
+        coverage_stats['trainer_total'] = coverage_stats.get('trainer_total', 0) + 1
+        if trainer_used_dated_snapshot:
+            coverage_stats['trainer_dated'] = coverage_stats.get('trainer_dated', 0) + 1
 
     # ── Barrier (gate draw) ──
     try:
@@ -1482,6 +1503,7 @@ def build_training_set(df, strike_rate_data=None):
     meeting_dates = []
     sire_names = []
     dam_names = []
+    snapshot_coverage_stats = {'jockey_total': 0, 'jockey_dated': 0, 'trainer_total': 0, 'trainer_dated': 0}
 
     for _, row in df_unique.iterrows():
         try:
@@ -1491,6 +1513,7 @@ def build_training_set(df, strike_rate_data=None):
                 as_of_date=row.get('meeting_date'),
                 pf_ratings_lookup=pf_ratings_lookup, pf_speedmaps_lookup=pf_speedmaps_lookup,
                 jockey_extra_lookup=jockey_extra_lookup, trainer_extra_lookup=trainer_extra_lookup,
+                coverage_stats=snapshot_coverage_stats,
             )
             finish = int(row['finish_position'])
             sp = float(row['sp']) if row['sp'] else None
@@ -1562,6 +1585,31 @@ def build_training_set(df, strike_rate_data=None):
     # run — see check_match_rate_regression() below.
     build_training_set.last_match_stats = log_match_stats(log, jockey_sr, trainer_sr)
 
+    # strike_rate_snapshots only started accumulating on 2026-07-21 (see
+    # load_strike_rate_data's jockeys_history/trainers_history docstring), so
+    # rows dated before a given name's first snapshot still fall back to the
+    # CURRENT snapshot in extract_features rather than getting a true
+    # point-in-time value. That fallback rate shrinks night over night as
+    # history accumulates, which quietly changes how much look-ahead leakage
+    # is in the training set from one run to the next — a run-over-run
+    # validation ROI drop can be this closing, not real model decay. Logged
+    # once per run (same place as the match-rate summary above) and stashed
+    # here so main()/write_results() can persist it on backtest_runs and
+    # save_best_model_to_db can flag a big coverage gap between challenger
+    # and champion as non-comparable.
+    jockey_total = snapshot_coverage_stats['jockey_total']
+    trainer_total = snapshot_coverage_stats['trainer_total']
+    jockey_coverage_pct = (snapshot_coverage_stats['jockey_dated'] / jockey_total * 100.0) if jockey_total else 0.0
+    trainer_coverage_pct = (snapshot_coverage_stats['trainer_dated'] / trainer_total * 100.0) if trainer_total else 0.0
+    log.info(
+        "Snapshot coverage: jockey=%.1f%% trainer=%.1f%% (rows with a dated snapshot vs fallback-to-current)",
+        jockey_coverage_pct, trainer_coverage_pct,
+    )
+    build_training_set.last_snapshot_coverage = {
+        'jockey_snapshot_coverage_pct': jockey_coverage_pct,
+        'trainer_snapshot_coverage_pct': trainer_coverage_pct,
+    }
+
     return X, y_roi, y_won, sp_values, race_ids, horse_ids, meeting_dates
 
 
@@ -1570,6 +1618,13 @@ def build_training_set(df, strike_rate_data=None):
 # jockey/trainer names) shouldn't page anyone; a real regression (e.g. a
 # PuntingForm feed/schema change breaking matching) should.
 MATCH_RATE_REGRESSION_TOLERANCE_PCT = float(os.environ.get('ML_MATCH_RATE_REGRESSION_TOLERANCE_PCT', '2.0'))
+
+# How many percentage points of jockey/trainer snapshot-coverage gap between a
+# challenger and the stored champion is tolerated before a promotion decision
+# is flagged as comparing two runs with meaningfully different amounts of
+# point-in-time leakage-closure (see build_training_set's "Snapshot coverage"
+# log line). This does not block promotion — see _snapshot_coverage_gap_note.
+SNAPSHOT_COVERAGE_GAP_TOLERANCE_PCT = float(os.environ.get('ML_SNAPSHOT_COVERAGE_GAP_TOLERANCE_PCT', '15.0'))
 
 
 def check_match_rate_regression(run_id, match_stats):
@@ -2590,6 +2645,53 @@ def _validation_windows_overlap_note(challenger_window, champion_window):
     return True, ""
 
 
+def _snapshot_coverage_gap_note(challenger_metrics, champion_metrics):
+    """Compare a challenger's and the stored champion's jockey/trainer
+    point-in-time snapshot coverage (jockey_snapshot_coverage_pct /
+    trainer_snapshot_coverage_pct in selection_metrics — see
+    build_training_set's "Snapshot coverage" log line) and report whether the
+    gap is wide enough that comparing their validation ROI is misleading.
+
+    strike_rate_snapshots only started accumulating on 2026-07-21, so the
+    fraction of training rows getting a real dated jockey/trainer strike rate
+    (vs falling back to the current snapshot) grows run over run. A challenger
+    trained with much higher coverage than the champion it's being compared
+    against saw meaningfully less look-ahead leakage, so an apparent ROI
+    edge (or deficit) can be that closing gap rather than a genuinely better
+    (or worse) model.
+
+    Returns (True, "") when comparable (either side's coverage is missing —
+    can't tell, not a false alarm — or both gaps are within
+    SNAPSHOT_COVERAGE_GAP_TOLERANCE_PCT). Returns (False, note) otherwise.
+    Same pattern as _validation_windows_overlap_note: this does not block
+    promotion, it only makes a non-comparable comparison visible instead of
+    silent.
+    """
+    def _get(metrics, key):
+        val = (metrics or {}).get(key)
+        try:
+            return float(val) if val is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    gaps = []
+    for label, key in (('jockey', 'jockey_snapshot_coverage_pct'), ('trainer', 'trainer_snapshot_coverage_pct')):
+        challenger_pct = _get(challenger_metrics, key)
+        champion_pct = _get(champion_metrics, key)
+        if challenger_pct is None or champion_pct is None:
+            continue
+        if abs(challenger_pct - champion_pct) > SNAPSHOT_COVERAGE_GAP_TOLERANCE_PCT:
+            gaps.append(f"{label} coverage champion={champion_pct:.1f}% challenger={challenger_pct:.1f}%")
+
+    if not gaps:
+        return True, ""
+    return False, (
+        f"snapshot coverage differs by more than {SNAPSHOT_COVERAGE_GAP_TOLERANCE_PCT:.1f}pp: {'; '.join(gaps)} "
+        "— jockey_sr/trainer_sr point-in-time coverage is still growing as strike_rate_snapshots backfills, "
+        "so validation ROI is not directly comparable"
+    )
+
+
 def _paired_bootstrap_p_value(challenger_fold_rois, champion_fold_rois, n_resamples=2000, seed=42):
     """One-sided paired bootstrap p-value for "challenger's per-fold ROI is
     really higher than champion's", used as a statistical-significance gate
@@ -2739,6 +2841,14 @@ def _attach_model_metadata(model, model_type, model_name, run_id, artifact_filen
     }
     model._form_analyst_expected_features = list(feature_names)
     model._form_analyst_selection_metrics = stamped_metrics
+    # Same pattern as _form_analyst_feature_medians: stamp the training run's
+    # jockey/trainer snapshot coverage onto the artifact itself so it travels
+    # with the pkl, not just the DB row — see build_training_set's
+    # "Snapshot coverage" log line for what these mean.
+    model._form_analyst_snapshot_coverage = {
+        'jockey_snapshot_coverage_pct': stamped_metrics.get('jockey_snapshot_coverage_pct'),
+        'trainer_snapshot_coverage_pct': stamped_metrics.get('trainer_snapshot_coverage_pct'),
+    }
     if getattr(model, 'feature_names_in_', None) is None:
         model.feature_names_in_ = np.asarray(list(feature_names))
     return model
@@ -3773,9 +3883,17 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         'end': val_dates.max().date().isoformat() if len(val_dates) and pd.notna(val_dates.max()) else None,
         'cutoff': cutoff.date().isoformat() if pd.notna(cutoff) else None,
     }
+    # Same jockey/trainer point-in-time snapshot coverage build_training_set()
+    # computed and logged for this run (all candidates here were trained on the
+    # same X, so the coverage is identical across them) — carried into
+    # selection_metrics so save_best_model_to_db can compare it against the
+    # stored champion's coverage at promotion time.
+    run_snapshot_coverage = getattr(build_training_set, 'last_snapshot_coverage', None) or {}
     for result in results:
         result['metrics']['selection_score'] = result['selection_score']
         result['metrics']['validation_period'] = validation_period
+        result['metrics']['jockey_snapshot_coverage_pct'] = run_snapshot_coverage.get('jockey_snapshot_coverage_pct')
+        result['metrics']['trainer_snapshot_coverage_pct'] = run_snapshot_coverage.get('trainer_snapshot_coverage_pct')
         result['metrics'] = _stamp_selection_metrics(result['metrics'])
         try:
             result['metrics']['value_edge_analysis'] = _value_edge_backtest(
@@ -4006,6 +4124,25 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
                 "Challenger %s vs champion %s: %s", challenger_id, champion[0] if champion else None, window_note,
             )
 
+        # Same visibility, for jockey/trainer point-in-time snapshot coverage
+        # instead of validation-window overlap: strike_rate_snapshots is still
+        # backfilling, so a challenger scored with much higher (or lower)
+        # coverage than the stored champion isn't a fair apples-to-apples
+        # comparison. Does not block promotion — see _snapshot_coverage_gap_note.
+        coverage_comparable, coverage_note = _snapshot_coverage_gap_note(
+            challenger_metrics=validation_metrics or {},
+            champion_metrics=champion_metrics,
+        )
+        if not coverage_comparable:
+            log.warning(
+                "Challenger %s vs champion %s: %s", challenger_id, champion[0] if champion else None, coverage_note,
+            )
+        comparability_notes = [n for n in (
+            None if windows_comparable else window_note,
+            None if coverage_comparable else coverage_note,
+        ) if n]
+        comparability_note = "" if not comparability_notes else " [" + "; ".join(comparability_notes) + "]"
+
         if challenger_feature_list_missing:
             # Must precede not_live_computable: an EMPTY feature list yields an
             # empty not_live_computable list, so every downstream gate here
@@ -4052,12 +4189,10 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
                     promote = True
                     stale_note = " (active champion was stale: rollback review — see ml_pipeline_alerts)" if champion_is_stale else ""
                     significance_note = f", bootstrap p={bootstrap_p_value:.3f}" if bootstrap_p_value is not None else ""
-                    comparability_note = "" if windows_comparable else f" [{window_note}]"
                     reason = (f"Promoted: challenger Champion Score {challenger_score:.3f} beat "
                               f"Champion Score {champion_score:.3f} under out-of-sample rule{significance_note}"
                               f"{stale_note}{comparability_note}")
             else:
-                comparability_note = "" if windows_comparable else f" [{window_note}]"
                 reason = (f"Rejected: challenger Champion Score {challenger_score:.3f} did not beat "
                           f"Champion Score {champion_score:.3f}{comparability_note}")
 
@@ -4934,6 +5069,7 @@ def write_results(run_id, feature_recommendations, component_results,
         best_roi = top_10_models[0]['roi_score'] * 100 if top_10_models else 0.0
         best_sr = top_10_models[0]['win_score'] * 100 if top_10_models else 0.0
         improvement = (best_roi - baseline_roi) if baseline_roi != 0 else 0.0
+        snapshot_coverage = getattr(build_training_set, 'last_snapshot_coverage', None) or {}
 
         conn.execute(text("""
             UPDATE backtest_runs
@@ -4946,7 +5082,9 @@ def write_results(run_id, feature_recommendations, component_results,
                 grid_search_best_roi = :grid_best_roi,
                 grid_search_best_sr = :grid_best_sr,
                 grid_search_improvement = :improvement,
-                best_model_rank = 1
+                best_model_rank = 1,
+                jockey_snapshot_coverage_pct = :jockey_snapshot_coverage_pct,
+                trainer_snapshot_coverage_pct = :trainer_snapshot_coverage_pct
             WHERE id = :run_id
         """), {
             'run_id': run_id,
@@ -4956,7 +5094,9 @@ def write_results(run_id, feature_recommendations, component_results,
             'baseline_sr': baseline_sr,
             'grid_best_roi': best_roi,
             'grid_best_sr': best_sr,
-            'improvement': improvement
+            'improvement': improvement,
+            'jockey_snapshot_coverage_pct': snapshot_coverage.get('jockey_snapshot_coverage_pct'),
+            'trainer_snapshot_coverage_pct': snapshot_coverage.get('trainer_snapshot_coverage_pct'),
         })
 
         if best_challenger:
