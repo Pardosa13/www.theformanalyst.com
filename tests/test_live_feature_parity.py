@@ -94,7 +94,7 @@ def backtest_row(cd, rail_position=3):
 
 def extract_both(cd, rail_position=3, pf_ratings=None, pf_speedmaps=None,
                  jockey_extras=None, trainer_extras=None):
-    training = backtest.extract_features(
+    training, _, _ = backtest.extract_features(
         backtest_row(cd, rail_position), {}, {},
         pf_ratings_lookup=pf_ratings, pf_speedmaps_lookup=pf_speedmaps,
         jockey_extra_lookup=jockey_extras, trainer_extra_lookup=trainer_extras,
@@ -150,11 +150,12 @@ def test_live_feature_contract_matches_training_columns_exactly():
     rows = []
     for tab_no in (1, 2):
         cd = full_csv_data(tab_no=tab_no)
-        rows.append(backtest.extract_features(
+        features, _, _ = backtest.extract_features(
             backtest_row(cd), {}, {},
             pf_ratings_lookup=PF_RATINGS, pf_speedmaps_lookup=PF_SPEEDMAPS,
             jockey_extra_lookup=JOCKEY_EXTRAS, trainer_extra_lookup=TRAINER_EXTRAS,
-        ))
+        )
+        rows.append(features)
     training_rows = backtest.add_race_relative_features(rows, [1, 1])
     training_columns = list(pd.DataFrame(training_rows).columns)
 
@@ -322,12 +323,13 @@ def test_predict_meeting_reports_zero_missing_and_zero_defaulted_features(monkey
     assert not [r for r in caplog.records if 'ML_FEATURE_MISSING_SOURCE' in r.getMessage()]
 
 
-def test_extract_features_coverage_stats_tracks_dated_vs_fallback():
-    """backtest.extract_features's coverage_stats param (feeding
-    build_training_set's per-run "Snapshot coverage" log line) must count a
-    dated-snapshot hit only when get_sr_win_pct_asof actually finds an
-    eligible snapshot, and a fallback otherwise — one entity with history,
-    one without, to exercise both branches in a single call."""
+def test_extract_features_reports_dated_vs_fallback_snapshot_usage():
+    """backtest.extract_features's jockey_used_dated_snapshot/
+    trainer_used_dated_snapshot return values (feeding build_training_set's
+    per-run "Snapshot coverage" log line) must be True only when
+    get_sr_win_pct_asof actually finds an eligible snapshot, and False
+    otherwise — one entity with history, one without, to exercise both
+    branches in a single call."""
     import datetime as dt
     from strike_rate_matching import build_strike_rate_history_lookup
 
@@ -337,14 +339,10 @@ def test_extract_features_coverage_stats_tracks_dated_vs_fallback():
     trainer_history = build_strike_rate_history_lookup([])  # no trainer snapshots yet
 
     cd = full_csv_data(jockey="John Smith", trainer="Jane Doe")
-    coverage_stats = {'jockey_total': 0, 'jockey_dated': 0, 'trainer_total': 0, 'trainer_dated': 0}
-    backtest.extract_features(
+    _, jockey_used_dated_snapshot, trainer_used_dated_snapshot = backtest.extract_features(
         backtest_row(cd), {}, {},
         jockey_sr_history=jockey_history, trainer_sr_history=trainer_history,
         as_of_date=dt.date(2026, 7, 12),
-        coverage_stats=coverage_stats,
     )
-    assert coverage_stats == {
-        'jockey_total': 1, 'jockey_dated': 1,
-        'trainer_total': 1, 'trainer_dated': 0,
-    }
+    assert jockey_used_dated_snapshot is True
+    assert trainer_used_dated_snapshot is False

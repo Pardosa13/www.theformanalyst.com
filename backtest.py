@@ -920,15 +920,16 @@ def parse_form_time_seconds(value):
 def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
                       jockey_sr_history=None, trainer_sr_history=None, as_of_date=None,
                       pf_ratings_lookup=None, pf_speedmaps_lookup=None,
-                      jockey_extra_lookup=None, trainer_extra_lookup=None,
-                      coverage_stats=None):
+                      jockey_extra_lookup=None, trainer_extra_lookup=None):
     """
     Extract ML features from a horse's csv_data dict.
-    Returns a flat dict of ~45 features covering everything scored in analyzer.js,
-    plus the 2026-07 audit features from previously unused columns (those default
-    to NaN — not 0 — when their source is missing; every training track imputes
-    NaNs with its own training-split median and persists that median on the model
-    artifact, so live scoring fills them consistently).
+    Returns (features, jockey_used_dated_snapshot, trainer_used_dated_snapshot).
+    features is a flat dict of ~45 features covering everything scored in
+    analyzer.js, plus the 2026-07 audit features from previously unused columns
+    (those default to NaN — not 0 — when their source is missing; every
+    training track imputes NaNs with its own training-split median and
+    persists that median on the model artifact, so live scoring fills them
+    consistently).
 
     jockey_sr_history/trainer_sr_history + as_of_date (optional): when supplied,
     jockey_sr/trainer_sr are looked up as they stood on as_of_date (point-in-time)
@@ -937,9 +938,9 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
     back to the current snapshot when no dated entry exists yet for that
     name/date (this only self-heals as snapshot history accumulates over time).
 
-    coverage_stats (optional): mutable dict this call increments with
-    jockey_total/jockey_dated/trainer_total/trainer_dated counts, so callers
-    (build_training_set) can report what fraction of rows got a real dated
+    jockey_used_dated_snapshot/trainer_used_dated_snapshot: whether that
+    fallback happened for this row, so callers (build_training_set) can report
+    what fraction of rows that actually made it into training got a real dated
     snapshot vs fell back to the current one — see log_match_stats-style
     coverage logging.
     """
@@ -1128,10 +1129,6 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
     jockey_used_dated_snapshot = features['jockey_sr'] != -1.0
     if not jockey_used_dated_snapshot:
         features['jockey_sr'] = get_sr_win_pct(jockey_name, jockey_sr_lookup or {})
-    if coverage_stats is not None:
-        coverage_stats['jockey_total'] = coverage_stats.get('jockey_total', 0) + 1
-        if jockey_used_dated_snapshot:
-            coverage_stats['jockey_dated'] = coverage_stats.get('jockey_dated', 0) + 1
 
     trainer_name = str(cd.get('horse trainer', '') or '').strip()
     features['trainer_sr'] = -1.0
@@ -1140,10 +1137,6 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
     trainer_used_dated_snapshot = features['trainer_sr'] != -1.0
     if not trainer_used_dated_snapshot:
         features['trainer_sr'] = get_sr_win_pct(trainer_name, trainer_sr_lookup or {})
-    if coverage_stats is not None:
-        coverage_stats['trainer_total'] = coverage_stats.get('trainer_total', 0) + 1
-        if trainer_used_dated_snapshot:
-            coverage_stats['trainer_dated'] = coverage_stats.get('trainer_dated', 0) + 1
 
     # ── Barrier (gate draw) ──
     try:
@@ -1343,7 +1336,7 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
     features['sire_win_rate'] = np.nan
     features['dam_win_rate'] = np.nan
 
-    return features
+    return features, jockey_used_dated_snapshot, trainer_used_dated_snapshot
 
 
 
@@ -1507,19 +1500,25 @@ def build_training_set(df, strike_rate_data=None):
 
     for _, row in df_unique.iterrows():
         try:
-            features = extract_features(
+            features, jockey_used_dated_snapshot, trainer_used_dated_snapshot = extract_features(
                 row, jockey_sr, trainer_sr,
                 jockey_sr_history=jockey_sr_history, trainer_sr_history=trainer_sr_history,
                 as_of_date=row.get('meeting_date'),
                 pf_ratings_lookup=pf_ratings_lookup, pf_speedmaps_lookup=pf_speedmaps_lookup,
                 jockey_extra_lookup=jockey_extra_lookup, trainer_extra_lookup=trainer_extra_lookup,
-                coverage_stats=snapshot_coverage_stats,
             )
             finish = int(row['finish_position'])
             sp = float(row['sp']) if row['sp'] else None
 
             if sp is None or not np.isfinite(sp) or sp <= 1.0:
                 continue
+
+            snapshot_coverage_stats['jockey_total'] += 1
+            if jockey_used_dated_snapshot:
+                snapshot_coverage_stats['jockey_dated'] += 1
+            snapshot_coverage_stats['trainer_total'] += 1
+            if trainer_used_dated_snapshot:
+                snapshot_coverage_stats['trainer_dated'] += 1
 
             race_id = row['race_id']
             avg_w = race_avg_weights.get(race_id, 55.0)
