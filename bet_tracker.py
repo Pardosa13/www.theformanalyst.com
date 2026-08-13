@@ -243,16 +243,19 @@ def register_bet_tracker_routes(app, db):
         bets = Bet.query.filter_by(user_id=current_user.id).order_by(Bet.date_placed.desc()).all()
 
         grouped = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+        month_totals = defaultdict(float)
         for b in bets:
             dp = b.date_placed or datetime.utcnow()
             month_key = dp.strftime('%B %Y')
             week_key = f"Week {dp.isocalendar()[1]}"
             day_key = dp.strftime('%A %d %b')
             grouped[month_key][week_key][day_key].append(b)
+            month_totals[month_key] += b.profit
 
         return render_template(
             'bet_tracker_history.html',
             grouped=grouped,
+            month_totals=month_totals,
             sports=SPORTS,
             bookies=BOOKIES,
             results=RESULTS,
