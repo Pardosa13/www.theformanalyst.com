@@ -52,11 +52,24 @@
   }
 
   .bt-month-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
     font-size: 1.1rem;
     font-weight: 700;
     color: var(--text-primary);
     margin: 28px 0 10px;
   }
+
+  .bt-month-total {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.95rem;
+    font-weight: 700;
+  }
+
+  .bt-month-total.positive { color: var(--success); }
+  .bt-month-total.negative { color: var(--danger); }
 
   .bt-week-header {
     font-size: 0.85rem;
@@ -193,7 +206,12 @@
 
   {% if grouped %}
     {% for month, weeks in grouped.items() %}
-      <div class="bt-month-header">{{ month }}</div>
+      <div class="bt-month-header">
+        <span>{{ month }}</span>
+        <span class="bt-month-total {{ 'positive' if month_totals[month] >= 0 else 'negative' }}">
+          {{ '%+.2f'|format(month_totals[month]) }} AU$
+        </span>
+      </div>
       {% for week, days in weeks.items() %}
         <div class="bt-week-header">{{ week }}</div>
         {% for day, bets in days.items() %}
