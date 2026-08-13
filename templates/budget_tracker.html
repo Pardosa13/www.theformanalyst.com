@@ -464,6 +464,8 @@
 
   // Bars represent REMAINING allowance, like a fuel gauge: full & green when nothing's
   // been spent yet, draining down and shifting yellow -> red as the allocation gets used up.
+  // At/over the limit the gauge shows full red rather than draining to nothing, so
+  // "overdrawn" stays visible instead of collapsing to an invisible 0-width bar.
   function barColor(actual, allowance) {
     if (allowance <= 0) return actual > 0 ? '#ef4444' : '#10b981';
     const ratio = actual / allowance;
@@ -473,7 +475,8 @@
   }
 
   function barWidthPct(actual, allowance) {
-    if (allowance <= 0) return actual > 0 ? 0 : 100;
+    if (allowance <= 0) return 100;
+    if (actual >= allowance) return 100;
     const remaining = 1 - (actual / allowance);
     return Math.max(0, Math.min(100, remaining * 100));
   }
