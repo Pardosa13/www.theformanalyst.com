@@ -182,6 +182,32 @@
     box-shadow: 0 4px 16px var(--accent-glow);
   }
 
+  .bt-import-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  .bt-import-btn:hover {
+    border-color: var(--border-accent);
+    color: var(--text-primary);
+  }
+
+  .bt-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
   /* ── Modal form ── */
   .bt-modal .modal-content {
     background: var(--bg-elevated);
@@ -226,9 +252,17 @@
       <h1>Bet Tracker</h1>
       <p>Your personal staking log — profit, ROI and progression over time.</p>
     </div>
-    <button type="button" class="bt-add-bet-btn" data-bs-toggle="modal" data-bs-target="#addBetModal">
-      <i class="bi bi-plus-circle"></i> Add Bet
-    </button>
+    <div class="bt-header-actions">
+      <form action="{{ url_for('bet_tracker_import_pardo_history') }}" method="post"
+            onsubmit="return confirm('Import historical monthly totals from Pardo (May 2024 – Aug 2026)? Safe to run more than once — already-imported months are skipped.');">
+        <button type="submit" class="bt-import-btn">
+          <i class="bi bi-cloud-arrow-down"></i> Import Pardo History
+        </button>
+      </form>
+      <button type="button" class="bt-add-bet-btn" data-bs-toggle="modal" data-bs-target="#addBetModal">
+        <i class="bi bi-plus-circle"></i> Add Bet
+      </button>
+    </div>
   </div>
 
   <div class="bt-subnav">

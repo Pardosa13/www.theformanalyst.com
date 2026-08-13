@@ -12,6 +12,7 @@ not touch, the PPE scoring engine.
 
 from __future__ import annotations
 
+import calendar
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -23,6 +24,96 @@ from models import Bet
 SPORTS = ['Horse Racing', 'Greyhounds', 'AFL', 'MMA', 'Soccer', 'NFL', 'NBA', 'Other']
 BOOKIES = ['Sportsbet', 'Betfair', 'Ladbrokes', 'Neds', 'Other']
 RESULTS = ['pending', 'won', 'lost', 'refunded']
+
+# Historical monthly net P/L totals carried over from Pardo (a previous
+# 3rd-party bet tracker app), exactly as shown in its history screen.
+# Pardo only exposed month-end totals, not individual bet records, so each
+# month below is imported as a single tagged "summary" bet (see
+# import_pardo_history()) rather than reconstructed bet-by-bet.
+PARDO_MONTHLY_TOTALS = [
+    (2024, 5, 54.64),
+    (2024, 6, 834.76),
+    (2024, 7, 359.00),
+    (2024, 8, -142.80),
+    (2024, 9, 2290.37),
+    (2024, 10, -229.50),
+    (2024, 11, -251.05),
+    (2024, 12, 589.67),
+    (2025, 1, -73.86),
+    (2025, 2, 748.15),
+    (2025, 3, 782.04),
+    (2025, 4, 152.64),
+    (2025, 5, -314.07),
+    (2025, 6, -277.84),
+    (2025, 7, -313.03),
+    (2025, 8, 15.23),
+    (2025, 9, 130.65),
+    (2025, 10, 726.28),
+    (2025, 11, 1024.07),
+    (2025, 12, 95.94),
+    (2026, 1, 313.74),
+    (2026, 2, 213.58),
+    (2026, 3, -954.27),
+    (2026, 4, 152.90),
+    (2026, 5, -50.42),
+    (2026, 6, 32.28),
+    (2026, 7, 34.83),
+    (2026, 8, -59.70),
+]
+
+
+def _pardo_import_tag(year, month):
+    return f"[pardo-import:{year:04d}-{month:02d}]"
+
+
+def _pardo_month_bet(user_id, year, month, profit):
+    last_day = calendar.monthrange(year, month)[1]
+    date_placed = datetime(year, month, last_day, 12, 0, 0)
+    month_name = date_placed.strftime('%B %Y')
+
+    if profit >= 0:
+        stake, odds, result = 1.0, round(1.0 + profit, 4), 'won'
+        payout = round(stake * odds, 2)
+    else:
+        stake, odds, result = round(-profit, 2), 2.0, 'lost'
+        payout = 0.0
+
+    return Bet(
+        user_id=user_id,
+        date_placed=date_placed,
+        sport='Other',
+        selection=f'Pardo import — {month_name}',
+        bookie='Other',
+        stake=stake,
+        odds=odds,
+        result=result,
+        payout=payout,
+        notes=(
+            f'Imported historical monthly total from Pardo (previous bet '
+            f'tracker app). Net P/L for {month_name}: {profit:+.2f} AU$. '
+            f'Not a real individual bet. {_pardo_import_tag(year, month)}'
+        ),
+    )
+
+
+def import_pardo_history(db, user):
+    """Import the Pardo monthly history for `user`, skipping months already
+    imported (matched by the [pardo-import:YYYY-MM] tag in bet notes).
+    Returns (created_count, skipped_count). Safe to call repeatedly."""
+    created, skipped = 0, 0
+    for year, month, profit in PARDO_MONTHLY_TOTALS:
+        tag = _pardo_import_tag(year, month)
+        exists = Bet.query.filter(
+            Bet.user_id == user.id,
+            Bet.notes.like(f'%{tag}%'),
+        ).first()
+        if exists:
+            skipped += 1
+            continue
+        db.session.add(_pardo_month_bet(user.id, year, month, profit))
+        created += 1
+    db.session.commit()
+    return created, skipped
 
 
 def _admin_gate():
@@ -166,6 +257,21 @@ def register_bet_tracker_routes(app, db):
             bookies=BOOKIES,
             results=RESULTS,
         )
+
+    @app.route('/bet-tracker/import-pardo-history', methods=['POST'])
+    @login_required
+    def bet_tracker_import_pardo_history():
+        gate = _admin_gate()
+        if gate:
+            return gate
+
+        created, skipped = import_pardo_history(db, current_user)
+        if created:
+            flash(f"Imported {created} month(s) of Pardo history "
+                  f"({skipped} already present).", "success")
+        else:
+            flash("Pardo history already imported — nothing new to add.", "info")
+        return redirect(url_for('bet_tracker_history'))
 
     @app.route('/bet-tracker/stats')
     @login_required
