@@ -131,13 +131,6 @@ class Prediction(db.Model):
     value_edge_ml_win_prob_pct = db.Column(db.Float, nullable=True)
     value_edge_price = db.Column(db.Float, nullable=True)
     value_edge_captured_at = db.Column(db.DateTime, nullable=True)
-    # Cached output of app.parse_notes_components(notes), kept in sync by a
-    # SQLAlchemy before_insert/before_update listener on this model. Lets
-    # analytics routes (e.g. component-analysis) read pre-parsed component
-    # scores instead of re-running ~250 regexes against `notes` per row on
-    # every request. Nullable so old rows fall back to live parsing until a
-    # backfill script populates them.
-    parsed_components = db.Column(db.JSON, nullable=True)
 
     def __repr__(self):
         return f'<Prediction {self.horse_id}: {self.score}>'
