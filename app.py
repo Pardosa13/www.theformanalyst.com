@@ -6030,7 +6030,10 @@ def data_analytics():
     min_score_filter = request.args.get('min_score', type=float)
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    limit_param = request.args.get('limit', 'all')
+    # Default to the "200 Races" option shown as selected in the filter bar.
+    # "all" must be an explicit user choice — it forces every analytics panel
+    # (component-analysis especially) to scan the entire race history.
+    limit_param = request.args.get('limit', '200')
 
     tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
@@ -7370,6 +7373,11 @@ NEGATIVE_COMPONENTS = {
 def is_scoring_component(name):
     return any(name.startswith(p) for p in SCORING_PREFIXES)
 
+# Hard ceiling on races processed by /api/data/component-analysis, even for an
+# explicit "all" request — each horse row runs ~250 regex/CSV checks in
+# Python, so this bounds worst-case request time as the race history grows.
+MAX_COMPONENT_ANALYSIS_RACES = 4000
+
 @app.route("/api/data/component-analysis")
 @login_required
 def api_component_analysis():
@@ -7411,9 +7419,13 @@ def api_component_analysis():
     ).all()
 
     if limit_param == 'all':
-        recent_race_ids = [r[0] for r in all_race_ids]
+        # This route parses ~250 notes/CSV patterns per horse in Python, so
+        # even an explicit "All Races" request is capped to keep it from
+        # scaling unbounded with the size of the race history.
+        recent_race_ids = [r[0] for r in all_race_ids[:MAX_COMPONENT_ANALYSIS_RACES]]
     else:
         limit = int(limit_param) if limit_param.isdigit() else 200
+        limit = min(limit, MAX_COMPONENT_ANALYSIS_RACES)
         recent_race_ids = [r[0] for r in all_race_ids[:limit]]
 
     if not recent_race_ids:
