@@ -518,32 +518,6 @@ with app.app_context():
     except Exception as e:
         print(f"ML Value Edge migration check: {e}")
 
-    # Cache parsed notes components on Prediction (see parse_notes_components
-    # / the before_insert/before_update listener below) so analytics like
-    # Component Analysis read pre-parsed JSON instead of re-running ~250
-    # regex patterns per horse on every request. Also add the join indexes
-    # the /data analytics routes were missing — both are what made Component
-    # Analysis time out once the race history passed a few thousand races.
-    try:
-        from sqlalchemy import inspect, text
-        inspector = inspect(db.engine)
-        predictions_columns = {col['name'] for col in inspector.get_columns('predictions')}
-        if 'parsed_components' not in predictions_columns:
-            with db.engine.connect() as conn:
-                conn.execute(text('ALTER TABLE predictions ADD COLUMN parsed_components JSON'))
-                conn.commit()
-            print("Added parsed_components column to predictions table")
-
-        with db.engine.connect() as conn:
-            conn.execute(text('CREATE INDEX IF NOT EXISTS ix_meetings_uploaded_at ON meetings (uploaded_at)'))
-            conn.execute(text('CREATE INDEX IF NOT EXISTS ix_races_meeting_id ON races (meeting_id)'))
-            conn.execute(text('CREATE INDEX IF NOT EXISTS ix_horses_race_id ON horses (race_id)'))
-            conn.execute(text('CREATE INDEX IF NOT EXISTS ix_predictions_horse_id ON predictions (horse_id)'))
-            conn.execute(text('CREATE INDEX IF NOT EXISTS ix_results_horse_id ON results (horse_id)'))
-            conn.commit()
-    except Exception as e:
-        print(f"Component analysis perf migration check: {e}")
-
     try:
         from sqlalchemy import inspect, text
         inspector = inspect(db.engine)
@@ -5965,44 +5939,9 @@ def admin_panel():
     
     stats['components'] = components_data
     # END NEW
-
+    
     return render_template("admin.html", stats=stats)
 
-
-COMPONENT_CACHE_BACKFILL_BATCH_SIZE = 3000
-
-
-@app.route("/admin/component-cache-status")
-@login_required
-def admin_component_cache_status():
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    total = db.session.query(Prediction.id).count()
-    missing = db.session.query(Prediction.id).filter(Prediction.parsed_components.is_(None)).count()
-    return jsonify({'total': total, 'missing': missing, 'cached': total - missing})
-
-
-@app.route("/admin/component-cache-backfill-batch", methods=["POST"])
-@login_required
-def admin_component_cache_backfill_batch():
-    """Populate Prediction.parsed_components for one batch of rows that predate
-    the write-time cache. Called repeatedly by the admin panel's progress bar
-    until nothing is left — see api_component_analysis for why this cache
-    exists (it lets Component Analysis cover the full race history instead
-    of re-parsing notes text on every request)."""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-
-    batch = Prediction.query.filter(
-        Prediction.parsed_components.is_(None)
-    ).order_by(Prediction.id).limit(COMPONENT_CACHE_BACKFILL_BATCH_SIZE).all()
-
-    for pred in batch:
-        pred.parsed_components = parse_notes_components(pred.notes or '')
-    db.session.commit()
-
-    missing = db.session.query(Prediction.id).filter(Prediction.parsed_components.is_(None)).count()
-    return jsonify({'batch_size': len(batch), 'missing': missing, 'done': missing == 0})
 
 
 def _build_canonical_analyzer_selections(track_filter='', min_score_filter=None, date_from='', date_to='', limit_param='all'):

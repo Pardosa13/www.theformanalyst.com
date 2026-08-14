@@ -545,26 +545,6 @@
 </div>
 
 <!-- ══════════════════════════════════════════
-     PERFORMANCE TOOLS SECTION
-══════════════════════════════════════════ -->
-<div class="component-section">
-  <h3>⚡ Performance Tools</h3>
-  <p>Speeds up the Component Analysis panel on the Data page. Predictions created from now on are cached automatically — this backfills older ones.</p>
-
-  <div class="card">
-    <div class="card-body">
-      <div id="componentCacheStatusText">Checking status…</div>
-      <div class="progress" style="height:22px; margin-top:10px; margin-bottom:14px;">
-        <div id="componentCacheProgressBar" class="progress-bar bg-success" role="progressbar" style="width:0%">0%</div>
-      </div>
-      <button id="componentCacheRunBtn" class="btn btn-primary" onclick="runComponentCacheBackfill()">
-        Speed Up Component Analysis
-      </button>
-    </div>
-  </div>
-</div>
-
-<!-- ══════════════════════════════════════════
      COMPONENT MANAGEMENT SECTION
 ══════════════════════════════════════════ -->
 <div class="component-section">
@@ -863,73 +843,6 @@ function openDeleteComponent(id, name) {
     document.getElementById('deleteComponentName').textContent = name;
     new bootstrap.Modal(document.getElementById('deleteComponentModal')).show();
 }
-
-/* ── Component Analysis speed-up (parsed_components backfill) ── */
-let componentCacheTotal = 0;
-
-function setComponentCacheProgress(cached, total) {
-    const pct = total > 0 ? Math.round((cached / total) * 100) : 100;
-    const bar = document.getElementById('componentCacheProgressBar');
-    bar.style.width = pct + '%';
-    bar.textContent = pct + '%';
-}
-
-function refreshComponentCacheStatus() {
-    fetch('/admin/component-cache-status')
-        .then(r => r.json())
-        .then(data => {
-            componentCacheTotal = data.total;
-            setComponentCacheProgress(data.cached, data.total);
-            const btn = document.getElementById('componentCacheRunBtn');
-            if (data.missing === 0) {
-                document.getElementById('componentCacheStatusText').textContent =
-                    `All ${data.total.toLocaleString()} predictions cached — Component Analysis is running at full speed.`;
-                btn.textContent = 'Up to date';
-                btn.disabled = true;
-            } else {
-                document.getElementById('componentCacheStatusText').textContent =
-                    `${data.cached.toLocaleString()} / ${data.total.toLocaleString()} predictions cached (${data.missing.toLocaleString()} left).`;
-                btn.textContent = 'Speed Up Component Analysis';
-                btn.disabled = false;
-            }
-        })
-        .catch(() => {
-            document.getElementById('componentCacheStatusText').textContent = 'Could not check status.';
-        });
-}
-
-function runComponentCacheBackfill() {
-    const btn = document.getElementById('componentCacheRunBtn');
-    btn.disabled = true;
-    btn.textContent = 'Running…';
-
-    function runNextBatch() {
-        fetch('/admin/component-cache-backfill-batch', { method: 'POST' })
-            .then(r => r.json())
-            .then(data => {
-                const cached = componentCacheTotal - data.missing;
-                setComponentCacheProgress(cached, componentCacheTotal);
-                document.getElementById('componentCacheStatusText').textContent =
-                    `${cached.toLocaleString()} / ${componentCacheTotal.toLocaleString()} predictions cached…`;
-
-                if (data.done || data.batch_size === 0) {
-                    refreshComponentCacheStatus();
-                } else {
-                    runNextBatch();
-                }
-            })
-            .catch(() => {
-                document.getElementById('componentCacheStatusText').textContent =
-                    'Backfill stopped after an error — click the button to retry, it will pick up where it left off.';
-                btn.disabled = false;
-                btn.textContent = 'Retry';
-            });
-    }
-
-    runNextBatch();
-}
-
-document.addEventListener('DOMContentLoaded', refreshComponentCacheStatus);
 </script>
 
 {% endblock %}
