@@ -85,7 +85,6 @@ def main():
         "ladbrokes_signal_mask": "INTEGER NOT NULL DEFAULT 0",
         "ladbrokes_signal_price": "FLOAT",
         "ladbrokes_signals_captured_at": "TIMESTAMP",
-        "parsed_components": "JSON",
     }
 
     with engine.begin() as conn:
@@ -138,24 +137,6 @@ def main():
                 else:
                     ensure_column(conn, "predictions", col_name, col_type)
                     print(f"  ✓ Added column '{col_name}'.")
-
-        # Indexes on the FK/date columns the /data analytics routes join on.
-        # None of these were previously indexed, so those joins fell back to
-        # sequential scans once the tables grew — this is what made pages
-        # like Component Analysis take ages to load at 8,000+ races.
-        join_indexes = [
-            ("meetings", "ix_meetings_uploaded_at", "uploaded_at"),
-            ("races", "ix_races_meeting_id", "meeting_id"),
-            ("horses", "ix_horses_race_id", "race_id"),
-            ("predictions", "ix_predictions_horse_id", "horse_id"),
-            ("results", "ix_results_horse_id", "horse_id"),
-        ]
-        for table_name, index_name, column_name in join_indexes:
-            if table_name in table_names:
-                index_sql = f'CREATE INDEX IF NOT EXISTS "{index_name}" ON "{table_name}" ("{column_name}");'
-                print(f"  Executing: {index_sql}")
-                conn.execute(text(index_sql))
-                print(f"  ✓ Index '{index_name}' verified/created.")
 
     print("\n" + "=" * 60)
     print("Done. All required columns verified/added.")

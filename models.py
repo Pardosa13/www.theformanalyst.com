@@ -44,7 +44,7 @@ class Meeting(db.Model):
     track = db.Column(db.String(100))
     date = db.Column(db.Date)
     csv_data = db.Column(db.Text)  # Store original CSV
-    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
     puntingform_id = db.Column(db.String(255))  # PuntingForm API meeting ID
     auto_imported = db.Column(db.Boolean, default=False)  # True if imported from API
     rail_position = db.Column(db.Integer, default=0)   # 0=True, 1-15 = metres out
@@ -62,7 +62,7 @@ class Race(db.Model):
     __tablename__ = 'races'
     
     id = db.Column(db.Integer, primary_key=True)
-    meeting_id = db.Column(db.Integer, db.ForeignKey('meetings.id'), nullable=False, index=True)
+    meeting_id = db.Column(db.Integer, db.ForeignKey('meetings.id'), nullable=False)
     race_number = db.Column(db.Integer, nullable=False)
     distance = db.Column(db.String(50))
     race_class = db.Column(db.String(50))
@@ -84,7 +84,7 @@ class Horse(db.Model):
     __tablename__ = 'horses'
     
     id = db.Column(db.Integer, primary_key=True)
-    race_id = db.Column(db.Integer, db.ForeignKey('races.id'), nullable=False, index=True)
+    race_id = db.Column(db.Integer, db.ForeignKey('races.id'), nullable=False)
     horse_name = db.Column(db.String(100), nullable=False)
     barrier = db.Column(db.Integer)
     weight = db.Column(db.Float)
@@ -108,7 +108,7 @@ class Prediction(db.Model):
     __tablename__ = 'predictions'
     
     id = db.Column(db.Integer, primary_key=True)
-    horse_id = db.Column(db.Integer, db.ForeignKey('horses.id'), nullable=False, index=True)
+    horse_id = db.Column(db.Integer, db.ForeignKey('horses.id'), nullable=False)
     score = db.Column(db.Float, nullable=False)
     predicted_odds = db.Column(db.String(20))
     win_probability = db.Column(db.String(20))
@@ -131,13 +131,6 @@ class Prediction(db.Model):
     value_edge_ml_win_prob_pct = db.Column(db.Float, nullable=True)
     value_edge_price = db.Column(db.Float, nullable=True)
     value_edge_captured_at = db.Column(db.DateTime, nullable=True)
-    # Cached output of app.parse_notes_components(notes), kept in sync by a
-    # SQLAlchemy before_insert/before_update listener on this model. Lets
-    # analytics routes (e.g. component-analysis) read pre-parsed component
-    # scores instead of re-running ~250 regexes against `notes` per row on
-    # every request. Nullable so old rows fall back to live parsing until a
-    # backfill script populates them.
-    parsed_components = db.Column(db.JSON, nullable=True)
 
     def __repr__(self):
         return f'<Prediction {self.horse_id}: {self.score}>'
@@ -153,7 +146,7 @@ class Result(db.Model):
     __tablename__ = 'results'
     
     id = db.Column(db.Integer, primary_key=True)
-    horse_id = db.Column(db.Integer, db.ForeignKey('horses.id'), nullable=False, index=True)
+    horse_id = db.Column(db.Integer, db.ForeignKey('horses.id'), nullable=False)
     finish_position = db.Column(db.Integer, nullable=False)  # 0=scratched, 1-4=placed, 5=unplaced
     sp = db.Column(db.Float, nullable=True)  # NULL for scratched horses
     recorded_at = db.Column(db.DateTime, default=datetime.utcnow)

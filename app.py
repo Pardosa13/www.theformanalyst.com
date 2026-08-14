@@ -15,7 +15,7 @@ import tweepy
 from anthropic import Anthropic
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from sqlalchemy import text, bindparam, inspect as sa_inspect, event as sa_event
+from sqlalchemy import text, bindparam, inspect as sa_inspect
 import uuid
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component, StrikeRate, Bet
@@ -2309,26 +2309,6 @@ def parse_notes_components(notes):
             components[name] = score
 
     return components
-
-
-@sa_event.listens_for(Prediction, 'before_insert')
-def _cache_prediction_parsed_components_on_insert(mapper, connection, target):
-    """Keep Prediction.parsed_components in sync with notes on every write.
-
-    This is what lets analytics routes (component-analysis, etc.) read
-    pre-parsed component scores instead of re-running parse_notes_components'
-    ~250 regex patterns against the notes text on every request.
-    """
-    target.parsed_components = parse_notes_components(target.notes or '')
-
-
-@sa_event.listens_for(Prediction, 'before_update')
-def _cache_prediction_parsed_components_on_update(mapper, connection, target):
-    # Only re-parse when notes actually changed in this flush — most updates
-    # to a Prediction (ml_score, best_bet_flagged_at, ladbrokes/value-edge
-    # snapshots) don't touch notes at all.
-    if sa_inspect(target).attrs.notes.history.has_changes():
-        target.parsed_components = parse_notes_components(target.notes or '')
 
 
 def parse_notes_component_matches(notes):
@@ -6050,10 +6030,7 @@ def data_analytics():
     min_score_filter = request.args.get('min_score', type=float)
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    # Default to the "200 Races" option shown as selected in the filter bar.
-    # "all" must be an explicit user choice — it forces every analytics panel
-    # (component-analysis especially) to scan the entire race history.
-    limit_param = request.args.get('limit', '200')
+    limit_param = request.args.get('limit', 'all')
 
     tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
@@ -7393,12 +7370,6 @@ NEGATIVE_COMPONENTS = {
 def is_scoring_component(name):
     return any(name.startswith(p) for p in SCORING_PREFIXES)
 
-# Hard ceiling on races processed by /api/data/component-analysis, even for
-# an explicit "all" request. Prediction.parsed_components (cached at write
-# time) keeps the per-row cost cheap, but this still bounds worst-case
-# request time as the race history keeps growing past today's ~8,000 races.
-MAX_COMPONENT_ANALYSIS_RACES = 20000
-
 @app.route("/api/data/component-analysis")
 @login_required
 def api_component_analysis():
@@ -7440,13 +7411,9 @@ def api_component_analysis():
     ).all()
 
     if limit_param == 'all':
-        # This route parses ~250 notes/CSV patterns per horse in Python, so
-        # even an explicit "All Races" request is capped to keep it from
-        # scaling unbounded with the size of the race history.
-        recent_race_ids = [r[0] for r in all_race_ids[:MAX_COMPONENT_ANALYSIS_RACES]]
+        recent_race_ids = [r[0] for r in all_race_ids]
     else:
         limit = int(limit_param) if limit_param.isdigit() else 200
-        limit = min(limit, MAX_COMPONENT_ANALYSIS_RACES)
         recent_race_ids = [r[0] for r in all_race_ids[:limit]]
 
     if not recent_race_ids:
@@ -7462,7 +7429,6 @@ def api_component_analysis():
         Prediction.score,
         Prediction.ml_score,
         Prediction.notes,
-        Prediction.parsed_components,
         Result.finish_position,
         Result.sp
     ).join(Horse,      Horse.race_id       == Race.id
@@ -7478,20 +7444,16 @@ def api_component_analysis():
 
     # ── Group into races — use ML score for ranking when source=ml ───────
     races = defaultdict(list)
-    for race_id, horse_name, score, ml_score, notes, parsed_components, finish_pos, sp in rows:
+    for race_id, horse_name, score, ml_score, notes, finish_pos, sp in rows:
         analyzer_score = _parse_analyzer_score(notes)
         ranking_score = (ml_score or 0) if use_ml else (analyzer_score if analyzer_score is not None else (score or 0))
-        # Prefer the cached parse (kept in sync by a before_insert/update
-        # listener on Prediction) — only re-parse live for rows written
-        # before that cache existed and not yet backfilled.
-        components = parsed_components if parsed_components is not None else parse_notes_components(notes or '')
         races[race_id].append({
             'horse_name': horse_name,
             'score':      ranking_score,
             'notes':      notes or '',
             'finish_pos': finish_pos,
             'sp':         sp or 0,
-            'components': components
+            'components': parse_notes_components(notes or '')
         })
 
     stake = 10.0
