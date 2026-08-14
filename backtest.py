@@ -63,6 +63,10 @@ from strike_rate_matching import (
     get_sr_win_pct, get_sr_win_pct_asof, log_match_stats, normalize_name,
 )
 from model_classes import ConsensusRegressor
+from notes_parsing import (
+    parse_notes_components, parse_analyzer_score,
+    is_scoring_component, NEGATIVE_COMPONENTS,
+)
 
 import numpy as np
 import pandas as pd
@@ -70,7 +74,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 # ML
-from collections import Counter
+from collections import Counter, defaultdict
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.base import clone
 from sklearn.model_selection import TimeSeriesSplit, StratifiedKFold
@@ -435,6 +439,25 @@ def ensure_tables():
 
         conn.commit()
     log.info("Backtest tables verified.")
+
+
+def ensure_component_analysis_table():
+    """Create the nightly Component Analysis cache table if it doesn't exist yet."""
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS component_analysis_cache (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER REFERENCES backtest_runs(id),
+                payload JSONB NOT NULL,
+                computed_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_component_analysis_cache_computed_at
+            ON component_analysis_cache (computed_at DESC)
+        """))
+        conn.commit()
+    log.info("component_analysis_cache table verified.")
 
 
 # ─────────────────────────────────────────────
@@ -5178,6 +5201,775 @@ def write_results(run_id, feature_recommendations, component_results,
 
 
 # ─────────────────────────────────────────────
+# COMPONENT ANALYSIS (nightly, all history)
+# Ported 1:1 from app.py's former api_component_analysis() live route —
+# see notes_parsing.py for the shared notes-parsing / bucketing helpers.
+# ─────────────────────────────────────────────
+def run_full_component_analysis(df):
+    log.info("Running full component analysis (nightly, all history)...")
+    stake = 10.0
+
+    # ── Group horse-races by race_id ────────────────────────────────────
+    races = defaultdict(list)
+    for row in df.itertuples(index=False):
+        notes = row.analyzer_notes
+        notes = notes if isinstance(notes, str) else ''
+
+        parsed_score = parse_analyzer_score(notes)
+        base_score = row.analyzer_score
+        base_score = float(base_score) if pd.notna(base_score) else 0.0
+        ranking_score = parsed_score if parsed_score is not None else base_score
+
+        finish_pos = int(row.finish_position) if pd.notna(row.finish_position) else 0
+        sp = float(row.sp) if pd.notna(row.sp) else 0.0
+
+        races[row.race_id].append({
+            'horse_name': row.horse_name,
+            'score':      ranking_score,
+            'notes':      notes,
+            'finish_pos': finish_pos,
+            'sp':         sp,
+            'components': parse_notes_components(notes),
+        })
+
+    # ══════════════════════════════════════════════════════════════════
+    # A — COMPONENT ROI STATS (all horses, ROI sorted)
+    # ══════════════════════════════════════════════════════════════════
+    comp_stats = defaultdict(lambda: {
+        'appearances': 0, 'wins': 0, 'places': 0, 'profit': 0.0
+    })
+
+    for race_id, horses in races.items():
+        for h in horses:
+            won    = h['finish_pos'] == 1
+            placed = h['finish_pos'] in (1, 2, 3)
+            profit = (h['sp'] * stake - stake) if won else -stake
+            for comp in h['components']:
+                if comp.startswith('_'):
+                    continue
+                comp_stats[comp]['appearances'] += 1
+                if won:
+                    comp_stats[comp]['wins'] += 1
+                    comp_stats[comp]['profit'] += profit
+                else:
+                    comp_stats[comp]['profit'] -= stake
+                if placed:
+                    comp_stats[comp]['places'] += 1
+
+    components_list = []
+    for name, stats in sorted(comp_stats.items(), key=lambda x: x[1]['profit'] / max(x[1]['appearances'], 1), reverse=True):
+        n = stats['appearances']
+        if n < 2:
+            continue
+        w = stats['wins']
+        p = stats['places']
+        roi = round(stats['profit'] / (n * stake) * 100, 1)
+        components_list.append({
+            'name':        name,
+            'appearances': n,
+            'wins':        w,
+            'strike_rate': round(w / n * 100, 1),
+            'places':      p,
+            'place_rate':  round(p / n * 100, 1),
+            'roi':         roi,
+        })
+
+    components_list.sort(key=lambda x: x['roi'], reverse=True)
+
+    # ══════════════════════════════════════════════════════════════════
+    # A (ENHANCED) — RACE-RELATIVE COMPONENT LIFT
+    # ══════════════════════════════════════════════════════════════════
+    comp_with    = defaultdict(lambda: {'races': 0, 'wins': 0})
+    comp_without = defaultdict(lambda: {'races': 0, 'wins': 0})
+
+    for race_id, horses in races.items():
+        if len(horses) < 2:
+            continue
+        all_comps_in_race = set()
+        for h in horses:
+            all_comps_in_race.update(
+                k for k in h['components'] if not k.startswith('_')
+            )
+        for comp in all_comps_in_race:
+            for h in horses:
+                has_comp = comp in h['components']
+                won      = h['finish_pos'] == 1
+                if has_comp:
+                    comp_with[comp]['races'] += 1
+                    if won:
+                        comp_with[comp]['wins'] += 1
+                else:
+                    comp_without[comp]['races'] += 1
+                    if won:
+                        comp_without[comp]['wins'] += 1
+
+    race_relative = []
+    for comp in comp_with:
+        with_r = comp_with[comp]['races']
+        with_w = comp_with[comp]['wins']
+        wo_r   = comp_without[comp]['races']
+        wo_w   = comp_without[comp]['wins']
+        if with_r < 10 or wo_r < 10:
+            continue
+        with_sr = round(with_w / with_r * 100, 1)
+        wo_sr   = round(wo_w   / wo_r   * 100, 1)
+        lift    = round(with_sr - wo_sr, 1)
+        race_relative.append({
+            'name':        comp,
+            'with_races':  with_r,
+            'with_wins':   with_w,
+            'with_sr':     with_sr,
+            'without_sr':  wo_sr,
+            'lift':        lift,
+        })
+
+    race_relative.sort(key=lambda x: x['lift'], reverse=True)
+
+    # ══════════════════════════════════════════════════════════════════
+    # B — WINNER GAP ANALYSIS
+    # ══════════════════════════════════════════════════════════════════
+    gap_comp_counts = defaultdict(int)
+    gap_total_races = 0
+    top_pick_losses = 0
+
+    for race_id, horses in races.items():
+        if len(horses) < 2:
+            continue
+        top_pick = max(horses, key=lambda x: x['score'])
+        winner   = next((h for h in horses if h['finish_pos'] == 1), None)
+        if not winner:
+            continue
+        gap_total_races += 1
+        if top_pick['horse_name'] == winner['horse_name']:
+            continue
+        top_comps    = set(k for k in top_pick['components'] if not k.startswith('_'))
+        winner_comps = set(k for k in winner['components']   if not k.startswith('_'))
+        missing      = winner_comps - top_comps
+        top_pick_losses += 1
+        for comp in missing:
+            gap_comp_counts[comp] += 1
+
+    winner_gap = [
+        {
+            'component':     comp,
+            'count':         count,
+            'pct_of_losses': round(count / top_pick_losses * 100, 1) if top_pick_losses else 0,
+        }
+        for comp, count in sorted(gap_comp_counts.items(), key=lambda x: x[1], reverse=True)
+        if count >= 5
+    ]
+
+    # ══════════════════════════════════════════════════════════════════
+    # C — COMPONENT STACKING
+    # ══════════════════════════════════════════════════════════════════
+    stacking_buckets = {
+        '<0':    {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '0-4':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '5-9':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '10-14': {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '15-19': {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '20-24': {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '25-29': {'horses': 0, 'wins': 0, 'profit': 0.0},
+        '30+':   {'horses': 0, 'wins': 0, 'profit': 0.0},
+    }
+
+    def get_stacking_bucket(n):
+        if n < 0:     return '<0'
+        elif n <= 4:  return '0-4'
+        elif n <= 9:  return '5-9'
+        elif n <= 14: return '10-14'
+        elif n <= 19: return '15-19'
+        elif n <= 24: return '20-24'
+        elif n <= 29: return '25-29'
+        else:         return '30+'
+
+    for race_id, horses in races.items():
+        for h in horses:
+            pos_count = sum(
+                1 for k in h['components']
+                if is_scoring_component(k)
+                and k not in NEGATIVE_COMPONENTS
+            )
+            neg_count = sum(
+                1 for k in h['components']
+                if is_scoring_component(k)
+                and k in NEGATIVE_COMPONENTS
+            )
+            net_count = pos_count - neg_count
+            won    = h['finish_pos'] == 1
+            profit = (h['sp'] * stake - stake) if won else -stake
+            bucket = get_stacking_bucket(net_count)
+            stacking_buckets[bucket]['horses'] += 1
+            if won:
+                stacking_buckets[bucket]['wins'] += 1
+            stacking_buckets[bucket]['profit'] += profit
+
+    bucket_order = ['<0','0-4','5-9','10-14','15-19','20-24','25-29','30+']
+    stacking_results = {}
+    for bucket in bucket_order:
+        data = stacking_buckets[bucket]
+        n = data['horses']
+        w = data['wins']
+        stacking_results[bucket] = {
+            'horses':      n,
+            'wins':        w,
+            'strike_rate': round(w / n * 100, 1) if n else 0,
+            'roi':         round(data['profit'] / (n * stake) * 100, 1) if n else 0,
+            'profit':      round(data['profit'], 2),
+        }
+
+    # ══════════════════════════════════════════════════════════════════
+    # D — SCORING AUDIT (over/under scored)
+    # ══════════════════════════════════════════════════════════════════
+    comp_points_roi = defaultdict(lambda: {
+        'total_points': 0.0,
+        'appearances':  0,
+        'wins':         0,
+        'profit':       0.0
+    })
+
+    for race_id, horses in races.items():
+        for h in horses:
+            won    = h['finish_pos'] == 1
+            profit = (h['sp'] * stake - stake) if won else -stake
+            for comp, pts in h['components'].items():
+                if comp.startswith('_'):
+                    continue
+                if not isinstance(pts, (int, float)):
+                    continue
+                comp_points_roi[comp]['total_points'] += pts
+                comp_points_roi[comp]['appearances']  += 1
+                if won:
+                    comp_points_roi[comp]['wins']   += 1
+                    comp_points_roi[comp]['profit'] += profit
+                else:
+                    comp_points_roi[comp]['profit'] -= stake
+
+    scoring_audit = []
+    for comp, data in comp_points_roi.items():
+        n = data['appearances']
+        if n < 10:
+            continue
+        avg_pts    = round(data['total_points'] / n, 1)
+        roi        = round(data['profit'] / (n * stake) * 100, 1)
+        sr         = round(data['wins'] / n * 100, 1)
+        divergence = round(avg_pts - (roi / 10), 1)
+        scoring_audit.append({
+            'name':        comp,
+            'appearances': n,
+            'avg_pts':     avg_pts,
+            'strike_rate': sr,
+            'roi':         roi,
+            'divergence':  divergence,
+        })
+
+    scoring_audit.sort(key=lambda x: x['divergence'], reverse=True)
+
+    # Top pick per race — needed for the raw-factor mining pass below (E)
+    # so it can accumulate top-pick-only stats (F2) in the same loop.
+    top_picks = {}
+    for race_id, horses in races.items():
+        if horses:
+            top_picks[race_id] = max(horses, key=lambda x: x['score'])['horse_name']
+
+    # ══════════════════════════════════════════════════════════════════
+    # E — RAW FACTOR MINING (csv_data fields not scored by analyzer)
+    #     Also feeds F2 (top-pick-only raw factors) via the same pass —
+    #     see _current_is_top_pick below.
+    # ══════════════════════════════════════════════════════════════════
+    raw_buckets    = defaultdict(lambda: {"wins": 0, "total": 0, "profit": 0.0, "category": ""})
+    tp_raw_buckets = defaultdict(lambda: {"wins": 0, "total": 0, "profit": 0.0, "category": ""})
+    _current_is_top_pick = [False]
+
+    def _racc(key, category, won, sp):
+        raw_buckets[key]["wins"]    += 1 if won else 0
+        raw_buckets[key]["total"]   += 1
+        raw_buckets[key]["profit"]  += (sp * stake - stake) if won else -stake
+        raw_buckets[key]["category"] = category
+        if _current_is_top_pick[0]:
+            tp_raw_buckets[key]["wins"]    += 1 if won else 0
+            tp_raw_buckets[key]["total"]   += 1
+            tp_raw_buckets[key]["profit"]  += (sp * stake - stake) if won else -stake
+            tp_raw_buckets[key]["category"] = category
+
+    total_raw = len(df)
+    raw_wins  = int((df['finish_position'] == 1).sum())
+    raw_avg_wr = raw_wins / total_raw * 100 if total_raw else 0
+
+    for row in df.itertuples(index=False):
+        race_id = row.race_id
+        horse_name = row.horse_name
+        finish_pos = int(row.finish_position) if pd.notna(row.finish_position) else 0
+        sp = float(row.sp) if pd.notna(row.sp) else 0.0
+        won = finish_pos == 1
+
+        csv = row.csv_data
+        if isinstance(csv, str):
+            try:
+                csv = json.loads(csv)
+            except Exception:
+                csv = {}
+        if not isinstance(csv, dict):
+            csv = {}
+
+        track_cond = row.track_condition if isinstance(row.track_condition, str) else ''
+        meeting_name = row.meeting_name if isinstance(row.meeting_name, str) else ''
+
+        _current_is_top_pick[0] = (top_picks.get(race_id) == horse_name)
+
+        # Age + Sex
+        age = csv.get("horse age")
+        sex = csv.get("horse sex", "").strip()
+        if age and sex:
+            _racc(f"AgeSex:{age}yo {sex}", "Age / Sex", won, sp)
+        if age:
+            _racc(f"Age:{age}yo", "Age", won, sp)
+
+        # Country
+        country = csv.get("country", "").strip().upper()
+        if country:
+            label = ("AUS" if country in ("AUS","AUSTRALIA") else
+                     "NZ"  if country in ("NZ","NEW ZEALAND") else
+                     "IRE" if country in ("IRE","IRELAND")    else
+                     "GB"  if country in ("GB","GBR","UK")    else
+                     "Other")
+            _racc(f"Country:{label}", "Country of Origin", won, sp)
+
+        # Barrier
+        try:
+            b = int(str(csv.get("horse barrier","0") or 0).strip())
+            if 1 <= b <= 20:
+                bg = ("1" if b==1 else "2-3" if b<=3 else "4-6" if b<=6 else "7-9" if b<=9 else "10+")
+                _racc(f"BarrierGroup:{bg}", "Barrier Group", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # Weight type
+        wt = csv.get("weight type", "").strip()
+        if wt:
+            _racc(f"WeightType:{wt}", "Weight Type", won, sp)
+
+        # Sex restrictions
+        sr = csv.get("sex restrictions", "").strip()
+        if sr:
+            _racc(f"SexRestrict:{sr}", "Sex Restrictions", won, sp)
+
+        # Apprentice claim
+        try:
+            claim = float(str(csv.get("horse claim","0") or 0).strip())
+            if claim > 0:
+                cb = ("1kg" if claim<=1 else "1.5kg" if claim<=1.5 else "2kg" if claim<=2 else "3kg+")
+                _racc(f"Claim:{cb}", "Claim Allowance", won, sp)
+                _racc("Claim:HasClaim", "Claim: Any", won, sp)
+            else:
+                _racc("Claim:NoClaim", "Claim: No Claim", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # Last start finish position
+        fp_raw = csv.get("form position", "")
+        try:
+            fp = int(str(fp_raw).strip())
+            label = ("1st" if fp==1 else "2nd" if fp==2 else "3rd" if fp==3 else
+                     "4th-6th" if fp<=6 else "7th-10th" if fp<=10 else "11th+")
+            _racc(f"LastPos:{label}", "Last Start Position", won, sp)
+        except (ValueError, TypeError):
+            _racc("LastPos:NoForm", "Last Start Position", won, sp)
+
+        # Last start SP
+        try:
+            fpp = float(str(csv.get("form price","0") or 0).strip())
+            if fpp > 0:
+                pb = ("≤$2" if fpp<=2 else "$2-$4" if fpp<=4 else "$4-$8" if fpp<=8 else
+                      "$8-$15" if fpp<=15 else "$15-$30" if fpp<=30 else "$30+")
+                _racc(f"LastSP:{pb}", "Last Start SP", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # Last start margin
+        try:
+            fm  = float(str(csv.get("form margin","0") or 0).strip())
+            won_last = str(fp_raw).strip() == "1"
+            if won_last:
+                ml = ("Won <0.5L" if fm<0.5 else "Won 0.5-2L" if fm<=2 else
+                      "Won 2-5L" if fm<=5 else "Won 5L+")
+            else:
+                ml = ("Lost <1L" if fm<1 else "Lost 1-2L" if fm<=2 else
+                      "Lost 2-4L" if fm<=4 else "Lost 4-8L" if fm<=8 else "Lost 8L+")
+            _racc(f"LastMargin:{ml}", "Last Start Margin", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # Last start going
+        ftc = csv.get("form track condition", "").strip()
+        if ftc:
+            going_base = ftc.split()[0].capitalize()
+            _racc(f"LastGoing:{ftc}",          "Last Start Going (Full)",  won, sp)
+            _racc(f"LastGoingBase:{going_base}","Last Start Going (Type)", won, sp)
+
+        # Last start class type
+        fc = csv.get("form class", "").strip().upper()
+        if fc:
+            cls_type = ("Maiden"    if "MAIDEN" in fc else
+                        "Benchmark" if "BENCH"  in fc or "BM" in fc else
+                        "Restricted" if "REST"  in fc else
+                        "Class"     if "CLASS"  in fc else
+                        "Open"      if "OPEN"   in fc else
+                        "Group/Listed" if ("GROUP" in fc or "GR" in fc or "LIST" in fc) else "Other")
+            _racc(f"LastClassType:{cls_type}", "Last Start Class Type", won, sp)
+
+        # Distance change vs last start
+        try:
+            today_d = int(str(csv.get("distance","0") or 0).replace("m","").strip())
+            form_d  = int(str(csv.get("form distance","0") or 0).replace("m","").strip())
+            if today_d > 0 and form_d > 0:
+                delta = today_d - form_d
+                dl = ("Same ±200m"   if abs(delta)<=200 else
+                      "Up 200-400m"  if 200<delta<=400  else
+                      "Up 400m+"     if delta>400        else
+                      "Down 200-400m" if -400<=delta<-200 else "Down 400m+")
+                _racc(f"DistChange:{dl}", "Distance Change", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # Weight change vs last start
+        try:
+            hw  = float(str(csv.get("horse weight","0") or 0).strip())
+            fmw = float(str(csv.get("form weight","0")  or 0).strip())
+            if 49<=hw<=65 and 49<=fmw<=65:
+                diff = fmw - hw
+                wl = ("Same ±0.5kg"    if abs(diff)<0.5  else
+                      "Lighter ≤1.5kg" if 0.5<=diff<=1.5 else
+                      "Lighter >1.5kg" if diff>1.5        else
+                      "Heavier ≤1.5kg" if diff>=-1.5     else "Heavier >1.5kg")
+                _racc(f"WeightChange:{wl}", "Weight Change vs Last", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # Career win-rate bucket
+        rec = csv.get("horse record","").strip()
+        try:
+            parts  = rec.replace("-",":").split(":")
+            starts = int(parts[0]); wins_c = int(parts[1])
+            if starts >= 3:
+                cr = wins_c/starts*100
+                cl = ("0 wins ever" if wins_c==0 else "<10% SR" if cr<10 else
+                      "10-20% SR" if cr<20 else "20-33% SR" if cr<33 else
+                      "33-50% SR" if cr<50 else "50%+ SR")
+                _racc(f"CareerSR:{cl}", "Career Strike Rate", won, sp)
+        except (ValueError, TypeError, IndexError):
+            pass
+
+        # Race prizemoney tier
+        prize_raw = csv.get("race prizemoney","") or csv.get("prizemoney","")
+        pm_match  = re.search(r"\$([\d,]+)", str(prize_raw))
+        try:
+            if pm_match:
+                pv = int(pm_match.group(1).replace(",",""))
+                pl = ("<$30k" if pv<30_000 else "$30k-$60k" if pv<60_000 else
+                      "$60k-$100k" if pv<100_000 else "$100k-$200k" if pv<200_000 else "$200k+")
+                _racc(f"Prizemoney:{pl}", "Race Prizemoney", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # Last start field size
+        fsize_raw = csv.get("form other runners","")
+        try:
+            m2 = re.match(r"^(\d+)", str(fsize_raw).strip())
+            if m2:
+                total_runners = int(m2.group(1)) + 1
+                fl = ("Small ≤7" if total_runners<=7 else "Mid 8-11" if total_runners<=11 else
+                      "Large 12-15" if total_runners<=15 else "Big 16+")
+                _racc(f"LastFieldSize:{fl}", "Last Start Field Size", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # Last start sectional (600m)
+        sect_raw = csv.get("sectional","").strip()
+        sect_match = re.match(r"([\d.]+)sec", sect_raw)
+        try:
+            if sect_match:
+                sv = float(sect_match.group(1))
+                if sv > 1:
+                    sl = ("<33.5s" if sv<33.5 else "33.5-34.5s" if sv<34.5 else
+                          "34.5-35.5s" if sv<35.5 else "35.5-36.5s" if sv<36.5 else ">36.5s")
+                    _racc(f"LastSect600m:{sl}", "Last 600m Sectional", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # horse last10 form string
+        last10 = csv.get("horse last10","").strip()
+        if last10:
+            digits = [c for c in last10 if c.isdigit()]
+            if digits:
+                wins_10 = digits.count("1")
+                recent5 = digits[-5:]
+                w5 = recent5.count("1")
+                _racc(f"Last10Wins:{'4+' if wins_10>=4 else '2-3' if wins_10>=2 else '1' if wins_10==1 else '0'}",
+                      "Last 10 Win Count", won, sp)
+                _racc(f"Last5Wins:{'2+' if w5>=2 else '1' if w5==1 else '0'}",
+                      "Last 5 Win Count", won, sp)
+
+        # Same track as last start
+        form_track    = csv.get("form track","").strip()
+        meeting_track = meeting_name.split("_")[1] if "_" in meeting_name else meeting_name
+        if form_track and meeting_track:
+            same = form_track.lower() == meeting_track.lower()
+            _racc(f"SameTrack:{'Yes' if same else 'No'}", "Same Track as Last Start", won, sp)
+
+        # Unregistered jockey flag
+        jock_id = csv.get("horse jockey id","").strip()
+        _racc(f"JockeyReg:{'Unregistered' if not jock_id else 'Registered'}",
+              "Jockey Registration", won, sp)
+
+        # Age restrictions
+        age_restr = csv.get("age restrictions","").strip()
+        _racc(f"AgeRestriction:{age_restr if age_restr else 'Open Age'}", "Age Restrictions", won, sp)
+
+        # Today's track condition type
+        cond_base = (track_cond or "Unknown").split()[0].capitalize()
+        _racc(f"ConditionType:{cond_base}", "Condition Type", won, sp)
+
+        # Jockeys can claim
+        jcc = csv.get("jockeys can claim","").strip()
+        if jcc:
+            _racc(f"JockeysCanClaim:{jcc}", "Jockeys Can Claim", won, sp)
+
+        # ── PFAI SCORE ──
+        pfai_raw = csv.get("pfaiScore", "").strip()
+        try:
+            pfai_val = float(pfai_raw)
+            if pfai_val > 0:
+                pfai_bucket = (
+                    "85-100" if pfai_val >= 85 else
+                    "75-84"  if pfai_val >= 75 else
+                    "60-74"  if pfai_val >= 60 else
+                    "40-59"  if pfai_val >= 40 else
+                    "<40"
+                )
+                _racc(f"PFAI:{pfai_bucket}", "PFAI Score", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # ── RUNNING POSITION (speed map) ──
+        rp = csv.get("runningPosition", "").strip().upper()
+        if rp in ("LEADER", "ONPACE", "MIDFIELD", "BACKMARKER"):
+            _racc(f"RunPos:{rp}", "Running Position", won, sp)
+
+        # ── LAST 600m SECTIONAL RANK (field-relative) ──
+        try:
+            rank600 = int(str(csv.get("last600TimeRank", "") or "").strip())
+            if rank600 > 0:
+                r600_bucket = (
+                    "Rank 1"   if rank600 == 1 else
+                    "Rank 2-3" if rank600 <= 3 else
+                    "Rank 4-6" if rank600 <= 6 else
+                    "Rank 7+"
+                )
+                _racc(f"Rank600m:{r600_bucket}", "Last 600m Rank", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # ── LAST 400m SECTIONAL RANK ──
+        try:
+            rank400 = int(str(csv.get("last400TimeRank", "") or "").strip())
+            if rank400 > 0:
+                r400_bucket = (
+                    "Rank 1"   if rank400 == 1 else
+                    "Rank 2-3" if rank400 <= 3 else
+                    "Rank 4-6" if rank400 <= 6 else
+                    "Rank 7+"
+                )
+                _racc(f"Rank400m:{r400_bucket}", "Last 400m Rank", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # ── LAST 200m SECTIONAL RANK ──
+        try:
+            rank200 = int(str(csv.get("last200TimeRank", "") or "").strip())
+            if rank200 > 0:
+                r200_bucket = (
+                    "Rank 1"   if rank200 == 1 else
+                    "Rank 2-3" if rank200 <= 3 else
+                    "Rank 4-6" if rank200 <= 6 else
+                    "Rank 7+"
+                )
+                _racc(f"Rank200m:{r200_bucket}", "Last 200m Rank", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # ── LAST 600m RAW TIME ──
+        try:
+            time600 = float(str(csv.get("last600TimePrice", "") or "").strip())
+            if time600 > 1:
+                t600_bucket = (
+                    "<33.5s"     if time600 < 33.5 else
+                    "33.5-34.5s" if time600 < 34.5 else
+                    "34.5-35.5s" if time600 < 35.5 else
+                    ">35.5s"
+                )
+                _racc(f"Time600m:{t600_bucket}", "Last 600m Time", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+        # ── RUNNING POSITION × DISTANCE ──
+        try:
+            dist_int = int(str(csv.get("distance", "0") or "0").replace("m", "").strip())
+            dist_type = (
+                "Sprint"  if dist_int <= 1200 else
+                "Mile"    if dist_int <= 1700 else
+                "Middle"  if dist_int <= 2200 else
+                "Staying"
+            )
+            if rp in ("LEADER", "ONPACE", "MIDFIELD", "BACKMARKER"):
+                _racc(f"RunPosDist:{rp}_{dist_type}", "Running Position × Distance", won, sp)
+        except (ValueError, TypeError):
+            pass
+
+    # Build raw_factors list — min 30 appearances, sorted by ROI
+    min_raw_n = 30
+    raw_factors = []
+    for key, stats in raw_buckets.items():
+        n = stats["total"]
+        if n < min_raw_n:
+            continue
+        w   = stats["wins"]
+        wr  = w / n * 100
+        roi = stats["profit"] / (n * stake) * 100
+        lift = wr - raw_avg_wr
+        raw_factors.append({
+            "key":      key,
+            "category": stats["category"],
+            "label":    key.split(":",1)[1] if ":" in key else key,
+            "total":    n,
+            "wins":     w,
+            "win_rate": round(wr, 1),
+            "roi":      round(roi, 1),
+            "lift":     round(lift, 1),
+            "profit":   round(stats["profit"], 2),
+        })
+
+    raw_factors.sort(key=lambda x: x["roi"], reverse=True)
+
+    # ══════════════════════════════════════════════════════════════════
+    # F — TOP PICK ONLY COMPONENT ANALYSIS
+    #     F1: parsed notes components (mirror of A, top pick only)
+    #     F2: raw CSV bucketed factors (mirror of E, top pick only) —
+    #         accumulated above in the same pass as E, via tp_raw_buckets.
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── F1: Parsed notes components — top pick only ─────────────────
+    tp_comp_stats = defaultdict(lambda: {
+        'appearances': 0, 'wins': 0, 'places': 0, 'profit': 0.0
+    })
+
+    for race_id, horses in races.items():
+        for h in horses:
+            if h['horse_name'] != top_picks.get(race_id):
+                continue
+            won    = h['finish_pos'] == 1
+            placed = h['finish_pos'] in (1, 2, 3)
+            profit = (h['sp'] * stake - stake) if won else -stake
+            for comp in h['components']:
+                if comp.startswith('_'):
+                    continue
+                tp_comp_stats[comp]['appearances'] += 1
+                if won:
+                    tp_comp_stats[comp]['wins']   += 1
+                    tp_comp_stats[comp]['profit'] += profit
+                else:
+                    tp_comp_stats[comp]['profit'] -= stake
+                if placed:
+                    tp_comp_stats[comp]['places'] += 1
+
+    tp_notes_list = []
+    for name, stats in tp_comp_stats.items():
+        n = stats['appearances']
+        if n < 2:
+            continue
+        w   = stats['wins']
+        p   = stats['places']
+        roi = round(stats['profit'] / (n * stake) * 100, 1)
+        tp_notes_list.append({
+            'name':        name,
+            'appearances': n,
+            'wins':        w,
+            'strike_rate': round(w / n * 100, 1),
+            'places':      p,
+            'place_rate':  round(p / n * 100, 1),
+            'roi':         roi,
+        })
+
+    tp_notes_list.sort(key=lambda x: x['roi'], reverse=True)
+
+    # Build F2 list
+    tp_raw_list = []
+    for key, stats in tp_raw_buckets.items():
+        n = stats["total"]
+        if n < 2:
+            continue
+        w   = stats["wins"]
+        roi = round(stats["profit"] / (n * stake) * 100, 1)
+        tp_raw_list.append({
+            "key":        key,
+            "category":   stats["category"],
+            "label":      key.split(":",1)[1] if ":" in key else key,
+            "appearances": n,
+            "wins":       w,
+            "strike_rate": round(w / n * 100, 1),
+            "roi":        roi,
+            "profit":     round(stats["profit"], 2),
+        })
+
+    tp_raw_list.sort(key=lambda x: x["roi"], reverse=True)
+
+    raw_meta = {
+        "total_horses":     total_raw,
+        "overall_win_rate": round(raw_avg_wr, 1),
+        "min_n":            min_raw_n,
+    }
+
+    log.info(
+        "Full component analysis complete: %d components, %d raw factors, %d races.",
+        len(components_list), len(raw_factors), len(races),
+    )
+
+    return {
+        'components':      components_list,
+        'race_relative':   race_relative,
+        'winner_gap':      winner_gap,
+        'winner_gap_meta': {
+            'total_races':     gap_total_races,
+            'top_pick_losses': top_pick_losses,
+            'top_pick_wins':   gap_total_races - top_pick_losses,
+            'top_pick_sr':     round((gap_total_races - top_pick_losses) / gap_total_races * 100, 1) if gap_total_races else 0,
+        },
+        'stacking':        stacking_results,
+        'scoring_audit':   scoring_audit,
+        'raw_factors':     raw_factors,
+        'raw_meta':        raw_meta,
+        'tp_notes':        tp_notes_list,
+        'tp_raw':          tp_raw_list,
+    }
+
+
+def write_component_analysis_cache(payload, run_id):
+    with engine.connect() as conn:
+        conn.execute(text("""
+            INSERT INTO component_analysis_cache (run_id, payload, computed_at)
+            VALUES (:run_id, :payload, NOW())
+        """), {'run_id': run_id, 'payload': json.dumps(payload)})
+        conn.execute(text("""
+            DELETE FROM component_analysis_cache
+            WHERE id NOT IN (
+                SELECT id FROM component_analysis_cache ORDER BY computed_at DESC LIMIT 5
+            )
+        """))
+        conn.commit()
+    log.info("Wrote component analysis cache (run_id=%s).", run_id)
+
+
+# ─────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────
 def main():
@@ -5187,6 +5979,7 @@ def main():
     log.info("=" * 80)
 
     ensure_tables()
+    ensure_component_analysis_table()
 
     rollback_model_id = os.environ.get('ML_ROLLBACK_MODEL_ID')
     if rollback_model_id:
@@ -5217,6 +6010,12 @@ def main():
 
     try:
         df, strike_rate_data = load_historical_data()
+
+        try:
+            component_analysis_payload = run_full_component_analysis(df)
+            write_component_analysis_cache(component_analysis_payload, run_id)
+        except Exception as e:
+            log.warning(f"Full component analysis (nightly) failed (non-fatal): {e}", exc_info=True)
 
         if len(df) < 50:
             log.warning("Not enough historical data (need 50+ races with results).")

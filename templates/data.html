@@ -1295,6 +1295,12 @@ function renderComponentAnalysis(data) {
 
     let html = '<div class="card-body">';
 
+    if (data.last_updated) {
+        const updatedDate = new Date(data.last_updated);
+        const updatedLabel = isNaN(updatedDate.getTime()) ? data.last_updated : updatedDate.toLocaleString();
+        html += `<p class="text-muted mb-3" style="font-size:12px"><i class="bi bi-clock-history"></i> Component analysis as of ${updatedLabel} (nightly snapshot, not live)</p>`;
+    }
+
     // ── A — Existing component table ──────────────────────────────────
     html += '<h5 style="margin-bottom:8px">📊 Component ROI Analysis</h5>';
     html += '<p class="text-muted mb-3" style="font-size:12px">All horses — which scoring factors predict winners? Sorted by ROI.</p>';
