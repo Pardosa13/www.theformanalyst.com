@@ -1608,6 +1608,7 @@ function updateScratchings(meetingId) {
           <th style="padding:12px; text-align:center;">Ladbrokes Price</th>
           <th style="padding:12px; text-align:center;">Win %</th>
           <th style="padding:12px; text-align:center;" title="Model's fair win probability minus the market's implied probability from the live Ladbrokes price. A bigger positive edge means the model likes this horse more than the market does.">Edge</th>
+          <th style="padding:12px; text-align:center;" title="Share of bankroll to stake on this horse, solved across the whole field at once (runners in a race are mutually exclusive, so the right size for each bet depends on the others). A dash means the price is too short to be worth backing — the model's ranking is unaffected either way.">Kelly Stake</th>
           {% if current_user.is_admin %}
           <th style="padding:12px; text-align:left;">Notes</th>
           {% endif %}
@@ -1664,6 +1665,13 @@ function updateScratchings(meetingId) {
             <!-- Populated once Ladbrokes price arrives: model fair win% minus market implied% -->
             <span class="edge-value" style="color:#666;font-size:13px;">—</span>
           </td>
+          <td style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0; font-weight:700;">
+            {% if horse.kelly_stake_pct and horse.kelly_stake_pct > 0 %}
+              <span style="color:#00a37a;">Back — {{ (horse.kelly_stake_pct * 100)|round(1) }}% of bankroll</span>
+            {% else %}
+              <span style="color:#666;font-size:13px;font-weight:400;">—</span>
+            {% endif %}
+          </td>
           {% if current_user.is_admin %}
 <td style="padding:12px; border-bottom:1px solid #e2e8f0; font-size:11px; max-width:300px;">
   <details>
@@ -1676,6 +1684,18 @@ function updateScratchings(meetingId) {
         {% endfor %}
       </tbody>
     </table>
+  </div>
+
+  {% set backed = race.horses|selectattr('kelly_stake_pct')|list %}
+  <div style="margin-top:10px; font-size:13px; color:#6c757d;">
+    {% if not race.kelly_market_available %}
+      Kelly stakes need a live market price — none available for this race yet.
+    {% elif not backed %}
+      No value bet this race — nothing in the field is priced above what the model rates it.
+    {% else %}
+      Staking {{ (backed|sum(attribute='kelly_stake_pct') * 100)|round(1) }}% of bankroll across
+      {{ backed|length }} runner{% if backed|length != 1 %}s{% endif %} in this race.
+    {% endif %}
   </div>
 
   <!-- Track Bias Indicator -->

@@ -82,6 +82,18 @@ class DummySavedModel:
     feature_names_in_ = ["horse_age", "horse_weight"]
 
 
+class DummyScoringModel:
+    """Saved artifact that can actually be re-scored, for heal paths that run a
+    full out-of-sample re-validation rather than only a walk-forward re-test."""
+
+    feature_names_in_ = ["horse_age", "horse_weight"]
+
+    def predict_proba(self, X):
+        import numpy as np
+        p = np.full(len(X), 0.4)
+        return np.column_stack([1 - p, p])
+
+
 class FetchResult:
     def __init__(self, row):
         self.row = row
@@ -696,6 +708,35 @@ def test_check_active_champion_staleness_self_heals_without_rollback(monkeypatch
     # durable alert is resolved rather than left open for a human to act on.
     assert "champion_missing_walk_forward_validation" in conn.resolved_alert_keys
     assert conn.pipeline_alerts == []
+
+
+def test_champion_carrying_pre_joint_kelly_metrics_is_fully_re_validated(monkeypatch):
+    """A champion promoted under the old one-bet-per-race Kelly simulation has
+    bankroll numbers describing a staking plan that no longer exists. Scoring
+    it from those against challengers measured on the joint allocation would
+    compare two different plans, so the heal must rebuild its raw metrics —
+    not just bolt walk-forward folds onto the stale ones."""
+    champion_metrics = {
+        "selection_score": 10.0, "roi": 4.0, "strike_rate": 18.0,
+        # Old format: no avg_horses_backed_per_race, because the old simulator
+        # only ever backed the top pick.
+        "kelly_staking": {"bankroll_growth": 3.0, "final_bankroll": 4.0,
+                          "max_drawdown_pct": 5.0, "ruined": False},
+    }
+    conn = FakeHealConnection(
+        champion_row=(101, json.dumps(champion_metrics)),
+        pkl_bytes=_pkl_bytes(DummyScoringModel()),
+        is_active=True,
+        rejected_rows=[],
+    )
+    _setup_heal_env(monkeypatch, conn)
+
+    backtest.check_active_champion_staleness(run_id=42)
+
+    updated_metrics = json.loads(conn.updated_champion["metrics"])
+    healed_kelly = updated_metrics["kelly_staking"]
+    assert "avg_horses_backed_per_race" in healed_kelly
+    assert healed_kelly["bankroll_growth"] != 3.0
 
 
 def test_check_active_champion_staleness_self_heals_and_rolls_back(monkeypatch):

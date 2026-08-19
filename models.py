@@ -131,6 +131,11 @@ class Prediction(db.Model):
     value_edge_ml_win_prob_pct = db.Column(db.Float, nullable=True)
     value_edge_price = db.Column(db.Float, nullable=True)
     value_edge_captured_at = db.Column(db.DateTime, nullable=True)
+    # Fraction of bankroll the joint Kelly solver allocates to this runner,
+    # computed against the live market price for the race and refreshed
+    # whenever the ML meeting view is rendered pre-race. NULL or 0 means the
+    # solver backed nothing here — the runner is not a value bet at that price.
+    kelly_stake_pct = db.Column(db.Float, nullable=True)
 
     def __repr__(self):
         return f'<Prediction {self.horse_id}: {self.score}>'

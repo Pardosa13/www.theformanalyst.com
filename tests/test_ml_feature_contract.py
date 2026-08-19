@@ -100,10 +100,10 @@ def test_live_contract_still_fails_when_stored_features_are_not_generated():
         )
 
 
-def test_live_feature_contract_passes_with_full_204_feature_contract():
+def test_live_feature_contract_passes_with_full_feature_contract():
     """A model trained on the full audit feature set must pass the live
     contract audit — the 146-feature cap is lifted."""
-    assert len(FEATURE_NAMES) == 204
+    assert len(FEATURE_NAMES) == 207
     model = DummyModel(FEATURE_NAMES)
     raw_X = pd.DataFrame([{name: float(idx) for idx, name in enumerate(FEATURE_NAMES)}])
     final_X = raw_X.reindex(columns=FEATURE_NAMES)

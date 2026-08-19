@@ -495,6 +495,19 @@ with app.app_context():
     except Exception as e:
         print(f"ML Value Edge migration check: {e}")
 
+    # Joint-Kelly stake recommendation, same snapshot-column pattern as above.
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        predictions_columns = {col['name'] for col in inspector.get_columns('predictions')}
+        if 'kelly_stake_pct' not in predictions_columns:
+            with db.engine.connect() as conn:
+                conn.execute(text('ALTER TABLE predictions ADD COLUMN kelly_stake_pct FLOAT'))
+                conn.commit()
+            print("Added kelly_stake_pct column to predictions table")
+    except Exception as e:
+        print(f"Kelly stake migration check: {e}")
+
     try:
         from sqlalchemy import inspect, text
         inspector = inspect(db.engine)
@@ -5784,12 +5797,80 @@ def _derive_ml_race_book(runners, score_getter):
         }
     return book
 
+
+def _apply_joint_kelly_stakes(race, meeting, track_name, date_str):
+    """Attach (and persist) joint-Kelly stake recommendations for one race.
+
+    The stake for a runner depends on the whole field — runners are mutually
+    exclusive, so the allocation is solved across the race at once rather than
+    bet by bet. It needs two things together, which is why it happens here: the
+    model's fair win probability (already derived above from ml_score) and a
+    live market price for a race that has not been run. The only source of the
+    latter in this codebase is the Ladbrokes fixed-win feed, the same feed and
+    the same staleness/closed-market gating the Best Bets scan uses.
+
+    Sets race['kelly_market_available'] so the template can tell "the market
+    says nothing here is a value bet" apart from "we could not price the race".
+    This never touches the model's ranking — only the stake beside it.
+    """
+    from types import SimpleNamespace
+    from ml_predict import compute_kelly_stakes_for_race
+
+    race['kelly_market_available'] = False
+    for horse in race['horses']:
+        horse['kelly_stake_pct'] = None
+
+    if not (track_name and date_str):
+        return
+
+    race_info = match_race_info(track_name, date_str, race['race_number'])
+    if not (race_info and race_info.get('uuid')):
+        return
+
+    runners = [
+        SimpleNamespace(id=horse.get('horse_id'), horse_name=horse.get('horse_name'),
+                        is_scratched=horse.get('is_scratched'))
+        for horse in race['horses']
+    ]
+    market, market_state = _rank_active_ladbrokes_market(fetch_race_odds(race_info['uuid']), runners)
+    if not market_state.get('available'):
+        return
+    race['kelly_market_available'] = True
+
+    stakes = compute_kelly_stakes_for_race([
+        {
+            'horse_id': horse.get('horse_id'),
+            'win_probability': (horse.get('ml_fair_probability_pct') or 0.0) / 100.0,
+            'odds': (market.get(horse.get('horse_id')) or {}).get('price'),
+        }
+        for horse in race['horses']
+        if not horse.get('is_scratched') and horse.get('ml_fair_probability_pct')
+    ])
+
+    # Every priced runner is written, backed or not, so a stake left over from
+    # an earlier price cannot linger on a horse the market has since shortened.
+    priced = {
+        horse['horse_id']: float(stakes.get(horse['horse_id'], 0.0))
+        for horse in race['horses']
+        if not horse.get('is_scratched') and horse.get('horse_id') in market
+    }
+    for horse in race['horses']:
+        if horse.get('horse_id') in priced:
+            horse['kelly_stake_pct'] = priced[horse['horse_id']]
+    if not priced:
+        return
+    for prediction in Prediction.query.filter(Prediction.horse_id.in_(priced)).all():
+        prediction.kelly_stake_pct = priced[prediction.horse_id]
+
+
 @app.route("/ml-meeting/<int:meeting_id>")
 @login_required
 def ml_view_meeting(meeting_id):
     """View a meeting ranked by ML scores."""
     meeting = Meeting.query.get_or_404(meeting_id)
     results = get_meeting_results(meeting_id)
+    track_name = _track_from_meeting(meeting)
+    date_str = meeting.date.strftime('%Y-%m-%d') if meeting.date else None
 
     # Re-sort horses within each race by ml_score (highest first) and build
     # ML-only assessed prices/probabilities for the ML meeting view.  These
@@ -5818,6 +5899,18 @@ def ml_view_meeting(meeting_id):
             # odds are polled in — kept separate from ml_win_probability
             # above, which is inflated by the 110% book for odds display.
             horse['ml_fair_probability_pct'] = round(book_entry['ml_fair_probability'] * 100.0, 2)
+
+        try:
+            _apply_joint_kelly_stakes(race, meeting, track_name, date_str)
+        except Exception as e:
+            logger.warning("Joint Kelly staking failed for meeting %s race %s: %s",
+                           meeting_id, race.get('race_number'), e)
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("Could not persist Kelly stakes for meeting %s: %s", meeting_id, e)
 
     return render_template(
         "MLRaceMeetings.html",

@@ -27,7 +27,7 @@ import backtest
 import ml_predict
 
 
-EXPECTED_LIVE_FEATURE_COUNT = 204  # 146 legacy + 58 audit features
+EXPECTED_LIVE_FEATURE_COUNT = 207  # 146 legacy + 58 audit + 3 opponent-quality-form
 
 
 def full_csv_data(tab_no=1, jockey="John Smith", trainer="Jane Doe",
@@ -221,9 +221,10 @@ class FakeRace:
 
 
 class FakeHorse:
-    def __init__(self, horse_id, cd):
+    def __init__(self, horse_id, cd, horse_name='Test Runner'):
         self.id = horse_id
         self.csv_data = cd
+        self.horse_name = horse_name
         self.is_scratched = False
 
 
@@ -266,6 +267,8 @@ class FakeSession:
             return Rows([('Great Sire', 40, 6)])
         if "'horse dam'" in sql:
             return Rows([('Great Dam', 12, 3)])
+        if 'FROM horse_form_scores' in sql:
+            return Rows([('test runner', 1.75), ('other runner', -0.5)])
         raise AssertionError(f"Unhandled SQL in fake session: {sql}")
 
 
@@ -292,8 +295,8 @@ def test_predict_meeting_reports_zero_missing_and_zero_defaulted_features(monkey
     models_stub.Horse = FakeHorse
     monkeypatch.setitem(sys.modules, 'models', models_stub)
 
-    horses = [FakeHorse(11, full_csv_data(tab_no=1, barrier=2)),
-              FakeHorse(12, full_csv_data(tab_no=2, barrier=9))]
+    horses = [FakeHorse(11, full_csv_data(tab_no=1, barrier=2), 'Test Runner'),
+              FakeHorse(12, full_csv_data(tab_no=2, barrier=9), 'Other Runner')]
     horses[1].csv_data['pfaiscore'] = '65.0'
     meeting = FakeMeeting()
     session = FakeSession(meeting, [FakeRace(horses)])
