@@ -991,6 +991,20 @@ def test_featureless_model_cannot_be_activated_by_direct_rollback(monkeypatch):
 # under an explicitly logged/alerted fallback rule, never silently.
 # ─────────────────────────────────────────────
 
+def _dummy_live_contract():
+    """The live feature contract, as the fallback tests' dummy artifacts see it.
+
+    ensure_champion_exists_after_run now requires a fallback candidate's stored
+    feature list to BE the current live contract, not merely a subset of it
+    (that is what let a 146-feature model look eligible against a 207-feature
+    live contract). The dummy artifacts here carry two features, so the live
+    contract has to be those same two for a valid candidate to stay valid —
+    every "must be excluded" fixture still fails for its own reason: no
+    feature list at all, or a feature live scoring cannot generate.
+    """
+    return ["horse_age", "horse_weight"]
+
+
 class FakeEnsureConnection:
     """Fakes the SQL surface ensure_champion_exists_after_run touches."""
 
@@ -1081,6 +1095,7 @@ def test_ensure_champion_exists_after_run_promotes_best_valid_feature_complete_c
     )
     monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
     monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+    monkeypatch.setattr(backtest, "_live_scoring_feature_names", _dummy_live_contract)
 
     rollback_calls = []
     monkeypatch.setattr(
@@ -1098,10 +1113,14 @@ def test_ensure_champion_exists_after_run_promotes_best_valid_feature_complete_c
     assert any(a.get("key") == "fallback_champion_promotion" and a.get("severity") == "blocking" for a in conn.pipeline_alerts)
 
 
-def test_ensure_champion_exists_after_run_promotes_even_when_all_folds_negative(monkeypatch):
-    """The one candidate on record failed the normal 'walk-forward all
-    negative' gate — that gate must not be the reason the night ends with zero
-    champions when there is nothing else to promote."""
+def test_ensure_champion_exists_after_run_refuses_a_candidate_that_lost_on_every_fold(monkeypatch):
+    """The fallback used to waive the 'every walk-forward fold negative' veto
+    on the reasoning that some champion beats no champion. That is backwards:
+    a candidate whose own out-of-sample folds all lose money is not a weaker
+    champion, it is a known-losing one, and promoting it unopposed puts real
+    stakes on bets nothing has validated. No champion shows no picks, which
+    costs nothing. Ending the night with zero champions and a blocking alert
+    is the correct outcome here."""
     negative_metrics = metrics(roi=-3.0)
     negative_metrics["walk_forward"] = {
         "folds": [{"roi": -1.0, "bets": 50}, {"roi": -2.0, "bets": 50}], "roi_std": 0.3,
@@ -1110,18 +1129,18 @@ def test_ensure_champion_exists_after_run_promotes_even_when_all_folds_negative(
     conn = FakeEnsureConnection(active_row=None, candidate_rows=[only_row])
     monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
     monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+    monkeypatch.setattr(backtest, "_live_scoring_feature_names", _dummy_live_contract)
 
-    rollback_calls = []
-    monkeypatch.setattr(
-        backtest, "rollback_to_champion",
-        lambda model_id, reason='': rollback_calls.append((model_id, reason)),
-    )
+    def _fail_if_called(model_id, reason=''):
+        raise AssertionError("a candidate that lost on every walk-forward fold must never be promoted")
+    monkeypatch.setattr(backtest, "rollback_to_champion", _fail_if_called)
 
     backtest.ensure_champion_exists_after_run(run_id=88)
 
-    assert len(rollback_calls) == 1
-    assert rollback_calls[0][0] == 301
-    assert "FALLBACK PROMOTION" in rollback_calls[0][1]
+    alert = next(a for a in conn.pipeline_alerts if a.get("key") == "no_active_champion")
+    assert alert["severity"] == "blocking"
+    assert "every walk-forward fold" in alert["message"]
+    assert conn.stamped_updates == []
 
 
 def test_ensure_champion_exists_after_run_records_blocking_alert_when_nothing_valid(monkeypatch):
@@ -1135,6 +1154,7 @@ def test_ensure_champion_exists_after_run_records_blocking_alert_when_nothing_va
     conn = FakeEnsureConnection(active_row=None, candidate_rows=[featureless_row])
     monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
     monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+    monkeypatch.setattr(backtest, "_live_scoring_feature_names", _dummy_live_contract)
 
     def _fail_if_called(model_id, reason=''):
         raise AssertionError("must not promote anything when nothing valid exists")
@@ -1182,6 +1202,7 @@ def test_fallback_promotion_rejects_a_candidate_with_an_implausible_score(monkey
     conn = FakeEnsureConnection(active_row=None, candidate_rows=[corrupt_row, honest_row])
     monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
     monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+    monkeypatch.setattr(backtest, "_live_scoring_feature_names", _dummy_live_contract)
 
     rollback_calls = []
     monkeypatch.setattr(
@@ -1206,6 +1227,7 @@ def test_fallback_promotion_alerts_rather_than_promoting_the_only_corrupt_candid
     conn = FakeEnsureConnection(active_row=None, candidate_rows=[corrupt_row])
     monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
     monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+    monkeypatch.setattr(backtest, "_live_scoring_feature_names", _dummy_live_contract)
 
     def _fail_if_called(model_id, reason=''):
         raise AssertionError("a candidate with an implausible score must never be promoted")
@@ -1232,6 +1254,7 @@ def test_fallback_promotion_keeps_the_whole_observed_score_range_eligible(monkey
         conn = FakeEnsureConnection(active_row=None, candidate_rows=[row])
         monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
         monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+        monkeypatch.setattr(backtest, "_live_scoring_feature_names", _dummy_live_contract)
 
         rollback_calls = []
         monkeypatch.setattr(
@@ -1242,3 +1265,155 @@ def test_fallback_promotion_keeps_the_whole_observed_score_range_eligible(monkey
         backtest.ensure_champion_exists_after_run(run_id=91)
 
         assert rollback_calls == [90], f"an ordinary candidate (roi={roi}) must stay eligible"
+
+
+# ── Champion Score: a contradicted holdout ROI earns nothing ────────────────
+# Model 81's headline holdout ROI was +50.6% while every one of its own
+# walk-forward folds was negative (-2.7%, -14.3%, -6.8%). The old blend still
+# handed it 0.3 * 50.6 = +15.2 points of Champion Score for that number, which
+# is most of what made it look promotable. A holdout ROI that every honest
+# out-of-sample fold contradicts must buy no credit at all.
+
+def _model_81_shaped_metrics(holdout_roi):
+    data = metrics(roi=holdout_roi, selection_score=None)
+    data["walk_forward"] = {
+        "folds": [
+            {"roi": -2.7, "bets": 60},
+            {"roi": -14.3, "bets": 60},
+            {"roi": -6.8, "bets": 60},
+        ],
+        "roi_std": 0.0,
+    }
+    return data
+
+
+def test_holdout_roi_earns_no_credit_when_every_walk_forward_fold_is_negative():
+    """The model 81 case. A wildly positive holdout must score exactly the same
+    as a zero holdout once every fold disagrees with it — otherwise the number
+    we know is unreliable is still doing the promoting."""
+    great_holdout = backtest._selection_score_from_metrics(
+        _model_81_shaped_metrics(50.6), force_recompute=True)
+    zero_holdout = backtest._selection_score_from_metrics(
+        _model_81_shaped_metrics(0.0), force_recompute=True)
+
+    assert great_holdout == zero_holdout, "a contradicted holdout ROI must add nothing to the score"
+    # And the score it does get is the walk-forward evidence: mean of the folds.
+    mean_fold_roi = (-2.7 + -14.3 + -6.8) / 3
+    only_folds = backtest._selection_score_from_metrics(
+        {k: v for k, v in _model_81_shaped_metrics(0.0).items() if k != "roi"}, force_recompute=True)
+    assert abs(great_holdout - only_folds) < 1e-9
+    assert great_holdout < mean_fold_roi + 1.0, "score must sit at the walk-forward evidence, not above it"
+
+
+def test_holdout_roi_still_counts_against_a_model_when_it_is_worse_than_the_folds():
+    """Dropping the holdout term must not become a way to launder a bad
+    holdout into a better score: it loses its weight only where it would
+    RAISE the score. A holdout worse than the folds agrees with them."""
+    bad_holdout = backtest._selection_score_from_metrics(
+        _model_81_shaped_metrics(-60.0), force_recompute=True)
+    zero_holdout = backtest._selection_score_from_metrics(
+        _model_81_shaped_metrics(0.0), force_recompute=True)
+
+    assert bad_holdout < zero_holdout, "a holdout worse than the folds must still drag the score down"
+
+
+def test_normal_blend_survives_when_the_folds_are_not_all_negative():
+    """The 0.3/0.7 blend is unchanged for every model whose walk-forward
+    evidence has not uniformly contradicted its holdout."""
+    def _mixed(holdout_roi):
+        data = metrics(roi=holdout_roi, selection_score=None)
+        data["walk_forward"] = {
+            "folds": [{"roi": -4.0, "bets": 50}, {"roi": 6.0, "bets": 50}], "roi_std": 0.0,
+        }
+        # Neutralise the stability penalty (which is itself measured against
+        # the holdout ROI) so this asserts on the blend alone.
+        data["stability"] = {}
+        return data
+
+    mixed, zero_holdout = _mixed(20.0), _mixed(0.0)
+
+    scored = backtest._selection_score_from_metrics(mixed, force_recompute=True)
+    scored_zero = backtest._selection_score_from_metrics(zero_holdout, force_recompute=True)
+
+    assert abs((scored - scored_zero) - (0.3 * 20.0)) < 1e-9
+
+
+# ── Fallback promotion: no model from a previous era is eligible ────────────
+
+class ShortContractModel:
+    """An artifact whose feature list is a strict SUBSET of the live contract —
+    the 146-vs-207 shape, which the old subset check waved through."""
+    feature_names_in_ = ["horse_age"]  # the fallback tests' live contract has two
+
+
+def _old_era_row(row_id, mutate):
+    data = metrics(roi=6.0, selection_score=None)
+    mutate(data)
+    return (row_id, "xgboost", "XGB OldEra", json.dumps(data), _pkl_bytes(DummySavedModel()))
+
+
+def _run_fallback(monkeypatch, conn, rollback_calls):
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+    monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+    monkeypatch.setattr(backtest, "_live_scoring_feature_names", _dummy_live_contract)
+    monkeypatch.setattr(
+        backtest, "rollback_to_champion",
+        lambda model_id, reason='': rollback_calls.append((model_id, reason)),
+    )
+    backtest.ensure_champion_exists_after_run(run_id=811)
+
+
+def test_fallback_promotion_refuses_a_model_scored_by_an_older_formula(monkeypatch):
+    """Every model stored before this release has scoring_formula_version NULL.
+    Their combined_scores were produced by rules that no longer exist, so
+    ranking them against today's models is meaningless — the fallback must
+    exclude them outright and end the run with no champion instead."""
+    stale_row = _old_era_row(77, lambda d: d.pop("scoring_formula_version"))
+    conn = FakeEnsureConnection(active_row=None, candidate_rows=[stale_row])
+    rollback_calls = []
+
+    _run_fallback(monkeypatch, conn, rollback_calls)
+
+    assert rollback_calls == [], "a model from an older scoring formula must never be fallback-promoted"
+    alert = next(a for a in conn.pipeline_alerts if a.get("key") == "no_active_champion")
+    assert alert["severity"] == "blocking"
+    assert "scoring_formula_version" in alert["message"]
+    assert conn.stamped_updates == []
+
+
+def test_fallback_promotion_refuses_a_model_whose_feature_contract_predates_live_scoring(monkeypatch):
+    """The 146-vs-207 mismatch, at the promotion layer. A model trained on
+    fewer features than live scoring now generates would have ~60 columns
+    median-filled on every race — it is not the model its stored score
+    describes, no matter how that score compares."""
+    short_row = (
+        78, "xgboost", "XGB ShortContract",
+        json.dumps(metrics(roi=6.0, selection_score=None)), _pkl_bytes(ShortContractModel()),
+    )
+    conn = FakeEnsureConnection(active_row=None, candidate_rows=[short_row])
+    rollback_calls = []
+
+    _run_fallback(monkeypatch, conn, rollback_calls)
+
+    assert rollback_calls == [], "a model whose feature contract predates the live one must not be promoted"
+    alert = next(a for a in conn.pipeline_alerts if a.get("key") == "no_active_champion")
+    assert alert["severity"] == "blocking"
+    assert "feature contract" in alert["message"]
+
+
+def test_fallback_promotion_prefers_no_champion_over_the_best_of_a_stale_field(monkeypatch):
+    """The decision this release encodes: given only old-era models — even a
+    high-scoring one — the correct outcome is zero active champions, not the
+    best of them. A current-era candidate in the same field still wins."""
+    stale_high = _old_era_row(77, lambda d: (d.pop("scoring_formula_version"), d.update(roi=40.0)))
+    current_low = (
+        90, "random_forest", "RF Current",
+        json.dumps(metrics(roi=1.0, selection_score=None)), _pkl_bytes(DummySavedModel()),
+    )
+    conn = FakeEnsureConnection(active_row=None, candidate_rows=[stale_high, current_low])
+    rollback_calls = []
+
+    _run_fallback(monkeypatch, conn, rollback_calls)
+
+    assert len(rollback_calls) == 1
+    assert rollback_calls[0][0] == 90, "the current-era candidate must win over a higher-scoring stale one"

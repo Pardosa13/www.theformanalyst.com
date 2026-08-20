@@ -54,3 +54,24 @@ def test_ml_shadow_global_stats_evaluates_central_cutoff_helper_before_sql():
     assert "AND {cutoff_sql}" in raw_sql_template
     assert "{_ml_performance_meeting_name_sql('m')}" not in raw_sql_template
     assert "_ml_performance_meeting_name_sql" not in raw_sql_template
+
+
+def test_meeting_scorer_reports_no_picks_instead_of_failing_without_a_champion():
+    """With no active champion, live scoring raises NoActiveChampionError
+    rather than scoring races from an unvalidated on-disk artifact. The shadow
+    scorer must turn that into an ordinary "no picks" result: it is the same
+    expected answer for every meeting on the card, so it should read as a
+    deliberate state, not as a page of red per-meeting failures."""
+    source = Path("ml_shadow_routes.py").read_text()
+    start = source.index("def _score_meeting_ml")
+    end = source.index("def _visible_ml_shadow_meetings_query", start)
+    scorer_source = source[start:end]
+
+    assert "from ml_predict import NoActiveChampionError, predict_meeting" in scorer_source
+    assert "except NoActiveChampionError:" in scorer_source
+    assert "'no_active_champion': True" in scorer_source
+    assert "NO_ACTIVE_CHAMPION_REASON" in scorer_source
+
+    bulk_start = source.index("def ml_shadow_score_visible")
+    bulk_end = source.index("@app.route('/api/ml-shadow/results", bulk_start)
+    assert "'no_picks' if score_result.get('no_active_champion') else 'error'" in source[bulk_start:bulk_end]

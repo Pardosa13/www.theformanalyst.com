@@ -277,6 +277,8 @@
   .champion-pill { background:rgba(182,255,0,.14); color:var(--ml-lime); border:1px solid rgba(182,255,0,.32); border-radius:999px; padding:6px 10px; font-size:11px; font-weight:800; white-space:nowrap; }
   .champion-pill.secondary { background:rgba(255,193,7,.12); color:#ffd166; border-color:rgba(255,193,7,.34); }
   .active-model-error { color:#ff8a8a; font-size:13px; margin:0; }
+  /* Deliberate "no champion" state: informational, not a failure. */
+  .active-model-notice { color:#ffd479; font-size:13px; margin:0; }
   .latest-challenger { margin-top:14px; padding-top:14px; border-top:1px solid rgba(255,255,255,.12); }
   .latest-challenger h6 { color:var(--ml-lime); margin:0 0 10px; font-weight:800; letter-spacing:.02em; }
   .latest-challenger .active-model-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
@@ -320,6 +322,8 @@
     </div>
     {% if active_model_metadata %}
     <span class="champion-pill {% if not active_model_metadata.selected_overall_champion %}secondary{% endif %}">{{ active_model_metadata.champion_status }}</span>
+    {% elif no_active_champion %}
+    <span class="champion-pill secondary">No picks — no active champion</span>
     {% endif %}
   </div>
   {% if active_model_metadata %}
@@ -357,6 +361,8 @@
       <div class="active-model-value">{{ active_model_metadata.model_class or 'Unknown' }}</div>
     </div>
   </div>
+  {% elif no_active_champion %}
+  <p class="active-model-notice">{{ active_model_metadata_error }}</p>
   {% else %}
   <p class="active-model-error">Active production model metadata is unavailable{% if active_model_metadata_error %}: {{ active_model_metadata_error }}{% endif %}.</p>
   {% endif %}

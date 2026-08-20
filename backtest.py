@@ -2723,6 +2723,54 @@ def _assert_champion_comparable(champion_id, champion_metrics, run_id=None, conn
         raise ChampionComparisonBlocked(message)
 
 
+def _model_era_mismatch(model_metrics, model_features, live_feature_names=None):
+    """Why a stored model predates the current pipeline era, or None if it doesn't.
+
+    A Champion Score is only meaningful against models scored by the same
+    formula on the same feature contract. Every model on record before this
+    release fails both tests: scoring_formula_version is NULL on all of them
+    and their artifacts carry 146 features against today's live contract of
+    207. Ranking those by combined_score and promoting the top one — which is
+    all the fallback path does once it has a pool — compares numbers produced
+    under rules that no longer exist, and the model it picks would then be
+    median-filling ~60 features it was never trained on, on every live race.
+
+    This is deliberately a hard exclusion rather than a penalty: an old-era
+    model isn't a worse candidate, it's an unmeasured one, and the fallback
+    path has no incumbent to beat and no edge bar to clear, so "unmeasured"
+    must mean "ineligible". Any future promotion path that picks a model off
+    the shelf rather than out of the current run should call this first.
+    """
+    reasons = []
+    stored_version = (model_metrics or {}).get('scoring_formula_version')
+    if stored_version != SCORING_FORMULA_VERSION:
+        reasons.append(
+            f"scoring_formula_version={stored_version or 'missing'} does not match the current "
+            f"{SCORING_FORMULA_VERSION} (its stored score was produced by rules that no longer apply)"
+        )
+    if live_feature_names is None:
+        live_feature_names = _live_scoring_feature_names()
+    stored_features = [str(f) for f in (model_features or [])]
+    if not stored_features:
+        reasons.append("artifact has no persisted feature list, so it cannot score a live race at all")
+    elif live_feature_names is not None:
+        live_set = {str(name) for name in live_feature_names}
+        stored_set = set(stored_features)
+        missing = sorted(live_set - stored_set)
+        unknown = sorted(stored_set - live_set)
+        if missing or unknown:
+            detail = (
+                f"feature contract mismatch: artifact carries {len(stored_set)} feature(s) against the "
+                f"current live contract's {len(live_set)}"
+            )
+            if missing:
+                detail += f"; {len(missing)} live feature(s) it was never trained on, e.g. {missing[:3]}"
+            if unknown:
+                detail += f"; {len(unknown)} feature(s) live scoring cannot generate, e.g. {unknown[:3]}"
+            reasons.append(detail)
+    return '; '.join(reasons) or None
+
+
 def record_pipeline_alert(conn, alert_key, message, severity='warning', run_id=None):
     """Open (or refresh) a durable pipeline alert. Idempotent: an already-open
     alert with the same alert_key just gets its message/timestamp refreshed
@@ -2936,7 +2984,26 @@ def _selection_score_from_metrics(metrics, force_recompute=False):
     fold_rois = [float(f.get('roi', 0.0) or 0.0) for f in (walk_forward.get('folds') or []) if f.get('bets', 0)]
     has_walk_forward = len(fold_rois) > 0
     walk_forward_mean_roi = float(np.mean(fold_rois)) if has_walk_forward else 0.0
-    blended_roi = (0.3 * holdout_roi) + (0.7 * walk_forward_mean_roi) if has_walk_forward else (0.3 * holdout_roi)
+    # When EVERY fold is negative, the holdout ROI has been actively
+    # contradicted by every honest out-of-sample test we have, so it must not
+    # buy the model any credit at all. Model 81 is the worked example: a
+    # headline holdout ROI of +50.6% against folds of -2.7%, -14.3% and -6.8%
+    # still collected 0.3 * 50.6 = +15.2 points of Champion Score, which was
+    # most of the reason it looked promotable. The holdout keeps its weight
+    # only where it can lower the score (min() below): a holdout WORSE than
+    # the folds is agreeing with them, and dropping it there would launder a
+    # bad number into a better score. So: the holdout can hurt, never help,
+    # once every fold has disagreed with it. This is the score-level twin of
+    # save_best_model_to_db's hard all-folds-negative promotion veto — that
+    # veto only guards the normal promotion path, while this governs every
+    # comparison and the fallback path too.
+    all_folds_negative = has_walk_forward and all(r <= 0.0 for r in fold_rois)
+    if not has_walk_forward:
+        blended_roi = 0.3 * holdout_roi
+    elif all_folds_negative:
+        blended_roi = min(walk_forward_mean_roi, (0.3 * holdout_roi) + (0.7 * walk_forward_mean_roi))
+    else:
+        blended_roi = (0.3 * holdout_roi) + (0.7 * walk_forward_mean_roi)
     walk_forward_penalty = float(walk_forward.get('roi_std', 0.0) or 0.0)
     calibration_penalty = (float(metrics.get('log_loss', 0.0) or 0.0) * 10.0) + (float(metrics.get('brier_score', 0.0) or 0.0) * 25.0) + (float(calibration.get('expected_calibration_error', 0.0) or 0.0) * 100.0)
     # Joint Kelly bankroll growth measures something ROI and A/E cannot: what
@@ -2986,7 +3053,9 @@ def _promotion_rule_text():
         f"positive validation ROI, strike rate >= {MIN_PROMOTION_STRIKE_RATE_PCT:.1f}%, and Champion Score "
         f"> active Champion Score + {PROMOTION_SELECTION_SCORE_EDGE:.3f}. "
         "Champion Score is stored internally as selection_score and equals "
-        "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI) + 10*(A/E ratio - 1.0) "
+        "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI — with the holdout term dropped entirely, "
+        "leaving the mean fold ROI alone, whenever EVERY walk-forward fold is negative and the holdout "
+        "would otherwise raise the score) + 10*(A/E ratio - 1.0) "
         "+ 5*joint-Kelly bankroll growth (clamped to [-1.0, 5.0], and scored as 0 for a "
         "kelly_staking record predating the joint solver) - 0.02*joint-Kelly max drawdown % "
         "(-10 more if the Kelly simulation went bust) - calibration penalties "
@@ -5138,13 +5207,23 @@ def ensure_champion_exists_after_run(run_id=None):
     Call this once, at the very end of a run, after every ordinary promotion
     decision (check_active_champion_staleness, save_best_model_to_db) has
     already run. If a usable active champion exists, this is a no-op. If not,
-    it promotes the best Champion Score among every valid, feature-complete
-    candidate on record — this run's rejected fresh challenger(s) included —
-    WITHOUT requiring it to clear the normal strict promotion bar. This is a
-    fallback of last resort, not a substitute for real validation, so it is
-    always logged and durably alerted as a distinct event: a model promoted
-    this way must never be mistaken for one that earned promotion under the
-    normal edge threshold.
+    it promotes the best Champion Score among every valid, feature-complete,
+    CURRENT-ERA candidate on record — this run's rejected fresh challenger(s)
+    included — WITHOUT requiring it to clear the normal strict promotion bar.
+    This is a fallback of last resort, not a substitute for real validation,
+    so it is always logged and durably alerted as a distinct event: a model
+    promoted this way must never be mistaken for one that earned promotion
+    under the normal edge threshold.
+
+    "Current-era" (_model_era_mismatch) is a hard eligibility gate, not a
+    ranking input: a candidate scored under an older formula version, or
+    trained on a feature set that isn't today's live contract, is excluded no
+    matter how high its stored score is. A candidate whose every walk-forward
+    fold is negative is excluded on the same footing. Preferring no champion
+    at all over an unmeasured or known-losing one is the deliberate choice
+    here — no picks is a visible, harmless state, while picks from a model
+    whose score means something else entirely are indistinguishable from good
+    ones until money is on them.
     """
     with engine.connect() as conn:
         active = conn.execute(text("""
@@ -5179,6 +5258,8 @@ def ensure_champion_exists_after_run(run_id=None):
         """)).fetchall()
 
         best = None
+        skipped_stale = []
+        skipped_losing = []
         for row_id, model_type, model_name, metrics_json, pkl_bytes in rows:
             try:
                 row_metrics = json.loads(metrics_json) if metrics_json else {}
@@ -5194,12 +5275,43 @@ def ensure_champion_exists_after_run(run_id=None):
             except Exception:
                 continue
             candidate_features = _stored_feature_list(candidate_model)
-            if candidate_features is None:
+            # Era check BEFORE scoring: the stamping this function does further
+            # down rewrites a promoted candidate's scoring_formula_version to
+            # the current one, so rollback_to_champion's own comparability
+            # assertion can no longer catch a stale model here. This is the
+            # only place the mismatch is still visible.
+            era_mismatch = _model_era_mismatch(row_metrics, candidate_features, live_feature_names)
+            if era_mismatch:
+                log.error(
+                    "Fallback promotion candidate id=%s excluded — it predates the current pipeline era: %s. "
+                    "Its combined_score is not comparable to a model scored under today's rules, and it is not "
+                    "safe to promote on the strength of it.",
+                    row_id, era_mismatch,
+                )
+                skipped_stale.append(f"id={row_id} ({era_mismatch})")
                 continue
-            if live_feature_names is not None:
-                live_set = set(live_feature_names)
-                if any(str(f) not in live_set for f in candidate_features):
-                    continue
+            # The all-folds-negative veto applies here too, not just on the
+            # normal promotion path. This used to be waived on the reasoning
+            # that some champion beats no champion — which is backwards once
+            # the candidate's own honest out-of-sample test says it loses
+            # money on every fold. No champion shows no picks, which costs
+            # nothing; a known-losing champion puts real stakes on bets that
+            # look validated. Waiting for a model that earns the position is
+            # the cheaper of the two.
+            candidate_fold_rois = [
+                float(f.get('roi', 0.0) or 0.0)
+                for f in ((row_metrics.get('walk_forward') or {}).get('folds') or [])
+                if f.get('bets', 0)
+            ]
+            if candidate_fold_rois and all(r <= 0.0 for r in candidate_fold_rois):
+                log.error(
+                    "Fallback promotion candidate id=%s excluded — every walk-forward fold is negative (%s). "
+                    "Its own out-of-sample evidence says it loses money; promoting it unopposed would put "
+                    "stakes on bets nothing has validated.",
+                    row_id, [round(r, 1) for r in candidate_fold_rois],
+                )
+                skipped_losing.append(f"id={row_id} (folds {[round(r, 1) for r in candidate_fold_rois]})")
+                continue
             score = _selection_score_from_metrics(row_metrics, force_recompute=True)
             if score is None:
                 continue
@@ -5227,9 +5339,19 @@ def ensure_champion_exists_after_run(run_id=None):
             message = (
                 f"Run {run_id}: no active champion and no valid, feature-complete fallback candidate exists "
                 "anywhere on record (candidates whose recomputed Champion Score fell outside "
-                f"{PLAUSIBLE_CHAMPION_SCORE_RANGE} were excluded as corrupt — see the errors logged above). "
-                "Live scoring is returning zero predictions. Manual intervention required."
+                f"{PLAUSIBLE_CHAMPION_SCORE_RANGE} were excluded as corrupt, and candidates predating the "
+                "current scoring formula or live feature contract were excluded as not comparable — see the "
+                "errors logged above). Live scoring shows no picks rather than predictions from an "
+                "unvalidated model. This is the intended safe state, but it needs a fresh model trained and "
+                "scored under the current rules to clear: no manual promotion of a stored model can."
             )
+            if skipped_stale:
+                message += f" Excluded as old-era: {'; '.join(skipped_stale[:5])}."
+            if skipped_losing:
+                message += (
+                    " Excluded for losing on every walk-forward fold: "
+                    f"{'; '.join(skipped_losing[:5])}."
+                )
             log.error(message)
             record_pipeline_alert(conn, 'no_active_champion', message=message, severity='blocking', run_id=run_id)
             conn.commit()
@@ -6374,11 +6496,14 @@ def main():
             best_challenger
         )
 
-        # Guarantee this run never finishes with zero active champions: none
-        # of the ordinary promotion gates evaluated above (positive ROI,
-        # walk-forward not all negative, "no comparable champion existed",
-        # etc.) are allowed to be the reason live scoring ends the night with
-        # nothing to serve.
+        # Last chance for this run to end with a champion: none of the
+        # ordinary promotion gates evaluated above (positive ROI, the Champion
+        # Score edge over the incumbent, "no comparable champion existed",
+        # etc.) should be the reason live scoring ends the night with nothing
+        # to serve — but two conditions still are, deliberately: a candidate
+        # from an older scoring/feature era, and one that lost on every
+        # walk-forward fold. Zero active champions is a supported end state
+        # (live scoring shows no picks), not a pipeline failure.
         ensure_champion_exists_after_run(run_id=run_id)
 
         # Final summary

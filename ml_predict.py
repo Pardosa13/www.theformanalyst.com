@@ -31,6 +31,26 @@ from model_classes import solve_joint_kelly
 
 log = logging.getLogger(__name__)
 
+
+class NoActiveChampionError(RuntimeError):
+    """Raised when the model DB is reachable but has no active champion row.
+
+    Distinct from FileNotFoundError ("no artifact anywhere"): this state is
+    normal and expected between a champion being deactivated and a fresh one
+    legitimately winning promotion. The correct response is to show no picks,
+    NOT to score races with whatever model happens to be on disk — see
+    load_model() for why that fallback is unsafe here.
+    """
+
+
+class UnusableActiveChampionError(NoActiveChampionError):
+    """The active champion row exists but cannot be trusted to score races.
+
+    A subclass because the safe response is identical: no picks. Callers that
+    handle "no champion" already handle this, and the distinction is kept only
+    so the message can say which of the two it is.
+    """
+
 # ── Feature extraction (mirrors backtest.py exactly) ──────────────────────────
 
 def parse_record(record_str):
@@ -972,7 +992,18 @@ def load_model():
                     model._form_analyst_selection_metrics = getattr(model, '_form_analyst_selection_metrics', {})
                 feature_count = len(_model_feature_names(model) or [])
                 if row[11] and feature_count and int(row[11]) != feature_count:
-                    raise RuntimeError(f"Active ML model feature count mismatch: db_expected={row[11]} artifact={feature_count}")
+                    # Raised as an UnusableActiveChampionError rather than a
+                    # bare RuntimeError so it propagates instead of being
+                    # swallowed by the except below and quietly answered with
+                    # the on-disk artifact. A champion whose stored feature
+                    # count disagrees with its own artifact is exactly the kind
+                    # of mismatch that must stop scoring, not reroute it to an
+                    # unvalidated model.
+                    raise UnusableActiveChampionError(
+                        f"Active champion id={row[0]} is unusable: feature count mismatch "
+                        f"db_expected={row[11]} artifact={feature_count}. Live ML scoring is producing no "
+                        "picks rather than falling back to the on-disk artifact, which has not passed promotion."
+                    )
                 log.info(
                     "ML_ACTIVE_MODEL_LOADED source=db active_algorithm=%s artifact_path=%s artifact_filename=%s training_run_id=%s training_date=%s model_version=%s feature_count=%s selected_overall_champion=%s selection_metrics=%s class=%s",
                     row[6], model._form_analyst_artifact_path, model._form_analyst_artifact_filename,
@@ -980,6 +1011,25 @@ def load_model():
                     model._form_analyst_selection_metrics, type(model).__name__,
                 )
                 return model
+            # DB reached, query ran, and there is no active champion (or the
+            # active row has no artifact). Do NOT fall through to the
+            # filesystem artifact: that pkl is whatever was last written to
+            # disk by a training run — not a model that ever passed the
+            # promotion bar, and quite possibly the very model just
+            # deactivated for being untrustworthy. "No active champion" is a
+            # deliberate state the pipeline puts itself in (see
+            # backtest.ensure_champion_exists_after_run) and the only safe
+            # reading of it is no picks tonight. Silently scoring races from
+            # an unvalidated artifact is the exact failure the deactivation
+            # was meant to prevent.
+            raise NoActiveChampionError(
+                "No active champion model: backtest_best_model has no row with is_active = TRUE "
+                "(or the active row has no stored artifact). Live ML scoring is intentionally "
+                "producing no picks until a model trained and scored under the current rules earns "
+                "promotion. Not falling back to the on-disk artifact, which has not passed promotion."
+            )
+    except NoActiveChampionError:
+        raise
     except Exception as e:
         log.warning(f"Could not load model from DB: {e}")
 
@@ -1038,7 +1088,10 @@ def active_production_model_metadata(emit_log=False):
     """Inspect the exact artifact loaded by production ML inference.
 
     This deliberately calls ``load_model()`` so the website and startup audit use
-    the same DB-first / filesystem-fallback path as live prediction scoring.
+    the same DB-first / filesystem-fallback path as live prediction scoring —
+    including raising NoActiveChampionError when there is no active champion,
+    so the audit and the ML Data page report that state instead of describing
+    an on-disk artifact that is not actually scoring anything.
     """
     model = load_model()
     feature_names = _model_feature_names(model) or []
@@ -1239,6 +1292,16 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
 
     try:
         model = load_model()
+    except NoActiveChampionError:
+        # Deliberately propagated, unlike FileNotFoundError below: callers must
+        # be able to tell "no champion, show no picks" apart from "scored zero
+        # horses", because those look identical downstream and only one of them
+        # is a healthy state that needs saying out loud.
+        log.error(
+            "ML_NO_ACTIVE_CHAMPION meeting=%s — no picks generated. There is no active champion model; "
+            "live scoring stays silent until a fresh model earns promotion.", meeting_id,
+        )
+        raise
     except FileNotFoundError as e:
         log.error(str(e))
         return {}, {}

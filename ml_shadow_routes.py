@@ -127,12 +127,31 @@ def _settle_meeting_results(db, meeting, recorded_by):
 
 
 
+NO_ACTIVE_CHAMPION_REASON = (
+    'No picks: there is no active champion model right now. Scoring stays off until a model '
+    'trained and validated under the current rules earns promotion — this is deliberate, not a failure.'
+)
+
+
 def _score_meeting_ml(db, meeting_id):
     """Generate and persist ML scores for one meeting, mirroring the manual button."""
-    from ml_predict import predict_meeting
+    from ml_predict import NoActiveChampionError, predict_meeting
     from models import Prediction
 
-    all_scores, _by_race = predict_meeting(meeting_id, db.session)
+    try:
+        all_scores, _by_race = predict_meeting(meeting_id, db.session)
+    except NoActiveChampionError:
+        # Reported as an ordinary unsuccessful result, not an exception: with no
+        # champion this is the expected outcome for every meeting on the card,
+        # and the bulk endpoints below should show "no picks" once per meeting
+        # rather than a stack trace per meeting.
+        log.info("ML shadow: meeting %s not scored — no active champion model", meeting_id)
+        return {
+            'success': False,
+            'scored': 0,
+            'no_active_champion': True,
+            'reason': NO_ACTIVE_CHAMPION_REASON,
+        }
     if not all_scores:
         return {
             'success': False,
@@ -233,7 +252,11 @@ def register_ml_shadow_routes(app, db):
             score_result = _score_meeting_ml(db, meeting_id)
 
             if not score_result['success']:
-                return jsonify({'success': False, 'error': score_result['reason']})
+                return jsonify({
+                    'success': False,
+                    'error': score_result['reason'],
+                    'no_active_champion': bool(score_result.get('no_active_champion')),
+                })
 
             updated = score_result['scored']
             db.session.commit()
@@ -284,7 +307,11 @@ def register_ml_shadow_routes(app, db):
                         details.append({
                             'meeting_id': meeting.id,
                             'meeting_name': meeting.meeting_name,
-                            'status': 'error',
+                            # No champion is not a per-meeting error — it is the
+                            # same expected answer for every meeting on the card,
+                            # so it reads as "no picks", not as a page full of
+                            # red failures nobody can act on.
+                            'status': 'no_picks' if score_result.get('no_active_champion') else 'error',
                             'reason': score_result.get('reason', 'No scores generated'),
                         })
                 except Exception as exc:
