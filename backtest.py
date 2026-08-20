@@ -2661,6 +2661,14 @@ MIN_WALK_FORWARD_FOLDS = int(os.environ.get('ML_MIN_WALK_FORWARD_FOLDS', '2'))
 PROMOTION_MAX_BOOTSTRAP_P_VALUE = float(os.environ.get('ML_PROMOTION_MAX_P_VALUE', '0.25'))
 MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
 SCORING_FORMULA_VERSION = 'champion_score_v6_joint_kelly'
+# Sanity bound for a recomputed Champion Score, used only by the fallback
+# promotion path. Every real score on record sits in the low-to-mid 40s, so
+# this is roughly 4x headroom over anything legitimately observed — wide
+# enough that no honest model is ever excluded, narrow enough that a
+# corrupted metrics blob cannot win the fallback by sheer magnitude. Model 81
+# scored 2,030,782,877.129 off one contaminated field and was promoted
+# unopposed because "highest score wins" had no floor or ceiling under it.
+PLAUSIBLE_CHAMPION_SCORE_RANGE = (-200.0, 200.0)
 REQUIRED_SELECTION_METRIC_COMPONENTS = (
     'roi',
     'strike_rate',
@@ -2939,12 +2947,35 @@ def _selection_score_from_metrics(metrics, force_recompute=False):
     # ruin is penalised hard enough that no amount of growth elsewhere can
     # outrank a model that busts the bankroll.
     kelly = metrics.get('kelly_staking') or {}
-    kelly_growth = kelly.get('bankroll_growth')
+    kelly_growth_raw = kelly.get('bankroll_growth')
+    kelly_ruined = bool(kelly.get('ruined'))
     kelly_drawdown = float(kelly.get('max_drawdown_pct', 0.0) or 0.0)
+    # Only the joint solver's output shape may earn (or lose) Kelly points. A
+    # kelly_staking block without avg_horses_backed_per_race was written by the
+    # deleted single-bet simulator, whose bankroll_growth is a different
+    # quantity measured under different assumptions and was never read by any
+    # scoring formula before v6 — the same "predates the joint solver" test
+    # _heal_stale_champion uses. Score it as no Kelly evidence at all rather
+    # than as a clamped number that means something else. See the model 81
+    # incident: a legacy row carrying bankroll_growth=406,156,577.65 was
+    # weighted *5.0 into a Champion Score of ~2.03bn and fallback-promoted.
+    is_new_format_kelly = 'avg_horses_backed_per_race' in kelly
     kelly_component = 0.0
-    if kelly_growth is not None:
-        kelly_component = (float(kelly_growth) * 5.0) - (kelly_drawdown * 0.02)
-    if bool(kelly.get('ruined')):
+    if is_new_format_kelly and kelly_growth_raw is not None:
+        try:
+            kelly_growth = float(kelly_growth_raw)
+        except (TypeError, ValueError):
+            kelly_growth = 0.0
+        if not np.isfinite(kelly_growth):
+            kelly_growth = 0.0
+        # bankroll_growth is a fractional return (0.5 = +50%), and a joint-Kelly
+        # simulation over a validation window cannot plausibly leave this range.
+        # Clamp rather than trust an unbounded compounding result: one corrupted
+        # or degenerate simulation must never be able to dominate every other
+        # term in the score.
+        kelly_growth = max(-1.0, min(kelly_growth, 5.0))
+        kelly_component = (kelly_growth * 5.0) - (kelly_drawdown * 0.02)
+    if is_new_format_kelly and kelly_ruined:
         kelly_component -= 10.0
     return float(blended_roi + a_e_component + kelly_component - calibration_penalty - (0.05 * stability_penalty) - (1.0 * walk_forward_penalty))
 
@@ -2956,8 +2987,9 @@ def _promotion_rule_text():
         f"> active Champion Score + {PROMOTION_SELECTION_SCORE_EDGE:.3f}. "
         "Champion Score is stored internally as selection_score and equals "
         "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI) + 10*(A/E ratio - 1.0) "
-        "+ 5*joint-Kelly bankroll growth - 0.02*joint-Kelly max drawdown % (-10 more if the Kelly "
-        "simulation went bust) - calibration penalties "
+        "+ 5*joint-Kelly bankroll growth (clamped to [-1.0, 5.0], and scored as 0 for a "
+        "kelly_staking record predating the joint solver) - 0.02*joint-Kelly max drawdown % "
+        "(-10 more if the Kelly simulation went bust) - calibration penalties "
         "(log loss, Brier score, expected calibration error) - stability penalty - walk-forward cross-fold ROI-std penalty; "
         "a model with no walk-forward evidence gets no credit for its holdout ROI beyond a 0.3x weight. "
         "ROI alone is never sufficient."
@@ -5171,6 +5203,20 @@ def ensure_champion_exists_after_run(run_id=None):
             score = _selection_score_from_metrics(row_metrics, force_recompute=True)
             if score is None:
                 continue
+            # A fallback promotion has no incumbent to beat and no edge
+            # threshold to clear, so the highest number simply wins — which
+            # makes an implausible number the most dangerous thing that can be
+            # on record here. Reject it outright rather than merely ranking it
+            # below others: a score this far outside the observed range means
+            # the stored metrics are corrupt, not that the model is excellent.
+            if not (PLAUSIBLE_CHAMPION_SCORE_RANGE[0] <= score <= PLAUSIBLE_CHAMPION_SCORE_RANGE[1]):
+                log.error(
+                    "Fallback promotion candidate id=%s has implausible Champion Score %.3f "
+                    "(outside %s) — excluding from fallback promotion, not treating as best. "
+                    "Its stored selection_metrics are corrupt and need manual inspection.",
+                    row_id, score, PLAUSIBLE_CHAMPION_SCORE_RANGE,
+                )
+                continue
             if best is None or score > best['score']:
                 best = {
                     'id': row_id, 'model_type': model_type, 'model_name': model_name,
@@ -5180,7 +5226,9 @@ def ensure_champion_exists_after_run(run_id=None):
         if best is None:
             message = (
                 f"Run {run_id}: no active champion and no valid, feature-complete fallback candidate exists "
-                "anywhere on record. Live scoring is returning zero predictions. Manual intervention required."
+                "anywhere on record (candidates whose recomputed Champion Score fell outside "
+                f"{PLAUSIBLE_CHAMPION_SCORE_RANGE} were excluded as corrupt — see the errors logged above). "
+                "Live scoring is returning zero predictions. Manual intervention required."
             )
             log.error(message)
             record_pipeline_alert(conn, 'no_active_champion', message=message, severity='blocking', run_id=run_id)

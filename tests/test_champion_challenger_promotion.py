@@ -1147,3 +1147,98 @@ def test_ensure_champion_exists_after_run_records_blocking_alert_when_nothing_va
         for a in conn.pipeline_alerts
     )
     assert conn.stamped_updates == []
+
+
+def _corrupt_metrics():
+    """A candidate whose stored metrics recompute to an absurd Champion Score.
+
+    Deliberately corrupted through a term the Kelly clamp does NOT cover: the
+    clamp fixes the one field that caused the model 81 incident, while this
+    bound is the backstop for every other way a stored metrics blob can go
+    bad. A test that corrupted bankroll_growth here would pass on the clamp
+    alone and prove nothing about the fallback path.
+    """
+    data = metrics(roi=406156577.65)
+    data["selection_score"] = None
+    data["stability"] = {}
+    return data
+
+
+def test_fallback_promotion_rejects_a_candidate_with_an_implausible_score(monkeypatch):
+    """The model 81 incident, reproduced at the promotion layer.
+
+    A candidate whose recomputed Champion Score is astronomically high must be
+    EXCLUDED from the fallback pool, not ranked at the top of it. The fallback
+    path has no incumbent to beat and no edge threshold to clear, so "highest
+    score wins" is the whole rule — which makes a garbage number the single
+    most dangerous thing that can be on record. A modest, honest candidate
+    must be promoted over it."""
+    corrupt_row = (
+        81, "xgboost", "XGB Corrupted", json.dumps(_corrupt_metrics()), _pkl_bytes(DummySavedModel()),
+    )
+    honest_row = (
+        77, "ensemble", "Ensemble Honest", json.dumps(metrics(roi=6.0)), _pkl_bytes(DummySavedModel()),
+    )
+    conn = FakeEnsureConnection(active_row=None, candidate_rows=[corrupt_row, honest_row])
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+    monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+
+    rollback_calls = []
+    monkeypatch.setattr(
+        backtest, "rollback_to_champion",
+        lambda model_id, reason='': rollback_calls.append((model_id, reason)),
+    )
+
+    backtest.ensure_champion_exists_after_run(run_id=81)
+
+    assert len(rollback_calls) == 1
+    assert rollback_calls[0][0] == 77, "the corrupted candidate must never win the fallback"
+    assert conn.stamped_updates[-1]["id"] == 77
+
+
+def test_fallback_promotion_alerts_rather_than_promoting_the_only_corrupt_candidate(monkeypatch):
+    """If excluding implausible scores empties the pool, ending the run with
+    zero active champions and a loud blocking alert is the correct outcome —
+    strictly better than silently promoting garbage into live scoring."""
+    corrupt_row = (
+        81, "xgboost", "XGB Corrupted", json.dumps(_corrupt_metrics()), _pkl_bytes(DummySavedModel()),
+    )
+    conn = FakeEnsureConnection(active_row=None, candidate_rows=[corrupt_row])
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+    monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+
+    def _fail_if_called(model_id, reason=''):
+        raise AssertionError("a candidate with an implausible score must never be promoted")
+    monkeypatch.setattr(backtest, "rollback_to_champion", _fail_if_called)
+
+    backtest.ensure_champion_exists_after_run(run_id=81)
+
+    assert any(
+        a.get("key") == "no_active_champion" and a.get("severity") == "blocking"
+        for a in conn.pipeline_alerts
+    )
+    assert conn.stamped_updates == []
+
+
+def test_fallback_promotion_keeps_the_whole_observed_score_range_eligible(monkeypatch):
+    """The bound exists to reject corruption, not to re-litigate model quality.
+    Every real score on record sits in the low-to-mid 40s, so a candidate
+    anywhere in that range — and well beyond it — must stay eligible."""
+    for roi in (-40.0, 0.0, 44.0, 120.0):
+        row = (
+            90, "xgboost", "XGB Ordinary", json.dumps(metrics(roi=roi, selection_score=None)),
+            _pkl_bytes(DummySavedModel()),
+        )
+        conn = FakeEnsureConnection(active_row=None, candidate_rows=[row])
+        monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+        monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+
+        rollback_calls = []
+        monkeypatch.setattr(
+            backtest, "rollback_to_champion",
+            lambda model_id, reason='': rollback_calls.append(model_id),
+        )
+
+        backtest.ensure_champion_exists_after_run(run_id=91)
+
+        assert rollback_calls == [90], f"an ordinary candidate (roi={roi}) must stay eligible"

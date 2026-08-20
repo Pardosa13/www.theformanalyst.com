@@ -1,4 +1,5 @@
 import os
+import random
 
 import pytest
 
@@ -133,20 +134,104 @@ def test_evaluate_model_on_validation_includes_joint_kelly_staking_metric():
     }
 
 
+_BASE_SCORE_METRICS = {
+    "roi": 5.0, "a_e_ratio": 1.0, "log_loss": 0.0, "brier_score": 0.0,
+    "calibration": {}, "stability": {}, "walk_forward": {},
+}
+
+
+def _kelly_block(bankroll_growth, ruined=False, max_drawdown_pct=0.0, new_format=True):
+    block = {
+        "bankroll_growth": bankroll_growth,
+        "max_drawdown_pct": max_drawdown_pct,
+        "ruined": ruined,
+    }
+    if new_format:
+        # The two keys only _simulate_joint_kelly_staking ever writes; their
+        # absence is what marks a record as coming from the deleted single-bet
+        # simulator.
+        block["avg_horses_backed_per_race"] = 1.4
+        block["races_with_zero_bets"] = 3
+    return block
+
+
+def _score(kelly_staking=None):
+    metrics = {**_BASE_SCORE_METRICS, "selection_score": None}
+    if kelly_staking is not None:
+        metrics["kelly_staking"] = kelly_staking
+    return backtest._selection_score_from_metrics(metrics)
+
+
 def test_champion_score_rewards_kelly_growth_and_punishes_ruin():
-    base = {"roi": 5.0, "a_e_ratio": 1.0, "log_loss": 0.0, "brier_score": 0.0,
-            "calibration": {}, "stability": {}, "walk_forward": {}}
-    no_kelly = backtest._selection_score_from_metrics({**base, "selection_score": None})
-    grew = backtest._selection_score_from_metrics({
-        **base, "selection_score": None,
-        "kelly_staking": {"bankroll_growth": 0.4, "max_drawdown_pct": 0.0, "ruined": False},
-    })
-    busted = backtest._selection_score_from_metrics({
-        **base, "selection_score": None,
-        "kelly_staking": {"bankroll_growth": 0.4, "max_drawdown_pct": 0.0, "ruined": True},
-    })
+    no_kelly = _score()
+    grew = _score(_kelly_block(0.4))
+    busted = _score(_kelly_block(0.4, ruined=True))
     assert grew > no_kelly
     assert busted < no_kelly
+
+
+def test_champion_score_clamps_an_implausible_bankroll_growth():
+    # Model 81 incident: a stored bankroll_growth of 406,156,577.65 was
+    # weighted *5.0 straight into the score, producing a Champion Score of
+    # ~2.03bn that won an unopposed fallback promotion. bankroll_growth is a
+    # fractional return, so no validation-window simulation can legitimately
+    # reach anything near this — the term must be clamped, not trusted.
+    corrupted = _score(_kelly_block(406156577.65))
+    at_clamp = _score(_kelly_block(5.0))
+    assert corrupted == pytest.approx(at_clamp)
+    assert corrupted < 100.0
+
+
+def test_champion_score_clamps_an_implausible_bankroll_loss():
+    assert _score(_kelly_block(-9999.0)) == pytest.approx(_score(_kelly_block(-1.0)))
+
+
+@pytest.mark.parametrize("bad_growth", [float("inf"), float("nan"), "not-a-number", None])
+def test_champion_score_ignores_an_unusable_bankroll_growth(bad_growth):
+    # Non-finite or non-numeric values must degrade to "no Kelly evidence",
+    # never propagate a nan/inf through the whole score.
+    assert _score(_kelly_block(bad_growth)) == pytest.approx(_score())
+
+
+def test_champion_score_ignores_kelly_records_predating_the_joint_solver():
+    # A kelly_staking block with no avg_horses_backed_per_race came from the
+    # deleted single-bet simulator. Its bankroll_growth measures a different
+    # quantity under different assumptions and was never validated against the
+    # v6 formula's expectations, so it earns nothing — not even a clamped
+    # amount — and its `ruined` flag costs nothing either. This is what stops
+    # the next legacy landmine from mattering at all.
+    assert _score(_kelly_block(0.4, new_format=False)) == pytest.approx(_score())
+    assert _score(_kelly_block(406156577.65, new_format=False)) == pytest.approx(_score())
+    assert _score(_kelly_block(0.4, ruined=True, new_format=False)) == pytest.approx(_score())
+
+
+def test_a_realistic_simulation_run_lands_well_inside_the_clamp():
+    # The clamp must catch corruption without truncating honest results. A
+    # model with a small genuine edge (30% estimated against a 27.8% market
+    # price, hitting 32% of the time) over 300 races finishes around +55%,
+    # nowhere near the +500% ceiling. Note the ceiling IS reachable by a
+    # sustained extreme edge compounding over a long window, so it is a
+    # deliberate cap on how much any one term may contribute, not a claim
+    # that no honest simulation can ever reach it.
+    random.seed(7)
+    rows = []
+    for race in range(300):
+        field = [
+            ("r%d" % race, 0.30 if runner == 0 else 0.14, 3.6 if runner == 0 else 7.0, 0)
+            for runner in range(6)
+        ]
+        winner = 0 if random.random() < 0.32 else random.randrange(1, 6)
+        field[winner] = field[winner][:3] + (1,)
+        rows.extend(field)
+
+    result = backtest._simulate_joint_kelly_staking(_eval_df(rows))
+
+    assert 0.0 < result["bankroll_growth"] < 5.0
+    unclamped_component = result["bankroll_growth"] * 5.0 - result["max_drawdown_pct"] * 0.02
+    scored = _score(_kelly_block(
+        result["bankroll_growth"], max_drawdown_pct=result["max_drawdown_pct"],
+    ))
+    assert scored - _score() == pytest.approx(unclamped_component)
 
 
 def test_live_staking_allocates_identically_to_the_backtest_simulation():
@@ -168,3 +253,52 @@ def test_live_staking_ignores_runners_with_no_usable_market_price():
         {"horse_id": 4, "win_probability": None, "odds": 4.0},
     ])
     assert set(stakes) == {1}
+
+
+# ─────────────────────────────────────────────
+# Model 81 incident, step 3c: the live joint solver was checked for a bug of
+# its own that could produce a runaway bankroll_growth. The closed form divides
+# by o * (1.0 - R), so the two ways it can blow up are odds at or near 1.0 and
+# a reserve R approaching 1.0. Both are already guarded — the odds > 1.0 filter
+# and the reserve >= 1.0 break — and the KKT positivity check catches whatever
+# slips between them. These tests pin that, so the guards cannot be removed as
+# "dead code" later and re-open the same failure mode from the live side.
+# ─────────────────────────────────────────────
+
+@pytest.mark.parametrize("odds", [1.0000001, 1.0, 0.5, 0.0, -2.0])
+def test_solver_never_divides_through_a_degenerate_price(odds):
+    # A near-certain runner at a near-1.0 price is the sharpest form of the
+    # division blow-up: the reserve 1/o sits just under 1.0, so 1.0 - R
+    # underflows toward zero and the closed form returns an enormous negative
+    # stake. It must produce no bet, not a huge one.
+    stakes = solve_joint_kelly([("a", 0.999, odds)], kelly_fraction_multiplier=1.0)
+    assert stakes == {}
+
+
+def test_solver_refuses_a_backed_set_that_covers_the_whole_book():
+    # sum(1/o) >= 1.0 means the backed set covers the book and 1.0 - R is zero
+    # or negative — the closed form stops meaning anything there.
+    assert solve_joint_kelly([(i, 0.09, 1.02) for i in range(12)]) == {}
+
+
+def test_total_race_exposure_is_bounded_even_for_a_miscalibrated_model():
+    # Probabilities summing well above 1.0 (a badly miscalibrated model) must
+    # still not commit more than the per-race cap. This bound is what makes a
+    # runaway bankroll structurally impossible in the joint simulator: no race
+    # can risk more than max_total_stake_pct of the bankroll.
+    stakes = solve_joint_kelly(
+        [(1, 0.8, 3.0), (2, 0.7, 3.0), (3, 0.6, 3.0)],
+        kelly_fraction_multiplier=1.0, max_total_stake_pct=0.20,
+    )
+    assert sum(stakes.values()) == pytest.approx(0.20)
+    assert all(0.0 <= stake <= 0.20 for stake in stakes.values())
+
+
+def test_simulation_stays_finite_on_degenerate_prices():
+    # End to end: a field of degenerate prices must leave the bankroll
+    # untouched and the reported growth finite, never nan/inf.
+    rows = [("r1", 0.999, 1.0, 1), ("r1", 0.999, 0.0, 0), ("r2", 0.5, 1.0, 0)]
+    result = backtest._simulate_joint_kelly_staking(_eval_df(rows))
+    assert result["bankroll_growth"] == pytest.approx(0.0)
+    assert result["final_bankroll"] == pytest.approx(1.0)
+    assert result["races_with_zero_bets"] == 2
