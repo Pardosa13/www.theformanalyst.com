@@ -371,8 +371,14 @@ def shutdown_session(exception=None):
 with app.app_context():
     db.create_all()
     try:
-        from ml_predict import active_production_model_metadata
-        active_production_model_metadata(emit_log=True)
+        from ml_predict import NoActiveChampionError, active_production_model_metadata
+        try:
+            active_production_model_metadata(emit_log=True)
+        except NoActiveChampionError as e:
+            # Startup with no champion is a supported state, not a boot
+            # failure: the app serves everything else and simply shows no ML
+            # picks until a model earns promotion.
+            logger.warning("ML_ACTIVE_PRODUCTION_MODEL_AUDIT no_active_champion=True — no ML picks will be generated: %s", e)
     except Exception as e:
         logger.warning("ML_ACTIVE_PRODUCTION_MODEL_AUDIT unavailable during startup: %s", e)
     
@@ -5679,10 +5685,24 @@ def ml_data_analytics():
 
     active_model_metadata = None
     active_model_metadata_error = None
+    no_active_champion = False
     latest_challenger = latest_ml_challenger_summary()
     try:
-        from ml_predict import active_production_model_metadata
-        active_model_metadata = active_production_model_metadata()
+        # Imported inside its own try so a NoActiveChampionError handler can
+        # never reference an unbound name if the import itself fails.
+        from ml_predict import NoActiveChampionError, active_production_model_metadata
+        try:
+            active_model_metadata = active_production_model_metadata()
+        except NoActiveChampionError as e:
+            # Not an error to fix: the pipeline is deliberately running with no
+            # champion, so the page says so in those words rather than showing a
+            # broken-looking "metadata unavailable" line.
+            no_active_champion = True
+            active_model_metadata_error = (
+                "No active champion model. No ML picks are being generated, on purpose — scoring stays "
+                "off until a model trained and validated under the current rules earns promotion."
+            )
+            logger.warning("ML Data page: no active champion model — live ML scoring is producing no picks: %s", e)
     except Exception as e:
         active_model_metadata_error = str(e)
         logger.warning("Unable to inspect active production ML model for ML Data page: %s", e)
@@ -5721,6 +5741,7 @@ def ml_data_analytics():
         value_edge_min_threshold_pct=VALUE_EDGE_MIN_THRESHOLD_PCT,
         active_model_metadata=active_model_metadata,
         active_model_metadata_error=active_model_metadata_error,
+        no_active_champion=no_active_champion,
         latest_challenger=latest_challenger,
         track_list=track_list,
         filters={
