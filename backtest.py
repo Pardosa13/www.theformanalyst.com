@@ -62,7 +62,7 @@ from strike_rate_matching import (
     build_strike_rate_lookup, build_strike_rate_history_lookup,
     get_sr_win_pct, get_sr_win_pct_asof, log_match_stats, normalize_name,
 )
-from model_classes import ConsensusRegressor
+from model_classes import ConsensusRegressor, solve_joint_kelly
 from notes_parsing import (
     parse_notes_components, parse_analyzer_score,
     is_scoring_component, NEGATIVE_COMPONENTS,
@@ -437,8 +437,36 @@ def ensure_tables():
             WHERE is_active = TRUE
         """))
 
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS horse_form_scores (
+                horse_name VARCHAR(200) PRIMARY KEY,
+                score FLOAT NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+
         conn.commit()
     log.info("Backtest tables verified.")
+
+
+def persist_form_scores(final_scores):
+    """Overwrite the live opponent-quality-form snapshot.
+
+    Current snapshot only, mirroring strike_rates rather than keeping dated
+    history: live scoring only ever needs "where does this horse stand now",
+    and the training-side scores are recomputed from full history each night.
+    """
+    if not final_scores:
+        return
+    with engine.connect() as conn:
+        for name, score in final_scores.items():
+            conn.execute(text("""
+                INSERT INTO horse_form_scores (horse_name, score, updated_at)
+                VALUES (:name, :score, NOW())
+                ON CONFLICT (horse_name) DO UPDATE SET score = :score, updated_at = NOW()
+            """), {'name': name, 'score': float(score)})
+        conn.commit()
+    log.info("Persisted %s horse_form_scores rows.", len(final_scores))
 
 
 def ensure_component_analysis_table():
@@ -1359,6 +1387,13 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
     features['sire_win_rate'] = np.nan
     features['dam_win_rate'] = np.nan
 
+    # ── Opponent-quality form ──
+    # Placeholder on the same terms as the breeding rates above:
+    # build_training_set() fills it after the row loop from strictly-earlier
+    # races. Its position in this dict is load-bearing — column order comes
+    # from insertion order, and ml_predict.FEATURE_NAMES lists it here too.
+    features['opponent_quality_form'] = np.nan
+
     return features, jockey_used_dated_snapshot, trainer_used_dated_snapshot
 
 
@@ -1370,6 +1405,7 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
 NEW_RELATIVE_COLS = [
     'form_speed_mps', 'pf_time_rank', 'pf_weight_class_rank', 'pfai_price',
     'sm_assessed_prob', 'sm_settle', 'pf_early_time_rank',
+    'opponent_quality_form',
 ]
 NEW_RELATIVE_LOWER_IS_BETTER = {
     'pf_time_rank', 'pf_weight_class_rank', 'pfai_price', 'sm_settle',
@@ -1467,6 +1503,91 @@ def _fill_point_in_time_breeding_rates(feature_rows, sire_names, dam_names,
                 pending.append((name, targets_won[i]))
 
 
+FORM_SCORE_DEFAULT = 0.0
+
+
+def _build_form_field_lookup(race_ids, horse_names, finish_positions):
+    """race_id -> [(normalized_horse_name, finish_position), ...] for every
+    runner in that race.
+
+    horse_names must already be normalize_name()'d — the same identity
+    convention sire_win_rate/dam_win_rate use, because `horses` rows are
+    per-race-appearance records rather than a persistent cross-race horse id.
+    """
+    lookup = defaultdict(list)
+    for race_id, name, position in zip(race_ids, horse_names, finish_positions):
+        if name:
+            lookup[race_id].append((name, position))
+    return lookup
+
+
+def _compute_point_in_time_form_scores(horse_names, race_ids, meeting_dates, field_lookup):
+    """Pairwise opponent-quality form score from finish positions alone.
+
+    A horse's score is the mean, over every opponent it met in its most recent
+    race, of that opponent's own score plus the number of places it finished
+    behind. Beating a well-rated field by several places therefore moves the
+    score further than scraping past a weak one by a single place, which a raw
+    finish-position average cannot express.
+
+    Strictly point-in-time: races are walked in date order and a day's results
+    are only folded into the accumulator once the date rolls over (the same
+    same-day-exclusion pattern as _fill_point_in_time_breeding_rates), so no
+    same-race or future information reaches a training row.
+
+    Returns (per_row_scores, final_scores):
+      per_row_scores: {(horse_name, race_id): score as it stood BEFORE that
+                      race} — used to fill the training feature rows.
+      final_scores:   {horse_name: score after the whole pass} — the live
+                      snapshot persisted to horse_form_scores.
+    """
+    if not race_ids:
+        return {}, {}
+
+    norm_dates = pd.to_datetime(pd.Series(meeting_dates), errors='coerce').fillna(pd.Timestamp.min)
+    order = sorted(range(len(race_ids)), key=lambda i: norm_dates.iloc[i])
+
+    scores = defaultdict(lambda: FORM_SCORE_DEFAULT)
+    per_row_scores = {}
+    pending = []
+    last_date = None
+
+    def _apply_pending():
+        # Every update in a batch is computed against the scores as they stood
+        # BEFORE the batch and only applied afterwards. Writing straight into
+        # `scores` while looping would let a runner read its own rivals' new
+        # scores — derived from the very race being folded in — so a horse's
+        # score would depend on the order rows happen to sit in.
+        updates = {}
+        for name, race_id in pending:
+            field = field_lookup.get(race_id, [])
+            positions = {opponent: position for opponent, position in field}
+            own_position = positions.get(name)
+            if own_position is None:
+                continue
+            contributions = [
+                scores[opponent] + (position - own_position)
+                for opponent, position in field
+                if opponent != name
+            ]
+            if contributions:
+                updates[name] = float(np.mean(contributions))
+        scores.update(updates)
+
+    for i in order:
+        date = norm_dates.iloc[i]
+        if last_date is not None and date != last_date:
+            _apply_pending()
+            pending = []
+        last_date = date
+        name, race_id = horse_names[i], race_ids[i]
+        per_row_scores[(name, race_id)] = scores[name]
+        pending.append((name, race_id))
+
+    _apply_pending()
+    return per_row_scores, dict(scores)
+
+
 # ─────────────────────────────────────────────
 # STEP 3: BUILD ML TRAINING SET
 # ─────────────────────────────────────────────
@@ -1519,6 +1640,8 @@ def build_training_set(df, strike_rate_data=None):
     meeting_dates = []
     sire_names = []
     dam_names = []
+    form_horse_names = []
+    form_finish_positions = []
     snapshot_coverage_stats = {'jockey_total': 0, 'jockey_dated': 0, 'trainer_total': 0, 'trainer_dated': 0}
 
     for _, row in df_unique.iterrows():
@@ -1562,6 +1685,8 @@ def build_training_set(df, strike_rate_data=None):
                     cd_row = {}
             sire_names.append(normalize_name(str(cd_row.get('horse sire') or '')))
             dam_names.append(normalize_name(str(cd_row.get('horse dam') or '')))
+            form_horse_names.append(normalize_name(str(row['horse_name'])))
+            form_finish_positions.append(finish)
 
             feature_rows.append(features)
             targets_roi.append(roi)
@@ -1575,6 +1700,19 @@ def build_training_set(df, strike_rate_data=None):
             continue
 
     _fill_point_in_time_breeding_rates(feature_rows, sire_names, dam_names, meeting_dates, targets_won)
+
+    field_lookup = _build_form_field_lookup(race_ids, form_horse_names, form_finish_positions)
+    per_row_form_scores, final_form_scores = _compute_point_in_time_form_scores(
+        form_horse_names, race_ids, meeting_dates, field_lookup
+    )
+    for i, name in enumerate(form_horse_names):
+        feature_rows[i]['opponent_quality_form'] = per_row_form_scores.get(
+            (name, race_ids[i]), FORM_SCORE_DEFAULT
+        )
+    # Stashed on the function object (same pattern as last_match_stats below)
+    # so main() can persist the live snapshot without widening the return
+    # tuple every caller unpacks.
+    build_training_set.last_final_form_scores = final_form_scores
 
     feature_count_before = len(feature_rows[0]) if feature_rows else 0
     log.info(f"Features before race-relative features: {feature_count_before}")
@@ -2522,7 +2660,7 @@ MIN_WALK_FORWARD_FOLDS = int(os.environ.get('ML_MIN_WALK_FORWARD_FOLDS', '2'))
 # of) the fixed Champion Score edge above.
 PROMOTION_MAX_BOOTSTRAP_P_VALUE = float(os.environ.get('ML_PROMOTION_MAX_P_VALUE', '0.25'))
 MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
-SCORING_FORMULA_VERSION = 'champion_score_v5_ae_ratio'
+SCORING_FORMULA_VERSION = 'champion_score_v6_joint_kelly'
 REQUIRED_SELECTION_METRIC_COMPONENTS = (
     'roi',
     'strike_rate',
@@ -2793,7 +2931,22 @@ def _selection_score_from_metrics(metrics, force_recompute=False):
     blended_roi = (0.3 * holdout_roi) + (0.7 * walk_forward_mean_roi) if has_walk_forward else (0.3 * holdout_roi)
     walk_forward_penalty = float(walk_forward.get('roi_std', 0.0) or 0.0)
     calibration_penalty = (float(metrics.get('log_loss', 0.0) or 0.0) * 10.0) + (float(metrics.get('brier_score', 0.0) or 0.0) * 25.0) + (float(calibration.get('expected_calibration_error', 0.0) or 0.0) * 100.0)
-    return float(blended_roi + a_e_component - calibration_penalty - (0.05 * stability_penalty) - (1.0 * walk_forward_penalty))
+    # Joint Kelly bankroll growth measures something ROI and A/E cannot: what
+    # the model's edge is worth once stakes are sized by the confidence it
+    # actually expresses, across every runner it would back rather than the top
+    # pick alone. Drawdown is subtracted because compounding growth bought with
+    # a near-ruinous trough is not a plan anyone could follow, and an outright
+    # ruin is penalised hard enough that no amount of growth elsewhere can
+    # outrank a model that busts the bankroll.
+    kelly = metrics.get('kelly_staking') or {}
+    kelly_growth = kelly.get('bankroll_growth')
+    kelly_drawdown = float(kelly.get('max_drawdown_pct', 0.0) or 0.0)
+    kelly_component = 0.0
+    if kelly_growth is not None:
+        kelly_component = (float(kelly_growth) * 5.0) - (kelly_drawdown * 0.02)
+    if bool(kelly.get('ruined')):
+        kelly_component -= 10.0
+    return float(blended_roi + a_e_component + kelly_component - calibration_penalty - (0.05 * stability_penalty) - (1.0 * walk_forward_penalty))
 
 
 def _promotion_rule_text():
@@ -2802,7 +2955,9 @@ def _promotion_rule_text():
         f"positive validation ROI, strike rate >= {MIN_PROMOTION_STRIKE_RATE_PCT:.1f}%, and Champion Score "
         f"> active Champion Score + {PROMOTION_SELECTION_SCORE_EDGE:.3f}. "
         "Champion Score is stored internally as selection_score and equals "
-        "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI) + 10*(A/E ratio - 1.0) - calibration penalties "
+        "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI) + 10*(A/E ratio - 1.0) "
+        "+ 5*joint-Kelly bankroll growth - 0.02*joint-Kelly max drawdown % (-10 more if the Kelly "
+        "simulation went bust) - calibration penalties "
         "(log loss, Brier score, expected calibration error) - stability penalty - walk-forward cross-fold ROI-std penalty; "
         "a model with no walk-forward evidence gets no credit for its holdout ROI beyond a 0.3x weight. "
         "ROI alone is never sufficient."
@@ -2947,45 +3102,80 @@ def _artifact_feature_contract_ok(model, feature_names):
     return True
 
 KELLY_FRACTION_MULTIPLIER = float(os.environ.get('ML_KELLY_FRACTION_MULTIPLIER', '0.5'))
-KELLY_MAX_STAKE_PCT = float(os.environ.get('ML_KELLY_MAX_STAKE_PCT', '0.05'))
+# Cap on the TOTAL fraction of bankroll committed to a single race across every
+# runner backed in it. The old ML_KELLY_MAX_STAKE_PCT capped one bet at a time,
+# which no longer describes the allocation: the joint solver can back several
+# runners in the same race, and what has to stay bounded is their sum.
+KELLY_MAX_TOTAL_STAKE_PCT = float(os.environ.get('ML_KELLY_MAX_TOTAL_STAKE_PCT', '0.20'))
 
 
-def _simulate_kelly_staking(selections, kelly_fraction_multiplier=KELLY_FRACTION_MULTIPLIER, max_stake_pct=KELLY_MAX_STAKE_PCT):
-    """Simulate fractional-Kelly bet sizing (bankroll compounds bet-by-bet)
-    using the model's own predicted win probability, instead of only ever
-    reporting ROI on a hypothetical flat uniform-unit stake. Uses half-Kelly
-    by default, capped at max_stake_pct of bankroll per bet — full Kelly is
-    high-variance and can be ruinous on a noisy probability estimate; a
-    capped half-Kelly is the standard practical compromise. This runs
-    alongside (not instead of) the flat-stake ROI metrics above, since a
-    staking plan changes what the walk-forward numbers would mean in
-    practice without changing model ranking.
+def _solve_joint_kelly(probs_odds, kelly_fraction_multiplier=KELLY_FRACTION_MULTIPLIER,
+                       max_total_stake_pct=KELLY_MAX_TOTAL_STAKE_PCT):
+    """Simultaneous Kelly allocation across the runners of one race.
+
+    Thin wrapper over model_classes.solve_joint_kelly so nightly validation and
+    ml_predict.py's live stake recommendations provably share one implementation
+    of the maths — see the note above that function.
     """
-    if selections.empty:
-        return {'bankroll_growth': 0.0, 'final_bankroll': 1.0, 'max_drawdown_pct': 0.0, 'ruined': False}
+    return solve_joint_kelly(probs_odds, kelly_fraction_multiplier, max_total_stake_pct)
+
+
+def _simulate_joint_kelly_staking(eval_df, kelly_fraction_multiplier=KELLY_FRACTION_MULTIPLIER,
+                                  max_total_stake_pct=KELLY_MAX_TOTAL_STAKE_PCT):
+    """Bankroll simulation staking every runner the joint solver backs.
+
+    The previous version bet a fixed fractional Kelly on the top pick alone,
+    one race at a time. That is not what the staking plan actually is: runners
+    in a race are mutually exclusive, so the correct allocation is solved
+    across the whole field at once, and a race where nothing clears the
+    solver's inclusion condition gets no bet at all. Runs alongside (not
+    instead of) the flat-stake ROI metrics — a staking plan changes what those
+    numbers mean in practice without changing model ranking.
+
+    eval_df needs race_id, row_id, pred (win probability), sp (decimal odds)
+    and won for EVERY runner, not just the per-race top pick.
+    """
     bankroll = 1.0
     peak = 1.0
     max_drawdown_pct = 0.0
     ruined = False
-    for pred, sp, won in zip(selections['pred'], selections['sp'], selections['won']):
+    per_race_bet_counts = []
+
+    if eval_df.empty:
+        return {
+            'bankroll_growth': 0.0, 'final_bankroll': 1.0, 'max_drawdown_pct': 0.0,
+            'ruined': False, 'avg_horses_backed_per_race': 0.0, 'races_with_zero_bets': 0,
+        }
+
+    for _race_id, race_df in eval_df.groupby('race_id'):
         if bankroll <= 0.0:
             ruined = True
             break
-        b = float(sp) - 1.0
-        if b <= 0:
+        keyed = race_df.set_index('row_id')
+        stakes = _solve_joint_kelly(
+            list(zip(keyed.index, keyed['pred'], keyed['sp'])),
+            kelly_fraction_multiplier, max_total_stake_pct,
+        )
+        per_race_bet_counts.append(len(stakes))
+        if not stakes:
             continue
-        kelly = ((b * float(pred)) - (1.0 - float(pred))) / b
-        stake_pct = max(0.0, min(kelly * kelly_fraction_multiplier, max_stake_pct))
-        stake = bankroll * stake_pct
-        bankroll += (stake * b) if won == 1 else -stake
+        race_profit = 0.0
+        for row_id, stake_pct in stakes.items():
+            row = keyed.loc[row_id]
+            stake = bankroll * stake_pct
+            race_profit += (stake * (row['sp'] - 1.0)) if row['won'] == 1 else -stake
+        bankroll += race_profit
         peak = max(peak, bankroll)
         if peak > 0:
             max_drawdown_pct = max(max_drawdown_pct, (peak - bankroll) / peak)
+
     return {
         'bankroll_growth': float(bankroll - 1.0),
         'final_bankroll': float(bankroll),
         'max_drawdown_pct': float(max_drawdown_pct * 100.0),
         'ruined': bool(ruined),
+        'avg_horses_backed_per_race': float(np.mean(per_race_bet_counts)) if per_race_bet_counts else 0.0,
+        'races_with_zero_bets': int(sum(1 for count in per_race_bet_counts if count == 0)),
     }
 
 
@@ -2998,6 +3188,9 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
         'won': np.asarray(y_won_val, dtype=int),
         'sp': np.asarray(sp_val, dtype=float),
     })
+    # Stable per-runner key for the joint Kelly simulation, which allocates
+    # across a whole race rather than picking a single row out of it.
+    eval_df['row_id'] = range(len(eval_df))
     selections = eval_df.loc[eval_df.groupby('race_id')['pred'].idxmax()].copy()
     profits = np.where(selections['won'] == 1, selections['sp'] - 1.0, -1.0)
     bets = int(len(selections))
@@ -3056,7 +3249,7 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
         'last_100': window_metrics(100),
         'last_250': window_metrics(250),
         'last_500': window_metrics(500),
-        'kelly_staking': _simulate_kelly_staking(selections),
+        'kelly_staking': _simulate_joint_kelly_staking(eval_df),
         'log_loss': float(log_loss(np.asarray(y_won_val, dtype=int), pred, labels=[0, 1])),
         'brier_score': float(brier_score_loss(np.asarray(y_won_val, dtype=int), pred)),
         'calibration': _calibration_summary(y_won_val, pred),
@@ -3181,6 +3374,9 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
                 'bets': fold_metrics['number_of_bets'],
                 'roi': fold_metrics['roi'],
                 'strike_rate': fold_metrics['strike_rate'],
+                # Carried per fold so Kelly growth can be read for variance
+                # across folds, not just as one holdout number.
+                'kelly_staking': fold_metrics.get('kelly_staking'),
             })
         except Exception as e:
             log.warning(f"Walk-forward fold {fold_idx} failed for {type(model).__name__}: {e}")
@@ -4645,11 +4841,23 @@ def _heal_stale_champion(champion_id, champion_metrics, run_id=None):
         # Track E candidate uses, via evaluate_model_on_validation. This is
         # the actual "full re-validation run" the earlier self-heal attempts
         # only ever logged as needed but never performed.
-        if 'roi' not in champion_metrics:
+        # A champion carrying kelly_staking from before the joint solver is in
+        # the same position: those numbers describe the old one-bet-per-race
+        # staking plan, which no longer exists, so scoring the champion from
+        # them against challengers measured on the joint allocation would
+        # compare two different plans. Its whole metric set is rebuilt too.
+        # avg_horses_backed_per_race only appears in joint-solver output. A
+        # champion with no kelly_staking at all is left alone: it scores a
+        # neutral zero for the Kelly term, which is no advantage to correct.
+        stored_kelly = champion_metrics.get('kelly_staking') or {}
+        stale_kelly_plan = bool(stored_kelly) and 'avg_horses_backed_per_race' not in stored_kelly
+        if 'roi' not in champion_metrics or stale_kelly_plan:
             log.info(
-                "Self-heal: champion id=%s has no raw metric components — running a full "
+                "Self-heal: champion id=%s needs its raw metric components rebuilt "
+                "(missing_raw_components=%s, kelly_staking_predates_joint_solver=%s) — running a full "
                 "out-of-sample re-validation (not just a walk-forward re-test) on the same "
-                "chronological holdout Track E challengers use...", champion_id,
+                "chronological holdout Track E challengers use...",
+                champion_id, 'roi' not in champion_metrics, stale_kelly_plan,
             )
             cutoff = dates_ordered.quantile(0.8)
             train_mask = dates_ordered <= cutoff
@@ -6029,6 +6237,10 @@ def main():
         X, y_roi, y_won, sp_values, race_ids, horse_ids, meeting_dates = build_training_set(
             df, strike_rate_data
         )
+        try:
+            persist_form_scores(getattr(build_training_set, 'last_final_form_scores', None))
+        except Exception as e:
+            log.warning(f"Persisting opponent-quality form scores failed (non-fatal): {e}")
         try:
             check_match_rate_regression(run_id, getattr(build_training_set, 'last_match_stats', None))
         except Exception as e:

@@ -27,6 +27,7 @@ from datetime import datetime
 # (module path '__main__') — see model_classes.py for why. Must happen
 # before load_model() is ever called.
 import model_classes  # noqa: F401
+from model_classes import solve_joint_kelly
 
 log = logging.getLogger(__name__)
 
@@ -190,7 +191,7 @@ def parse_form_time_seconds(value):
 def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_lookup=None,
                      rail_position=None, pf_ratings_lookup=None, pf_speedmaps_lookup=None,
                      jockey_extra_lookup=None, trainer_extra_lookup=None,
-                     sire_rates=None, dam_rates=None):
+                     sire_rates=None, dam_rates=None, opponent_quality_form=None):
     """
     Extract the same raw features backtest.py trains on.
     cd = horse.csv_data dict
@@ -203,6 +204,10 @@ def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_look
         career/L100 actual-vs-expected extras from strike_rates
     sire_rates / dam_rates = normalised-name -> historical progeny win rate
         (only names with >= MIN_BREEDING_RUNS_FOR_RATE prior runs are present)
+    opponent_quality_form = this horse's current opponent-quality form score,
+        already looked up from the horse_form_scores snapshot by the caller.
+        Unlike training, live scoring does not recompute the pairwise pass —
+        the nightly job does that once over full history.
 
     The 2026-07 audit features default to NaN — not 0 — when their source is
     missing; _fill_missing_features() then imputes them with the training-split
@@ -501,6 +506,15 @@ def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_look
     features['sire_win_rate'] = float(sire_rate) if sire_rate is not None else np.nan
     features['dam_win_rate'] = float(dam_rate) if dam_rate is not None else np.nan
 
+    # ── Opponent-quality form ──
+    # Must stay immediately after dam_win_rate: column order comes from dict
+    # insertion order here and from the matching placeholder in
+    # backtest.extract_features, and a mismatch misaligns every feature
+    # downstream without raising anything.
+    features['opponent_quality_form'] = (
+        float(opponent_quality_form) if opponent_quality_form is not None else np.nan
+    )
+
     return features
 
 # Race-relative derivatives (rank within race + delta vs race average) for the
@@ -510,6 +524,7 @@ def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_look
 NEW_RELATIVE_COLS = [
     'form_speed_mps', 'pf_time_rank', 'pf_weight_class_rank', 'pfai_price',
     'sm_assessed_prob', 'sm_settle', 'pf_early_time_rank',
+    'opponent_quality_form',
 ]
 NEW_RELATIVE_LOWER_IS_BETTER = {
     'pf_time_rank', 'pf_weight_class_rank', 'pfai_price', 'sm_settle',
@@ -594,7 +609,7 @@ FEATURE_NAMES = [
     'sm_jockey_a2e', 'sm_rated_run_style', 'sm_rated_settle', 'sm_assessed_prob',
     'jockey_career_a2e', 'jockey_l100_a2e', 'jockey_career_runs',
     'trainer_career_a2e', 'trainer_l100_a2e', 'trainer_career_runs',
-    'sire_win_rate', 'dam_win_rate',
+    'sire_win_rate', 'dam_win_rate', 'opponent_quality_form',
 ]
 
 RACE_RELATIVE_BASE_COLS = [
@@ -1180,6 +1195,28 @@ def _load_breeding_win_rates(db_session):
     return rates[0], rates[1]
 
 
+def _load_form_scores(db_session):
+    """Current opponent-quality-form snapshot, keyed by normalised horse name.
+
+    Written once a night by backtest.persist_form_scores from a single
+    strictly-earlier pass over full history, so a plain read of the current
+    snapshot is the correct point-in-time value for a race yet to be run. The
+    table does not exist until the first nightly run after deploy; until then
+    this returns {} and the feature is median-filled like any other gap.
+    """
+    from sqlalchemy import text
+
+    try:
+        rows = db_session.execute(text(
+            "SELECT horse_name, score FROM horse_form_scores"
+        )).fetchall()
+    except Exception as e:
+        log.warning("Could not load horse_form_scores for live scoring "
+                    "(opponent_quality_form stays NaN -> training-median fill): %s", e)
+        return {}
+    return {normalize_name(str(name or '')): float(score) for name, score in rows if name}
+
+
 def predict_meeting(meeting_id, db_session, strike_rate_data=None):
     """
     Generate ML scores for all non-scratched horses in a meeting.
@@ -1238,6 +1275,7 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
 
     rail_position = getattr(meeting, 'rail_position', None)
     sire_rates, dam_rates = _load_breeding_win_rates(db_session)
+    form_scores = _load_form_scores(db_session)
 
     all_scores   = {}   # horse_id -> ml_score
     by_race      = {}   # race_id  -> {horse_id: ml_score}
@@ -1248,10 +1286,10 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
     log.info(
         "ML_PREDICTION_LIVE_LOOKUPS meeting=%s rail_position=%s pf_ratings_entries=%s "
         "pf_speedmap_entries=%s jockey_sr_loaded=%s trainer_sr_loaded=%s "
-        "jockey_extras=%s trainer_extras=%s sire_rates=%s dam_rates=%s",
+        "jockey_extras=%s trainer_extras=%s sire_rates=%s dam_rates=%s form_scores=%s",
         meeting_id, rail_position, len(pf_ratings_lookup), len(pf_speedmaps_lookup),
         bool(jockey_sr), bool(trainer_sr), len(jockey_extra), len(trainer_extra),
-        len(sire_rates), len(dam_rates),
+        len(sire_rates), len(dam_rates), len(form_scores),
     )
 
     for race in races:
@@ -1285,6 +1323,11 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
                     trainer_extra_lookup=trainer_extra,
                     sire_rates=sire_rates,
                     dam_rates=dam_rates,
+                    # horses.horse_name is the column backtest.build_training_set
+                    # normalises for this feature, so the same source is used here.
+                    opponent_quality_form=form_scores.get(
+                        normalize_name(str(horse.horse_name or ''))
+                    ),
                 )
 
                 curr_w = feats['horse_weight']
@@ -1346,3 +1389,43 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         by_race[race.id] = race_scores
 
     return all_scores, by_race
+
+
+# ── Live joint Kelly staking ─────────────────────────────────────────────────
+
+KELLY_FRACTION_MULTIPLIER = float(os.environ.get('ML_KELLY_FRACTION_MULTIPLIER', '0.5'))
+KELLY_MAX_TOTAL_STAKE_PCT = float(os.environ.get('ML_KELLY_MAX_TOTAL_STAKE_PCT', '0.20'))
+
+
+def compute_kelly_stakes_for_race(predictions):
+    """Stake recommendations for one race, as fractions of bankroll.
+
+    predictions: iterable of dicts with 'horse_id', 'win_probability' (0-1, the
+    model's fair win probability — NOT the 110%-book display probability) and
+    'odds' (live decimal market price).
+
+    Returns {horse_id: stake_fraction} for the runners the joint solver backs;
+    every other runner in the race gets no stake and is simply absent, and an
+    empty dict means the race has no value bet at all. The same
+    model_classes.solve_joint_kelly the nightly validation simulates with, so
+    the displayed plan and the validated plan cannot drift apart.
+
+    This never reorders or filters the model's own ranking — which horse is
+    shown as the top pick is untouched; only the stake attached to it changes.
+    """
+    probs_odds = []
+    for prediction in predictions or []:
+        odds = prediction.get('odds')
+        probability = prediction.get('win_probability')
+        if odds is None or probability is None:
+            continue
+        try:
+            odds = float(odds)
+            probability = float(probability)
+        except (TypeError, ValueError):
+            continue
+        if odds <= 1.0:
+            continue
+        probs_odds.append((prediction.get('horse_id'), probability, odds))
+
+    return solve_joint_kelly(probs_odds, KELLY_FRACTION_MULTIPLIER, KELLY_MAX_TOTAL_STAKE_PCT)
