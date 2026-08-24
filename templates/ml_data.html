@@ -353,6 +353,10 @@
       <div class="active-model-value">{{ active_model_metadata.model_version or 'Unknown' }}</div>
     </div>
     <div class="active-model-field">
+      <div class="active-model-label">ROI / Strike Rate</div>
+      <div class="active-model-value">{{ '%.1f%%'|format(active_model_metadata.get('roi')) if active_model_metadata.get('roi') is not none else 'Unknown' }} / {{ '%.1f%%'|format(active_model_metadata.get('strike_rate')) if active_model_metadata.get('strike_rate') is not none else 'Unknown' }}</div>
+    </div>
+    <div class="active-model-field">
       <div class="active-model-label">Champion Scope</div>
       <div class="active-model-value">{% if active_model_metadata.selected_overall_champion %}Selected overall champion{% else %}Best of algorithm type / fallback{% endif %}</div>
     </div>

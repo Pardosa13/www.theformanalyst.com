@@ -1099,6 +1099,10 @@ def active_production_model_metadata(emit_log=False):
     selected_overall = bool(getattr(model, '_form_analyst_is_active', False))
     metadata = {
         'active_algorithm': _display_algorithm(model),
+        # Row id of the champion in backtest_best_model, so callers can read the
+        # champion's own validation metrics (ROI / strike rate) back off exactly
+        # the row this artifact was loaded from.
+        'model_id': getattr(model, '_form_analyst_model_id', None),
         'model_type': getattr(model, '_form_analyst_model_type', None),
         'model_artifact_filename': getattr(model, '_form_analyst_artifact_filename', None),
         'model_artifact_path': getattr(model, '_form_analyst_artifact_path', None),
