@@ -5624,13 +5624,59 @@ def data_analytics():
 
 
 
+# One column list for both the champion and the challenger panels: the whole
+# point of showing ROI / strike rate on both cards is that the two are directly
+# comparable, which they only are while they come from the same table and the
+# same columns.
+_ML_MODEL_SUMMARY_COLUMNS = """
+            bm.id, bm.run_id, bm.model_type, bm.model_name, bm.combined_score,
+            bm.validation_roi, bm.validation_strike_rate, bm.validation_bets,
+            bm.selection_metrics, bm.promotion_reason, bm.is_active
+"""
+
+
+def _ml_model_summary_from_row(row):
+    """Map one backtest_best_model row to the summary dict the panels render."""
+    metrics = {}
+    if row.selection_metrics:
+        try:
+            metrics = json.loads(row.selection_metrics)
+        except Exception:
+            metrics = {}
+    # validation_roi / validation_strike_rate / validation_bets are written
+    # straight from this same selection_metrics dict at save time (see
+    # backtest.save_best_model_to_db), so reading the JSON when a column is
+    # NULL reports the model's own numbers on older rows instead of a blank
+    # field — and does it identically for champion and challenger.
+    roi = row.validation_roi if row.validation_roi is not None else metrics.get('roi')
+    strike_rate = (row.validation_strike_rate if row.validation_strike_rate is not None
+                   else metrics.get('strike_rate'))
+    bets = row.validation_bets if row.validation_bets is not None else metrics.get('number_of_bets')
+    return {
+        'model_id': row.id,
+        'run_id': row.run_id,
+        'model_type': row.model_type,
+        'model_name': row.model_name,
+        'champion_score': row.combined_score,
+        'selection_score': row.combined_score,  # Backward-compatible alias for templates or clients.
+        'roi': roi,
+        'strike_rate': strike_rate,
+        'bets': bets,
+        'log_loss': metrics.get('log_loss'),
+        'brier_score': metrics.get('brier_score'),
+        'calibration': metrics.get('calibration') or {},
+        'validation_period': metrics.get('validation_period') or {},
+        'promotion_reason': row.promotion_reason,
+        'beat_champion': bool(row.is_active) or str(row.promotion_reason or '').lower().startswith('promoted:'),
+        'completed_at': getattr(row, 'completed_at', None),
+    }
+
+
 def latest_ml_challenger_summary():
     """Return the newest completed run's overall winner and champion comparison."""
     try:
-        row = db.session.execute(text("""
-            SELECT bm.id, bm.run_id, bm.model_type, bm.model_name, bm.combined_score,
-                   bm.validation_roi, bm.validation_strike_rate, bm.validation_bets,
-                   bm.selection_metrics, bm.promotion_reason, bm.is_active, br.completed_at
+        row = db.session.execute(text(f"""
+            SELECT {_ML_MODEL_SUMMARY_COLUMNS}, br.completed_at
             FROM backtest_best_model bm
             JOIN backtest_runs br ON br.id = bm.run_id
             WHERE br.status = 'complete'
@@ -5639,32 +5685,50 @@ def latest_ml_challenger_summary():
         """)).fetchone()
         if not row:
             return None
-        metrics = {}
-        if row.selection_metrics:
-            try:
-                metrics = json.loads(row.selection_metrics)
-            except Exception:
-                metrics = {}
-        return {
-            'model_id': row.id,
-            'run_id': row.run_id,
-            'model_type': row.model_type,
-            'model_name': row.model_name,
-            'champion_score': row.combined_score,
-            'selection_score': row.combined_score,  # Backward-compatible alias for templates or clients.
-            'roi': row.validation_roi,
-            'strike_rate': row.validation_strike_rate,
-            'bets': row.validation_bets,
-            'log_loss': metrics.get('log_loss'),
-            'brier_score': metrics.get('brier_score'),
-            'calibration': metrics.get('calibration') or {},
-            'validation_period': metrics.get('validation_period') or {},
-            'promotion_reason': row.promotion_reason,
-            'beat_champion': bool(row.is_active) or str(row.promotion_reason or '').lower().startswith('promoted:'),
-            'completed_at': row.completed_at,
-        }
+        return _ml_model_summary_from_row(row)
     except Exception as exc:
         logger.warning("Unable to load latest ML challenger summary: %s", exc)
+        return {'error': str(exc)}
+
+
+def champion_model_backtest_summary(model_id=None, run_id=None):
+    """Return the active champion's own backtest metrics (ROI, strike rate, ...).
+
+    Deliberately the same query and mapper as latest_ml_challenger_summary, run
+    against the champion's own row instead of the newest completed run's, so the
+    two panels report numbers produced the same way. Looks the row up by model
+    id when the loaded artifact carries one, and otherwise by the champion's
+    training/backtest run id (run 204 for the current champion).
+    """
+    if model_id is None and run_id is None:
+        return None
+    try:
+        row = None
+        if model_id is not None:
+            row = db.session.execute(text(f"""
+                SELECT {_ML_MODEL_SUMMARY_COLUMNS}, br.completed_at
+                FROM backtest_best_model bm
+                LEFT JOIN backtest_runs br ON br.id = bm.run_id
+                WHERE bm.id = :model_id
+                LIMIT 1
+            """), {'model_id': model_id}).fetchone()
+        if row is None and run_id is not None:
+            # A promoting run saves a single backtest_best_model row, but order
+            # by is_active anyway so the champion wins if a run ever saved more.
+            row = db.session.execute(text(f"""
+                SELECT {_ML_MODEL_SUMMARY_COLUMNS}, br.completed_at
+                FROM backtest_best_model bm
+                LEFT JOIN backtest_runs br ON br.id = bm.run_id
+                WHERE bm.run_id = :run_id
+                ORDER BY bm.is_active DESC, bm.combined_score DESC NULLS LAST, bm.id DESC
+                LIMIT 1
+            """), {'run_id': run_id}).fetchone()
+        if row is None:
+            return None
+        return _ml_model_summary_from_row(row)
+    except Exception as exc:
+        logger.warning("Unable to load champion backtest summary (model_id=%s run_id=%s): %s",
+                       model_id, run_id, exc)
         return {'error': str(exc)}
 
 @app.route("/ml-data")
@@ -5693,6 +5757,21 @@ def ml_data_analytics():
         from ml_predict import NoActiveChampionError, active_production_model_metadata
         try:
             active_model_metadata = active_production_model_metadata()
+            # The champion card shows ROI / strike rate from the champion's own
+            # backtest run, read through the same helper the challenger card
+            # uses, so the two cards can be compared line for line.
+            champion_backtest = champion_model_backtest_summary(
+                model_id=active_model_metadata.get('model_id'),
+                run_id=active_model_metadata.get('training_backtest_run_id'),
+            ) or {}
+            if champion_backtest.get('error'):
+                champion_backtest = {}
+            # Set unconditionally (None when the champion's row has no metrics)
+            # so the template always has the fields and renders 'Unknown'.
+            active_model_metadata['roi'] = champion_backtest.get('roi')
+            active_model_metadata['strike_rate'] = champion_backtest.get('strike_rate')
+            active_model_metadata['bets'] = champion_backtest.get('bets')
+            active_model_metadata['champion_score'] = champion_backtest.get('champion_score')
         except NoActiveChampionError as e:
             # Not an error to fix: the pipeline is deliberately running with no
             # champion, so the page says so in those words rather than showing a
