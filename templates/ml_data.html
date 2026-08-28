@@ -274,6 +274,11 @@
   .active-model-field { background:rgba(6,12,20,.62); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:12px; min-height:78px; }
   .active-model-label { color:var(--text-muted); font-size:10px; text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; }
   .active-model-value { color:var(--text); font-size:14px; font-weight:700; word-break:break-word; }
+  .score-formula-note { color:var(--text-muted); font-size:10px; margin-top:4px; font-family:ui-monospace,Menlo,monospace; }
+  .score-formula-warning { background:rgba(214,138,32,.12); border:1px solid rgba(214,138,32,.45);
+    border-radius:6px; padding:10px 12px; margin-bottom:14px; font-size:12px; line-height:1.55; color:var(--text); }
+  .score-formula-warning strong { display:block; margin-bottom:4px; }
+  .score-formula-warning .mono { font-family:ui-monospace,Menlo,monospace; font-size:11px; }
   .champion-pill { background:rgba(182,255,0,.14); color:var(--ml-lime); border:1px solid rgba(182,255,0,.32); border-radius:999px; padding:6px 10px; font-size:11px; font-weight:800; white-space:nowrap; }
   .champion-pill.secondary { background:rgba(255,193,7,.12); color:#ffd166; border-color:rgba(255,193,7,.34); }
   .active-model-error { color:#ff8a8a; font-size:13px; margin:0; }
@@ -376,6 +381,18 @@
     {% if latest_challenger.error %}
       <p class="active-model-error">Latest challenger metadata is unavailable: {{ latest_challenger.error }}.</p>
     {% else %}
+    {% if not champion_scores_comparable %}
+    <div class="score-formula-warning">
+      <strong>These two Champion Scores are not comparable.</strong>
+      The active model was scored by
+      <span class="mono">{{ active_model_metadata.scoring_formula_version or 'an unrecorded formula' }}</span>
+      and this run by
+      <span class="mono">{{ latest_challenger.scoring_formula_version or 'an unrecorded formula' }}</span>.
+      The scoring rule has changed five times; each change shifts every score by a
+      fixed offset, so the difference between these numbers is mostly the formula,
+      not the models. Compare ROI, strike rate and the walk-forward folds instead.
+    </div>
+    {% endif %}
     <div class="active-model-grid">
       <div class="active-model-field">
         <div class="active-model-label">Completed Run</div>
@@ -392,6 +409,11 @@
       <div class="active-model-field">
         <div class="active-model-label">Champion Score</div>
         <div class="active-model-value">{{ '%.3f'|format(latest_challenger.champion_score) if latest_challenger.champion_score is not none else 'Unknown' }}</div>
+        {% if latest_challenger.scoring_formula_version %}
+        <div class="score-formula-note">scored by {{ latest_challenger.scoring_formula_version }}</div>
+        {% else %}
+        <div class="score-formula-note">scoring formula not recorded</div>
+        {% endif %}
       </div>
       <div class="active-model-field">
         <div class="active-model-label">ROI / Strike Rate</div>

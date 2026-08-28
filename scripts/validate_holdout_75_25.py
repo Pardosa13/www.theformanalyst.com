@@ -53,10 +53,23 @@ DEFAULT_FAMILIES = 'rf,mlp,xgboost,lightgbm,catboost'
 
 # ── PostgREST data loading (mirrors backtest.load_historical_data's SQL) ─────
 
+# limit/offset paging is only well-defined under a total order. Without one,
+# PostgreSQL is free to return rows in a different order for each page, so rows
+# can be silently skipped and others returned twice — the page count and the
+# grand total still look right, which is what makes it hard to notice. Two runs
+# of this loader minutes apart disagreed by 14,437 rows on how many carried a
+# NULL meeting_date. Every table paged here is keyed by 'id', so that is the
+# default sort; callers may override it but must not turn it off.
+_DEFAULT_PAGE_ORDER = 'id.asc'
+
+
 def _postgrest_fetch(table, select, order=None, page_size=10000, cache_key=None, retries=4):
     """Paginated PostgREST fetch with retries and an optional local pickle
     cache — the horses fetch alone moves ~0.5GB, so a mid-run network blip
-    must not force refetching everything from scratch."""
+    must not force refetching everything from scratch.
+
+    Pages are always fetched under a total order (see _DEFAULT_PAGE_ORDER);
+    order=None means "use the default", not "unordered"."""
     import pickle
     import time
 
@@ -80,9 +93,8 @@ def _postgrest_fetch(table, select, order=None, page_size=10000, cache_key=None,
     rows = []
     offset = 0
     while True:
-        params = {'select': select, 'limit': page_size, 'offset': offset}
-        if order:
-            params['order'] = order
+        params = {'select': select, 'limit': page_size, 'offset': offset,
+                  'order': order or _DEFAULT_PAGE_ORDER}
         page = None
         for attempt in range(retries):
             try:
@@ -138,7 +150,8 @@ def load_data_via_postgrest():
     sr = _postgrest_fetch(
         'strike_rates',
         'type,name,l100_wins,l100_runs,career_actual_to_expected,last100_actual_to_expected,career_runs,updated_at',
-        order='updated_at.desc',
+        # id tie-breaks a non-unique sort key so paging stays a total order.
+        order='updated_at.desc,id.asc',
     )
     strike_rate_data = {'jockeys': {}, 'trainers': {}, 'jockeys_history': {}, 'trainers_history': {},
                         'jockeys_extra': {}, 'trainers_extra': {}}
@@ -159,7 +172,8 @@ def load_data_via_postgrest():
     try:
         snapshots = _postgrest_fetch(
             'strike_rate_snapshots', 'type,name,l100_wins,l100_runs,snapshot_date',
-            order='snapshot_date.asc',
+            # id tie-breaks a non-unique sort key so paging stays a total order.
+        order='snapshot_date.asc,id.asc',
         )
         for sr_type, key in (('jockey', 'jockeys_history'), ('trainer', 'trainers_history')):
             subset = snapshots[snapshots['type'] == sr_type]

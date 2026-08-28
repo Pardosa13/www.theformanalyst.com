@@ -56,6 +56,7 @@ import json
 import re
 import logging
 import pickle
+import statistics
 from datetime import date, datetime, timedelta
 from itertools import product
 from strike_rate_matching import (
@@ -63,6 +64,7 @@ from strike_rate_matching import (
     get_sr_win_pct, get_sr_win_pct_asof, log_match_stats, normalize_name,
 )
 from model_classes import ConsensusRegressor, solve_joint_kelly
+from book_quality import SUSPICIOUS_OVERROUND, unusable_race_ids
 from notes_parsing import (
     parse_notes_components, parse_analyzer_score,
     is_scoring_component, NEGATIVE_COMPONENTS,
@@ -1669,6 +1671,30 @@ def build_training_set(df, strike_rate_data=None):
                 pass
         race_avg_weights[race_id] = sum(weights) / len(weights) if weights else 55.0
 
+    # ── Book-quality gate ──────────────────────────────────────────────
+    # Races whose starting-price data is incomplete must never become training
+    # targets. In the 1,489 affected races a price exists for essentially only
+    # the top-four finishers (100% of placegetters vs 1.2% of unplaced runners),
+    # so the row-level SP filter below would keep exactly the horses that placed
+    # and drop the rest — handing the model a field it cannot lose in. See
+    # book_quality.py for the measurements behind the threshold.
+    unusable_books = unusable_race_ids(
+        (row['race_id'], row.get('sp'), row.get('finish_position'))
+        for _, row in df_unique.iterrows()
+    )
+    if unusable_books:
+        excluded_rows = int(df_unique['race_id'].isin(unusable_books).sum())
+        suspicious = sum(1 for q in unusable_books.values() if q['suspicious_overround'])
+        log.warning(
+            "Book-quality gate: excluding %s races (%s rows) whose starting-price "
+            "data is incomplete — median coverage %.0f%%, %s of them with a book "
+            "summing under %.2f. These races cannot be scored honestly and are kept "
+            "out of training and validation alike.",
+            len(unusable_books), excluded_rows,
+            100.0 * statistics.median([q['coverage'] for q in unusable_books.values()]),
+            suspicious, SUSPICIOUS_OVERROUND,
+        )
+
     feature_rows = []
     targets_roi = []
     targets_won = []
@@ -1683,6 +1709,8 @@ def build_training_set(df, strike_rate_data=None):
     snapshot_coverage_stats = {'jockey_total': 0, 'jockey_dated': 0, 'trainer_total': 0, 'trainer_dated': 0}
 
     for _, row in df_unique.iterrows():
+        if row['race_id'] in unusable_books:
+            continue
         try:
             features, jockey_used_dated_snapshot, trainer_used_dated_snapshot = extract_features(
                 row, jockey_sr, trainer_sr,
