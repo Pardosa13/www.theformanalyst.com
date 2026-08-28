@@ -43,10 +43,52 @@ import subprocess
 import sys
 from datetime import datetime
 
+from sqlalchemy import create_engine, text
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def run_variant(label, ablate, outdir):
+def _engine():
+    url = os.environ['DATABASE_URL']
+    if url.startswith('postgres://'):
+        url = url.replace('postgres://', 'postgresql://', 1)
+    return create_engine(url, pool_pre_ping=True)
+
+
+def _max_run_id(engine):
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT COALESCE(MAX(id), 0) FROM backtest_runs")).fetchone()
+    return int(row[0])
+
+
+def _competition_rows(engine, run_id):
+    """Every Track E candidate scored in this run, best Champion Score first."""
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT model_type, model_name, selection_score, validation_roi,
+                   validation_strike_rate, validation_bets, log_loss,
+                   brier_score, walk_forward
+            FROM backtest_model_competition
+            WHERE run_id = :rid
+            ORDER BY selection_score DESC NULLS LAST
+        """), {'rid': run_id}).mappings().all()
+    out = []
+    for r in rows:
+        d = dict(r)
+        wf = d.pop('walk_forward', None)
+        folds = []
+        if wf:
+            try:
+                folds = [f.get('roi') for f in (json.loads(wf).get('folds') or [])]
+            except (ValueError, TypeError, AttributeError):
+                folds = []
+        d['walk_forward_fold_rois'] = folds
+        d['walk_forward_mean_roi'] = (sum(folds) / len(folds)) if folds else None
+        out.append(d)
+    return out
+
+
+def run_variant(label, ablate, outdir, engine):
     env = dict(os.environ)
     env['ABLATE_AUDIT_FEATURES'] = '1' if ablate else '0'
     env['ML_MODEL_VERSION'] = f"diag_{label}_{datetime.utcnow():%Y%m%d%H%M}"
@@ -54,11 +96,82 @@ def run_variant(label, ablate, outdir):
     print(f"\n=== running variant: {label} "
           f"({'136 pre-audit features' if ablate else '197 current features'}) ===")
     print(f"    log -> {logpath}")
+
+    before = _max_run_id(engine)
     with open(logpath, 'w') as fh:
         rc = subprocess.call([sys.executable, os.path.join(REPO, 'backtest.py')],
                              cwd=REPO, env=env, stdout=fh, stderr=subprocess.STDOUT)
+    after = _max_run_id(engine)
     print(f"    exit code: {rc}")
-    return {'label': label, 'ablate': ablate, 'exit_code': rc, 'log': logpath}
+
+    run_id = after if after > before else None
+    if run_id is None:
+        print("    WARNING: no new backtest_runs row — the run did not get far "
+              "enough to record anything. Check the log.")
+    return {
+        'label': label,
+        'ablate': ablate,
+        'feature_set': '136 (pre-audit)' if ablate else '197 (current)',
+        'exit_code': rc,
+        'log': logpath,
+        'run_id': run_id,
+        'candidates': _competition_rows(engine, run_id) if run_id else [],
+    }
+
+
+def _fmt(v, spec='.2f'):
+    return 'n/a' if v is None else format(v, spec)
+
+
+def report(results):
+    print("\n" + "=" * 78)
+    print("CHAMPION SCORE / ROI / STRIKE RATE — identical data, features the only variable")
+    print("=" * 78)
+    for res in results:
+        print(f"\n{res['label']}  [{res['feature_set']}]  run_id={res['run_id']}")
+        if not res['candidates']:
+            print("  (no candidates recorded)")
+            continue
+        print(f"  {'model':<22}{'ChampScore':>11}{'holdoutROI':>12}"
+              f"{'SR%':>8}{'bets':>7}{'wfMeanROI':>11}  folds")
+        for c in res['candidates']:
+            print(f"  {str(c['model_name'])[:21]:<22}"
+                  f"{_fmt(c['selection_score']):>11}"
+                  f"{_fmt(c['validation_roi']):>12}"
+                  f"{_fmt(c['validation_strike_rate']):>8}"
+                  f"{_fmt(c['validation_bets'], 'd'):>7}"
+                  f"{_fmt(c['walk_forward_mean_roi']):>11}"
+                  f"  {[round(f, 1) for f in c['walk_forward_fold_rois']]}")
+
+    best = {}
+    for res in results:
+        scored = [c for c in res['candidates'] if c['selection_score'] is not None]
+        best[res['label']] = max(scored, key=lambda c: c['selection_score']) if scored else None
+
+    cur, pre = best.get('current_207'), best.get('preaudit_146')
+    print("\n" + "-" * 78)
+    if cur and pre:
+        delta = cur['selection_score'] - pre['selection_score']
+        print(f"Best Champion Score  current(197) {cur['selection_score']:.2f}  "
+              f"vs  pre-audit(136) {pre['selection_score']:.2f}   delta {delta:+.2f}")
+        if delta > 1.0:
+            verdict = ("The audit features HELP. Dropping them scores worse, so they are "
+                       "not the cause of the recent bad models — investigate the data/pipeline "
+                       "changes after run 136 instead.")
+        elif delta < -1.0:
+            verdict = ("The audit features HURT on this data. Rolling them back and "
+                       "re-promoting from the 136-feature set is justified.")
+        else:
+            verdict = ("No meaningful difference (within the +/-1.0 promotion edge). The "
+                       "features are not what changed — look at the data and the pipeline.")
+        print("\nVERDICT: " + verdict)
+        if (cur['walk_forward_mean_roi'] or 0) < 0 and (pre['walk_forward_mean_roi'] or 0) < 0:
+            print("\nNOTE: both feature sets have a NEGATIVE walk-forward mean ROI. Neither "
+                  "has demonstrable out-of-sample edge on this data, whatever the "
+                  "Champion Scores say relative to each other.")
+    else:
+        print("Could not compare: at least one variant produced no scored candidate.")
+    print("-" * 78)
 
 
 def main():
@@ -76,19 +189,19 @@ def main():
     outdir = os.environ.get('DIAG_OUTDIR') or os.path.join(REPO, 'diag_runs')
     os.makedirs(outdir, exist_ok=True)
 
+    engine = _engine()
     results = [
-        run_variant('current_207', ablate=False, outdir=outdir),
-        run_variant('preaudit_146', ablate=True, outdir=outdir),
+        run_variant('current_207', ablate=False, outdir=outdir, engine=engine),
+        run_variant('preaudit_146', ablate=True, outdir=outdir, engine=engine),
     ]
 
     summary = os.path.join(outdir, 'summary.json')
     with open(summary, 'w') as fh:
-        json.dump(results, fh, indent=2)
+        json.dump(results, fh, indent=2, default=str)
+    report(results)
     print(f"\nWrote {summary}")
-    print("\nCompare Champion Score / ROI / strike rate / A-E ratio for the two "
-          "run_ids in backtest_best_model, and the per-fold walk-forward ROIs.\n"
-          "The walk-forward fold mean is the number to trust — not the single "
-          "holdout ROI, which is what made run 133 look like +30-42%.")
+    print("\nTrust the walk-forward fold mean over the single holdout ROI: the "
+          "holdout is what made run 133 look like +30-42%.")
 
 
 if __name__ == '__main__':
