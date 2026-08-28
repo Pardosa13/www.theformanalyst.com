@@ -34,10 +34,31 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-if not os.environ.get('DATABASE_URL'):
-    sys.exit("DATABASE_URL is not set.")
+USING_POSTGREST = bool(os.environ.get('POSTGREST_URL')) and not os.environ.get('DATABASE_URL')
+if USING_POSTGREST:
+    # backtest.py reads DATABASE_URL at import time and exits without one, but
+    # nothing on this path touches the engine — the loader comes from
+    # validate_holdout_75_25, which fetches over the read-only PostgREST API.
+    os.environ.setdefault('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:5432/unused')
+elif not os.environ.get('DATABASE_URL'):
+    sys.exit("Set DATABASE_URL (direct Postgres) or POSTGREST_URL (read-only REST API).")
 
 import backtest as bt  # noqa: E402  (import after the env check; module reads it at import)
+
+
+def load_inputs():
+    """Return (df, strike_rate_data) from whichever read-only source is configured."""
+    if USING_POSTGREST:
+        print(f"Loading via PostgREST: {os.environ['POSTGREST_URL']}")
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'vh', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'validate_holdout_75_25.py'))
+        vh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(vh)
+        return vh.load_data_via_postgrest()
+    print("Loading via direct Postgres connection")
+    return bt.load_historical_data(), bt.load_strike_rate_data()
 
 
 def _fmt(v, spec='.2f'):
@@ -82,8 +103,7 @@ def print_table(label, feature_count, rows):
 
 def main():
     print("Loading data (read-only)...")
-    df = bt.load_historical_data()
-    sr = bt.load_strike_rate_data()
+    df, sr = load_inputs()
 
     X, y_roi, y_won, sp_values, race_ids, horse_ids, meeting_dates = \
         bt.build_training_set(df, sr)
