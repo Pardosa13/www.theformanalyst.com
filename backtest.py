@@ -1413,6 +1413,44 @@ NEW_RELATIVE_LOWER_IS_BETTER = {
 }
 
 
+# ─────────────────────────────────────────────
+# 2026-07 AUDIT FEATURE ABLATION (diagnostic only)
+# ─────────────────────────────────────────────
+# The 61 columns commit 9491ea7 ("Add audit-validated features...", 2026-07-21)
+# and 233ff6b (opponent_quality_form, 2026-08-19) added on top of the
+# 146-feature era set. Setting ABLATE_AUDIT_FEATURES=1 drops exactly these
+# from the training matrix and leaves EVERYTHING else identical — same data
+# window, same undated-meeting repair, same chronological splits, same
+# Champion Score formula. That isolates the features as a variable, which
+# re-running the old backtest.py file cannot do: that file also carries the
+# pre-repair undated-meeting bug and the v2 (0.5 * strike_rate) score.
+#
+# Inert unless the env var is set. Never set it for the nightly production run.
+AUDIT_FEATURES_2026_07 = [
+    'form_speed_mps', 'race_number', 'start_hour', 'is_handicap', 'race_min_age',
+    'race_age_open', 'race_sex_restricted', 'rec_good_win_rate', 'rec_soft_win_rate',
+    'rec_heavy_win_rate', 'wet_track_runs', 'tab_number', 'rail_position',
+    'last200_price', 'last400_price', 'last600_price', 'pf_time_rank',
+    'pf_time_price', 'pf_early_time_rank', 'pf_weight_class_rank',
+    'pf_adj_weight_class_rank', 'pf_class_change', 'pf_predicted_settle',
+    'pf_avg_hist_settle', 'pf_run_style', 'pf_is_reliable', 'pfai_price',
+    'pfai_rank', 'sm_assessed_price', 'sm_speed', 'sm_settle', 'sm_map_a2e',
+    'sm_jockey_a2e', 'sm_rated_run_style', 'sm_rated_settle', 'sm_assessed_prob',
+    'jockey_career_a2e', 'jockey_l100_a2e', 'jockey_career_runs',
+    'trainer_career_a2e', 'trainer_l100_a2e', 'trainer_career_runs',
+    'sire_win_rate', 'dam_win_rate', 'opponent_quality_form',
+    'form_speed_mps_race_rank', 'form_speed_mps_vs_race_avg',
+    'pf_time_rank_race_rank', 'pf_time_rank_vs_race_avg',
+    'pf_weight_class_rank_race_rank', 'pf_weight_class_rank_vs_race_avg',
+    'pfai_price_race_rank', 'pfai_price_vs_race_avg',
+    'sm_assessed_prob_race_rank', 'sm_assessed_prob_vs_race_avg',
+    'sm_settle_race_rank', 'sm_settle_vs_race_avg',
+    'pf_early_time_rank_race_rank', 'pf_early_time_rank_vs_race_avg',
+    'opponent_quality_form_race_rank', 'opponent_quality_form_vs_race_avg',
+]
+ABLATE_AUDIT_FEATURES = os.environ.get('ABLATE_AUDIT_FEATURES', '').strip().lower() in ('1', 'true', 'yes')
+
+
 def add_race_relative_features(feature_rows, race_ids):
     temp = pd.DataFrame(feature_rows)
     temp['race_id'] = race_ids
@@ -1722,6 +1760,17 @@ def build_training_set(df, strike_rate_data=None):
     log.info("field_size feature added")
 
     X = pd.DataFrame(feature_rows)
+    if ABLATE_AUDIT_FEATURES:
+        drop_cols = [c for c in AUDIT_FEATURES_2026_07 if c in X.columns]
+        missing = [c for c in AUDIT_FEATURES_2026_07 if c not in X.columns]
+        X = X.drop(columns=drop_cols)
+        log.warning(
+            "ABLATE_AUDIT_FEATURES=1: dropped %s of the %s 2026-07 audit features "
+            "(%s not present in this matrix). Training matrix is now %s features, "
+            "reproducing the pre-audit feature set under the CURRENT data repair "
+            "and Champion Score formula. DIAGNOSTIC RUN — do not promote.",
+            len(drop_cols), len(AUDIT_FEATURES_2026_07), len(missing), X.shape[1],
+        )
     y_roi = pd.Series(targets_roi)
     y_won = pd.Series(targets_won)
 
