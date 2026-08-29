@@ -1,6 +1,8 @@
 # Updated 2025-11-26 to fix deployment
 import os
 import json
+from scoring_versions import group_by_formula_version, scores_comparable
+from book_quality import race_book_quality
 import re
 import subprocess
 import csv
@@ -4668,6 +4670,26 @@ def fetch_automatic_results(meeting_id):
         
         db.session.commit()
         flash(f"✓ Auto-fetched results for {horses_updated} horses from PuntingForm", "success")
+
+        # The feed does not always price every runner. Say so now, per race, so a
+        # part-priced meeting is visible at import instead of quietly becoming
+        # training data that no model can be scored honestly against.
+        incomplete = []
+        for race in meeting.races:
+            rows = [(h.result.sp, h.result.finish_position)
+                    for h in race.horses if h.result is not None]
+            if not rows:
+                continue
+            if not race_book_quality(rows)['usable']:
+                incomplete.append(race.race_number)
+        if incomplete:
+            flash(
+                f"⚠️ {len(incomplete)} race(s) came back part-priced and will be "
+                f"EXCLUDED from model training: race(s) "
+                f"{', '.join(str(n) for n in sorted(incomplete))}. Add the missing "
+                f"starting prices to make them usable.",
+                "warning",
+            )
         
     except Exception as e:
         logger.error(f"Auto-fetch error: {str(e)}", exc_info=True)
@@ -5119,10 +5141,22 @@ def save_results(meeting_id):
         elif finish not in [0, 1, 2, 3, 4, 5]:  # Added 0 for scratched
             errors.append(f"Invalid finish position for {horse.horse_name}")
         
-        # Only require SP for horses that actually ran (not scratched)
-        if finish in [1, 2, 3, 4]:
+        # Require SP for every horse that RAN, including unplaced ones (finish 5).
+        #
+        # This used to read `finish in [1, 2, 3, 4]`, so a price was only ever
+        # demanded from the placegetters. That is the origin of the 1,489 broken
+        # races: in them 100% of top-four finishers carry a price against 1.2% of
+        # unplaced runners, which makes "has a price" almost the same fact as
+        # "finished in the first four". Training then drops the unpriced rows and
+        # learns from a field that already placed. Demanding the full book here is
+        # what stops that data being created in the first place.
+        if finish in [1, 2, 3, 4, 5]:
             if sp is None:
-                errors.append(f"Missing SP for {horse.horse_name}")
+                errors.append(
+                    f"Missing SP for {horse.horse_name}. Every runner needs a "
+                    f"starting price, not just the placegetters — a part-priced "
+                    f"race cannot be used to train or evaluate a model."
+                )
             elif sp < 1.01 or sp > 999:
                 errors.append(f"Invalid SP for {horse.horse_name} (must be $1.01 - $999)")
         
@@ -5159,6 +5193,27 @@ def save_results(meeting_id):
     
     db.session.commit()
     flash(f"Race {race_number} results saved successfully", "success")
+
+    # Report the saved book's quality. The validation above should keep every
+    # race on the right side of this, so a warning here means something reached
+    # the database by another route — worth seeing now rather than discovering it
+    # in a backtest weeks later.
+    book = race_book_quality(
+        (item['sp'], item['finish']) for item in results_to_save
+    )
+    if not book['usable']:
+        flash(
+            f"⚠️ Race {race_number} will be EXCLUDED from model training: "
+            f"{book['reason']}.",
+            "warning",
+        )
+    elif book['suspicious_overround']:
+        flash(
+            f"⚠️ Race {race_number}'s prices sum to {book['overround']:.3f}. A "
+            f"complete book sums above 1.0 — below that, backing every runner "
+            f"would show a profit, so check these prices.",
+            "warning",
+        )
     
     # Check if all races are complete
     all_complete = True
@@ -5631,8 +5686,28 @@ def data_analytics():
 _ML_MODEL_SUMMARY_COLUMNS = """
             bm.id, bm.run_id, bm.model_type, bm.model_name, bm.combined_score,
             bm.validation_roi, bm.validation_strike_rate, bm.validation_bets,
-            bm.selection_metrics, bm.promotion_reason, bm.is_active
+            bm.selection_metrics, bm.promotion_reason, bm.is_active,
+            bm.scoring_formula_version
 """
+
+
+# Champion Score comparability lives in scoring_versions.py: pure functions,
+# importable and testable without standing up Flask or a database.
+champion_scores_comparable = scores_comparable
+group_scores_by_formula_version = group_by_formula_version
+
+
+def _current_scoring_formula_version():
+    """The formula version this deployment's backtest.py would produce.
+
+    Imported lazily: app.py must not pull backtest.py (and its ML stack) in at
+    module import time just to render a page.
+    """
+    try:
+        from backtest import SCORING_FORMULA_VERSION
+        return SCORING_FORMULA_VERSION
+    except Exception:
+        return None
 
 
 def _ml_model_summary_from_row(row):
@@ -5669,6 +5744,14 @@ def _ml_model_summary_from_row(row):
         'promotion_reason': row.promotion_reason,
         'beat_champion': bool(row.is_active) or str(row.promotion_reason or '').lower().startswith('promoted:'),
         'completed_at': getattr(row, 'completed_at', None),
+        # Which scoring rule produced champion_score. Carried through so no
+        # panel, chart or client can compare two scores without knowing whether
+        # they are the same unit.
+        'scoring_formula_version': getattr(row, 'scoring_formula_version', None),
+        'scoring_formula_is_current': (
+            getattr(row, 'scoring_formula_version', None) is not None
+            and getattr(row, 'scoring_formula_version', None) == _current_scoring_formula_version()
+        ),
     }
 
 
@@ -5772,6 +5855,10 @@ def ml_data_analytics():
             active_model_metadata['strike_rate'] = champion_backtest.get('strike_rate')
             active_model_metadata['bets'] = champion_backtest.get('bets')
             active_model_metadata['champion_score'] = champion_backtest.get('champion_score')
+            # The formula that produced champion_score, so the page can refuse to
+            # present it as comparable with a challenger scored by another rule.
+            active_model_metadata['scoring_formula_version'] = champion_backtest.get('scoring_formula_version')
+            active_model_metadata['scoring_formula_is_current'] = champion_backtest.get('scoring_formula_is_current')
         except NoActiveChampionError as e:
             # Not an error to fix: the pipeline is deliberately running with no
             # champion, so the page says so in those words rather than showing a
@@ -5814,6 +5901,8 @@ def ml_data_analytics():
         logger.warning("Error calculating ML Value Edge performance: %s", e)
 
     return render_template("ml_data.html",
+        champion_scores_comparable=champion_scores_comparable(
+            active_model_metadata, latest_challenger),
         ml_performance_stats=ml_performance_stats,
         ladbrokes_signal_performance=ladbrokes_signal_performance,
         value_edge_performance=value_edge_performance,
