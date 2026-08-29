@@ -3127,8 +3127,11 @@ def _selection_score_from_metrics(metrics, force_recompute=False):
 def _promotion_rule_text():
     return (
         f"Promote only if the completed run's overall winner has at least {MIN_VALIDATION_BETS} validation bets, "
-        f"positive validation ROI, strike rate >= {MIN_PROMOTION_STRIKE_RATE_PCT:.1f}%, and Champion Score "
+        f"strike rate >= {MIN_PROMOTION_STRIKE_RATE_PCT:.1f}%, a live-computable feature contract, at least "
+        f"{MIN_WALK_FORWARD_FOLDS} walk-forward folds (not all negative), and Champion Score "
         f"> active Champion Score + {PROMOTION_SELECTION_SCORE_EDGE:.3f}. "
+        "Validation ROI is NOT required to be positive: the best-scoring eligible candidate by Champion Score "
+        "wins promotion whether its ROI is positive or negative. "
         "Champion Score is stored internally as selection_score and equals "
         "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI — with the holdout term dropped entirely, "
         "leaving the mean fold ROI alone, whenever EVERY walk-forward fold is negative and the holdout "
@@ -3138,7 +3141,7 @@ def _promotion_rule_text():
         "(-10 more if the Kelly simulation went bust) - calibration penalties "
         "(log loss, Brier score, expected calibration error) - stability penalty - walk-forward cross-fold ROI-std penalty; "
         "a model with no walk-forward evidence gets no credit for its holdout ROI beyond a 0.3x weight. "
-        "ROI alone is never sufficient."
+        "ROI alone is never sufficient, and a negative ROI is not by itself disqualifying."
     )
 RF_BEST_ARTIFACT_NAME = 'form_analyst_best_random_forest.pkl'
 LEGACY_RF_BEST_ARTIFACT_NAME = 'form_analyst_best.pkl'
@@ -4468,7 +4471,14 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
         challenger_roi = float(val_roi) if val_roi is not None else None
         challenger_sr = float(val_sr) if val_sr is not None else None
         challenger_sample_ok = int(val_bets or 0) >= MIN_VALIDATION_BETS
-        challenger_roi_positive = challenger_roi is not None and challenger_roi > 0.0
+        # Deliberately no "validation ROI must be positive" flag here any more.
+        # Promotion now picks the best-scoring ELIGIBLE candidate by Champion
+        # Score, whether that score is built on a positive or a negative ROI:
+        # a field in which every honest candidate loses money is still a field
+        # with a best model in it, and refusing to promote it only pins live
+        # scoring to an older model that is losing more. The sample-size,
+        # strike-rate, feature-contract, walk-forward-fold and Champion-Score
+        # edge gates below are untouched and still do the real filtering.
         challenger_sr_acceptable = challenger_sr is not None and challenger_sr >= MIN_PROMOTION_STRIKE_RATE_PCT
 
         # Statistical-significance gate, layered on top of the fixed Champion
@@ -4555,8 +4565,6 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
             )
         elif challenger_roi is None or challenger_sr is None or challenger_score is None:
             reason = "Rejected: challenger validation metrics or Champion Score missing"
-        elif not challenger_roi_positive:
-            reason = "Rejected: challenger validation ROI is not positive"
         elif not challenger_sample_ok:
             reason = "Rejected: validation sample too small"
         elif not challenger_sr_acceptable:
@@ -5270,13 +5278,13 @@ def check_active_champion_staleness(run_id=None):
 def ensure_champion_exists_after_run(run_id=None):
     """Guarantee this run never finishes with zero active champions.
 
-    Every ordinary promotion gate in this module (positive ROI, walk-forward
-    not all negative, the Champion Score edge over the incumbent, statistical
-    significance, "no comparable champion existed") is correct for ordinary
-    promotion decisions. None of them is allowed to be the reason a night
-    ends with NO active champion: check_active_champion_staleness may have
-    just evicted an unusable incumbent (e.g. no persisted feature list) with
-    no rejected challenger available to replace it, and then every fresh
+    Every ordinary promotion gate in this module (validation sample size,
+    strike rate, walk-forward not all negative, the Champion Score edge over
+    the incumbent, statistical significance, "no comparable champion existed")
+    is correct for ordinary promotion decisions. None of them is allowed to be
+    the reason a night ends with NO active champion: check_active_champion_staleness
+    may have just evicted an unusable incumbent (e.g. no persisted feature list)
+    with no rejected challenger available to replace it, and then every fresh
     challenger trained this run can independently fail the strict bar above
     — leaving live scoring returning zero predictions with nobody notified
     beyond a log line.
@@ -5438,8 +5446,9 @@ def ensure_champion_exists_after_run(run_id=None):
             f"FALLBACK PROMOTION (not the normal edge-threshold rule): no usable active champion existed at "
             f"the end of run {run_id}, so model {best['id']} (Champion Score {best['score']:.3f}) was promoted "
             "as the best Champion Score among valid, feature-complete candidates on record, WITHOUT clearing "
-            "the normal strict promotion bar (positive ROI / walk-forward not all negative / Champion Score "
-            "edge over the incumbent / statistical significance). Flagged for manual review."
+            "the normal strict promotion bar (validation sample size / strike rate / walk-forward not all "
+            "negative / Champion Score edge over the incumbent / statistical significance). Flagged for "
+            "manual review."
         )
         # rollback_to_champion re-checks comparability via _assert_champion_comparable,
         # which would reject the very candidate just chosen if its stored row still
@@ -6574,8 +6583,8 @@ def main():
         )
 
         # Last chance for this run to end with a champion: none of the
-        # ordinary promotion gates evaluated above (positive ROI, the Champion
-        # Score edge over the incumbent, "no comparable champion existed",
+        # ordinary promotion gates evaluated above (validation sample size, the
+        # Champion Score edge over the incumbent, "no comparable champion existed",
         # etc.) should be the reason live scoring ends the night with nothing
         # to serve — but two conditions still are, deliberately: a candidate
         # from an older scoring/feature era, and one that lost on every

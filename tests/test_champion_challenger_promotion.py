@@ -359,7 +359,12 @@ def test_worse_challenger_remains_rejected(monkeypatch, tmp_path):
     )
 
 
-def test_validation_failures_still_block_higher_scoring_challenger(monkeypatch, tmp_path):
+def test_negative_roi_challenger_promotes_when_it_wins_on_champion_score(monkeypatch, tmp_path):
+    """The positive-ROI promotion requirement is gone by design: promotion picks
+    the best-scoring ELIGIBLE candidate by Champion Score, positive ROI or not.
+    A challenger that clears every remaining gate (sample size, strike rate,
+    feature contract, walk-forward folds, score edge) must be promoted even
+    though its holdout ROI is negative."""
     conn = FakeConnection(champion=champion_row(10.0))
 
     save_model_with_fake_db(
@@ -369,10 +374,79 @@ def test_validation_failures_still_block_higher_scoring_challenger(monkeypatch, 
         metrics(selection_score=12.0, roi=-1.0, strike_rate=20.0, bets=150),
     )
 
+    assert conn.activated_challenger is not None
+    assert conn.activated_challenger["id"] == conn.challenger_id
+    assert conn.deactivated_champions is True
+    assert conn.promotion_history["new_champion_id"] == conn.challenger_id
+    assert "Champion Score 12.000 beat Champion Score 10.000" in conn.activated_challenger["reason"]
+
+
+def test_validation_failures_still_block_higher_scoring_challenger(monkeypatch, tmp_path):
+    """The remaining gates are untouched by the ROI-rule removal: a
+    below-minimum validation sample still blocks a challenger that would
+    otherwise win on Champion Score."""
+    conn = FakeConnection(champion=champion_row(10.0))
+
+    save_model_with_fake_db(
+        monkeypatch,
+        tmp_path,
+        conn,
+        metrics(selection_score=12.0, roi=-1.0, strike_rate=20.0,
+                bets=backtest.MIN_VALIDATION_BETS - 1),
+    )
+
     assert conn.activated_challenger is None
     assert conn.deactivated_champions is False
     assert conn.promotion_history is None
-    assert conn.rejected_challenger["reason"] == "Rejected: challenger validation ROI is not positive"
+    assert conn.rejected_challenger["reason"] == "Rejected: validation sample too small"
+
+
+def test_below_gate_strike_rate_still_blocks_a_negative_roi_challenger(monkeypatch, tmp_path):
+    """Removing the ROI rule must not open the strike-rate gate as a side
+    effect."""
+    conn = FakeConnection(champion=champion_row(10.0))
+
+    save_model_with_fake_db(
+        monkeypatch,
+        tmp_path,
+        conn,
+        metrics(selection_score=12.0, roi=-1.0,
+                strike_rate=backtest.MIN_PROMOTION_STRIKE_RATE_PCT - 1.0, bets=150),
+    )
+
+    assert conn.activated_challenger is None
+    assert conn.promotion_history is None
+    assert conn.rejected_challenger["reason"] == (
+        "Rejected: challenger validation strike rate is below promotion gate"
+    )
+
+
+def test_all_negative_walk_forward_folds_still_veto_promotion(monkeypatch, tmp_path):
+    """The every-fold-negative veto is a separate, still-active rule: it is not
+    the positive-ROI requirement and survives its removal."""
+    conn = FakeConnection(champion=champion_row(10.0))
+    losing = metrics(selection_score=12.0, roi=-1.0, strike_rate=20.0, bets=150)
+    losing["walk_forward"] = {
+        "folds": [{"roi": -2.0, "strike_rate": 18.0, "bets": 50},
+                  {"roi": -4.0, "strike_rate": 17.0, "bets": 50}],
+        "roi_std": 0.5,
+    }
+
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, losing)
+
+    assert conn.activated_challenger is None
+    assert conn.promotion_history is None
+    assert "every walk-forward fold was negative" in conn.rejected_challenger["reason"]
+
+
+def test_promotion_rule_text_no_longer_advertises_a_positive_roi_requirement():
+    rule = backtest._promotion_rule_text()
+
+    assert "positive validation ROI" not in rule
+    assert "negative ROI is not by itself disqualifying" in rule
+    assert f"at least {backtest.MIN_VALIDATION_BETS} validation bets" in rule
+    assert f"strike rate >= {backtest.MIN_PROMOTION_STRIKE_RATE_PCT:.1f}%" in rule
+    assert f"at least {backtest.MIN_WALK_FORWARD_FOLDS} walk-forward folds" in rule
 
 
 def test_promotion_preserves_model_history_and_rollback_records(monkeypatch, tmp_path):
