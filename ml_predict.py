@@ -19,7 +19,9 @@ from collections import Counter, defaultdict
 import numpy as np
 from strike_rate_matching import build_strike_rate_lookup, get_sr_win_pct, normalize_name
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
+
+from sqlalchemy import text
 
 # Importing this registers ConsensusRegressor (and any future shared custom
 # estimator classes) on this process's __main__ module, so joblib.load()
@@ -1208,6 +1210,80 @@ def _load_pf_race_lookups_for_meeting(races):
     return ratings_lookup, speedmaps_lookup
 
 
+# ── Live pre-race market odds ────────────────────────────────────────────────
+# odds_ingest.py writes one insert-only row per runner per observation into
+# live_odds_snapshots. Scoring only wants the newest row per runner, but the
+# whole path is kept there because it cannot be reconstructed later.
+
+# A price captured longer ago than this is not "the market right now". The
+# poller's default interval is 180s, so this tolerates a few missed passes
+# while still refusing to score a race off an hour-old board.
+LIVE_ODDS_MAX_AGE_SECONDS = float(os.environ.get('ML_LIVE_ODDS_MAX_AGE_SECONDS', '900'))
+
+
+def _load_latest_live_odds_for_meeting(races, db_session):
+    """Newest usable live price per runner across this meeting's races.
+
+    Returns {horse_id: {'odds', 'captured_at', 'source', 'age_seconds'}} for
+    every runner with a fresh, unscratched price. A runner with no snapshot,
+    only stale snapshots, or a scratched-at-capture snapshot is simply absent —
+    callers must treat "no live price" as normal, because it is: the poller may
+    not have reached this meeting, and a meeting being re-scored days later has
+    no live market at all.
+
+    Missing table, missing column, unreachable database: all return {} with a
+    warning. Live scoring predates this table and must keep working without it.
+    """
+    race_ids = [race.id for race in (races or [])]
+    if not race_ids:
+        return {}
+    try:
+        # DISTINCT ON is the direct expression of "newest row per runner" and
+        # is served by ix_live_odds_snapshots_latest without a sort.
+        rows = db_session.execute(text("""
+            SELECT DISTINCT ON (horse_id)
+                   horse_id, odds, source, captured_at, is_scratched
+            FROM live_odds_snapshots
+            WHERE race_id = ANY(:race_ids)
+            ORDER BY horse_id, captured_at DESC
+        """), {'race_ids': race_ids}).mappings().all()
+    except Exception as e:
+        log.warning(
+            "Could not read live_odds_snapshots (%s); scoring this meeting without "
+            "live market odds. Has odds_ingest.py run against this database?", e,
+        )
+        return {}
+
+    now = datetime.now(timezone.utc)
+    out = {}
+    stale = 0
+    for row in rows:
+        if row['is_scratched'] or row['odds'] is None:
+            continue
+        captured_at = row['captured_at']
+        if captured_at is None:
+            continue
+        # captured_at is stored as a naive UTC timestamp (NOW() on a UTC
+        # container); treat a naive value as UTC rather than as local time.
+        if captured_at.tzinfo is None:
+            captured_at = captured_at.replace(tzinfo=timezone.utc)
+        age_seconds = (now - captured_at).total_seconds()
+        if age_seconds > LIVE_ODDS_MAX_AGE_SECONDS:
+            stale += 1
+            continue
+        out[row['horse_id']] = {
+            'odds': float(row['odds']),
+            'source': row['source'],
+            'captured_at': captured_at,
+            'age_seconds': age_seconds,
+        }
+    log.info(
+        "ML_LIVE_ODDS_LOADED races=%s runners_with_fresh_price=%s stale_dropped=%s max_age_seconds=%s",
+        len(race_ids), len(out), stale, LIVE_ODDS_MAX_AGE_SECONDS,
+    )
+    return out
+
+
 def _load_breeding_win_rates(db_session):
     """Historical sire/dam progeny win rates from recorded results.
 
@@ -1352,13 +1428,19 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
     races = db_session.query(Race).filter_by(meeting_id=meeting_id).all()
 
     pf_ratings_lookup, pf_speedmaps_lookup = _load_pf_race_lookups_for_meeting(races)
+    # The live market's own opinion of this meeting, captured by odds_ingest.py.
+    # Read once for the whole meeting rather than per race: one query beats one
+    # per race, and a meeting with no snapshots at all should cost one round
+    # trip to discover.
+    live_odds = _load_latest_live_odds_for_meeting(races, db_session)
     log.info(
         "ML_PREDICTION_LIVE_LOOKUPS meeting=%s rail_position=%s pf_ratings_entries=%s "
         "pf_speedmap_entries=%s jockey_sr_loaded=%s trainer_sr_loaded=%s "
-        "jockey_extras=%s trainer_extras=%s sire_rates=%s dam_rates=%s form_scores=%s",
+        "jockey_extras=%s trainer_extras=%s sire_rates=%s dam_rates=%s form_scores=%s "
+        "live_odds_runners=%s",
         meeting_id, rail_position, len(pf_ratings_lookup), len(pf_speedmaps_lookup),
         bool(jockey_sr), bool(trainer_sr), len(jockey_extra), len(trainer_extra),
-        len(sire_rates), len(dam_rates), len(form_scores),
+        len(sire_rates), len(dam_rates), len(form_scores), len(live_odds),
     )
 
     for race in races:
