@@ -6,6 +6,11 @@ RUN apt-get update && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+# Unbuffered stdout/stderr: without this, Python block-buffers stdout when it
+# is a pipe (which it is under Railway), so a job that is killed mid-run can
+# lose every line it had written and show no logs at all.
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 COPY . .
 

@@ -51,6 +51,24 @@ CHANGELOG - 2026-07-21 (data audit + holdout-validated improvements):
 
 import os
 import sys
+
+# ─────────────────────────────────────────────
+# BOOT MARKERS (before anything heavy)
+# ─────────────────────────────────────────────
+# Railway shows "Starting Container" and then whatever the process writes. If
+# this job dies during the numpy/pandas/sklearn import block — an OOM kill on a
+# small container, or a broken wheel after a rebuild — it dies BEFORE
+# logging.basicConfig() below runs, so a bare `log.info` design prints nothing
+# at all and the deploy log stops at "Starting Container" with no clue why.
+# These two markers go straight to stderr, unbuffered, so the last line that
+# made it tells you exactly how far the process got.
+def _boot(msg):
+    sys.stderr.write(f"[boot] {msg}\n")
+    sys.stderr.flush()
+
+
+_boot(f"python {sys.version.split()[0]} — backtest.py entered, importing dependencies...")
+
 import io
 import json
 import re
@@ -89,21 +107,32 @@ import joblib
 import warnings
 warnings.filterwarnings('ignore')
 
+_boot("dependencies imported")
+
 # ─────────────────────────────────────────────
 # LOGGING
 # ─────────────────────────────────────────────
+# force=True so this configuration wins even if an imported module has already
+# touched the root logger: basicConfig is a no-op when the root logger already
+# has handlers, and silently losing every log line that way is precisely the
+# failure this file must never have.
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True,
 )
 log = logging.getLogger(__name__)
+log.info("Logging initialised — backtest.py module loaded")
 
 # ─────────────────────────────────────────────
 # DB CONNECTION
 # ─────────────────────────────────────────────
 DATABASE_URL = os.environ.get('DATABASE_URL')
 if not DATABASE_URL:
+    # Also to stderr: a misconfigured cron service is the one case where the
+    # only symptom is an instant, silent exit, so it must be impossible to miss.
+    _boot("FATAL: DATABASE_URL not set — exiting immediately")
     log.error("DATABASE_URL not set. Exiting.")
     sys.exit(1)
 
@@ -6636,4 +6665,21 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    _boot("entering main()")
+    try:
+        main()
+    except SystemExit:
+        raise
+    except BaseException:
+        # main() handles its own in-run failures; anything reaching here died
+        # before or outside that guard (ensure_tables, the run_id INSERT, the
+        # staleness check re-raise, a SIGTERM). Report it on stderr as well as
+        # through logging so the cause is visible even if the logging stack is
+        # the thing that is broken, and never exit 0 on a failed run.
+        import traceback
+        _boot("FATAL: unhandled exception — traceback follows")
+        traceback.print_exc()
+        sys.stderr.flush()
+        raise
+    finally:
+        _boot("process exiting")
