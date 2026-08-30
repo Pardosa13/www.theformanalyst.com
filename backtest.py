@@ -69,6 +69,7 @@ def _boot(msg):
 
 _boot(f"python {sys.version.split()[0]} — backtest.py entered, importing dependencies...")
 
+import copy
 import io
 import json
 import re
@@ -81,8 +82,15 @@ from strike_rate_matching import (
     build_strike_rate_lookup, build_strike_rate_history_lookup,
     get_sr_win_pct, get_sr_win_pct_asof, log_match_stats, normalize_name,
 )
-from model_classes import ConsensusRegressor, solve_joint_kelly
+from model_classes import (
+    MARKET_BLEND_ALPHA_ATTR, ConsensusRegressor, RaceGroupedRanker,
+    set_race_context, solve_joint_kelly,
+)
 from book_quality import SUSPICIOUS_OVERROUND, unusable_race_ids
+from market_probability import (
+    blend_probabilities_by_race, fair_probabilities, fair_probabilities_by_race,
+    summarise_z,
+)
 from notes_parsing import (
     parse_notes_components, parse_analyzer_score,
     is_scoring_component, NEGATIVE_COMPONENTS,
@@ -2766,7 +2774,7 @@ MIN_WALK_FORWARD_FOLDS = int(os.environ.get('ML_MIN_WALK_FORWARD_FOLDS', '2'))
 # of) the fixed Champion Score edge above.
 PROMOTION_MAX_BOOTSTRAP_P_VALUE = float(os.environ.get('ML_PROMOTION_MAX_P_VALUE', '0.25'))
 MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
-SCORING_FORMULA_VERSION = 'champion_score_v6_joint_kelly'
+SCORING_FORMULA_VERSION = 'champion_score_v7_flb_corrected_ae'
 # Sanity bound for a recomputed Champion Score, used only by the fallback
 # promotion path. Every real score on record sits in the low-to-mid 40s, so
 # this is roughly 4x headroom over anything legitimately observed — wide
@@ -3172,7 +3180,8 @@ def _promotion_rule_text():
         "Champion Score is stored internally as selection_score and equals "
         "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI — with the holdout term dropped entirely, "
         "leaving the mean fold ROI alone, whenever EVERY walk-forward fold is negative and the holdout "
-        "would otherwise raise the score) + 10*(A/E ratio - 1.0) "
+        "would otherwise raise the score) + 10*(A/E ratio - 1.0, where expected wins come from favourite-longshot-corrected "
+        "market probabilities rather than raw 1/SP) "
         "+ 5*joint-Kelly bankroll growth (clamped to [-1.0, 5.0], and scored as 0 for a "
         "kelly_staking record predating the joint solver) - 0.02*joint-Kelly max drawdown % "
         "(-10 more if the Kelly simulation went bust) - calibration penalties "
@@ -3184,14 +3193,46 @@ RF_BEST_ARTIFACT_NAME = 'form_analyst_best_random_forest.pkl'
 LEGACY_RF_BEST_ARTIFACT_NAME = 'form_analyst_best.pkl'
 
 
-def _predict_win_scores(model, X):
-    """Return comparable win-likelihood scores for classifiers or regressors."""
-    if hasattr(model, 'predict_proba'):
-        proba = np.asarray(model.predict_proba(X), dtype=float)
-        if proba.ndim == 2 and proba.shape[1] > 1:
-            return proba[:, 1]
-        return proba.ravel()
-    return np.asarray(model.predict(X), dtype=float)
+def _predict_win_scores(model, X, race_ids=None):
+    """Return comparable win-likelihood scores for classifiers or regressors.
+
+    race_ids: which race each row of X belongs to. Only a race-grouped ranker
+    needs it — its scores are softmaxed within a race — but it is passed
+    wherever it is known, so no call site has to know which candidates are
+    ranker-backed. set_race_context is a no-op for everything else.
+    """
+    if race_ids is not None:
+        set_race_context(model, race_ids)
+    try:
+        if hasattr(model, 'predict_proba'):
+            proba = np.asarray(model.predict_proba(X), dtype=float)
+            if proba.ndim == 2 and proba.shape[1] > 1:
+                return proba[:, 1]
+            return proba.ravel()
+        return np.asarray(model.predict(X), dtype=float)
+    finally:
+        if race_ids is not None:
+            # The context describes one call's rows, not the model, so it must
+            # not survive into the next call with a different X.
+            set_race_context(model, None)
+
+
+def _fit_candidate(model, X, y, race_ids=None):
+    """Fit a candidate, giving a race-grouped ranker the grouping it needs.
+
+    The ranker's fit() takes a group array the other candidates' do not, which
+    is why it cannot share their fit call unchanged. Routing every fit through
+    here means the difference is expressed once instead of at each of the five
+    places a candidate gets fitted.
+    """
+    if race_ids is not None:
+        set_race_context(model, race_ids)
+    try:
+        model.fit(X, y)
+    finally:
+        if race_ids is not None:
+            set_race_context(model, None)
+    return model
 
 
 
@@ -3233,6 +3274,11 @@ def _attach_model_metadata(model, model_type, model_name, run_id, artifact_filen
         'scoring_formula_version': SCORING_FORMULA_VERSION,
         'training_run_id': run_id,
         'built_at': datetime.utcnow().isoformat(),
+        # The validated market-blend weight, when this candidate has one. It is
+        # already an attribute on the artifact (which is what ml_predict reads);
+        # recording it here too means a stored build-metadata blob says on its
+        # own face whether the model it describes blends with the market.
+        'market_blend_alpha': getattr(model, MARKET_BLEND_ALPHA_ATTR, None),
     }
     model._form_analyst_expected_features = list(feature_names)
     model._form_analyst_selection_metrics = stamped_metrics
@@ -3397,9 +3443,100 @@ def _simulate_joint_kelly_staking(eval_df, kelly_fraction_multiplier=KELLY_FRACT
     }
 
 
-def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
-    """Evaluate top model selection in every validation race with betting metrics."""
-    pred = np.clip(_predict_win_scores(model, X_val), 1e-6, 1 - 1e-6)
+# Every evaluation in this file reads the same closing SP as "the market", so
+# the FLB correction is applied once, in one place, on the way in. Live scoring
+# reads a live Ladbrokes snapshot instead — a different odds source through the
+# same fair_probabilities() call, not a different correction.
+def _flb_market_probabilities(eval_df):
+    """FLB-corrected market win probability for every row of an eval frame.
+
+    Returns a Series aligned to eval_df.index. Rows whose SP is missing or
+    unusable come back as NaN — they contribute nothing to an expectation sum,
+    which is the same treatment raw 1/SP gave a NaN price, so a partially
+    priced race degrades exactly as it did before rather than failing.
+    """
+    probabilities, _z_values = fair_probabilities_by_race(
+        eval_df['sp'].tolist(), eval_df['race_id'].tolist()
+    )
+    return pd.Series(
+        [np.nan if p is None else p for p in probabilities],
+        index=eval_df.index, dtype=float,
+    )
+
+
+def _log_flb_z_summary(sp_values, race_ids, label=""):
+    """Summarise the Shin insider proportion across one set of races.
+
+    Called once per Track E run rather than once per candidate: every
+    candidate is scored on the same validation SPs, so their z values are the
+    same numbers over and over and only the aggregate says anything.
+
+    z near 0 on most races with occasional spikes is the healthy shape. A mean
+    pinned at ~0 everywhere is the signature of prices that are not really a
+    book — exactly the defect book_quality.py exists to gate — so
+    market_probability.summarise_z warns on it here, at the point of
+    measurement.
+    """
+    _probabilities, z_values = fair_probabilities_by_race(list(sp_values), list(race_ids))
+    summary = summarise_z(z_values, label=label)
+    if summary['races_solved']:
+        log.info(
+            "Favourite-longshot (Shin) correction%s: races_solved=%s mean_z=%.5f "
+            "median_z=%.5f min_z=%.5f max_z=%.5f plausible_range=%.2f-%.2f in_range=%s",
+            f" [{label}]" if label else "", summary['races_solved'], summary['mean_z'],
+            summary['median_z'], summary['min_z'], summary['max_z'],
+            summary['plausible_range'][0], summary['plausible_range'][1],
+            summary.get('mean_z_in_plausible_range'),
+        )
+    else:
+        log.info(
+            "Favourite-longshot (Shin) correction%s: no race produced a solvable "
+            "book (every race fell back to naive 1/SP normalisation).",
+            f" [{label}]" if label else "",
+        )
+    return summary
+
+
+# alpha for the model/market blend. NO_BLEND is the reference: at alpha = 1.0
+# the market is ignored entirely and the candidate is exactly its unblended
+# self, so it is handled by skipping the blend rather than by running a blend
+# that would still renormalise the model's probabilities within each race.
+NO_BLEND_ALPHA = 1.0
+
+
+def _blend_with_market(pred, fair_market_probs, race_ids, blend_alpha):
+    """Apply the market blend to a model's raw per-runner probabilities.
+
+    Returns `pred` unchanged when there is no blend to apply. Kept as one
+    function so the holdout evaluation, the per-fold walk-forward evaluation
+    and the selection-frame builder cannot drift apart on what "blended" means.
+
+    Note what the blend does beyond mixing in the market: it renormalises each
+    race to sum to 1.0. The base candidates emit independent per-horse
+    probabilities that do NOT sum to 1 across a field, so a blended variant is
+    also a race-normalised variant. That is inherent to the Benter
+    log-combination, not an accident of this implementation — but it means a
+    blended candidate's calibration metrics differ from its base for two
+    reasons at once, which is worth remembering when reading the two side by
+    side.
+    """
+    if blend_alpha is None or float(blend_alpha) >= NO_BLEND_ALPHA:
+        return pred
+    return np.clip(
+        blend_probabilities_by_race(pred, list(fair_market_probs), list(race_ids), blend_alpha),
+        1e-6, 1 - 1e-6,
+    )
+
+
+def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val, blend_alpha=None):
+    """Evaluate top model selection in every validation race with betting metrics.
+
+    blend_alpha: weight on the model's own probability when combined with the
+    FLB-corrected market probability (see _blend_with_market). None or 1.0
+    scores the model exactly as it stands — the reference every blended
+    variant is measured against.
+    """
+    pred = np.clip(_predict_win_scores(model, X_val, race_ids=race_ids_val), 1e-6, 1 - 1e-6)
     eval_df = pd.DataFrame({
         'race_id': list(race_ids_val),
         'pred': pred,
@@ -3409,6 +3546,13 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
     # Stable per-runner key for the joint Kelly simulation, which allocates
     # across a whole race rather than picking a single row out of it.
     eval_df['row_id'] = range(len(eval_df))
+    # Solved once for the whole frame and reused by the A/E ratio, the Kelly
+    # simulation and the market blend, so none of the three can disagree about
+    # what the market thinks of a runner.
+    fair_market_probs = _flb_market_probabilities(eval_df)
+    if blend_alpha is not None and float(blend_alpha) < NO_BLEND_ALPHA:
+        pred = _blend_with_market(pred, fair_market_probs, race_ids_val, blend_alpha)
+        eval_df['pred'] = pred
     selections = eval_df.loc[eval_df.groupby('race_id')['pred'].idxmax()].copy()
     profits = np.where(selections['won'] == 1, selections['sp'] - 1.0, -1.0)
     bets = int(len(selections))
@@ -3439,13 +3583,21 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
             'profit_units': float(np.sum(p)),
         }
 
-    # A/E ratio: actual wins vs expected wins implied by the market (1/SP).
-    # This is what edge actually looks like — a model can win often on short
-    # prices (strike rate high) with zero edge, or win rarely on overlays
-    # (strike rate low) with real edge. A/E > 1.0 means the model's picks win
-    # more than the market says they should.
-    implied_probs = 1.0 / selections['sp'].clip(lower=1.0001)
-    expected_wins = float(implied_probs.sum()) if bets else 0.0
+    # A/E ratio: actual wins vs expected wins implied by the market. This is
+    # what edge actually looks like — a model can win often on short prices
+    # (strike rate high) with zero edge, or win rarely on overlays (strike
+    # rate low) with real edge. A/E > 1.0 means the model's picks win more
+    # than the market says they should.
+    #
+    # "What the market says" is the FLB-corrected probability, not 1/SP. Raw
+    # 1/SP carries the bookmaker's whole overround (so it overstates EVERY
+    # runner's chance, deflating A/E across the board) and carries the
+    # favourite-longshot bias on top of that (so how much it overstates
+    # depends on the price, which biases A/E differently for a model that
+    # leans short than for one that leans long). Both distortions are removed
+    # per race by market_probability.fair_probabilities before the expectation
+    # is summed. See _flb_market_probabilities above for the fallbacks.
+    expected_wins = float(fair_market_probs[selections.index].sum()) if bets else 0.0
     a_e_ratio = (wins / expected_wins) if expected_wins > 0 else None
 
     return {
@@ -3453,6 +3605,7 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
         'profit_units': float(np.sum(profits)) if bets else 0.0,
         'strike_rate': float(wins / bets * 100.0) if bets else 0.0,
         'a_e_ratio': a_e_ratio,
+        'a_e_market_probability_method': 'shin_flb_corrected',
         'number_of_bets': bets,
         'winners': wins,
         'average_winner_sp': float(selections.loc[selections['won'] == 1, 'sp'].mean()) if wins else 0.0,
@@ -3525,7 +3678,23 @@ def _safe_time_series_splits(n_rows, n_splits, gap):
 
 
 def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_all,
-                                     n_splits=WALK_FORWARD_N_SPLITS, embargo_rows=WALK_FORWARD_EMBARGO_ROWS):
+                                     n_splits=WALK_FORWARD_N_SPLITS, embargo_rows=WALK_FORWARD_EMBARGO_ROWS,
+                                     blend_alpha=None):
+    """Walk-forward stability for one model at one blend weight.
+
+    Thin wrapper over _walk_forward_metrics_for_alphas, which does the work for
+    a whole grid of blend weights off a single set of fold fits. Kept so the
+    many call sites that want one number are not obliged to unpack a dict.
+    """
+    return _walk_forward_metrics_for_alphas(
+        model, X_all, y_won_all, sp_all, race_ids_all,
+        alphas=[blend_alpha], n_splits=n_splits, embargo_rows=embargo_rows,
+    )[blend_alpha]
+
+
+def _walk_forward_metrics_for_alphas(model, X_all, y_won_all, sp_all, race_ids_all,
+                                     alphas=(None,), n_splits=WALK_FORWARD_N_SPLITS,
+                                     embargo_rows=WALK_FORWARD_EMBARGO_ROWS):
     """Score ROI/strike-rate stability across chronological expanding-window folds.
 
     The headline validation metrics above come from a single 80/20 time-ordered
@@ -3542,14 +3711,27 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
     run compared against another — uses identical fold boundaries. Both are
     also stored on the returned dict so it travels with each model's
     persisted metadata for cross-run auditing.
+
+    `alphas` is the grid of market-blend weights to score. Every alpha shares
+    ONE fit per fold: the fit is what a fold costs, and re-scoring an already
+    fitted fold model at another blend weight is arithmetic. This is what makes
+    fitting alpha out-of-sample affordable — the alternative, one walk-forward
+    pass per alpha, would multiply the nightly run's training time by the size
+    of the grid. Returns {alpha: walk_forward_result}, keyed by the exact
+    values passed in (None included).
     """
+    alphas = list(alphas) if alphas else [None]
+
     n = len(X_all)
-    empty_result = {
-        'n_splits': 0, 'n_splits_requested': n_splits, 'folds': [],
-        'roi_std': 0.0, 'strike_rate_std': 0.0, 'embargo_rows': embargo_rows,
-    }
+
+    def _empty():
+        return {
+            'n_splits': 0, 'n_splits_requested': n_splits, 'folds': [],
+            'roi_std': 0.0, 'strike_rate_std': 0.0, 'embargo_rows': embargo_rows,
+        }
+
     if n < (n_splits + 1) * 20:
-        return empty_result
+        return {alpha: _empty() for alpha in alphas}
 
     X_all = X_all.reset_index(drop=True)
     y_won_all = pd.Series(y_won_all).reset_index(drop=True)
@@ -3558,8 +3740,8 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
 
     splits = _safe_time_series_splits(n, n_splits, embargo_rows)
     if not splits:
-        return empty_result
-    folds = []
+        return {alpha: _empty() for alpha in alphas}
+    folds_by_alpha = {alpha: [] for alpha in alphas}
     for fold_idx, (train_idx, test_idx) in enumerate(splits):
         if len(test_idx) < 10 or len(train_idx) < 20:
             continue
@@ -3583,32 +3765,50 @@ def _walk_forward_metrics_for_model(model, X_all, y_won_all, sp_all, race_ids_al
             fold_X_test = X_all.iloc[test_idx].fillna(fold_median)
 
             fold_model = _clone_for_fold_fit(model, fold_y_train)
-            fold_model.fit(fold_X_train, fold_y_train)
+            # Race grouping is computed from THIS fold's own training slice,
+            # after the chronological split — never once globally. A global
+            # grouping would put runners of a race that straddles a fold
+            # boundary into one group spanning both sides of it, which is a
+            # leak of exactly the kind the embargo exists to prevent.
+            _fit_candidate(
+                fold_model, fold_X_train, fold_y_train,
+                race_ids=[race_ids_list[i] for i in train_idx],
+            )
             fold_race_ids = [race_ids_list[i] for i in test_idx]
             fold_sp = sp_array[test_idx]
             fold_y = y_won_all.iloc[test_idx]
-            fold_metrics = evaluate_model_on_validation(fold_model, fold_X_test, fold_y, fold_race_ids, fold_sp)
-            folds.append({
-                'bets': fold_metrics['number_of_bets'],
-                'roi': fold_metrics['roi'],
-                'strike_rate': fold_metrics['strike_rate'],
-                # Carried per fold so Kelly growth can be read for variance
-                # across folds, not just as one holdout number.
-                'kelly_staking': fold_metrics.get('kelly_staking'),
-            })
+            # One fit, every alpha. Fitting is what a fold costs; re-scoring
+            # the same fitted model at another blend weight is a vector
+            # operation, which is what makes an alpha grid affordable here at
+            # all rather than multiplying the run's training time by 21.
+            for alpha in alphas:
+                fold_metrics = evaluate_model_on_validation(
+                    fold_model, fold_X_test, fold_y, fold_race_ids, fold_sp, blend_alpha=alpha,
+                )
+                folds_by_alpha[alpha].append({
+                    'bets': fold_metrics['number_of_bets'],
+                    'roi': fold_metrics['roi'],
+                    'strike_rate': fold_metrics['strike_rate'],
+                    # Carried per fold so Kelly growth can be read for variance
+                    # across folds, not just as one holdout number.
+                    'kelly_staking': fold_metrics.get('kelly_staking'),
+                })
         except Exception as e:
             log.warning(f"Walk-forward fold {fold_idx} failed for {type(model).__name__}: {e}")
 
-    roi_values = [f['roi'] for f in folds if f['bets'] > 0]
-    sr_values = [f['strike_rate'] for f in folds if f['bets'] > 0]
-    return {
-        'n_splits': len(folds),
-        'n_splits_requested': n_splits,
-        'folds': folds,
-        'roi_std': float(np.std(roi_values, ddof=0)) if len(roi_values) > 1 else 0.0,
-        'strike_rate_std': float(np.std(sr_values, ddof=0)) if len(sr_values) > 1 else 0.0,
-        'embargo_rows': embargo_rows,
-    }
+    results = {}
+    for alpha, folds in folds_by_alpha.items():
+        roi_values = [f['roi'] for f in folds if f['bets'] > 0]
+        sr_values = [f['strike_rate'] for f in folds if f['bets'] > 0]
+        results[alpha] = {
+            'n_splits': len(folds),
+            'n_splits_requested': n_splits,
+            'folds': folds,
+            'roi_std': float(np.std(roi_values, ddof=0)) if len(roi_values) > 1 else 0.0,
+            'strike_rate_std': float(np.std(sr_values, ddof=0)) if len(sr_values) > 1 else 0.0,
+            'embargo_rows': embargo_rows,
+        }
+    return results
 
 
 def _log_walk_forward_fold_composition(dates_all, tracks_all, n_splits=WALK_FORWARD_N_SPLITS,
@@ -3705,14 +3905,22 @@ def _optional_classifier(model_type, trial=None):
 
 
 
-def _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val):
+def _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val, blend_alpha=None):
     frame = pd.DataFrame({
         'race_id': list(race_ids_val),
         'row_id': range(len(race_ids_val)),
-        'pred': _predict_win_scores(model, X_val),
+        'pred': _predict_win_scores(model, X_val, race_ids=race_ids_val),
         'won': np.asarray(y_won_val, dtype=int),
         'sp': np.asarray(sp_val, dtype=float),
     })
+    if blend_alpha is not None and float(blend_alpha) < NO_BLEND_ALPHA:
+        # The selection frame drives the RF-vs-challenger comparison and the
+        # value-edge diagnostic, so a blended candidate has to be compared on
+        # the picks it would actually make, not on its base model's.
+        frame['pred'] = _blend_with_market(
+            frame['pred'].to_numpy(dtype=float), _flb_market_probabilities(frame),
+            race_ids_val, blend_alpha,
+        )
     return frame.loc[frame.groupby('race_id')['pred'].idxmax()].set_index('race_id')
 
 
@@ -3835,6 +4043,143 @@ def _audit_validation_betting_pipeline(selection_frames, race_ids_val, sp_val):
             one_bet_per_race, len(selections), expected_race_count, len(missing), len(extra), duplicate_bets
         )
 
+# ─────────────────────────────────────────────
+# MARKET-BLENDED CANDIDATE VARIANTS
+# ─────────────────────────────────────────────
+# Benter's result: a model built from form and the market's own price are not
+# rival opinions to choose between, they are two estimates to combine. alpha is
+# the weight on the model's own opinion; alpha = 1.0 ignores the market.
+#
+# Which alpha is right is an empirical question, so it is fitted here rather
+# than assumed — on the walk-forward folds, out-of-sample, scored by the same
+# Champion Score everything else in this file is scored by. If alpha = 1.0 wins
+# the grid then blending does not help this model, which is a finding worth
+# logging, not a failure: no blended variant is added and the base candidate
+# competes alone.
+#
+# Backtesting blends against CLOSING SP, which is what the rest of this
+# pipeline already treats as "the market" everywhere (training targets, A/E,
+# evaluate_model_on_validation). Live scoring blends against the latest
+# Ladbrokes snapshot instead. Two odds sources, one fair_probabilities() call —
+# no special-casing anywhere downstream.
+MARKET_BLEND_ALPHA_GRID = tuple(round(0.05 * i, 2) for i in range(21))  # 0.00 .. 1.00
+
+
+def _blended_candidate(result, walk_forward_by_alpha, fold_boundaries,
+                       X_val, y_won_val, race_ids_val, sp_val):
+    """Fit alpha out-of-sample for one candidate and return its blended form.
+
+    Returns a `results`-shaped dict for the winning blend weight, or None when
+    the grid picks alpha = 1.0 (ignore the market). In that case the blended
+    variant would BE the base candidate — the blend is skipped entirely at
+    alpha = 1.0 — so adding it would only duplicate an entry in the
+    competition.
+
+    alpha is chosen on the WALK-FORWARD FOLDS ALONE — mean fold ROI, penalised
+    by the spread across folds, exactly the two things the Champion Score's ROI
+    terms reward. The 80/20 holdout is deliberately kept out of the choice:
+    it is a single high-variance window, and picking the best of 21 alphas on
+    the same number that then gets reported would hand every blended variant an
+    optimism the unblended candidates never got. The folds are not immune to
+    that either, but they are several independent windows rather than one, and
+    fitting alpha there is what makes it out-of-sample at all.
+
+    Selecting on fold ROI is not the "ROI alone must never promote" rule being
+    quietly relaxed: this picks a hyperparameter WITHIN a candidate, and the
+    candidate that comes out still has to clear the full Champion Score bar
+    against every other challenger afterwards. Each alpha's full Champion Score
+    is recorded in the search rows regardless, so the choice can be re-examined
+    from stored metrics without re-running the night.
+    """
+    model_type = result['model_type']
+    base_score = None
+    search_rows = []
+    best = None
+    for alpha in MARKET_BLEND_ALPHA_GRID:
+        walk_forward = walk_forward_by_alpha.get(alpha)
+        if walk_forward is None:
+            continue
+        fold_rois = [f['roi'] for f in walk_forward.get('folds') or [] if f.get('bets', 0)]
+        if not fold_rois:
+            # No out-of-sample evidence for this alpha at all. Scoring it off
+            # the holdout instead is exactly what this search must not do.
+            continue
+        mean_fold_roi = float(np.mean(fold_rois))
+        fold_roi_std = float(walk_forward.get('roi_std', 0.0) or 0.0)
+        out_of_sample_score = mean_fold_roi - fold_roi_std
+
+        metrics = evaluate_model_on_validation(
+            result['model'], X_val, y_won_val, race_ids_val, sp_val, blend_alpha=alpha,
+        )
+        metrics['walk_forward'] = {**walk_forward, 'fold_boundaries': fold_boundaries}
+        champion_score = _selection_score_from_metrics({**metrics, 'selection_score': None})
+        search_rows.append({
+            'alpha': alpha,
+            'out_of_sample_score': out_of_sample_score,
+            'walk_forward_mean_roi': mean_fold_roi,
+            'walk_forward_roi_std': fold_roi_std,
+            'selection_score': champion_score,
+            'holdout_roi': metrics['roi'],
+            'bets': metrics['number_of_bets'],
+        })
+        if alpha >= NO_BLEND_ALPHA:
+            base_score = out_of_sample_score
+        # >= rather than >, walking the grid upward: on a tie the HIGHER alpha
+        # wins, i.e. the least market-dependent blend that does the job. Two
+        # alphas scoring identically out-of-sample are equally good evidence,
+        # and the one that leans less on an external live feed is the one that
+        # still behaves when that feed is missing.
+        if best is None or out_of_sample_score >= best['out_of_sample_score']:
+            best = {
+                'alpha': alpha,
+                'out_of_sample_score': out_of_sample_score,
+                'champion_score': champion_score,
+                'metrics': metrics,
+            }
+
+    if best is None:
+        return None
+
+    log.info(
+        "Market-blend alpha search for %s (selected on walk-forward folds, not the holdout): "
+        "best_alpha=%.2f best_fold_score=%.3f no_blend_fold_score=%s "
+        "resulting_champion_score=%.3f grid=%s",
+        model_type, best['alpha'], best['out_of_sample_score'],
+        f"{base_score:.3f}" if base_score is not None else "n/a",
+        best['champion_score'],
+        " ".join(f"a={row['alpha']:.2f}:{row['out_of_sample_score']:.2f}" for row in search_rows),
+    )
+
+    if best['alpha'] >= NO_BLEND_ALPHA:
+        log.info(
+            "Market blend does not help %s: alpha=1.00 (ignore the market entirely) won its own "
+            "grid, so no blended variant enters the competition. This is a result, not a failure.",
+            model_type,
+        )
+        return None
+
+    # The blended variant is the SAME fitted estimator carrying a validated
+    # alpha, not a separately trained model — live scoring reads the alpha off
+    # the artifact and applies the blend itself. A shallow copy gives it its
+    # own attribute dict so stamping alpha here cannot leak onto the base
+    # candidate, which must keep competing unblended.
+    blended_model = copy.copy(result['model'])
+    setattr(blended_model, MARKET_BLEND_ALPHA_ATTR, best['alpha'])
+    metrics = best['metrics']
+    metrics['market_blend_alpha'] = best['alpha']
+    metrics['market_blend_alpha_selected_on'] = 'walk_forward_mean_roi_minus_roi_std'
+    metrics['market_blend_alpha_search'] = search_rows
+    metrics['market_blend_base_model_type'] = model_type
+    metrics['market_blend_odds_source'] = 'closing_sp_shin_corrected'
+    return {
+        'model_type': f'{model_type}_blended',
+        'model_name': f"{result['model_name']} (Market Blend a={best['alpha']:.2f})",
+        'model': blended_model,
+        'metrics': metrics,
+        'blend_alpha': best['alpha'],
+    }
+
+
 def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, df, grid_search_best_rf_params=None, baseline_roi=0.0):
     """Train RF, boosted candidates and consensus on one shared unseen validation set.
 
@@ -3913,6 +4258,10 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     X_train, X_val = X[train_mask], X[val_mask]
     y_train, y_won_val = y_roi[train_mask], y_won[val_mask]
     race_ids_val = [r for r, keep in zip(race_ids, val_mask) if keep]
+    # The training split's race ids, in the same row order as X_train. Only the
+    # race-grouped ranker reads them, but they are threaded through every fit
+    # and predict below so no call site has to know which candidate is which.
+    race_ids_train = [r for r, keep in zip(race_ids, train_mask) if keep]
 
     # Impute with the TRAINING split's own median only — X_val must never
     # influence a fill value used to train or score against it. The same
@@ -3939,6 +4288,11 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
             log.warning(f"Ignoring malformed grid_search_best_rf_params {grid_search_best_rf_params}: {e}")
 
     log.info("Track E random_forest hyperparameters source=%s params=%s", rf_params_source, rf_params)
+
+    # Sanity-check the favourite-longshot correction on the exact prices every
+    # candidate below will be scored against, before any model is fitted, so a
+    # bad SP feed shows up as its own log line instead of as a puzzling A/E.
+    flb_z_summary = _log_flb_z_summary(sp_val, race_ids_val, label='track_e_validation')
 
     candidates = {
         # Isotonic-calibrated: class_weight='balanced_subsample' (needed so the
@@ -3978,6 +4332,8 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         y_tune_train = y_train_reset.iloc[:tune_split_idx]
         X_tune_eval = X_train_reset.iloc[tune_split_idx:]
         y_tune_eval = y_train_reset.iloc[tune_split_idx:]
+        race_ids_tune_train = race_ids_train[:tune_split_idx]
+        race_ids_tune_eval = race_ids_train[tune_split_idx:]
 
         for mt in ('xgboost', 'lightgbm', 'catboost'):
             try:
@@ -4047,12 +4403,47 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         len(X), len(X_train), len(X_val), 0, 0
     )
 
+    # Race-grouped ranking candidate. Every other candidate above is pointwise:
+    # each horse carries its own win/loss label and is scored without reference
+    # to the field it ran against. This one is trained on pairs WITHIN a race —
+    # did the actual winner outrank the actual losers? — which is the structure
+    # the problem actually has (exactly one winner per race) and the only thing
+    # a bet ever depends on (the order within a race, never an absolute
+    # probability).
+    #
+    # Its raw output is not a probability, so RaceGroupedRanker converts it with
+    # a per-race softmax (the Plackett-Luce first-place probability) before
+    # anything downstream sees it. That is what lets it feed
+    # evaluate_model_on_validation, Kelly staking, the market blend and the
+    # consensus ensemble with no special-casing in any of them.
+    #
+    # Left untuned for its first run, like the mlp candidate: a fixed sensible
+    # configuration competing on the same footing as everything else answers
+    # "does ranking beat pointwise here at all" before any compute is spent
+    # tuning it. LightGBM's LGBMRanker is the drop-in fallback if XGBoost's
+    # ranker underperforms — same idea, also already a dependency.
+    candidates['xgboost_ranker'] = RaceGroupedRanker(
+        objective=os.environ.get('ML_RANKER_OBJECTIVE', 'rank:pairwise'),
+        n_estimators=int(os.environ.get('ML_RANKER_N_ESTIMATORS', '200')),
+        max_depth=int(os.environ.get('ML_RANKER_MAX_DEPTH', '4')),
+        learning_rate=float(os.environ.get('ML_RANKER_LEARNING_RATE', '0.06')),
+        subsample=0.9,
+        colsample_bytree=0.9,
+        random_state=42,
+    )
+    log.info(
+        "Track E split for xgboost_ranker: total_candidate_rows=%s train_rows=%s validation_rows=%s "
+        "internal_tuning_train_rows=%s internal_tuning_eval_rows=%s train_races=%s validation_races=%s",
+        len(X), len(X_train), len(X_val), 0, 0,
+        len(set(race_ids_train)), len(set(race_ids_val)),
+    )
+
     fitted = {}
     results = []
     selection_frames = {}
     for mt, model in candidates.items():
         try:
-            model.fit(X_train, y_won[train_mask])
+            _fit_candidate(model, X_train, y_won[train_mask], race_ids=race_ids_train)
             metrics = evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val)
             selection_frames[mt] = _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val)
             fitted[mt] = model
@@ -4072,11 +4463,18 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         log.warning(f"Walk-forward fold composition logging failed (non-fatal): {e}")
 
     walk_forward_by_model = {}
+    blended_results = []
     for result in results:
+        walk_forward_by_alpha = {}
         try:
-            walk_forward = _walk_forward_metrics_for_model(
-                result['model'], X, y_won, sp_values, race_ids
+            # One walk-forward pass covers the unblended candidate AND every
+            # blend weight in the grid: the folds are fitted once and re-scored
+            # per alpha (see _walk_forward_metrics_for_alphas).
+            walk_forward_by_alpha = _walk_forward_metrics_for_alphas(
+                result['model'], X, y_won, sp_values, race_ids,
+                alphas=[None] + list(MARKET_BLEND_ALPHA_GRID),
             )
+            walk_forward = walk_forward_by_alpha[None]
         except Exception as e:
             log.warning(f"Walk-forward stability check failed for {result['model_type']}: {e}")
             walk_forward = {'n_splits': 0, 'n_splits_requested': WALK_FORWARD_N_SPLITS, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0, 'embargo_rows': WALK_FORWARD_EMBARGO_ROWS}
@@ -4089,9 +4487,38 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
             [round(f['roi'], 1) for f in walk_forward['folds']],
         )
 
-    # Consensus ensemble is built from the RF/boosted members only. The mlp
+        # Market-blended form of this same candidate, if the grid found a blend
+        # weight that beats ignoring the market. Added as a separate entry in
+        # `results` and left to win or lose on Champion Score like any other
+        # challenger — the same shape as the ensemble variants below.
+        if walk_forward_by_alpha:
+            try:
+                blended = _blended_candidate(
+                    result, walk_forward_by_alpha, fold_boundaries,
+                    X_val, y_won_val, race_ids_val, sp_val,
+                )
+                if blended is not None:
+                    selection_frames[blended['model_type']] = _top_selection_rows(
+                        blended['model'], X_val, y_won_val, race_ids_val, sp_val,
+                        blend_alpha=blended['blend_alpha'],
+                    )
+                    blended_results.append(blended)
+            except Exception as e:
+                log.warning(f"Market-blend search failed for {result['model_type']} (non-fatal): {e}")
+    results.extend(blended_results)
+
+    # Consensus ensemble is built from the RF/boosted/ranker members. The mlp
     # candidate competes standalone: only the standalone configuration was
     # holdout-validated, so it must not silently change ensemble behaviour.
+    #
+    # The ranker IS included. Worth knowing when reading its weight: its
+    # probabilities sum to 1 within a race (the softmax makes them a proper
+    # book) while the pointwise members' do not, so on a big field its numbers
+    # sit lower than theirs at the same level of confidence. The consensus is a
+    # weighted average, so that scale difference shifts the blend toward the
+    # pointwise members — it does not break the ranking, and the ensemble
+    # variants compete on Champion Score like everything else, but it is the
+    # reason a ranker's contribution is not simply "one vote in n".
     ensemble_eligible = {mt: model for mt, model in fitted.items() if mt != 'mlp'}
     if len(ensemble_eligible) > 1:
         ensemble_members = list(ensemble_eligible.items())
@@ -4118,8 +4545,8 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
                     # overfitting: a member that just memorised X_train would
                     # look artificially good and dominate the ensemble.
                     oos_model = clone(model)
-                    oos_model.fit(X_tune_train, y_tune_train)
-                    oos_preds = _predict_win_scores(oos_model, X_tune_eval)
+                    _fit_candidate(oos_model, X_tune_train, y_tune_train, race_ids=race_ids_tune_train)
+                    oos_preds = _predict_win_scores(oos_model, X_tune_eval, race_ids=race_ids_tune_eval)
                     oos_mse = float(mean_squared_error(y_tune_eval, oos_preds))
                     base_weight = 1.0 / max(oos_mse, 0.0001)
                 else:
@@ -4166,7 +4593,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
 
             ensemble_weights.append(base_weight * stability_factor * performance_factor * fold_completion_factor)
         ensemble = ConsensusRegressor(ensemble_members, weights=ensemble_weights)
-        ensemble.fit(X_train, y_won[train_mask])
+        _fit_candidate(ensemble, X_train, y_won[train_mask], race_ids=race_ids_train)
         metrics = evaluate_model_on_validation(ensemble, X_val, y_won_val, race_ids_val, sp_val)
         metrics['ensemble_weights'] = dict(zip([name for name, _ in ensemble_members], ensemble.weights_.tolist()))
         selection_frames['ensemble'] = _top_selection_rows(ensemble, X_val, y_won_val, race_ids_val, sp_val)
@@ -4190,7 +4617,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         for variant_name, variant_weights in ensemble_variants.items():
             try:
                 variant = ConsensusRegressor(ensemble_members, weights=variant_weights)
-                variant.fit(X_train, y_won[train_mask])
+                _fit_candidate(variant, X_train, y_won[train_mask], race_ids=race_ids_train)
                 variant_metrics = evaluate_model_on_validation(variant, X_val, y_won_val, race_ids_val, sp_val)
                 variant_metrics['ensemble_weights'] = dict(zip([name for name, _ in ensemble_members], variant.weights_.tolist()))
                 selection_frames[variant_name] = _top_selection_rows(variant, X_val, y_won_val, race_ids_val, sp_val)
@@ -4203,23 +4630,22 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
             except Exception as e:
                 log.warning(f"Skipping ensemble variant {variant_name}: {e}")
 
-    # Persist the exact training-split median used above on every candidate so
-    # live inference (ml_predict.py) can fill missing/unseen features with the
-    # same values the model was actually trained against, instead of 0.
-    train_median_dict = train_median.to_dict()
-    for result in results:
-        result['model']._form_analyst_feature_medians = train_median_dict
-
     # Walk-forward stability for the base candidates was already computed above
     # (before ensemble construction, so it could feed ensemble weighting too).
-    # The ensemble itself didn't exist yet at that point, so score it now.
-    for result in results:
+    # The ensemble variants didn't exist yet at that point, so score them now —
+    # and search their blend weight too, so an ensemble competes in the same
+    # two forms every base candidate does.
+    ensemble_blended_results = []
+    for result in list(results):
         if 'walk_forward' in result['metrics']:
             continue
+        walk_forward_by_alpha = {}
         try:
-            walk_forward = _walk_forward_metrics_for_model(
-                result['model'], X, y_won, sp_values, race_ids
+            walk_forward_by_alpha = _walk_forward_metrics_for_alphas(
+                result['model'], X, y_won, sp_values, race_ids,
+                alphas=[None] + list(MARKET_BLEND_ALPHA_GRID),
             )
+            walk_forward = walk_forward_by_alpha[None]
         except Exception as e:
             log.warning(f"Walk-forward stability check failed for {result['model_type']}: {e}")
             walk_forward = {'n_splits': 0, 'n_splits_requested': WALK_FORWARD_N_SPLITS, 'folds': [], 'roi_std': 0.0, 'strike_rate_std': 0.0, 'embargo_rows': WALK_FORWARD_EMBARGO_ROWS}
@@ -4230,6 +4656,34 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
             result['model_type'], walk_forward['n_splits'], walk_forward['roi_std'], walk_forward['strike_rate_std'],
             [round(f['roi'], 1) for f in walk_forward['folds']],
         )
+        if walk_forward_by_alpha:
+            try:
+                blended = _blended_candidate(
+                    result, walk_forward_by_alpha, fold_boundaries,
+                    X_val, y_won_val, race_ids_val, sp_val,
+                )
+                if blended is not None:
+                    selection_frames[blended['model_type']] = _top_selection_rows(
+                        blended['model'], X_val, y_won_val, race_ids_val, sp_val,
+                        blend_alpha=blended['blend_alpha'],
+                    )
+                    # The ensemble's own weights describe the same estimator,
+                    # so they belong on the blended entry too.
+                    if 'ensemble_weights' in result['metrics']:
+                        blended['metrics']['ensemble_weights'] = result['metrics']['ensemble_weights']
+                    ensemble_blended_results.append(blended)
+            except Exception as e:
+                log.warning(f"Market-blend search failed for {result['model_type']} (non-fatal): {e}")
+    results.extend(ensemble_blended_results)
+
+    # Persist the exact training-split median used above on every candidate so
+    # live inference (ml_predict.py) can fill missing/unseen features with the
+    # same values the model was actually trained against, instead of 0. Runs
+    # here, after the last candidate has been added, so nothing that competes
+    # can reach an artifact without it.
+    train_median_dict = train_median.to_dict()
+    for result in results:
+        result['model']._form_analyst_feature_medians = train_median_dict
 
     n_candidates = len(fitted)
     agreement_summary = {f'{n}_of_{n_candidates}': 0 for n in range(n_candidates, 0, -1)}
@@ -4238,7 +4692,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         selections_by_model = {}
         for mt, model in fitted.items():
             temp = val_frame.copy()
-            temp['pred'] = _predict_win_scores(model, X_val)
+            temp['pred'] = _predict_win_scores(model, X_val, race_ids=race_ids_val)
             selections_by_model[mt] = temp.loc[temp.groupby('race_id')['pred'].idxmax()].set_index('race_id')['row_id'].to_dict()
         for race_id in val_frame['race_id'].unique():
             chosen = [sel.get(race_id) for sel in selections_by_model.values()]
@@ -4307,6 +4761,15 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         calibration_penalty = (m['log_loss'] * 10.0) + (m['brier_score'] * 25.0) + (m['calibration']['expected_calibration_error'] * 100.0)
         result['selection_score'] = _selection_score_from_metrics({**m, 'selection_score': None})
     best = max(results, key=lambda r: (r['selection_score'], r['metrics']['roi'], r['metrics']['strike_rate']))
+    blended_entries = [r for r in results if r['metrics'].get('market_blend_alpha') is not None]
+    log.info(
+        "Market blend summary: candidates_with_a_winning_blend=%s of %s scored | %s",
+        len(blended_entries), len(results),
+        ", ".join(
+            f"{r['model_type']}(a={r['metrics']['market_blend_alpha']:.2f}, score={r['selection_score']:.2f})"
+            for r in sorted(blended_entries, key=lambda r: -r['selection_score'])
+        ) or "no candidate beat ignoring the market",
+    )
     log.info(
         "ML model selection on untouched chronological test set: best=%s selection_score=%.3f roi=%.1f%% sr=%.1f%% log_loss=%.4f brier=%.4f ece=%.4f bets=%s",
         best['model_type'], best['selection_score'], best['metrics']['roi'], best['metrics']['strike_rate'],
@@ -4330,6 +4793,10 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         result['metrics']['validation_period'] = validation_period
         result['metrics']['jockey_snapshot_coverage_pct'] = run_snapshot_coverage.get('jockey_snapshot_coverage_pct')
         result['metrics']['trainer_snapshot_coverage_pct'] = run_snapshot_coverage.get('trainer_snapshot_coverage_pct')
+        # Identical for every candidate (same validation SPs), but stored per
+        # model so a persisted metrics blob carries the evidence that its A/E
+        # was measured against a sane book.
+        result['metrics']['flb_z_summary'] = flb_z_summary
         result['metrics'] = _stamp_selection_metrics(result['metrics'])
         try:
             result['metrics']['value_edge_analysis'] = _value_edge_backtest(

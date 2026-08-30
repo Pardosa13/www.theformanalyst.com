@@ -115,8 +115,14 @@ def build_next_to_go_races(date_str: str, limit: int | None = None) -> dict:
     return {"status": "ok", "races": races, "fetched_at": now_utc.isoformat().replace("+00:00", "Z")}
 
 # ── Name normalisation (mirrors normalize_runner_name in app.py) ───────────
-def _norm(name: str) -> str:
-    """Lowercase, strip punctuation, collapse spaces."""
+def normalize_runner_name(name: str) -> str:
+    """Lowercase, strip punctuation, collapse spaces.
+
+    The odds dict returned by fetch_race_odds is keyed by this, so anything
+    matching internal horse rows against it (app.py's Best Bets scan,
+    odds_ingest.py's poller) must normalise its own names with this exact
+    function or the two sides will not meet.
+    """
     import re
     if not name:
         return ""
@@ -124,6 +130,11 @@ def _norm(name: str) -> str:
     s = re.sub(r"[^a-z0-9\s]", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
     return s
+
+
+# Long-standing private name, kept so existing call sites in this module read
+# unchanged.
+_norm = normalize_runner_name
 
 
 # ── Venue name fuzzy match ─────────────────────────────────────────────────

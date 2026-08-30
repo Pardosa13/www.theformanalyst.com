@@ -18,7 +18,9 @@ from collections import Counter, defaultdict
 import numpy as np
 from strike_rate_matching import build_strike_rate_lookup, get_sr_win_pct, normalize_name
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
+
+from sqlalchemy import text
 
 # Importing this registers ConsensusRegressor (and any future shared custom
 # estimator classes) on this process's __main__ module, so joblib.load()
@@ -27,7 +29,8 @@ from datetime import datetime
 # (module path '__main__') — see model_classes.py for why. Must happen
 # before load_model() is ever called.
 import model_classes  # noqa: F401
-from model_classes import solve_joint_kelly
+from model_classes import MARKET_BLEND_ALPHA_ATTR, solve_joint_kelly
+from market_probability import blend_probabilities, fair_probabilities
 
 log = logging.getLogger(__name__)
 
@@ -1206,6 +1209,80 @@ def _load_pf_race_lookups_for_meeting(races):
     return ratings_lookup, speedmaps_lookup
 
 
+# ── Live pre-race market odds ────────────────────────────────────────────────
+# odds_ingest.py writes one insert-only row per runner per observation into
+# live_odds_snapshots. Scoring only wants the newest row per runner, but the
+# whole path is kept there because it cannot be reconstructed later.
+
+# A price captured longer ago than this is not "the market right now". The
+# poller's default interval is 180s, so this tolerates a few missed passes
+# while still refusing to score a race off an hour-old board.
+LIVE_ODDS_MAX_AGE_SECONDS = float(os.environ.get('ML_LIVE_ODDS_MAX_AGE_SECONDS', '900'))
+
+
+def _load_latest_live_odds_for_meeting(races, db_session):
+    """Newest usable live price per runner across this meeting's races.
+
+    Returns {horse_id: {'odds', 'captured_at', 'source', 'age_seconds'}} for
+    every runner with a fresh, unscratched price. A runner with no snapshot,
+    only stale snapshots, or a scratched-at-capture snapshot is simply absent —
+    callers must treat "no live price" as normal, because it is: the poller may
+    not have reached this meeting, and a meeting being re-scored days later has
+    no live market at all.
+
+    Missing table, missing column, unreachable database: all return {} with a
+    warning. Live scoring predates this table and must keep working without it.
+    """
+    race_ids = [race.id for race in (races or [])]
+    if not race_ids:
+        return {}
+    try:
+        # DISTINCT ON is the direct expression of "newest row per runner" and
+        # is served by ix_live_odds_snapshots_latest without a sort.
+        rows = db_session.execute(text("""
+            SELECT DISTINCT ON (horse_id)
+                   horse_id, odds, source, captured_at, is_scratched
+            FROM live_odds_snapshots
+            WHERE race_id = ANY(:race_ids)
+            ORDER BY horse_id, captured_at DESC
+        """), {'race_ids': race_ids}).mappings().all()
+    except Exception as e:
+        log.warning(
+            "Could not read live_odds_snapshots (%s); scoring this meeting without "
+            "live market odds. Has odds_ingest.py run against this database?", e,
+        )
+        return {}
+
+    now = datetime.now(timezone.utc)
+    out = {}
+    stale = 0
+    for row in rows:
+        if row['is_scratched'] or row['odds'] is None:
+            continue
+        captured_at = row['captured_at']
+        if captured_at is None:
+            continue
+        # captured_at is stored as a naive UTC timestamp (NOW() on a UTC
+        # container); treat a naive value as UTC rather than as local time.
+        if captured_at.tzinfo is None:
+            captured_at = captured_at.replace(tzinfo=timezone.utc)
+        age_seconds = (now - captured_at).total_seconds()
+        if age_seconds > LIVE_ODDS_MAX_AGE_SECONDS:
+            stale += 1
+            continue
+        out[row['horse_id']] = {
+            'odds': float(row['odds']),
+            'source': row['source'],
+            'captured_at': captured_at,
+            'age_seconds': age_seconds,
+        }
+    log.info(
+        "ML_LIVE_ODDS_LOADED races=%s runners_with_fresh_price=%s stale_dropped=%s max_age_seconds=%s",
+        len(race_ids), len(out), stale, LIVE_ODDS_MAX_AGE_SECONDS,
+    )
+    return out
+
+
 def _load_breeding_win_rates(db_session):
     """Historical sire/dam progeny win rates from recorded results.
 
@@ -1272,6 +1349,76 @@ def _load_form_scores(db_session):
                     "(opponent_quality_form stays NaN -> training-median fill): %s", e)
         return {}
     return {normalize_name(str(name or '')): float(score) for name, score in rows if name}
+
+
+# ── Market blend weight carried on the champion artifact ─────────────────────
+# alpha travels with the model the same way _form_analyst_feature_medians does:
+# stamped onto the artifact at training time by backtest.run_model_competition,
+# so live scoring uses the exact weight that won validation for THIS champion
+# rather than a constant that could drift away from what was tested.
+MODEL_MARKET_ALPHA_ATTR = MARKET_BLEND_ALPHA_ATTR
+# A champion trained before the blend existed has no alpha. 1.0 = "ignore the
+# market", i.e. behave exactly as the pipeline did before the blend.
+DEFAULT_MARKET_ALPHA = 1.0
+
+
+def model_market_alpha(model):
+    """Validated market-blend weight stamped on a model artifact.
+
+    Returns DEFAULT_MARKET_ALPHA for any model without one, or with one that
+    is not a usable number in [0, 1] — a corrupted attribute must degrade to
+    "pure model", never to an extrapolated blend nobody validated.
+    """
+    raw = getattr(model, MODEL_MARKET_ALPHA_ATTR, None)
+    if raw is None:
+        return DEFAULT_MARKET_ALPHA
+    try:
+        alpha = float(raw)
+    except (TypeError, ValueError):
+        log.warning("Ignoring non-numeric market blend alpha %r on active champion.", raw)
+        return DEFAULT_MARKET_ALPHA
+    if not np.isfinite(alpha) or not (0.0 <= alpha <= 1.0):
+        log.warning("Ignoring out-of-range market blend alpha %r on active champion.", raw)
+        return DEFAULT_MARKET_ALPHA
+    return alpha
+
+
+def _blend_race_with_live_market(raw_preds, horse_ids, live_odds, blend_alpha):
+    """Blend one race's model probabilities with the live market's.
+
+    Returns `(probabilities, diagnostics)`. `diagnostics` is None when no blend
+    was attempted at all (this champion has no validated alpha), so the caller
+    can stay quiet rather than logging a no-op per race.
+
+    The whole race is corrected together: Shin's method decomposes one book, so
+    a runner's fair market probability is not defined without its rivals. A
+    runner with no live price keeps its own model probability and the priced
+    runners around it still blend — a partly-priced race is common (a late
+    scratching, a runner the feed has not opened) and must not cost the rest of
+    the field its market information.
+
+    Falls back to the unblended probabilities whenever the market cannot supply
+    a real book: fewer than two priced runners is not a market, and blending
+    against a one-horse "book" would hand that runner probability 1.0.
+    """
+    if blend_alpha is None or float(blend_alpha) >= DEFAULT_MARKET_ALPHA:
+        return raw_preds, None
+
+    race_odds = [(live_odds.get(horse_id) or {}).get('odds') for horse_id in horse_ids]
+    priced = sum(1 for odds in race_odds if odds)
+    if priced < 2:
+        return raw_preds, {'priced_runners': priced, 'applied': False}
+
+    market_probs = fair_probabilities(race_odds)
+    blended = blend_probabilities(list(np.asarray(raw_preds, dtype=float)), market_probs, blend_alpha)
+    out = np.asarray(
+        [
+            blended[i] if (blended[i] is not None and np.isfinite(blended[i])) else float(raw_preds[i])
+            for i in range(len(horse_ids))
+        ],
+        dtype=float,
+    )
+    return out, {'priced_runners': priced, 'applied': True}
 
 
 def predict_meeting(meeting_id, db_session, strike_rate_data=None):
@@ -1350,13 +1497,25 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
     races = db_session.query(Race).filter_by(meeting_id=meeting_id).all()
 
     pf_ratings_lookup, pf_speedmaps_lookup = _load_pf_race_lookups_for_meeting(races)
+    # The live market's own opinion of this meeting, captured by odds_ingest.py.
+    # Read once for the whole meeting rather than per race: one query beats one
+    # per race, and a meeting with no snapshots at all should cost one round
+    # trip to discover.
+    live_odds = _load_latest_live_odds_for_meeting(races, db_session)
+    blend_alpha = model_market_alpha(model)
     log.info(
         "ML_PREDICTION_LIVE_LOOKUPS meeting=%s rail_position=%s pf_ratings_entries=%s "
         "pf_speedmap_entries=%s jockey_sr_loaded=%s trainer_sr_loaded=%s "
-        "jockey_extras=%s trainer_extras=%s sire_rates=%s dam_rates=%s form_scores=%s",
+        "jockey_extras=%s trainer_extras=%s sire_rates=%s dam_rates=%s form_scores=%s "
+        "live_odds_runners=%s",
         meeting_id, rail_position, len(pf_ratings_lookup), len(pf_speedmaps_lookup),
         bool(jockey_sr), bool(trainer_sr), len(jockey_extra), len(trainer_extra),
-        len(sire_rates), len(dam_rates), len(form_scores),
+        len(sire_rates), len(dam_rates), len(form_scores), len(live_odds),
+    )
+    log.info(
+        "ML_LIVE_MARKET_BLEND_CONFIG meeting=%s alpha=%.2f blending=%s "
+        "(alpha=1.00 means this champion won validation without the market)",
+        meeting_id, blend_alpha, blend_alpha < DEFAULT_MARKET_ALPHA,
     )
 
     for race in races:
@@ -1425,6 +1584,21 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
             log.error(f"Model prediction failed for race {race.race_number}: {ex}")
             continue
 
+        # Blend the model's opinion with the market's, if this champion won
+        # validation with a blend. This is the ONLY place the live blend is
+        # applied: everything downstream (the displayed book, Kelly staking,
+        # value edge) reads the ml_score derived from these probabilities, so
+        # blending again anywhere else would apply the market twice.
+        raw_preds, blend_diagnostics = _blend_race_with_live_market(
+            raw_preds, horse_ids, live_odds, blend_alpha,
+        )
+        if blend_diagnostics:
+            log.info(
+                "ML_LIVE_MARKET_BLEND meeting=%s race=%s alpha=%.2f runners=%s priced=%s applied=%s",
+                meeting_id, race.race_number, blend_alpha, len(horse_ids),
+                blend_diagnostics['priced_runners'], blend_diagnostics['applied'],
+            )
+
         min_p = raw_preds.min()
         max_p = raw_preds.max()
         if max_p > min_p:
@@ -1464,12 +1638,26 @@ KELLY_FRACTION_MULTIPLIER = float(os.environ.get('ML_KELLY_FRACTION_MULTIPLIER',
 KELLY_MAX_TOTAL_STAKE_PCT = float(os.environ.get('ML_KELLY_MAX_TOTAL_STAKE_PCT', '0.20'))
 
 
-def compute_kelly_stakes_for_race(predictions):
+def compute_kelly_stakes_for_race(predictions, market_alpha=None):
     """Stake recommendations for one race, as fractions of bankroll.
 
     predictions: iterable of dicts with 'horse_id', 'win_probability' (0-1, the
     model's fair win probability — NOT the 110%-book display probability) and
     'odds' (live decimal market price).
+
+    market_alpha: blend weight on the model's own probability when combining it
+    with the FLB-corrected market probability. None (the default) applies NO
+    blend, because the probabilities reaching this function have normally been
+    blended already.
+
+    That is deliberate, and it is the one thing to get right here: the blend
+    belongs at the single point where the model's probabilities are produced
+    (predict_meeting), not at each place they are consumed. Blending here as
+    well would apply the market twice — once through the ml_score the caller
+    derived its probability from, and once more on the way in — which is not a
+    stronger blend, it is a different and unvalidated one. Pass an explicit
+    alpha only when handing in RAW model probabilities that have not been
+    through predict_meeting.
 
     Returns {horse_id: stake_fraction} for the runners the joint solver backs;
     every other runner in the race gets no stake and is simply absent, and an
@@ -1477,10 +1665,17 @@ def compute_kelly_stakes_for_race(predictions):
     model_classes.solve_joint_kelly the nightly validation simulates with, so
     the displayed plan and the validated plan cannot drift apart.
 
+    When a blend IS requested, the race's odds go through
+    market_probability.fair_probabilities first: a price is only a probability
+    once the overround and the favourite-longshot bias are out of it. Only the
+    probability reading is corrected — the payoff odds handed to the solver
+    stay the price actually offered, because that is what a winning bet is
+    settled at.
+
     This never reorders or filters the model's own ranking — which horse is
     shown as the top pick is untouched; only the stake attached to it changes.
     """
-    probs_odds = []
+    usable = []
     for prediction in predictions or []:
         odds = prediction.get('odds')
         probability = prediction.get('win_probability')
@@ -1493,6 +1688,29 @@ def compute_kelly_stakes_for_race(predictions):
             continue
         if odds <= 1.0:
             continue
-        probs_odds.append((prediction.get('horse_id'), probability, odds))
+        usable.append((prediction.get('horse_id'), probability, odds))
 
+    if not usable:
+        return {}
+
+    if market_alpha is None or float(market_alpha) >= DEFAULT_MARKET_ALPHA:
+        # No blend: the probabilities go to the solver exactly as they arrive.
+        # Running them through the blend at alpha=1.0 would still renormalise
+        # them, and `predictions` is only the PRICED runners — a subset of the
+        # field — so renormalising it to 1.0 would silently inflate every
+        # probability and therefore every stake. Passing through is the honest
+        # no-op.
+        probs_odds = list(usable)
+    else:
+        # The whole priced race goes through the solve at once — Shin's
+        # correction is a per-race decomposition of one book, so a runner's
+        # fair probability is not defined without its rivals.
+        market_probs = fair_probabilities([odds for _, _, odds in usable])
+        blended = blend_probabilities(
+            [probability for _, probability, _ in usable], market_probs, market_alpha,
+        )
+        probs_odds = [
+            (horse_id, blended[i] if blended[i] is not None else probability, odds)
+            for i, (horse_id, probability, odds) in enumerate(usable)
+        ]
     return solve_joint_kelly(probs_odds, KELLY_FRACTION_MULTIPLIER, KELLY_MAX_TOTAL_STAKE_PCT)

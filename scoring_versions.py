@@ -1,17 +1,23 @@
 """Champion Score comparability across scoring-formula versions.
 
-The Champion Score formula changed five times in five weeks:
+The Champion Score formula changed six times:
 
     champion_score_v2_walk_forward_calibrated   blended_roi + 0.5 * strike_rate
     champion_score_v3_ae_ratio                  ... + (A/E - 1) * 10 instead
     champion_score_v4_ae_ratio
     champion_score_v5_ae_ratio
     champion_score_v6_joint_kelly               ... + a joint-Kelly term
+    champion_score_v7_flb_corrected_ae          ... A/E measured against
+                                                favourite-longshot-corrected
+                                                market probabilities, not 1/SP
 
 Each change shifts every score by a fixed offset. Under v2 a 35% strike rate was
 worth a flat +17.7 points to every model regardless of edge; v3 replaced that
 term with one centred on zero. So a v2 score of 49 and a v6 score of -26 can
-describe models of similar quality.
+describe models of similar quality. v7 moves every A/E up by roughly the book's
+overround (raw 1/SP sums to ~1.10-1.25, so it overstated expected wins and
+understated A/E for every model at once) — a uniform shift, but not one that
+can be undone by eye, which is why it needs its own version.
 
 Plotting those on one axis is what made a scoring-rule change look like a
 collapse in model performance and sent an investigation after the wrong cause.
