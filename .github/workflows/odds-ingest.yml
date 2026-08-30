@@ -9,10 +9,18 @@ name: Live Odds Ingest
 # for it and no other owner). A job that never runs creates nothing and writes
 # nothing, so ml_predict.py had neither a table to read nor rows to find.
 #
-# So this is the fix for both halves at once: the first run creates the table,
-# and every run after it keeps the table full. Trigger it manually
-# (workflow_dispatch) once to bootstrap production immediately, rather than
-# waiting for the next scheduled window.
+# Scheduling it was necessary but NOT sufficient, and the first run proved it:
+# run #1 (2026-08-30) died in under a second on `DATABASE_URL not set` because
+# the repository has no DATABASE_URL secret. `secrets.DATABASE_URL` renders as
+# an empty string when the secret is absent, so the job starts, installs 300MB
+# of wheels, and only then exits 1 — which reads like a broken job rather than
+# missing configuration. Every other DB-touching workflow here (mma-sync.yml,
+# fix-2026-player-ids.yml) has been failing the same way, unnoticed.
+#
+# So the table does not exist yet and no snapshot has ever been written. Until
+# the DATABASE_URL repository secret is set, this workflow cannot create it and
+# ml_predict.py's market blend will keep reporting priced=0. The preflight step
+# below states exactly that, up front, instead of burying it.
 #
 # ONE JOB, MANY PASSES
 # --------------------
@@ -56,6 +64,26 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      # Before the checkout and the ~45s dependency install, so a missing
+      # secret is the first thing in the log rather than the last. An absent
+      # secret is indistinguishable from an empty one here, and both mean the
+      # poll cannot run.
+      - name: Verify DATABASE_URL secret is present
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error title=DATABASE_URL secret is not set::This workflow cannot \
+          poll odds without it. odds_ingest.py owns live_odds_snapshots and creates \
+          it on the way in, so while this secret is missing the table does not exist, \
+          no snapshots are written, and ml_predict.py's ML_LIVE_MARKET_BLEND reports \
+          priced=0. Set it at Settings > Secrets and variables > Actions > New \
+          repository secret, name it DATABASE_URL, and give it the same Postgres \
+          connection string the Railway app uses."
+            exit 1
+          fi
+          echo "DATABASE_URL secret is present."
+
       - name: Checkout repo
         uses: actions/checkout@v4
 
