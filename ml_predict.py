@@ -34,6 +34,18 @@ from market_probability import blend_probabilities, fair_probabilities
 
 log = logging.getLogger(__name__)
 
+# The model version this serving process believes it is running, for the
+# artifact-vs-code check in _live_feature_contract_predicates.
+#
+# backtest.py stamps every artifact with its own MODEL_VERSION, which is
+# `os.environ.get('ML_MODEL_VERSION', <UTC date at training>)`. That default is
+# a BUILD DATE, not a code revision, so it only means something here when both
+# sides are pinned to the same deliberate value. Left unset, there is nothing
+# to compare against — which is reported as None ("not configured"), never as
+# a mismatch. Deliberately read straight from the environment rather than
+# imported from backtest.py, which pulls in sklearn/catboost/xgboost.
+SERVING_MODEL_VERSION = os.environ.get('ML_MODEL_VERSION')
+
 
 class NoActiveChampionError(RuntimeError):
     """Raised when the model DB is reachable but has no active champion row.
@@ -810,7 +822,14 @@ def _live_feature_contract_predicates(model, raw_X, final_X):
     expected_feature_count_matches = expected_feature_count_int is None or expected_feature_count_int == len(final_features)
     expected_feature_count_matches_stored = expected_feature_count_int is None or expected_feature_count_int == len(stored_features)
     feature_hash_matches = bool(stored_features) and _feature_contract_hash(stored_features) == _feature_contract_hash(final_features)
-    metadata_version_matches = getattr(model, '_form_analyst_model_version', None) == globals().get('MODEL_VERSION')
+    # None (not False) when ML_MODEL_VERSION is unset: nothing was compared, so
+    # claiming a mismatch would be a lie, and a False here lands in
+    # failed_predicates and sends a real contract diagnosis down the wrong path.
+    artifact_model_version = getattr(model, '_form_analyst_model_version', None)
+    metadata_version_matches = (
+        None if SERVING_MODEL_VERSION is None
+        else artifact_model_version == SERVING_MODEL_VERSION
+    )
     contains_nan = bool(final_X.isna().any().any())
     numeric_values = final_X.select_dtypes(include=[np.number])
     contains_infinity = bool(np.isinf(numeric_values.to_numpy(dtype=float)).any()) if not numeric_values.empty else False
@@ -900,7 +919,7 @@ def _log_live_feature_audit(model, meeting_id, race, feature_rows, raw_X, final_
                 'model_n_features_matches', 'expected_feature_count_matches', 'feature_hash_matches',
                 'metadata_version_matches', 'dtype_check_passes',
             )
-            if not contract[name]
+            if contract[name] is False
         ]
         failed_predicates.extend(
             name for name in ('contains_nan', 'contains_infinity') if contract[name]

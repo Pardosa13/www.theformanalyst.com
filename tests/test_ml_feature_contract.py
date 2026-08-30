@@ -114,3 +114,79 @@ def test_live_feature_contract_passes_with_full_feature_contract():
     assert contract["missing_features_empty"] is True
     assert contract["extra_features_empty"] is True
     assert contract["order_matches"] is True
+
+
+class TestMetadataVersionPredicate:
+    """The artifact-vs-serving-code version stamp.
+
+    This predicate spent its whole life comparing a real artifact version
+    against `globals().get('MODEL_VERSION')` — a name never defined in
+    ml_predict — so it read None and could only ever report False. It never
+    detected drift; it just always claimed drift.
+    """
+
+    FEATURES = [f"stored_feature_{idx}" for idx in range(5)]
+
+    def _contract(self, monkeypatch, serving_version, artifact_version):
+        import importlib
+
+        import ml_predict as module
+
+        if serving_version is None:
+            monkeypatch.delenv("ML_MODEL_VERSION", raising=False)
+        else:
+            monkeypatch.setenv("ML_MODEL_VERSION", serving_version)
+        module = importlib.reload(module)
+
+        model = DummyModel(self.FEATURES)
+        model._form_analyst_model_version = artifact_version
+        raw_X = pd.DataFrame([{name: float(i) for i, name in enumerate(self.FEATURES)}])
+        return module._live_feature_contract_predicates(
+            model, raw_X, raw_X.reindex(columns=self.FEATURES)
+        )
+
+    def test_unconfigured_serving_version_reports_none_not_a_mismatch(self, monkeypatch):
+        contract = self._contract(monkeypatch, None, "20260815")
+        assert contract["metadata_version_matches"] is None
+
+    def test_matching_versions_can_actually_pass(self, monkeypatch):
+        contract = self._contract(monkeypatch, "20260815", "20260815")
+        assert contract["metadata_version_matches"] is True
+
+    def test_genuinely_different_versions_still_report_false(self, monkeypatch):
+        contract = self._contract(monkeypatch, "20260901", "20260815")
+        assert contract["metadata_version_matches"] is False
+
+    def test_version_stamp_never_blocks_scoring(self, monkeypatch):
+        """It is diagnostic only — it is not part of genuine_contract_matches."""
+        for serving, artifact in ((None, "20260815"), ("20260901", "20260815")):
+            contract = self._contract(monkeypatch, serving, artifact)
+            assert contract["genuine_contract_matches"] is True
+
+    def test_unconfigured_version_is_not_listed_among_failed_predicates(self, monkeypatch):
+        """A None must not be swept up by the `not contract[name]` filter and
+        blamed for a failure it had no part in."""
+        import importlib
+
+        import ml_predict as module
+
+        monkeypatch.delenv("ML_MODEL_VERSION", raising=False)
+        module = importlib.reload(module)
+
+        model = DummyModel(self.FEATURES)
+        model._form_analyst_model_version = "20260815"
+        raw_X = pd.DataFrame([{name: float(i) for i, name in enumerate(self.FEATURES)}])
+        # Drop a stored feature so the contract genuinely fails and the audit
+        # enumerates failed_predicates.
+        final_X = raw_X.reindex(columns=self.FEATURES[:-1])
+
+        with pytest.raises(RuntimeError) as excinfo:
+            module._log_live_feature_audit(
+                model,
+                meeting_id=1962,
+                race=SimpleNamespace(race_number=8),
+                feature_rows=[{name: float(i) for i, name in enumerate(self.FEATURES)}],
+                raw_X=raw_X,
+                final_X=final_X,
+            )
+        assert "metadata_version_matches" not in str(excinfo.value)
