@@ -1234,14 +1234,15 @@ def test_ensure_champion_exists_after_run_promotes_best_valid_feature_complete_c
     assert any(a.get("key") == "fallback_champion_promotion" and a.get("severity") == "blocking" for a in conn.pipeline_alerts)
 
 
-def test_ensure_champion_exists_after_run_refuses_a_candidate_that_lost_on_every_fold(monkeypatch):
-    """The fallback used to waive the 'every walk-forward fold negative' veto
-    on the reasoning that some champion beats no champion. That is backwards:
-    a candidate whose own out-of-sample folds all lose money is not a weaker
-    champion, it is a known-losing one, and promoting it unopposed puts real
-    stakes on bets nothing has validated. No champion shows no picks, which
-    costs nothing. Ending the night with zero champions and a blocking alert
-    is the correct outcome here."""
+def test_ensure_champion_exists_after_run_promotes_a_candidate_that_lost_on_every_fold(monkeypatch):
+    """The fallback no longer excludes a candidate for losing on every
+    walk-forward fold, same as the normal path. Excluding it assumed "no
+    champion" was a cheap, temporary state — but while no model in this
+    pipeline has an edge, that exclusion empties the entire candidate pool and
+    holds live scoring at zero picks indefinitely. That is the stuck-champion
+    failure again with a worse outcome: nothing showing at all instead of
+    something stale. The best measured candidate on record is promoted, loudly
+    flagged as a fallback."""
     negative_metrics = metrics(roi=-3.0)
     negative_metrics["walk_forward"] = {
         "folds": [{"roi": -1.0, "bets": 50}, {"roi": -2.0, "bets": 50}], "roi_std": 0.3,
@@ -1252,15 +1253,45 @@ def test_ensure_champion_exists_after_run_refuses_a_candidate_that_lost_on_every
     monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
     monkeypatch.setattr(backtest, "_live_scoring_feature_names", _dummy_live_contract)
 
+    rollback_calls = []
+    monkeypatch.setattr(
+        backtest, "rollback_to_champion",
+        lambda model_id, reason='': rollback_calls.append((model_id, reason)),
+    )
+
+    backtest.ensure_champion_exists_after_run(run_id=88)
+
+    assert len(rollback_calls) == 1
+    assert rollback_calls[0][0] == 301
+    assert "FALLBACK PROMOTION" in rollback_calls[0][1]
+    assert conn.stamped_updates and conn.stamped_updates[-1]["id"] == 301
+    assert any(
+        a.get("key") == "fallback_champion_promotion" and a.get("severity") == "blocking"
+        for a in conn.pipeline_alerts
+    ), "a fallback promotion must still be loudly, durably alerted"
+    assert not any(a.get("key") == "no_active_champion" for a in conn.pipeline_alerts)
+
+
+def test_fallback_still_refuses_a_candidate_below_the_walk_forward_fold_minimum(monkeypatch):
+    """Dropping the fold-SIGN exclusion must not drop the fold-COUNT one: a
+    candidate with too little out-of-sample evidence to be measured at all is
+    still ineligible, and no champion is still the right outcome then."""
+    thin_metrics = metrics(roi=-3.0)
+    thin_metrics["walk_forward"] = {"folds": [{"roi": -1.0, "bets": 50}], "roi_std": 0.0}
+    only_row = (302, "random_forest", "RF OneFold", json.dumps(thin_metrics), _pkl_bytes(DummySavedModel()))
+    conn = FakeEnsureConnection(active_row=None, candidate_rows=[only_row])
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+    monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+    monkeypatch.setattr(backtest, "_live_scoring_feature_names", _dummy_live_contract)
+
     def _fail_if_called(model_id, reason=''):
-        raise AssertionError("a candidate that lost on every walk-forward fold must never be promoted")
+        raise AssertionError("a candidate below the walk-forward fold minimum must never be promoted")
     monkeypatch.setattr(backtest, "rollback_to_champion", _fail_if_called)
 
     backtest.ensure_champion_exists_after_run(run_id=88)
 
     alert = next(a for a in conn.pipeline_alerts if a.get("key") == "no_active_champion")
     assert alert["severity"] == "blocking"
-    assert "every walk-forward fold" in alert["message"]
     assert conn.stamped_updates == []
 
 

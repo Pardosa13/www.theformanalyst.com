@@ -3071,13 +3071,16 @@ def _selection_score_from_metrics(metrics, force_recompute=False):
     # the folds is agreeing with them, and dropping it there would launder a
     # bad number into a better score. So: the holdout can hurt, never help,
     # once every fold has disagreed with it. This is now the ONLY all-folds-
-    # negative rule on the normal promotion path: save_best_model_to_db's hard
-    # veto (which rejected such a challenger outright) has been removed, since
-    # it rejected the entire field every night in a pipeline where no candidate
-    # yet has an edge. This one is not a veto — it denies an all-negative-fold
-    # model the credit of a rosy holdout, and then lets it compete on its fold
-    # ROI like anything else. It governs every comparison and the fallback path
-    # too.
+    # negative rule left anywhere in promotion: the hard vetoes that rejected
+    # such a model outright — in save_best_model_to_db and in
+    # ensure_champion_exists_after_run's fallback — have both been removed,
+    # because in a pipeline where no candidate yet has an edge they rejected
+    # the entire field, every night and from every path. This one is not a
+    # veto and does not have that failure mode: it denies an all-negative-fold
+    # model the credit of a rosy holdout, then lets it compete on its fold ROI
+    # like anything else. It governs every comparison and the fallback path
+    # too, which is why fold evidence still decides who wins even though fold
+    # sign no longer disqualifies anyone.
     all_folds_negative = has_walk_forward and all(r <= 0.0 for r in fold_rois)
     if not has_walk_forward:
         blended_roi = 0.3 * holdout_roi
@@ -5315,12 +5318,20 @@ def ensure_champion_exists_after_run(run_id=None):
     "Current-era" (_model_era_mismatch) is a hard eligibility gate, not a
     ranking input: a candidate scored under an older formula version, or
     trained on a feature set that isn't today's live contract, is excluded no
-    matter how high its stored score is. A candidate whose every walk-forward
-    fold is negative is excluded on the same footing. Preferring no champion
-    at all over an unmeasured or known-losing one is the deliberate choice
-    here — no picks is a visible, harmless state, while picks from a model
-    whose score means something else entirely are indistinguishable from good
-    ones until money is on them.
+    matter how high its stored score is. Preferring no champion at all over an
+    UNMEASURED one is the deliberate choice there — picks from a model whose
+    score means something else entirely are indistinguishable from good ones
+    until money is on them.
+
+    That reasoning does NOT extend to a merely losing candidate, and the
+    all-folds-negative exclusion that used to sit alongside it here has been
+    removed. A model that loses on every fold is measured, not unmeasured: its
+    score means exactly what it says. Excluding it assumed "no champion" was a
+    cheap, temporary state, but while no model in this pipeline has an edge it
+    would empty the whole candidate pool and hold live scoring at zero picks
+    indefinitely — the stuck-champion problem again, with nothing showing at
+    all instead of something stale. Fold count, era and feature contract still
+    gate eligibility; fold sign does not.
     """
     with engine.connect() as conn:
         active = conn.execute(text("""
@@ -5356,7 +5367,6 @@ def ensure_champion_exists_after_run(run_id=None):
 
         best = None
         skipped_stale = []
-        skipped_losing = []
         for row_id, model_type, model_name, metrics_json, pkl_bytes in rows:
             try:
                 row_metrics = json.loads(metrics_json) if metrics_json else {}
@@ -5387,32 +5397,23 @@ def ensure_champion_exists_after_run(run_id=None):
                 )
                 skipped_stale.append(f"id={row_id} ({era_mismatch})")
                 continue
-            # The all-folds-negative veto is now LOCAL TO THIS FALLBACK PATH:
-            # the normal promotion path in save_best_model_to_db no longer
-            # rejects a challenger on fold sign, because doing so rejected the
-            # whole field every night. It still applies here because the two
-            # situations are not the same one. On the normal path there is a
-            # champion already live, so the choice is between two models that
-            # both bet; picking the better-scoring one is strictly better. Here
-            # there is NO champion, so the choice is between a known-losing
-            # model and no picks at all — and no picks costs nothing, while a
-            # known-losing champion promoted unopposed puts real stakes on bets
-            # nothing has validated. Waiting for a model that earns the position
-            # is the cheaper of the two.
-            candidate_fold_rois = [
-                float(f.get('roi', 0.0) or 0.0)
-                for f in ((row_metrics.get('walk_forward') or {}).get('folds') or [])
-                if f.get('bets', 0)
-            ]
-            if candidate_fold_rois and all(r <= 0.0 for r in candidate_fold_rois):
-                log.error(
-                    "Fallback promotion candidate id=%s excluded — every walk-forward fold is negative (%s). "
-                    "Its own out-of-sample evidence says it loses money; promoting it unopposed would put "
-                    "stakes on bets nothing has validated.",
-                    row_id, [round(r, 1) for r in candidate_fold_rois],
-                )
-                skipped_losing.append(f"id={row_id} (folds {[round(r, 1) for r in candidate_fold_rois]})")
-                continue
+            # No all-folds-negative exclusion here either — it is gone from
+            # this fallback path for the same reason it is gone from
+            # save_best_model_to_db. The argument for keeping it here was that
+            # "no champion" is a cheap safe state: no picks, no stakes, nothing
+            # lost. That is only true if the state is temporary, and it is not.
+            # Every model this pipeline currently produces loses on every fold,
+            # so the exclusion would reject the entire 200-row candidate pool
+            # the first time an incumbent is evicted, and no amount of retraining
+            # clears it until the models find an edge. The choice it actually
+            # forces is not "known-losing champion vs. wait a night" but
+            # "best model on record vs. an indefinite blackout with zero picks"
+            # — which is the stuck-champion failure again, with a worse outcome.
+            # A candidate still has to clear can_become_champion's fold-count
+            # minimum, the era/feature-contract check, and the plausible-score
+            # range below; it just no longer has to have won on a fold. The
+            # fallback stays loudly logged and alerted as a distinct event, so a
+            # model promoted this way is never mistaken for one that earned it.
             score = _selection_score_from_metrics(row_metrics, force_recompute=True)
             if score is None:
                 continue
@@ -5448,11 +5449,6 @@ def ensure_champion_exists_after_run(run_id=None):
             )
             if skipped_stale:
                 message += f" Excluded as old-era: {'; '.join(skipped_stale[:5])}."
-            if skipped_losing:
-                message += (
-                    " Excluded for losing on every walk-forward fold: "
-                    f"{'; '.join(skipped_losing[:5])}."
-                )
             log.error(message)
             record_pipeline_alert(conn, 'no_active_champion', message=message, severity='blocking', run_id=run_id)
             conn.commit()
