@@ -14,6 +14,7 @@ import os
 import json
 import re
 import logging
+import time
 from collections import Counter, defaultdict
 import numpy as np
 from strike_rate_matching import build_strike_rate_lookup, get_sr_win_pct, normalize_name
@@ -28,6 +29,7 @@ from datetime import datetime
 # before load_model() is ever called.
 import model_classes  # noqa: F401
 from model_classes import solve_joint_kelly
+from market_probability import blend_probabilities, fair_probabilities
 
 log = logging.getLogger(__name__)
 
@@ -1464,12 +1466,17 @@ KELLY_FRACTION_MULTIPLIER = float(os.environ.get('ML_KELLY_FRACTION_MULTIPLIER',
 KELLY_MAX_TOTAL_STAKE_PCT = float(os.environ.get('ML_KELLY_MAX_TOTAL_STAKE_PCT', '0.20'))
 
 
-def compute_kelly_stakes_for_race(predictions):
+def compute_kelly_stakes_for_race(predictions, market_alpha=None):
     """Stake recommendations for one race, as fractions of bankroll.
 
     predictions: iterable of dicts with 'horse_id', 'win_probability' (0-1, the
     model's fair win probability — NOT the 110%-book display probability) and
     'odds' (live decimal market price).
+
+    market_alpha: blend weight on the model's own probability when combining it
+    with the market's. None (the default) reads the active champion's validated
+    alpha off the model artifact; 1.0 means "ignore the market", which is what
+    a champion trained before the blend existed gets.
 
     Returns {horse_id: stake_fraction} for the runners the joint solver backs;
     every other runner in the race gets no stake and is simply absent, and an
@@ -1477,10 +1484,17 @@ def compute_kelly_stakes_for_race(predictions):
     model_classes.solve_joint_kelly the nightly validation simulates with, so
     the displayed plan and the validated plan cannot drift apart.
 
+    Before solving, the whole race's odds are run through
+    market_probability.fair_probabilities: a price is only a probability once
+    the overround and the favourite-longshot bias are taken out of it, and
+    Kelly sizes stakes off probabilities. Only the probability reading is
+    corrected — the payoff odds handed to the solver stay the price actually
+    offered, because that is what a winning bet is settled at.
+
     This never reorders or filters the model's own ranking — which horse is
     shown as the top pick is untouched; only the stake attached to it changes.
     """
-    probs_odds = []
+    usable = []
     for prediction in predictions or []:
         odds = prediction.get('odds')
         probability = prediction.get('win_probability')
@@ -1493,6 +1507,93 @@ def compute_kelly_stakes_for_race(predictions):
             continue
         if odds <= 1.0:
             continue
-        probs_odds.append((prediction.get('horse_id'), probability, odds))
+        usable.append((prediction.get('horse_id'), probability, odds))
 
+    if not usable:
+        return {}
+
+    if market_alpha is None:
+        market_alpha = active_champion_market_alpha()
+
+    if market_alpha >= 1.0:
+        # No validated blend weight for this champion: the model's own
+        # probabilities go to the solver exactly as they arrive. Running them
+        # through the blend at alpha=1.0 would still renormalise them, and
+        # `predictions` is only the PRICED runners — a subset of the field —
+        # so renormalising it to 1.0 would silently inflate every probability
+        # and therefore every stake. Passing through is the honest no-op.
+        probs_odds = list(usable)
+    else:
+        # The whole priced race goes through the solve at once — Shin's
+        # correction is a per-race decomposition of one book, so a runner's
+        # fair probability is not defined without its rivals.
+        market_probs = fair_probabilities([odds for _, _, odds in usable])
+        blended = blend_probabilities(
+            [probability for _, probability, _ in usable], market_probs, market_alpha,
+        )
+        probs_odds = [
+            (horse_id, blended[i] if blended[i] is not None else probability, odds)
+            for i, (horse_id, probability, odds) in enumerate(usable)
+        ]
     return solve_joint_kelly(probs_odds, KELLY_FRACTION_MULTIPLIER, KELLY_MAX_TOTAL_STAKE_PCT)
+
+
+# ── Market blend weight carried on the champion artifact ─────────────────────
+# alpha travels with the model the same way _form_analyst_feature_medians does:
+# stamped onto the artifact at training time by backtest.run_model_competition,
+# so live scoring uses the exact weight that won validation for THIS champion
+# rather than a constant that could drift away from what was tested.
+MODEL_MARKET_ALPHA_ATTR = '_form_analyst_market_blend_alpha'
+# A champion trained before the blend existed has no alpha. 1.0 = "ignore the
+# market", i.e. behave exactly as the pipeline did before the blend.
+DEFAULT_MARKET_ALPHA = 1.0
+_MARKET_ALPHA_CACHE_TTL_SECONDS = 60.0
+_market_alpha_cache = {'value': None, 'fetched_at': 0.0}
+
+
+def model_market_alpha(model):
+    """Validated market-blend weight stamped on a model artifact.
+
+    Returns DEFAULT_MARKET_ALPHA for any model without one, or with one that
+    is not a usable number in [0, 1] — a corrupted attribute must degrade to
+    "pure model", never to an extrapolated blend nobody validated.
+    """
+    raw = getattr(model, MODEL_MARKET_ALPHA_ATTR, None)
+    if raw is None:
+        return DEFAULT_MARKET_ALPHA
+    try:
+        alpha = float(raw)
+    except (TypeError, ValueError):
+        log.warning("Ignoring non-numeric market blend alpha %r on active champion.", raw)
+        return DEFAULT_MARKET_ALPHA
+    if not np.isfinite(alpha) or not (0.0 <= alpha <= 1.0):
+        log.warning("Ignoring out-of-range market blend alpha %r on active champion.", raw)
+        return DEFAULT_MARKET_ALPHA
+    return alpha
+
+
+def active_champion_market_alpha():
+    """The active champion's market-blend weight, cached briefly.
+
+    compute_kelly_stakes_for_race runs once per race on a page that renders a
+    whole meeting, and load_model() is a database round trip plus an unpickle.
+    A short TTL keeps that from turning one page view into a dozen champion
+    loads while still picking up a promotion within the minute.
+
+    Any failure to read the champion returns DEFAULT_MARKET_ALPHA: staking must
+    keep working (unblended) when the champion cannot be inspected, rather than
+    failing the page.
+    """
+    now = time.time()
+    cached = _market_alpha_cache
+    if cached['value'] is not None and (now - cached['fetched_at']) < _MARKET_ALPHA_CACHE_TTL_SECONDS:
+        return cached['value']
+    try:
+        alpha = model_market_alpha(load_model())
+    except Exception as e:
+        log.warning("Could not read the active champion's market blend alpha (%s); using %.2f.",
+                    e, DEFAULT_MARKET_ALPHA)
+        alpha = DEFAULT_MARKET_ALPHA
+    _market_alpha_cache['value'] = alpha
+    _market_alpha_cache['fetched_at'] = now
+    return alpha

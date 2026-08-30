@@ -104,6 +104,24 @@ def solve_joint_kelly(probs_odds,
     room. For a single included runner the formula collapses to the familiar
     x = (pO - 1) / (O - 1).
 
+    A NOTE ON THE FAVOURITE-LONGSHOT CORRECTION
+    -------------------------------------------
+    market_probability.fair_probabilities corrects a price's reading as a
+    PROBABILITY (overround + favourite-longshot bias) and callers apply it
+    before they get here, to whatever probability they hand in. The odds passed
+    to this function are deliberately left raw, in both roles they play:
+
+      * as the payoff (O - 1 per unit staked) — a winning bet is settled at the
+        price actually offered, not at a de-biased one; and
+      * inside `reserve = sum(1/O)` — that term is the cost of covering the
+        included set, a payoff-structure quantity in the Smoczynski & Tomkins
+        closed form, not an estimate of anybody's probability. Substituting
+        corrected probabilities for it would not de-bias the solver, it would
+        stop solving the Kelly problem.
+
+    So the correction reaches staking through `win_probability`, which is where
+    a probability estimate belongs, and nowhere else.
+
     probs_odds: iterable of (key, win_probability, decimal_odds).
     Returns {key: stake_fraction_of_bankroll} containing only backed runners;
     anything absent from the result gets no stake.

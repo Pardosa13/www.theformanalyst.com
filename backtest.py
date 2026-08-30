@@ -83,6 +83,10 @@ from strike_rate_matching import (
 )
 from model_classes import ConsensusRegressor, solve_joint_kelly
 from book_quality import SUSPICIOUS_OVERROUND, unusable_race_ids
+from market_probability import (
+    blend_probabilities_by_race, fair_probabilities, fair_probabilities_by_race,
+    summarise_z,
+)
 from notes_parsing import (
     parse_notes_components, parse_analyzer_score,
     is_scoring_component, NEGATIVE_COMPONENTS,
@@ -2766,7 +2770,7 @@ MIN_WALK_FORWARD_FOLDS = int(os.environ.get('ML_MIN_WALK_FORWARD_FOLDS', '2'))
 # of) the fixed Champion Score edge above.
 PROMOTION_MAX_BOOTSTRAP_P_VALUE = float(os.environ.get('ML_PROMOTION_MAX_P_VALUE', '0.25'))
 MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
-SCORING_FORMULA_VERSION = 'champion_score_v6_joint_kelly'
+SCORING_FORMULA_VERSION = 'champion_score_v7_flb_corrected_ae'
 # Sanity bound for a recomputed Champion Score, used only by the fallback
 # promotion path. Every real score on record sits in the low-to-mid 40s, so
 # this is roughly 4x headroom over anything legitimately observed — wide
@@ -3172,7 +3176,8 @@ def _promotion_rule_text():
         "Champion Score is stored internally as selection_score and equals "
         "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI — with the holdout term dropped entirely, "
         "leaving the mean fold ROI alone, whenever EVERY walk-forward fold is negative and the holdout "
-        "would otherwise raise the score) + 10*(A/E ratio - 1.0) "
+        "would otherwise raise the score) + 10*(A/E ratio - 1.0, where expected wins come from favourite-longshot-corrected "
+        "market probabilities rather than raw 1/SP) "
         "+ 5*joint-Kelly bankroll growth (clamped to [-1.0, 5.0], and scored as 0 for a "
         "kelly_staking record predating the joint solver) - 0.02*joint-Kelly max drawdown % "
         "(-10 more if the Kelly simulation went bust) - calibration penalties "
@@ -3397,6 +3402,60 @@ def _simulate_joint_kelly_staking(eval_df, kelly_fraction_multiplier=KELLY_FRACT
     }
 
 
+# Every evaluation in this file reads the same closing SP as "the market", so
+# the FLB correction is applied once, in one place, on the way in. Live scoring
+# reads a live Ladbrokes snapshot instead — a different odds source through the
+# same fair_probabilities() call, not a different correction.
+def _flb_market_probabilities(eval_df):
+    """FLB-corrected market win probability for every row of an eval frame.
+
+    Returns a Series aligned to eval_df.index. Rows whose SP is missing or
+    unusable come back as NaN — they contribute nothing to an expectation sum,
+    which is the same treatment raw 1/SP gave a NaN price, so a partially
+    priced race degrades exactly as it did before rather than failing.
+    """
+    probabilities, _z_values = fair_probabilities_by_race(
+        eval_df['sp'].tolist(), eval_df['race_id'].tolist()
+    )
+    return pd.Series(
+        [np.nan if p is None else p for p in probabilities],
+        index=eval_df.index, dtype=float,
+    )
+
+
+def _log_flb_z_summary(sp_values, race_ids, label=""):
+    """Summarise the Shin insider proportion across one set of races.
+
+    Called once per Track E run rather than once per candidate: every
+    candidate is scored on the same validation SPs, so their z values are the
+    same numbers over and over and only the aggregate says anything.
+
+    z near 0 on most races with occasional spikes is the healthy shape. A mean
+    pinned at ~0 everywhere is the signature of prices that are not really a
+    book — exactly the defect book_quality.py exists to gate — so
+    market_probability.summarise_z warns on it here, at the point of
+    measurement.
+    """
+    _probabilities, z_values = fair_probabilities_by_race(list(sp_values), list(race_ids))
+    summary = summarise_z(z_values, label=label)
+    if summary['races_solved']:
+        log.info(
+            "Favourite-longshot (Shin) correction%s: races_solved=%s mean_z=%.5f "
+            "median_z=%.5f min_z=%.5f max_z=%.5f plausible_range=%.2f-%.2f in_range=%s",
+            f" [{label}]" if label else "", summary['races_solved'], summary['mean_z'],
+            summary['median_z'], summary['min_z'], summary['max_z'],
+            summary['plausible_range'][0], summary['plausible_range'][1],
+            summary.get('mean_z_in_plausible_range'),
+        )
+    else:
+        log.info(
+            "Favourite-longshot (Shin) correction%s: no race produced a solvable "
+            "book (every race fell back to naive 1/SP normalisation).",
+            f" [{label}]" if label else "",
+        )
+    return summary
+
+
 def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
     """Evaluate top model selection in every validation race with betting metrics."""
     pred = np.clip(_predict_win_scores(model, X_val), 1e-6, 1 - 1e-6)
@@ -3409,6 +3468,10 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
     # Stable per-runner key for the joint Kelly simulation, which allocates
     # across a whole race rather than picking a single row out of it.
     eval_df['row_id'] = range(len(eval_df))
+    # Solved once for the whole frame and reused by both the A/E ratio and the
+    # Kelly simulation, so those two can never disagree about what the market
+    # thinks of a runner.
+    fair_market_probs = _flb_market_probabilities(eval_df)
     selections = eval_df.loc[eval_df.groupby('race_id')['pred'].idxmax()].copy()
     profits = np.where(selections['won'] == 1, selections['sp'] - 1.0, -1.0)
     bets = int(len(selections))
@@ -3439,13 +3502,21 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
             'profit_units': float(np.sum(p)),
         }
 
-    # A/E ratio: actual wins vs expected wins implied by the market (1/SP).
-    # This is what edge actually looks like — a model can win often on short
-    # prices (strike rate high) with zero edge, or win rarely on overlays
-    # (strike rate low) with real edge. A/E > 1.0 means the model's picks win
-    # more than the market says they should.
-    implied_probs = 1.0 / selections['sp'].clip(lower=1.0001)
-    expected_wins = float(implied_probs.sum()) if bets else 0.0
+    # A/E ratio: actual wins vs expected wins implied by the market. This is
+    # what edge actually looks like — a model can win often on short prices
+    # (strike rate high) with zero edge, or win rarely on overlays (strike
+    # rate low) with real edge. A/E > 1.0 means the model's picks win more
+    # than the market says they should.
+    #
+    # "What the market says" is the FLB-corrected probability, not 1/SP. Raw
+    # 1/SP carries the bookmaker's whole overround (so it overstates EVERY
+    # runner's chance, deflating A/E across the board) and carries the
+    # favourite-longshot bias on top of that (so how much it overstates
+    # depends on the price, which biases A/E differently for a model that
+    # leans short than for one that leans long). Both distortions are removed
+    # per race by market_probability.fair_probabilities before the expectation
+    # is summed. See _flb_market_probabilities above for the fallbacks.
+    expected_wins = float(fair_market_probs[selections.index].sum()) if bets else 0.0
     a_e_ratio = (wins / expected_wins) if expected_wins > 0 else None
 
     return {
@@ -3453,6 +3524,7 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val):
         'profit_units': float(np.sum(profits)) if bets else 0.0,
         'strike_rate': float(wins / bets * 100.0) if bets else 0.0,
         'a_e_ratio': a_e_ratio,
+        'a_e_market_probability_method': 'shin_flb_corrected',
         'number_of_bets': bets,
         'winners': wins,
         'average_winner_sp': float(selections.loc[selections['won'] == 1, 'sp'].mean()) if wins else 0.0,
@@ -3940,6 +4012,11 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
 
     log.info("Track E random_forest hyperparameters source=%s params=%s", rf_params_source, rf_params)
 
+    # Sanity-check the favourite-longshot correction on the exact prices every
+    # candidate below will be scored against, before any model is fitted, so a
+    # bad SP feed shows up as its own log line instead of as a puzzling A/E.
+    flb_z_summary = _log_flb_z_summary(sp_val, race_ids_val, label='track_e_validation')
+
     candidates = {
         # Isotonic-calibrated: class_weight='balanced_subsample' (needed so the
         # forest actually splits on the ~12% winner class instead of always
@@ -4330,6 +4407,10 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         result['metrics']['validation_period'] = validation_period
         result['metrics']['jockey_snapshot_coverage_pct'] = run_snapshot_coverage.get('jockey_snapshot_coverage_pct')
         result['metrics']['trainer_snapshot_coverage_pct'] = run_snapshot_coverage.get('trainer_snapshot_coverage_pct')
+        # Identical for every candidate (same validation SPs), but stored per
+        # model so a persisted metrics blob carries the evidence that its A/E
+        # was measured against a sane book.
+        result['metrics']['flb_z_summary'] = flb_z_summary
         result['metrics'] = _stamp_selection_metrics(result['metrics'])
         try:
             result['metrics']['value_edge_analysis'] = _value_edge_backtest(
