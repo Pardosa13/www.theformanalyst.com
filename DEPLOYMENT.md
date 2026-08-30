@@ -203,6 +203,17 @@ insert-only table.
 off the model alone, with no market blend. That is the intended degraded
 state — picks are still produced.
 
+**Reading the workflow while the secret is missing:** a scheduled run checks
+for `DATABASE_URL` first, and if it is absent it skips the poll and finishes
+**green**, with the reason and the fix written into the run's job summary and
+raised as a warning annotation. Green here means "nothing to do", not
+"snapshots written" — a `*/15` cron that failed on missing configuration would
+mail out 96 identical failures a day and drown any real one. A run you start
+yourself with **Run workflow** still fails outright if the secret is missing,
+since you are standing there waiting for it. `mma-sync.yml` behaves the same
+way. Once the secret is set, both workflows run for real and a failure email
+means something is genuinely broken.
+
 ### Step 6: Test the Deployment
 1. Visit your Railway URL
 2. You should see the login page

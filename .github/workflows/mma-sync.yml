@@ -2,6 +2,15 @@ name: MMA Weekly Sync
 
 # Runs every Sunday at 9am UTC (matches Railway cron 0 9 * * 0).
 # Can also be triggered manually via the GitHub Actions UI.
+#
+# This job has never once succeeded: it needs the DATABASE_URL repository
+# secret, which does not exist, so every scheduled run since it was added has
+# built a full Python environment and then died on `DATABASE_URL not set`.
+# Nineteen straight failure emails went unread, which is what a weekly email
+# saying the same thing gets. The preflight below applies the same rule as
+# odds-ingest.yml: a missing secret is configuration, so a scheduled run skips
+# and stays green (with the reason in the job summary), while a manual run —
+# where a human is waiting on an answer — fails loudly and immediately.
 on:
   schedule:
     - cron: '0 9 * * 0'
@@ -15,19 +24,62 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Ahead of the checkout and pip install, so an unconfigured repository
+      # costs seconds instead of a full environment build.
+      - name: Check DATABASE_URL secret
+        id: preflight
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          MANUAL_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          if [ -n "$DATABASE_URL" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "DATABASE_URL secret is present."
+            exit 0
+          fi
+
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## MMA sync skipped — DATABASE_URL secret is not set"
+            echo
+            echo "\`mma_sync.py\` writes fights, fighters and odds straight to Postgres,"
+            echo "so with no connection string there is nothing for this job to do."
+            echo
+            echo "**To fix:** Settings > Secrets and variables > Actions > New repository"
+            echo "secret, name it \`DATABASE_URL\`, and give it the same Postgres"
+            echo "connection string the Railway app uses."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$MANUAL_RUN" = "true" ]; then
+            echo "::error title=DATABASE_URL secret is not set::You triggered this run \
+          manually and it cannot sync without the secret. Set it at Settings > Secrets \
+          and variables > Actions > New repository secret, name it DATABASE_URL, and \
+          give it the same Postgres connection string the Railway app uses."
+            exit 1
+          fi
+
+          echo "::warning title=DATABASE_URL secret is not set::Skipping the MMA sync. \
+          No fights, fighters or odds are being written until the DATABASE_URL \
+          repository secret is set; see the job summary for the fix."
+
       - name: Checkout repo
+        if: steps.preflight.outputs.configured == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Python
+        if: steps.preflight.outputs.configured == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
       - name: Install dependencies
+        if: steps.preflight.outputs.configured == 'true'
         run: pip install -r requirements.txt
 
       - name: Run MMA sync
+        if: steps.preflight.outputs.configured == 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
@@ -36,8 +88,10 @@ jobs:
       # Read-only accuracy report over completed fights that had a real
       # (non-fallback) prediction — no model training happens here. Never
       # blocks the sync job; a failure here shouldn't fail the whole run.
+      # `always()` means "even if the sync step failed", so it still has to
+      # check the preflight itself or it would run on a skipped job too.
       - name: Log MMA prediction accuracy
-        if: always()
+        if: always() && steps.preflight.outputs.configured == 'true'
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
