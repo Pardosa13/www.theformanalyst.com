@@ -17,6 +17,15 @@ from sklearn.base import BaseEstimator, RegressorMixin, clone
 import numpy as np
 
 
+# Attribute name under which a model artifact carries its validated
+# market-blend weight. Defined here, in the module both backtest.py and
+# ml_predict.py already import, for the same reason ConsensusRegressor is: the
+# nightly job writes this attribute and the web app reads it, and a name that
+# exists twice is a name that can drift. alpha travels with the pkl exactly
+# like _form_analyst_feature_medians does.
+MARKET_BLEND_ALPHA_ATTR = '_form_analyst_market_blend_alpha'
+
+
 class ConsensusRegressor(BaseEstimator, RegressorMixin):
     """Weighted consensus of model win-likelihood scores."""
 
