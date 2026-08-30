@@ -168,7 +168,7 @@ class FakeEngine:
         return self.conn
 
 
-def champion_row(champion_score=10.0):
+def champion_row(champion_score=10.0, fold_rois=None):
     champion_metrics = {
         "selection_score": champion_score,
         "scoring_formula_version": backtest.SCORING_FORMULA_VERSION,
@@ -179,7 +179,11 @@ def champion_row(champion_score=10.0):
         "calibration": {"expected_calibration_error": 0.01},
         "stability": {"roi_last_100": 4.0, "roi_last_250": 4.0},
         "walk_forward": {
-            "folds": [{"roi": 4.0, "strike_rate": 22.0, "bets": 50} for _ in range(backtest.MIN_WALK_FORWARD_FOLDS)],
+            "folds": [
+                {"roi": roi, "strike_rate": 22.0, "bets": 50}
+                for roi in (fold_rois if fold_rois is not None
+                            else [4.0] * backtest.MIN_WALK_FORWARD_FOLDS)
+            ],
             "roi_std": 0.5,
         },
     }
@@ -421,11 +425,35 @@ def test_below_gate_strike_rate_still_blocks_a_negative_roi_challenger(monkeypat
     )
 
 
-def test_all_negative_walk_forward_folds_still_veto_promotion(monkeypatch, tmp_path):
-    """The every-fold-negative veto is a separate, still-active rule: it is not
-    the positive-ROI requirement and survives its removal."""
-    conn = FakeConnection(champion=champion_row(10.0))
+def test_all_negative_walk_forward_folds_no_longer_veto_promotion(monkeypatch, tmp_path):
+    """The every-fold-negative veto is gone, for the same reason the
+    positive-ROI requirement went: every model this pipeline currently produces
+    loses money on every fold, so a rule that rejects on fold SIGN rejects the
+    entire field every night and freezes the champion on an old model forever.
+    A challenger that loses less than the champion on the same fold boundaries
+    is the best model available, and it wins promotion."""
+    conn = FakeConnection(champion=champion_row(10.0, fold_rois=[-6.0, -8.0]))
     losing = metrics(selection_score=12.0, roi=-1.0, strike_rate=20.0, bets=150)
+    losing["walk_forward"] = {
+        "folds": [{"roi": -2.0, "strike_rate": 18.0, "bets": 50},
+                  {"roi": -4.0, "strike_rate": 17.0, "bets": 50}],
+        "roi_std": 0.5,
+    }
+
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, losing)
+
+    assert conn.activated_challenger["id"] == conn.challenger_id
+    assert conn.promotion_history["old_champion_id"] == 101
+    assert "every walk-forward fold" not in conn.promotion_history["reason"]
+    assert "Champion Score 12.000 beat Champion Score 10.000" in conn.promotion_history["reason"]
+
+
+def test_all_negative_folds_still_face_every_other_promotion_gate(monkeypatch, tmp_path):
+    """Removing the fold-sign veto must not become a blanket waiver: an
+    all-negative-fold challenger that does NOT clear the Champion Score edge
+    over the incumbent is still rejected, on that gate."""
+    conn = FakeConnection(champion=champion_row(10.0, fold_rois=[-6.0, -8.0]))
+    losing = metrics(selection_score=10.5, roi=-1.0, strike_rate=20.0, bets=150)
     losing["walk_forward"] = {
         "folds": [{"roi": -2.0, "strike_rate": 18.0, "bets": 50},
                   {"roi": -4.0, "strike_rate": 17.0, "bets": 50}],
@@ -436,13 +464,32 @@ def test_all_negative_walk_forward_folds_still_veto_promotion(monkeypatch, tmp_p
 
     assert conn.activated_challenger is None
     assert conn.promotion_history is None
-    assert "every walk-forward fold was negative" in conn.rejected_challenger["reason"]
+    assert "did not beat" in conn.rejected_challenger["reason"]
+
+
+def test_all_negative_folds_still_need_the_walk_forward_fold_minimum(monkeypatch, tmp_path):
+    """The fold-COUNT gate is untouched by the fold-SIGN removal: a challenger
+    with a single negative fold has too little out-of-sample evidence to be
+    champion at all, whatever its Champion Score."""
+    conn = FakeConnection(champion=champion_row(10.0, fold_rois=[-6.0, -8.0]))
+    losing = metrics(selection_score=12.0, roi=-1.0, strike_rate=20.0, bets=150)
+    losing["walk_forward"] = {
+        "folds": [{"roi": -2.0, "strike_rate": 18.0, "bets": 50}],
+        "roi_std": 0.0,
+    }
+
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, losing)
+
+    assert conn.activated_challenger is None
+    assert conn.promotion_history is None
+    assert "walk-forward fold(s)" in conn.rejected_challenger["reason"]
 
 
 def test_promotion_rule_text_no_longer_advertises_a_positive_roi_requirement():
     rule = backtest._promotion_rule_text()
 
     assert "positive validation ROI" not in rule
+    assert "not all negative" not in rule, "the fold-sign veto is gone from the rule too"
     assert "negative ROI is not by itself disqualifying" in rule
     assert f"at least {backtest.MIN_VALIDATION_BETS} validation bets" in rule
     assert f"strike rate >= {backtest.MIN_PROMOTION_STRIKE_RATE_PCT:.1f}%" in rule
@@ -1187,14 +1234,15 @@ def test_ensure_champion_exists_after_run_promotes_best_valid_feature_complete_c
     assert any(a.get("key") == "fallback_champion_promotion" and a.get("severity") == "blocking" for a in conn.pipeline_alerts)
 
 
-def test_ensure_champion_exists_after_run_refuses_a_candidate_that_lost_on_every_fold(monkeypatch):
-    """The fallback used to waive the 'every walk-forward fold negative' veto
-    on the reasoning that some champion beats no champion. That is backwards:
-    a candidate whose own out-of-sample folds all lose money is not a weaker
-    champion, it is a known-losing one, and promoting it unopposed puts real
-    stakes on bets nothing has validated. No champion shows no picks, which
-    costs nothing. Ending the night with zero champions and a blocking alert
-    is the correct outcome here."""
+def test_ensure_champion_exists_after_run_promotes_a_candidate_that_lost_on_every_fold(monkeypatch):
+    """The fallback no longer excludes a candidate for losing on every
+    walk-forward fold, same as the normal path. Excluding it assumed "no
+    champion" was a cheap, temporary state — but while no model in this
+    pipeline has an edge, that exclusion empties the entire candidate pool and
+    holds live scoring at zero picks indefinitely. That is the stuck-champion
+    failure again with a worse outcome: nothing showing at all instead of
+    something stale. The best measured candidate on record is promoted, loudly
+    flagged as a fallback."""
     negative_metrics = metrics(roi=-3.0)
     negative_metrics["walk_forward"] = {
         "folds": [{"roi": -1.0, "bets": 50}, {"roi": -2.0, "bets": 50}], "roi_std": 0.3,
@@ -1205,15 +1253,45 @@ def test_ensure_champion_exists_after_run_refuses_a_candidate_that_lost_on_every
     monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
     monkeypatch.setattr(backtest, "_live_scoring_feature_names", _dummy_live_contract)
 
+    rollback_calls = []
+    monkeypatch.setattr(
+        backtest, "rollback_to_champion",
+        lambda model_id, reason='': rollback_calls.append((model_id, reason)),
+    )
+
+    backtest.ensure_champion_exists_after_run(run_id=88)
+
+    assert len(rollback_calls) == 1
+    assert rollback_calls[0][0] == 301
+    assert "FALLBACK PROMOTION" in rollback_calls[0][1]
+    assert conn.stamped_updates and conn.stamped_updates[-1]["id"] == 301
+    assert any(
+        a.get("key") == "fallback_champion_promotion" and a.get("severity") == "blocking"
+        for a in conn.pipeline_alerts
+    ), "a fallback promotion must still be loudly, durably alerted"
+    assert not any(a.get("key") == "no_active_champion" for a in conn.pipeline_alerts)
+
+
+def test_fallback_still_refuses_a_candidate_below_the_walk_forward_fold_minimum(monkeypatch):
+    """Dropping the fold-SIGN exclusion must not drop the fold-COUNT one: a
+    candidate with too little out-of-sample evidence to be measured at all is
+    still ineligible, and no champion is still the right outcome then."""
+    thin_metrics = metrics(roi=-3.0)
+    thin_metrics["walk_forward"] = {"folds": [{"roi": -1.0, "bets": 50}], "roi_std": 0.0}
+    only_row = (302, "random_forest", "RF OneFold", json.dumps(thin_metrics), _pkl_bytes(DummySavedModel()))
+    conn = FakeEnsureConnection(active_row=None, candidate_rows=[only_row])
+    monkeypatch.setattr(backtest, "engine", FakeEngine(conn))
+    monkeypatch.setattr(backtest.joblib, "load", lambda f: pickle.load(f))
+    monkeypatch.setattr(backtest, "_live_scoring_feature_names", _dummy_live_contract)
+
     def _fail_if_called(model_id, reason=''):
-        raise AssertionError("a candidate that lost on every walk-forward fold must never be promoted")
+        raise AssertionError("a candidate below the walk-forward fold minimum must never be promoted")
     monkeypatch.setattr(backtest, "rollback_to_champion", _fail_if_called)
 
     backtest.ensure_champion_exists_after_run(run_id=88)
 
     alert = next(a for a in conn.pipeline_alerts if a.get("key") == "no_active_champion")
     assert alert["severity"] == "blocking"
-    assert "every walk-forward fold" in alert["message"]
     assert conn.stamped_updates == []
 
 
