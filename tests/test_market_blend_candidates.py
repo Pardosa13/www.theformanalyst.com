@@ -138,6 +138,9 @@ class TestBlendedCandidate:
         assert blended['blend_alpha'] < 1.0
         assert blended['metrics']['market_blend_alpha'] == blended['blend_alpha']
         assert blended['metrics']['market_blend_base_model_type'] == 'random_forest'
+        assert blended['metrics']['market_blend_alpha_selected_on'] == (
+            'walk_forward_mean_roi_minus_roi_std'
+        )
         assert blended['metrics']['market_blend_odds_source'] == 'closing_sp_shin_corrected'
 
     def test_the_winning_alpha_is_stamped_on_the_artifact(self):
@@ -165,12 +168,9 @@ class TestBlendedCandidate:
     def test_no_variant_when_ignoring_the_market_wins(self):
         """alpha = 1.0 winning is a result, not a failure — and adding the
         variant anyway would just duplicate the base candidate."""
-        # A model that already agrees with the market on the holdout, so the
-        # walk-forward folds are what decide — which is the case this test is
-        # about.
         result, X, y, race_ids, sp = self._result(CONFIDENTLY_RIGHT)
         by_alpha = self._walk_forward_by_alpha(
-            {alpha: ([40.0, 42.0] if alpha >= 1.0 else [-200.0, -201.0])
+            {alpha: ([40.0, 42.0] if alpha >= 1.0 else [-30.0, -31.0])
              for alpha in backtest.MARKET_BLEND_ALPHA_GRID}
         )
         assert backtest._blended_candidate(result, by_alpha, [], X, y, race_ids, sp) is None
@@ -185,7 +185,64 @@ class TestBlendedCandidate:
         search = blended['metrics']['market_blend_alpha_search']
         assert len(search) == len(backtest.MARKET_BLEND_ALPHA_GRID)
         assert {row['alpha'] for row in search} == set(backtest.MARKET_BLEND_ALPHA_GRID)
+        # Both the criterion alpha was chosen on and the full Champion Score the
+        # chosen alpha produces, so the decision can be re-examined from stored
+        # metrics without re-running the night.
+        assert all('out_of_sample_score' in row for row in search)
         assert all('selection_score' in row for row in search)
+
+    def test_alpha_is_chosen_on_the_folds_not_the_holdout(self):
+        """Picking the best of 21 alphas on the same 80/20 holdout that then
+        gets reported would hand every blended variant an optimism the
+        unblended candidates never got."""
+        result, X, y, race_ids, sp = self._result()
+        # One alpha is the clear out-of-sample winner. Every other alpha would
+        # beat it on the holdout, because the base model is confidently wrong
+        # there and a stronger blend rescues it — so a holdout-driven search
+        # would pick something else.
+        by_alpha = self._walk_forward_by_alpha(
+            {alpha: ([30.0, 31.0] if alpha == 0.95 else [-40.0, -41.0])
+             for alpha in backtest.MARKET_BLEND_ALPHA_GRID}
+        )
+        blended = backtest._blended_candidate(result, by_alpha, [], X, y, race_ids, sp)
+        assert blended['blend_alpha'] == pytest.approx(0.95)
+        search = {row['alpha']: row for row in blended['metrics']['market_blend_alpha_search']}
+        assert search[0.0]['selection_score'] > search[0.95]['selection_score'], (
+            "fixture no longer exercises the case it was written for"
+        )
+
+    def test_a_consistent_blend_beats_a_more_profitable_but_erratic_one(self):
+        """Fold spread is penalised, the same thing the Champion Score does."""
+        result, X, y, race_ids, sp = self._result()
+        fold_rois = {alpha: [-40.0, -41.0] for alpha in backtest.MARKET_BLEND_ALPHA_GRID}
+        fold_rois[0.20] = [30.0, 10.0]   # mean 20, spread 10 -> 10
+        fold_rois[0.40] = [16.0, 14.0]   # mean 15, spread 1  -> 14
+        blended = backtest._blended_candidate(
+            result, self._walk_forward_by_alpha(fold_rois), [], X, y, race_ids, sp
+        )
+        assert blended['blend_alpha'] == pytest.approx(0.40)
+
+    def test_an_alpha_with_no_fold_evidence_cannot_win(self):
+        result, X, y, race_ids, sp = self._result()
+        by_alpha = self._walk_forward_by_alpha(
+            {alpha: ([] if alpha < 0.5 else [-5.0, -6.0])
+             for alpha in backtest.MARKET_BLEND_ALPHA_GRID}
+        )
+        blended = backtest._blended_candidate(result, by_alpha, [], X, y, race_ids, sp)
+        assert blended is None or blended['blend_alpha'] >= 0.5
+
+    def test_a_tie_goes_to_the_least_market_dependent_blend(self):
+        """Two alphas scoring identically out-of-sample are equally good
+        evidence; the one leaning less on an external live feed is the one
+        that still behaves when that feed is missing."""
+        result, X, y, race_ids, sp = self._result()
+        fold_rois = {alpha: [-40.0, -41.0] for alpha in backtest.MARKET_BLEND_ALPHA_GRID}
+        for tied in (0.10, 0.30, 0.60):
+            fold_rois[tied] = [12.0, 12.0]
+        blended = backtest._blended_candidate(
+            result, self._walk_forward_by_alpha(fold_rois), [], X, y, race_ids, sp
+        )
+        assert blended['blend_alpha'] == pytest.approx(0.60)
 
     def test_alpha_grid_spans_the_whole_range(self):
         grid = backtest.MARKET_BLEND_ALPHA_GRID

@@ -17,6 +17,28 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 import numpy  # noqa: F401
 import pandas  # noqa: F401
 
+# Same reasoning for sklearn, one step further. The stubs below only stand in
+# when sklearn is genuinely absent, but "absent" was previously decided by
+# whether anything had happened to import it YET — so in a full-suite run where
+# sklearn IS installed, this file could still be the first to touch it and
+# would install stubs for the rest of the session. That poisons more than this
+# file: xgboost decides once, at its own import, whether the sklearn it can see
+# is real, and refuses to build any estimator ("sklearn needs to be installed")
+# for the remainder of the process if it is not. Import the real submodules
+# first when they exist, so the stubs below are only reached on a machine
+# without the ML stack, which is what they were written for.
+try:  # pragma: no cover - depends on what is installed, not on any branch here
+    import sklearn.base  # noqa: F401
+    import sklearn.calibration  # noqa: F401
+    import sklearn.ensemble  # noqa: F401
+    import sklearn.metrics  # noqa: F401
+    import sklearn.model_selection  # noqa: F401
+    import sklearn.neural_network  # noqa: F401
+    import sklearn.pipeline  # noqa: F401
+    import sklearn.preprocessing  # noqa: F401
+except ImportError:
+    pass
+
 if "sqlalchemy" not in sys.modules:
     sqlalchemy = types.ModuleType("sqlalchemy")
     sqlalchemy.create_engine = lambda *args, **kwargs: None
