@@ -146,6 +146,63 @@ If your database is missing required columns (e.g., `races.market_id` or Betfair
 
 Both options are idempotent and safe to run multiple times. Check the logs to confirm columns were added/verified.
 
+### Step 5.6: Schedule the live odds ingest (`live_odds_snapshots`)
+
+**This step is not optional if you want live picks.** Meeting 1962 produced
+zero picks because `live_odds_snapshots` did not exist on production, and the
+reason it did not exist is that nothing was running the job that creates it.
+
+`odds_ingest.py` **owns this table**. There is no Alembic migration for it and
+`scripts/ensure_db_columns.py` does not know about it — `ensure_tables()` runs
+on the way into every `odds_ingest.py` invocation and creates the table and its
+indexes idempotently. So scheduling the job *is* the migration: the first run
+creates the table, and every run after it keeps it full.
+
+**Bootstrap it now (creates the table on the spot):**
+
+```bash
+# a single pass — creates live_odds_snapshots, polls once, exits
+python odds_ingest.py
+```
+
+Then confirm the table exists *and* is being written to. An empty table is
+still a broken pipeline:
+
+```sql
+SELECT COUNT(*) AS rows, MAX(captured_at) AS newest FROM live_odds_snapshots;
+```
+
+`newest` must be within the last few minutes during racing hours. If it is
+hours old, the poller has stopped and live scoring is quietly degrading to
+model-only prices.
+
+**Then keep it running.** Pick one:
+
+**Option A: a Railway worker service (preferred).** Add a second service on the
+same repo and database with the start command:
+
+```bash
+python odds_ingest.py --loop
+```
+
+No per-run startup cost and no scheduler delay, so it really does poll every
+`ODDS_INGEST_INTERVAL_SECONDS` (default 180).
+
+**Option B: the GitHub Actions workflow** (`.github/workflows/odds-ingest.yml`,
+already in the repo). It fires every 15 minutes and each run holds its own
+3-minute poll loop for ~13 minutes via `--duration-seconds`, because GitHub's
+scheduler cannot be relied on to fire every few minutes itself. It needs the
+`DATABASE_URL` repository secret. Use **Run workflow** on the Actions tab to
+bootstrap production immediately instead of waiting for the next window.
+
+Run one of these, not both: two pollers double every insert into an
+insert-only table.
+
+**What happens if you skip this:** live scoring keeps working. It logs
+`ML_LIVE_ODDS_LOADED ... runners_with_fresh_price=0` and scores every meeting
+off the model alone, with no market blend. That is the intended degraded
+state — picks are still produced.
+
 ### Step 6: Test the Deployment
 1. Visit your Railway URL
 2. You should see the login page

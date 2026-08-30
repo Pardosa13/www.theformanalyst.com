@@ -1139,6 +1139,39 @@ def _predict_raw_scores(model, X):
 
 # ── Live lookups for the 2026-07 audit features ──────────────────────────────
 
+def _rollback_after_failed_query(db_session, what):
+    """Clear a failed query off the session so the NEXT query can still run.
+
+    Every lookup below is optional: a failure is meant to cost that one
+    feature and nothing else. On PostgreSQL that promise is not kept by
+    catching the exception alone. A statement that errors inside a
+    transaction poisons the whole transaction, and every subsequent
+    statement on the same connection comes back with
+
+        current transaction is aborted, commands ignored until end of
+        transaction block
+
+    until someone rolls back. That is how a missing live_odds_snapshots
+    table took meeting 1962 from "score without live odds" to zero picks:
+    the optional lookup failed, the transaction stayed aborted, and the
+    mandatory "load this race's horses" query inherited the failure.
+
+    So the rollback is part of degrading gracefully, not error-handling
+    hygiene, and it is unconditional: a timeout, a dropped connection, a
+    permissions error and a missing table all leave the same poison
+    behind. Failing to roll back is itself swallowed — the session may be
+    a plain object in a test, or already unusable — because a broken
+    rollback must not become the exception that takes the meeting down.
+    """
+    rollback = getattr(db_session, 'rollback', None)
+    if rollback is None:
+        return
+    try:
+        rollback()
+    except Exception as e:  # pragma: no cover - defensive
+        log.warning("Rollback after failed %s query did not succeed: %s", what, e)
+
+
 def _load_live_strike_rate_lookups(db_session):
     """Load jockey/trainer strike-rate lookups + A2E extras from strike_rates.
 
@@ -1165,6 +1198,7 @@ def _load_live_strike_rate_lookups(db_session):
             log.warning("Could not load %s strike-rate data for live scoring (%s_sr and "
                         "%s A2E features will use their unmatched/median fallbacks): %s",
                         sr_type, sr_type, sr_type, e)
+            _rollback_after_failed_query(db_session, 'strike_rates')
             continue
         lookups[lookup_key] = build_strike_rate_lookup([(r[0], r[1], r[2]) for r in rows])
         extra = {}
@@ -1251,6 +1285,7 @@ def _load_latest_live_odds_for_meeting(races, db_session):
             "Could not read live_odds_snapshots (%s); scoring this meeting without "
             "live market odds. Has odds_ingest.py run against this database?", e,
         )
+        _rollback_after_failed_query(db_session, 'live_odds_snapshots')
         return {}
 
     now = datetime.now(timezone.utc)
@@ -1314,6 +1349,7 @@ def _load_breeding_win_rates(db_session):
         except Exception as e:
             log.warning("Could not load %s progeny win rates for live scoring "
                         "(feature stays NaN -> training-median fill): %s", key, e)
+            _rollback_after_failed_query(db_session, 'breeding win rates')
             rates.append({})
             continue
         for name, runs, wins in rows:
@@ -1347,6 +1383,7 @@ def _load_form_scores(db_session):
     except Exception as e:
         log.warning("Could not load horse_form_scores for live scoring "
                     "(opponent_quality_form stays NaN -> training-median fill): %s", e)
+        _rollback_after_failed_query(db_session, 'horse_form_scores')
         return {}
     return {normalize_name(str(name or '')): float(score) for name, score in rows if name}
 

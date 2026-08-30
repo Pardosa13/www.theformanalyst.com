@@ -1,0 +1,79 @@
+name: Live Odds Ingest
+
+# WHY THIS FILE EXISTS
+# --------------------
+# Meeting 1962 scored zero picks because live_odds_snapshots did not exist on
+# the production database. The table was never missing by accident: NOTHING
+# scheduled odds_ingest.py, and odds_ingest.py is what creates the table
+# (ensure_tables(), on the way into every run — there is no Alembic migration
+# for it and no other owner). A job that never runs creates nothing and writes
+# nothing, so ml_predict.py had neither a table to read nor rows to find.
+#
+# So this is the fix for both halves at once: the first run creates the table,
+# and every run after it keeps the table full. Trigger it manually
+# (workflow_dispatch) once to bootstrap production immediately, rather than
+# waiting for the next scheduled window.
+#
+# ONE JOB, MANY PASSES
+# --------------------
+# A price is only worth reading while it is still the market (ml_predict drops
+# a snapshot older than ML_LIVE_ODDS_MAX_AGE_SECONDS, 15 minutes by default),
+# so this wants to poll every few minutes. GitHub's scheduler cannot be relied
+# on for that — the minimum is 5 minutes and runs are routinely delayed under
+# load — and each firing pays a checkout and a pip install before it does any
+# work. So the cron fires every 15 minutes and each run holds its own
+# 3-minute poll loop for ~13 minutes: real 3-minute resolution, at one
+# scheduler firing per quarter hour.
+#
+# If a long-running Railway worker service is available, `python odds_ingest.py
+# --loop` there is strictly better (no per-run startup cost, no scheduler
+# delay) and this workflow can be disabled. See DEPLOYMENT.md.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Meeting date to poll (YYYY-MM-DD). Blank = today, Melbourne time.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two overlapping pollers would double every insert into an insert-only
+  # table, which is not corruption but is noise the price path has to be read
+  # through later. A delayed run is skipped rather than queued: its window has
+  # already passed and the next one is minutes away.
+  group: odds-ingest
+  cancel-in-progress: false
+
+jobs:
+  odds-ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Poll Ladbrokes and store snapshots
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python odds_ingest.py \
+            --loop \
+            --interval 180 \
+            --duration-seconds 780 \
+            ${{ github.event.inputs.date && format('--date {0}', github.event.inputs.date) || '' }}

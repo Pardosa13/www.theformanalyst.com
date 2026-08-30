@@ -245,3 +245,71 @@ class TestLiveOddsFreshness:
                 raise RuntimeError('relation "live_odds_snapshots" does not exist')
 
         assert ml_predict._load_latest_live_odds_for_meeting([self._Race(101)], Broken()) == {}
+
+
+class TestBoundedLoop:
+    """`--duration-seconds` exists so a scheduler that can only fire every
+    quarter hour can still poll every three minutes: one run holds the loop
+    for its window and then exits on its own. Killing the process instead
+    would work, but a SIGKILL and a crash look identical in the logs, which is
+    the wrong thing for the job whose silence took live picks down."""
+
+    def _run(self, monkeypatch, argv, sleeps_before_stop=10):
+        passes = []
+        slept = []
+
+        monkeypatch.setattr(odds_ingest, 'get_engine', lambda: object())
+        monkeypatch.setattr(odds_ingest, 'ensure_tables', lambda _engine: None)
+        monkeypatch.setattr(
+            odds_ingest, 'run_once',
+            lambda *args, **kwargs: passes.append(1),
+        )
+
+        # A monotonic clock that only advances when the loop sleeps, so the
+        # window is exercised deterministically instead of in real time.
+        now = {'t': 0.0}
+        monkeypatch.setattr(odds_ingest.time, 'monotonic', lambda: now['t'])
+
+        def fake_sleep(seconds):
+            slept.append(seconds)
+            now['t'] += seconds
+            if len(slept) > sleeps_before_stop:
+                raise AssertionError("loop did not stop at its deadline")
+
+        monkeypatch.setattr(odds_ingest.time, 'sleep', fake_sleep)
+        assert odds_ingest.main(argv) == 0
+        return passes, slept
+
+    def test_the_loop_exits_after_its_window(self, monkeypatch):
+        passes, slept = self._run(
+            monkeypatch,
+            ['--loop', '--interval', '180', '--duration-seconds', '780'],
+        )
+        # 780s / 180s leaves room for the pass at t=0 and three more sleeps;
+        # the fifth would run past the deadline, so the loop stops instead.
+        assert len(passes) == 5
+        assert slept == [180.0, 180.0, 180.0, 180.0]
+
+    def test_a_window_shorter_than_one_interval_still_polls_once(self, monkeypatch):
+        """A misconfigured window must not turn into a job that stores
+        nothing — the pass runs before the deadline is ever consulted."""
+        passes, slept = self._run(
+            monkeypatch,
+            ['--loop', '--interval', '180', '--duration-seconds', '10'],
+        )
+        assert len(passes) == 1
+        assert slept == []
+
+    def test_ensure_tables_runs_before_any_polling(self, monkeypatch):
+        """The table is created by this job and nothing else — no migration
+        owns live_odds_snapshots — so a single one-shot run against a database
+        that has never seen it must leave it there."""
+        order = []
+        monkeypatch.setattr(odds_ingest, 'get_engine', lambda: object())
+        monkeypatch.setattr(odds_ingest, 'ensure_tables',
+                            lambda _engine: order.append('ensure_tables'))
+        monkeypatch.setattr(odds_ingest, 'run_once',
+                            lambda *a, **kw: order.append('run_once'))
+
+        assert odds_ingest.main([]) == 0
+        assert order == ['ensure_tables', 'run_once']

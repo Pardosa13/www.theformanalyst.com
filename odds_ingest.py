@@ -368,6 +368,12 @@ def main(argv=None):
                         help=f"Start polling a race this long before the jump (default {DEFAULT_LOOKAHEAD_HOURS}).")
     parser.add_argument('--grace-minutes', type=float, default=DEFAULT_GRACE_MINUTES,
                         help=f"Keep polling this long past the scheduled start (default {DEFAULT_GRACE_MINUTES}).")
+    parser.add_argument('--duration-seconds', type=float, default=None,
+                        help="Stop the --loop cleanly after this long. For a scheduler that "
+                             "cannot fire every few minutes itself (a 15-minute GitHub Actions "
+                             "cron holding a 3-minute poll loop, say) — the alternative is "
+                             "killing the process, which is indistinguishable from a crash in "
+                             "the logs.")
     args = parser.parse_args(argv)
 
     meeting_date = date.fromisoformat(args.date) if args.date else None
@@ -378,8 +384,10 @@ def main(argv=None):
         run_once(engine, meeting_date, args.lookahead_hours, args.grace_minutes)
         return 0
 
-    log.info("Odds ingest loop started (interval=%ss lookahead=%sh grace=%smin).",
-             args.interval, args.lookahead_hours, args.grace_minutes)
+    log.info("Odds ingest loop started (interval=%ss lookahead=%sh grace=%smin duration=%ss).",
+             args.interval, args.lookahead_hours, args.grace_minutes,
+             args.duration_seconds if args.duration_seconds else 'unbounded')
+    deadline = (time.monotonic() + args.duration_seconds) if args.duration_seconds else None
     while True:
         started = time.monotonic()
         try:
@@ -392,7 +400,15 @@ def main(argv=None):
         except Exception as e:
             log.exception("Odds ingest pass failed entirely: %s", e)
         elapsed = time.monotonic() - started
-        time.sleep(max(1.0, args.interval - elapsed))
+        sleep_for = max(1.0, args.interval - elapsed)
+        if deadline is not None:
+            # Only sleep if a whole further pass still fits: waking up just to
+            # exit wastes the scheduler's window, and a pass cut off midway
+            # would write a partial book.
+            if time.monotonic() + sleep_for >= deadline:
+                log.info("Odds ingest loop finished its %.0fs window.", args.duration_seconds)
+                return 0
+        time.sleep(sleep_for)
 
 
 if __name__ == '__main__':
