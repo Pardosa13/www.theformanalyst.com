@@ -1621,6 +1621,7 @@ function updateScratchings(meetingId) {
             data-horse-id="{{ horse.horse_id }}"
             data-active-components="{{ horse.matched_component_keys|join(',') }}"
             data-ml-win-prob-pct="{{ horse.ml_fair_probability_pct if horse.ml_fair_probability_pct is not none else '' }}"
+            {% if horse.value_edge_pct is not none %}data-edge="{{ horse.value_edge_pct }}"{% endif %}
             class="{% if horse.is_scratched %}horse-scratched{% endif %}{% if is_ml_top %} ml-agreement-highlight{% endif %}">
 
           <td style="padding:12px; text-align:center; font-weight:bold; border-bottom:1px solid #e2e8f0;">
@@ -1656,14 +1657,25 @@ function updateScratchings(meetingId) {
             {% if horse.ml_assessed_odds %}{{ horse.ml_assessed_odds }}{% else %}<span style="color:#666;font-size:13px">N/A</span>{% endif %}
           </td>
           <td class="lb-price-cell" style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0;">
-            <!-- Populated by Ladbrokes polling JS -->
+            {# The price the server struck this row's edge and stake at, from the
+               stored live-odds snapshots. Overwritten in place by the Ladbrokes
+               polling JS below whenever that poll lands. #}
+            {% if horse.ladbrokes_fixed_win_price %}<span style="font-weight:600;">${{ '%.2f'|format(horse.ladbrokes_fixed_win_price) }}</span>{% endif %}
           </td>
           <td style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0;">
             {% if horse.ml_win_probability %}{{ horse.ml_win_probability }}{% else %}<span style="color:#666;font-size:13px">N/A</span>{% endif %}
           </td>
           <td class="edge-cell" style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0; font-weight:700;">
-            <!-- Populated once Ladbrokes price arrives: model fair win% minus market implied% -->
-            <span class="edge-value" style="color:#666;font-size:13px;">—</span>
+            {# Server-rendered from predictions.value_edge_pct, which the ML
+               scoring run persists off the stored live market. The Ladbrokes
+               polling JS refreshes this cell in place when a live price
+               arrives, but the column no longer depends on that poll landing. #}
+            {% if horse.value_edge_pct is not none %}
+              <span class="edge-value {{ 'edge-positive' if horse.value_edge_pct >= 0 else 'edge-negative' }}"
+                    title="Model {{ '%.1f'|format(horse.ml_fair_probability_pct or 0) }}% vs market {{ '%.1f'|format(horse.market_implied_probability_pct or 0) }}%{% if horse.ladbrokes_fixed_win_price %} (from ${{ '%.2f'|format(horse.ladbrokes_fixed_win_price) }}){% endif %}">{{ '+' if horse.value_edge_pct > 0 }}{{ '%.1f'|format(horse.value_edge_pct) }}pp{% if horse.value_edge_pct >= 5 %}<span class="edge-badge">value</span>{% endif %}</span>
+            {% else %}
+              <span class="edge-value" style="color:#666;font-size:13px;">—</span>
+            {% endif %}
           </td>
           <td style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0; font-weight:700;">
             {% if horse.kelly_stake_pct and horse.kelly_stake_pct > 0 %}
@@ -2886,12 +2898,11 @@ function updateEdgeCell(row, horseOdds) {
     var price = horseOdds && horseOdds.win ? parseFloat(horseOdds.win) : NaN;
 
     if (isNaN(mlProbPct) || isNaN(price) || price <= 0) {
-        delete row.dataset.edge;
-        edgeCell.className = 'edge-value';
-        edgeCell.style.color = '#666';
-        edgeCell.style.fontSize = '13px';
-        edgeCell.textContent = '—';
-        row.classList.remove('edge-highlight');
+        // No live price in this poll. The cell may already hold the edge the
+        // server computed from the stored odds snapshot, which is a real
+        // number and stays — a poll that came back empty is not evidence that
+        // the edge is unknown, and blanking it here is what made the column
+        // look permanently empty.
         return;
     }
 

@@ -134,12 +134,25 @@ NO_ACTIVE_CHAMPION_REASON = (
 
 
 def _score_meeting_ml(db, meeting_id):
-    """Generate and persist ML scores for one meeting, mirroring the manual button."""
-    from ml_predict import NoActiveChampionError, predict_meeting
+    """Generate and persist ML scores for one meeting, mirroring the manual button.
+
+    Scoring a meeting means three numbers per runner, not one: the ml_score, the
+    value edge that score implies against the live market, and the Kelly stake
+    that follows from the pair. They are written together here because they are
+    a single answer about a single race — leaving the last two to be filled in
+    later by whichever page happened to be opened is what left them NULL/0 in
+    the first place.
+    """
+    from ml_predict import (
+        NoActiveChampionError,
+        compute_live_market_edges_for_meeting,
+        persist_live_market_edges,
+        predict_meeting,
+    )
     from models import Prediction
 
     try:
-        all_scores, _by_race = predict_meeting(meeting_id, db.session)
+        all_scores, by_race = predict_meeting(meeting_id, db.session)
     except NoActiveChampionError:
         # Reported as an ordinary unsuccessful result, not an exception: with no
         # champion this is the expected outcome for every meeting on the card,
@@ -166,7 +179,68 @@ def _score_meeting_ml(db, meeting_id):
             pred.ml_score = ml_score
             updated += 1
 
-    return {'success': True, 'scored': updated}
+    # The scores are committed BEFORE pricing, not alongside it. Pricing reads
+    # the market, and on Postgres one failed statement aborts the whole
+    # transaction — committing them together would let a market read that could
+    # not complete take the scores down with it, which is the failure shape
+    # this whole change exists to stop repeating.
+    db.session.commit()
+
+    # Value edge and Kelly stake, priced off the scores just written. Reported
+    # in the result rather than logged and forgotten: "scored 96 horses, priced
+    # none of them" is the exact state that hid this bug, and it should be
+    # visible to whoever pressed the button.
+    priced = 0
+    market_diagnostics = {}
+    market_error = None
+    try:
+        edges, market_diagnostics = compute_live_market_edges_for_meeting(
+            meeting_id, db.session, scores_by_race=by_race,
+        )
+        priced = persist_live_market_edges(edges, db.session)
+        db.session.commit()
+    except Exception as exc:
+        # Rolled back so a poisoned transaction cannot follow this call out into
+        # the caller's next meeting, and never swallowed: the reason comes back
+        # in the result as well as going to the log.
+        db.session.rollback()
+        market_error = str(exc)
+        log.exception(
+            "ML value edge/Kelly pricing failed for meeting %s; ml_score values are already committed "
+            "and unaffected.",
+            meeting_id,
+        )
+
+    return {
+        'success': True,
+        'scored': updated,
+        'priced': priced,
+        'market': market_diagnostics,
+        'market_error': market_error,
+    }
+
+
+def _reprice_meeting_market(db, meeting_id):
+    """Refresh value edge and Kelly stake for an already-scored meeting.
+
+    Re-uses the ml_score values already on `predictions` and prices them
+    against the newest `live_odds_snapshots` rows. Returns
+    (predictions_updated, error_message) — the error is returned rather than
+    raised so one meeting that cannot be priced does not abort a bulk pass.
+    """
+    from ml_predict import compute_live_market_edges_for_meeting, persist_live_market_edges
+
+    try:
+        edges, _diagnostics = compute_live_market_edges_for_meeting(meeting_id, db.session)
+        updated = persist_live_market_edges(edges, db.session)
+        db.session.commit()
+        return updated, None
+    except Exception as exc:
+        # Rolled back so one unpriceable meeting cannot abort the meetings after
+        # it in the bulk pass with an already-aborted transaction.
+        db.session.rollback()
+        log.exception("ML value edge/Kelly re-pricing failed for meeting %s.", meeting_id)
+        return 0, str(exc)
 
 
 def _visible_ml_shadow_meetings_query():
@@ -260,8 +334,17 @@ def register_ml_shadow_routes(app, db):
 
             updated = score_result['scored']
             db.session.commit()
-            log.info(f"ML shadow: scored {updated} horses for meeting {meeting_id}")
-            return jsonify({'success': True, 'scored': updated})
+            log.info(
+                "ML shadow: scored %s horses for meeting %s (value edge/Kelly priced for %s of them; %s)",
+                updated, meeting_id, score_result.get('priced', 0), score_result.get('market') or {},
+            )
+            return jsonify({
+                'success': True,
+                'scored': updated,
+                'priced': score_result.get('priced', 0),
+                'market': score_result.get('market') or {},
+                'market_error': score_result.get('market_error'),
+            })
 
         except Exception as e:
             db.session.rollback()
@@ -284,12 +367,20 @@ def register_ml_shadow_routes(app, db):
 
             for meeting in meetings:
                 if meeting.id in scored_ids:
+                    # The ml_scores stand, but the market they were priced
+                    # against has moved on, so the value edge and Kelly stake
+                    # are re-derived from the newest snapshots. Skipping this
+                    # would leave a meeting scored before odds_ingest reached
+                    # it with no edge and no stake, permanently.
                     skipped += 1
+                    repriced, reprice_error = _reprice_meeting_market(db, meeting.id)
                     details.append({
                         'meeting_id': meeting.id,
                         'meeting_name': meeting.meeting_name,
                         'status': 'skipped',
                         'reason': 'already scored',
+                        'priced': repriced,
+                        'market_error': reprice_error,
                     })
                     continue
 
@@ -302,6 +393,8 @@ def register_ml_shadow_routes(app, db):
                             'meeting_name': meeting.meeting_name,
                             'status': 'generated',
                             'scored': score_result.get('scored', 0),
+                            'priced': score_result.get('priced', 0),
+                            'market_error': score_result.get('market_error'),
                         })
                     else:
                         details.append({

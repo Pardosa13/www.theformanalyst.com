@@ -229,6 +229,42 @@ def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_
         }
     return out
 
+def _value_edge_fields_with_stored_fallback(edge_fields, prediction):
+    """Live value-edge fields, backfilled from the edge already persisted on `predictions`.
+
+    evaluate_ladbrokes_best_bet_signals can only produce an edge when the
+    in-request Ladbrokes fetch returns a price. The ML scoring run computes the
+    same edge from the `live_odds_snapshots` rows odds_ingest.py writes, and
+    persists it — so when the direct fetch comes back with nothing, that stored
+    edge is the better answer available, not a reason to treat the horse as
+    having no edge at all.
+
+    Returns a new dict; never mutates `edge_fields`, and never overwrites a live
+    edge with a stored one.
+    """
+    fields = dict(edge_fields or {})
+    if fields.get('value_edge_pct') is not None or prediction is None:
+        return fields
+
+    stored_edge = getattr(prediction, 'value_edge_pct', None)
+    if stored_edge is None:
+        return fields
+
+    stored_edge = float(stored_edge)
+    fields['value_edge_pct'] = stored_edge
+    fields['value_edge_source'] = 'stored'
+    if fields.get('ml_fair_probability_pct') is None:
+        fields['ml_fair_probability_pct'] = getattr(prediction, 'value_edge_ml_win_prob_pct', None)
+    if fields.get('ladbrokes_fixed_win_price') is None:
+        fields['ladbrokes_fixed_win_price'] = getattr(prediction, 'value_edge_price', None)
+    if fields.get('market_implied_probability_pct') is None:
+        price = fields.get('ladbrokes_fixed_win_price')
+        fields['market_implied_probability_pct'] = round(100.0 / float(price), 2) if price else None
+    fields['is_value_edge_bet'] = stored_edge >= VALUE_EDGE_MIN_THRESHOLD_PCT
+    fields['is_value_edge_promoted'] = stored_edge >= VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT
+    return fields
+
+
 def _ml_performance_meeting_name_sql(alias='m'):
     """Temporary SQL fragment for verified ML performance meetings."""
     return f"LEFT({alias}.meeting_name, 6) >= '{ML_PERFORMANCE_MEETING_NAME_CUTOFF}'"
@@ -3500,13 +3536,22 @@ def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_t
 
 
 # Edge-size buckets for the ML Value Edge cohort breakdown: lower bound inclusive,
-# upper bound exclusive (None = unbounded). Lower bound of the first bucket is
-# VALUE_EDGE_MIN_THRESHOLD_PCT itself, so every tracked value-edge bet falls into
-# exactly one bucket.
+# upper bound exclusive, None on either side meaning unbounded. Every measured
+# edge falls into exactly one bucket, including the ones no threshold would ever
+# bet — that is the point. Only the top bucket is shown on Best Bets
+# (VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT), so the buckets underneath it are
+# the evidence for whether 20pp is the right cutoff, too conservative or too
+# aggressive. Answering that from results needs the strike rate and ROI at every
+# edge level, not just at the levels that already qualify; the negative bucket is
+# the control group — if the model's edge means anything, that cohort should be
+# the worst of them.
 VALUE_EDGE_BUCKETS = (
-    ('8_12', '8–12pp', VALUE_EDGE_MIN_THRESHOLD_PCT, 12.0),
-    ('12_20', '12–20pp', 12.0, 20.0),
-    ('20_plus', '20pp+', 20.0, None),
+    ('below_0', 'below 0pp', None, 0.0),
+    ('0_5', '0–5pp', 0.0, 5.0),
+    ('5_10', '5–10pp', 5.0, 10.0),
+    ('10_15', '10–15pp', 10.0, 15.0),
+    ('15_20', '15–20pp', 15.0, 20.0),
+    ('20_plus', '20pp+', VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT, None),
 )
 
 
@@ -3557,11 +3602,32 @@ def calculate_value_edge_performance(track_filter="", date_from="", date_to="", 
     for key, label, lower, upper in VALUE_EDGE_BUCKETS:
         bucket_rows = [
             (prediction, result) for prediction, result in rows
-            if (prediction.value_edge_pct or 0) >= lower and (upper is None or (prediction.value_edge_pct or 0) < upper)
+            if prediction.value_edge_pct is not None
+            and (lower is None or float(prediction.value_edge_pct) >= lower)
+            and (upper is None or float(prediction.value_edge_pct) < upper)
         ]
-        buckets.append({'key': key, 'label': label, **summarise(bucket_rows)})
+        buckets.append({
+            'key': key,
+            'label': label,
+            # Marks the bucket(s) Best Bets actually shows, so the table reads as
+            # "here is what we bet, and here is what we passed on".
+            'is_best_bets_bucket': lower is not None and lower >= VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT,
+            **summarise(bucket_rows),
+        })
 
-    return {'overall': summarise(rows), 'buckets': buckets}
+    # Bets at or above the Best Bets threshold, as their own line: the cohort the
+    # current cutoff would actually have backed, next to everything it skipped.
+    at_threshold = [
+        (prediction, result) for prediction, result in rows
+        if prediction.value_edge_pct is not None
+        and float(prediction.value_edge_pct) >= VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT
+    ]
+    return {
+        'overall': summarise(rows),
+        'buckets': buckets,
+        'at_best_bets_threshold': summarise(at_threshold),
+        'best_bets_threshold_pct': VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT,
+    }
 
 
 # ----- PuntingForm API Routes -----
@@ -5960,22 +6026,19 @@ def _derive_ml_race_book(runners, score_getter):
     percentage, and assessed odds. This mirrors the ML meeting page logic and
     intentionally does not use Analyzer predicted_odds or win_probability.
     """
-    weighted = []
-    for idx, runner in enumerate(runners):
-        try:
-            score = float(score_getter(runner) or 0)
-        except (TypeError, ValueError):
-            score = 0.0
-        if score > 0:
-            weighted.append((idx, score))
+    from ml_predict import derive_ml_fair_probabilities
 
-    total_score = sum(score for _, score in weighted)
-    if total_score <= 0:
-        return {}
+    # One definition of "the model's fair win probability", shared with the
+    # value edge and the Kelly solver in ml_predict, so the book shown on the
+    # page and the edge/stake computed against it cannot drift apart.
+    fair_probabilities_list = derive_ml_fair_probabilities(
+        [score_getter(runner) for runner in runners]
+    )
 
     book = {}
-    for idx, score in weighted:
-        fair_probability = score / total_score
+    for idx, fair_probability in enumerate(fair_probabilities_list):
+        if fair_probability is None:
+            continue
         probability_110 = fair_probability * 1.10
         probability_110_pct = probability_110 * 100.0
         book[idx] = {
@@ -5985,6 +6048,56 @@ def _derive_ml_race_book(runners, score_getter):
             'ml_assessed_odds': (1 / probability_110) if probability_110 > 0 else None,
         }
     return book
+
+
+def _apply_stored_market_edges(results, meeting_id):
+    """Attach the stored live market's value edge and Kelly stake to a meeting's races.
+
+    This is the primary pricing path for the ML meeting page. It reads
+    `live_odds_snapshots` — the table odds_ingest.py fills — through
+    ml_predict, rather than fetching a bookmaker inside the request the way
+    _apply_joint_kelly_stakes below has to. That matters because the direct
+    fetch is the part that was failing: when it returned nothing, both columns
+    stayed empty for the whole card and the page rendered as though the market
+    simply had no opinion.
+
+    Returns the set of race numbers that were priced, so the caller can fall
+    back to the live-fetch path for races this one could not price. Every horse
+    dict is given `value_edge_pct` and `kelly_stake_pct` keys either way, so the
+    template never has to guess whether pricing was attempted.
+    """
+    from ml_predict import compute_live_market_edges_for_meeting, persist_live_market_edges
+
+    for race in results['races']:
+        race['kelly_market_available'] = False
+        for horse in race['horses']:
+            horse.setdefault('value_edge_pct', None)
+            horse.setdefault('market_implied_probability_pct', None)
+            horse.setdefault('ladbrokes_fixed_win_price', None)
+            horse['kelly_stake_pct'] = None
+
+    edges, _diagnostics = compute_live_market_edges_for_meeting(meeting_id, db.session)
+    if not edges:
+        return set()
+
+    priced_race_numbers = set()
+    for race in results['races']:
+        race_priced = False
+        for horse in race['horses']:
+            fields = edges.get(horse.get('horse_id'))
+            if not fields:
+                continue
+            race_priced = True
+            horse['value_edge_pct'] = fields['value_edge_pct']
+            horse['market_implied_probability_pct'] = fields['market_implied_probability_pct']
+            horse['ladbrokes_fixed_win_price'] = fields['market_price']
+            horse['kelly_stake_pct'] = fields['kelly_stake_pct']
+        if race_priced:
+            race['kelly_market_available'] = True
+            priced_race_numbers.add(race.get('race_number'))
+
+    persist_live_market_edges(edges, db.session)
+    return priced_race_numbers
 
 
 def _apply_joint_kelly_stakes(race, meeting, track_name, date_str):
@@ -6043,13 +6156,36 @@ def _apply_joint_kelly_stakes(race, meeting, track_name, date_str):
         for horse in race['horses']
         if not horse.get('is_scratched') and horse.get('horse_id') in market
     }
+    # The same price that sized the stake also settles the value edge, so both
+    # are derived here rather than leaving the edge to be filled in client-side
+    # from a second fetch that may never land.
+    edges = {}
     for horse in race['horses']:
-        if horse.get('horse_id') in priced:
-            horse['kelly_stake_pct'] = priced[horse['horse_id']]
-    if not priced:
+        horse_id = horse.get('horse_id')
+        if horse_id in priced:
+            horse['kelly_stake_pct'] = priced[horse_id]
+        price = _coerce_price((market.get(horse_id) or {}).get('price'))
+        fair_pct = horse.get('ml_fair_probability_pct')
+        if price is None or fair_pct is None or horse.get('is_scratched'):
+            continue
+        implied_pct = 100.0 / price
+        horse['ladbrokes_fixed_win_price'] = price
+        horse['market_implied_probability_pct'] = round(implied_pct, 2)
+        horse['value_edge_pct'] = round(float(fair_pct) - implied_pct, 2)
+        edges[horse_id] = (horse['value_edge_pct'], float(fair_pct), price)
+
+    if not priced and not edges:
         return
-    for prediction in Prediction.query.filter(Prediction.horse_id.in_(priced)).all():
-        prediction.kelly_stake_pct = priced[prediction.horse_id]
+    captured_at = datetime.utcnow()
+    for prediction in Prediction.query.filter(
+        Prediction.horse_id.in_(set(priced) | set(edges))
+    ).all():
+        if prediction.horse_id in priced:
+            prediction.kelly_stake_pct = priced[prediction.horse_id]
+        edge = edges.get(prediction.horse_id)
+        if edge:
+            prediction.value_edge_pct, prediction.value_edge_ml_win_prob_pct, prediction.value_edge_price = edge
+            prediction.value_edge_captured_at = captured_at
 
 
 @app.route("/ml-meeting/<int:meeting_id>")
@@ -6060,6 +6196,19 @@ def ml_view_meeting(meeting_id):
     results = get_meeting_results(meeting_id)
     track_name = _track_from_meeting(meeting)
     date_str = meeting.date.strftime('%Y-%m-%d') if meeting.date else None
+
+    # Value edge and Kelly stake for the whole meeting, priced off the stored
+    # live market. One query for the card, before the per-race loop, because
+    # both numbers are per-runner but the market read is per-meeting.
+    try:
+        priced_race_numbers = _apply_stored_market_edges(results, meeting_id)
+    except Exception as e:
+        # Rolled back so an aborted transaction cannot poison the rest of the
+        # render, and logged at error, not warning: an empty Edge/Kelly column
+        # with a warning buried in the log is exactly how this went unnoticed.
+        db.session.rollback()
+        priced_race_numbers = set()
+        logger.error("Stored-market pricing failed for meeting %s: %s", meeting_id, e, exc_info=True)
 
     # Re-sort horses within each race by ml_score (highest first) and build
     # ML-only assessed prices/probabilities for the ML meeting view.  These
@@ -6089,11 +6238,15 @@ def ml_view_meeting(meeting_id):
             # above, which is inflated by the 110% book for odds display.
             horse['ml_fair_probability_pct'] = round(book_entry['ml_fair_probability'] * 100.0, 2)
 
-        try:
-            _apply_joint_kelly_stakes(race, meeting, track_name, date_str)
-        except Exception as e:
-            logger.warning("Joint Kelly staking failed for meeting %s race %s: %s",
-                           meeting_id, race.get('race_number'), e)
+        # Only races the stored market could not price fall back to fetching a
+        # bookmaker live inside the request — the slower, less reliable path
+        # that used to be the only one.
+        if race.get('race_number') not in priced_race_numbers:
+            try:
+                _apply_joint_kelly_stakes(race, meeting, track_name, date_str)
+            except Exception as e:
+                logger.warning("Joint Kelly staking failed for meeting %s race %s: %s",
+                               meeting_id, race.get('race_number'), e)
 
     try:
         db.session.commit()
@@ -10889,6 +11042,11 @@ def best_bets():
                 Prediction.win_probability,
                 Prediction.notes,
                 Prediction.ml_score,
+                Prediction.value_edge_pct,
+                Prediction.value_edge_ml_win_prob_pct,
+                Prediction.value_edge_price,
+                Prediction.value_edge_captured_at,
+                Prediction.ladbrokes_signal_mask,
             ),
         )
         .filter(Meeting.uploaded_at >= cutoff)
@@ -10941,7 +11099,13 @@ def best_bets():
                     # page's bucketed reporting, but only horses at/above
                     # VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT (20.0pp) are shown in
                     # this page's ML Value Edge Bets panel. ──
-                    edge_fields = ladbrokes_signal_fields.get(horse.id, {})
+                    # The live fetch is not the only source of an edge any more:
+                    # when it comes back empty, the edge the ML scoring run
+                    # already persisted from the stored odds snapshots stands in.
+                    edge_fields = _value_edge_fields_with_stored_fallback(
+                        ladbrokes_signal_fields.get(horse.id, {}), horse.prediction,
+                    )
+                    ladbrokes_signal_fields[horse.id] = edge_fields
                     if edge_fields.get('is_value_edge_bet'):
                         if horse.prediction.value_edge_captured_at is None:
                             horse.prediction.value_edge_pct = edge_fields.get('value_edge_pct')
@@ -11045,12 +11209,22 @@ def best_bets():
                     if rank_idx > 0 else 0
                 )
 
-                # Include if matched components, ≥80% win probability, jockey sole ride,
-                # Analyzer/PFAI/ML all agree on the top selection, or the horse is an
-                # ML Value Edge bet of at least VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT.
+                # Value edge is the gate for this page, not one qualifier among
+                # several: a horse appears here only if the model's fair win
+                # probability clears the market by at least
+                # VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT (20pp). Components,
+                # win probability, a sole ride and the consensus badges are still
+                # computed and still shown on the rows that qualify — they simply
+                # no longer put a horse on the page by themselves, because a
+                # signal without a price advantage is not a bet worth taking.
+                #
+                # Everything below 20pp is still captured on `predictions` above
+                # and reported by the ML Data page's edge buckets, which is where
+                # the question "is 20 the right cutoff?" gets answered from real
+                # results rather than from what this page happens to display.
                 jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
                 value_edge_promoted = bool(lb_fields.get('is_value_edge_promoted'))
-                if matched_components or wp >= 80 or jockey_sole or signal_agreement or ladbrokes_signal_count or value_edge_promoted:
+                if value_edge_promoted:
                     matched_components.sort(key=lambda x: x['roi'], reverse=True)
                     best_bets.append({
                         'meeting_id': meeting.id,

@@ -179,11 +179,73 @@ def test_promote_threshold_is_a_single_module_constant():
     assert APP_SOURCE.count('VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT = 20.0') == 1
 
 
-def test_best_bets_route_includes_promoted_value_edge_bets_in_normal_section():
+def test_best_bets_route_shows_only_horses_at_or_above_the_promote_threshold():
+    """Value edge is the gate for the Best Bets page, not one qualifier among
+    several. A component match, an 80% win probability, a sole ride or a
+    consensus badge no longer puts a horse on the page by itself — only an edge
+    of at least VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT does. Smaller edges
+    are still captured on `predictions` and reported by the ML Data buckets."""
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
     assert "value_edge_promoted = bool(lb_fields.get('is_value_edge_promoted'))" in source
-    assert 'or value_edge_promoted:' in source
+    assert 'if value_edge_promoted:' in source
+    # The old "any one of these qualifies" gate must be gone.
+    assert 'or value_edge_promoted:' not in source
+    assert 'if matched_components or wp >= 80' not in source
+
+
+def test_best_bets_falls_back_to_the_stored_edge_when_the_live_fetch_is_empty():
+    """The in-request Ladbrokes fetch is not the only source of an edge: the ML
+    scoring run persists one computed from live_odds_snapshots. Gating the page
+    on the edge would hide everything whenever that fetch fails, so the stored
+    edge stands in."""
+    source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
+    source = source[:source.index('\n@app.route(', 1)]
+    assert '_value_edge_fields_with_stored_fallback(' in source
+
+    prediction = SimpleNamespace(
+        value_edge_pct=25.0, value_edge_ml_win_prob_pct=45.0, value_edge_price=4.0,
+    )
+    out = appmod._value_edge_fields_with_stored_fallback({'value_edge_pct': None}, prediction)
+    assert out['value_edge_pct'] == 25.0
+    assert out['is_value_edge_promoted'] is True
+    assert out['ml_fair_probability_pct'] == 45.0
+    assert out['ladbrokes_fixed_win_price'] == 4.0
+    assert out['market_implied_probability_pct'] == 25.0
+
+
+def test_stored_edge_never_overwrites_a_live_one():
+    prediction = SimpleNamespace(
+        value_edge_pct=25.0, value_edge_ml_win_prob_pct=45.0, value_edge_price=4.0,
+    )
+    live = {'value_edge_pct': 3.0, 'ml_fair_probability_pct': 20.0}
+    out = appmod._value_edge_fields_with_stored_fallback(live, prediction)
+    assert out['value_edge_pct'] == 3.0
+    assert live['value_edge_pct'] == 3.0  # input untouched
+
+
+def test_value_edge_buckets_cover_every_edge_level():
+    """ML Data tracks outcomes at every edge level, not only the levels that
+    qualify as a Best Bet — that is how the 20pp cutoff gets tested."""
+    buckets = appmod.VALUE_EDGE_BUCKETS
+    keys = [key for key, _label, _lower, _upper in buckets]
+    assert keys == ['below_0', '0_5', '5_10', '10_15', '15_20', '20_plus']
+
+    # Contiguous and total: every possible edge lands in exactly one bucket.
+    assert buckets[0][2] is None
+    assert buckets[-1][3] is None
+    for (_k, _l, _lower, upper), (_k2, _l2, next_lower, _u2) in zip(buckets, buckets[1:]):
+        assert upper == next_lower
+
+    for edge in (-40.0, -0.01, 0.0, 4.9, 5.0, 14.99, 19.99, 20.0, 250.0):
+        matched = [
+            key for key, _label, lower, upper in buckets
+            if (lower is None or edge >= lower) and (upper is None or edge < upper)
+        ]
+        assert matched == [matched[0]], f'edge {edge} matched {matched}'
+
+    # The bettable bucket starts exactly where the Best Bets page's gate does.
+    assert buckets[-1][2] == appmod.VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT
 
 
 def test_best_bets_route_only_displays_promoted_edge_bets_but_tracks_all():

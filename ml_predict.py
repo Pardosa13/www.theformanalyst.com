@@ -1770,3 +1770,249 @@ def compute_kelly_stakes_for_race(predictions, market_alpha=None):
             for i, (horse_id, probability, odds) in enumerate(usable)
         ]
     return solve_joint_kelly(probs_odds, KELLY_FRACTION_MULTIPLIER, KELLY_MAX_TOTAL_STAKE_PCT)
+
+
+# ── Value edge + Kelly stake against the stored live market ──────────────────
+#
+# WHY THIS LIVES HERE
+# -------------------
+# Both numbers need the same two inputs — the model's fair win probability for
+# a runner and a live pre-race price for its race — and both were previously
+# computed only inside a request handler that fetched Ladbrokes directly
+# (app.py's `_apply_joint_kelly_stakes` and `evaluate_ladbrokes_best_bet_signals`).
+# That direct fetch is a separate, far less reliable path than the one
+# odds_ingest.py already writes to `live_odds_snapshots`, so whenever it came
+# back empty both columns silently stayed NULL/0 for the whole card: the
+# exceptions were caught and logged at warning level and the page rendered
+# anyway.
+#
+# Computing them here, off `live_odds_snapshots`, puts them on the same source
+# predict_meeting already blends with — the one confirmed to be flowing — and
+# lets the ML scoring path persist them in the same pass that writes ml_score.
+
+
+def derive_ml_fair_probabilities(scores):
+    """Fair win probabilities from one race's ml_score values.
+
+    Returns a list aligned with `scores`, holding each runner's share of the
+    race's total ml_score, or None for a runner that cannot be given one.
+
+    This is the single definition of "the model's fair win probability" used by
+    the ML meeting book, the value edge and the Kelly solver, so those three can
+    never disagree about what the model thinks. A non-positive or unusable score
+    yields None and is left out of the denominator, exactly as the ML meeting
+    book has always done: ml_score is min-max normalised per race, so the
+    bottom-ranked runner scores 0.0 and simply has no fair price to quote.
+    """
+    cleaned = []
+    for score in scores:
+        try:
+            value = float(score)
+        except (TypeError, ValueError):
+            cleaned.append(None)
+            continue
+        cleaned.append(value if np.isfinite(value) and value > 0 else None)
+
+    total = sum(value for value in cleaned if value is not None)
+    if total <= 0:
+        return [None] * len(cleaned)
+    return [(value / total) if value is not None else None for value in cleaned]
+
+
+def _market_implied_probability_pct(price):
+    """Market's implied win probability, in percentage points, from a price."""
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        return None
+    return (100.0 / price) if price > 1.0 else None
+
+
+def compute_live_market_edges_for_meeting(meeting_id, db_session, scores_by_race=None):
+    """Per-runner value edge and joint-Kelly stake for every race in a meeting.
+
+    Reads the live market from `live_odds_snapshots` (what odds_ingest.py
+    writes) rather than fetching a bookmaker directly, so this works wherever
+    the ingest cron reaches — which is the only place a live price is known to
+    exist for this deployment.
+
+    `scores_by_race` is predict_meeting's second return value. Pass it to price
+    the scores that were just computed; omit it to price whatever ml_score
+    values are already persisted on `predictions` (used when re-pricing a
+    meeting that was scored earlier).
+
+    Returns `(edges, diagnostics)`.
+
+    `edges` is {horse_id: {...}} covering every runner with a live price, with:
+        ml_fair_probability_pct   model's fair win probability, percentage points
+        market_implied_probability_pct  100/price
+        value_edge_pct            the first minus the second, in points; the
+                                  number the Best Bets threshold and the ML Data
+                                  buckets are both defined on
+        market_price              the live decimal price the edge was struck at
+        kelly_stake_pct           fraction of bankroll the joint solver allocates,
+                                  0.0 for a priced runner it declines to back
+        captured_at               when that price was observed
+
+    Runners with no live price are absent — that is the normal state for a
+    meeting the poller has not reached, or one being re-scored days later, and
+    it must stay distinguishable from "priced, and worth nothing".
+
+    Raises nothing of its own: a race that cannot be priced is skipped and
+    counted in `diagnostics`, so a single bad race cannot cost the rest of the
+    card its numbers.
+    """
+    from models import Race
+
+    races = db_session.query(Race).filter_by(meeting_id=meeting_id).all()
+    diagnostics = {
+        'races': len(races),
+        'races_priced': 0,
+        'runners_priced': 0,
+        'runners_with_edge': 0,
+        'runners_backed': 0,
+        'races_failed': 0,
+    }
+    if not races:
+        return {}, diagnostics
+
+    live_odds = _load_latest_live_odds_for_meeting(races, db_session)
+    if not live_odds:
+        log.warning(
+            "ML_VALUE_EDGE_NO_LIVE_MARKET meeting=%s — no fresh rows in live_odds_snapshots for "
+            "any race in this meeting, so value_edge_pct and kelly_stake_pct cannot be computed. "
+            "Is odds_ingest.py running against this database, and is this meeting still pre-race?",
+            meeting_id,
+        )
+        return {}, diagnostics
+
+    edges = {}
+    for race in races:
+        try:
+            active = [horse for horse in race.horses if not horse.is_scratched]
+            if not active:
+                continue
+
+            race_scores = (scores_by_race or {}).get(race.id) or {}
+            horse_ids = []
+            scores = []
+            for horse in active:
+                score = race_scores.get(horse.id)
+                if score is None:
+                    prediction = getattr(horse, 'prediction', None)
+                    score = getattr(prediction, 'ml_score', None) if prediction else None
+                horse_ids.append(horse.id)
+                scores.append(score)
+
+            fair_probabilities_list = derive_ml_fair_probabilities(scores)
+
+            priced = []
+            for horse_id, fair_probability in zip(horse_ids, fair_probabilities_list):
+                price = (live_odds.get(horse_id) or {}).get('odds')
+                implied_pct = _market_implied_probability_pct(price)
+                if implied_pct is None:
+                    continue
+                priced.append((horse_id, fair_probability, float(price), implied_pct))
+
+            if not priced:
+                continue
+            diagnostics['races_priced'] += 1
+            diagnostics['runners_priced'] += len(priced)
+
+            # Only runners the model can quote a probability for can be staked;
+            # an unquotable runner still gets its row so a stake left over from
+            # an earlier price cannot linger on it.
+            stakes = compute_kelly_stakes_for_race([
+                {'horse_id': horse_id, 'win_probability': fair_probability, 'odds': price}
+                for horse_id, fair_probability, price, _ in priced
+                if fair_probability is not None
+            ])
+
+            for horse_id, fair_probability, price, implied_pct in priced:
+                fair_pct = round(fair_probability * 100.0, 2) if fair_probability is not None else None
+                value_edge_pct = (
+                    round(fair_pct - implied_pct, 2) if fair_pct is not None else None
+                )
+                stake = float(stakes.get(horse_id, 0.0))
+                if value_edge_pct is not None:
+                    diagnostics['runners_with_edge'] += 1
+                if stake > 0:
+                    diagnostics['runners_backed'] += 1
+                edges[horse_id] = {
+                    'ml_fair_probability_pct': fair_pct,
+                    'market_implied_probability_pct': round(implied_pct, 2),
+                    'value_edge_pct': value_edge_pct,
+                    'market_price': price,
+                    'kelly_stake_pct': stake,
+                    'captured_at': (live_odds.get(horse_id) or {}).get('captured_at'),
+                }
+        except Exception:
+            # One unpriceable race must not cost the rest of the card its
+            # numbers, but it is never swallowed silently: the stack trace goes
+            # to the log and the count comes back to the caller, which reports
+            # it to whoever pressed the button.
+            diagnostics['races_failed'] += 1
+            log.exception(
+                "ML_VALUE_EDGE_RACE_FAILED meeting=%s race=%s — this race has no value edge or "
+                "Kelly stake; the rest of the meeting is unaffected.",
+                meeting_id, getattr(race, 'race_number', None),
+            )
+
+    log.info(
+        "ML_VALUE_EDGE_COMPUTED meeting=%s races=%s races_priced=%s runners_priced=%s "
+        "runners_with_edge=%s runners_backed=%s races_failed=%s",
+        meeting_id, diagnostics['races'], diagnostics['races_priced'],
+        diagnostics['runners_priced'], diagnostics['runners_with_edge'],
+        diagnostics['runners_backed'], diagnostics['races_failed'],
+    )
+    return edges, diagnostics
+
+
+def persist_live_market_edges(edges, db_session):
+    """Write computed value edges and Kelly stakes onto their `predictions` rows.
+
+    Returns the number of prediction rows updated. Adds nothing to the session
+    and does NOT commit — the caller owns the transaction, because this runs
+    inside the same unit of work that persists ml_score and the two must land
+    together or not at all.
+
+    Every priced runner is written, including a zero stake and a negative edge:
+    "the model rates this one below the market" is a real answer the ML Data
+    buckets need, and a runner whose price has since shortened must lose the
+    stake it had at the old price rather than keep it.
+
+    The edge snapshot is refreshed on every run rather than captured once. What
+    made capture-once necessary on the Best Bets path — a direct bookmaker fetch
+    that could return a post-race price — does not apply here: a snapshot only
+    reaches this function after `_load_latest_live_odds_for_meeting` has dropped
+    anything older than LIVE_ODDS_MAX_AGE_SECONDS, and odds_ingest.py stops
+    polling a race shortly after its scheduled jump, so what is stored is a
+    pre-race price by construction. Refreshing means the numbers reflect the
+    market as it stands when the button is pressed, which is the whole point of
+    pressing it.
+    """
+    from models import Prediction
+
+    if not edges:
+        return 0
+
+    horse_ids = list(edges)
+    updated = 0
+    captured_at = datetime.utcnow()
+    for prediction in db_session.query(Prediction).filter(Prediction.horse_id.in_(horse_ids)).all():
+        fields = edges.get(prediction.horse_id)
+        if not fields:
+            continue
+        prediction.kelly_stake_pct = fields['kelly_stake_pct']
+        if fields['value_edge_pct'] is not None:
+            prediction.value_edge_pct = fields['value_edge_pct']
+            prediction.value_edge_ml_win_prob_pct = fields['ml_fair_probability_pct']
+            prediction.value_edge_price = fields['market_price']
+            prediction.value_edge_captured_at = captured_at
+        updated += 1
+
+    log.info(
+        "ML_VALUE_EDGE_PERSISTED predictions_updated=%s runners_priced=%s",
+        updated, len(horse_ids),
+    )
+    return updated
