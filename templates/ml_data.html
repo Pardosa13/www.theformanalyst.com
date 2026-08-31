@@ -555,10 +555,13 @@
   <div id="mlValueEdgeBets" class="collapse show">
     <div class="card-body">
       <p class="text-muted mb-3">
-        Horses flagged pre-race the moment the model's fair win probability cleared the market-implied
-        probability by at least {{ "%.1f"|format(value_edge_min_threshold_pct) }} percentage points — settled
-        as $10 win bets on the recorded result SP. This tracks the backtest's "filter to positive-edge bets"
-        finding against genuinely new, real-world results rather than the historical validation set.
+        Every runner whose model-vs-market edge was measured pre-race, bucketed by the size of that edge and
+        settled as $10 win bets on the recorded result SP — not just the ones big enough to bet. Best Bets shows
+        only the {{ "%.0f"|format(value_edge_performance.best_bets_threshold_pct if value_edge_performance else 20) }}pp+
+        bucket; the rows underneath it are what that cutoff passed on. Compare their strike rate and ROI to judge
+        whether {{ "%.0f"|format(value_edge_performance.best_bets_threshold_pct if value_edge_performance else 20) }}pp
+        is the right cutoff, too conservative or too aggressive. The below-0pp row is the control: if the edge
+        measures anything real, it should be the worst cohort on the table.
       </p>
       {% if value_edge_performance and value_edge_performance.overall.bets %}
       <div class="table-responsive">
@@ -578,9 +581,22 @@
               <td class="{% if value_edge_performance.overall.profit >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(value_edge_performance.overall.profit) }}</td>
               <td class="{% if value_edge_performance.overall.roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(value_edge_performance.overall.roi) }}%</td>
             </tr>
+            {% if value_edge_performance.at_best_bets_threshold %}
+            <tr>
+              <td><strong>Shown on Best Bets ({{ "%.0f"|format(value_edge_performance.best_bets_threshold_pct) }}pp+)</strong></td>
+              <td>{{ value_edge_performance.at_best_bets_threshold.bets }}</td>
+              <td>{{ value_edge_performance.at_best_bets_threshold.wins }}</td>
+              <td>{{ "%.1f"|format(value_edge_performance.at_best_bets_threshold.strike_rate) }}%</td>
+              <td>{{ "%.1f"|format(value_edge_performance.at_best_bets_threshold.avg_edge_pct) }}pp</td>
+              <td>${{ "%.2f"|format(value_edge_performance.at_best_bets_threshold.total_staked) }}</td>
+              <td>${{ "%.2f"|format(value_edge_performance.at_best_bets_threshold.total_return) }}</td>
+              <td class="{% if value_edge_performance.at_best_bets_threshold.profit >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(value_edge_performance.at_best_bets_threshold.profit) }}</td>
+              <td class="{% if value_edge_performance.at_best_bets_threshold.roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(value_edge_performance.at_best_bets_threshold.roi) }}%</td>
+            </tr>
+            {% endif %}
             {% for bucket in value_edge_performance.buckets %}
             <tr>
-              <td>Edge {{ bucket.label }}</td>
+              <td>Edge {{ bucket.label }}{% if bucket.is_best_bets_bucket %} <span class="badge bg-success">on Best Bets</span>{% endif %}</td>
               <td>{{ bucket.bets }}</td>
               <td>{{ bucket.wins }}</td>
               <td>{{ "%.1f"|format(bucket.strike_rate) }}%</td>

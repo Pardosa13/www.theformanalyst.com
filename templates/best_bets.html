@@ -527,7 +527,11 @@
 <!-- Page header -->
 <div class="bets-header">
   <h2>🔥 Today's Best Bets</h2>
-  <p>Horses matching active positive ROI components — including non-top-pick component signals</p>
+  <p>Horses whose ML fair win probability clears the live market by at least
+     {{ '%.0f'|format(value_edge_min_threshold_pct) }} percentage points. Component matches, win
+     probability, sole rides and the consensus badges are shown on the rows that qualify, but a
+     horse without that price advantage is not listed here — every smaller edge is still tracked
+     on the ML Data page.</p>
 </div>
 
 <!-- Stat tiles -->
@@ -651,11 +655,12 @@
   </div>
   <div style="padding:14px 18px;">
     <p class="text-muted" style="font-size:12px;margin-bottom:12px;">
-      Horses where the model's fair win probability clears the market's Ladbrokes-implied probability by at least
-      {{ '%.1f'|format(value_edge_min_threshold_pct) }} percentage points are shown here and are also promoted into
-      the normal best bets list below, eligible for Telegram &amp; Twitter. Every horse at
-      {{ '%.1f'|format(value_edge_track_min_threshold_pct) }}pp or better is still logged as its own tracked bet
-      type — see the ML Data page for real-world results across all edge bets.
+      Horses where the model's fair win probability clears the market's implied probability by at least
+      {{ '%.1f'|format(value_edge_min_threshold_pct) }} percentage points. This is the same set as the best bets
+      list below — that list is now gated on the same threshold — and these are eligible for Telegram &amp; Twitter.
+      Every horse at {{ '%.1f'|format(value_edge_track_min_threshold_pct) }}pp or better is still logged as its own
+      tracked bet type, and every measured edge of any size is bucketed on the ML Data page, which is where the
+      {{ '%.0f'|format(value_edge_min_threshold_pct) }}pp cutoff gets tested against real results.
     </p>
     {% if value_edge_bets %}
     <div class="table-responsive">
@@ -698,14 +703,16 @@
 {% if total_bets == 0 %}
 <div class="no-bets-alert">
   <h4>No Signals Found</h4>
-  <p>No horses in the last {{ hours_back }} hours match your active positive ROI components{% if mode == 'top_pick' %} as top pick{% elif mode == 'non_top_pick' %} as non-top-pick signals{% endif %}.</p>
-  <p style="margin-bottom:4px;">Try:</p>
+  <p>No horse in the last {{ hours_back }} hours clears the
+     {{ '%.0f'|format(value_edge_min_threshold_pct) }}pp value-edge threshold{% if mode == 'top_pick' %} as top pick{% elif mode == 'non_top_pick' %} as a non-top-pick signal{% endif %}.
+     That is a normal result: a {{ '%.0f'|format(value_edge_min_threshold_pct) }}pp edge is a high bar,
+     and on many cards nothing reaches it.</p>
+  <p style="margin-bottom:4px;">Check:</p>
   <ul>
-    <li>Uploading a new meeting</li>
+    <li>The meeting has been scored — Edge and Kelly Stake are written by the ML scoring run</li>
+    <li>Live odds are flowing (odds_ingest) — no market price means no edge to measure</li>
+    <li>The ML Data page's edge buckets, to see what the smaller edges are doing</li>
     <li>Increasing the time window</li>
-    <li>Switching mode to "All Signals"</li>
-    <li>Activating more components in the Admin panel</li>
-    <li>Lowering the minimum score filter</li>
   </ul>
 </div>
 

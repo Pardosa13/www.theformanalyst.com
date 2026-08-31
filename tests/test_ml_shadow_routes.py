@@ -67,7 +67,12 @@ def test_meeting_scorer_reports_no_picks_instead_of_failing_without_a_champion()
     end = source.index("def _visible_ml_shadow_meetings_query", start)
     scorer_source = source[start:end]
 
-    assert "from ml_predict import NoActiveChampionError, predict_meeting" in scorer_source
+    # Asserted on the imported names rather than one exact import line: the
+    # scorer also imports the value-edge/Kelly helpers, so the import spans
+    # several lines and its formatting is not what this test is about.
+    assert "from ml_predict import" in scorer_source
+    assert "NoActiveChampionError" in scorer_source
+    assert "predict_meeting" in scorer_source
     assert "except NoActiveChampionError:" in scorer_source
     assert "'no_active_champion': True" in scorer_source
     assert "NO_ACTIVE_CHAMPION_REASON" in scorer_source
