@@ -3555,12 +3555,42 @@ VALUE_EDGE_BUCKETS = (
 )
 
 
+# Notional bankroll the Kelly-staked cohort is settled against. Fixed rather
+# than compounding, on purpose: a compounding bankroll makes every bet's stake
+# depend on the order the bets are replayed in, and these rows are grouped by
+# edge bucket rather than run in time order, so the same cohort would score
+# differently depending on how it was sliced. Holding the bankroll constant
+# makes each bet independent — exactly what the flat $10 cohort does — so the
+# two tables differ only in how each bet was sized, which is the one question
+# being asked.
+KELLY_TRACKING_BANKROLL = float(os.environ.get('ML_KELLY_TRACKING_BANKROLL', '1000'))
+
+
 def calculate_value_edge_performance(track_filter="", date_from="", date_to="", limit_param="all", stake=10.0):
-    """Settle captured pre-race ML Value Edge bets at a flat win stake.
+    """Settle captured pre-race ML Value Edge bets, flat-staked and Kelly-staked.
 
     Mirrors calculate_ladbrokes_signal_performance's cohort pattern above, but
     tracked independently via Prediction.value_edge_captured_at rather than
     the qualitative ladbrokes_signal_mask badges.
+
+    Every cohort is settled twice over the identical set of rows:
+
+      * flat — one `stake` dollar win bet on every runner whose edge was
+        measured, the existing cohort, unchanged; and
+      * kelly — `predictions.kelly_stake_pct` of KELLY_TRACKING_BANKROLL on the
+        runners the joint solver actually backed, and nothing at all on the
+        rest.
+
+    The Kelly numbers hang off each cohort as a nested `kelly` dict rather than
+    living in a separate parallel structure, so the two tables cannot drift out
+    of alignment: they are guaranteed to be the same rows, the same filters and
+    the same buckets, differing only in how each bet was sized.
+
+    A caveat worth stating, because it bounds what the comparison proves:
+    kelly_stake_pct is overwritten every time a meeting is re-priced, so what is
+    settled here is the stake at the LAST pre-race price seen, not at some
+    canonical bet-placement moment. That is the same caveat value_edge_pct
+    already carries, and it applies equally to both columns of the comparison.
     """
     query = db.session.query(Prediction, Result).join(Horse, Prediction.horse_id == Horse.id).join(
         Race, Horse.race_id == Race.id
@@ -3580,6 +3610,69 @@ def calculate_value_edge_performance(track_filter="", date_from="", date_to="", 
         limit = int(limit_param) if str(limit_param).isdigit() else 200
         rows = rows[:limit]
 
+    def summarise_kelly(selections):
+        """The same cohort, sized by the stake the joint solver actually set.
+
+        A row with no stake is not a losing bet, it is a bet that was never
+        placed, so it is excluded from bets/wins/staked entirely rather than
+        counted at zero. That is the whole substance of the comparison: Kelly
+        backs fewer runners than the flat cohort and sizes the ones it does back
+        by how far the price is out, so its strike rate, its turnover and its ROI
+        are all answers to a different staking plan over identical predictions.
+        `no_bet` carries how many of the cohort's rows it declined, so a bucket
+        with a strong flat ROI and almost no Kelly bets reads as what it is.
+        """
+        staked = [
+            (prediction, result) for prediction, result in selections
+            if prediction.kelly_stake_pct is not None and float(prediction.kelly_stake_pct) > 0
+        ]
+        bets = len(staked)
+        wins = sum(result.finish_position == 1 for _, result in staked)
+        total_staked = sum(
+            float(prediction.kelly_stake_pct) * KELLY_TRACKING_BANKROLL for prediction, _ in staked
+        )
+        total_return = sum(
+            float(prediction.kelly_stake_pct) * KELLY_TRACKING_BANKROLL * float(result.sp)
+            for prediction, result in staked if result.finish_position == 1
+        )
+        profit = total_return - total_staked
+
+        # The same runners Kelly backed, flat-staked. Without this the only
+        # available comparison is Kelly's ROI against the flat cohort's, and
+        # those two cover different sets of bets — the flat cohort also carries
+        # every runner Kelly declined. Comparing against this number instead
+        # holds the selections constant and isolates the one variable being
+        # asked about: bet sizing.
+        flat_staked_same_bets = bets * stake
+        flat_return_same_bets = sum(
+            stake * float(result.sp) for _, result in staked if result.finish_position == 1
+        )
+        flat_profit_same_bets = flat_return_same_bets - flat_staked_same_bets
+
+        return {
+            'bets': bets,
+            'wins': wins,
+            'no_bet': len(selections) - bets,
+            'strike_rate': wins / bets * 100 if bets else 0.0,
+            'total_staked': total_staked,
+            'total_return': total_return,
+            'profit': profit,
+            'roi': profit / total_staked * 100 if total_staked else 0.0,
+            'avg_stake': total_staked / bets if bets else 0.0,
+            'avg_stake_pct': (
+                sum(float(prediction.kelly_stake_pct) for prediction, _ in staked) / bets * 100
+                if bets else 0.0
+            ),
+            'avg_edge_pct': (
+                sum(float(prediction.value_edge_pct or 0) for prediction, _ in staked) / bets
+                if bets else 0.0
+            ),
+            'flat_staked_same_bets': flat_staked_same_bets,
+            'flat_roi_same_bets': (
+                flat_profit_same_bets / flat_staked_same_bets * 100 if flat_staked_same_bets else 0.0
+            ),
+        }
+
     def summarise(selections):
         bets = len(selections)
         wins = sum(result.finish_position == 1 for _, result in selections)
@@ -3596,6 +3689,10 @@ def calculate_value_edge_performance(track_filter="", date_from="", date_to="", 
             'profit': profit,
             'roi': profit / total_staked * 100 if total_staked else 0.0,
             'avg_edge_pct': avg_edge_pct,
+            # Same rows, sized by Kelly instead of flat. Nested rather than
+            # returned separately so the two tables are structurally incapable
+            # of showing different cohorts.
+            'kelly': summarise_kelly(selections),
         }
 
     buckets = []
@@ -3627,6 +3724,15 @@ def calculate_value_edge_performance(track_filter="", date_from="", date_to="", 
         'buckets': buckets,
         'at_best_bets_threshold': summarise(at_threshold),
         'best_bets_threshold_pct': VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT,
+        'flat_stake': stake,
+        'kelly_bankroll': KELLY_TRACKING_BANKROLL,
+        # How much of the tracked field the solver ever staked at all. Zero here
+        # means the Kelly table is empty because no stake was ever persisted,
+        # not because Kelly staking lost money — two very different findings.
+        'kelly_rows_staked': sum(
+            1 for prediction, _ in rows
+            if prediction.kelly_stake_pct is not None and float(prediction.kelly_stake_pct) > 0
+        ),
     }
 
 
@@ -5939,6 +6045,16 @@ def ml_data_analytics():
         active_model_metadata_error = str(e)
         logger.warning("Unable to inspect active production ML model for ML Data page: %s", e)
 
+    # The champion-metadata lookup above reads the DB inside a try/except. On
+    # Postgres a statement that fails leaves the whole transaction aborted, and
+    # every later query in this request raises InFailedSqlTransaction — which
+    # each of the three blocks below catches and turns into an empty panel. The
+    # page then reads "no settled Value Edge bets yet" when the truth is that
+    # the query never ran, which is the same silent-empty-panel failure this
+    # column has already been debugged for once. Nothing on this page writes,
+    # so clearing the transaction here costs nothing and cannot lose work.
+    db.session.rollback()
+
     ml_performance_stats = None
     ladbrokes_signal_performance = []
     try:
@@ -5949,14 +6065,19 @@ def ml_data_analytics():
             limit_param=limit_param,
         )
     except Exception as e:
-        print(f"Error calculating ML performance stats: {e}")
+        # Rolled back for the same reason as above: whichever of these three
+        # calculations fails, the two after it must still get a usable session
+        # rather than inheriting an aborted transaction and blanking too.
+        db.session.rollback()
+        logger.warning("Error calculating ML performance stats: %s", e, exc_info=True)
 
     try:
         ladbrokes_signal_performance = calculate_ladbrokes_signal_performance(
             track_filter=track_filter, date_from=date_from, date_to=date_to, limit_param=limit_param
         )
     except Exception as e:
-        logger.warning("Error calculating Ladbrokes signal performance: %s", e)
+        db.session.rollback()
+        logger.warning("Error calculating Ladbrokes signal performance: %s", e, exc_info=True)
 
     value_edge_performance = None
     try:
@@ -5964,7 +6085,11 @@ def ml_data_analytics():
             track_filter=track_filter, date_from=date_from, date_to=date_to, limit_param=limit_param
         )
     except Exception as e:
-        logger.warning("Error calculating ML Value Edge performance: %s", e)
+        db.session.rollback()
+        # Logged with a stack trace, not a one-line warning: an empty Value Edge
+        # panel is indistinguishable from "no bets settled yet" on the page, so
+        # the log is the only place the difference can show up.
+        logger.warning("Error calculating ML Value Edge performance: %s", e, exc_info=True)
 
     return render_template("ml_data.html",
         champion_scores_comparable=champion_scores_comparable(
@@ -6254,10 +6379,19 @@ def ml_view_meeting(meeting_id):
         db.session.rollback()
         logger.warning("Could not persist Kelly stakes for meeting %s: %s", meeting_id, e)
 
+    # The staking constants go to the template so the polling JS can re-solve
+    # the joint Kelly allocation against a freshly polled price with exactly the
+    # parameters the server used. Hard-coding them in the template would let the
+    # displayed stake drift from the persisted one the moment either env var is
+    # tuned.
+    from ml_predict import KELLY_FRACTION_MULTIPLIER, KELLY_MAX_TOTAL_STAKE_PCT
+
     return render_template(
         "MLRaceMeetings.html",
         meeting=meeting,
         results=results,
+        kelly_fraction_multiplier=KELLY_FRACTION_MULTIPLIER,
+        kelly_max_total_stake_pct=KELLY_MAX_TOTAL_STAKE_PCT,
     )
 
 
