@@ -774,7 +774,7 @@ body.modal-open .main-container {
                 <ul class="navbar-nav ms-auto align-items-lg-center">
                     {% if current_user.is_authenticated %}
                         {% if not julz_restricted %}
-                        {% set racing_active = request.endpoint in ['history', 'ml_meetings', 'results', 'results_entry', 'data_analytics', 'ml_data_analytics', 'backtest'] %}
+                        {% set racing_active = request.endpoint in ['history', 'ml_meetings', 'results', 'results_entry', 'data_analytics', 'ml_data_analytics', 'backtest', 'race_animation.race_animations_predictions'] %}
                         {% set sports_active = request.endpoint in ['afl_hub', 'mma.mma_hub'] %}
                         {% set tools_active = request.endpoint == 'best_bets' or (request.endpoint and request.endpoint.startswith('bet_tracker')) or request.endpoint == 'ml_shadow' %}
                         <li class="nav-item">
@@ -804,6 +804,9 @@ body.modal-open .main-container {
                                 </a></li>
                                 <li><a class="dropdown-item {{ 'active' if request.endpoint == 'backtest' }}" href="{{ url_for('backtest') }}">
                                     <i class="bi bi-cpu"></i> Backtest
+                                </a></li>
+                                <li><a class="dropdown-item {{ 'active' if request.endpoint == 'race_animation.race_animations_predictions' }}" href="{{ url_for('race_animation.race_animations_predictions') }}" title="Race Animations — animated replay driven by the composite prediction score">
+                                    🏇 Race Animations
                                 </a></li>
                             </ul>
                         </li>

@@ -26,6 +26,7 @@ from scratchings import compute_is_scratched_final, extract_debug_scratch_fields
 from ladbrokes import match_race_uuid, match_race_info, fetch_race_odds, build_next_to_go_races, MELBOURNE_TZ, ODDS_CACHE_TTL
 from afl_routes import register_afl_routes, afl_nightly_sync
 from mma_routes import register_mma_routes
+from race_animation_routes import register_race_animation_routes
 from ml_shadow_routes import register_ml_shadow_routes
 from bet_tracker import register_bet_tracker_routes
 from budget_tracker import register_budget_tracker_routes, is_budget_tracker_allowed, is_julz
@@ -388,6 +389,7 @@ register_mma_routes(app, db)
 register_ml_shadow_routes(app, db)
 register_bet_tracker_routes(app, db)
 register_budget_tracker_routes(app, db)
+register_race_animation_routes(app, db)
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))

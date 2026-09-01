@@ -1,0 +1,569 @@
+{% extends "base.html" %}
+
+{% block title %}Race Animations & Predictions{% endblock %}
+
+{% block content %}
+{#
+   Race Animations & Predictions — standalone page.
+
+   Additive by design: it extends base.html for the shell only and owns all of
+   its own markup, styles and scripts. Data comes from the /api/race-animation/*
+   endpoints in race_animation_routes.py; the artwork and the race engine live
+   in static/js/race-horse-art.js and static/js/race-animation.js. No existing
+   page, route, template or script is touched by any of it.
+
+   Palette is taken straight from base.html's variables so this sits alongside
+   the meeting pages rather than looking bolted on.
+#}
+<style>
+.rap-shell { max-width: 1360px; margin: 0 auto; padding: 4px 0 56px; }
+
+.rap-head { margin-bottom: 18px; }
+.rap-title { font-size: 1.6rem; font-weight: 800; color: var(--text-primary); margin: 0 0 6px; }
+.rap-sub { color: var(--text-secondary); font-size: 14px; margin: 0; max-width: 76ch; }
+
+/* ── Pickers ── */
+.rap-pickers {
+  display: grid; grid-template-columns: minmax(220px, 2fr) minmax(180px, 1.4fr) auto;
+  gap: 12px; align-items: end;
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: 14px; padding: 16px; margin-bottom: 18px;
+}
+.rap-field label {
+  display: block; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-muted); font-weight: 700; margin-bottom: 6px;
+}
+.rap-field select {
+  width: 100%; background: var(--bg-elevated); color: var(--text-primary);
+  border: 1px solid var(--border-mid); border-radius: 10px;
+  padding: 10px 12px; font-size: 14px; font-weight: 600;
+}
+.rap-field select:focus { outline: none; border-color: var(--border-accent); }
+.rap-field select:disabled { opacity: 0.5; }
+
+/* ── Stage ── */
+.rap-stage {
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: 16px; padding: 14px; margin-bottom: 18px; position: relative;
+}
+.rap-stage-head {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  justify-content: space-between; margin-bottom: 10px;
+}
+.rap-race-name { font-size: 15px; font-weight: 800; color: var(--text-primary); }
+.rap-race-meta { font-size: 12px; color: var(--text-secondary); }
+.rap-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.rap-btn {
+  background: var(--bg-elevated); color: var(--text-primary);
+  border: 1px solid var(--border-mid); border-radius: 9px;
+  padding: 7px 14px; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.rap-btn:hover { background: var(--bg-hover); border-color: var(--border-accent); }
+.rap-btn--primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: transparent; color: #fff;
+}
+.rap-btn[aria-pressed="true"] { border-color: var(--border-accent); color: var(--accent); }
+.rap-speed { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.rap-speed input { width: 96px; }
+
+.rap-canvas-wrap { position: relative; border-radius: 12px; overflow: hidden; background: #0b1410; }
+.rap-canvas { display: block; width: 100%; height: auto; }
+
+.rap-progress { height: 4px; background: rgba(255,255,255,0.07); border-radius: 3px; margin-top: 10px; overflow: hidden; }
+.rap-progress-bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+
+/* Live running order, updated every frame. */
+.rap-live {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px;
+  font-family: 'DM Mono', ui-monospace, monospace; font-size: 11px;
+}
+.rap-live-item {
+  background: var(--bg-elevated); border: 1px solid var(--border-subtle);
+  border-radius: 7px; padding: 4px 8px; color: var(--text-secondary);
+  display: flex; align-items: center; gap: 5px; white-space: nowrap;
+}
+.rap-live-item b { color: var(--text-primary); font-weight: 700; }
+.rap-live-item .rap-pos { color: var(--text-muted); }
+.rap-live-item.is-lead { border-color: var(--border-accent); color: var(--text-primary); }
+
+/* Tap-to-reveal popup, for fields too big to label. */
+.rap-popup {
+  position: absolute; z-index: 5; pointer-events: none;
+  background: rgba(9,9,15,0.95); border: 1px solid var(--border-accent);
+  border-radius: 10px; padding: 9px 12px; min-width: 180px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+}
+.rap-popup[hidden] { display: none; }
+.rap-popup-name { font-size: 13px; font-weight: 800; color: var(--text-primary); }
+.rap-popup-row { font-size: 11px; color: var(--text-secondary); margin-top: 3px; display: flex; justify-content: space-between; gap: 14px; }
+.rap-popup-row b { color: var(--text-primary); font-family: 'DM Mono', ui-monospace, monospace; }
+
+/* ── Breakdown table ── */
+.rap-table-card {
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: 16px; padding: 16px;
+}
+.rap-table-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; justify-content: space-between; margin-bottom: 4px; }
+.rap-table-title { font-size: 15px; font-weight: 800; color: var(--text-primary); margin: 0; }
+.rap-weights { font-size: 11px; color: var(--text-muted); font-family: 'DM Mono', ui-monospace, monospace; }
+.rap-table-note { font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; }
+.rap-scroller { overflow-x: auto; }
+.rap-table { width: 100%; border-collapse: separate; border-spacing: 0 4px; font-size: 13px; min-width: 940px; }
+.rap-table th {
+  text-align: right; padding: 8px 10px; font-size: 10px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-muted); font-weight: 700; white-space: nowrap;
+}
+.rap-table th:nth-child(-n+3) { text-align: left; }
+.rap-table td { padding: 9px 10px; text-align: right; background: var(--bg-elevated); color: var(--text-primary); }
+.rap-table td:nth-child(-n+3) { text-align: left; }
+.rap-table td:first-child { border-radius: 9px 0 0 9px; }
+.rap-table td:last-child { border-radius: 0 9px 9px 0; }
+.rap-table tbody tr { cursor: pointer; }
+.rap-table tbody tr:hover td { background: var(--bg-hover); }
+.rap-table tbody tr.is-selected td { background: rgba(102,126,234,0.16); }
+.rap-rank { font-weight: 800; font-family: 'DM Mono', ui-monospace, monospace; }
+.rap-rank-1 { color: #34d399; } .rap-rank-2 { color: #fbbf24; } .rap-rank-3 { color: #f59e0b; }
+.rap-runner { display: flex; align-items: center; gap: 8px; }
+.rap-silk { width: 24px; height: 24px; border-radius: 6px; flex: 0 0 auto; border: 1px solid var(--border-subtle); }
+.rap-runner-name { font-weight: 700; }
+.rap-runner-sub { display: block; font-size: 11px; color: var(--text-muted); font-weight: 500; }
+.rap-num {
+  font-family: 'DM Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.rap-raw { color: var(--text-secondary); }
+/* An imputed component — the runner had no data, so it was filled with the
+   field average rather than scored zero. Flagged so the table stays honest. */
+.rap-imputed { color: var(--text-muted); font-style: italic; }
+.rap-imputed::after { content: '*'; color: #f59e0b; font-style: normal; }
+.rap-composite { font-weight: 800; font-size: 14px; }
+.rap-pace {
+  display: inline-block; padding: 2px 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.rap-pace-leader   { background: rgba(226,59,59,0.18);  color: #f08d8d; }
+.rap-pace-onpace   { background: rgba(239,127,46,0.18); color: #f0ae7e; }
+.rap-pace-midfield { background: rgba(47,111,208,0.18); color: #8fb4ec; }
+.rap-pace-back     { background: rgba(139,79,196,0.18); color: #bda0e4; }
+
+.rap-empty, .rap-error {
+  padding: 44px 20px; text-align: center; color: var(--text-secondary); font-size: 14px;
+}
+.rap-error { color: #f08d8d; }
+.rap-legend { font-size: 11px; color: var(--text-muted); margin-top: 10px; }
+
+@media (max-width: 860px) {
+  .rap-pickers { grid-template-columns: 1fr; }
+  .rap-stage-head { flex-direction: column; align-items: flex-start; }
+}
+</style>
+
+<div class="rap-shell">
+  <div class="rap-head">
+    <h1 class="rap-title">🏇 Race Animations &amp; Predictions</h1>
+    <p class="rap-sub">
+      Every runner lines up in its barrier and speed-map position, then runs an oval
+      circuit to a finish order set by a blended prediction score. The break is driven by
+      the speed map, the run home by the composite. The table underneath shows the same
+      numbers so the picture can be checked against the maths.
+    </p>
+  </div>
+
+  <div class="rap-pickers">
+    <div class="rap-field">
+      <label for="rapMeeting">Meeting</label>
+      <select id="rapMeeting"><option value="">Loading meetings…</option></select>
+    </div>
+    <div class="rap-field">
+      <label for="rapRace">Race</label>
+      <select id="rapRace" disabled><option value="">Pick a meeting first</option></select>
+    </div>
+    <div class="rap-field">
+      <label for="rapReload">&nbsp;</label>
+      <button class="rap-btn" id="rapReload" type="button">↻ Reload</button>
+    </div>
+  </div>
+
+  <div class="rap-stage">
+    <div class="rap-stage-head">
+      <div>
+        <div class="rap-race-name" id="rapRaceName">No race selected</div>
+        <div class="rap-race-meta" id="rapRaceMeta">Choose a meeting and a race to run the animation.</div>
+      </div>
+      <div class="rap-controls">
+        <button class="rap-btn rap-btn--primary" id="rapPlay" type="button" disabled>▶ Run the race</button>
+        <button class="rap-btn" id="rapReplay" type="button" disabled>↺ Replay</button>
+        <button class="rap-btn" id="rapNames" type="button" aria-pressed="false" disabled>Names</button>
+        <span class="rap-speed">
+          Speed <input id="rapSpeed" type="range" min="50" max="250" value="100">
+          <span class="rap-num" id="rapSpeedValue">1.0×</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="rap-canvas-wrap" id="rapCanvasWrap">
+      <svg class="rap-canvas" id="rapCanvas" viewBox="0 0 1200 700" role="img"
+           aria-label="Animated race replay driven by the composite prediction score"></svg>
+      <div class="rap-popup" id="rapPopup" hidden></div>
+    </div>
+
+    <div class="rap-progress"><div class="rap-progress-bar" id="rapProgressBar"></div></div>
+    <div class="rap-live" id="rapLive"></div>
+    <div class="rap-legend" id="rapLegend"></div>
+  </div>
+
+  <div class="rap-table-card">
+    <div class="rap-table-head">
+      <h2 class="rap-table-title">Composite score breakdown</h2>
+      <div class="rap-weights" id="rapWeights"></div>
+    </div>
+    <p class="rap-table-note">
+      Each input is normalised across this field before weighting — the sectional rank and the
+      adjusted time are lower-is-better, so they are inverted first. Tap a row to pick that runner
+      out on the track. An italic value marked <span style="color:#f59e0b">*</span> means the runner
+      had no data for that input and was given the field average rather than a zero.
+    </p>
+    <div class="rap-scroller">
+      <table class="rap-table">
+        <thead>
+          <tr>
+            <th>#</th><th>Runner</th><th>Pace</th>
+            <th>Bar</th>
+            <th>MAP<br><span class="rap-weights">40%</span></th>
+            <th>Sectional<br><span class="rap-weights">10%</span></th>
+            <th>Adj Time<br><span class="rap-weights">10%</span></th>
+            <th>Assessment<br><span class="rap-weights">40%</span></th>
+            <th>Composite</th>
+          </tr>
+        </thead>
+        <tbody id="rapTableBody">
+          <tr><td colspan="9" class="rap-empty">No race loaded yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/race-horse-art.js') }}"></script>
+<script src="{{ url_for('static', filename='js/race-animation.js') }}"></script>
+<script>
+(function () {
+  'use strict';
+
+  var API = '/api/race-animation';
+  var els = {
+    meeting: document.getElementById('rapMeeting'),
+    race: document.getElementById('rapRace'),
+    reload: document.getElementById('rapReload'),
+    raceName: document.getElementById('rapRaceName'),
+    raceMeta: document.getElementById('rapRaceMeta'),
+    play: document.getElementById('rapPlay'),
+    replay: document.getElementById('rapReplay'),
+    names: document.getElementById('rapNames'),
+    speed: document.getElementById('rapSpeed'),
+    speedValue: document.getElementById('rapSpeedValue'),
+    canvas: document.getElementById('rapCanvas'),
+    canvasWrap: document.getElementById('rapCanvasWrap'),
+    popup: document.getElementById('rapPopup'),
+    progressBar: document.getElementById('rapProgressBar'),
+    live: document.getElementById('rapLive'),
+    legend: document.getElementById('rapLegend'),
+    weights: document.getElementById('rapWeights'),
+    tableBody: document.getElementById('rapTableBody')
+  };
+
+  var race = null;          // the current payload
+  var engine = null;        // the current RaceAnimation controller
+  var namesOn = false;
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function fmt(value, decimals) {
+    if (value == null || value === '' || isNaN(value)) return '—';
+    return Number(value).toFixed(decimals == null ? 1 : decimals);
+  }
+
+  function getJson(url) {
+    return fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+      .then(function (response) {
+        return response.json().catch(function () { return {}; }).then(function (body) {
+          if (!response.ok) throw new Error(body.error || ('Request failed (' + response.status + ')'));
+          return body;
+        });
+      });
+  }
+
+  function showError(message) {
+    els.tableBody.innerHTML = '<tr><td colspan="9" class="rap-error">' + escapeHtml(message) + '</td></tr>';
+    els.raceMeta.textContent = message;
+  }
+
+  /* Reuse the site's silk sprite the same way view_meeting.html does: one
+     horizontal strip, 32px per runner, offset by runner number. */
+  function silkStyle(silk) {
+    if (silk && silk.sprite_url && silk.runner_number) {
+      var size = silk.tile_px || 32;
+      return 'background-image:url(' + encodeURI(silk.sprite_url) + ');' +
+             'background-position:' + (silk.tile_offset_px || 0) + 'px 0;' +
+             'background-repeat:no-repeat;background-size:auto ' + size + 'px;';
+    }
+    var fallback = (silk && silk.fallback) || {};
+    var primary = fallback.primary || '#55556a';
+    var secondary = fallback.secondary || primary;
+    if (fallback.pattern === 'halved') return 'background:linear-gradient(90deg,' + primary + ' 50%,' + secondary + ' 50%);';
+    if (fallback.pattern === 'stripes') return 'background:repeating-linear-gradient(90deg,' + primary + ' 0 4px,' + secondary + ' 4px 8px);';
+    if (fallback.pattern === 'hoops') return 'background:repeating-linear-gradient(180deg,' + primary + ' 0 4px,' + secondary + ' 4px 8px);';
+    if (fallback.pattern === 'sash') return 'background:repeating-linear-gradient(135deg,' + primary + ' 0 5px,' + secondary + ' 5px 8px);';
+    return 'background:' + primary + ';';
+  }
+
+  // ── Dropdowns ───────────────────────────────────────────────────────────
+  function loadMeetings() {
+    return getJson(API + '/meetings').then(function (data) {
+      var meetings = data.meetings || [];
+      if (!meetings.length) {
+        els.meeting.innerHTML = '<option value="">No meetings available</option>';
+        showError('No meetings have been imported yet.');
+        return;
+      }
+      els.meeting.innerHTML = '<option value="">Select a meeting…</option>' +
+        meetings.map(function (meeting) {
+          var label = (meeting.date ? meeting.date + ' — ' : '') +
+                      (meeting.track || meeting.name) +
+                      (meeting.race_count ? ' (' + meeting.race_count + ' races)' : '');
+          return '<option value="' + meeting.id + '">' + escapeHtml(label) + '</option>';
+        }).join('');
+    }).catch(function (error) {
+      els.meeting.innerHTML = '<option value="">Could not load meetings</option>';
+      showError(error.message);
+    });
+  }
+
+  function loadRaces(meetingId) {
+    els.race.disabled = true;
+    els.race.innerHTML = '<option value="">Loading races…</option>';
+    return getJson(API + '/meeting/' + meetingId + '/races').then(function (data) {
+      var races = data.races || [];
+      if (!races.length) {
+        els.race.innerHTML = '<option value="">No races in this meeting</option>';
+        return;
+      }
+      els.race.innerHTML = '<option value="">Select a race…</option>' +
+        races.map(function (item) {
+          var label = 'R' + item.race_number +
+                      (item.distance ? ' · ' + item.distance : '') +
+                      (item.runner_count ? ' · ' + item.runner_count + ' runners' : '');
+          return '<option value="' + item.id + '">' + escapeHtml(label) + '</option>';
+        }).join('');
+      els.race.disabled = false;
+    }).catch(function (error) {
+      els.race.innerHTML = '<option value="">Could not load races</option>';
+      showError(error.message);
+    });
+  }
+
+  // ── Race load + build ───────────────────────────────────────────────────
+  function loadRace(raceId) {
+    els.raceMeta.textContent = 'Loading race…';
+    return getJson(API + '/race/' + raceId).then(function (payload) {
+      race = payload;
+      renderRaceHeader(payload);
+      renderTable(payload);
+      buildAnimation(payload);
+    }).catch(function (error) {
+      race = null;
+      if (engine) { engine.destroy(); engine = null; }
+      setControlsEnabled(false);
+      showError(error.message);
+    });
+  }
+
+  function renderRaceHeader(payload) {
+    var meta = payload.race || {};
+    els.raceName.textContent = (payload.meeting.track || payload.meeting.name) + ' — Race ' + meta.race_number;
+    var bits = [];
+    if (meta.distance) bits.push(meta.distance);
+    if (meta.race_class) bits.push(meta.race_class);
+    if (meta.track_condition) bits.push(meta.track_condition);
+    bits.push(meta.field_size + ' runners');
+    els.raceMeta.textContent = bits.join(' · ');
+
+    var weights = payload.weights || {};
+    els.weights.textContent = 'MAP ' + weights.speed_map + '% · Sectional ' + weights.sectional +
+      '% · Adj Time ' + weights.adjusted_time + '% · Assessment ' + weights.assessment + '%';
+
+    var missing = [];
+    if (!meta.has_speed_map) missing.push('no speed map for this race — pace categories and MAP fall back to neutral');
+    if (!meta.has_sectionals) missing.push('no PFAI sectionals stored');
+    if (!meta.has_silks) missing.push('no live silks — showing coded colours instead');
+    els.legend.textContent = missing.length ? 'Note: ' + missing.join('; ') + '.' : '';
+  }
+
+  function setControlsEnabled(enabled) {
+    els.play.disabled = !enabled;
+    els.replay.disabled = !enabled;
+    els.names.disabled = !enabled;
+  }
+
+  function buildAnimation(payload) {
+    if (engine) engine.destroy();
+    var fieldSize = payload.runners.length;
+    // Big fields: names off by default, silk colour carries the identity, and a
+    // tap on a horse opens the popup instead. Same rule as real race vision.
+    namesOn = fieldSize <= 11;
+    els.names.setAttribute('aria-pressed', namesOn ? 'true' : 'false');
+
+    engine = window.RaceAnimation.create({
+      svg: els.canvas,
+      runners: payload.runners,
+      duration: 15,
+      showNames: namesOn,
+      onTick: function (time, order) {
+        els.progressBar.style.width = (time * 100).toFixed(1) + '%';
+        renderLiveOrder(order);
+      },
+      onFinish: function () {
+        els.play.textContent = '▶ Run the race';
+        els.raceMeta.textContent = 'Result: ' + payload.runners[0].horse_name +
+          ' wins on a composite of ' + fmt(payload.runners[0].composite_score, 1) + '.';
+      },
+      onSelect: function (runner) {
+        showPopup(runner);
+        highlightRow(runner ? runner.horse_id : null);
+      }
+    });
+    engine.setSpeed(Number(els.speed.value) / 100);
+    // Exposed on purpose: lets the race be scrubbed to any point from the
+    // console (raceAnimationEngine.scrubTo(0.62)) when tuning the phases.
+    window.raceAnimationEngine = engine;
+    setControlsEnabled(true);
+    els.play.textContent = '▶ Run the race';
+    els.progressBar.style.width = '0%';
+    renderLiveOrder(payload.runners);
+  }
+
+  var liveKey = '';
+  function renderLiveOrder(order) {
+    // Rebuild only when the order actually changes — this runs every frame.
+    var key = order.map(function (runner) { return runner.horse_id; }).join(',');
+    if (key === liveKey) return;
+    liveKey = key;
+    els.live.innerHTML = order.slice(0, 24).map(function (runner, index) {
+      return '<span class="rap-live-item' + (index === 0 ? ' is-lead' : '') + '">' +
+        '<span class="rap-pos">' + (index + 1) + '</span>' +
+        '<b>' + escapeHtml(runner.tab_number ? runner.tab_number + '. ' + runner.horse_name : runner.horse_name) + '</b>' +
+        '</span>';
+    }).join('');
+  }
+
+  function showPopup(runner) {
+    if (!runner) { els.popup.hidden = true; return; }
+    els.popup.innerHTML =
+      '<div class="rap-popup-name">' +
+        escapeHtml((runner.tab_number ? runner.tab_number + '. ' : '') + runner.horse_name) + '</div>' +
+      '<div class="rap-popup-row"><span>Composite</span><b>' + fmt(runner.composite_score, 1) + '</b></div>' +
+      '<div class="rap-popup-row"><span>Predicted finish</span><b>' + runner.rank + '</b></div>' +
+      '<div class="rap-popup-row"><span>Pace</span><b>' + escapeHtml(runner.pace_label) + '</b></div>' +
+      '<div class="rap-popup-row"><span>Barrier</span><b>' + (runner.barrier || '—') + '</b></div>' +
+      '<div class="rap-popup-row"><span>Jockey</span><b>' + escapeHtml(runner.jockey || '—') + '</b></div>';
+    els.popup.hidden = false;
+    // Park it top-right of the stage: the runner it describes is moving, so a
+    // popup pinned to the horse would chase it around the track.
+    els.popup.style.top = '12px';
+    els.popup.style.right = '12px';
+    els.popup.style.left = 'auto';
+  }
+
+  function highlightRow(horseId) {
+    Array.prototype.forEach.call(els.tableBody.querySelectorAll('tr'), function (row) {
+      row.classList.toggle('is-selected', String(row.getAttribute('data-horse-id')) === String(horseId));
+    });
+  }
+
+  // ── Breakdown table ─────────────────────────────────────────────────────
+  function componentCell(component, decimals) {
+    if (!component) return '<td class="rap-num">—</td>';
+    var raw = component.available ? fmt(component.raw, decimals) : '—';
+    var normalised = fmt(component.normalised, 0);
+    var cls = 'rap-num' + (component.available ? '' : ' rap-imputed');
+    return '<td class="' + cls + '">' + normalised +
+           '<span class="rap-runner-sub rap-raw">raw ' + raw + '</span></td>';
+  }
+
+  function renderTable(payload) {
+    els.tableBody.innerHTML = payload.runners.map(function (runner) {
+      var components = runner.components || {};
+      var rankClass = runner.rank <= 3 ? ' rap-rank-' + runner.rank : '';
+      return '<tr data-horse-id="' + runner.horse_id + '">' +
+        '<td><span class="rap-rank' + rankClass + '">' + runner.rank + '</span></td>' +
+        '<td><div class="rap-runner">' +
+          '<span class="rap-silk" style="' + silkStyle(runner.silk) + '"></span>' +
+          '<span><span class="rap-runner-name">' +
+            escapeHtml((runner.tab_number ? runner.tab_number + '. ' : '') + runner.horse_name) +
+          '</span><span class="rap-runner-sub">' + escapeHtml(runner.jockey || 'Jockey TBA') + '</span></span>' +
+        '</div></td>' +
+        '<td><span class="rap-pace rap-pace-' + runner.pace_category + '">' +
+          escapeHtml(runner.pace_label) + '</span></td>' +
+        '<td class="rap-num">' + (runner.barrier || '—') + '</td>' +
+        componentCell(components.speed_map, 2) +
+        componentCell(components.sectional, 1) +
+        componentCell(components.adjusted_time, 2) +
+        componentCell(components.assessment, 1) +
+        '<td class="rap-num rap-composite">' + fmt(runner.composite_score, 1) + '</td>' +
+      '</tr>';
+    }).join('');
+
+    Array.prototype.forEach.call(els.tableBody.querySelectorAll('tr'), function (row) {
+      row.addEventListener('click', function () {
+        var horseId = Number(row.getAttribute('data-horse-id'));
+        var runner = payload.runners.filter(function (item) { return item.horse_id === horseId; })[0];
+        var alreadyOn = row.classList.contains('is-selected');
+        if (engine) engine.select(alreadyOn ? null : horseId);
+        showPopup(alreadyOn ? null : runner);
+        highlightRow(alreadyOn ? null : horseId);
+      });
+    });
+  }
+
+  // ── Wiring ──────────────────────────────────────────────────────────────
+  els.meeting.addEventListener('change', function () {
+    els.race.innerHTML = '<option value="">Select a race…</option>';
+    els.race.disabled = true;
+    if (this.value) loadRaces(this.value);
+  });
+  els.race.addEventListener('change', function () {
+    if (this.value) loadRace(this.value);
+  });
+  els.reload.addEventListener('click', function () {
+    if (els.race.value) loadRace(els.race.value);
+    else loadMeetings();
+  });
+  els.play.addEventListener('click', function () {
+    if (!engine) return;
+    var running = engine.toggle();
+    this.textContent = running ? '❚❚ Pause' : '▶ Run the race';
+  });
+  els.replay.addEventListener('click', function () {
+    if (!engine) return;
+    engine.replay();
+    els.play.textContent = '❚❚ Pause';
+  });
+  els.names.addEventListener('click', function () {
+    namesOn = !namesOn;
+    this.setAttribute('aria-pressed', namesOn ? 'true' : 'false');
+    if (engine) engine.setNamesVisible(namesOn);
+  });
+  els.speed.addEventListener('input', function () {
+    var value = Number(this.value) / 100;
+    els.speedValue.textContent = value.toFixed(1) + '×';
+    if (engine) engine.setSpeed(value);
+  });
+
+  loadMeetings();
+}());
+</script>
+{% endblock %}
