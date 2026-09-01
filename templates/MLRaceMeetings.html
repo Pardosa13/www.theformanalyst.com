@@ -339,6 +339,24 @@
   background: linear-gradient(135deg, #22d3ee 0%, #0e7490 100%);
   color: #04252b;
 }
+/* Kelly stake column — three distinct states, never collapsed into one dash:
+   backed (the joint solve allocates bankroll), No Bet (priced, and the solve
+   declines it) and unpriced (no live market for this runner yet). "No Bet" and
+   "—" answer different questions, and rendering both as "—" is what made a
+   positive-edge runner look like a bug. */
+.kelly-value.kelly-back { color: #00a37a; font-weight: 700; }
+.kelly-value.kelly-no-bet {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(148, 163, 184, 0.18);
+  color: #94a3b8;
+}
+.kelly-value.kelly-unpriced { color: #666; font-size: 13px; font-weight: 400; }
 .vm-race-card tbody tr.edge-highlight {
   background: rgba(34, 211, 238, 0.14) !important;
   border-left: 5px solid #22d3ee !important;
@@ -1608,7 +1626,7 @@ function updateScratchings(meetingId) {
           <th style="padding:12px; text-align:center;">Ladbrokes Price</th>
           <th style="padding:12px; text-align:center;">Win %</th>
           <th style="padding:12px; text-align:center;" title="Model's fair win probability minus the market's implied probability from the live Ladbrokes price. A bigger positive edge means the model likes this horse more than the market does.">Edge</th>
-          <th style="padding:12px; text-align:center;" title="Share of bankroll to stake on this horse, solved across the whole field at once (runners in a race are mutually exclusive, so the right size for each bet depends on the others). A dash means the price is too short to be worth backing — the model's ranking is unaffected either way.">Kelly Stake</th>
+          <th style="padding:12px; text-align:center;" title="Share of bankroll to stake on this horse, solved across the whole field at once (runners in a race are mutually exclusive, so the right size for each bet depends on the others). &quot;No Bet&quot; means this runner was priced and the solve allocated it nothing: its price is not above what the model rates it, so the bet is a losing one before it is struck. A dash means no live price for it yet, so no stake could be solved at all. The model's ranking is unaffected either way.">Kelly Stake</th>
           {% if current_user.is_admin %}
           <th style="padding:12px; text-align:left;">Notes</th>
           {% endif %}
@@ -1677,11 +1695,34 @@ function updateScratchings(meetingId) {
               <span class="edge-value" style="color:#666;font-size:13px;">—</span>
             {% endif %}
           </td>
-          <td style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0; font-weight:700;">
+          <td class="kelly-cell" style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0; font-weight:700;">
+            {# Three states, not two. A runner is "priced" for staking purposes
+               exactly when it has a value edge — both need the same pair of
+               inputs, a live price and a model fair probability — so the edge
+               being present is what separates "the solve said no" from "we
+               could not ask".
+
+               Worth knowing when reading this column: at a given price, a
+               positive edge and a positive stake are the same condition.
+               solve_joint_kelly's eligibility test is p*O > 1, which is
+               exactly edge > 0, and its stakes-stay-positive check can never
+               reject an eligible runner (Q/(1-R) < 1 < p*O whenever the fair
+               probabilities sum to at most 1, which derive_ml_fair_probabilities
+               guarantees). So "Back" pairs with a positive edge and "No Bet"
+               with a non-positive one, always — and a positive Edge sitting
+               beside a "No Bet" or a dash means the two cells were struck at
+               different prices, which is the bug this column had. The polling
+               JS below re-solves the whole race and repaints these cells from
+               the same price it paints into the Edge column, so they cannot
+               come apart. #}
             {% if horse.kelly_stake_pct and horse.kelly_stake_pct > 0 %}
-              <span style="color:#00a37a;">Back — {{ (horse.kelly_stake_pct * 100)|round(1) }}% of bankroll</span>
+              <span class="kelly-value kelly-back"
+                    title="Joint Kelly across this race allocates {{ (horse.kelly_stake_pct * 100)|round(1) }}% of bankroll to this runner{% if horse.ladbrokes_fixed_win_price %} at ${{ '%.2f'|format(horse.ladbrokes_fixed_win_price) }}{% endif %}.">Back — {{ (horse.kelly_stake_pct * 100)|round(1) }}% of bankroll</span>
+            {% elif horse.value_edge_pct is not none %}
+              <span class="kelly-value kelly-no-bet"
+                    title="Priced{% if horse.ladbrokes_fixed_win_price %} at ${{ '%.2f'|format(horse.ladbrokes_fixed_win_price) }}{% endif %}, and the joint Kelly solve stakes nothing on it: the price does not beat what the model rates this runner, so backing it has negative expectation at any size. Every runner priced above the model's fair price does get a stake, so a positive Edge beside this cell means the two columns are reading different prices.">No Bet</span>
             {% else %}
-              <span style="color:#666;font-size:13px;font-weight:400;">—</span>
+              <span class="kelly-value kelly-unpriced" title="No live market price for this runner yet, so no stake can be solved.">—</span>
             {% endif %}
           </td>
           {% if current_user.is_admin %}
@@ -1699,11 +1740,15 @@ function updateScratchings(meetingId) {
   </div>
 
   {% set backed = race.horses|selectattr('kelly_stake_pct')|list %}
-  <div style="margin-top:10px; font-size:13px; color:#6c757d;">
+  {# Repainted by the polling JS off the same re-solve that fills the Kelly
+     cells, so this line can never claim "no value bet" while a cell above it
+     reads "Back — 3.1% of bankroll". #}
+  <div class="kelly-race-summary" style="margin-top:10px; font-size:13px; color:#6c757d;">
     {% if not race.kelly_market_available %}
       Kelly stakes need a live market price — none available for this race yet.
     {% elif not backed %}
-      No value bet this race — nothing in the field is priced above what the model rates it.
+      No bet this race — nothing in the field is priced above what the model rates it, so the
+      joint Kelly solve stakes nothing here.
     {% else %}
       Staking {{ (backed|sum(attribute='kelly_stake_pct') * 100)|round(1) }}% of bankroll across
       {{ backed|length }} runner{% if backed|length != 1 %}s{% endif %} in this race.
@@ -2923,6 +2968,123 @@ function updateEdgeCell(row, horseOdds) {
     row.classList.toggle('edge-highlight', edgeHighlightEnabled && edge >= EDGE_HIGHLIGHT_THRESHOLD_PCT);
 }
 
+// ══════════════════════════════════════════
+//  KELLY STAKE — joint allocation across one race's runners
+//
+//  WHY THIS EXISTS ON THE CLIENT
+//  The Edge cell is recomputed from every live poll (updateEdgeCell above),
+//  because the polled price is fresher than the snapshot the server priced
+//  from. The Kelly cell was not, so a row could be repainted to "+9.6pp VALUE"
+//  from a live price while its stake still showed the server's answer at an
+//  older price — or no answer at all. Edge and stake are two readings of the
+//  same price and must move together, so the poll re-solves the stake for the
+//  whole race from exactly the prices it just painted into the Edge column.
+//
+//  This is a direct port of model_classes.solve_joint_kelly (Smoczynski &
+//  Tomkins closed form), with the same fraction multiplier and total-stake cap
+//  the server uses, handed down below. Runners are mutually exclusive, so the
+//  solve is per race and not per bet: how much each backed runner gets depends
+//  on the rest of the field. Which runners get anything does not — the
+//  eligibility test p*O > 1 is exactly "edge > 0" — so a repainted Edge and a
+//  repainted stake always agree, and a priced runner the solve declines is
+//  rendered "No Bet" rather than the dash reserved for having no price.
+// ══════════════════════════════════════════
+var KELLY_FRACTION_MULTIPLIER  = {{ kelly_fraction_multiplier|tojson }};
+var KELLY_MAX_TOTAL_STAKE_PCT  = {{ kelly_max_total_stake_pct|tojson }};
+
+function solveJointKelly(entries) {
+    var candidates = entries.filter(function(entry) {
+        // p*O > 1 is the break-even test: below it the bet has negative
+        // expectation and can never earn a positive Kelly stake.
+        return isFinite(entry.prob) && isFinite(entry.odds) &&
+               entry.odds > 1 && entry.prob > 0 && entry.prob < 1 &&
+               (entry.prob * entry.odds) > 1;
+    }).sort(function(a, b) { return (b.prob * b.odds) - (a.prob * a.odds); });
+
+    function reserveOf(set) {
+        return set.reduce(function(sum, e) { return sum + (1 / e.odds); }, 0);
+    }
+    function noWinnerProbOf(set) {
+        return 1 - set.reduce(function(sum, e) { return sum + e.prob; }, 0);
+    }
+
+    var included = [];
+    for (var i = 0; i < candidates.length; i++) {
+        var trial    = included.concat([candidates[i]]);
+        var reserve  = reserveOf(trial);
+        // reserve >= 1 means the backed set covers the whole book; the closed
+        // form divides by (1 - reserve) and stops being meaningful.
+        if (reserve >= 1) break;
+        var noWinner = noWinnerProbOf(trial);
+        var allPositive = trial.every(function(e) {
+            return (e.prob - (noWinner / (e.odds * (1 - reserve)))) > 0;
+        });
+        if (!allPositive) break;
+        included = trial;
+    }
+
+    var stakes = {};
+    if (!included.length) return stakes;
+
+    var finalReserve  = reserveOf(included);
+    var finalNoWinner = noWinnerProbOf(included);
+    var total = 0;
+    included.forEach(function(e) {
+        var stake = Math.max(0, (e.prob - (finalNoWinner / (e.odds * (1 - finalReserve)))) * KELLY_FRACTION_MULTIPLIER);
+        stakes[e.key] = stake;
+        total += stake;
+    });
+    if (KELLY_MAX_TOTAL_STAKE_PCT !== null && total > KELLY_MAX_TOTAL_STAKE_PCT) {
+        var shrink = KELLY_MAX_TOTAL_STAKE_PCT / total;
+        Object.keys(stakes).forEach(function(key) { stakes[key] *= shrink; });
+    }
+    return stakes;
+}
+
+function renderKellyCell(row, stake, price) {
+    var cell = row.querySelector('.kelly-cell .kelly-value');
+    if (!cell) return;
+    var priceNote = (price && isFinite(price)) ? ' at $' + price.toFixed(2) : '';
+    if (stake > 0) {
+        cell.className = 'kelly-value kelly-back';
+        cell.textContent = 'Back — ' + (stake * 100).toFixed(1) + '% of bankroll';
+        cell.title = 'Joint Kelly across this race allocates ' + (stake * 100).toFixed(1) +
+                     '% of bankroll to this runner' + priceNote + '.';
+    } else {
+        cell.className = 'kelly-value kelly-no-bet';
+        cell.textContent = 'No Bet';
+        cell.title = 'Priced' + priceNote + ', and the joint Kelly solve stakes nothing on it: ' +
+                     'the price does not beat what the model rates this runner, so backing it has ' +
+                     'negative expectation at any size.';
+    }
+}
+
+// Re-solve one race from the prices the poll just landed and repaint every
+// Kelly cell it can price. Rows the poll had no price for are left exactly as
+// the server rendered them: an empty poll is not evidence that a stake is
+// unknown, the same reasoning updateEdgeCell applies to the Edge column.
+function updateRaceKellyStakes(raceCard, entries) {
+    if (!entries.length) return;
+    var stakes = solveJointKelly(entries);
+    var backedCount = 0;
+    var totalStake  = 0;
+    entries.forEach(function(entry) {
+        var stake = stakes[entry.key] || 0;
+        if (stake > 0) { backedCount += 1; totalStake += stake; }
+        renderKellyCell(entry.row, stake, entry.odds);
+    });
+
+    var summary = raceCard.querySelector('.kelly-race-summary');
+    if (!summary) return;
+    if (backedCount) {
+        summary.textContent = 'Staking ' + (totalStake * 100).toFixed(1) + '% of bankroll across ' +
+                              backedCount + ' runner' + (backedCount === 1 ? '' : 's') + ' in this race.';
+    } else {
+        summary.textContent = 'No bet this race — nothing in the field is priced above what the model ' +
+                              'rates it, so the joint Kelly solve stakes nothing here.';
+    }
+}
+
 function toggleEdgeHighlight() {
     edgeHighlightEnabled = !edgeHighlightEnabled;
     var btn = document.getElementById('edge-highlight-toggle');
@@ -3021,6 +3183,11 @@ function toggleEdgeSort() {
         var odds    = oddsData.odds     || {};
         var silkUrl = oddsData.silk_url || '';
 
+        // Collected across the row loop and solved once at the end: the Kelly
+        // stake for a runner is a function of the whole race, so it cannot be
+        // decided inside a per-row pass the way the edge can.
+        var kellyEntries = [];
+
         raceCard.querySelectorAll('tbody tr').forEach(function(row) {
             var nameCell = row.cells[1]; // td:nth-child(2) — horse name + silk
             var oddsCell = row.cells[4]; // td:nth-child(5) — dedicated Ladbrokes Price column
@@ -3038,6 +3205,24 @@ function toggleEdgeSort() {
             // to "—" when the market price isn't available yet); nothing is
             // ever hidden or filtered out based on this value.
             updateEdgeCell(row, horseOdds);
+
+            // ── 0b. KELLY STAKE INPUT ─────────────────────────────────
+            // Same price and same fair probability the edge above was just
+            // struck at, so the two columns cannot disagree about the market.
+            // Scratched runners are excluded: they cannot be backed, and
+            // leaving them in would let a dead runner soak up bankroll in the
+            // joint solve and shrink every live stake beside it.
+            var kellyProbPct = parseFloat(row.dataset.mlWinProbPct);
+            var kellyPrice   = (horseOdds && horseOdds.win) ? parseFloat(horseOdds.win) : NaN;
+            if (!row.classList.contains('horse-scratched') &&
+                !isNaN(kellyProbPct) && !isNaN(kellyPrice) && kellyPrice > 1) {
+                kellyEntries.push({
+                    key:  row.dataset.horseId || normName,
+                    row:  row,
+                    prob: kellyProbPct / 100,
+                    odds: kellyPrice,
+                });
+            }
 
             // ── 1. SILK ───────────────────────────────────────────────
             var existingSilk = nameCell.querySelector('.lb-silk');
@@ -3117,6 +3302,8 @@ function toggleEdgeSort() {
                 oddsCell.appendChild(span);
             }
         });
+
+        updateRaceKellyStakes(raceCard, kellyEntries);
 
         syncVisibleSpeedMapSilks(raceNumber);
 

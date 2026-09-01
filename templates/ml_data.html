@@ -550,7 +550,7 @@
 <!-- ML Value Edge Bets — tracked independently of the badge cohorts above. -->
 <div class="section-card">
   <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlValueEdgeBets" aria-expanded="true">
-    <h5>💎 ML Value Edge Bets ($10 Win)</h5><i class="bi bi-chevron-down"></i>
+    <h5>💎 ML Value Edge Bets — Flat $10 vs Kelly Staking</h5><i class="bi bi-chevron-down"></i>
   </div>
   <div id="mlValueEdgeBets" class="collapse show">
     <div class="card-body">
@@ -610,6 +610,77 @@
           </tbody>
         </table>
       </div>
+
+      <!-- Kelly-staked cohort — identical rows, identical filters, sized by
+           predictions.kelly_stake_pct instead of a flat ticket. This is the
+           side-by-side the flat table above cannot answer on its own: whether
+           sizing by edge beats betting the same amount every time. -->
+      <hr class="my-4">
+      <h6 class="mb-2">📐 Same bets, sized by Kelly (${{ "%.0f"|format(value_edge_performance.kelly_bankroll) }} bankroll)</h6>
+      <p class="text-muted mb-3">
+        The very same cohorts, settled at <code>kelly_stake_pct</code> of a fixed
+        ${{ "%.0f"|format(value_edge_performance.kelly_bankroll) }} bankroll instead of a flat
+        ${{ "%.0f"|format(value_edge_performance.flat_stake) }} a bet. The bankroll is held constant rather than
+        compounded, so each bet stays independent and the only thing that changes between the two tables is
+        how much went on each one. Bet counts are lower here on purpose: the joint Kelly solve stakes a runner
+        only when its price beats what the model rates it, so everything at a non-positive edge lands in
+        <em>No Bet</em> — a bet never placed, not a bet that lost.
+      </p>
+      <p class="text-muted mb-3">
+        <strong>Sizing Gain</strong> is the answer to "is Kelly worth it": Kelly's ROI minus the ROI those
+        <em>same</em> bets would have returned at a flat ${{ "%.0f"|format(value_edge_performance.flat_stake) }}.
+        It holds the selections constant and isolates bet sizing, which comparing against the table above
+        cannot do — that cohort also carries every runner Kelly declined. Positive means backing the bigger
+        edges harder paid; negative means flat staking would have done better on the same bets.
+      </p>
+      {% if value_edge_performance.kelly_rows_staked %}
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr><th>Cohort</th><th>Bets</th><th>No Bet</th><th>Wins</th><th>Strike Rate</th><th>Avg Stake</th><th>Staked</th><th>Return</th><th>Profit</th><th>ROI</th><th title="Kelly ROI minus what the same bets would have returned flat-staked. Isolates bet sizing from bet selection.">Sizing Gain</th></tr>
+          </thead>
+          <tbody>
+            {% macro kelly_row(label, cohort, badge) %}
+            <tr>
+              <td>{{ label|safe }}{% if badge %} <span class="badge bg-success">on Best Bets</span>{% endif %}</td>
+              <td>{{ cohort.kelly.bets }}</td>
+              <td class="text-muted">{{ cohort.kelly.no_bet }}</td>
+              <td>{{ cohort.kelly.wins }}</td>
+              <td>{{ "%.1f"|format(cohort.kelly.strike_rate) }}%</td>
+              <td>${{ "%.2f"|format(cohort.kelly.avg_stake) }} <span class="text-muted">({{ "%.2f"|format(cohort.kelly.avg_stake_pct) }}%)</span></td>
+              <td>${{ "%.2f"|format(cohort.kelly.total_staked) }}</td>
+              <td>${{ "%.2f"|format(cohort.kelly.total_return) }}</td>
+              <td class="{% if cohort.kelly.profit >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(cohort.kelly.profit) }}</td>
+              <td class="{% if cohort.kelly.roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(cohort.kelly.roi) }}%</td>
+              {# The whole point of the table: Kelly's ROI minus the ROI of the
+                 SAME bets flat-staked, not minus the flat cohort's — that one
+                 covers a different set of runners, so the difference would be
+                 selection and sizing mixed together. Blank when Kelly placed no
+                 bet here, because there is nothing to compare. #}
+              <td class="{% if cohort.kelly.bets == 0 %}text-muted{% elif cohort.kelly.roi >= cohort.kelly.flat_roi_same_bets %}profit{% else %}loss{% endif %}"
+                  title="{% if cohort.kelly.bets %}Kelly {{ "%+.1f"|format(cohort.kelly.roi) }}% vs {{ "%+.1f"|format(cohort.kelly.flat_roi_same_bets) }}% flat over the same {{ cohort.kelly.bets }} bet{{ '' if cohort.kelly.bets == 1 else 's' }} (${{ "%.2f"|format(cohort.kelly.flat_staked_same_bets) }} flat turnover).{% else %}Kelly staked nothing in this cohort, so there is nothing to compare.{% endif %}">
+                {% if cohort.kelly.bets %}{{ "%+.1f"|format(cohort.kelly.roi - cohort.kelly.flat_roi_same_bets) }}pp{% else %}—{% endif %}
+              </td>
+            </tr>
+            {% endmacro %}
+
+            {{ kelly_row('<strong>All Value Edge Bets</strong>', value_edge_performance.overall, false) }}
+            {% if value_edge_performance.at_best_bets_threshold %}
+            {{ kelly_row('<strong>Shown on Best Bets (' ~ "%.0f"|format(value_edge_performance.best_bets_threshold_pct) ~ 'pp+)</strong>', value_edge_performance.at_best_bets_threshold, false) }}
+            {% endif %}
+            {% for bucket in value_edge_performance.buckets %}
+            {{ kelly_row('Edge ' ~ bucket.label, bucket, bucket.is_best_bets_bucket) }}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">
+        No Kelly-staked bets to settle yet — every settled runner in the cohorts above has
+        <code>kelly_stake_pct = 0</code>, meaning the joint solve declined them all. That is a statement about
+        staking, not about results: the flat table above still shows how those same runners performed.
+      </p>
+      {% endif %}
       {% else %}
       <p class="text-muted mb-0">No settled Value Edge bets yet — results will populate here once flagged pre-race bets have run their race.</p>
       {% endif %}
