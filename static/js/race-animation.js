@@ -24,27 +24,44 @@
  * one arc-length parameter means runners on the same progress are genuinely
  * abreast, on the same radial line, all the way round.
  *
+ * The lane is not fixed. It starts as the barrier draw — lane 0 is barrier 1,
+ * on the rail — and over the first tenth of the race the whole field slides
+ * across into speed-map lanes instead: leaders innermost, then onpace, midfield
+ * and backmarkers furthest out, each group ordered inside itself by its speed
+ * rating. That is the crossing a real field makes in the first furlong, and it
+ * leaves the runners in tidy grouped rows for the middle of the race.
+ *
  * MOVEMENT
- * Each runner has a progress curve p(t), 0 at the barriers and ~1 at the post,
- * built as a monotone cubic (PCHIP) through four control points:
+ * Every runner shares one pack curve pack(t) — 0 at the gates, 1 at the post,
+ * with a burst of extra speed over the first 6% of the race so the jump reads
+ * as an acceleration and not a rolling start. Each runner is then displaced
+ * along the track from that pack by an offset, and it is the offset, never the
+ * pack, that carries the story of the race:
  *
- *   t=0.00  p=0            the barriers
- *   t=0.20  p=break        set by the speed map pace category — leaders clear
- *   t=0.62  p=midrace      order roughly holds, composite starts to leak in
- *   t=1.00  p=finish       set by composite rank and the score gaps
+ *   GATE    t 0    -> 0.26   offsets ramp up from zero, so the field leaves the
+ *                            barrier line together and strings out into its
+ *                            speed-map order. A per-runner delay of a few
+ *                            frames stops the launch looking synchronised.
+ *   SETTLE  t 0.26 -> 0.65   offsets hold constant. Nobody passes anybody, and
+ *                            nobody changes lanes. The only movement is a small
+ *                            bob and a little lateral drift, so the field looks
+ *                            alive but locked in its mapped positions.
+ *   SPRINT  t 0.65 -> 1      offsets interpolate from the settled position to
+ *                            the finishing position on a t^1.6 curve, so the
+ *                            moves build through the straight. This is where a
+ *                            backmarker with a big composite comes over the top
+ *                            and a weak leader drops out of it.
  *
- * PCHIP is the point here: it is monotone by construction, so no runner ever
- * slides backwards between control points however aggressive the run home is.
- * The last control point is the composite-score finish position, so the finish
- * order always matches the ranking from the API — the drama in between is
- * shaped by the first two control points, never by fudging the result.
+ * The pack rises far faster than any offset can fall, so no runner ever goes
+ * backwards, and the sprint target is the composite finish order, so the result
+ * always matches the ranking the API sent.
  *
- * The three phases are deliberately mapped onto the three sections of track.
- * The race is three-quarters of a lap — it starts at the top of the back
- * straight, not at the post — so the break plays out along the back straight
- * where it can be seen, the midrace covers the turn, and the run home is the
- * whole of the home straight nearest the viewer. p≈0.645 at t=0.62 is exactly
- * the top of the home straight.
+ * FINISH SPACING
+ * Real beaten margins are honest and unreadable: a two-length win is a handful
+ * of pixels. Finishing offsets are therefore laid out with a MINIMUM gap between
+ * adjacent placings, measured in horse body lengths and widest at the head of
+ * the field, so first, second and third separate at a glance. The order is never
+ * touched — only the spacing.
  *
  * ORIENTATION
  * Horses stay upright rather than rotating with the path, because a runner
@@ -60,31 +77,74 @@
     var SVG_NS = 'http://www.w3.org/2000/svg';
 
     // ── Phase boundaries, in normalised race time ──
-    var T_BREAK = 0.20;      // barriers -> settled
-    var T_MIDRACE = 0.62;    // settled -> top of the home straight
+    var T_GATE = 0.26;         // barriers -> settled into speed-map order
+    var T_LANE_START = 0.05;   // the cross into speed-map lanes starts here...
+    var T_LANE_END = 0.13;     // ...and finishes here: the first tenth of the race
+    var T_SPRINT = 0.65;       // the settle phase ends and the run home begins
+    var GATE_STAGGER = 0.012;  // biggest per-runner delay out of the gate
 
-    // How far up the track each pace category is when the field settles.
-    // A leader is clear of a backmarker by ~7% of a lap out of the gates.
-    var PACE_BREAK = { leader: 0.205, onpace: 0.184, midfield: 0.158, back: 0.134 };
+    // Lane order across the track once the field has settled, rail outwards.
+    var PACE_LANE_ORDER = { leader: 0, onpace: 1, midfield: 2, back: 3 };
 
-    // At the top of the straight the order still mostly reflects the break, but
-    // the composite has begun to tell — this is the 'minor jostling' phase, not
-    // a reshuffle, so the mix leans hard on the break. The spread matters as
-    // much as the mix: keep the field too tight here and the run home has no
-    // ground for a closer to make up, so the surge reads as a drift instead of
-    // a finish. 0.175 of a lap is roughly the eight-lengths-off-them a genuine
-    // backmarker gives the leaders turning in.
-    var MID_BASE = 0.685;
-    var MID_SPREAD = 0.175;
-    var MID_FROM_BREAK = 0.80;
-    var MID_FROM_SCORE = 0.20;
+    // The settled field is strung out by walking the speed-map order and giving
+    // each runner a gap back on the one in front, in HORSE BODY LENGTHS. Body
+    // lengths rather than a share of the lap because the horses shrink as the
+    // field grows, and the gaps have to shrink with them or a big field runs off
+    // the back of the screen. The extra step at a group boundary is what makes
+    // the leaders, the onpacers and the backmarkers read as separate bunches.
+    var SETTLE_STEP_LENGTHS = 0.38;        // runner to runner inside a group
+    var SETTLE_GROUP_STEP_LENGTHS = 0.90;  // extra, crossing into the next group
+    var SETTLE_JITTER_LENGTHS = 0.22;      // deterministic per-runner untidiness
 
-    // One length as a fraction of the lap. A 20-length spread across the field
-    // then covers ~4% of the circuit, which reads as a strung-out finish
-    // without pushing the tail of the field back onto the turn.
-    var LENGTH_FRACTION = 0.0021;
+    // Hard cap on leader-to-tail at the settle, as a share of the race. This is
+    // not a taste setting: the field has to reach its settled shape inside the
+    // gate phase, so the rate the gaps open at is spread / gate length, and once
+    // that passes the pack's own speed the tail runner would be going backwards
+    // across the ground. Capping the spread keeps every runner moving forward
+    // whatever the field size, and the same cap keeps a big field on screen.
+    var SETTLE_MAX_SPREAD = 0.10;
+    // Finish spacing. Display only: it never reorders anybody.
+    var FINISH_MIN_GAP_HEAD = 0.80;   // body lengths between 1st and 2nd
+    var FINISH_MIN_GAP_FLOOR = 0.35;  // ...and the floor further down the field
+    var FINISH_GAP_DECAY = 0.90;      // per placing
+    var TRUE_MARGIN_SCALE = 0.35;     // API lengths -> body lengths on screen
+    var FINISH_MAX_SPREAD = 0.16;     // cap on 1st-to-last, as a share of the race
+
+    // A body length as a share of the drawn icon: the art is drawn on a 100-unit
+    // box with air around the horse, so the animal itself is ~70 of it.
+    var BODY_OF_ICON = 0.70;
+
+    // Icon size against field size. A match race gets big horses that can
+    // actually be read; a 24-runner Cup gets small ones so the field still fits
+    // one screen. Anything in between interpolates along the steps.
+    var SIZE_STEPS = [[6, 80], [8, 72], [12, 58], [16, 46], [20, 37], [24, 32]];
 
     function clamp(value, low, high) { return value < low ? low : (value > high ? high : value); }
+
+    function smoothstep(edge0, edge1, x) {
+        if (edge1 - edge0 < 1e-9) return x < edge0 ? 0 : 1;
+        var t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
+        return t * t * (3 - 2 * t);
+    }
+
+    /* Deterministic 0..1 out of a seed. The same horse jitters the same way
+     * every time, so a replay is a replay of the same race and not a new one. */
+    function hash01(seed) {
+        var value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+        return value - Math.floor(value);
+    }
+
+    function horseSizeForField(fieldSize) {
+        if (fieldSize <= SIZE_STEPS[0][0]) return SIZE_STEPS[0][1];
+        for (var i = 1; i < SIZE_STEPS.length; i++) {
+            if (fieldSize <= SIZE_STEPS[i][0]) {
+                var low = SIZE_STEPS[i - 1], high = SIZE_STEPS[i];
+                var f = (fieldSize - low[0]) / (high[0] - low[0]);
+                return low[1] + (high[1] - low[1]) * f;
+            }
+        }
+        return SIZE_STEPS[SIZE_STEPS.length - 1][1];
+    }
 
     // ── Monotone cubic interpolation (PCHIP) ──────────────────────────────
     /* Fritsch-Carlson slope limiting: where the data changes direction, or
@@ -145,8 +205,10 @@
     // The running surface is a fixed width whatever the field size — the lanes
     // pack tighter as runners are added rather than the track fattening up.
     // Letting the band grow with the field turned the infield into a sliver and
-    // the whole oval into a green blob.
-    var TRACK_BAND = 150;
+    // the whole oval into a green blob. It is as wide as it can be without
+    // doing that, because every pixel of it is lane spacing, and lane spacing is
+    // what stops a field standing in the barriers looking like one animal.
+    var TRACK_BAND = 186;
 
     /* One lane, as a stadium path traced anti-clockwise from the winning post.
      *
@@ -221,46 +283,97 @@
         return { x: x, y: y, angle: angle };
     }
 
-    // ── Progress curves ───────────────────────────────────────────────────
-    /* Build one runner's p(t) from its pace category and composite rank.
+    // ── Movement ──────────────────────────────────────────────────────────
+    /* The pack curve. Everybody runs on this; the offsets do the racing.
      *
-     * `spread01` is the runner's composite score placed on 0..1 against the
-     * field (1 = the top-rated horse), so a race where everything is rated
-     * within a point of everything else produces a blanket finish rather than
-     * an artificial procession.
-     */
-    function buildProgressCurve(runner, spread01, fieldSize, seed) {
-        var pace = PACE_BREAK[runner.pace_category] != null ? runner.pace_category : 'midfield';
+     * PCHIP through (0,0), (0.06, 0.085), (1,1): monotone by construction, and
+     * that middle point is the gate burst — 8.5% of the trip covered in the
+     * first 6% of the clock, so the field visibly accelerates off the barriers
+     * and then settles into an even gallop. */
+    var packCurve = pchip([0, 0.06, 1], [0, 0.085, 1]);
 
-        // Break: pace category sets it, with a small deterministic wobble so
-        // two leaders out of adjacent barriers do not move as one object.
-        var wobble = (Math.sin(seed * 12.9898) * 43758.5453) % 1;
-        wobble = (wobble - Math.floor(wobble)) - 0.5;
-        var breakProgress = PACE_BREAK[pace] + wobble * 0.018;
+    /* Settled gaps back from the leader, in progress units, for a field already
+     * sorted into speed-map order (leaders first). Each runner is given a gap on
+     * the one in front, with an extra step whenever the pace group changes, so
+     * the bunches read as bunches. Capped by SETTLE_MAX_SPREAD. */
+    function settleOffsets(order, bodyProgress) {
+        var out = [0];
+        var back = 0;
+        for (var i = 1; i < order.length; i++) {
+            var step = SETTLE_STEP_LENGTHS;
+            if (order[i - 1].pace_category !== order[i].pace_category) step += SETTLE_GROUP_STEP_LENGTHS;
+            step += hash01(i * 3.7 + 1) * SETTLE_JITTER_LENGTHS;
+            back += step;
+            out.push(-back * bodyProgress);
+        }
+        var spread = back * bodyProgress;
+        if (spread > SETTLE_MAX_SPREAD) {
+            var scale = SETTLE_MAX_SPREAD / spread;
+            for (var k = 0; k < out.length; k++) out[k] *= scale;
+        }
+        return out;
+    }
 
-        // Settled: mostly still the break order, with the composite leaking in.
-        var breakRank01 = (breakProgress - PACE_BREAK.back) / (PACE_BREAK.leader - PACE_BREAK.back);
-        var midMix = MID_FROM_BREAK * breakRank01 + MID_FROM_SCORE * spread01;
-        var midProgress = MID_BASE + (midMix - 0.5) * MID_SPREAD + wobble * 0.012;
+    /* Beaten margins -> on-screen finishing gaps, in pixels, cumulative from
+     * the winner. `ranked` is the field in composite-rank order.
+     *
+     * Each gap is the true score-derived margin OR a minimum, whichever is
+     * bigger, and the minimum decays down the field so the placings that matter
+     * get the most air. The whole thing is then scaled to fit FINISH_MAX_SPREAD
+     * so a 24-runner field cannot push its tail back onto the turn. */
+    function finishGapsPx(ranked, bodyLengthPx, raceLengthPx) {
+        var gaps = [0];
+        var previous = ranked.length ? (ranked[0].beaten_margin || 0) : 0;
+        for (var i = 1; i < ranked.length; i++) {
+            var margin = ranked[i].beaten_margin || 0;
+            var truth = Math.max(0, margin - previous) * TRUE_MARGIN_SCALE * bodyLengthPx;
+            var floor = Math.max(FINISH_MIN_GAP_FLOOR,
+                                 FINISH_MIN_GAP_HEAD * Math.pow(FINISH_GAP_DECAY, i - 1)) * bodyLengthPx;
+            gaps.push(gaps[i - 1] + Math.max(truth, floor));
+            previous = margin;
+        }
+        var total = gaps[gaps.length - 1];
+        var cap = raceLengthPx * FINISH_MAX_SPREAD;
+        if (total > cap && total > 0) {
+            var scale = cap / total;
+            for (var k = 0; k < gaps.length; k++) gaps[k] *= scale;
+        }
+        return gaps;
+    }
 
-        // Finish: locked to the composite rank via the beaten margin the API
-        // derived from the score gaps. This is the only control point that
-        // decides the result.
-        var margin = runner.beaten_margin || 0;
-        var finishProgress = 1 - margin * LENGTH_FRACTION;
+    /* How far round the track a runner is at race time t (0..1). */
+    function progressAt(entry, t) {
+        // The gate delay is a genuine slow beginning — a horse held in the stalls
+        // for a few frames — that washes out again by the time the field settles,
+        // so it ruffles the jump without quietly reordering the settled field.
+        var settled = smoothstep(0, T_GATE, t);
+        var base = packCurve(t - entry.gateDelay * (1 - settled));
 
-        // Keep the control points strictly increasing so PCHIP stays sane even
-        // if a huge field pushes the margins further than expected.
-        midProgress = Math.max(midProgress, breakProgress + 0.05);
-        finishProgress = Math.max(finishProgress, midProgress + 0.04);
+        var offset;
+        if (t <= T_SPRINT) {
+            // Gate then settle: the mapped gap fades in on a per-runner shape,
+            // and every runner is on its mark by T_GATE, after which it holds.
+            offset = entry.settleOffset * Math.pow(settled, entry.settleShape);
+        } else {
+            // Run home: settled position -> finishing position, accelerating.
+            var u = (t - T_SPRINT) / (1 - T_SPRINT);
+            offset = entry.settleOffset + (entry.finishOffset - entry.settleOffset) * Math.pow(u, 1.6);
+        }
 
-        var curve = pchip([0, T_BREAK, T_MIDRACE, 1], [0, breakProgress, midProgress, finishProgress]);
-        return {
-            at: curve,
-            breakProgress: breakProgress,
-            midProgress: midProgress,
-            finishProgress: finishProgress
-        };
+        // Cosmetic bob through the settle phase — enough to look alive, far too
+        // small to take a place off anybody (the smallest settled gap between
+        // two runners is wider than two horses' bobs put together).
+        var alive = settled * (1 - smoothstep(T_SPRINT, T_SPRINT + 0.1, t));
+        var bob = Math.sin(t * 9.1 + entry.jostleSeed) * entry.bobAmplitude * alive;
+
+        return clamp(base + offset + bob, 0, 1);
+    }
+
+    /* Sideways position in px: the barrier lane out of the gates, crossing to
+     * the speed-map lane over the first tenth of the race, then held. */
+    function laneOffsetAt(entry, t) {
+        var mix = smoothstep(T_LANE_START, T_LANE_END, t);
+        return entry.barrierOffset + (entry.settleLaneOffset - entry.barrierOffset) * mix;
     }
 
     // ── Scenery ───────────────────────────────────────────────────────────
@@ -314,6 +427,41 @@
 
     }
 
+    /* The barrier stalls, at the top of the back straight where the race starts.
+     *
+     * Travel along that straight is right to left, so the gate line is vertical
+     * and the stalls sit behind the field, off to its right. One stall per lane,
+     * innermost stall = barrier 1, which is exactly where the runners line up.
+     */
+    function buildGate(parent, laneBase, laneGap, fieldSize, innerRadius, outerRadius) {
+        var gateX = VIEW.cx + VIEW.straight;
+        var gate = append(parent, el('g', { 'class': 'ra-gate' }));
+        var stallDepth = clamp(laneGap * 1.7, 11, 22);
+
+        // The line the field jumps from, right across the running surface.
+        append(gate, el('line', {
+            x1: gateX, y1: VIEW.cy - (outerRadius + 18), x2: gateX, y2: VIEW.cy - (innerRadius - 18),
+            stroke: '#ffffff', 'stroke-width': 2.6, 'stroke-dasharray': '6 4', opacity: 0.8
+        }));
+
+        for (var lane = 0; lane < fieldSize; lane++) {
+            var y = VIEW.cy - (laneBase + lane * laneGap);
+            append(gate, el('rect', {
+                x: gateX, y: y - laneGap * 0.46,
+                width: stallDepth, height: Math.max(3, laneGap * 0.92),
+                rx: 1.4, fill: 'rgba(10,12,18,0.72)',
+                stroke: 'rgba(232,236,242,0.5)', 'stroke-width': 0.7
+            }));
+        }
+
+        var label = append(gate, el('text', {
+            x: gateX + stallDepth + 9, y: VIEW.cy - (outerRadius + 12),
+            'font-size': 13, 'font-weight': '800', fill: '#f4f6fa', opacity: 0.75,
+            'font-family': "'DM Mono', ui-monospace, monospace"
+        }));
+        label.textContent = 'BARRIERS';
+    }
+
     // ── The controller ────────────────────────────────────────────────────
     /* options:
      *   svg           the <svg> to build into (cleared first)
@@ -334,10 +482,12 @@
         while (svg.firstChild) svg.removeChild(svg.firstChild);
         svg.setAttribute('viewBox', '0 0 ' + VIEW.width + ' ' + VIEW.height);
 
-        // Lane spacing and horse size both fall away as the field grows, which
-        // is what keeps a 24-runner race on one screen without scrolling.
-        var laneGap = Math.min(18, TRACK_BAND / (fieldSize + 1));
-        var horseSize = clamp(laneGap * 4.4, 40, 78);
+        // Lane spacing falls away as the field grows, which is what keeps a
+        // 24-runner race on one screen without scrolling. The icons are sized
+        // off the field directly rather than off the lane gap, so a small field
+        // gets genuinely big horses instead of merely wider lanes.
+        var laneGap = Math.min(30, TRACK_BAND / (fieldSize + 0.6));
+        var horseSize = horseSizeForField(fieldSize);
         var outerRadius = VIEW.outerRy;
         var innerRadius = outerRadius - TRACK_BAND;
         // Centre the lanes in the band so a small field runs down the middle of
@@ -347,6 +497,7 @@
         var referenceRadius = laneBase + midLane * laneGap;
 
         buildTrack(svg, innerRadius, outerRadius);
+        buildGate(svg, laneBase, laneGap, fieldSize, innerRadius, outerRadius);
 
         var laneLayer = append(svg, el('g', { 'class': 'ra-lanes', opacity: 0.12 }));
 
@@ -361,11 +512,52 @@
         var horseLayer = append(svg, el('g', { 'class': 'ra-horses' }));
         var labelLayer = append(svg, el('g', { 'class': 'ra-labels' }));
 
-        // Composite spread, for shaping how much the run home reshuffles.
-        var scores = runners.map(function (r) { return r.composite_score || 0; });
-        var bestScore = Math.max.apply(null, scores);
-        var worstScore = Math.min.apply(null, scores);
-        var scoreSpan = Math.max(1e-6, bestScore - worstScore);
+        // Runners always have an id from the API; the fallback only exists so a
+        // hand-built payload cannot collide every runner onto one map key.
+        function idOf(runner) {
+            return runner.horse_id != null ? runner.horse_id : ('n' + runners.indexOf(runner));
+        }
+
+        var bodyLengthPx = horseSize * BODY_OF_ICON;
+        var bodyProgress = bodyLengthPx / table.raceLength;
+
+        // ── The settled shape, straight off the speed map ──────────────────
+        // Rail outwards by pace group, and inside a group by speed rating. The
+        // one order sets both the lane AND the gap back through the field, so
+        // what the middle of the race shows is the speed map drawn on a track.
+        var settleOrder = runners.slice().sort(function (a, b) {
+            var pa = PACE_LANE_ORDER[a.pace_category] != null ? PACE_LANE_ORDER[a.pace_category] : 2;
+            var pb = PACE_LANE_ORDER[b.pace_category] != null ? PACE_LANE_ORDER[b.pace_category] : 2;
+            if (pa !== pb) return pa - pb;
+            var sa = a.speed != null ? a.speed : -Infinity;
+            var sb = b.speed != null ? b.speed : -Infinity;
+            if (sa !== sb) return sb - sa;
+            return (a.rank || 99) - (b.rank || 99);
+        });
+
+        var settleGaps = settleOffsets(settleOrder, bodyProgress);
+        // The bob is cosmetic and must stay cosmetic: two neighbours bobbing in
+        // opposite phase still have to keep their order, so cap the amplitude
+        // against the tightest settled gap in this particular field.
+        var tightestGap = Infinity;
+        for (var g = 1; g < settleGaps.length; g++) {
+            tightestGap = Math.min(tightestGap, settleGaps[g - 1] - settleGaps[g]);
+        }
+        var bobCeiling = isFinite(tightestGap) ? tightestGap * 0.35 : bodyProgress * 0.09;
+
+        var settleLaneById = {}, settleOffsetById = {};
+        settleOrder.forEach(function (runner, index) {
+            settleLaneById[idOf(runner)] = index;
+            settleOffsetById[idOf(runner)] = settleGaps[index];
+        });
+
+        // ── The finishing shape, straight off the composite ────────────────
+        var rankOrder = runners.slice().sort(function (a, b) { return (a.rank || 99) - (b.rank || 99); });
+        var finishGaps = finishGapsPx(rankOrder, bodyLengthPx, table.raceLength);
+        var finishOffsetById = {};
+        rankOrder.forEach(function (runner, index) {
+            finishOffsetById[idOf(runner)] = -finishGaps[index] / table.raceLength;
+        });
 
         var showNames = options.showNames != null ? options.showNames : fieldSize <= 11;
         // Chips shrink with the horses, and are staggered over three rows so
@@ -376,9 +568,12 @@
         var entries = [];
 
         runners.forEach(function (runner, index) {
-            var lane = runner.lane != null ? runner.lane : index;
+            var lane = runner.lane != null ? runner.lane : index;      // barrier draw
+            var settleLane = settleLaneById[idOf(runner)];
+            if (settleLane == null) settleLane = lane;
             // Positive offsets move towards the rail, so barrier 1 sits inside.
-            var laneOffset = (midLane - lane) * laneGap;
+            var barrierOffset = (midLane - lane) * laneGap;
+            var settleLaneOffset = (midLane - settleLane) * laneGap;
             append(laneLayer, el('path', {
                 d: lanePathData(laneBase + lane * laneGap), fill: 'none',
                 stroke: '#8fb79a', 'stroke-width': 0.8, 'stroke-dasharray': '3 7'
@@ -411,19 +606,27 @@
             }));
             chipText.textContent = (runner.tab_number ? runner.tab_number + '. ' : '') + runner.horse_name;
 
-            var spread01 = (runner.composite_score - worstScore) / scoreSpan;
+            var seed = lane + 1 + index * 0.37;
             entries.push({
                 runner: runner,
                 lane: lane,
-                laneOffset: laneOffset,
+                settleLane: settleLane,
+                barrierOffset: barrierOffset,
+                settleLaneOffset: settleLaneOffset,
+                // A few frames of delay each, so the jump is a ragged line of
+                // horses and not one object leaving the gates.
+                gateDelay: hash01(seed * 1.7) * GATE_STAGGER,
+                settleShape: 0.88 + hash01(seed * 2.9) * 0.3,
+                settleOffset: settleOffsetById[idOf(runner)] || 0,
+                finishOffset: finishOffsetById[idOf(runner)] || 0,
+                bobAmplitude: Math.min((0.05 + hash01(seed * 4.3) * 0.04) * bodyProgress, bobCeiling),
                 art: art,
                 holder: holder,
                 chip: chip,
                 chipBg: chipBg,
-                curve: buildProgressCurve(runner, spread01, fieldSize, lane + 1 + runner.horse_id * 0.37),
                 gait: Math.random(),
                 lastProgress: 0,
-                jostleSeed: (lane * 1.7) + (runner.horse_id % 7)
+                jostleSeed: (lane * 1.7) + (index % 7)
             });
         });
 
@@ -449,17 +652,18 @@
         var rafHandle = null;
         var lastDepthKey = '';
 
-        /* Lateral drift. Horses do not run down a painted line: they shift
-         * across each other for a run, most of it through the middle stages,
-         * and straighten up under pressure in the last furlong. Doing this
-         * sideways rather than by nudging progress keeps the finish order — and
-         * PCHIP's monotonicity — completely untouched. */
-        function jostle(entry, t) {
-            var settle = t < 0.06 ? t / 0.06 : 1;                    // none in the gates
-            var taper = t > 0.82 ? Math.max(0, 1 - (t - 0.82) / 0.18) : 1;
+        /* Lateral drift on top of the lane. Horses do not run down a painted
+         * line, but through the settle phase they are meant to look locked, so
+         * the drift is held to a shimmer there and only opens up once the
+         * sprint starts and runners begin looking for room. Doing this sideways
+         * rather than by nudging progress leaves the finish order untouched. */
+        function drift(entry, t) {
+            var alive = t < 0.06 ? t / 0.06 : 1;                     // none in the gates
+            var room = 0.28 + 0.72 * smoothstep(T_SPRINT - 0.04, T_SPRINT + 0.16, t);
+            var taper = t > 0.86 ? Math.max(0, 1 - (t - 0.86) / 0.14) : 1;
             var wave = Math.sin(t * 5.3 + entry.jostleSeed) * 0.62
                      + Math.sin(t * 2.1 + entry.jostleSeed * 2.3) * 0.38;
-            return wave * laneGap * 0.42 * settle * taper;
+            return wave * laneGap * 0.42 * alive * room * taper;
         }
 
         function frame(now) {
@@ -483,13 +687,14 @@
             var live = [];
             for (var i = 0; i < entries.length; i++) {
                 var entry = entries[i];
-                var progress = entry.curve.at(raceTime);
+                var progress = progressAt(entry, raceTime);
                 // Belt and braces on top of PCHIP: a horse never goes backwards.
                 if (progress < entry.lastProgress) progress = entry.lastProgress;
                 var travelled = progress - entry.lastProgress;
                 entry.lastProgress = progress;
 
-                var point = samplePoint(table, progress, entry.laneOffset + jostle(entry, raceTime));
+                var point = samplePoint(table, progress,
+                    laneOffsetAt(entry, raceTime) + drift(entry, raceTime));
                 var scale = horseSize / 100;
 
                 // Facing: cos(tangent) is +1 running right down the home
@@ -521,7 +726,7 @@
                 }
                 entry.art.setGait(entry.gait);
 
-                var chipY = point.y - horseSize * 0.46 - (entry.lane % 3) * chipRowHeight;
+                var chipY = point.y - horseSize * 0.46 - (entry.settleLane % 3) * chipRowHeight;
                 entry.chip.setAttribute('transform',
                     'translate(' + point.x.toFixed(2) + ',' + Math.max(12, chipY).toFixed(2) + ')');
 
@@ -615,11 +820,20 @@
     global.RaceAnimation = {
         create: create,
         pchip: pchip,
-        buildProgressCurve: buildProgressCurve,
+        packCurve: packCurve,
+        progressAt: progressAt,
+        settleOffsets: settleOffsets,
+        laneOffsetAt: laneOffsetAt,
+        finishGapsPx: finishGapsPx,
+        horseSizeForField: horseSizeForField,
         lanePathData: lanePathData,
         VIEW: VIEW,
-        T_BREAK: T_BREAK,
-        T_MIDRACE: T_MIDRACE,
-        PACE_BREAK: PACE_BREAK
+        T_GATE: T_GATE,
+        T_SPRINT: T_SPRINT,
+        T_LANE_START: T_LANE_START,
+        T_LANE_END: T_LANE_END,
+        GATE_STAGGER: GATE_STAGGER,
+        BODY_OF_ICON: BODY_OF_ICON,
+        PACE_LANE_ORDER: PACE_LANE_ORDER
     };
 }(typeof window !== 'undefined' ? window : this));
