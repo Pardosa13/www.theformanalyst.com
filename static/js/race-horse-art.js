@@ -298,6 +298,7 @@
      *   .node            the root <g> — position/scale this from outside
      *   .setGait(phase)  advance the gallop cycle, phase in 0..1
      *   .setDimmed(on)   fade a runner back when another one is selected
+     *   .setSilk(info)   drop real silk artwork on after the horse is drawn
      *   .destroy()       drop the node
      */
     function create(options) {
@@ -397,25 +398,46 @@
 
         // Torso — the silk. Coded pattern underneath, sprite over the top.
         append(jockey, el('path', { d: JOCKEY_TORSO_PATH, fill: bodyPaint }));
-        if (useSprite) {
-            var clip = append(defs, el('clipPath', { id: id + '-silkclip' }));
-            append(clip, el('path', { d: JOCKEY_TORSO_PATH }));
-            var tile = silk.tile_px || 32;
+
+        /* Crop the runner's tile out of the silk sprite strip and clip it to
+         * the torso outline.
+         *
+         * Broken out of the build so it can also run LATER: the race payload no
+         * longer waits on the bookmaker for artwork, so a runner is drawn in
+         * its coded colours first and the real silk is dropped on top if and
+         * when the separate silks request answers. Calling this again replaces
+         * whatever is there, so a second answer cannot stack two strips up. */
+        var spriteFrame = null;
+        function mountSprite(info) {
+            if (spriteFrame && spriteFrame.parentNode) {
+                spriteFrame.parentNode.removeChild(spriteFrame);
+            }
+            spriteFrame = null;
+            if (!info || !info.sprite_url || !info.runner_number) return;
+
+            if (!defs.querySelector('#' + id + '-silkclip')) {
+                var clip = append(defs, el('clipPath', { id: id + '-silkclip' }));
+                append(clip, el('path', { d: JOCKEY_TORSO_PATH }));
+            }
+            var tile = info.tile_px || 32;
             var frame = append(jockey, el('svg', {
                 x: 46.4, y: 5.2, width: 20.6, height: 17,
-                viewBox: ((silk.runner_number - 1) * tile) + ' 0 ' + tile + ' ' + tile,
+                viewBox: ((info.runner_number - 1) * tile) + ' 0 ' + tile + ' ' + tile,
                 preserveAspectRatio: 'none',
                 'clip-path': 'url(#' + id + '-silkclip)'
             }));
             var image = append(frame, el('image', { x: 0, y: 0 }));
-            image.setAttributeNS(XLINK_NS, 'xlink:href', silk.sprite_url);
-            image.setAttribute('href', silk.sprite_url);
+            image.setAttributeNS(XLINK_NS, 'xlink:href', info.sprite_url);
+            image.setAttribute('href', info.sprite_url);
             // If the strip fails to load, the coded pattern under it is already
             // drawn, so just remove the empty frame rather than leaving a hole.
             image.addEventListener('error', function () {
                 if (frame.parentNode) frame.parentNode.removeChild(frame);
+                if (spriteFrame === frame) spriteFrame = null;
             });
+            spriteFrame = frame;
         }
+        if (useSprite) mountSprite(silk);
         append(jockey, el('path', {                                 // arm reaching to the reins
             d: 'M 63.4,11.2 C 67.6,12.2 71.6,13.8 74.6,15.8',
             stroke: shade(fallback.primary || '#cccccc', -0.12),
@@ -490,6 +512,11 @@
 
             setNumberVisible: function (visible) {
                 numberText.setAttribute('display', visible ? 'inline' : 'none');
+            },
+
+            /* Swap in real silk artwork after the fact. See mountSprite(). */
+            setSilk: function (info) {
+                mountSprite(info);
             },
 
             destroy: function () {
