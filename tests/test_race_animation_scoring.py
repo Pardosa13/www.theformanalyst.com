@@ -9,12 +9,23 @@ import race_animation_scoring as scoring
 
 
 def test_weights_are_the_published_blend():
-    assert scoring.WEIGHTS == {
+    """The four published inputs still carry the whole default blend.
+
+    Four newer components (jockey/trainer, draw, pace fit, market) were added
+    to the blend later. They default to zero weight on purpose: switching an
+    input on is a change to every prediction on the site, so it has to be a
+    deliberate act — a preset, a slider, or the tuner earning it. This guard is
+    what stops one arriving switched on by accident.
+    """
+    assert {key: scoring.WEIGHTS[key] for key in scoring.CORE_COMPONENT_KEYS} == {
         'speed_map': 0.50,
         'sectional': 0.10,
         'adjusted_time': 0.10,
         'assessment': 0.30,
     }
+    for key in scoring.COMPONENT_KEYS:
+        if key not in scoring.CORE_COMPONENT_KEYS:
+            assert scoring.WEIGHTS[key] == 0.0, f"{key} must default to no weight"
 
 
 def test_weights_sum_to_one():
@@ -137,9 +148,13 @@ def test_weighted_contributions_add_up_to_the_composite():
 
 def test_weights_as_percentages_reads_back_the_split():
     weights = scoring.resolve_weights({'speed_map': 60, 'sectional': 20, 'adjusted_time': 10, 'assessment': 10})
-    assert scoring.weights_as_percentages(weights) == {
+    as_pct = scoring.weights_as_percentages(weights)
+    assert {key: as_pct[key] for key in scoring.CORE_COMPONENT_KEYS} == {
         'speed_map': 60.0, 'sectional': 20.0, 'adjusted_time': 10.0, 'assessment': 10.0,
     }
+    # Components the request never mentioned stay out of the blend entirely.
+    assert all(as_pct[key] == 0.0 for key in scoring.COMPONENT_KEYS
+               if key not in scoring.CORE_COMPONENT_KEYS)
 
 
 def test_partial_percentage_request_is_not_swamped_by_fraction_defaults():

@@ -5,12 +5,18 @@
  * race-horse-art.js for the runners themselves.
  *
  * TRACK
- * A stadium oval: two straights joined by two turns, run anti-clockwise, with
- * the start/finish post at the end of the home (bottom) straight. Positions
- * come from sampling the real SVG path with getPointAtLength() rather than from
- * hand-rolled curve maths — the path is sampled once into a lookup table at
- * build time, so a 24-runner field costs a couple of array reads per horse per
- * frame instead of dozens of geometry calls.
+ * A stadium oval: two straights joined by two turns, with the start/finish post
+ * at the end of the home straight. Positions come from sampling the real SVG
+ * path with getPointAtLength() rather than from hand-rolled curve maths — the
+ * path is sampled once into a lookup table at build time, so a 24-runner field
+ * costs a couple of array reads per horse per frame instead of dozens of
+ * geometry calls.
+ *
+ * The direction of travel and how much of the lap the race covers both come
+ * from the payload. Australian fields run clockwise in New South Wales and
+ * Queensland and anti-clockwise everywhere else, and a 1000m dash starts a long
+ * way closer to the post than a 2400m staying race. Drawing every race as the
+ * same three-quarter lap made a sprint and a Cup look identical.
  *
  * LANES
  * Every runner shares ONE reference path — the middle lane — and is pushed off
@@ -46,15 +52,30 @@
  *                            nobody changes lanes. The only movement is a small
  *                            bob and a little lateral drift, so the field looks
  *                            alive but locked in its mapped positions.
- *   SPRINT  t 0.65 -> 1      offsets interpolate from the settled position to
- *                            the finishing position on a t^1.6 curve, so the
- *                            moves build through the straight. This is where a
- *                            backmarker with a big composite comes over the top
- *                            and a weak leader drops out of it.
+ *   SPRINT  t 0.65 -> 1      offsets move from the settled position to the
+ *                            finishing position, on a curve whose shape is the
+ *                            runner's own — see PACE below.
  *
  * The pack rises far faster than any offset can fall, so no runner ever goes
  * backwards, and the sprint target is the composite finish order, so the result
  * always matches the ranking the API sent.
+ *
+ * PACE
+ * The run home used to be one shared t^1.6 for everybody, which meant the speed
+ * map decided the middle of the race and nothing else — a leader who got hunted
+ * and a backmarker who got a dream run both arrived exactly where their score
+ * said, in exactly the same manner. Now each runner sprints on its own curve,
+ * taken from its map role and the tempo of the race:
+ *
+ *   a leader in a soft race holds on (early, flat curve)
+ *   a leader in a speed duel kicks clear and is swallowed (a fade transient)
+ *   a backmarker sprints late and hard (a steep curve)
+ *
+ * The curve and the transient both land on exactly the finishing offset at the
+ * post, so the story is in HOW a runner gets there, never in where it ends up.
+ * Pace changes the result through the score instead — pace fit is a scoring
+ * component now, so a hot tempo genuinely reorders the field before the
+ * animation ever runs.
  *
  * FINISH SPACING
  * Real beaten margins are honest and unreadable: a two-length win is a handful
@@ -70,6 +91,13 @@
  * squashing towards the turn apex and coming back out mirrored, which reads as
  * a horse turning away from and back towards the camera — which is what
  * actually happens in race vision at the top of the bend.
+ *
+ * FRAME LOOP
+ * The loop only runs while there is something to animate. It used to fire sixty
+ * times a second forever — paused, finished, tab in the background — which is a
+ * fan spinning for nothing. Now pausing stops it, finishing stops it, and
+ * hiding the tab stops it; anything that changes the picture asks for a single
+ * frame instead.
  */
 (function (global) {
     'use strict';
@@ -85,6 +113,21 @@
 
     // Lane order across the track once the field has settled, rail outwards.
     var PACE_LANE_ORDER = { leader: 0, onpace: 1, midfield: 2, back: 3 };
+
+    // How each pace role runs its home straight. The exponent shapes the curve
+    // from the settled position to the finishing one: 1 is a runner already
+    // rolling that simply holds its ground, and anything above builds later and
+    // harder. A backmarker's whole race is the last furlong, so it gets the
+    // steepest curve on the track.
+    var SPRINT_EXPONENT = { leader: 1.0, onpace: 1.35, midfield: 1.8, back: 2.5 };
+
+    // The fade. In a speed duel the leaders go too hard, get clear, and stop.
+    // This is that transient: a bump forward early in the straight that decays
+    // to nothing by the post, so the finishing order is untouched and only the
+    // manner of it changes. Scaled by the race's pace pressure, so a soft lead
+    // produces none of it at all.
+    var FADE_ROLE = { leader: 1.0, onpace: 0.55, midfield: 0.0, back: -0.35 };
+    var FADE_STRENGTH = 0.55;   // in body lengths, at full pressure
 
     // The settled field is strung out by walking the speed-map order and giving
     // each runner a gap back on the one in front, in HORSE BODY LENGTHS. Body
@@ -144,6 +187,17 @@
             }
         }
         return SIZE_STEPS[SIZE_STEPS.length - 1][1];
+    }
+
+    /* Does this viewer want less movement? Checked once per build rather than
+     * per frame, and overridable, because the page also exposes it as a toggle. */
+    function prefersReducedMotion() {
+        try {
+            return !!(global.matchMedia &&
+                      global.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        } catch (error) {
+            return false;
+        }
     }
 
     // ── Monotone cubic interpolation (PCHIP) ──────────────────────────────
@@ -210,16 +264,30 @@
     // what stops a field standing in the barriers looking like one animal.
     var TRACK_BAND = 186;
 
-    /* One lane, as a stadium path traced anti-clockwise from the winning post.
+    /* One lane, as a stadium path traced in the direction of travel.
      *
-     * The path deliberately STARTS at the post and ends back there, so a full
-     * lap is exactly progress 0 -> 1 and the barriers sit on the winning line.
-     * Order of travel: right-hand turn (up), back straight (right to left),
-     * left-hand turn (down), home straight (left to right) into the post.
+     * The path deliberately STARTS at the winning post and ends back there, so
+     * a full lap is exactly progress 0 -> 1 and any fraction of a lap can be
+     * measured back from the post.
+     *
+     * Anti-clockwise: post at the right-hand end of the home straight; the lap
+     * runs right turn (up), back straight (right to left), left turn (down),
+     * home straight (left to right) into the post.
+     *
+     * Clockwise mirrors all of that: the post sits at the left-hand end of the
+     * home straight and the lap runs the other way round, which is what a field
+     * at Randwick or Eagle Farm actually does.
      */
-    function lanePathData(radius) {
+    function lanePathData(radius, clockwise) {
         var cx = VIEW.cx, cy = VIEW.cy, a = VIEW.straight;
         var r = radius;
+        if (clockwise) {
+            return 'M ' + (cx - a) + ',' + (cy + r) +
+                   ' A ' + r + ',' + r + ' 0 0 1 ' + (cx - a) + ',' + (cy - r) +
+                   ' L ' + (cx + a) + ',' + (cy - r) +
+                   ' A ' + r + ',' + r + ' 0 0 1 ' + (cx + a) + ',' + (cy + r) +
+                   ' Z';
+        }
         return 'M ' + (cx + a) + ',' + (cy + r) +
                ' A ' + r + ',' + r + ' 0 0 0 ' + (cx + a) + ',' + (cy - r) +
                ' L ' + (cx - a) + ',' + (cy - r) +
@@ -233,14 +301,16 @@
      * it ~2,900 times a second. Sampling once at build time and interpolating
      * between samples gives the same picture for a fraction of the cost, and
      * the sample count scales with the path so the spacing stays under ~4px.
+     *
+     * `lapFraction` is how much of the circuit this race covers, so the start
+     * point is that far back from the post. A 1200m race over a nominal 1800m
+     * circuit starts two thirds of the way round; a staying race starts at the
+     * post and runs the full lap.
      */
-    function sampleLane(path, radius) {
+    function sampleLane(path, lapFraction) {
         var total = path.getTotalLength();
-        // The lap is traced from the winning post, so the first segment is the
-        // right-hand turn. Skipping it puts the barriers at the top of the back
-        // straight and makes the race three-quarters of a lap, finishing at the
-        // post. Both turns are circular (rx = ry), so the arc is exactly pi*r.
-        var startAt = Math.PI * radius;
+        var fraction = clamp(lapFraction == null ? 0.75 : lapFraction, 0.08, 1);
+        var startAt = total * (1 - fraction);
         var count = Math.max(360, Math.min(1400, Math.round(total / 3.5)));
         var xs = new Float32Array(count + 1);
         var ys = new Float32Array(count + 1);
@@ -261,8 +331,12 @@
         };
     }
 
-    /* Position at progress p (0..1) plus a perpendicular offset in px. */
-    function samplePoint(table, progress, sideways) {
+    /* Position at progress p (0..1) plus a perpendicular offset in px.
+     *
+     * `laneSign` flips which side of the path counts as "towards the rail",
+     * because the infield is on the runners' left going anti-clockwise and on
+     * their right going the other way. */
+    function samplePoint(table, progress, sideways, laneSign) {
         var along = table.startFraction + clamp(progress, 0, 1) * (1 - table.startFraction);
         var scaled = along * table.count;
         var i = Math.min(table.count - 1, Math.floor(scaled));
@@ -277,8 +351,9 @@
         while (delta < -Math.PI) delta += Math.PI * 2;
         var angle = a0 + delta * frac;
         if (sideways) {
-            x += Math.sin(angle) * sideways;
-            y += -Math.cos(angle) * sideways;
+            var offset = sideways * (laneSign == null ? 1 : laneSign);
+            x += Math.sin(angle) * offset;
+            y += -Math.cos(angle) * offset;
         }
         return { x: x, y: y, angle: angle };
     }
@@ -341,6 +416,20 @@
         return gaps;
     }
 
+    /* The fade transient, in progress units.
+     *
+     * A hump through the middle of the straight: zero when the sprint starts,
+     * biggest around a third of the way home, and back to zero at the post. A
+     * leader with a positive fade goes clear and is then reeled in; a
+     * backmarker's small negative one has it drop out the back before it
+     * launches. It cannot change the result because it is worth nothing at the
+     * line — the whole point is that it changes the manner, not the placing. */
+    function fadeAt(entry, u) {
+        if (!entry.fade) return 0;
+        // sin(pi * u^0.7) peaks early in the straight rather than halfway.
+        return entry.fade * Math.sin(Math.PI * Math.pow(clamp(u, 0, 1), 0.7));
+    }
+
     /* How far round the track a runner is at race time t (0..1). */
     function progressAt(entry, t) {
         // The gate delay is a genuine slow beginning — a horse held in the stalls
@@ -355,9 +444,14 @@
             // and every runner is on its mark by T_GATE, after which it holds.
             offset = entry.settleOffset * Math.pow(settled, entry.settleShape);
         } else {
-            // Run home: settled position -> finishing position, accelerating.
+            // Run home. The curve from settled to finishing position is the
+            // runner's own — see SPRINT_EXPONENT — and the fade rides on top of
+            // it. Both are exact at u = 1, so the finishing order is whatever
+            // the composite said and nothing here can move it.
             var u = (t - T_SPRINT) / (1 - T_SPRINT);
-            offset = entry.settleOffset + (entry.finishOffset - entry.settleOffset) * Math.pow(u, 1.6);
+            var eased = Math.pow(u, entry.sprintExponent);
+            offset = entry.settleOffset + (entry.finishOffset - entry.settleOffset) * eased;
+            offset += fadeAt(entry, u);
         }
 
         // Cosmetic bob through the settle phase — enough to look alive, far too
@@ -377,7 +471,7 @@
     }
 
     // ── Scenery ───────────────────────────────────────────────────────────
-    function buildTrack(svg, innerRadius, outerRadius) {
+    function buildTrack(svg, innerRadius, outerRadius, clockwise, post) {
         var defs = append(svg, el('defs'));
 
         var turf = append(defs, el('linearGradient', { id: 'ra-turf', x1: '0', y1: '0', x2: '0', y2: '1' }));
@@ -393,24 +487,23 @@
         // The running surface: one path holding the outer and inner outlines,
         // filled even-odd so the middle punches out as the infield.
         append(scenery, el('path', {
-            d: lanePathData(outerRadius + 18) + ' ' + lanePathData(innerRadius - 18),
+            d: lanePathData(outerRadius + 18, clockwise) + ' ' + lanePathData(innerRadius - 18, clockwise),
             'fill-rule': 'evenodd', fill: 'url(#ra-turf)'
         }));
         append(scenery, el('path', {
-            d: lanePathData(innerRadius - 18), fill: 'url(#ra-infield)'
+            d: lanePathData(innerRadius - 18, clockwise), fill: 'url(#ra-infield)'
         }));
         append(scenery, el('path', {                        // inside running rail
-            d: lanePathData(innerRadius - 18), fill: 'none',
+            d: lanePathData(innerRadius - 18, clockwise), fill: 'none',
             stroke: '#e8ecf2', 'stroke-width': 2.4, opacity: 0.85
         }));
         append(scenery, el('path', {                        // outside rail
-            d: lanePathData(outerRadius + 18), fill: 'none',
+            d: lanePathData(outerRadius + 18, clockwise), fill: 'none',
             stroke: '#5d6b74', 'stroke-width': 2, opacity: 0.7
         }));
 
-        // Winning post, at the end of the home straight where every lane path
-        // both starts and finishes.
-        var postX = VIEW.cx + VIEW.straight;
+        // Winning post, wherever the lane path both starts and finishes.
+        var postX = post.x;
         append(scenery, el('line', {
             x1: postX, y1: VIEW.cy + innerRadius - 18, x2: postX, y2: VIEW.cy + outerRadius + 18,
             stroke: '#ffffff', 'stroke-width': 3, 'stroke-dasharray': '7 5', opacity: 0.9
@@ -419,47 +512,63 @@
             x: postX - 3.5, y: VIEW.cy + outerRadius + 10, width: 7, height: 34, rx: 2, fill: '#f4f6fa'
         }));
         var label = append(scenery, el('text', {
-            x: postX + 14, y: VIEW.cy + outerRadius + 34,
+            x: postX + (clockwise ? -14 : 14), y: VIEW.cy + outerRadius + 34,
+            'text-anchor': clockwise ? 'end' : 'start',
             'font-size': 15, 'font-weight': '800', fill: '#f4f6fa', opacity: 0.85,
             'font-family': "'DM Mono', ui-monospace, monospace"
         }));
-        label.textContent = 'START / FINISH';
+        label.textContent = 'FINISH';
 
+        return scenery;
     }
 
-    /* The barrier stalls, at the top of the back straight where the race starts.
+    /* The barrier stalls, drawn wherever this race actually starts.
      *
-     * Travel along that straight is right to left, so the gate line is vertical
-     * and the stalls sit behind the field, off to its right. One stall per lane,
+     * The start point moves with the distance now, so the gate is placed off
+     * the sampled path rather than assumed to be at the top of the back
+     * straight: one stall per lane along the track's normal at progress zero,
      * innermost stall = barrier 1, which is exactly where the runners line up.
      */
-    function buildGate(parent, laneBase, laneGap, fieldSize, innerRadius, outerRadius) {
-        var gateX = VIEW.cx + VIEW.straight;
+    function buildGate(parent, table, laneGap, fieldSize, laneSign) {
         var gate = append(parent, el('g', { 'class': 'ra-gate' }));
         var stallDepth = clamp(laneGap * 1.7, 11, 22);
+        var midLane = (fieldSize - 1) / 2;
 
-        // The line the field jumps from, right across the running surface.
+        // Where the field jumps from, and which way the line of stalls runs.
+        var innerEdge = samplePoint(table, 0, (midLane * laneGap) + laneGap, laneSign);
+        var outerEdge = samplePoint(table, 0, -(midLane * laneGap) - laneGap, laneSign);
+
         append(gate, el('line', {
-            x1: gateX, y1: VIEW.cy - (outerRadius + 18), x2: gateX, y2: VIEW.cy - (innerRadius - 18),
+            x1: innerEdge.x, y1: innerEdge.y, x2: outerEdge.x, y2: outerEdge.y,
             stroke: '#ffffff', 'stroke-width': 2.6, 'stroke-dasharray': '6 4', opacity: 0.8
         }));
 
         for (var lane = 0; lane < fieldSize; lane++) {
-            var y = VIEW.cy - (laneBase + lane * laneGap);
+            // Lane 0 is barrier 1, on the rail: the same positive-is-inside
+            // convention the runners themselves use.
+            var at = samplePoint(table, 0, (midLane - lane) * laneGap, laneSign);
+            // The stall faces the way the field will run. samplePoint already
+            // carries the track's tangent there — deriving it from a second
+            // sample "just behind" would not work, because progress is clamped
+            // at zero and both samples would land on the same point.
+            var angle = at.angle * 180 / Math.PI;
             append(gate, el('rect', {
-                x: gateX, y: y - laneGap * 0.46,
+                x: -stallDepth, y: -Math.max(3, laneGap * 0.92) / 2,
                 width: stallDepth, height: Math.max(3, laneGap * 0.92),
                 rx: 1.4, fill: 'rgba(10,12,18,0.72)',
-                stroke: 'rgba(232,236,242,0.5)', 'stroke-width': 0.7
+                stroke: 'rgba(232,236,242,0.5)', 'stroke-width': 0.7,
+                transform: 'translate(' + at.x.toFixed(2) + ',' + at.y.toFixed(2) + ') ' +
+                           'rotate(' + angle.toFixed(2) + ')'
             }));
         }
 
         var label = append(gate, el('text', {
-            x: gateX + stallDepth + 9, y: VIEW.cy - (outerRadius + 12),
+            x: outerEdge.x, y: outerEdge.y - 10, 'text-anchor': 'middle',
             'font-size': 13, 'font-weight': '800', fill: '#f4f6fa', opacity: 0.75,
             'font-family': "'DM Mono', ui-monospace, monospace"
         }));
-        label.textContent = 'BARRIERS';
+        label.textContent = 'START';
+        return gate;
     }
 
     // ── The controller ────────────────────────────────────────────────────
@@ -467,10 +576,16 @@
      *   svg           the <svg> to build into (cleared first)
      *   runners       the API payload's runners, already in composite-rank order
      *   duration      race length in seconds at speed 1 (default 15)
+     *   direction     'clockwise' | 'anticlockwise'
+     *   lapFraction   how much of the circuit this race covers (0..1)
+     *   pace          the payload's pace profile ({pressure, shape, ...})
+     *   reducedMotion suppress the cosmetic bob and drift, and never autoplay
      *   showNames     draw name chips (auto-off for big fields)
+     *   showResults   put the actual finishing position on each chip
      *   onTick        (raceTime01, liveOrder[]) each frame
      *   onFinish      (runners) when the winner hits the post
      *   onSelect      (runner|null) when a horse is tapped
+     *   onPlayState   (isPlaying) whenever the loop starts or stops
      */
     function create(options) {
         options = options || {};
@@ -481,6 +596,13 @@
 
         while (svg.firstChild) svg.removeChild(svg.firstChild);
         svg.setAttribute('viewBox', '0 0 ' + VIEW.width + ' ' + VIEW.height);
+
+        var clockwise = options.direction === 'clockwise';
+        // Going the other way round, the infield — and therefore the rail — is
+        // on the runners' other side, so the lane offsets flip with it.
+        var laneSign = clockwise ? -1 : 1;
+        var reducedMotion = options.reducedMotion != null
+            ? !!options.reducedMotion : prefersReducedMotion();
 
         // Lane spacing falls away as the field grows, which is what keeps a
         // 24-runner race on one screen without scrolling. The icons are sized
@@ -496,19 +618,20 @@
         var midLane = (fieldSize - 1) / 2;
         var referenceRadius = laneBase + midLane * laneGap;
 
-        buildTrack(svg, innerRadius, outerRadius);
-        buildGate(svg, laneBase, laneGap, fieldSize, innerRadius, outerRadius);
+        // Build the reference path first: the post and the barrier line are
+        // both read off it, so the scenery has to follow the geometry rather
+        // than assume it.
+        var measureLayer = append(svg, el('g', { 'class': 'ra-measure', opacity: 0 }));
+        var referencePath = append(measureLayer, el('path', {
+            d: lanePathData(referenceRadius, clockwise), fill: 'none', stroke: 'none'
+        }));
+        var table = sampleLane(referencePath, options.lapFraction);
+        measureLayer.parentNode.removeChild(measureLayer);
+
+        var post = samplePoint(table, 1, 0, laneSign);
+        buildTrack(svg, innerRadius, outerRadius, clockwise, post);
 
         var laneLayer = append(svg, el('g', { 'class': 'ra-lanes', opacity: 0.12 }));
-
-        // The one path every runner is parameterised against. It is only ever
-        // measured, never shown, so it lives outside the visible layers.
-        var referencePath = append(laneLayer, el('path', {
-            d: lanePathData(referenceRadius), fill: 'none', stroke: 'none'
-        }));
-        var table = sampleLane(referencePath, referenceRadius);
-        referencePath.parentNode.removeChild(referencePath);
-
         var horseLayer = append(svg, el('g', { 'class': 'ra-horses' }));
         var labelLayer = append(svg, el('g', { 'class': 'ra-labels' }));
 
@@ -559,7 +682,12 @@
             finishOffsetById[idOf(runner)] = -finishGaps[index] / table.raceLength;
         });
 
+        // How hard the tempo is, 0 (soft lead) to 1 (speed duel). Drives the
+        // fade: nobody fades in a race with one leader out in front on its own.
+        var pressure = clamp(Number((options.pace || {}).pressure) || 0, 0, 1);
+
         var showNames = options.showNames != null ? options.showNames : fieldSize <= 11;
+        var showResults = !!options.showResults;
         // Chips shrink with the horses, and are staggered over three rows so
         // adjacent barriers do not stack their labels on top of each other when
         // the field bunches up.
@@ -575,7 +703,7 @@
             var barrierOffset = (midLane - lane) * laneGap;
             var settleLaneOffset = (midLane - settleLane) * laneGap;
             append(laneLayer, el('path', {
-                d: lanePathData(laneBase + lane * laneGap), fill: 'none',
+                d: lanePathData(laneBase + lane * laneGap, clockwise), fill: 'none',
                 stroke: '#8fb79a', 'stroke-width': 0.8, 'stroke-dasharray': '3 7'
             }));
 
@@ -604,10 +732,10 @@
                 x: 0, y: 0.6, 'text-anchor': 'middle', 'font-size': 9, 'font-weight': '700',
                 fill: '#f0f0f5', 'font-family': "-apple-system, 'Segoe UI', system-ui, sans-serif"
             }));
-            chipText.textContent = (runner.tab_number ? runner.tab_number + '. ' : '') + runner.horse_name;
 
+            var pace = runner.pace_category || 'midfield';
             var seed = lane + 1 + index * 0.37;
-            entries.push({
+            var entry = {
                 runner: runner,
                 lane: lane,
                 settleLane: settleLane,
@@ -619,26 +747,54 @@
                 settleShape: 0.88 + hash01(seed * 2.9) * 0.3,
                 settleOffset: settleOffsetById[idOf(runner)] || 0,
                 finishOffset: finishOffsetById[idOf(runner)] || 0,
-                bobAmplitude: Math.min((0.05 + hash01(seed * 4.3) * 0.04) * bodyProgress, bobCeiling),
+                // The run home, shaped by the runner's own map role.
+                sprintExponent: SPRINT_EXPONENT[pace] != null ? SPRINT_EXPONENT[pace] : 1.8,
+                // The fade, scaled by the tempo. Zero in a soft race whatever
+                // the role, because there is nothing to be cooked by.
+                fade: (FADE_ROLE[pace] || 0) * pressure * FADE_STRENGTH * bodyProgress,
+                bobAmplitude: reducedMotion ? 0
+                    : Math.min((0.05 + hash01(seed * 4.3) * 0.04) * bodyProgress, bobCeiling),
                 art: art,
                 holder: holder,
                 chip: chip,
                 chipBg: chipBg,
-                gait: Math.random(),
+                chipText: chipText,
+                gait: hash01(seed * 5.1),
                 lastProgress: 0,
                 jostleSeed: (lane * 1.7) + (index % 7)
-            });
+            };
+            entries.push(entry);
+            setChipText(entry);
         });
 
-        // Wider chips need the background sized to the text; measure once.
-        entries.forEach(function (entry) {
-            var text = entry.chip.querySelector('text');
-            var width = 0;
-            try { width = text.getComputedTextLength(); } catch (e) { width = 70; }
-            var boxWidth = Math.max(30, width + 12);
-            entry.chipBg.setAttribute('width', boxWidth);
-            entry.chipBg.setAttribute('x', -boxWidth / 2);
-        });
+        /* What the chip says. The saddlecloth and the name always; the actual
+         * finishing position too, once the race has been settled and the page
+         * has asked for it — that is the whole point of showing a replay of a
+         * race we already know the answer to. */
+        function setChipText(entry) {
+            var runner = entry.runner;
+            var text = (runner.tab_number ? runner.tab_number + '. ' : '') + runner.horse_name;
+            if (showResults && runner.result && runner.result.ran) {
+                var finish = runner.result.finish_position;
+                text += finish === 1 ? '  ★ WON'
+                      : (finish <= 4 ? '  ' + finish + (finish === 2 ? 'nd' : finish === 3 ? 'rd' : 'th')
+                                     : '  unpl');
+            }
+            entry.chipText.textContent = text;
+        }
+
+        function measureChips() {
+            entries.forEach(function (entry) {
+                var width = 0;
+                try { width = entry.chipText.getComputedTextLength(); } catch (e) { width = 70; }
+                var boxWidth = Math.max(30, width + 12);
+                entry.chipBg.setAttribute('width', boxWidth);
+                entry.chipBg.setAttribute('x', -boxWidth / 2);
+            });
+        }
+        measureChips();
+
+        buildGate(svg, table, laneGap, fieldSize, laneSign);
 
         // ── Frame loop ────────────────────────────────────────────────────
         var duration = options.duration || 15;
@@ -651,6 +807,7 @@
         var lastFrame = 0;
         var rafHandle = null;
         var lastDepthKey = '';
+        var destroyed = false;
 
         /* Lateral drift on top of the lane. Horses do not run down a painted
          * line, but through the settle phase they are meant to look locked, so
@@ -658,6 +815,7 @@
          * sprint starts and runners begin looking for room. Doing this sideways
          * rather than by nudging progress leaves the finish order untouched. */
         function drift(entry, t) {
+            if (reducedMotion) return 0;
             var alive = t < 0.06 ? t / 0.06 : 1;                     // none in the gates
             var room = 0.28 + 0.72 * smoothstep(T_SPRINT - 0.04, T_SPRINT + 0.16, t);
             var taper = t > 0.86 ? Math.max(0, 1 - (t - 0.86) / 0.14) : 1;
@@ -666,21 +824,56 @@
             return wave * laneGap * 0.42 * alive * room * taper;
         }
 
+        /* Ask for one frame. The loop is not a heartbeat — it exists only while
+         * the race is running, or for the single frame something else needs to
+         * redraw. Everything that changes the picture calls this. */
+        function requestFrame() {
+            if (destroyed || rafHandle != null) return;
+            rafHandle = global.requestAnimationFrame(frame);
+        }
+
+        function stopLoop() {
+            if (rafHandle != null) {
+                global.cancelAnimationFrame(rafHandle);
+                rafHandle = null;
+            }
+            lastFrame = 0;
+        }
+
+        function setPlaying(value) {
+            var next = !!value;
+            if (next === playing) return;
+            playing = next;
+            if (playing) requestFrame();
+            if (options.onPlayState) options.onPlayState(playing);
+        }
+
         function frame(now) {
+            rafHandle = null;
+            if (destroyed) return;
+
             var delta = lastFrame ? Math.min(0.05, (now - lastFrame) / 1000) : 0;
             lastFrame = now;
+
             if (playing) {
                 raceTime += (delta * speed) / duration;
                 if (raceTime >= 1) { raceTime = 1; playing = false; finished = true; }
             }
             render(delta);
+
             // Announce the result once per running of the race, not once per
             // frame — and reset the flag on replay so a rerun announces again.
             if (finished && !finishAnnounced) {
                 finishAnnounced = true;
                 if (options.onFinish) options.onFinish(runners);
             }
-            rafHandle = global.requestAnimationFrame(frame);
+            if (playing) {
+                requestFrame();
+            } else {
+                // Nothing is moving any more, so nothing needs a next frame.
+                lastFrame = 0;
+                if (options.onPlayState) options.onPlayState(false);
+            }
         }
 
         function render(delta) {
@@ -694,7 +887,7 @@
                 entry.lastProgress = progress;
 
                 var point = samplePoint(table, progress,
-                    laneOffsetAt(entry, raceTime) + drift(entry, raceTime));
+                    laneOffsetAt(entry, raceTime) + drift(entry, raceTime), laneSign);
                 var scale = horseSize / 100;
 
                 // Facing: cos(tangent) is +1 running right down the home
@@ -761,15 +954,27 @@
             });
         }
 
+        // Every listener added here is remembered so destroy() can take it off
+        // again. The background click lives on the <svg>, which OUTLIVES this
+        // engine — the page keeps one canvas and rebuilds the race into it — so
+        // a listener left behind would stack up one per weight change, each
+        // holding a dead race alive.
+        var teardown = [];
+        function listen(node, type, handler, capture) {
+            node.addEventListener(type, handler, capture);
+            teardown.push(function () { node.removeEventListener(type, handler, capture); });
+        }
+
         entries.forEach(function (entry) {
-            entry.holder.addEventListener('click', function (event) {
+            listen(entry.holder, 'click', function (event) {
                 event.stopPropagation();
                 selectedId = selectedId === entry.runner.horse_id ? null : entry.runner.horse_id;
                 applySelection();
                 if (options.onSelect) options.onSelect(selectedId ? entry.runner : null);
             });
         });
-        svg.addEventListener('click', function () {
+
+        listen(svg, 'click', function () {
             if (selectedId != null) {
                 selectedId = null;
                 applySelection();
@@ -777,23 +982,34 @@
             }
         });
 
+        // A race running in a tab nobody is looking at is pure waste, and the
+        // browser throttles the frames anyway, which makes the replay stutter
+        // when the tab comes back. Pause instead.
+        listen(document, 'visibilitychange', function () {
+            if (document.hidden && playing) setPlaying(false);
+        });
+
         render(0);
-        rafHandle = global.requestAnimationFrame(frame);
 
         return {
-            play: function () { if (!finished) playing = true; },
-            pause: function () { playing = false; },
-            toggle: function () { if (finished) { this.replay(); } else { playing = !playing; } return playing; },
+            play: function () { if (!finished) setPlaying(true); },
+            pause: function () { setPlaying(false); },
+            toggle: function () {
+                if (finished) { this.replay(); return true; }
+                setPlaying(!playing);
+                return playing;
+            },
             isPlaying: function () { return playing; },
             isFinished: function () { return finished; },
             replay: function () {
-                raceTime = 0; finished = false; finishAnnounced = false; playing = true;
+                raceTime = 0; finished = false; finishAnnounced = false;
                 entries.forEach(function (entry) { entry.lastProgress = 0; });
                 lastDepthKey = '';
                 render(0);
+                setPlaying(true);
             },
             scrubTo: function (t) {
-                playing = false;
+                setPlaying(false);
                 raceTime = clamp(t, 0, 1);
                 finished = raceTime >= 1;
                 finishAnnounced = finished;
@@ -804,13 +1020,41 @@
             },
             setSpeed: function (value) { speed = clamp(value, 0.25, 4); },
             getTime: function () { return raceTime; },
-            setNamesVisible: function (visible) { showNames = !!visible; applySelection(); },
+            getDuration: function () { return duration; },
+            setNamesVisible: function (visible) {
+                showNames = !!visible;
+                applySelection();
+            },
+            setResultsVisible: function (visible) {
+                showResults = !!visible;
+                entries.forEach(setChipText);
+                measureChips();
+            },
+            /* Repaint every runner's silk once the live artwork has arrived.
+             * The payload no longer waits on the bookmaker, so the race is
+             * already on screen in its coded colours when this lands. */
+            applySilks: function (byHorseId) {
+                entries.forEach(function (entry) {
+                    var silk = byHorseId[entry.runner.horse_id];
+                    if (!silk) return;
+                    var merged = {};
+                    var key;
+                    for (key in (entry.runner.silk || {})) merged[key] = entry.runner.silk[key];
+                    for (key in silk) merged[key] = silk[key];
+                    entry.runner.silk = merged;
+                    if (entry.art.setSilk) entry.art.setSilk(merged);
+                });
+                render(0);
+            },
             select: function (horseId) {
                 selectedId = horseId;
                 applySelection();
             },
             destroy: function () {
-                if (rafHandle) global.cancelAnimationFrame(rafHandle);
+                destroyed = true;
+                stopLoop();
+                teardown.forEach(function (off) { off(); });
+                teardown.length = 0;
                 entries.forEach(function (entry) { entry.art.destroy(); });
                 while (svg.firstChild) svg.removeChild(svg.firstChild);
             }
@@ -822,11 +1066,13 @@
         pchip: pchip,
         packCurve: packCurve,
         progressAt: progressAt,
+        fadeAt: fadeAt,
         settleOffsets: settleOffsets,
         laneOffsetAt: laneOffsetAt,
         finishGapsPx: finishGapsPx,
         horseSizeForField: horseSizeForField,
         lanePathData: lanePathData,
+        prefersReducedMotion: prefersReducedMotion,
         VIEW: VIEW,
         T_GATE: T_GATE,
         T_SPRINT: T_SPRINT,
@@ -834,6 +1080,8 @@
         T_LANE_END: T_LANE_END,
         GATE_STAGGER: GATE_STAGGER,
         BODY_OF_ICON: BODY_OF_ICON,
-        PACE_LANE_ORDER: PACE_LANE_ORDER
+        PACE_LANE_ORDER: PACE_LANE_ORDER,
+        SPRINT_EXPONENT: SPRINT_EXPONENT,
+        FADE_ROLE: FADE_ROLE
     };
 }(typeof window !== 'undefined' ? window : this));

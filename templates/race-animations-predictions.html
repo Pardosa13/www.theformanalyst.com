@@ -9,8 +9,16 @@
    Additive by design: it extends base.html for the shell only and owns all of
    its own markup, styles and scripts. Data comes from the /api/race-animation/*
    endpoints in race_animation_routes.py; the artwork and the race engine live
-   in static/js/race-horse-art.js and static/js/race-animation.js. No existing
-   page, route, template or script is touched by any of it.
+   in static/js/race-horse-art.js and static/js/race-animation.js, and the blend
+   arithmetic the sliders run on is in static/js/race-animation-scoring.js.
+
+   That last file is shared on purpose. The page re-blends the composite locally
+   so the sliders respond without a round trip, and that copy of the maths used
+   to sit inline here with its own hardcoded weights — which meant a change in
+   race_animation_scoring.py silently made the browser disagree with the server.
+   Every constant now arrives in `scoring_config` below, straight out of the
+   Python module, and tests/test_race_animation_parity.py runs both
+   implementations over one fixture and fails if they drift apart.
 
    Palette is taken straight from base.html's variables so this sits alongside
    the meeting pages rather than looking bolted on.
@@ -24,7 +32,7 @@
 
 /* ── Pickers ── */
 .rap-pickers {
-  display: grid; grid-template-columns: minmax(220px, 2fr) minmax(180px, 1.4fr) auto;
+  display: grid; grid-template-columns: minmax(220px, 2fr) minmax(180px, 1.4fr) auto auto;
   gap: 12px; align-items: end;
   background: var(--bg-surface); border: 1px solid var(--border-subtle);
   border-radius: 14px; padding: 16px; margin-bottom: 18px;
@@ -59,10 +67,12 @@
   padding: 7px 14px; font-size: 13px; font-weight: 700; cursor: pointer;
 }
 .rap-btn:hover { background: var(--bg-hover); border-color: var(--border-accent); }
+.rap-btn:disabled { opacity: 0.45; cursor: default; }
 .rap-btn--primary {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   border-color: transparent; color: #fff;
 }
+.rap-btn--small { padding: 5px 10px; font-size: 12px; }
 .rap-btn[aria-pressed="true"] { border-color: var(--border-accent); color: var(--accent); }
 .rap-speed { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
 .rap-speed input { width: 96px; }
@@ -91,13 +101,35 @@
 .rap-popup {
   position: absolute; z-index: 5; pointer-events: none;
   background: rgba(9,9,15,0.95); border: 1px solid var(--border-accent);
-  border-radius: 10px; padding: 9px 12px; min-width: 180px;
+  border-radius: 10px; padding: 9px 12px; min-width: 190px;
   box-shadow: 0 8px 28px rgba(0,0,0,0.55);
 }
 .rap-popup[hidden] { display: none; }
 .rap-popup-name { font-size: 13px; font-weight: 800; color: var(--text-primary); }
 .rap-popup-row { font-size: 11px; color: var(--text-secondary); margin-top: 3px; display: flex; justify-content: space-between; gap: 14px; }
 .rap-popup-row b { color: var(--text-primary); font-family: 'DM Mono', ui-monospace, monospace; }
+
+/* ── Scoreboard: did the prediction get it right? ── */
+.rap-scoreboard {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 1px; background: var(--border-subtle);
+  border: 1px solid var(--border-subtle); border-radius: 14px;
+  overflow: hidden; margin-bottom: 18px;
+}
+.rap-scoreboard[hidden] { display: none; }
+.rap-score { background: var(--bg-surface); padding: 14px 16px; }
+.rap-score-label {
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted); font-weight: 700; margin-bottom: 5px;
+}
+.rap-score-value {
+  font-size: 20px; font-weight: 800; color: var(--text-primary);
+  font-family: 'DM Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+.rap-score-note { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+.rap-score-value.is-hit { color: #34d399; }
+.rap-score-value.is-miss { color: #f08d8d; }
 
 /* ── Breakdown table ── */
 .rap-table-card {
@@ -123,6 +155,7 @@
 .rap-weight-grid {
   display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 14px;
 }
+.rap-weight.is-off { opacity: 0.58; }
 .rap-weight-top {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;
 }
@@ -158,20 +191,59 @@
   padding: 4px 11px; font-size: 11px; font-weight: 700; cursor: pointer;
 }
 .rap-weight-preset:hover { color: var(--text-primary); border-color: var(--border-accent); }
+
+/* ── Proving it: accuracy over history, and the tuner ── */
+.rap-proof {
+  border-top: 1px solid var(--border-subtle); margin-top: 14px; padding-top: 12px;
+}
+.rap-proof-head {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+}
+.rap-proof-title { font-size: 12px; font-weight: 800; color: var(--text-primary); }
+.rap-proof-note { font-size: 11px; color: var(--text-muted); max-width: 66ch; margin-top: 4px; }
+.rap-proof-out { margin-top: 12px; font-size: 12.5px; color: var(--text-secondary); }
+.rap-proof-out[hidden] { display: none; }
+.rap-proof-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px; margin-top: 8px;
+}
+.rap-proof-cell {
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: 9px; padding: 9px 11px;
+}
+.rap-proof-cell dt {
+  font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-muted); font-weight: 700; margin-bottom: 3px;
+}
+.rap-proof-cell dd {
+  margin: 0; font-family: 'DM Mono', ui-monospace, monospace;
+  font-size: 15px; font-weight: 700; color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.rap-proof-cell .rap-delta { font-size: 11px; font-weight: 600; margin-left: 6px; }
+.rap-delta.is-better { color: #34d399; }
+.rap-delta.is-worse { color: #f08d8d; }
+.rap-verdict {
+  margin-top: 10px; padding: 9px 12px; border-radius: 9px;
+  font-size: 12.5px; border: 1px solid var(--border-subtle); background: var(--bg-surface);
+}
+.rap-verdict.is-better { border-color: rgba(52,211,153,0.45); color: #34d399; }
+.rap-verdict.is-worse { border-color: rgba(240,141,141,0.4); color: #f08d8d; }
+
 .rap-scroller { overflow-x: auto; }
 .rap-table { width: 100%; border-collapse: separate; border-spacing: 0 4px; font-size: 13px; min-width: 940px; }
 .rap-table th {
   text-align: right; padding: 8px 10px; font-size: 10px; letter-spacing: 0.05em;
   text-transform: uppercase; color: var(--text-muted); font-weight: 700; white-space: nowrap;
 }
-.rap-table th:nth-child(-n+3) { text-align: left; }
+.rap-table th.rap-left, .rap-table td.rap-left { text-align: left; }
 .rap-table td { padding: 9px 10px; text-align: right; background: var(--bg-elevated); color: var(--text-primary); }
-.rap-table td:nth-child(-n+3) { text-align: left; }
 .rap-table td:first-child { border-radius: 9px 0 0 9px; }
 .rap-table td:last-child { border-radius: 0 9px 9px 0; }
 .rap-table tbody tr { cursor: pointer; }
 .rap-table tbody tr:hover td { background: var(--bg-hover); }
 .rap-table tbody tr.is-selected td { background: rgba(102,126,234,0.16); }
+.rap-table tbody tr.is-winner td { box-shadow: inset 0 0 0 1px rgba(52,211,153,0.35); }
 .rap-rank { font-weight: 800; font-family: 'DM Mono', ui-monospace, monospace; }
 .rap-rank-1 { color: #34d399; } .rap-rank-2 { color: #fbbf24; } .rap-rank-3 { color: #f59e0b; }
 .rap-runner { display: flex; align-items: center; gap: 8px; }
@@ -188,6 +260,15 @@
 .rap-imputed { color: var(--text-muted); font-style: italic; }
 .rap-imputed::after { content: '*'; color: #f59e0b; font-style: normal; }
 .rap-composite { font-weight: 800; font-size: 14px; }
+.rap-value { color: var(--text-secondary); }
+.rap-value.is-value { color: #34d399; font-weight: 700; }
+.rap-finish {
+  display: inline-block; min-width: 26px; padding: 2px 6px; border-radius: 6px;
+  font-family: 'DM Mono', ui-monospace, monospace; font-size: 11px; font-weight: 800;
+}
+.rap-finish-1 { background: rgba(52,211,153,0.18); color: #34d399; }
+.rap-finish-2, .rap-finish-3 { background: rgba(251,191,36,0.15); color: #fbbf24; }
+.rap-finish-other { background: var(--bg-surface); color: var(--text-muted); }
 .rap-pace {
   display: inline-block; padding: 2px 7px; border-radius: 999px;
   font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
@@ -202,6 +283,13 @@
 }
 .rap-error { color: #f08d8d; }
 .rap-legend { font-size: 11px; color: var(--text-muted); margin-top: 10px; }
+.rap-tempo {
+  display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px;
+  font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; margin-left: 6px;
+}
+.rap-tempo-hot  { background: rgba(226,59,59,0.18);  color: #f08d8d; }
+.rap-tempo-even { background: rgba(47,111,208,0.18); color: #8fb4ec; }
+.rap-tempo-soft { background: rgba(47,168,96,0.18);  color: #7fd4a2; }
 
 @media (max-width: 1020px) {
   .rap-weight-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
@@ -209,6 +297,11 @@
 @media (max-width: 860px) {
   .rap-pickers { grid-template-columns: 1fr; }
   .rap-stage-head { flex-direction: column; align-items: flex-start; }
+}
+/* The rest of the site honours this; the page that actually moves has to as
+   well. The engine also drops the bob and the drift, and never autoplays. */
+@media (prefers-reduced-motion: reduce) {
+  .rap-progress-bar { transition: none !important; }
 }
 </style>
 
@@ -218,9 +311,9 @@
     <p class="rap-sub">
       Every runner jumps from its barrier, crosses to the lane its speed-map role calls
       for, and holds that settled position until the corner — then the blended prediction
-      score decides the run home. The break is driven by the speed map, the sprint by the
-      composite. The table underneath shows the same numbers so the picture can be checked
-      against the maths.
+      score decides the run home, in the manner the tempo of the race calls for. Where the
+      race has been run, the actual result is scored against the prediction underneath, so
+      the picture can be checked against what really happened.
     </p>
   </div>
 
@@ -237,7 +330,14 @@
       <label for="rapReload">&nbsp;</label>
       <button class="rap-btn" id="rapReload" type="button">↻ Reload</button>
     </div>
+    <div class="rap-field">
+      <label for="rapShare">&nbsp;</label>
+      <button class="rap-btn" id="rapShare" type="button"
+              title="Copy a link that reopens this race on exactly these weights">🔗 Copy link</button>
+    </div>
   </div>
+
+  <div class="rap-scoreboard" id="rapScoreboard" hidden></div>
 
   <div class="rap-stage">
     <div class="rap-stage-head">
@@ -249,6 +349,10 @@
         <button class="rap-btn rap-btn--primary" id="rapPlay" type="button" disabled>▶ Run the race</button>
         <button class="rap-btn" id="rapReplay" type="button" disabled>↺ Replay</button>
         <button class="rap-btn" id="rapNames" type="button" aria-pressed="false" disabled>Names</button>
+        <button class="rap-btn" id="rapResults" type="button" aria-pressed="false" disabled
+                title="Put the actual finishing position on each runner">Result</button>
+        <button class="rap-btn" id="rapMotion" type="button" aria-pressed="false"
+                title="Drop the bob and the drift, and never start on its own">Calm</button>
         <span class="rap-speed">
           Speed <input id="rapSpeed" type="range" min="50" max="250" value="100">
           <span class="rap-num" id="rapSpeedValue">1.0×</span>
@@ -273,10 +377,11 @@
       <div class="rap-weights" id="rapWeights"></div>
     </div>
     <p class="rap-table-note">
-      Each input is normalised across this field before weighting — the sectional rank and the
-      adjusted time are lower-is-better, so they are inverted first. Tap a row to pick that runner
-      out on the track. An italic value marked <span style="color:#f59e0b">*</span> means the runner
-      had no data for that input and was given the field average rather than a zero.
+      Each input is scored by where the runner sits in this field, so one freak number cannot
+      distort everybody else's. Tap a row to pick that runner out on the track. An italic value
+      marked <span style="color:#f59e0b">*</span> means the runner had no data for that input
+      and was given the field average rather than a zero. Only the inputs actually carrying
+      weight get a column.
     </p>
 
     <div class="rap-weight-panel">
@@ -292,27 +397,44 @@
       <div class="rap-weight-foot">
         <span class="rap-weight-total" id="rapWeightTotal"></span>
         <span class="rap-weight-actions">
-          <button class="rap-weight-preset" type="button" data-preset="default">Default 50/10/10/30</button>
-          <button class="rap-weight-preset" type="button" data-preset="even">Even 25/25/25/25</button>
+          <button class="rap-weight-preset" type="button" data-preset="default">Published default</button>
+          <button class="rap-weight-preset" type="button" data-preset="even">Even</button>
           <button class="rap-weight-preset" type="button" data-preset="map">Speed map only</button>
           <button class="rap-weight-preset" type="button" data-preset="assessment">Assessment only</button>
+          <button class="rap-weight-preset" type="button" data-preset="everything">Every input</button>
           <button class="rap-btn rap-btn--primary" type="button" id="rapWeightRun">▶ Run with these weights</button>
         </span>
       </div>
+
+      <div class="rap-proof">
+        <div class="rap-proof-head">
+          <div>
+            <div class="rap-proof-title">Does this weighting actually work?</div>
+            <div class="rap-proof-note">
+              Score it against every past race we hold a result for, or let the history pick a
+              weighting of its own. The tuner trains on older races and reports its score on
+              later ones it never saw — an in-sample number would look wonderful and mean nothing.
+            </div>
+          </div>
+          <span class="rap-weight-actions">
+            <label class="rap-weight-total" for="rapNorm" style="display:flex;align-items:center;gap:6px;">
+              Scaling
+              <select id="rapNorm" style="background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-mid);border-radius:7px;padding:3px 7px;font-size:12px;">
+                <option value="rank">By field rank</option>
+                <option value="minmax">Best-to-worst stretch</option>
+              </select>
+            </label>
+            <button class="rap-btn rap-btn--small" type="button" id="rapScore">📊 Score it</button>
+            <button class="rap-btn rap-btn--small" type="button" id="rapTune">🎯 Tune on history</button>
+          </span>
+        </div>
+        <div class="rap-proof-out" id="rapProofOut" hidden></div>
+      </div>
     </div>
+
     <div class="rap-scroller">
       <table class="rap-table">
-        <thead>
-          <tr>
-            <th>#</th><th>Runner</th><th>Pace</th>
-            <th>Bar</th>
-            <th>MAP<br><span class="rap-weights" data-weight-head="speed_map">50%</span></th>
-            <th>Sectional<br><span class="rap-weights" data-weight-head="sectional">10%</span></th>
-            <th>Adj Time<br><span class="rap-weights" data-weight-head="adjusted_time">10%</span></th>
-            <th>Assessment<br><span class="rap-weights" data-weight-head="assessment">30%</span></th>
-            <th>Composite</th>
-          </tr>
-        </thead>
+        <thead id="rapTableHead"></thead>
         <tbody id="rapTableBody">
           <tr><td colspan="9" class="rap-empty">No race loaded yet.</td></tr>
         </tbody>
@@ -321,6 +443,8 @@
   </div>
 </div>
 
+<script id="rapScoringConfig" type="application/json">{{ scoring_config | tojson }}</script>
+<script src="{{ url_for('static', filename='js/race-animation-scoring.js') }}"></script>
 <script src="{{ url_for('static', filename='js/race-horse-art.js') }}"></script>
 <script src="{{ url_for('static', filename='js/race-animation.js') }}"></script>
 <script>
@@ -328,15 +452,25 @@
   'use strict';
 
   var API = '/api/race-animation';
+  var S = window.RaceAnimationScoring;
+  // Every constant the blend needs comes from race_animation_scoring.py, so
+  // there is exactly one place a weight or a margin rule is written down.
+  var CONFIG = JSON.parse(document.getElementById('rapScoringConfig').textContent);
+  var KEYS = CONFIG.component_keys;
+  var CORE = CONFIG.core_component_keys;
+
   var els = {
     meeting: document.getElementById('rapMeeting'),
     race: document.getElementById('rapRace'),
     reload: document.getElementById('rapReload'),
+    share: document.getElementById('rapShare'),
     raceName: document.getElementById('rapRaceName'),
     raceMeta: document.getElementById('rapRaceMeta'),
     play: document.getElementById('rapPlay'),
     replay: document.getElementById('rapReplay'),
     names: document.getElementById('rapNames'),
+    results: document.getElementById('rapResults'),
+    motion: document.getElementById('rapMotion'),
     speed: document.getElementById('rapSpeed'),
     speedValue: document.getElementById('rapSpeedValue'),
     canvas: document.getElementById('rapCanvas'),
@@ -345,16 +479,25 @@
     progressBar: document.getElementById('rapProgressBar'),
     live: document.getElementById('rapLive'),
     legend: document.getElementById('rapLegend'),
+    scoreboard: document.getElementById('rapScoreboard'),
     weights: document.getElementById('rapWeights'),
     weightGrid: document.getElementById('rapWeightGrid'),
     weightTotal: document.getElementById('rapWeightTotal'),
     weightRun: document.getElementById('rapWeightRun'),
+    norm: document.getElementById('rapNorm'),
+    score: document.getElementById('rapScore'),
+    tune: document.getElementById('rapTune'),
+    proofOut: document.getElementById('rapProofOut'),
+    tableHead: document.getElementById('rapTableHead'),
     tableBody: document.getElementById('rapTableBody')
   };
 
   var race = null;          // the current payload
   var engine = null;        // the current RaceAnimation controller
-  var namesOn = false;
+  var namesOn = null;       // null = follow the field size; true/false = the viewer chose
+  var resultsOn = true;
+  var calmOn = window.RaceAnimation.prefersReducedMotion();
+  var normMethod = CONFIG.default_norm_method;
 
   function escapeHtml(value) {
     return String(value == null ? '' : value)
@@ -364,6 +507,10 @@
   function fmt(value, decimals) {
     if (value == null || value === '' || isNaN(value)) return '—';
     return Number(value).toFixed(decimals == null ? 1 : decimals);
+  }
+  function pct(value, decimals) {
+    if (value == null || isNaN(value)) return '—';
+    return Number(value).toFixed(decimals == null ? 1 : decimals) + '%';
   }
 
   function getJson(url) {
@@ -377,7 +524,7 @@
   }
 
   function showError(message) {
-    els.tableBody.innerHTML = '<tr><td colspan="9" class="rap-error">' + escapeHtml(message) + '</td></tr>';
+    els.tableBody.innerHTML = '<tr><td colspan="12" class="rap-error">' + escapeHtml(message) + '</td></tr>';
     els.raceMeta.textContent = message;
   }
 
@@ -401,60 +548,68 @@
   }
 
   /* ── Adjustable weights ───────────────────────────────────────────────
-     The four component scores the API sends are already normalised across the
-     field, and that normalisation does not depend on the weights at all — it is
-     purely "where does this runner rank on this input". So a new weighting can
-     be blended right here in the browser, with no round trip: composite is just
-     the sum of (normalised x weight), and the finish order, the beaten margins
-     and the animation all follow from it.
+     The component scores the API sends are already scaled across the field, and
+     that scaling does not depend on the weights at all — it is purely "where
+     does this runner rank on this input". So a new weighting can be blended
+     right here in the browser, with no round trip.
 
-     race_animation_scoring.py does exactly this arithmetic server-side, and the
-     API takes the same weights as w_<component> query params, so the numbers
-     below match what the server would return for the same split.            */
-  var WEIGHT_KEYS = ['speed_map', 'sectional', 'adjusted_time', 'assessment'];
-  var WEIGHT_LABELS = {
-    speed_map: 'MAP', sectional: 'Sectional',
-    adjusted_time: 'Adj Time', assessment: 'Assessment'
-  };
-  // Mirrors WEIGHTS in race_animation_scoring.py.
-  var DEFAULT_WEIGHTS = { speed_map: 50, sectional: 10, adjusted_time: 10, assessment: 30 };
+     The arithmetic itself lives in race-animation-scoring.js, which is the same
+     code the parity test runs against the Python module.                    */
+  var DEFAULT_WEIGHTS = CONFIG.default_weights;
   var WEIGHT_PRESETS = {
     'default': DEFAULT_WEIGHTS,
-    even: { speed_map: 25, sectional: 25, adjusted_time: 25, assessment: 25 },
-    map: { speed_map: 100, sectional: 0, adjusted_time: 0, assessment: 0 },
-    assessment: { speed_map: 0, sectional: 0, adjusted_time: 0, assessment: 100 }
+    even: buildPreset(CORE, 25),
+    map: buildPreset(['speed_map'], 100),
+    assessment: buildPreset(['assessment'], 100),
+    everything: buildPreset(KEYS, Math.round(100 / KEYS.length))
   };
-  // Margin constants, kept in step with finish_margins() in the scoring module.
-  var MARGIN_MIN = 0.4, MARGIN_MAX = 3.2, MARGIN_TOTAL = 26.0;
-  var WEIGHT_STORE = 'rapWeights.v1';
+  var WEIGHT_STORE = 'rapWeights.v2';
 
-  function copyWeights(source) {
+  function buildPreset(onKeys, value) {
     var out = {};
-    WEIGHT_KEYS.forEach(function (key) { out[key] = Number(source[key]) || 0; });
+    KEYS.forEach(function (key) { out[key] = onKeys.indexOf(key) >= 0 ? value : 0; });
     return out;
   }
 
-  var weightsPct = readStoredWeights();
+  function copyWeights(source) {
+    var out = {};
+    KEYS.forEach(function (key) { out[key] = Number(source[key]) || 0; });
+    return out;
+  }
 
-  function readStoredWeights() {
-    // localStorage throws outright in some privacy modes, so never let a stored
-    // preference be the thing that stops the page loading.
+  var weightsPct = readStartingWeights();
+
+  /* Weights come from the URL first — that is what makes a link shareable —
+     then from whatever this browser last used, then from the published
+     default. localStorage throws outright in some privacy modes, so never let
+     a stored preference be the thing that stops the page loading. */
+  function readStartingWeights() {
+    var params = new URLSearchParams(window.location.search);
+    var fromUrl = {};
+    var urlHasAny = false;
+    KEYS.forEach(function (key) {
+      var raw = params.get('w_' + key);
+      var value = raw == null ? NaN : Number(raw);
+      if (isFinite(value) && value >= 0) { fromUrl[key] = Math.min(100, value); urlHasAny = true; }
+      else { fromUrl[key] = 0; }
+    });
+    if (urlHasAny) return fromUrl;
+
     var stored = null;
     try { stored = JSON.parse(window.localStorage.getItem(WEIGHT_STORE) || 'null'); }
     catch (error) { stored = null; }
+
     var out = {};
     var usable = false;
-    WEIGHT_KEYS.forEach(function (key) {
+    KEYS.forEach(function (key) {
       var value = stored && Number(stored[key]);
       if (stored && isFinite(value) && value >= 0) { out[key] = Math.min(100, value); usable = true; }
-      else { out[key] = DEFAULT_WEIGHTS[key]; }
+      else { out[key] = Number(DEFAULT_WEIGHTS[key]) || 0; }
     });
     if (!usable) return copyWeights(DEFAULT_WEIGHTS);
     // An all-zero saved split has no ordering information in it — treat it as
     // never having been saved rather than serving a flat field.
-    if (WEIGHT_KEYS.reduce(function (sum, key) { return sum + out[key]; }, 0) <= 0) {
-      return copyWeights(DEFAULT_WEIGHTS);
-    }
+    if (weightTotalOf(out) <= 0) return copyWeights(DEFAULT_WEIGHTS);
     return out;
   }
 
@@ -463,42 +618,32 @@
     catch (error) { /* storage unavailable — the session still works, it just won't persist */ }
   }
 
-  function weightTotal() {
-    return WEIGHT_KEYS.reduce(function (sum, key) { return sum + (Number(weightsPct[key]) || 0); }, 0);
+  function weightTotalOf(source) {
+    return KEYS.reduce(function (sum, key) { return sum + (Number(source[key]) || 0); }, 0);
   }
-
-  /* Slider percentages -> fractions summing to exactly 1. Rescaling is what lets
-     the sliders be dragged freely without the composite drifting off the 0-100
-     scale the table and the default blend are read on. */
-  function effectiveWeights() {
-    var total = weightTotal();
-    var out = {};
-    if (total <= 0) {
-      WEIGHT_KEYS.forEach(function (key) { out[key] = DEFAULT_WEIGHTS[key] / 100; });
-      return out;
-    }
-    WEIGHT_KEYS.forEach(function (key) { out[key] = (Number(weightsPct[key]) || 0) / total; });
-    return out;
-  }
+  function weightTotal() { return weightTotalOf(weightsPct); }
+  function effectiveWeights() { return S.resolveWeights(weightsPct, CONFIG); }
 
   function buildWeightPanel() {
-    els.weightGrid.innerHTML = WEIGHT_KEYS.map(function (key) {
-      return '<div class="rap-weight" data-weight="' + key + '">' +
+    els.weightGrid.innerHTML = KEYS.map(function (key) {
+      var label = CONFIG.short_labels[key] || key;
+      var full = CONFIG.labels[key] || label;
+      return '<div class="rap-weight" data-weight="' + key + '" title="' + escapeHtml(full) + '">' +
         '<div class="rap-weight-top">' +
-          '<label for="rapWRange_' + key + '">' + WEIGHT_LABELS[key] + '</label>' +
+          '<label for="rapWRange_' + key + '">' + escapeHtml(label) + '</label>' +
           '<span class="rap-weight-entry">' +
             '<input type="number" id="rapWNum_' + key + '" min="0" max="100" step="1" ' +
-              'aria-label="' + WEIGHT_LABELS[key] + ' weight, per cent">' +
+              'aria-label="' + escapeHtml(full) + ' weight, per cent">' +
             '<span>%</span>' +
           '</span>' +
         '</div>' +
         '<input type="range" id="rapWRange_' + key + '" min="0" max="100" step="1" ' +
-          'aria-label="' + WEIGHT_LABELS[key] + ' weight slider">' +
+          'aria-label="' + escapeHtml(full) + ' weight slider">' +
         '<div class="rap-weight-eff" data-weight-eff="' + key + '"></div>' +
       '</div>';
     }).join('');
 
-    WEIGHT_KEYS.forEach(function (key) {
+    KEYS.forEach(function (key) {
       var range = document.getElementById('rapWRange_' + key);
       var number = document.getElementById('rapWNum_' + key);
       // input = live re-score while dragging; change = the settled value, which
@@ -532,7 +677,10 @@
   }
 
   function syncWeightInputs() {
-    WEIGHT_KEYS.forEach(function (key) {
+    var total = weightTotal();
+    var effective = effectiveWeights();
+
+    KEYS.forEach(function (key) {
       var value = Math.round(weightsPct[key]);
       var range = document.getElementById('rapWRange_' + key);
       var number = document.getElementById('rapWNum_' + key);
@@ -542,24 +690,23 @@
       if (number && document.activeElement !== number && String(number.value) !== String(value)) {
         number.value = value;
       }
-    });
+      var block = document.querySelector('[data-weight="' + key + '"]');
+      if (block) block.classList.toggle('is-off', value <= 0);
 
-    var total = weightTotal();
-    var effective = effectiveWeights();
-    WEIGHT_KEYS.forEach(function (key) {
       var note = document.querySelector('[data-weight-eff="' + key + '"]');
-      if (!note) return;
-      note.textContent = Math.abs(total - 100) < 0.5 || total <= 0
-        ? '' : '= ' + (effective[key] * 100).toFixed(1) + '% of the blend';
+      if (note) {
+        note.textContent = (Math.abs(total - 100) < 0.5 || total <= 0)
+          ? '' : '= ' + (effective[key] * 100).toFixed(1) + '% of the blend';
+      }
     });
 
     var off = Math.abs(total - 100) >= 0.5;
     els.weightTotal.className = 'rap-weight-total' + (off && total > 0 ? ' is-off' : '');
     if (total <= 0) {
-      els.weightTotal.innerHTML = 'Total <b>0%</b> — nothing to blend, so the default 50/10/10/30 is used.';
+      els.weightTotal.innerHTML = 'Total <b>0%</b> — nothing to blend, so the published default is used.';
     } else if (off) {
       els.weightTotal.innerHTML = 'Total <b>' + Math.round(total) + '%</b> — rescaled to 100%, ' +
-        'so only the proportions between the four count.';
+        'so only the proportions between the inputs count.';
     } else {
       els.weightTotal.innerHTML = 'Total <b>100%</b>.';
     }
@@ -567,61 +714,23 @@
 
   function renderWeightSummary() {
     var effective = effectiveWeights();
-    function pct(key) {
+    var parts = [];
+    KEYS.forEach(function (key) {
       var value = effective[key] * 100;
-      return (Math.abs(value - Math.round(value)) < 0.05 ? Math.round(value) : value.toFixed(1)) + '%';
-    }
-    els.weights.textContent = 'MAP ' + pct('speed_map') + ' · Sectional ' + pct('sectional') +
-      ' · Adj Time ' + pct('adjusted_time') + ' · Assessment ' + pct('assessment');
-    Array.prototype.forEach.call(document.querySelectorAll('[data-weight-head]'), function (cell) {
-      cell.textContent = pct(cell.getAttribute('data-weight-head'));
+      if (value < 0.05) return;
+      var text = (Math.abs(value - Math.round(value)) < 0.05 ? Math.round(value) : value.toFixed(1)) + '%';
+      parts.push((CONFIG.short_labels[key] || key) + ' ' + text);
     });
+    els.weights.textContent = parts.join(' · ') || 'Nothing weighted';
   }
 
-  /* Rank order, matching build_composite_scores() exactly: composite desc, then
-     assessment, then MAP, then barrier, then name — so a tie never depends on
-     the order the runners happened to arrive in. */
-  function compareRunners(a, b) {
-    var byComposite = (b.composite_score || 0) - (a.composite_score || 0);
-    if (byComposite) return byComposite;
-    var byAssessment = (b.assessment_score || 0) - (a.assessment_score || 0);
-    if (byAssessment) return byAssessment;
-    var byMap = (b.map_value || 0) - (a.map_value || 0);
-    if (byMap) return byMap;
-    var byBarrier = (a.barrier || 99) - (b.barrier || 99);
-    if (byBarrier) return byBarrier;
-    return String(a.horse_name || '') < String(b.horse_name || '') ? -1 : 1;
-  }
-
-  /* Composite gaps -> cumulative beaten margins. Port of finish_margins(). */
-  function assignMargins(ordered) {
-    if (!ordered.length) return;
-    var drops = [];
-    var biggest = 0;
-    for (var i = 0; i < ordered.length - 1; i++) {
-      var drop = Math.max(0, (ordered[i].composite_score || 0) - (ordered[i + 1].composite_score || 0));
-      drops.push(drop);
-      if (drop > biggest) biggest = drop;
-    }
-    var margins = [0];
-    drops.forEach(function (drop) {
-      var share = biggest > 1e-9 ? drop / biggest : 0;
-      margins.push(margins[margins.length - 1] + MARGIN_MIN + share * (MARGIN_MAX - MARGIN_MIN));
-    });
-    var last = margins[margins.length - 1];
-    var scale = last > MARGIN_TOTAL ? MARGIN_TOTAL / last : 1;
-    ordered.forEach(function (runner, index) {
-      runner.beaten_margin = Math.round(margins[index] * scale * 100) / 100;
-    });
-  }
-
-  /* Barrier draw, inside to outside; anything with no barrier goes to the
-     outside in rank order. Same rule the payload was built with. */
-  function assignLanes(ordered) {
-    var drawn = ordered.filter(function (r) { return r.barrier; })
-      .sort(function (a, b) { return a.barrier - b.barrier; });
-    var undrawn = ordered.filter(function (r) { return !r.barrier; });
-    drawn.concat(undrawn).forEach(function (runner, lane) { runner.lane = lane; });
+  /* Which component columns the table shows: whatever is actually carrying
+     weight. A column for an input contributing nothing is noise, and with eight
+     inputs available the table would otherwise be unreadable. */
+  function activeKeys() {
+    var effective = effectiveWeights();
+    var active = KEYS.filter(function (key) { return effective[key] > 0.0005; });
+    return active.length ? active : CORE.slice();
   }
 
   /* Re-blend the loaded race under the current sliders. `settled` means the
@@ -630,39 +739,38 @@
      rebuilding on every pixel of a drag would restart the race repeatedly. */
   function applyWeights(settled) {
     renderWeightSummary();
-    if (settled) storeWeights();
+    if (settled) { storeWeights(); syncUrl(); }
     if (!race || !race.runners || !race.runners.length) return;
 
-    var effective = effectiveWeights();
-    race.runners.forEach(function (runner) {
-      var components = runner.components || {};
-      var composite = 0;
-      WEIGHT_KEYS.forEach(function (key) {
-        var component = components[key];
-        if (!component) return;
-        var weight = effective[key];
-        var weighted = (component.normalised || 0) * weight;
-        component.weight = weight;
-        component.weight_pct = Math.round(weight * 1000) / 10;
-        component.weighted = Math.round(weighted * 100) / 100;
-        composite += weighted;
-      });
-      runner.composite_score = Math.round(composite * 100) / 100;
+    var outcome = S.rescore(race.runners, weightsPct, CONFIG);
+    race.weights = {};
+    KEYS.forEach(function (key) {
+      race.weights[key] = Math.round(outcome.weights[key] * 1000) / 10;
     });
 
-    race.runners.sort(compareRunners);
-    race.runners.forEach(function (runner, index) { runner.rank = index + 1; });
-    assignMargins(race.runners);
-    assignLanes(race.runners);
-    race.weights = {};
-    WEIGHT_KEYS.forEach(function (key) { race.weights[key] = Math.round(effective[key] * 1000) / 10; });
-
     renderTable(race);
+    renderScoreboard(race);
     if (settled) {
       buildAnimation(race);
       els.raceMeta.textContent = 'Re-scored on your weighting — ' + race.runners[0].horse_name +
         ' now rates the winner. Press Run the race to watch it.';
     }
+  }
+
+  /* Put the current race and weighting in the address bar, so the link in the
+     bar is always the link worth sharing. The API takes exactly these
+     parameters, so a copied link works against the server too. */
+  function syncUrl() {
+    if (!window.history || !window.history.replaceState) return;
+    var params = new URLSearchParams();
+    if (els.meeting.value) params.set('meeting', els.meeting.value);
+    if (els.race.value) params.set('race', els.race.value);
+    KEYS.forEach(function (key) {
+      var value = Math.round(Number(weightsPct[key]) || 0);
+      if (value > 0) params.set('w_' + key, value);
+    });
+    if (normMethod !== CONFIG.default_norm_method) params.set('norm', normMethod);
+    window.history.replaceState(null, '', window.location.pathname + '?' + params.toString());
   }
 
   // ── Dropdowns ───────────────────────────────────────────────────────────
@@ -681,6 +789,7 @@
                       (meeting.race_count ? ' (' + meeting.race_count + ' races)' : '');
           return '<option value="' + meeting.id + '">' + escapeHtml(label) + '</option>';
         }).join('');
+      return restoreFromUrl();
     }).catch(function (error) {
       els.meeting.innerHTML = '<option value="">Could not load meetings</option>';
       showError(error.message);
@@ -710,47 +819,109 @@
     });
   }
 
+  /* Reopen whatever the link pointed at. The weights were already read off the
+     URL before anything loaded, so the race arrives on the right blend. */
+  function restoreFromUrl() {
+    var params = new URLSearchParams(window.location.search);
+    var meetingId = params.get('meeting');
+    var raceId = params.get('race');
+    var norm = params.get('norm');
+    if (norm && CONFIG.norm_methods.indexOf(norm) >= 0) {
+      normMethod = norm;
+      els.norm.value = norm;
+    }
+    if (!meetingId) return;
+    els.meeting.value = meetingId;
+    if (els.meeting.value !== meetingId) return;      // that meeting is gone
+    return loadRaces(meetingId).then(function () {
+      if (!raceId) return;
+      els.race.value = raceId;
+      if (els.race.value === raceId) return loadRace(raceId);
+    });
+  }
+
   // ── Race load + build ───────────────────────────────────────────────────
   function loadRace(raceId) {
     els.raceMeta.textContent = 'Loading race…';
-    return getJson(API + '/race/' + raceId).then(function (payload) {
-      race = payload;
-      renderRaceHeader(payload);
-      // Re-blend to whatever the sliders are set to (the payload arrives on the
-      // default split) — this renders the table; the animation follows it.
-      applyWeights(false);
-      buildAnimation(payload);
-    }).catch(function (error) {
-      race = null;
-      if (engine) { engine.destroy(); engine = null; }
-      setControlsEnabled(false);
-      showError(error.message);
-    });
+    return getJson(API + '/race/' + raceId + '?norm=' + encodeURIComponent(normMethod))
+      .then(function (payload) {
+        race = payload;
+        renderRaceHeader(payload);
+        // Re-blend to whatever the sliders are set to (the payload arrives on
+        // the default split) — this renders the table; the animation follows.
+        applyWeights(false);
+        buildAnimation(payload);
+        syncUrl();
+        loadSilks(raceId);
+      }).catch(function (error) {
+        race = null;
+        if (engine) { engine.destroy(); engine = null; }
+        setControlsEnabled(false);
+        showError(error.message);
+      });
+  }
+
+  /* Live silk artwork, fetched after the race is already on screen.
+     It goes over the network to a bookmaker and cannot succeed at all for a
+     meeting older than today, so it is never allowed to hold up the payload —
+     the runners are drawn in their coded colours and repainted if this lands. */
+  function loadSilks(raceId) {
+    getJson(API + '/race/' + raceId + '/silks').then(function (data) {
+      if (!data.has_silks || !race || String(race.race.id) !== String(raceId)) return;
+      var byHorseId = {};
+      (data.runners || []).forEach(function (silk) { byHorseId[silk.horse_id] = silk; });
+      race.runners.forEach(function (runner) {
+        var silk = byHorseId[runner.horse_id];
+        if (silk) {
+          runner.silk.sprite_url = silk.sprite_url;
+          runner.silk.runner_number = silk.runner_number;
+          runner.silk.tile_offset_px = silk.tile_offset_px;
+        }
+      });
+      if (engine) engine.applySilks(byHorseId);
+      renderTable(race);
+    }).catch(function () { /* decoration only — the coded silks stand */ });
   }
 
   function renderRaceHeader(payload) {
     var meta = payload.race || {};
     els.raceName.textContent = (payload.meeting.track || payload.meeting.name) + ' — Race ' + meta.race_number;
+
     var bits = [];
     if (meta.distance) bits.push(meta.distance);
     if (meta.race_class) bits.push(meta.race_class);
     if (meta.track_condition) bits.push(meta.track_condition);
     bits.push(meta.field_size + ' runners');
+    bits.push(meta.direction === 'clockwise' ? 'clockwise' : 'anti-clockwise');
     els.raceMeta.textContent = bits.join(' · ');
 
     renderWeightSummary();
 
-    var missing = [];
-    if (!meta.has_speed_map) missing.push('no speed map for this race — pace categories and MAP fall back to neutral');
-    if (!meta.has_sectionals) missing.push('no PFAI sectionals stored');
-    if (!meta.has_silks) missing.push('no live silks — showing coded colours instead');
-    els.legend.textContent = missing.length ? 'Note: ' + missing.join('; ') + '.' : '';
+    var notes = [];
+    if (!meta.has_speed_map) notes.push('no speed map for this race — pace and MAP fall back to neutral');
+    if (!meta.has_sectionals) notes.push('no PFAI sectionals stored');
+    if (!meta.has_prices) notes.push('no prices, so there is no market comparison');
+    if (meta.laps && meta.laps > 1) {
+      notes.push('a ' + meta.distance + ' trip — the final ' + meta.shown_from_m + 'm is drawn');
+    }
+    if (payload.meeting.rail_position) notes.push('rail out ' + payload.meeting.rail_position + 'm');
+
+    var pace = payload.pace || {};
+    var tempo = pace.shape ? ' <span class="rap-tempo rap-tempo-' + pace.shape + '">' +
+      escapeHtml(pace.shape_label) + '</span>' : '';
+    var counts = pace.counts;
+    els.legend.innerHTML =
+      (counts ? 'Tempo: ' + counts.leader + ' want the lead, ' + counts.onpace +
+        ' on pace, ' + counts.midfield + ' midfield, ' + counts.back +
+        ' backmarkers.' + tempo : '') +
+      (notes.length ? '<br>Note: ' + escapeHtml(notes.join('; ')) + '.' : '');
   }
 
   function setControlsEnabled(enabled) {
     els.play.disabled = !enabled;
     els.replay.disabled = !enabled;
     els.names.disabled = !enabled;
+    els.results.disabled = !enabled || !(race && race.result_summary && race.result_summary.has_results);
   }
 
   function buildAnimation(payload) {
@@ -758,22 +929,42 @@
     var fieldSize = payload.runners.length;
     // Big fields: names off by default, silk colour carries the identity, and a
     // tap on a horse opens the popup instead. Same rule as real race vision.
-    namesOn = fieldSize <= 11;
-    els.names.setAttribute('aria-pressed', namesOn ? 'true' : 'false');
+    // A viewer who has pressed the button keeps their choice through a rebuild
+    // — it used to be reset every time a slider moved.
+    var showNames = namesOn == null ? fieldSize <= 11 : namesOn;
+    els.names.setAttribute('aria-pressed', showNames ? 'true' : 'false');
+
+    var hasResults = !!(payload.result_summary && payload.result_summary.has_results);
 
     engine = window.RaceAnimation.create({
       svg: els.canvas,
       runners: payload.runners,
-      duration: 15,
-      showNames: namesOn,
+      duration: (payload.race && payload.race.duration_seconds) || 15,
+      direction: payload.race && payload.race.direction,
+      lapFraction: payload.race && payload.race.lap_fraction,
+      pace: payload.pace,
+      reducedMotion: calmOn,
+      showNames: showNames,
+      showResults: hasResults && resultsOn,
       onTick: function (time, order) {
         els.progressBar.style.width = (time * 100).toFixed(1) + '%';
         renderLiveOrder(order);
       },
+      onPlayState: function (isPlaying) {
+        els.play.textContent = isPlaying ? '❚❚ Pause' : '▶ Run the race';
+      },
       onFinish: function () {
-        els.play.textContent = '▶ Run the race';
-        els.raceMeta.textContent = 'Result: ' + payload.runners[0].horse_name +
-          ' wins on a composite of ' + fmt(payload.runners[0].composite_score, 1) + '.';
+        var summary = payload.result_summary || {};
+        if (summary.has_results) {
+          els.raceMeta.textContent = 'Predicted ' + payload.runners[0].horse_name +
+            '; ' + (summary.winner_name || 'the winner') + ' actually won' +
+            (summary.found_winner ? ' — called it.' : ' (we had it ' +
+              (summary.predicted_place_of_winner || '—') + 'th).');
+        } else {
+          els.raceMeta.textContent = 'Result: ' + payload.runners[0].horse_name +
+            ' wins on a composite of ' + fmt(payload.runners[0].composite_score, 1) +
+            ' — ' + pct(payload.runners[0].win_probability_pct) + ' of the time.';
+        }
       },
       onSelect: function (runner) {
         showPopup(runner);
@@ -785,6 +976,7 @@
     // console (raceAnimationEngine.scrubTo(0.62)) when tuning the phases.
     window.raceAnimationEngine = engine;
     setControlsEnabled(true);
+    els.results.setAttribute('aria-pressed', hasResults && resultsOn ? 'true' : 'false');
     els.play.textContent = '▶ Run the race';
     els.progressBar.style.width = '0%';
     renderLiveOrder(payload.runners);
@@ -804,16 +996,86 @@
     }).join('');
   }
 
+  // ── The scoreboard: was the prediction right? ────────────────────────────
+  function renderScoreboard(payload) {
+    var summary = payload.result_summary || {};
+    var simulation = payload.simulation || {};
+    var top = payload.runners[0] || {};
+    var cells = [];
+
+    var byHorse = {};
+    (simulation.summary || []).forEach(function (row) { byHorse[row.horse_id] = row; });
+    var topSim = byHorse[top.horse_id];
+
+    cells.push(card('Our pick',
+      escapeHtml(top.horse_name || '—'),
+      topSim ? 'Wins ' + pct(topSim.win_pct) + ' of 1,000+ simulated runnings'
+             : 'On a composite of ' + fmt(top.composite_score, 1)));
+
+    if (top.fair_odds) {
+      var value = top.value || {};
+      cells.push(card('Fair price',
+        '$' + fmt(top.fair_odds, 2),
+        value.price ? ('Market $' + fmt(value.price, 2) + ' · edge ' +
+          (value.edge_pct > 0 ? '+' : '') + fmt(value.edge_pct, 1) + '%')
+          : 'No market price for this race'));
+    }
+
+    if (summary.has_results) {
+      cells.push(card('Actual winner',
+        escapeHtml(summary.winner_name || '—'),
+        summary.winner_sp ? 'Started at $' + fmt(summary.winner_sp, 2) : 'No starting price recorded',
+        summary.found_winner ? 'is-hit' : 'is-miss'));
+      cells.push(card('Called it?',
+        summary.found_winner ? 'Yes' : 'No',
+        summary.found_winner ? 'Top pick won'
+          : 'The winner was our ' + (summary.predicted_place_of_winner || '—') + 'th pick' +
+            (summary.winner_in_top3 ? ' — inside our top three' : ''),
+        summary.found_winner ? 'is-hit' : 'is-miss'));
+      if (summary.mean_placing_error != null) {
+        cells.push(card('Placings out by',
+          fmt(summary.mean_placing_error, 2),
+          'Average error across the placegetters'));
+      }
+    } else {
+      cells.push(card('Result', 'Not run yet',
+        'The scoreboard fills in once the result is entered'));
+    }
+
+    els.scoreboard.innerHTML = cells.join('');
+    els.scoreboard.hidden = false;
+  }
+
+  function card(label, value, note, valueClass) {
+    return '<div class="rap-score">' +
+      '<div class="rap-score-label">' + escapeHtml(label) + '</div>' +
+      '<div class="rap-score-value ' + (valueClass || '') + '">' + value + '</div>' +
+      '<div class="rap-score-note">' + note + '</div>' +
+    '</div>';
+  }
+
   function showPopup(runner) {
     if (!runner) { els.popup.hidden = true; return; }
-    els.popup.innerHTML =
-      '<div class="rap-popup-name">' +
-        escapeHtml((runner.tab_number ? runner.tab_number + '. ' : '') + runner.horse_name) + '</div>' +
+    var value = runner.value || {};
+    var rows =
       '<div class="rap-popup-row"><span>Composite</span><b>' + fmt(runner.composite_score, 1) + '</b></div>' +
+      '<div class="rap-popup-row"><span>Wins</span><b>' + pct(runner.win_probability_pct) + '</b></div>' +
+      '<div class="rap-popup-row"><span>Fair price</span><b>' +
+        (runner.fair_odds ? '$' + fmt(runner.fair_odds, 2) : '—') + '</b></div>' +
       '<div class="rap-popup-row"><span>Predicted finish</span><b>' + runner.rank + '</b></div>' +
       '<div class="rap-popup-row"><span>Pace</span><b>' + escapeHtml(runner.pace_label) + '</b></div>' +
       '<div class="rap-popup-row"><span>Barrier</span><b>' + (runner.barrier || '—') + '</b></div>' +
       '<div class="rap-popup-row"><span>Jockey</span><b>' + escapeHtml(runner.jockey || '—') + '</b></div>';
+    if (value.price) {
+      rows += '<div class="rap-popup-row"><span>Market</span><b>$' + fmt(value.price, 2) + '</b></div>';
+    }
+    if (runner.result && runner.result.ran) {
+      rows += '<div class="rap-popup-row"><span>Actually finished</span><b>' +
+        (runner.result.finish_position >= 5 ? 'unplaced' : runner.result.finish_position) + '</b></div>';
+    }
+    els.popup.innerHTML =
+      '<div class="rap-popup-name">' +
+        escapeHtml((runner.tab_number ? runner.tab_number + '. ' : '') + runner.horse_name) + '</div>' + rows;
     els.popup.hidden = false;
     // Park it top-right of the stage: the runner it describes is moving, so a
     // popup pinned to the horse would chase it around the track.
@@ -829,9 +1091,9 @@
   }
 
   // ── Breakdown table ─────────────────────────────────────────────────────
-  function componentCell(component, decimals) {
+  function componentCell(component) {
     if (!component) return '<td class="rap-num">—</td>';
-    var raw = component.available ? fmt(component.raw, decimals) : '—';
+    var raw = component.available ? fmt(component.raw, component.decimals) : '—';
     var normalised = fmt(component.normalised, 0);
     var cls = 'rap-num' + (component.available ? '' : ' rap-imputed');
     return '<td class="' + cls + '">' + normalised +
@@ -839,26 +1101,65 @@
   }
 
   function renderTable(payload) {
+    var keys = activeKeys();
+    var effective = effectiveWeights();
+    var hasResults = !!(payload.result_summary && payload.result_summary.has_results);
+    var hasPrices = !!(payload.race && payload.race.has_prices);
+
+    els.tableHead.innerHTML = '<tr>' +
+      '<th class="rap-left">#</th><th class="rap-left">Runner</th><th class="rap-left">Pace</th>' +
+      '<th>Bar</th>' +
+      keys.map(function (key) {
+        return '<th>' + escapeHtml(CONFIG.short_labels[key] || key) +
+          '<br><span class="rap-weights">' + (effective[key] * 100).toFixed(0) + '%</span></th>';
+      }).join('') +
+      '<th>Composite</th><th>Wins</th><th>Fair</th>' +
+      (hasPrices ? '<th>Market</th><th>Edge</th>' : '') +
+      (hasResults ? '<th>Actual</th>' : '') +
+      '</tr>';
+
+    var winnerId = payload.result_summary && payload.result_summary.winner_horse_id;
+
     els.tableBody.innerHTML = payload.runners.map(function (runner) {
       var components = runner.components || {};
       var rankClass = runner.rank <= 3 ? ' rap-rank-' + runner.rank : '';
-      return '<tr data-horse-id="' + runner.horse_id + '">' +
-        '<td><span class="rap-rank' + rankClass + '">' + runner.rank + '</span></td>' +
-        '<td><div class="rap-runner">' +
+      var value = runner.value || {};
+      var result = runner.result;
+
+      var row = '<tr data-horse-id="' + runner.horse_id + '"' +
+        (winnerId && runner.horse_id === winnerId ? ' class="is-winner"' : '') + '>' +
+        '<td class="rap-left"><span class="rap-rank' + rankClass + '">' + runner.rank + '</span></td>' +
+        '<td class="rap-left"><div class="rap-runner">' +
           '<span class="rap-silk" style="' + silkStyle(runner.silk) + '"></span>' +
           '<span><span class="rap-runner-name">' +
             escapeHtml((runner.tab_number ? runner.tab_number + '. ' : '') + runner.horse_name) +
           '</span><span class="rap-runner-sub">' + escapeHtml(runner.jockey || 'Jockey TBA') + '</span></span>' +
         '</div></td>' +
-        '<td><span class="rap-pace rap-pace-' + runner.pace_category + '">' +
+        '<td class="rap-left"><span class="rap-pace rap-pace-' + runner.pace_category + '">' +
           escapeHtml(runner.pace_label) + '</span></td>' +
         '<td class="rap-num">' + (runner.barrier || '—') + '</td>' +
-        componentCell(components.speed_map, 2) +
-        componentCell(components.sectional, 1) +
-        componentCell(components.adjusted_time, 2) +
-        componentCell(components.assessment, 1) +
+        keys.map(function (key) { return componentCell(components[key]); }).join('') +
         '<td class="rap-num rap-composite">' + fmt(runner.composite_score, 1) + '</td>' +
-      '</tr>';
+        '<td class="rap-num">' + pct(runner.win_probability_pct) + '</td>' +
+        '<td class="rap-num">' + (runner.fair_odds ? '$' + fmt(runner.fair_odds, 2) : '—') + '</td>';
+
+      if (hasPrices) {
+        row += '<td class="rap-num">' + (value.price ? '$' + fmt(value.price, 2) : '—') + '</td>' +
+          '<td class="rap-num rap-value' + (value.is_value ? ' is-value' : '') + '">' +
+            (value.edge_pct == null ? '—'
+              : (value.edge_pct > 0 ? '+' : '') + fmt(value.edge_pct, 1) + '%' +
+                (value.is_value && value.kelly_pct ? '<span class="rap-runner-sub rap-raw">' +
+                  fmt(value.kelly_pct, 2) + '% bank</span>' : '')) +
+          '</td>';
+      }
+      if (hasResults) {
+        var finish = result && result.ran ? result.finish_position : null;
+        var finishClass = finish === 1 ? 'rap-finish-1'
+          : (finish === 2 || finish === 3) ? 'rap-finish-' + finish : 'rap-finish-other';
+        row += '<td class="rap-num"><span class="rap-finish ' + finishClass + '">' +
+          (finish == null ? '—' : (finish >= 5 ? 'unpl' : finish)) + '</span></td>';
+      }
+      return row + '</tr>';
     }).join('');
 
     Array.prototype.forEach.call(els.tableBody.querySelectorAll('tr'), function (row) {
@@ -873,11 +1174,112 @@
     });
   }
 
+  // ── Proving it: history and tuning ──────────────────────────────────────
+  function weightQuery() {
+    var params = new URLSearchParams();
+    KEYS.forEach(function (key) {
+      params.set('w_' + key, Math.round(Number(weightsPct[key]) || 0));
+    });
+    params.set('norm', normMethod);
+    return params.toString();
+  }
+
+  function proofBusy(message) {
+    els.proofOut.hidden = false;
+    els.proofOut.innerHTML = escapeHtml(message);
+  }
+
+  function metricCell(label, value, note) {
+    return '<div class="rap-proof-cell"><dt>' + escapeHtml(label) + '</dt>' +
+      '<dd>' + value + (note || '') + '</dd></div>';
+  }
+
+  function delta(mine, theirs, lowerIsBetter, suffix) {
+    if (mine == null || theirs == null) return '';
+    var difference = mine - theirs;
+    if (Math.abs(difference) < 0.005) return '';
+    var better = lowerIsBetter ? difference < 0 : difference > 0;
+    return '<span class="rap-delta ' + (better ? 'is-better' : 'is-worse') + '">' +
+      (difference > 0 ? '+' : '') + difference.toFixed(2) + (suffix || '') + '</span>';
+  }
+
+  function renderAccuracy(data) {
+    if (!data.has_history) {
+      els.proofOut.innerHTML = escapeHtml(data.reason ||
+        'No settled races with enough data to score yet.');
+      return;
+    }
+    var mine = data.current || {};
+    var base = data.default || {};
+    els.proofOut.innerHTML =
+      '<div>Scored over <b>' + mine.races + '</b> settled races. Your weighting against the ' +
+      'published default:</div>' +
+      '<div class="rap-proof-grid">' +
+        metricCell('Found the winner', pct(mine.strike_rate),
+          delta(mine.strike_rate, base.strike_rate, false, '%')) +
+        metricCell('Winner in our top 3', pct(mine.top3_rate),
+          delta(mine.top3_rate, base.top3_rate, false, '%')) +
+        metricCell('Log loss (lower better)', fmt(mine.log_loss, 3),
+          delta(mine.log_loss, base.log_loss, true)) +
+        metricCell('Flat bet on top pick',
+          mine.roi_pct == null ? '—' : (mine.roi_pct > 0 ? '+' : '') + fmt(mine.roi_pct, 1) + '%',
+          delta(mine.roi_pct, base.roi_pct, false, '%')) +
+      '</div>' +
+      '<div class="rap-proof-note" style="margin-top:8px;">Default blend: ' +
+        pct(base.strike_rate) + ' strike rate, log loss ' + fmt(base.log_loss, 3) + '.</div>';
+  }
+
+  function renderTuning(data) {
+    if (!data.ok) {
+      els.proofOut.innerHTML = escapeHtml(data.reason || 'Not enough history to tune on yet.');
+      return;
+    }
+    var tuned = data.out_of_sample || {};
+    var base = data.default_out_of_sample || {};
+    var split = KEYS.map(function (key) {
+      var value = data.weights_pct[key];
+      return value > 0.05 ? (CONFIG.short_labels[key] || key) + ' ' + Math.round(value) + '%' : null;
+    }).filter(Boolean).join(' · ');
+
+    els.proofOut.innerHTML =
+      '<div>Tuned over <b>' + data.races + '</b> races in <b>' + data.folds + '</b> ' +
+      'walk-forward blocks. Every figure below is measured on races the search never saw.</div>' +
+      '<div class="rap-proof-grid">' +
+        metricCell('Found the winner', pct(tuned.strike_rate),
+          delta(tuned.strike_rate, base.strike_rate, false, '%')) +
+        metricCell('Winner in top 3', pct(tuned.top3_rate),
+          delta(tuned.top3_rate, base.top3_rate, false, '%')) +
+        metricCell('Log loss (lower better)', fmt(tuned.log_loss, 3),
+          delta(tuned.log_loss, base.log_loss, true)) +
+        metricCell('Flat bet on top pick',
+          tuned.roi_pct == null ? '—' : (tuned.roi_pct > 0 ? '+' : '') + fmt(tuned.roi_pct, 1) + '%',
+          delta(tuned.roi_pct, base.roi_pct, false, '%')) +
+      '</div>' +
+      '<div class="rap-verdict ' + (data.beats_default ? 'is-better' : 'is-worse') + '">' +
+        (data.beats_default
+          ? 'This weighting beat the published default out of sample.'
+          : 'This did NOT beat the published default out of sample — the default stands.') +
+      '</div>' +
+      '<div class="rap-proof-out" style="margin-top:10px;">Best split found: <b>' +
+        escapeHtml(split) + '</b> ' +
+        '<button class="rap-btn rap-btn--small" type="button" id="rapApplyTune">Apply it</button></div>';
+
+    var apply = document.getElementById('rapApplyTune');
+    if (apply) {
+      apply.addEventListener('click', function () {
+        weightsPct = copyWeights(data.weights_pct);
+        syncWeightInputs();
+        applyWeights(true);
+      });
+    }
+  }
+
   // ── Wiring ──────────────────────────────────────────────────────────────
   els.meeting.addEventListener('change', function () {
     els.race.innerHTML = '<option value="">Select a race…</option>';
     els.race.disabled = true;
     if (this.value) loadRaces(this.value);
+    syncUrl();
   });
   els.race.addEventListener('change', function () {
     if (this.value) loadRace(this.value);
@@ -886,33 +1288,74 @@
     if (els.race.value) loadRace(els.race.value);
     else loadMeetings();
   });
+  els.share.addEventListener('click', function () {
+    syncUrl();
+    var link = window.location.href;
+    var button = this;
+    var restore = function (text) {
+      button.textContent = text;
+      window.setTimeout(function () { button.textContent = '🔗 Copy link'; }, 1800);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(link)
+        .then(function () { restore('✓ Copied'); })
+        .catch(function () { restore('Copy failed'); });
+    } else {
+      restore('Link is in the address bar');
+    }
+  });
   els.play.addEventListener('click', function () {
     if (!engine) return;
-    var running = engine.toggle();
-    this.textContent = running ? '❚❚ Pause' : '▶ Run the race';
+    engine.toggle();
   });
   els.replay.addEventListener('click', function () {
     if (!engine) return;
     engine.replay();
-    els.play.textContent = '❚❚ Pause';
   });
   els.names.addEventListener('click', function () {
-    namesOn = !namesOn;
+    namesOn = !(this.getAttribute('aria-pressed') === 'true');
     this.setAttribute('aria-pressed', namesOn ? 'true' : 'false');
     if (engine) engine.setNamesVisible(namesOn);
   });
+  els.results.addEventListener('click', function () {
+    resultsOn = !resultsOn;
+    this.setAttribute('aria-pressed', resultsOn ? 'true' : 'false');
+    if (engine) engine.setResultsVisible(resultsOn);
+  });
+  els.motion.addEventListener('click', function () {
+    calmOn = !calmOn;
+    this.setAttribute('aria-pressed', calmOn ? 'true' : 'false');
+    if (race) buildAnimation(race);
+  });
   els.weightRun.addEventListener('click', function () {
     applyWeights(true);
-    if (!engine) return;
-    engine.replay();
-    els.play.textContent = '❚❚ Pause';
+    if (engine) engine.replay();
   });
   els.speed.addEventListener('input', function () {
     var value = Number(this.value) / 100;
     els.speedValue.textContent = value.toFixed(1) + '×';
     if (engine) engine.setSpeed(value);
   });
+  els.norm.addEventListener('change', function () {
+    normMethod = this.value;
+    syncUrl();
+    if (els.race.value) loadRace(els.race.value);
+  });
+  els.score.addEventListener('click', function () {
+    proofBusy('Scoring your weighting over every settled race we hold…');
+    getJson(API + '/accuracy?' + weightQuery())
+      .then(renderAccuracy)
+      .catch(function (error) { els.proofOut.textContent = error.message; });
+  });
+  els.tune.addEventListener('click', function () {
+    proofBusy('Searching for a better weighting, walk-forward. This takes a moment…');
+    getJson(API + '/tune?scope=all&norm=' + encodeURIComponent(normMethod))
+      .then(renderTuning)
+      .catch(function (error) { els.proofOut.textContent = error.message; });
+  });
 
+  els.motion.setAttribute('aria-pressed', calmOn ? 'true' : 'false');
+  els.norm.value = normMethod;
   buildWeightPanel();
   loadMeetings();
 }());
