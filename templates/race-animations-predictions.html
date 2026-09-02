@@ -9,8 +9,9 @@
    Additive by design: it extends base.html for the shell only and owns all of
    its own markup, styles and scripts. Data comes from the /api/race-animation/*
    endpoints in race_animation_routes.py; the artwork and the race engine live
-   in static/js/race-horse-art.js and static/js/race-animation.js, and the blend
-   arithmetic the sliders run on is in static/js/race-animation-scoring.js.
+   in static/js/race-horse-art.js and static/js/race-animation.js, the sound bed
+   in static/js/race-animation-audio.js, and the blend arithmetic the sliders
+   run on is in static/js/race-animation-scoring.js.
 
    That last file is shared on purpose. The page re-blends the composite locally
    so the sliders respond without a round trip, and that copy of the maths used
@@ -353,6 +354,8 @@
                 title="Put the actual finishing position on each runner">Result</button>
         <button class="rap-btn" id="rapMotion" type="button" aria-pressed="false"
                 title="Drop the bob and the drift, and never start on its own">Calm</button>
+        <button class="rap-btn" id="rapSound" type="button" aria-pressed="false"
+                title="Hoofbeats, the gate and the crowd. Starts when you start the race">🔈 Sound</button>
         <span class="rap-speed">
           Speed <input id="rapSpeed" type="range" min="50" max="250" value="100">
           <span class="rap-num" id="rapSpeedValue">1.0×</span>
@@ -446,6 +449,7 @@
 <script id="rapScoringConfig" type="application/json">{{ scoring_config | tojson }}</script>
 <script src="{{ url_for('static', filename='js/race-animation-scoring.js') }}"></script>
 <script src="{{ url_for('static', filename='js/race-horse-art.js') }}"></script>
+<script src="{{ url_for('static', filename='js/race-animation-audio.js') }}"></script>
 <script src="{{ url_for('static', filename='js/race-animation.js') }}"></script>
 <script>
 (function () {
@@ -477,6 +481,7 @@
     canvasWrap: document.getElementById('rapCanvasWrap'),
     popup: document.getElementById('rapPopup'),
     progressBar: document.getElementById('rapProgressBar'),
+    sound: document.getElementById('rapSound'),
     live: document.getElementById('rapLive'),
     legend: document.getElementById('rapLegend'),
     scoreboard: document.getElementById('rapScoreboard'),
@@ -497,7 +502,27 @@
   var namesOn = null;       // null = follow the field size; true/false = the viewer chose
   var resultsOn = true;
   var calmOn = window.RaceAnimation.prefersReducedMotion();
+  /* Sound is off by default for anyone who has asked their machine for less
+   * movement — not because the spec says so, but because it is the same
+   * posture the rest of this page already takes, and it is one button to turn
+   * back on. Held in a variable exactly as calmOn is, so it survives a rebuild
+   * and nothing else. */
+  var soundOn = !calmOn && !!(window.RaceAnimationAudio && window.RaceAnimationAudio.supported());
+  /* One audio module for the life of the page, not one per race. It builds
+   * nothing until unlockSound() is called from a click — see the play handler
+   * — because a browser will not let a page make a noise before that, and a
+   * page that tries has its audio suspended for good. */
+  var audio = (window.RaceAnimationAudio && window.RaceAnimationAudio.supported())
+    ? window.RaceAnimationAudio.create({ muted: !soundOn })
+    : null;
   var normMethod = CONFIG.default_norm_method;
+
+  /* Every control that can START the race calls this first. It is the click
+   * itself that buys the right to make a sound, so it has to happen in the
+   * handler and not a frame later. */
+  function unlockSound() {
+    if (audio && soundOn) audio.unlock();
+  }
 
   function escapeHtml(value) {
     return String(value == null ? '' : value)
@@ -944,6 +969,7 @@
       lapFraction: payload.race && payload.race.lap_fraction,
       pace: payload.pace,
       reducedMotion: calmOn,
+      audio: audio,
       showNames: showNames,
       showResults: hasResults && resultsOn,
       onTick: function (time, order) {
@@ -1306,10 +1332,12 @@
   });
   els.play.addEventListener('click', function () {
     if (!engine) return;
+    unlockSound();
     engine.toggle();
   });
   els.replay.addEventListener('click', function () {
     if (!engine) return;
+    unlockSound();
     engine.replay();
   });
   els.names.addEventListener('click', function () {
@@ -1327,7 +1355,18 @@
     this.setAttribute('aria-pressed', calmOn ? 'true' : 'false');
     if (race) buildAnimation(race);
   });
+  els.sound.addEventListener('click', function () {
+    soundOn = !soundOn;
+    this.setAttribute('aria-pressed', soundOn ? 'true' : 'false');
+    this.textContent = soundOn ? '🔊 Sound' : '🔈 Sound';
+    if (!audio) return;
+    audio.setMuted(!soundOn);
+    // Turning it on mid-race is a click too, so it can start the graph there
+    // and then rather than making the viewer press play again.
+    if (soundOn) audio.unlock();
+  });
   els.weightRun.addEventListener('click', function () {
+    unlockSound();
     applyWeights(true);
     if (engine) engine.replay();
   });
@@ -1355,6 +1394,9 @@
   });
 
   els.motion.setAttribute('aria-pressed', calmOn ? 'true' : 'false');
+  els.sound.setAttribute('aria-pressed', soundOn ? 'true' : 'false');
+  els.sound.textContent = soundOn ? '🔊 Sound' : '🔈 Sound';
+  els.sound.disabled = !audio;
   els.norm.value = normMethod;
   buildWeightPanel();
   loadMeetings();

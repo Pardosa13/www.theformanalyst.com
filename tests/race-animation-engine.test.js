@@ -258,3 +258,40 @@ test('reduced motion is detected without a matchMedia to ask', () => {
     // throwing, or the page cannot be built in any environment lacking one.
     assert.strictEqual(RA.prefersReducedMotion(), false);
 });
+
+/* ── The presentation layer ────────────────────────────────────────────────
+ *
+ * Shadows, the camera, the trails and the sound all hang off raceTime and the
+ * positions the engine has already worked out, so none of them can be reached
+ * without a browser. What CAN be checked here is the thing that would actually
+ * hurt: that the settings driving them are the right side of the line between
+ * a flourish and a page that eats its own result. */
+
+test('the finish is held long enough to see and short enough not to hang', () => {
+    // Too short and the page jumps to the result before the winner is past the
+    // post; too long and a viewer is sitting looking at a frozen picture
+    // wondering whether the thing has broken.
+    assert.ok(RA.FINISH_HOLD_MS >= 300, 'the hold is too short to register');
+    assert.ok(RA.FINISH_HOLD_MS <= 2000, 'the hold outstays its welcome');
+});
+
+test('the camera tightens on the finish rather than pulling away from it', () => {
+    assert.ok(RA.CAMERA_TIGHTEST < 1, 'a zoom that is not a zoom in');
+    // Below about two thirds and a big field starts finishing off screen.
+    assert.ok(RA.CAMERA_TIGHTEST > 0.65, 'the camera crops the field out of the finish');
+});
+
+test('nothing in the presentation layer has moved the race', () => {
+    /* The whole point of the polish was that it is drawn ON TOP of the engine.
+     * This pins the pack curve and the phase boundaries it is all driven from,
+     * so a future effect that quietly reaches for progressAt() to make itself
+     * look better fails here rather than in a race somebody is betting on. */
+    assert.strictEqual(RA.T_GATE, 0.26);
+    assert.strictEqual(RA.T_SPRINT, 0.65);
+    assert.strictEqual(RA.T_LANE_START, 0.05);
+    assert.strictEqual(RA.T_LANE_END, 0.13);
+    assert.ok(Math.abs(RA.packCurve(0) - 0) < 1e-9);
+    assert.ok(Math.abs(RA.packCurve(1) - 1) < 1e-9);
+    // The gate burst: 8.5% of the trip inside the first 6% of the clock.
+    assert.ok(Math.abs(RA.packCurve(0.06) - 0.085) < 1e-6);
+});

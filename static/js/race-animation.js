@@ -92,6 +92,15 @@
  * a horse turning away from and back towards the camera — which is what
  * actually happens in race vision at the top of the bend.
  *
+ * PRESENTATION
+ * Everything above decides where a horse is. A separate, strictly one-way
+ * layer decides how the picture of it looks: ground shadows, a softened
+ * background once the race is on, a camera that tightens onto the leading pack
+ * in the straight, sprint trails, a held frame and a flash at the post, a
+ * vignette, and a sound bed. None of it can move a runner or change a placing
+ * — it is all read off raceTime and the positions the engine has already
+ * worked out — and all of it is either dropped or frozen under reduced motion.
+ *
  * FRAME LOOP
  * The loop only runs while there is something to animate. It used to fire sixty
  * times a second forever — paused, finished, tab in the background — which is a
@@ -156,6 +165,18 @@
     // A body length as a share of the drawn icon: the art is drawn on a 100-unit
     // box with air around the horse, so the animal itself is ~70 of it.
     var BODY_OF_ICON = 0.70;
+
+    // ── Presentation. None of this touches where a horse is. ──
+    var FINISH_HOLD_MS = 800;    // the picture is held at the post before the
+                                 // result is announced, so the winner is seen
+                                 // to win rather than the page jumping to text
+    var CAMERA_TIGHTEST = 0.78;  // viewBox scale by the time the leader arrives
+    var CAMERA_RATE = 0.055;     // how fast the camera chases its target, per frame
+    var TRAIL_SPACING = [0.17, 0.36];   // trail copies, in icon widths behind
+    var TRAIL_OPACITY = [0.20, 0.10];   // ...and how solid each one is
+    var BUNCH_LENGTHS = 4;       // within this many body lengths of the leader
+                                 // counts as part of the leading bunch, which
+                                 // is what the hoofbeat bed is scaled by
 
     // Icon size against field size. A match race gets big horses that can
     // actually be read; a 24-runner Cup gets small ones so the field still fits
@@ -471,6 +492,50 @@
     }
 
     // ── Scenery ───────────────────────────────────────────────────────────
+    /* The crowd on the outer rail of the home straight.
+     *
+     * Deliberately a silhouette and nothing more: banked rows of heads under a
+     * roof line, all of it darker than the turf so it reads as depth behind the
+     * runners rather than as something to look at. Built once at track time —
+     * it never moves, so it never costs a frame. */
+    function buildGrandstand(parent) {
+        var stand = append(parent, el('g', { 'class': 'ra-stand' }));
+        var left = VIEW.cx - VIEW.straight - 62;
+        var right = VIEW.cx + VIEW.straight + 62;
+        var top = VIEW.cy + VIEW.outerRy + 24;
+
+        append(stand, el('rect', {                          // terracing
+            x: left, y: top, width: right - left, height: VIEW.height - top,
+            rx: 6, fill: '#111820', opacity: 0.95
+        }));
+        append(stand, el('path', {                          // roof over the front of it
+            d: 'M ' + (left - 12) + ',' + top + ' L ' + (right + 12) + ',' + top +
+               ' L ' + (right - 2) + ',' + (top - 10) + ' L ' + (left + 2) + ',' + (top - 10) + ' Z',
+            fill: '#1c2530'
+        }));
+        append(stand, el('line', {                          // the lip catching the light
+            x1: left - 12, y1: top, x2: right + 12, y2: top,
+            stroke: '#3d4a58', 'stroke-width': 1.4, opacity: 0.8
+        }));
+
+        // Three banked rows of heads, spaced closer than they are wide so they
+        // overlap into a mass rather than reading as a row of dots. Only the
+        // height, the size and the shade wobble, which is all it needs at this
+        // size and keeps the whole crowd to one cheap deterministic pass.
+        for (var row = 0; row < 3; row++) {
+            var y = top + 11 + row * 11;
+            for (var x = left + 6; x < right - 4; x += 6.2) {
+                var wobble = hash01(x * 0.31 + row * 7.7);
+                append(stand, el('circle', {
+                    cx: x + wobble * 1.8, cy: y - wobble * 2.2, r: 3.7 + wobble * 1.1,
+                    fill: ['#2c3540', '#37414d', '#424d5a'][row],
+                    opacity: 0.62 + wobble * 0.3
+                }));
+            }
+        }
+        return stand;
+    }
+
     function buildTrack(svg, innerRadius, outerRadius, clockwise, post) {
         var defs = append(svg, el('defs'));
 
@@ -482,7 +547,60 @@
         append(infield, el('stop', { offset: '0', 'stop-color': '#16281b' }));
         append(infield, el('stop', { offset: '1', 'stop-color': '#1b3421' }));
 
+        // The ground the oval sits on. Flat black behind the track made the
+        // whole thing look like a diagram; a cool wash at the top falling to
+        // near-black at the bottom gives it somewhere to be.
+        var sky = append(defs, el('linearGradient', { id: 'ra-sky', x1: '0', y1: '0', x2: '0', y2: '1' }));
+        append(sky, el('stop', { offset: '0', 'stop-color': '#16232e' }));
+        append(sky, el('stop', { offset: '0.55', 'stop-color': '#0f1a18' }));
+        append(sky, el('stop', { offset: '1', 'stop-color': '#0a1210' }));
+
+        /* Depth of field, in two strengths.
+         *
+         * A blurred background is not free: the browser rasterises the filtered
+         * group once and reuses it, which costs nothing while the frame is
+         * still — but the camera moves the frame every frame down the straight,
+         * and re-blurring the whole track sixty times a second took a
+         * 24-runner field from 60fps to 50. So the blur belongs to the wide,
+         * static shot, and the run home gets the desaturation alone. Nothing is
+         * lost: by then the camera crop and the vignette are doing the job the
+         * blur was doing, on the part of the picture the eye is actually on. */
+        var soften = append(defs, el('filter', {
+            id: 'ra-soften', x: '-6%', y: '-6%', width: '112%', height: '112%',
+            'color-interpolation-filters': 'sRGB'
+        }));
+        append(soften, el('feGaussianBlur', { stdDeviation: '1.25', result: 'ra-blur' }));
+        append(soften, el('feColorMatrix', { 'in': 'ra-blur', type: 'saturate', values: '0.74' }));
+
+        var softenLite = append(defs, el('filter', {
+            id: 'ra-soften-lite', x: '-2%', y: '-2%', width: '104%', height: '104%',
+            'color-interpolation-filters': 'sRGB'
+        }));
+        append(softenLite, el('feColorMatrix', { type: 'saturate', values: '0.74' }));
+
+        // The edges of the frame, darkened, so the eye goes to the pack rather
+        // than to the empty turf in the corners.
+        var vignette = append(defs, el('radialGradient', {
+            id: 'ra-vignette', cx: '0.5', cy: '0.52', r: '0.72'
+        }));
+        append(vignette, el('stop', { offset: '0.5', 'stop-color': '#000000', 'stop-opacity': '0' }));
+        append(vignette, el('stop', { offset: '0.82', 'stop-color': '#000000', 'stop-opacity': '0.22' }));
+        append(vignette, el('stop', { offset: '1', 'stop-color': '#000000', 'stop-opacity': '0.55' }));
+
+        // The whiteout on the line as the winner goes past.
+        var flash = append(defs, el('radialGradient', {
+            id: 'ra-flash', cx: '0.5', cy: '0.5', r: '0.5'
+        }));
+        append(flash, el('stop', { offset: '0', 'stop-color': '#ffffff', 'stop-opacity': '0.92' }));
+        append(flash, el('stop', { offset: '0.45', 'stop-color': '#fff6d8', 'stop-opacity': '0.42' }));
+        append(flash, el('stop', { offset: '1', 'stop-color': '#fff6d8', 'stop-opacity': '0' }));
+
         var scenery = append(svg, el('g', { 'class': 'ra-scenery' }));
+
+        append(scenery, el('rect', {
+            x: 0, y: 0, width: VIEW.width, height: VIEW.height, fill: 'url(#ra-sky)'
+        }));
+        buildGrandstand(scenery);
 
         // The running surface: one path holding the outer and inner outlines,
         // filled even-odd so the middle punches out as the infield.
@@ -580,6 +698,9 @@
      *   lapFraction   how much of the circuit this race covers (0..1)
      *   pace          the payload's pace profile ({pressure, shape, ...})
      *   reducedMotion suppress the cosmetic bob and drift, and never autoplay
+     *   audio         optional sound module — see race-animation-audio.js. Any
+     *                 of play/pause/stop/update/finish it does not implement is
+     *                 simply not called, and one that throws is dropped
      *   showNames     draw name chips (auto-off for big fields)
      *   showResults   put the actual finishing position on each chip
      *   onTick        (raceTime01, liveOrder[]) each frame
@@ -629,10 +750,14 @@
         measureLayer.parentNode.removeChild(measureLayer);
 
         var post = samplePoint(table, 1, 0, laneSign);
-        buildTrack(svg, innerRadius, outerRadius, clockwise, post);
+        var scenery = buildTrack(svg, innerRadius, outerRadius, clockwise, post);
 
         var laneLayer = append(svg, el('g', { 'class': 'ra-lanes', opacity: 0.12 }));
         var horseLayer = append(svg, el('g', { 'class': 'ra-horses' }));
+        // Shadows and sprint trails belong under every runner, not just under
+        // their own. They live in the first child of the horse layer, and the
+        // depth sort only ever appendChild()s holders, so this stays first.
+        var underLayer = append(horseLayer, el('g', { 'class': 'ra-under' }));
         var labelLayer = append(svg, el('g', { 'class': 'ra-labels' }));
 
         // Runners always have an id from the API; the fallback only exists so a
@@ -693,6 +818,10 @@
         // the field bunches up.
         var chipScale = clamp(horseSize / 88, 0.42, 0.85);
         var chipRowHeight = 15 * chipScale;
+        // Only big fields bunch hard enough to need separating, and a small
+        // field looks wrong with it, so the nudge fades in from about nine
+        // runners and is worth a third of a lane at twenty.
+        var zJitterRange = laneGap * 0.34 * smoothstep(9, 16, fieldSize);
         var entries = [];
 
         runners.forEach(function (runner, index) {
@@ -711,8 +840,34 @@
                 seedName: runner.horse_name,
                 name: runner.horse_name,
                 number: runner.tab_number || runner.barrier || (index + 1),
-                silk: runner.silk || {}
+                silk: runner.silk || {},
+                reducedMotion: reducedMotion
             });
+
+            // The horse's own shadow on the ground. Drawn flat and separately
+            // rather than inside the runner's group, because a shadow that
+            // rotated with the body through the turn would read as painted on
+            // the horse instead of lying under it.
+            var shadow = append(underLayer, el('ellipse', {
+                cx: 0, cy: 0, rx: horseSize * 0.30, ry: horseSize * 0.075,
+                fill: '#000000', opacity: 0.26
+            }));
+
+            // Two flat copies of the runner's outline, trailed behind it in the
+            // straight. Copies of the SILHOUETTE, not of the rig: cloning the
+            // articulated horse would triple the cost of a big field to draw a
+            // shape that is 20% opaque and eight pixels long.
+            var trails = [];
+            if (!reducedMotion && global.RaceHorseArt.BODY_PATH) {
+                var silhouette = global.RaceHorseArt.BODY_PATH + ' ' + global.RaceHorseArt.NECK_PATH;
+                for (var tI = 0; tI < TRAIL_SPACING.length; tI++) {
+                    trails.push(append(underLayer, el('path', {
+                        d: silhouette, fill: (art.coat && art.coat.body) || '#5b3a22',
+                        opacity: 0, display: 'none'
+                    })));
+                }
+            }
+
             var holder = append(horseLayer, el('g', { 'class': 'ra-runner', 'data-horse-id': runner.horse_id }));
             holder.style.cursor = 'pointer';
             append(holder, art.node);
@@ -754,8 +909,16 @@
                 fade: (FADE_ROLE[pace] || 0) * pressure * FADE_STRENGTH * bodyProgress,
                 bobAmplitude: reducedMotion ? 0
                     : Math.min((0.05 + hash01(seed * 4.3) * 0.04) * bodyProgress, bobCeiling),
+                // A fixed few pixels up or down at draw time so two runners on
+                // the same stride in a twenty-runner field do not sit exactly
+                // on top of each other. It is added to the drawn y and nothing
+                // else — not to the lane, not to progress — for the same reason
+                // the bob is capped: readability must not become a result.
+                zJitter: (hash01(seed * 6.7) - 0.5) * zJitterRange,
                 art: art,
                 holder: holder,
+                shadow: shadow,
+                trails: trails,
                 chip: chip,
                 chipBg: chipBg,
                 chipText: chipText,
@@ -796,6 +959,25 @@
 
         buildGate(svg, table, laneGap, fieldSize, laneSign);
 
+        // ── Overlays, above everything and deaf to the mouse ───────────────
+        // pointer-events matters: the <svg> carries the click that clears a
+        // selection and each runner carries its own, and a sheet of glass over
+        // the top would swallow both.
+        var overlay = append(svg, el('g', { 'class': 'ra-overlay' }));
+        overlay.style.pointerEvents = 'none';
+
+        // The whiteout at the post. Sized off the track band so it covers the
+        // width the field can cross the line on, whatever the field size.
+        var flashSpan = TRACK_BAND + 120;
+        var finishFlash = append(overlay, el('rect', {
+            x: post.x - flashSpan / 2, y: VIEW.cy + innerRadius - 60,
+            width: flashSpan, height: TRACK_BAND + 120,
+            fill: 'url(#ra-flash)', opacity: 0
+        }));
+        append(overlay, el('rect', {
+            x: 0, y: 0, width: VIEW.width, height: VIEW.height, fill: 'url(#ra-vignette)'
+        }));
+
         // ── Frame loop ────────────────────────────────────────────────────
         var duration = options.duration || 15;
         var raceTime = 0;          // 0..1 through the race
@@ -808,6 +990,75 @@
         var rafHandle = null;
         var lastDepthKey = '';
         var destroyed = false;
+
+        // ── Presentation state ─────────────────────────────────────────────
+        var audio = options.audio || null;
+        var holdUntil = 0;         // the post-race freeze ends at this timestamp
+        var softening = '';        // which softening filter the scenery is on
+        var lastViewBox = '';
+        var cameraGoal = null;     // where the last render wanted the camera
+        // The camera, as a viewBox. Kept as numbers so it can be eased rather
+        // than snapped, and reset to the full frame on anything that restarts
+        // the race.
+        var fullView = [0, 0, VIEW.width, VIEW.height];
+        var camera = fullView.slice();
+
+        function callAudio(name, a, b) {
+            if (!audio || typeof audio[name] !== 'function') return;
+            // A sound module that throws must never take the race down with it.
+            try { audio[name](a, b); } catch (error) { audio = null; }
+        }
+
+        /* Push the background back for the duration of the race, so the
+         * runners sit in front of the track instead of in it. Full blur while
+         * the camera is still, desaturation alone once it starts moving — see
+         * the ra-soften defs for why. Toggled on a state flag rather than set
+         * every frame: it is one attribute, but it is an attribute that makes
+         * the browser rebuild a filter. */
+        function setSoftened(on) {
+            var want = '';
+            if (on && !reducedMotion) want = raceTime > T_SPRINT ? 'ra-soften-lite' : 'ra-soften';
+            if (want === softening) return;
+            softening = want;
+            if (want) scenery.setAttribute('filter', 'url(#' + want + ')');
+            else scenery.removeAttribute('filter');
+        }
+
+        /* Where the camera wants to be this frame.
+         *
+         * Full frame for the whole race until the run home, then tightening on
+         * the leader through the straight. Clamped inside the full view so a
+         * leader near the edge pans the frame rather than showing the void
+         * outside it. */
+        function cameraTarget(leadX, leadY) {
+            if (reducedMotion || raceTime <= T_SPRINT || leadX == null) return fullView;
+            var u = (raceTime - T_SPRINT) / (1 - T_SPRINT);
+            var zoom = 1 - (1 - CAMERA_TIGHTEST) * smoothstep(0, 0.8, u);
+            var w = VIEW.width * zoom, h = VIEW.height * zoom;
+            var x = clamp(leadX - w / 2, 0, VIEW.width - w);
+            var y = clamp(leadY - h / 2, 0, VIEW.height - h);
+            return [x, y, w, h];
+        }
+
+        function applyCamera(target, snap) {
+            for (var i = 0; i < 4; i++) {
+                camera[i] = snap ? target[i] : camera[i] + (target[i] - camera[i]) * CAMERA_RATE;
+            }
+            var next = camera[0].toFixed(1) + ' ' + camera[1].toFixed(1) + ' ' +
+                       camera[2].toFixed(1) + ' ' + camera[3].toFixed(1);
+            if (next === lastViewBox) return;
+            lastViewBox = next;
+            svg.setAttribute('viewBox', next);
+        }
+
+        /* Back to the start: full frame, sharp background, no flash. Called by
+         * everything that puts the race back to a time it has already run. */
+        function resetPresentation() {
+            applyCamera(fullView, true);
+            setSoftened(false);
+            finishFlash.setAttribute('opacity', 0);
+            holdUntil = 0;
+        }
 
         /* Lateral drift on top of the lane. Horses do not run down a painted
          * line, but through the settle phase they are meant to look locked, so
@@ -844,7 +1095,12 @@
             var next = !!value;
             if (next === playing) return;
             playing = next;
-            if (playing) requestFrame();
+            if (playing) {
+                requestFrame();
+                callAudio('play', raceTime);
+            } else {
+                callAudio('pause');
+            }
             if (options.onPlayState) options.onPlayState(playing);
         }
 
@@ -857,17 +1113,38 @@
 
             if (playing) {
                 raceTime += (delta * speed) / duration;
-                if (raceTime >= 1) { raceTime = 1; playing = false; finished = true; }
+                if (raceTime >= 1) {
+                    raceTime = 1;
+                    playing = false;
+                    finished = true;
+                    callAudio('finish');
+                    // Hold the picture at the post for a beat before the page
+                    // is told who won, so the finish is watched rather than
+                    // read. Reduced motion gets the result immediately.
+                    if (!reducedMotion) holdUntil = now + FINISH_HOLD_MS;
+                }
             }
             render(delta);
 
+            /* The freeze. Not a second clock: raceTime is already pinned at 1
+             * and nothing moves, the loop simply stays awake long enough to
+             * fade the flash out. A hidden tab gets no frames anyway, so it
+             * drops the hold and announces rather than stalling on the result
+             * until somebody comes back to the tab. */
+            var holding = holdUntil > now && !document.hidden;
+            if (holdUntil) {
+                var left = holding ? (holdUntil - now) / FINISH_HOLD_MS : 0;
+                finishFlash.setAttribute('opacity', (left * left).toFixed(3));
+                if (!holding) holdUntil = 0;
+            }
+
             // Announce the result once per running of the race, not once per
             // frame — and reset the flag on replay so a rerun announces again.
-            if (finished && !finishAnnounced) {
+            if (finished && !finishAnnounced && !holding) {
                 finishAnnounced = true;
                 if (options.onFinish) options.onFinish(runners);
             }
-            if (playing) {
+            if (playing || holding) {
                 requestFrame();
             } else {
                 // Nothing is moving any more, so nothing needs a next frame.
@@ -878,6 +1155,16 @@
 
         function render(delta) {
             var live = [];
+            // How far into the run home the field is: 0 for the whole first two
+            // thirds of the race, then 0..1. The art layer takes it as the one
+            // signal for how hard a horse is being asked — sweat, ears, the
+            // rider's seat and the whip all hang off it.
+            var sprintU = raceTime > T_SPRINT
+                ? clamp((raceTime - T_SPRINT) / (1 - T_SPRINT), 0, 1) : 0;
+            var trailShow = !reducedMotion && sprintU > 0;
+            var trailFade = smoothstep(0, 0.18, sprintU);
+            var leadProgress = -1, leadX = null, leadY = 0;
+
             for (var i = 0; i < entries.length; i++) {
                 var entry = entries[i];
                 var progress = progressAt(entry, raceTime);
@@ -902,13 +1189,43 @@
                 // A little lean into the turn: zero on both straights, where
                 // sin(tangent) is zero, and largest at the apex.
                 var lean = Math.sin(point.angle) * 6;
+                // Drawn position only. See entry.zJitter.
+                var drawY = point.y + entry.zJitter;
 
                 // Anchor mid-body, low, so the horse straddles its lane line.
-                entry.holder.setAttribute('transform',
-                    'translate(' + point.x.toFixed(2) + ',' + point.y.toFixed(2) + ') ' +
-                    'rotate(' + lean.toFixed(2) + ') ' +
+                var pose = 'rotate(' + lean.toFixed(2) + ') ' +
                     'scale(' + (scale * squash).toFixed(4) + ',' + scale.toFixed(4) + ') ' +
-                    'translate(-50,-44)');
+                    'translate(-50,-44)';
+                entry.holder.setAttribute('transform',
+                    'translate(' + point.x.toFixed(2) + ',' + drawY.toFixed(2) + ') ' + pose);
+
+                // The shadow lies on the ground: it takes the turn's
+                // foreshortening and only a fraction of the lean, so it stays
+                // put under the horse instead of tipping with it.
+                entry.shadow.setAttribute('transform',
+                    'translate(' + point.x.toFixed(2) + ',' + (drawY + horseSize * 0.17).toFixed(2) + ') ' +
+                    'rotate(' + (lean * 0.35).toFixed(2) + ') ' +
+                    'scale(' + Math.max(0.4, Math.abs(squash)).toFixed(3) + ',1)');
+
+                // Trails, only down the straight, laid backwards along the
+                // track's own tangent so they follow the line the horse ran
+                // rather than pointing off it through the turn.
+                for (var t = 0; t < entry.trails.length; t++) {
+                    var trail = entry.trails[t];
+                    if (!trailShow) {
+                        if (trail.getAttribute('display') !== 'none') trail.setAttribute('display', 'none');
+                        continue;
+                    }
+                    // The tangent already points the way this runner is
+                    // travelling, so backwards is simply minus it — no need to
+                    // know which straight the horse is on.
+                    var back = TRAIL_SPACING[t] * horseSize;
+                    trail.setAttribute('display', 'inline');
+                    trail.setAttribute('opacity', (TRAIL_OPACITY[t] * trailFade).toFixed(3));
+                    trail.setAttribute('transform',
+                        'translate(' + (point.x - Math.cos(point.angle) * back).toFixed(2) +
+                        ',' + (drawY - Math.sin(point.angle) * back).toFixed(2) + ') ' + pose);
+                }
 
                 // Legs cycle at the speed the horse is actually travelling, so
                 // a fading runner visibly shortens stride while a finisher
@@ -917,13 +1234,39 @@
                     var pixels = travelled * table.raceLength;
                     entry.gait = (entry.gait + pixels / (horseSize * 1.15)) % 1;
                 }
+                // Phase before stride: the stride reads the effort the phase
+                // has just set, so setting it the other way round would leave
+                // the whip and the nostrils a frame behind the race.
+                entry.art.setPhase(raceTime, sprintU, lean);
                 entry.art.setGait(entry.gait);
 
-                var chipY = point.y - horseSize * 0.46 - (entry.settleLane % 3) * chipRowHeight;
+                var chipY = drawY - horseSize * 0.46 - (entry.settleLane % 3) * chipRowHeight;
                 entry.chip.setAttribute('transform',
                     'translate(' + point.x.toFixed(2) + ',' + Math.max(12, chipY).toFixed(2) + ')');
 
-                live.push({ entry: entry, progress: progress, y: point.y });
+                if (progress > leadProgress) {
+                    leadProgress = progress;
+                    leadX = point.x;
+                    leadY = drawY;
+                }
+                live.push({ entry: entry, progress: progress, y: drawY });
+            }
+
+            // ── The picture around the runners ────────────────────────────
+            setSoftened(raceTime > 0);
+            cameraGoal = cameraTarget(leadX, leadY);
+            applyCamera(cameraGoal, raceTime === 0);
+
+            if (audio) {
+                // How much of the field is still in touch with the leader. A
+                // strung-out procession and a wall of horses coming to the line
+                // should not sound the same, and the depth-sorted positions the
+                // renderer has just worked out are already the answer.
+                var bunched = 0;
+                for (var b = 0; b < live.length; b++) {
+                    if (leadProgress - live[b].progress <= bodyProgress * BUNCH_LENGTHS) bunched++;
+                }
+                callAudio('update', raceTime, bunched / Math.max(1, fieldSize));
             }
 
             // Painter's order: whatever is lower on screen is nearer the camera,
@@ -1005,6 +1348,7 @@
                 raceTime = 0; finished = false; finishAnnounced = false;
                 entries.forEach(function (entry) { entry.lastProgress = 0; });
                 lastDepthKey = '';
+                resetPresentation();
                 render(0);
                 setPlaying(true);
             },
@@ -1016,7 +1360,12 @@
                 // The monotone clamp is relative to the last frame, so it has
                 // to be released before jumping backwards through the race.
                 entries.forEach(function (entry) { entry.lastProgress = 0; });
+                // Scrubbing is not watching: land on the frame asked for with
+                // the camera already where that moment of the race puts it,
+                // rather than easing towards it over the next second.
+                resetPresentation();
                 render(0);
+                applyCamera(cameraGoal, true);
             },
             setSpeed: function (value) { speed = clamp(value, 0.25, 4); },
             getTime: function () { return raceTime; },
@@ -1053,10 +1402,15 @@
             destroy: function () {
                 destroyed = true;
                 stopLoop();
+                callAudio('stop');
                 teardown.forEach(function (off) { off(); });
                 teardown.length = 0;
                 entries.forEach(function (entry) { entry.art.destroy(); });
                 while (svg.firstChild) svg.removeChild(svg.firstChild);
+                // Hand the canvas back the way it was found. The page keeps one
+                // <svg> and rebuilds into it, so a viewBox left zoomed on the
+                // last finish would be the frame the next race started in.
+                svg.setAttribute('viewBox', '0 0 ' + VIEW.width + ' ' + VIEW.height);
             }
         };
     }
@@ -1080,6 +1434,8 @@
         T_LANE_END: T_LANE_END,
         GATE_STAGGER: GATE_STAGGER,
         BODY_OF_ICON: BODY_OF_ICON,
+        FINISH_HOLD_MS: FINISH_HOLD_MS,
+        CAMERA_TIGHTEST: CAMERA_TIGHTEST,
         PACE_LANE_ORDER: PACE_LANE_ORDER,
         SPRINT_EXPONENT: SPRINT_EXPONENT,
         FADE_ROLE: FADE_ROLE
