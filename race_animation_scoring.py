@@ -9,10 +9,10 @@ disturbed by this module).
 The composite is a weighted blend of four inputs that are already computed
 elsewhere in the system:
 
-    Speed Map (MAP / mapA2E)                 40%   higher is better
+    Speed Map (MAP / mapA2E)                 50%   higher is better
     PFAI sectional heatmap rank              10%   LOWER is better  -> inverted
     Adjusted times (best recent, seconds)    10%   LOWER is better  -> inverted
-    Overall race assessment (ML / PFAI)      40%   higher is better
+    Overall race assessment (ML / PFAI)      30%   higher is better
 
 Each input is normalised to 0-100 *within the race field* before weighting,
 because ranks and times are only comparable against the other runners in the
@@ -34,10 +34,10 @@ from typing import Any, Iterable, Sequence
 
 # ── Weights (must sum to 1.0) ─────────────────────────────────────────────
 WEIGHTS = {
-    'speed_map': 0.40,
+    'speed_map': 0.50,
     'sectional': 0.10,
     'adjusted_time': 0.10,
-    'assessment': 0.40,
+    'assessment': 0.30,
 }
 
 COMPONENT_LABELS = {
