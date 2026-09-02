@@ -11,6 +11,14 @@ Routes:
   GET /api/race-animation/meetings                     -> meetings for the dropdown
   GET /api/race-animation/meeting/<id>/races           -> races within a meeting
   GET /api/race-animation/race/<race_id>               -> the per-race payload
+
+The race payload accepts an optional custom weighting, so the page's sliders can
+ask the server for a different blend:
+
+  /api/race-animation/race/123?w_speed_map=60&w_sectional=20&w_adjusted_time=10&w_assessment=10
+
+Any weight left out keeps its published default, and the four are rescaled to
+sum to 100% before the blend runs.
 """
 
 from __future__ import annotations
@@ -24,6 +32,7 @@ from flask_login import login_required
 
 from models import Meeting, Race
 from race_animation_scoring import (
+    COMPONENT_KEYS,
     PACE_CATEGORIES,
     PACE_LABELS,
     WEIGHTS,
@@ -32,8 +41,10 @@ from race_animation_scoring import (
     finish_margins,
     normalise_name,
     pace_category_for_settle,
+    resolve_weights,
     sectional_rank_from_pfai,
     to_float,
+    weights_as_percentages,
 )
 
 logger = logging.getLogger(__name__)
@@ -209,8 +220,28 @@ def _ladbrokes_silks(meeting, race):
         return empty
 
 
-def build_race_payload(race, meeting, include_silks: bool = True) -> dict:
-    """Assemble the full per-race JSON: runners, components, composite, rank."""
+def _weights_from_request(args) -> dict[str, float]:
+    """Read w_<component> off a query string into a weight override dict.
+
+    Only keys that are actually present are passed on; resolve_weights() fills
+    the rest from the published defaults and rescales the lot to sum to 1.0.
+    """
+    overrides = {}
+    for key in COMPONENT_KEYS:
+        value = args.get('w_' + key)
+        if value not in (None, ''):
+            overrides[key] = value
+    return overrides
+
+
+def build_race_payload(race, meeting, include_silks: bool = True, weights=None) -> dict:
+    """Assemble the full per-race JSON: runners, components, composite, rank.
+
+    `weights` is an optional custom blend (anything resolve_weights() accepts —
+    percentages or fractions, partial or complete). Left out, the page's
+    published default split is used.
+    """
+    blend = resolve_weights(weights)
     speed_map = _speed_map_items(race)
     sectionals = _pfai_sectionals(race)
     silks = _ladbrokes_silks(meeting, race) if include_silks else {'sprite_url': '', 'runner_numbers': {}}
@@ -288,7 +319,7 @@ def build_race_payload(race, meeting, include_silks: bool = True) -> dict:
             },
         })
 
-    ordered = build_composite_scores(runners)
+    ordered = build_composite_scores(runners, blend)
     margins = finish_margins(ordered)
     for runner, margin in zip(ordered, margins):
         runner['beaten_margin'] = round(margin, 2)
@@ -323,7 +354,9 @@ def build_race_payload(race, meeting, include_silks: bool = True) -> dict:
             'has_sectionals': bool(sectionals),
             'has_silks': bool(silks['sprite_url']),
         },
-        'weights': {key: round(value * 100) for key, value in WEIGHTS.items()},
+        'weights': weights_as_percentages(blend),
+        'default_weights': weights_as_percentages(WEIGHTS),
+        'weights_are_default': weights_as_percentages(blend) == weights_as_percentages(WEIGHTS),
         'pace_counts': pace_counts,
         'runners': ordered,
     }
@@ -396,7 +429,11 @@ def register_race_animation_routes(app, db):
             if meeting is None:
                 return jsonify({'success': False, 'error': 'Meeting not found for this race'}), 404
             include_silks = request.args.get('silks', '1') != '0'
-            payload = build_race_payload(race, meeting, include_silks=include_silks)
+            payload = build_race_payload(
+                race, meeting,
+                include_silks=include_silks,
+                weights=_weights_from_request(request.args),
+            )
             if not payload['runners']:
                 payload['success'] = False
                 payload['error'] = 'No unscratched runners with data for this race'

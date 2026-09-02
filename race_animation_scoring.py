@@ -33,12 +33,17 @@ import re
 from typing import Any, Iterable, Sequence
 
 # ── Weights (must sum to 1.0) ─────────────────────────────────────────────
+# This is the published default blend. It is what the page loads with and what
+# its "Default 50/10/10/30" preset puts back; a viewer can dial their own split
+# on the page instead, which arrives here through resolve_weights().
 WEIGHTS = {
     'speed_map': 0.50,
     'sectional': 0.10,
     'adjusted_time': 0.10,
     'assessment': 0.30,
 }
+
+COMPONENT_KEYS = ('speed_map', 'sectional', 'adjusted_time', 'assessment')
 
 COMPONENT_LABELS = {
     'speed_map': 'Speed Map (MAP)',
@@ -103,6 +108,54 @@ def to_float(value: Any) -> float | None:
         return float(text)
     except (TypeError, ValueError):
         return None
+
+
+def resolve_weights(overrides: Any = None) -> dict[str, float]:
+    """Turn a requested weight split into usable fractions that sum to 1.0.
+
+    `overrides` is whatever came off the page or the query string — a dict keyed
+    by component, holding either percentages (50) or fractions (0.5). Anything
+    missing keeps its published default, negatives are floored at zero, and the
+    result is rescaled so the four weights always sum to exactly 1.0. That
+    rescaling is what lets the sliders be moved freely: a viewer who asks for
+    60/20/20/20 gets those proportions, not a composite that quietly runs to
+    120% and stops being comparable with the default blend.
+
+    A request where everything is zero (or nothing parses) carries no ordering
+    information at all, so the published defaults are handed back instead.
+    """
+    if not isinstance(overrides, dict):
+        return dict(WEIGHTS)
+
+    supplied: dict[str, float] = {}
+    for key in COMPONENT_KEYS:
+        value = to_float(overrides.get(key))
+        if value is not None:
+            supplied[key] = max(0.0, value)
+
+    if not supplied:
+        return dict(WEIGHTS)
+
+    # Percentages and fractions are both accepted, because only the proportions
+    # between the four survive the rescale below — 50/10/10/30 and
+    # 0.5/0.1/0.1/0.3 are the same blend. The one place the scale does matter is
+    # a partial request (?w_speed_map=60 on its own): the defaults filling the
+    # gaps have to be put on the same scale as what was asked for, or a 60 would
+    # be blended against 0.1s and swamp them.
+    scale = 100.0 if max(supplied.values()) > 1.5 else 1.0
+    requested = {
+        key: supplied.get(key, WEIGHTS[key] * scale) for key in COMPONENT_KEYS
+    }
+
+    total = sum(requested.values())
+    if total <= 1e-9:
+        return dict(WEIGHTS)
+    return {key: value / total for key, value in requested.items()}
+
+
+def weights_as_percentages(weights: dict[str, float]) -> dict[str, float]:
+    """Fractions -> percentages for display, rounded to one decimal."""
+    return {key: round(weights.get(key, 0.0) * 100, 1) for key in COMPONENT_KEYS}
 
 
 def pace_category_for_settle(settle: Any) -> str:
@@ -232,7 +285,7 @@ def extract_best_adjusted_time(notes: str | None) -> dict | None:
 
 
 # ── The blend ─────────────────────────────────────────────────────────────
-def build_composite_scores(runners: list[dict]) -> list[dict]:
+def build_composite_scores(runners: list[dict], weights: dict[str, float] | None = None) -> list[dict]:
     """Blend the four raw components into one 0-100 composite per runner.
 
     `runners` is a list of dicts, each carrying whatever raw values could be
@@ -243,6 +296,12 @@ def build_composite_scores(runners: list[dict]) -> list[dict]:
         adjusted_time          float  best recent adjusted seconds, lower better
         assessment_score       float  ML score, or the PFAI blend score
 
+    `weights` is an optional custom split (fractions summing to 1.0, as
+    resolve_weights() returns). Left out, the published WEIGHTS are used. The
+    normalisation above it does not depend on the weights at all — it is purely
+    a within-field ranking of each raw input — so reweighting only ever changes
+    how those normalised values are blended, never the values themselves.
+
     Each runner dict is mutated in place with `components` (per-component raw /
     normalised / weighted / availability), `composite_score` and `rank`, and the
     same list is returned sorted by rank. Rank 1 is the predicted winner, and
@@ -250,6 +309,8 @@ def build_composite_scores(runners: list[dict]) -> list[dict]:
     """
     if not runners:
         return []
+
+    blend = dict(WEIGHTS) if weights is None else weights
 
     raw_by_component = {
         'speed_map': [to_float(r.get('map_value')) for r in runners],
@@ -269,14 +330,15 @@ def build_composite_scores(runners: list[dict]) -> list[dict]:
     for index, runner in enumerate(runners):
         components = {}
         composite = 0.0
-        for key, weight in WEIGHTS.items():
+        for key in COMPONENT_KEYS:
+            weight = blend.get(key, 0.0)
             normalised = normalised_by_component[key][index]
             weighted = normalised * weight
             composite += weighted
             components[key] = {
                 'label': COMPONENT_LABELS[key],
-                'weight': weight,
-                'weight_pct': round(weight * 100),
+                'weight': round(weight, 6),
+                'weight_pct': round(weight * 100, 1),
                 'raw': raw_by_component[key][index],
                 'normalised': round(normalised, 2),
                 'weighted': round(weighted, 2),

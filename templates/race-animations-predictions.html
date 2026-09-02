@@ -108,6 +108,56 @@
 .rap-table-title { font-size: 15px; font-weight: 800; color: var(--text-primary); margin: 0; }
 .rap-weights { font-size: 11px; color: var(--text-muted); font-family: 'DM Mono', ui-monospace, monospace; }
 .rap-table-note { font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; }
+
+/* ── Adjustable weights ── */
+.rap-weight-panel {
+  background: var(--bg-elevated); border: 1px solid var(--border-subtle);
+  border-radius: 12px; padding: 14px; margin: 0 0 14px;
+}
+.rap-weight-panel-head {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline;
+  justify-content: space-between; margin-bottom: 12px;
+}
+.rap-weight-panel-title { font-size: 13px; font-weight: 800; color: var(--text-primary); }
+.rap-weight-panel-note { font-size: 11px; color: var(--text-muted); max-width: 62ch; }
+.rap-weight-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 14px;
+}
+.rap-weight-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;
+}
+.rap-weight-top label {
+  font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--text-muted); font-weight: 700;
+}
+.rap-weight-entry { display: flex; align-items: center; gap: 3px; }
+.rap-weight-entry input {
+  width: 54px; background: var(--bg-surface); color: var(--text-primary);
+  border: 1px solid var(--border-mid); border-radius: 7px;
+  padding: 3px 6px; font-size: 13px; font-weight: 700; text-align: right;
+  font-family: 'DM Mono', ui-monospace, monospace;
+}
+.rap-weight-entry input:focus { outline: none; border-color: var(--border-accent); }
+.rap-weight-entry span { font-size: 12px; color: var(--text-muted); }
+.rap-weight input[type="range"] { width: 100%; accent-color: var(--accent); }
+.rap-weight-eff {
+  font-size: 10px; color: var(--text-muted); margin-top: 4px; min-height: 13px;
+  font-family: 'DM Mono', ui-monospace, monospace;
+}
+.rap-weight-foot {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  justify-content: space-between; margin-top: 12px;
+}
+.rap-weight-total { font-size: 12px; color: var(--text-secondary); font-family: 'DM Mono', ui-monospace, monospace; }
+.rap-weight-total b { color: var(--text-primary); }
+.rap-weight-total.is-off b { color: #fbbf24; }
+.rap-weight-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.rap-weight-preset {
+  background: transparent; color: var(--text-secondary);
+  border: 1px solid var(--border-subtle); border-radius: 999px;
+  padding: 4px 11px; font-size: 11px; font-weight: 700; cursor: pointer;
+}
+.rap-weight-preset:hover { color: var(--text-primary); border-color: var(--border-accent); }
 .rap-scroller { overflow-x: auto; }
 .rap-table { width: 100%; border-collapse: separate; border-spacing: 0 4px; font-size: 13px; min-width: 940px; }
 .rap-table th {
@@ -153,6 +203,9 @@
 .rap-error { color: #f08d8d; }
 .rap-legend { font-size: 11px; color: var(--text-muted); margin-top: 10px; }
 
+@media (max-width: 1020px) {
+  .rap-weight-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+}
 @media (max-width: 860px) {
   .rap-pickers { grid-template-columns: 1fr; }
   .rap-stage-head { flex-direction: column; align-items: flex-start; }
@@ -225,16 +278,38 @@
       out on the track. An italic value marked <span style="color:#f59e0b">*</span> means the runner
       had no data for that input and was given the field average rather than a zero.
     </p>
+
+    <div class="rap-weight-panel">
+      <div class="rap-weight-panel-head">
+        <span class="rap-weight-panel-title">Your weighting</span>
+        <span class="rap-weight-panel-note">
+          Move a slider and the table re-scores straight away. The animation is rebuilt to the new
+          order too, so hit <b>Run the race</b> to watch it. Your split is remembered on this
+          browser and carries over to the next race you pick.
+        </span>
+      </div>
+      <div class="rap-weight-grid" id="rapWeightGrid"></div>
+      <div class="rap-weight-foot">
+        <span class="rap-weight-total" id="rapWeightTotal"></span>
+        <span class="rap-weight-actions">
+          <button class="rap-weight-preset" type="button" data-preset="default">Default 50/10/10/30</button>
+          <button class="rap-weight-preset" type="button" data-preset="even">Even 25/25/25/25</button>
+          <button class="rap-weight-preset" type="button" data-preset="map">Speed map only</button>
+          <button class="rap-weight-preset" type="button" data-preset="assessment">Assessment only</button>
+          <button class="rap-btn rap-btn--primary" type="button" id="rapWeightRun">▶ Run with these weights</button>
+        </span>
+      </div>
+    </div>
     <div class="rap-scroller">
       <table class="rap-table">
         <thead>
           <tr>
             <th>#</th><th>Runner</th><th>Pace</th>
             <th>Bar</th>
-            <th>MAP<br><span class="rap-weights">50%</span></th>
-            <th>Sectional<br><span class="rap-weights">10%</span></th>
-            <th>Adj Time<br><span class="rap-weights">10%</span></th>
-            <th>Assessment<br><span class="rap-weights">30%</span></th>
+            <th>MAP<br><span class="rap-weights" data-weight-head="speed_map">50%</span></th>
+            <th>Sectional<br><span class="rap-weights" data-weight-head="sectional">10%</span></th>
+            <th>Adj Time<br><span class="rap-weights" data-weight-head="adjusted_time">10%</span></th>
+            <th>Assessment<br><span class="rap-weights" data-weight-head="assessment">30%</span></th>
             <th>Composite</th>
           </tr>
         </thead>
@@ -271,6 +346,9 @@
     live: document.getElementById('rapLive'),
     legend: document.getElementById('rapLegend'),
     weights: document.getElementById('rapWeights'),
+    weightGrid: document.getElementById('rapWeightGrid'),
+    weightTotal: document.getElementById('rapWeightTotal'),
+    weightRun: document.getElementById('rapWeightRun'),
     tableBody: document.getElementById('rapTableBody')
   };
 
@@ -320,6 +398,271 @@
     if (fallback.pattern === 'hoops') return 'background:repeating-linear-gradient(180deg,' + primary + ' 0 4px,' + secondary + ' 4px 8px);';
     if (fallback.pattern === 'sash') return 'background:repeating-linear-gradient(135deg,' + primary + ' 0 5px,' + secondary + ' 5px 8px);';
     return 'background:' + primary + ';';
+  }
+
+  /* ── Adjustable weights ───────────────────────────────────────────────
+     The four component scores the API sends are already normalised across the
+     field, and that normalisation does not depend on the weights at all — it is
+     purely "where does this runner rank on this input". So a new weighting can
+     be blended right here in the browser, with no round trip: composite is just
+     the sum of (normalised x weight), and the finish order, the beaten margins
+     and the animation all follow from it.
+
+     race_animation_scoring.py does exactly this arithmetic server-side, and the
+     API takes the same weights as w_<component> query params, so the numbers
+     below match what the server would return for the same split.            */
+  var WEIGHT_KEYS = ['speed_map', 'sectional', 'adjusted_time', 'assessment'];
+  var WEIGHT_LABELS = {
+    speed_map: 'MAP', sectional: 'Sectional',
+    adjusted_time: 'Adj Time', assessment: 'Assessment'
+  };
+  // Mirrors WEIGHTS in race_animation_scoring.py.
+  var DEFAULT_WEIGHTS = { speed_map: 50, sectional: 10, adjusted_time: 10, assessment: 30 };
+  var WEIGHT_PRESETS = {
+    'default': DEFAULT_WEIGHTS,
+    even: { speed_map: 25, sectional: 25, adjusted_time: 25, assessment: 25 },
+    map: { speed_map: 100, sectional: 0, adjusted_time: 0, assessment: 0 },
+    assessment: { speed_map: 0, sectional: 0, adjusted_time: 0, assessment: 100 }
+  };
+  // Margin constants, kept in step with finish_margins() in the scoring module.
+  var MARGIN_MIN = 0.4, MARGIN_MAX = 3.2, MARGIN_TOTAL = 26.0;
+  var WEIGHT_STORE = 'rapWeights.v1';
+
+  function copyWeights(source) {
+    var out = {};
+    WEIGHT_KEYS.forEach(function (key) { out[key] = Number(source[key]) || 0; });
+    return out;
+  }
+
+  var weightsPct = readStoredWeights();
+
+  function readStoredWeights() {
+    // localStorage throws outright in some privacy modes, so never let a stored
+    // preference be the thing that stops the page loading.
+    var stored = null;
+    try { stored = JSON.parse(window.localStorage.getItem(WEIGHT_STORE) || 'null'); }
+    catch (error) { stored = null; }
+    var out = {};
+    var usable = false;
+    WEIGHT_KEYS.forEach(function (key) {
+      var value = stored && Number(stored[key]);
+      if (stored && isFinite(value) && value >= 0) { out[key] = Math.min(100, value); usable = true; }
+      else { out[key] = DEFAULT_WEIGHTS[key]; }
+    });
+    if (!usable) return copyWeights(DEFAULT_WEIGHTS);
+    // An all-zero saved split has no ordering information in it — treat it as
+    // never having been saved rather than serving a flat field.
+    if (WEIGHT_KEYS.reduce(function (sum, key) { return sum + out[key]; }, 0) <= 0) {
+      return copyWeights(DEFAULT_WEIGHTS);
+    }
+    return out;
+  }
+
+  function storeWeights() {
+    try { window.localStorage.setItem(WEIGHT_STORE, JSON.stringify(weightsPct)); }
+    catch (error) { /* storage unavailable — the session still works, it just won't persist */ }
+  }
+
+  function weightTotal() {
+    return WEIGHT_KEYS.reduce(function (sum, key) { return sum + (Number(weightsPct[key]) || 0); }, 0);
+  }
+
+  /* Slider percentages -> fractions summing to exactly 1. Rescaling is what lets
+     the sliders be dragged freely without the composite drifting off the 0-100
+     scale the table and the default blend are read on. */
+  function effectiveWeights() {
+    var total = weightTotal();
+    var out = {};
+    if (total <= 0) {
+      WEIGHT_KEYS.forEach(function (key) { out[key] = DEFAULT_WEIGHTS[key] / 100; });
+      return out;
+    }
+    WEIGHT_KEYS.forEach(function (key) { out[key] = (Number(weightsPct[key]) || 0) / total; });
+    return out;
+  }
+
+  function buildWeightPanel() {
+    els.weightGrid.innerHTML = WEIGHT_KEYS.map(function (key) {
+      return '<div class="rap-weight" data-weight="' + key + '">' +
+        '<div class="rap-weight-top">' +
+          '<label for="rapWRange_' + key + '">' + WEIGHT_LABELS[key] + '</label>' +
+          '<span class="rap-weight-entry">' +
+            '<input type="number" id="rapWNum_' + key + '" min="0" max="100" step="1" ' +
+              'aria-label="' + WEIGHT_LABELS[key] + ' weight, per cent">' +
+            '<span>%</span>' +
+          '</span>' +
+        '</div>' +
+        '<input type="range" id="rapWRange_' + key + '" min="0" max="100" step="1" ' +
+          'aria-label="' + WEIGHT_LABELS[key] + ' weight slider">' +
+        '<div class="rap-weight-eff" data-weight-eff="' + key + '"></div>' +
+      '</div>';
+    }).join('');
+
+    WEIGHT_KEYS.forEach(function (key) {
+      var range = document.getElementById('rapWRange_' + key);
+      var number = document.getElementById('rapWNum_' + key);
+      // input = live re-score while dragging; change = the settled value, which
+      // is when the animation is rebuilt and the choice is saved.
+      range.addEventListener('input', function () { setWeight(key, this.value, false); });
+      range.addEventListener('change', function () { setWeight(key, this.value, true); });
+      number.addEventListener('input', function () { setWeight(key, this.value, false); });
+      number.addEventListener('change', function () { setWeight(key, this.value, true); });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-preset]'), function (button) {
+      button.addEventListener('click', function () {
+        var preset = WEIGHT_PRESETS[this.getAttribute('data-preset')];
+        if (!preset) return;
+        weightsPct = copyWeights(preset);
+        syncWeightInputs();
+        applyWeights(true);
+      });
+    });
+
+    syncWeightInputs();
+    renderWeightSummary();
+  }
+
+  function setWeight(key, rawValue, settled) {
+    var value = Number(rawValue);
+    if (!isFinite(value)) return;                 // mid-typing "" or "-" — wait
+    weightsPct[key] = Math.min(100, Math.max(0, value));
+    syncWeightInputs();
+    applyWeights(settled);
+  }
+
+  function syncWeightInputs() {
+    WEIGHT_KEYS.forEach(function (key) {
+      var value = Math.round(weightsPct[key]);
+      var range = document.getElementById('rapWRange_' + key);
+      var number = document.getElementById('rapWNum_' + key);
+      if (range && String(range.value) !== String(value)) range.value = value;
+      // Leave the box alone while it has focus, or typing "5" to reach 50 would
+      // be rewritten to "5" under the cursor on every keystroke.
+      if (number && document.activeElement !== number && String(number.value) !== String(value)) {
+        number.value = value;
+      }
+    });
+
+    var total = weightTotal();
+    var effective = effectiveWeights();
+    WEIGHT_KEYS.forEach(function (key) {
+      var note = document.querySelector('[data-weight-eff="' + key + '"]');
+      if (!note) return;
+      note.textContent = Math.abs(total - 100) < 0.5 || total <= 0
+        ? '' : '= ' + (effective[key] * 100).toFixed(1) + '% of the blend';
+    });
+
+    var off = Math.abs(total - 100) >= 0.5;
+    els.weightTotal.className = 'rap-weight-total' + (off && total > 0 ? ' is-off' : '');
+    if (total <= 0) {
+      els.weightTotal.innerHTML = 'Total <b>0%</b> — nothing to blend, so the default 50/10/10/30 is used.';
+    } else if (off) {
+      els.weightTotal.innerHTML = 'Total <b>' + Math.round(total) + '%</b> — rescaled to 100%, ' +
+        'so only the proportions between the four count.';
+    } else {
+      els.weightTotal.innerHTML = 'Total <b>100%</b>.';
+    }
+  }
+
+  function renderWeightSummary() {
+    var effective = effectiveWeights();
+    function pct(key) {
+      var value = effective[key] * 100;
+      return (Math.abs(value - Math.round(value)) < 0.05 ? Math.round(value) : value.toFixed(1)) + '%';
+    }
+    els.weights.textContent = 'MAP ' + pct('speed_map') + ' · Sectional ' + pct('sectional') +
+      ' · Adj Time ' + pct('adjusted_time') + ' · Assessment ' + pct('assessment');
+    Array.prototype.forEach.call(document.querySelectorAll('[data-weight-head]'), function (cell) {
+      cell.textContent = pct(cell.getAttribute('data-weight-head'));
+    });
+  }
+
+  /* Rank order, matching build_composite_scores() exactly: composite desc, then
+     assessment, then MAP, then barrier, then name — so a tie never depends on
+     the order the runners happened to arrive in. */
+  function compareRunners(a, b) {
+    var byComposite = (b.composite_score || 0) - (a.composite_score || 0);
+    if (byComposite) return byComposite;
+    var byAssessment = (b.assessment_score || 0) - (a.assessment_score || 0);
+    if (byAssessment) return byAssessment;
+    var byMap = (b.map_value || 0) - (a.map_value || 0);
+    if (byMap) return byMap;
+    var byBarrier = (a.barrier || 99) - (b.barrier || 99);
+    if (byBarrier) return byBarrier;
+    return String(a.horse_name || '') < String(b.horse_name || '') ? -1 : 1;
+  }
+
+  /* Composite gaps -> cumulative beaten margins. Port of finish_margins(). */
+  function assignMargins(ordered) {
+    if (!ordered.length) return;
+    var drops = [];
+    var biggest = 0;
+    for (var i = 0; i < ordered.length - 1; i++) {
+      var drop = Math.max(0, (ordered[i].composite_score || 0) - (ordered[i + 1].composite_score || 0));
+      drops.push(drop);
+      if (drop > biggest) biggest = drop;
+    }
+    var margins = [0];
+    drops.forEach(function (drop) {
+      var share = biggest > 1e-9 ? drop / biggest : 0;
+      margins.push(margins[margins.length - 1] + MARGIN_MIN + share * (MARGIN_MAX - MARGIN_MIN));
+    });
+    var last = margins[margins.length - 1];
+    var scale = last > MARGIN_TOTAL ? MARGIN_TOTAL / last : 1;
+    ordered.forEach(function (runner, index) {
+      runner.beaten_margin = Math.round(margins[index] * scale * 100) / 100;
+    });
+  }
+
+  /* Barrier draw, inside to outside; anything with no barrier goes to the
+     outside in rank order. Same rule the payload was built with. */
+  function assignLanes(ordered) {
+    var drawn = ordered.filter(function (r) { return r.barrier; })
+      .sort(function (a, b) { return a.barrier - b.barrier; });
+    var undrawn = ordered.filter(function (r) { return !r.barrier; });
+    drawn.concat(undrawn).forEach(function (runner, lane) { runner.lane = lane; });
+  }
+
+  /* Re-blend the loaded race under the current sliders. `settled` means the
+     control has come to rest (slider released, number committed, preset
+     clicked), which is when the animation is rebuilt and the split is saved —
+     rebuilding on every pixel of a drag would restart the race repeatedly. */
+  function applyWeights(settled) {
+    renderWeightSummary();
+    if (settled) storeWeights();
+    if (!race || !race.runners || !race.runners.length) return;
+
+    var effective = effectiveWeights();
+    race.runners.forEach(function (runner) {
+      var components = runner.components || {};
+      var composite = 0;
+      WEIGHT_KEYS.forEach(function (key) {
+        var component = components[key];
+        if (!component) return;
+        var weight = effective[key];
+        var weighted = (component.normalised || 0) * weight;
+        component.weight = weight;
+        component.weight_pct = Math.round(weight * 1000) / 10;
+        component.weighted = Math.round(weighted * 100) / 100;
+        composite += weighted;
+      });
+      runner.composite_score = Math.round(composite * 100) / 100;
+    });
+
+    race.runners.sort(compareRunners);
+    race.runners.forEach(function (runner, index) { runner.rank = index + 1; });
+    assignMargins(race.runners);
+    assignLanes(race.runners);
+    race.weights = {};
+    WEIGHT_KEYS.forEach(function (key) { race.weights[key] = Math.round(effective[key] * 1000) / 10; });
+
+    renderTable(race);
+    if (settled) {
+      buildAnimation(race);
+      els.raceMeta.textContent = 'Re-scored on your weighting — ' + race.runners[0].horse_name +
+        ' now rates the winner. Press Run the race to watch it.';
+    }
   }
 
   // ── Dropdowns ───────────────────────────────────────────────────────────
@@ -373,7 +716,9 @@
     return getJson(API + '/race/' + raceId).then(function (payload) {
       race = payload;
       renderRaceHeader(payload);
-      renderTable(payload);
+      // Re-blend to whatever the sliders are set to (the payload arrives on the
+      // default split) — this renders the table; the animation follows it.
+      applyWeights(false);
       buildAnimation(payload);
     }).catch(function (error) {
       race = null;
@@ -393,9 +738,7 @@
     bits.push(meta.field_size + ' runners');
     els.raceMeta.textContent = bits.join(' · ');
 
-    var weights = payload.weights || {};
-    els.weights.textContent = 'MAP ' + weights.speed_map + '% · Sectional ' + weights.sectional +
-      '% · Adj Time ' + weights.adjusted_time + '% · Assessment ' + weights.assessment + '%';
+    renderWeightSummary();
 
     var missing = [];
     if (!meta.has_speed_map) missing.push('no speed map for this race — pace categories and MAP fall back to neutral');
@@ -558,12 +901,19 @@
     this.setAttribute('aria-pressed', namesOn ? 'true' : 'false');
     if (engine) engine.setNamesVisible(namesOn);
   });
+  els.weightRun.addEventListener('click', function () {
+    applyWeights(true);
+    if (!engine) return;
+    engine.replay();
+    els.play.textContent = '❚❚ Pause';
+  });
   els.speed.addEventListener('input', function () {
     var value = Number(this.value) / 100;
     els.speedValue.textContent = value.toFixed(1) + '×';
     if (engine) engine.setSpeed(value);
   });
 
+  buildWeightPanel();
   loadMeetings();
 }());
 </script>
