@@ -421,6 +421,124 @@ def test_the_tuning_endpoint_refuses_when_there_is_nothing_to_learn_from(client)
     assert 'reason' in data
 
 
+# ── Solving the race backwards ────────────────────────────────────────────
+def test_calibrate_defaults_to_the_horse_that_actually_won(client, app):
+    """The whole point: open a beaten race and ask what would have picked it.
+
+    No horse_id is sent, so the endpoint has to reach for the recorded winner on
+    its own — that is the click the page makes.
+    """
+    data = _get(client, '/api/race-animation/race/%d/calibrate' % _race_id(app, 5))
+
+    assert data['success'] is True
+    assert data['ok'] is True
+    assert data['target']['is_actual_winner'] is True
+    assert data['target']['horse_name'] == 'Ardent Lane'
+    assert data['race']['condition'] == 'good'
+    # Either it was already on top or a weighting was found; both are answers,
+    # and both have to carry the reading of the race with them.
+    assert 'solo_ranks' in data and len(data['solo_ranks']) == 8
+    assert data['start_rank'] >= 1
+
+
+def test_calibrate_solves_for_any_runner_you_name(client, app):
+    """Clicking a beaten horse asks the same question of that one."""
+    race_id = _race_id(app, 5)
+    payload = _get(client, '/api/race-animation/race/%d' % race_id)
+    tail = payload['runners'][-1]
+
+    data = _get(client, '/api/race-animation/race/%d/calibrate?horse_id=%d'
+                % (race_id, tail['horse_id']))
+
+    assert data['ok'] is True
+    assert data['target']['horse_name'] == tail['horse_name']
+    assert data['target']['is_actual_winner'] is False
+    assert data['start_rank'] == tail['rank']
+
+
+def test_a_solved_weighting_really_does_put_that_runner_on_top(client, app):
+    """The answer is only worth having if the page reproduces it.
+
+    So the solved split is sent straight back through the race payload endpoint,
+    which is exactly what the "Apply this weighting" button does.
+    """
+    race_id = _race_id(app, 5)
+    payload = _get(client, '/api/race-animation/race/%d' % race_id)
+
+    checked = 0
+    for beaten in payload['runners'][1:]:
+        solved = _get(client, '/api/race-animation/race/%d/calibrate?horse_id=%d'
+                      % (race_id, beaten['horse_id']))
+        if not solved.get('reachable'):
+            # A runner nothing would have found is a real answer, not a failure.
+            assert solved['weights'] is None
+            continue
+        query = '&'.join('w_%s=%s' % (key, value)
+                         for key, value in solved['weights'].items())
+        rescored = _get(client, '/api/race-animation/race/%d?%s' % (race_id, query))
+        assert rescored['runners'][0]['horse_id'] == beaten['horse_id'], (
+            '%s was solved for but does not top the field on the solved weighting'
+            % beaten['horse_name'])
+        checked += 1
+
+    assert checked, 'no beaten runner in the fixture was reachable at all'
+
+
+
+def test_calibrate_honours_a_custom_weighting_and_a_lock(client, app):
+    """The sliders decide where the solve starts, and a lock pins one of them.
+
+    Every weight is named: a partial query keeps the published defaults for
+    whatever is left out, which is right for a shared link and wrong for a test
+    that means "exactly this split".
+    """
+    race_id = _race_id(app, 5)
+    split = {'speed_map': 40, 'sectional': 15, 'adjusted_time': 15,
+             'assessment': 30, 'jockey_trainer': 0, 'draw': 0,
+             'pace_fit': 0, 'market': 0}
+    query = '&'.join('w_%s=%s' % (key, value) for key, value in split.items())
+
+    # A runner that is NOT already on top, so the lock has something to constrain.
+    payload = _get(client, '/api/race-animation/race/%d?%s' % (race_id, query))
+    beaten = payload['runners'][-1]
+
+    data = _get(client, '/api/race-animation/race/%d/calibrate?%s&lock=speed_map&horse_id=%d'
+                % (race_id, query, beaten['horse_id']))
+
+    assert data['ok'] is True
+    assert data['already_top'] is False
+    assert data['locked_keys'] == ['speed_map']
+    assert data['start_weights']['speed_map'] == 40.0
+    # Locked means locked: it cannot be moved, and it cannot be the one lever.
+    assert data['single_levers']['speed_map'] is None
+    if data.get('weights'):
+        assert abs(data['weights']['speed_map'] - 40.0) < 0.05
+
+
+def test_calibrate_says_so_when_a_race_has_not_been_run(client, app):
+    """Race 6 has no results, so there is no winner to solve back from."""
+    data = _get(client, '/api/race-animation/race/%d/calibrate' % _race_id(app, 6))
+    assert data['success'] is True
+    assert data['ok'] is False
+    assert 'reason' in data
+
+
+def test_calibrate_rejects_a_runner_from_another_race(client, app):
+    response = client.get('/api/race-animation/race/%d/calibrate?horse_id=99999'
+                          % _race_id(app, 5))
+    assert response.status_code == 404
+
+
+def test_the_drift_endpoint_answers_even_with_almost_no_history(client):
+    """One settled race cannot show a bias. Saying so is the right answer."""
+    data = _get(client, '/api/race-animation/calibration-drift')
+    assert data['success'] is True
+    if data['ok']:
+        assert data['holdout']['ok'] is False       # nowhere near enough to test on
+    else:
+        assert 'reason' in data
+
+
 # ── The page itself ───────────────────────────────────────────────────────
 def test_the_page_hands_its_constants_to_the_browser(client, app, monkeypatch):
     """The fix for the two implementations drifting apart.

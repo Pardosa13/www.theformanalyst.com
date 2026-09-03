@@ -14,6 +14,8 @@ Routes:
   GET /api/race-animation/race/<race_id>/silks         -> live silk artwork
   GET /api/race-animation/accuracy                     -> how a weighting has done
   GET /api/race-animation/tune                         -> let history pick a weighting
+  GET /api/race-animation/race/<race_id>/calibrate     -> what would have picked THIS runner
+  GET /api/race-animation/calibration-drift            -> where the missed winners point
 
 The race payload accepts an optional custom weighting and normalisation, so the
 page's sliders can ask the server for a different blend:
@@ -90,6 +92,11 @@ from race_animation_tuning import (
     evaluate_weights,
     optimise_weights,
     prepare_records,
+)
+from race_animation_calibration import (
+    calibration_drift,
+    condition_group,
+    solve_for_runner,
 )
 
 logger = logging.getLogger(__name__)
@@ -617,6 +624,24 @@ def _result_summary(ordered):
 
 
 # ── History, for the scoreboard and the tuner ─────────────────────────────
+def _distance_band(distance_m) -> str:
+    """Sprint / mile / staying, in the brackets the form talks in.
+
+    Only used to split the calibration findings: barrier and pace matter in
+    completely different amounts over 1000m and over 2400m, so lumping them
+    together hides both.
+    """
+    if not distance_m:
+        return 'unknown'
+    if distance_m <= 1200:
+        return 'sprint'
+    if distance_m <= 1600:
+        return 'mile'
+    if distance_m <= 2000:
+        return 'middle'
+    return 'staying'
+
+
 def _history_records(limit_races: int = 400, days: int | None = None):
     """Every settled race we can score, as plain dicts for the tuner.
 
@@ -688,9 +713,24 @@ def _history_records(limit_races: int = 400, days: int | None = None):
                     'sp': to_float(horse.result.sp),
                 })
 
+            # Context is only carried for the calibration analysis, which splits
+            # its findings by it — a wet Saturday and a dry Wednesday are not the
+            # same question, and asking them together is how a real bias gets
+            # averaged into nothing.
+            distance_m = parse_distance_metres(race.distance)
             records.append({
                 'race_id': race.id,
                 'sort_key': meeting.date.isoformat() if meeting.date else str(race.id),
+                'context': {
+                    'track': meeting.track or meeting.meeting_name or '',
+                    'date': meeting.date.isoformat() if meeting.date else None,
+                    'track_condition': race.track_condition or '',
+                    'condition': condition_group(race.track_condition),
+                    'tempo': profile.get('shape') if isinstance(profile, dict) else None,
+                    'distance_m': distance_m,
+                    'trip': _distance_band(distance_m),
+                    'field_size': len(live),
+                },
                 'runners': runners,
             })
             if len(records) >= limit_races:
@@ -923,6 +963,148 @@ def register_race_animation_routes(app, db):
         except Exception as exc:
             logger.error("Race animation tuning failed: %s", exc, exc_info=True)
             return jsonify({'success': False, 'error': 'Could not tune the weighting'}), 500
+
+    @race_animation_bp.route('/api/race-animation/race/<int:race_id>/calibrate')
+    @login_required
+    def api_race_animation_calibrate(race_id):
+        """What would the weighting have had to be for THIS runner to rate top?
+
+        Defaults to the horse that actually won, which is the question worth
+        asking after a race is beaten. `?horse_id=` asks it of any runner, and
+        `?lock=market,draw` pins components where they are so the answer has to
+        come out of the rest.
+
+        The answer is a reading of the race, not a weighting to go and use — one
+        race fitted after the fact will always look convincing. The drift
+        endpoint below is where it turns into something measurable.
+        """
+        try:
+            race = _load_race(race_id)
+            if race is None:
+                return jsonify({'success': False, 'error': 'Race not found'}), 404
+            meeting = db.session.get(Meeting, race.meeting_id)
+            if meeting is None:
+                return jsonify({'success': False, 'error': 'Meeting not found for this race'}), 404
+
+            weights = resolve_weights(_weights_from_request(request.args))
+            method = resolve_norm_method(request.args.get('norm'))
+            # simulate=False: the Monte Carlo is for the animation, and solving
+            # a weighting has no use for it.
+            payload = build_race_payload(race, meeting, weights=weights,
+                                         norm_method=method, include_prices=False,
+                                         simulate=False)
+            runners = payload.get('runners') or []
+            if not runners:
+                return jsonify({'success': False,
+                                'error': 'No unscratched runners with data for this race'}), 404
+
+            summary = payload.get('result_summary') or {}
+            requested = request.args.get('horse_id')
+            try:
+                target_id = int(requested) if requested else summary.get('winner_horse_id')
+            except (TypeError, ValueError):
+                target_id = summary.get('winner_horse_id')
+
+            if not target_id:
+                return jsonify({
+                    'success': True, 'ok': False,
+                    'reason': ('This race has no recorded winner yet, so there is '
+                               'nothing to solve back from. Pick a runner to solve for.'),
+                })
+
+            index = next((i for i, r in enumerate(runners)
+                          if r.get('horse_id') == target_id), None)
+            if index is None:
+                return jsonify({'success': False,
+                                'error': 'That runner is not in this race'}), 404
+
+            locked = [key.strip() for key in (request.args.get('lock') or '').split(',')
+                      if key.strip() in COMPONENT_KEYS]
+
+            matrix = [[(r.get('components', {}).get(key) or {}).get('normalised')
+                       for key in COMPONENT_KEYS] for r in runners]
+            outcome = solve_for_runner(
+                matrix, index, weights, locked_keys=locked,
+                labels=[r.get('horse_name') or '' for r in runners])
+
+            target = runners[index]
+            outcome['success'] = True
+            outcome['norm_method'] = method
+            outcome['race'] = {
+                'id': race.id,
+                'race_number': race.race_number,
+                'track': meeting.track or meeting.meeting_name or '',
+                'date': meeting.date.isoformat() if meeting.date else None,
+                'track_condition': race.track_condition,
+                'condition': condition_group(race.track_condition),
+                'field_size': len(runners),
+                'tempo': (payload.get('pace') or {}).get('shape'),
+                'tempo_label': (payload.get('pace') or {}).get('shape_label'),
+            }
+            outcome['target'] = {
+                'horse_id': target.get('horse_id'),
+                'horse_name': target.get('horse_name'),
+                'tab_number': target.get('tab_number'),
+                'pace_label': target.get('pace_label'),
+                'finish_position': (target.get('result') or {}).get('finish_position'),
+                'won': bool((target.get('result') or {}).get('won')),
+                'sp': (target.get('result') or {}).get('sp'),
+                'is_actual_winner': target.get('horse_id') == summary.get('winner_horse_id'),
+            }
+            outcome['predicted_winner'] = {
+                'horse_id': runners[0].get('horse_id'),
+                'horse_name': runners[0].get('horse_name'),
+                'finish_position': (runners[0].get('result') or {}).get('finish_position'),
+            }
+            return jsonify(outcome)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error("Race animation calibration failed for race %s: %s",
+                         race_id, exc, exc_info=True)
+            return jsonify({'success': False,
+                            'error': 'Could not solve this race'}), 500
+
+    @race_animation_bp.route('/api/race-animation/calibration-drift')
+    @login_required
+    def api_race_animation_calibration_drift():
+        """Where every missed winner would have pulled the weighting.
+
+        Solves the same question the per-race endpoint answers, over every
+        settled race the current weighting got wrong, and reports where those
+        answers point — split by track condition (`?group=condition`), tempo,
+        trip or track.
+
+        The headline number here is the holdout: a weighting fixed off the
+        EARLIEST of those races and scored on the later ones it has never seen.
+        The medians on their own are fitted to results already known and will
+        always flatter themselves.
+        """
+        try:
+            weights = resolve_weights(_weights_from_request(request.args))
+            method = resolve_norm_method(request.args.get('norm'))
+            group = request.args.get('group', 'condition')
+            if group not in ('condition', 'tempo', 'trip', 'track'):
+                group = 'condition'
+            try:
+                days = int(request.args.get('days')) if request.args.get('days') else None
+            except (TypeError, ValueError):
+                days = None
+
+            records = _history_records(days=days)
+            prepared = prepare_records(records, method)
+            if not prepared:
+                return jsonify({'success': True, 'ok': False,
+                                'reason': 'No settled races with enough data to solve yet.'})
+
+            outcome = calibration_drift(prepared, weights, group_by=group)
+            outcome['success'] = True
+            outcome['norm_method'] = method
+            return jsonify(outcome)
+        except Exception as exc:
+            logger.error("Race animation calibration drift failed: %s", exc, exc_info=True)
+            return jsonify({'success': False,
+                            'error': 'Could not analyse the missed winners'}), 500
 
     app.register_blueprint(race_animation_bp)
     logger.info("✓ Race animation routes registered")
