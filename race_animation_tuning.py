@@ -79,6 +79,9 @@ def prepare_records(races: Iterable[dict], norm_method: str = DEFAULT_NORM_METHO
         race_id       anything hashable, for reporting
         sort_key      what to order races by for the walk-forward split
                       (a date, a timestamp, or the race id as a last resort)
+        context       optional free-form dict about the race (track condition,
+                      distance and so on), passed through untouched for callers
+                      that split their findings by it
         runners       list of dicts carrying the same raw component values
                       build_composite_scores() takes, plus:
                           finish_position  1 = won, 0/None = did not run
@@ -121,6 +124,10 @@ def prepare_records(races: Iterable[dict], norm_method: str = DEFAULT_NORM_METHO
         prepared.append({
             'race_id': race.get('race_id'),
             'sort_key': race.get('sort_key') or race.get('race_id') or 0,
+            # Carried straight through, untouched: the tuner has no use for it,
+            # but race_animation_calibration.py splits its findings by track
+            # condition and distance, and this is where those arrive.
+            'context': race.get('context') or {},
             'matrix': matrix,
             'winner_index': winner_index,
             'finish_positions': [int(to_float(r.get('finish_position')) or 0) for r in runners],
