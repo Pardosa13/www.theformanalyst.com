@@ -108,7 +108,7 @@ VALUE_EDGE_MIN_THRESHOLD_PCT = 8.0
 # promoted into the normal Best Bets section for a meeting/race — making them
 # checkbox-selectable and eligible for the Telegram/Twitter "Post Selected
 # Bets" flow alongside the Analyzer/PFAI/ML-driven picks.
-VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT = 20.0
+VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT = 10.0
 
 
 def _coerce_price(value):
@@ -3540,10 +3540,10 @@ def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_t
 # Edge-size buckets for the ML Value Edge cohort breakdown: lower bound inclusive,
 # upper bound exclusive, None on either side meaning unbounded. Every measured
 # edge falls into exactly one bucket, including the ones no threshold would ever
-# bet — that is the point. Only the top bucket is shown on Best Bets
-# (VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT), so the buckets underneath it are
-# the evidence for whether 20pp is the right cutoff, too conservative or too
-# aggressive. Answering that from results needs the strike rate and ROI at every
+# bet — that is the point. Only the buckets at or above
+# VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT are shown on Best Bets, so the
+# buckets underneath it are the evidence for whether that cutoff is right, too
+# conservative or too aggressive. Answering that from results needs the strike rate and ROI at every
 # edge level, not just at the levels that already qualify; the negative bucket is
 # the control group — if the model's edge means anything, that cohort should be
 # the worst of them.
@@ -3553,7 +3553,7 @@ VALUE_EDGE_BUCKETS = (
     ('5_10', '5–10pp', 5.0, 10.0),
     ('10_15', '10–15pp', 10.0, 15.0),
     ('15_20', '15–20pp', 15.0, 20.0),
-    ('20_plus', '20pp+', VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT, None),
+    ('20_plus', '20pp+', 20.0, None),
 )
 
 
@@ -11233,7 +11233,7 @@ def best_bets():
                     # admin visit's filters happen to keep. All horses at/above
                     # VALUE_EDGE_MIN_THRESHOLD_PCT (8.0pp) are captured for the ML Data
                     # page's bucketed reporting, but only horses at/above
-                    # VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT (20.0pp) are shown in
+                    # VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT (10.0pp) are shown in
                     # this page's ML Value Edge Bets panel. ──
                     # The live fetch is not the only source of an edge any more:
                     # when it comes back empty, the edge the ML scoring run
@@ -11348,13 +11348,13 @@ def best_bets():
                 # Value edge is the gate for this page, not one qualifier among
                 # several: a horse appears here only if the model's fair win
                 # probability clears the market by at least
-                # VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT (20pp). Components,
+                # VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT (10pp). Components,
                 # win probability, a sole ride and the consensus badges are still
                 # computed and still shown on the rows that qualify — they simply
                 # no longer put a horse on the page by themselves, because a
                 # signal without a price advantage is not a bet worth taking.
                 #
-                # Everything below 20pp is still captured on `predictions` above
+                # Everything below 10pp is still captured on `predictions` above
                 # and reported by the ML Data page's edge buckets, which is where
                 # the question "is 20 the right cutoff?" gets answered from real
                 # results rather than from what this page happens to display.

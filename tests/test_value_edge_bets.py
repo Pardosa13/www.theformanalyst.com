@@ -176,7 +176,7 @@ def test_promote_does_not_change_qualitative_badge_counting():
 
 
 def test_promote_threshold_is_a_single_module_constant():
-    assert APP_SOURCE.count('VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT = 20.0') == 1
+    assert APP_SOURCE.count('VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT = 10.0') == 1
 
 
 def test_best_bets_route_shows_only_horses_at_or_above_the_promote_threshold():
@@ -226,7 +226,7 @@ def test_stored_edge_never_overwrites_a_live_one():
 
 def test_value_edge_buckets_cover_every_edge_level():
     """ML Data tracks outcomes at every edge level, not only the levels that
-    qualify as a Best Bet — that is how the 20pp cutoff gets tested."""
+    qualify as a Best Bet — that is how the promote cutoff gets tested."""
     buckets = appmod.VALUE_EDGE_BUCKETS
     keys = [key for key, _label, _lower, _upper in buckets]
     assert keys == ['below_0', '0_5', '5_10', '10_15', '15_20', '20_plus']
@@ -244,15 +244,18 @@ def test_value_edge_buckets_cover_every_edge_level():
         ]
         assert matched == [matched[0]], f'edge {edge} matched {matched}'
 
-    # The bettable bucket starts exactly where the Best Bets page's gate does.
-    assert buckets[-1][2] == appmod.VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT
+    # The bettable band starts exactly where the Best Bets page's gate does:
+    # some bucket's lower bound is the promote threshold, so the "we bet this"
+    # marking never cuts a bucket in half.
+    threshold = appmod.VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT
+    assert threshold in [lower for _k, _l, lower, _u in buckets]
 
 
 def test_best_bets_route_only_displays_promoted_edge_bets_but_tracks_all():
     # The ML Value Edge Bets panel on the Best Bets page should only list
-    # horses that clear the 20pp promotion threshold, while the DB snapshot
-    # capture (used by the ML Data page's 8-12/12-20/20+ buckets) still fires
-    # for every horse at/above the lower 8pp threshold.
+    # horses that clear the 10pp promotion threshold, while the DB snapshot
+    # capture (used by the ML Data page's edge buckets) still fires for every
+    # horse at/above the lower 8pp threshold.
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
     assert "if edge_fields.get('is_value_edge_bet'):" in source

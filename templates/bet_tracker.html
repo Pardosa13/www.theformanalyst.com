@@ -219,6 +219,60 @@
     box-shadow: none;
   }
 
+  /* ── Monthly totals ── */
+  .bt-months {
+    margin-bottom: 24px;
+  }
+
+  .bt-months-title {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+  }
+
+  .bt-month-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    padding: 16px 20px;
+    margin-bottom: 10px;
+  }
+
+  .bt-month-name {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  /* The +/- total is the whole point of this list, so it gets a tinted pill
+     rather than plain coloured text — readable at a glance while scrolling. */
+  .bt-month-pl {
+    font-family: 'DM Mono', monospace;
+    font-size: 1rem;
+    font-weight: 700;
+    padding: 8px 14px;
+    border-radius: 10px;
+    white-space: nowrap;
+  }
+
+  .bt-month-pl.positive {
+    color: var(--success);
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+  }
+
+  .bt-month-pl.negative {
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+  }
+
   .bt-empty {
     padding: 40px 20px;
     text-align: center;
@@ -276,6 +330,11 @@
       <div class="bt-tile-label">Progression</div>
       <div class="bt-tile-value" id="tileProgression">0.00%</div>
     </div>
+  </div>
+
+  <div class="bt-months">
+    <div class="bt-months-title">Monthly profit / loss</div>
+    <div id="btMonths"></div>
   </div>
 
   <div class="bt-bankroll">
@@ -433,10 +492,48 @@
       });
   }
 
+  function loadMonths(range) {
+    fetch(`/api/bet-tracker/monthly?range=${range}`)
+      .then(r => r.json())
+      .then(data => {
+        const box = document.getElementById('btMonths');
+        const months = data.months || [];
+        box.innerHTML = '';
+
+        if (!months.length) {
+          const empty = document.createElement('div');
+          empty.className = 'bt-empty';
+          empty.textContent = 'No bets in this range yet.';
+          box.appendChild(empty);
+          return;
+        }
+
+        months.forEach(m => {
+          const row = document.createElement('div');
+          row.className = 'bt-month-row';
+
+          const name = document.createElement('span');
+          name.className = 'bt-month-name';
+          name.textContent = m.label;
+
+          const pl = document.createElement('span');
+          pl.className = 'bt-month-pl ' + (m.profit >= 0 ? 'positive' : 'negative');
+          // Explicit sign on both directions: "34.83" and "-34.83" scan very
+          // differently at a glance, and the colour alone is not enough.
+          pl.textContent = (m.profit >= 0 ? '+' : '') + m.profit.toFixed(2) + ' AU$';
+
+          row.appendChild(name);
+          row.appendChild(pl);
+          box.appendChild(row);
+        });
+      });
+  }
+
   function refresh(range) {
     currentRange = range;
     loadChart(range);
     loadSummary(range);
+    loadMonths(range);
   }
 
   document.querySelectorAll('.bt-filter-btn').forEach(btn => {
