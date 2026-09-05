@@ -430,6 +430,42 @@ def register_bet_tracker_routes(app, db):
 
         return jsonify({'points': points})
 
+    @app.route('/api/bet-tracker/monthly')
+    @login_required
+    def api_bet_tracker_monthly():
+        """Net profit/loss per calendar month, newest month first.
+
+        The dashboard renders one row per month with the total coloured green
+        or red, so months with no bets are simply absent rather than shown as
+        a 0.00 row — an empty month is not a break-even month.
+        """
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin privileges required'}), 403
+
+        range_key = request.args.get('range', 'all')
+        cutoff = _range_cutoff(range_key)
+
+        query = Bet.query.filter_by(user_id=current_user.id)
+        if cutoff:
+            query = query.filter(Bet.date_placed >= cutoff)
+        bets = query.all()
+
+        totals = defaultdict(float)
+        for b in bets:
+            dp = b.date_placed or datetime.utcnow()
+            totals[(dp.year, dp.month)] += b.profit
+
+        months = [
+            {
+                'year': year,
+                'month': month,
+                'label': f"{calendar.month_name[month]} {year}",
+                'profit': round(total, 2),
+            }
+            for (year, month), total in sorted(totals.items(), reverse=True)
+        ]
+        return jsonify({'months': months})
+
     @app.route('/api/bet-tracker/summary')
     @login_required
     def api_bet_tracker_summary():
