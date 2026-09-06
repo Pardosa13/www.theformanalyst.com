@@ -66,7 +66,7 @@ def test_ml_specific_analytics_use_ml_score_for_ranking():
 
 def test_ml_performance_cutoff_is_centralized():
     source = Path('app.py').read_text()
-    assert "ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260625'" in source
+    assert "ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260903'" in source
     assert "def _ml_performance_meeting_name_sql" in source
     assert "cutoff_sql = _ml_performance_meeting_name_sql('m')" in _function_source('_build_ml_performance_race_results')
     assert "_filter_verified_ml_performance_meetings" in _function_source('_filter_ml_predictions')

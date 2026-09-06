@@ -37,7 +37,10 @@ from notes_parsing import (
 
 # Temporary ML performance verification filter. Remove this helper when a verified
 # prediction timestamp column is available; it must only affect performance stats.
-ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260625'
+# Set to the promotion date of the current champion (mlp_blended, run 224) on
+# 3 September 2026: the blended model is a new scoring era, so performance stats
+# only count meetings it actually scored.
+ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260903'
 
 
 _PFAI_SCORE_RE = re.compile(r'PFAI Score:\s*([\d.]+)', re.IGNORECASE)
@@ -272,7 +275,7 @@ def _ml_performance_meeting_name_sql(alias='m'):
 
 
 def _filter_verified_ml_performance_meetings(query):
-    """Restrict ML performance analytics to meetings from 25 June 2026 onwards."""
+    """Restrict ML performance analytics to meetings from 3 September 2026 onwards."""
     return query.filter(text(_ml_performance_meeting_name_sql('meetings')))
 
 
