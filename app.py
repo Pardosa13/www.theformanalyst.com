@@ -1804,17 +1804,37 @@ def get_meeting_results(meeting_id):
 
 
 # ----- Routes -----
+def default_landing_endpoint(user):
+    """The endpoint a signed-in user lands on by default.
+
+    Julz's account stays locked to the Budget Tracker, admins land on ML Race
+    Meetings, and everyone else keeps the Meeting History page.
+    """
+    if is_julz(user):
+        return "budget_tracker"
+    if getattr(user, "is_admin", False):
+        return "ml_meetings"
+    return "history"
+
+
+@app.context_processor
+def inject_default_landing():
+    return {
+        'default_landing_endpoint': default_landing_endpoint(current_user),
+    }
+
+
 @app.route("/")
 def home():
     if current_user.is_authenticated:
-        return redirect(url_for("history"))
+        return redirect(url_for(default_landing_endpoint(current_user)))
     return redirect(url_for("login"))
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for("history"))
+        return redirect(url_for(default_landing_endpoint(current_user)))
         
     if request.method == "POST":
         username = request.form.get("username")
@@ -1837,7 +1857,7 @@ def login():
         
         login_user(user, remember=remember)
         flash(f"Welcome back, {username}!", "success")
-        return redirect(url_for("history"))
+        return redirect(url_for(default_landing_endpoint(user)))
     
     # This handles GET requests - notice it's NOT indented under the if POST block
     return render_template("login.html")

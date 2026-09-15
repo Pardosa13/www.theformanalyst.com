@@ -759,7 +759,7 @@ body.modal-open .main-container {
     <!-- ═══ NAVIGATION ═══ (all links/logic identical to original) -->
     <nav class="navbar navbar-expand-xl fixed-top">
         <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('budget_tracker') if julz_restricted else url_for('history') }}">
+            <a class="navbar-brand" href="{{ url_for(default_landing_endpoint) }}">
                 <img src="{{ url_for('static', filename='apple-touch-icon.png') }}"
                      style="height: 32px; width: auto;">
                 The Form Analyst
