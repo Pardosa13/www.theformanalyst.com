@@ -346,12 +346,14 @@
              href="{{ url_for('view_meeting', meeting_id=m.id) }}">
             View
           </a>
+          {% if current_user.is_admin or m.user_id == current_user.id %}
           <form method="post"
                 action="{{ url_for('delete_meeting', meeting_id=m.id) }}"
                 onsubmit="return confirm('Delete this meeting?');"
                 style="display:inline;">
             <button type="submit" class="btn btn-sm btn-danger">Delete</button>
           </form>
+          {% endif %}
         </div>
 
       </div>

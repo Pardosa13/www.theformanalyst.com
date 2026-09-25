@@ -777,11 +777,13 @@ body.modal-open .main-container {
                         {% set racing_active = request.endpoint in ['history', 'ml_meetings', 'results', 'results_entry', 'data_analytics', 'ml_data_analytics', 'backtest', 'race_animation.race_animations_predictions'] %}
                         {% set sports_active = request.endpoint in ['afl_hub', 'mma.mma_hub'] %}
                         {% set tools_active = request.endpoint == 'best_bets' or (request.endpoint and request.endpoint.startswith('bet_tracker')) or request.endpoint == 'ml_shadow' %}
+                        {% if current_user.is_admin %}
                         <li class="nav-item">
                             <a class="nav-link {{ 'active' if request.endpoint == 'dashboard' }}" href="{{ url_for('dashboard') }}">
                                 <i class="bi bi-speedometer2"></i> Dashboard
                             </a>
                         </li>
+                        {% endif %}
                         <li class="nav-item dropdown{{ ' has-active' if racing_active }}">
                             <a class="nav-link dropdown-toggle {{ 'active' if racing_active }}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                                 <i class="bi bi-clock-history"></i> Racing
@@ -793,6 +795,7 @@ body.modal-open .main-container {
                                 <li><a class="dropdown-item {{ 'active' if request.endpoint == 'ml_meetings' }}" href="{{ url_for('ml_meetings') }}" title="ML Race Meetings — ranked by ML score">
                                     <i class="bi bi-robot" style="color:#00e5b0"></i> ML Meetings
                                 </a></li>
+                                {% if current_user.is_admin %}
                                 <li><a class="dropdown-item {{ 'active' if request.endpoint in ['results', 'results_entry'] }}" href="{{ url_for('results') }}">
                                     <i class="bi bi-check2-square"></i> Results
                                 </a></li>
@@ -805,6 +808,7 @@ body.modal-open .main-container {
                                 <li><a class="dropdown-item {{ 'active' if request.endpoint == 'backtest' }}" href="{{ url_for('backtest') }}">
                                     <i class="bi bi-cpu"></i> Backtest
                                 </a></li>
+                                {% endif %}
                                 <li><a class="dropdown-item {{ 'active' if request.endpoint == 'race_animation.race_animations_predictions' }}" href="{{ url_for('race_animation.race_animations_predictions') }}" title="Race Animations — animated replay driven by the composite prediction score">
                                     🏇 Race Animations
                                 </a></li>
@@ -823,27 +827,23 @@ body.modal-open .main-container {
                                 </a></li>
                             </ul>
                         </li>
+                        {% if current_user.is_admin %}
                         <li class="nav-item dropdown{{ ' has-active' if tools_active }}">
                             <a class="nav-link dropdown-toggle {{ 'active' if tools_active }}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                                 <i class="bi bi-tools"></i> Tools
                             </a>
                             <ul class="dropdown-menu">
-                                {% if current_user.is_admin %}
                                 <li><a class="dropdown-item {{ 'active' if request.endpoint and request.endpoint.startswith('bet_tracker') }}" href="{{ url_for('bet_tracker') }}">
                                     <i class="bi bi-clipboard-data"></i> Bet Tracker
                                 </a></li>
-                                {% endif %}
                                 <li><a class="dropdown-item {{ 'active' if request.endpoint == 'best_bets' }}" href="{{ url_for('best_bets') }}">
                                     <i class="bi bi-fire"></i> Best Bets
                                 </a></li>
-                                {% if current_user.is_admin %}
                                 <li><a class="dropdown-item {{ 'active' if request.endpoint == 'ml_shadow' }}" href="{{ url_for('ml_shadow') }}">
                                     <i class="bi bi-cpu"></i> Horse Racing ML
                                 </a></li>
-                                {% endif %}
                             </ul>
                         </li>
-                        {% if current_user.is_admin %}
                         <li class="nav-item">
                             <a class="nav-link {{ 'active' if request.endpoint == 'admin_panel' }}" href="{{ url_for('admin_panel') }}">
                                 <i class="bi bi-shield-lock"></i> Admin
