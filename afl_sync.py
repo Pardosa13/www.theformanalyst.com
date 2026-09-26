@@ -192,6 +192,18 @@ def sync_afl_all(season: int = None):
             logger.error("  ✗ Fixtures sync failed: %s", exc)
             _safe_log_sync(db, "squiggle_games", season=season, status="error", error=str(exc))
 
+        # ── 1b. Game weather (Open-Meteo) ─────────────────────────
+        # Own table (afl_game_weather) so the player-stats upsert never
+        # overwrites it. Only untagged, completed games are fetched.
+        try:
+            from afl_weather import sync_game_weather
+            count = sync_game_weather(db, season)
+            _safe_log_sync(db, "game_weather", season=season, rows=count)
+            logger.info("  ✓ Weather: %s games tagged", count)
+        except Exception as exc:
+            logger.error("  ✗ Weather sync failed: %s", exc)
+            _safe_log_sync(db, "game_weather", season=season, status="error", error=str(exc))
+
         # ── 2. Squiggle ladder ────────────────────────────────────
         try:
             current_round = fetch_squiggle_current_round(season)
