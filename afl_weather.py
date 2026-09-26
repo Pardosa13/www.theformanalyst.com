@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 RAIN_THRESHOLD_MM = float(os.environ.get("AFL_RAIN_THRESHOLD_MM", "1.0"))
 REQUEST_DELAY_SECONDS = float(os.environ.get("AFL_WEATHER_REQUEST_DELAY", "1.0"))
 MAX_RETRIES = int(os.environ.get("AFL_WEATHER_MAX_RETRIES", "4"))
+REQUEST_TIMEOUT_SECONDS = float(os.environ.get("AFL_WEATHER_TIMEOUT", "30"))
 
 GAME_WINDOW_HOURS = 3
 DATE_ONLY_WINDOW = (12, 22)  # local hours, used when bounce time is unknown
@@ -232,7 +233,8 @@ def fetch_hourly_weather(lat: float, lon: float, tz: str,
     }
     for attempt in range(MAX_RETRIES):
         try:
-            response = requests.get(OPEN_METEO_ARCHIVE_URL, params=params, timeout=30)
+            response = requests.get(OPEN_METEO_ARCHIVE_URL, params=params,
+                                    timeout=REQUEST_TIMEOUT_SECONDS)
             if response.status_code == 429 or response.status_code >= 500:
                 raise requests.RequestException(f"HTTP {response.status_code}")
             if response.status_code >= 400:
