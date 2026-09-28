@@ -41,19 +41,11 @@ def test_ml_shadow_bulk_button_calls_score_visible_not_settle_all():
     assert "/api/ml-shadow/settle-all" not in function_source
 
 
-def test_ml_shadow_global_stats_evaluates_central_cutoff_helper_before_sql():
+def test_ml_shadow_global_stats_has_no_meeting_date_cutoff():
     source = Path('ml_shadow_routes.py').read_text()
-    assert "ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260625'" in source
-    assert "def _ml_performance_meeting_name_sql" in source
-    start = source.index("@app.route('/api/ml-shadow/global-stats')")
-    function_source = source[start:]
-    sql_start = function_source.index("text(f\"\"\"")
-    sql_end = function_source.index("\"\"\"", sql_start + len("text(f\"\"\""))
-    raw_sql_template = function_source[sql_start:sql_end]
-    assert "cutoff_sql = _ml_performance_meeting_name_sql('m')" in function_source
-    assert "AND {cutoff_sql}" in raw_sql_template
-    assert "{_ml_performance_meeting_name_sql('m')}" not in raw_sql_template
-    assert "_ml_performance_meeting_name_sql" not in raw_sql_template
+    assert "ML_PERFORMANCE_MEETING_NAME_CUTOFF" not in source
+    assert "_ml_performance_meeting_name_sql" not in source
+    assert "LEFT(m.meeting_name, 6) >=" not in source
 
 
 def test_meeting_scorer_reports_no_picks_instead_of_failing_without_a_champion():

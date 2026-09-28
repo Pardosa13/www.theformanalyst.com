@@ -21,16 +21,6 @@ from sqlalchemy import text
 
 log = logging.getLogger(__name__)
 
-# Temporary ML performance verification filter. Remove when a verified prediction
-# timestamp column replaces the meeting-name cutoff.
-ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260625'
-
-
-def _ml_performance_meeting_name_sql(alias='m'):
-    """Temporary SQL fragment for verified ML performance meetings."""
-    return f"LEFT({alias}.meeting_name, 6) >= '{ML_PERFORMANCE_MEETING_NAME_CUTOFF}'"
-
-
 def _meeting_date_string(meeting):
     """Return YYYY-MM-DD for a meeting, using the date column or YYMMDD_Track name."""
     if getattr(meeting, 'date', None):
@@ -545,7 +535,6 @@ def register_ml_shadow_routes(app, db):
             return jsonify({'error': 'Admin only'}), 403
 
         try:
-            cutoff_sql = _ml_performance_meeting_name_sql('m')
             rows = db.session.execute(text(f"""
                 SELECT
                     rc.id AS race_id,
@@ -564,7 +553,6 @@ def register_ml_shadow_routes(app, db):
                 JOIN meetings m ON m.id = rc.meeting_id
                 JOIN results r ON r.horse_id = h.id
                 WHERE p.ml_score IS NOT NULL
-                  AND {cutoff_sql}
                   AND COALESCE(h.is_scratched, FALSE) = FALSE
                   AND r.finish_position IS NOT NULL
                   AND r.finish_position > 0

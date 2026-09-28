@@ -35,14 +35,6 @@ from notes_parsing import (
     parse_notes_components,
 )
 
-# Temporary ML performance verification filter. Remove this helper when a verified
-# prediction timestamp column is available; it must only affect performance stats.
-# Set to the promotion date of the current champion (mlp_blended, run 224) on
-# 3 September 2026: the blended model is a new scoring era, so performance stats
-# only count meetings it actually scored.
-ML_PERFORMANCE_MEETING_NAME_CUTOFF = '260903'
-
-
 _PFAI_SCORE_RE = re.compile(r'PFAI Score:\s*([\d.]+)', re.IGNORECASE)
 
 def parse_pfai_score_from_horse(horse, prediction=None):
@@ -267,16 +259,6 @@ def _value_edge_fields_with_stored_fallback(edge_fields, prediction):
     fields['is_value_edge_bet'] = stored_edge >= VALUE_EDGE_MIN_THRESHOLD_PCT
     fields['is_value_edge_promoted'] = stored_edge >= VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT
     return fields
-
-
-def _ml_performance_meeting_name_sql(alias='m'):
-    """Temporary SQL fragment for verified ML performance meetings."""
-    return f"LEFT({alias}.meeting_name, 6) >= '{ML_PERFORMANCE_MEETING_NAME_CUTOFF}'"
-
-
-def _filter_verified_ml_performance_meetings(query):
-    """Restrict ML performance analytics to meetings from 3 September 2026 onwards."""
-    return query.filter(text(_ml_performance_meeting_name_sql('meetings')))
 
 
 import logging
@@ -2987,15 +2969,11 @@ def dashboard():
 
 def _filter_ml_predictions(query):
     """Limit ML performance analytics to verified rows with real ML scores."""
-    return _filter_verified_ml_performance_meetings(
-        query.filter(Prediction.ml_score.isnot(None))
-    )
+    return query.filter(Prediction.ml_score.isnot(None))
 
 def _join_ml_predictions_for_race_ids(query):
     """Limit race-id discovery to races represented in verified persisted ML results."""
-    return _filter_verified_ml_performance_meetings(
-        query.join(Prediction, Prediction.horse_id == Horse.id).filter(Prediction.ml_score.isnot(None))
-    )
+    return query.join(Prediction, Prediction.horse_id == Horse.id).filter(Prediction.ml_score.isnot(None))
 
 def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""):
     """Return settled ML race results ordered exactly like the Machine Learning page."""
@@ -3011,7 +2989,6 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
         filters.append("m.uploaded_at <= :date_to")
         params["date_to"] = date_to
     extra_where = " AND " + " AND ".join(filters) if filters else ""
-    cutoff_sql = _ml_performance_meeting_name_sql('m')
 
     rows = db.session.execute(text(f"""
         SELECT
@@ -3031,7 +3008,6 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
         JOIN meetings m ON m.id = rc.meeting_id
         JOIN results r ON r.horse_id = h.id
         WHERE p.ml_score IS NOT NULL
-          AND {cutoff_sql}
           AND COALESCE(h.is_scratched, FALSE) = FALSE
           AND r.finish_position IS NOT NULL
           AND r.finish_position > 0
@@ -6022,7 +5998,7 @@ def ml_data_analytics():
     track_filter = request.args.get('track', '')
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    limit_param = request.args.get('limit', '200')
+    limit_param = request.args.get('limit', 'all')
 
     tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
