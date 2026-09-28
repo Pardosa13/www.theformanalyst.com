@@ -5998,7 +5998,7 @@ def ml_data_analytics():
     track_filter = request.args.get('track', '')
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    limit_param = request.args.get('limit', '200')
+    limit_param = request.args.get('limit', 'all')
 
     tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))

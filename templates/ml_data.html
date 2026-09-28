@@ -456,11 +456,11 @@
         <select name="limit" class="form-select" style="min-width:180px;">
           <option value="50"  {% if filters.limit == 50  %}selected{% endif %}>50 Races (Fast)</option>
           <option value="100" {% if filters.limit == 100 %}selected{% endif %}>100 Races</option>
-          <option value="200" {% if filters.limit == 200 or not filters.limit %}selected{% endif %}>200 Races</option>
+          <option value="200" {% if filters.limit == 200 %}selected{% endif %}>200 Races</option>
           <option value="500" {% if filters.limit == 500 %}selected{% endif %}>500 Races</option>
           <option value="1000" {% if filters.limit == 1000 %}selected{% endif %}>1000 Races</option>
           {% if current_user.is_admin %}
-          <option value="all" {% if filters.limit == 'all' %}selected{% endif %}>All Races (Admin)</option>
+          <option value="all" {% if filters.limit == 'all' or not filters.limit %}selected{% endif %}>All Races (Admin)</option>
           {% endif %}
         </select>
       </div>
@@ -890,7 +890,7 @@ const filterParams = new URLSearchParams({
     track: '{{ filters.track }}',
     date_from: '{{ filters.date_from }}',
     date_to: '{{ filters.date_to }}',
-    limit: '{{ filters.limit or 200 }}',
+    limit: '{{ filters.limit or 'all' }}',
     source: 'ml'
 });
 
