@@ -86,6 +86,19 @@ def signals_all_agree_top(horse_id, signal_top_ids):
     top_ids = [signal_top_ids.get('analyzer'), signal_top_ids.get('pfai'), signal_top_ids.get('ml')]
     return all(top_id is not None for top_id in top_ids) and len(set(top_ids)) == 1 and top_ids[0] == horse_id
 
+MAIDEN_RACE_CLASS_RE = re.compile(r'Maiden|Mdn', re.IGNORECASE)
+
+
+def is_maiden_race(race_class):
+    """Maiden = race class contains "Maiden" or "Mdn" (case-insensitive)."""
+    return bool(MAIDEN_RACE_CLASS_RE.search(race_class or ''))
+
+
+# Analyzer + PFAI + ML all picking the same horse is a losing bet overall but
+# profitable in maiden races (ML Data > Maiden Race Split), so that combination
+# qualifies a horse for Best Bets on its own, with or without a value edge.
+MAIDEN_AGREEMENT_BADGE = '🏇 Maiden Agreement (Analyzer + PFAI + ML)'
+
 BEST_BETS_LADBROKES_STALE_SECONDS = max(90, ODDS_CACHE_TTL * 3)
 LADBROKES_CLOSED_MARKET_STATUSES = {"closed", "final", "finalised", "abandoned", "resulted", "interim", "live", "jumped", "error"}
 LADBROKES_UNAVAILABLE_RUNNER_STATUSES = {"scratched", "closed", "inactive", "unavailable", "late scratching"}
@@ -9135,7 +9148,7 @@ def api_ml_signal_agreement():
     analysis = _build_ml_performance_breakdowns(triple, dims)
     headline = analysis['headline']
     # Maiden split: same agreement bets, with and without maiden races.
-    is_maiden = lambda o: bool(re.search(r'Maiden|Mdn', o.get('race_class') or '', re.IGNORECASE))
+    is_maiden = lambda o: is_maiden_race(o.get('race_class'))
     maiden_split = {}
     for key, subset in (('without_maiden', [o for o in triple if not is_maiden(o)]),
                         ('maiden_only', [o for o in triple if is_maiden(o)])):
@@ -11369,7 +11382,15 @@ def best_bets():
                 # results rather than from what this page happens to display.
                 jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
                 value_edge_promoted = bool(lb_fields.get('is_value_edge_promoted'))
-                if value_edge_promoted:
+                maiden_agreement = signal_agreement and is_maiden_race(race.race_class)
+                if maiden_agreement:
+                    lb_fields = {
+                        **lb_fields,
+                        'best_bet_badges': [*(lb_fields.get('best_bet_badges') or []), MAIDEN_AGREEMENT_BADGE],
+                        'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []),
+                                             'Qualified because Analyzer, PFAI and ML all rank this horse first in a maiden race.'],
+                    }
+                if value_edge_promoted or maiden_agreement:
                     matched_components.sort(key=lambda x: x['roi'], reverse=True)
                     best_bets.append({
                         'meeting_id': meeting.id,
@@ -11398,6 +11419,7 @@ def best_bets():
                         'rank_in_race': rank_in_race,
                         'high_confidence': wp >= 80,
                         'signal_agreement': signal_agreement,
+                        'is_maiden_agreement': maiden_agreement,
                         **lb_fields,
                     })
 
