@@ -188,7 +188,7 @@ def test_best_bets_route_shows_only_horses_at_or_above_the_promote_threshold():
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
     assert "value_edge_promoted = bool(lb_fields.get('is_value_edge_promoted'))" in source
-    assert 'if value_edge_promoted:' in source
+    assert 'if value_edge_promoted or maiden_agreement:' in source
     # The old "any one of these qualifies" gate must be gone.
     assert 'or value_edge_promoted:' not in source
     assert 'if matched_components or wp >= 80' not in source
@@ -268,3 +268,20 @@ def test_best_bets_template_shows_both_thresholds():
     template = Path('templates/best_bets.html').read_text()
     assert 'value_edge_min_threshold_pct' in template
     assert 'value_edge_track_min_threshold_pct' in template
+
+
+def test_best_bets_route_also_shows_maiden_triple_agreement():
+    """Analyzer + PFAI + ML agreement in a maiden race qualifies on its own."""
+    source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
+    source = source[:source.index('\n@app.route(', 1)]
+    assert 'maiden_agreement = signal_agreement and is_maiden_race(race.race_class)' in source
+    assert 'MAIDEN_AGREEMENT_BADGE' in source
+
+
+def test_is_maiden_race_matches_maiden_and_mdn():
+    from app import is_maiden_race
+    assert is_maiden_race('Maiden Plate')
+    assert is_maiden_race('MDN-SW')
+    assert is_maiden_race('3yo mdn')
+    assert not is_maiden_race('Benchmark 64')
+    assert not is_maiden_race(None)
