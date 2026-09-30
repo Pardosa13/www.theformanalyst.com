@@ -9134,11 +9134,21 @@ def api_ml_signal_agreement():
     dims = ['price_bracket', 'ml_score_bracket', 'ml_score_gap', 'field_size', 'jurisdiction', 'distance', 'day_of_week', 'market_rank', 'favourite_status']
     analysis = _build_ml_performance_breakdowns(triple, dims)
     headline = analysis['headline']
+    # Maiden split: same agreement bets, with and without maiden races.
+    is_maiden = lambda o: bool(re.search(r'Maiden|Mdn', o.get('race_class') or '', re.IGNORECASE))
+    maiden_split = {}
+    for key, subset in (('without_maiden', [o for o in triple if not is_maiden(o)]),
+                        ('maiden_only', [o for o in triple if is_maiden(o)])):
+        perf = _blank_perf()
+        for o in subset:
+            _acc_perf(perf, o)
+        maiden_split[key] = _finalise_perf(perf)
     latest_result_at = None
     return jsonify({
         **headline,
         'latest_result_at': latest_result_at,
         'analysis': analysis,
+        'maiden_split': maiden_split,
         'backend_helper': '_get_ml_top_selection_observations + _build_ml_performance_breakdowns',
         'sql_logic': ML_BREAKDOWN_SQL_DESCRIPTION + '\nTriple agreement filter: analyzer_rank = 1, pfai_rank = 1, ml_rank = 1 on the same selected horse.',
         'handling_notes': ML_BREAKDOWN_SQL_DESCRIPTION,
