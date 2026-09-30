@@ -3093,12 +3093,43 @@ function renderMlSignalAgreement(data) {
     ];
     const analysis = data.analysis || {};
     for (const [dim, label] of dims) container.innerHTML += '';
-    let extra = '';
+    let extra = renderMlMaidenSplit(data.maiden_split || {}, data);
     for (const [dim, label] of dims) extra += renderMlBreakdownTable(label, ((analysis.breakdowns || {})[dim] || []), ((analysis.reconciliation || {})[dim]));
     extra += `<div class="alert alert-secondary mt-3" style="font-size:12px;white-space:pre-wrap"><strong>Backend helper:</strong> ${escapeHtml(data.backend_helper || '')}
 <strong>SQL / handling:</strong> ${escapeHtml(data.sql_logic || data.handling_notes || '')}</div>`;
     container.innerHTML += extra + `</div>`;
     return;
+}
+
+function renderMlMaidenSplit(split, all) {
+    const rows = [
+        ['All agreement bets', all],
+        ['WITHOUT maiden races', split.without_maiden],
+        ['Maiden races ONLY', split.maiden_only],
+    ];
+    const sign = v => (v >= 0 ? '+' : '');
+    let body = '';
+    for (const [label, s] of rows) {
+        if (!s) continue;
+        const bets = s.bets || 0;
+        const profit = s.profit || 0;
+        const roi = s.roi_pct || 0;
+        const cls = profit >= 0 ? 'profit' : 'loss';
+        const verdict = !bets ? '<span class="text-muted">No bets</span>'
+            : profit >= 0 ? '<span class="badge bg-success">PROFITABLE</span>'
+            : '<span class="badge bg-danger">LOSING</span>';
+        body += `<tr><td><strong>${label}</strong></td><td>${bets}</td><td>${s.wins || 0}</td>
+            <td>${(s.strike_rate_pct || 0).toFixed(2)}%</td><td>${(s.avg_winner_sp || 0).toFixed(2)}</td>
+            <td>${(s.total_staked || 0).toFixed(0)}</td><td>${(s.total_return || 0).toFixed(2)}</td>
+            <td class="${cls}">${sign(profit)}${profit.toFixed(2)}</td><td class="${cls}">${sign(roi)}${roi.toFixed(2)}%</td>
+            <td>${verdict}</td><td><small class="text-muted">${escapeHtml(s.sample_warning || '')}</small></td></tr>`;
+    }
+    return `<h6 class="mt-3">🐣 Maiden Race Split</h6>
+        <p class="text-muted" style="font-size:12px">Same agreement bets, split by maiden races. Maiden = race class contains "Maiden" or "Mdn". $10 win bets.</p>
+        <div class="table-responsive"><table class="table table-sm table-hover">
+            <thead class="table-dark"><tr><th>Scenario</th><th>Bets</th><th>Wins</th><th>Strike %</th><th>Avg Winner SP</th><th>Total Staked</th><th>Total Return</th><th>Profit</th><th>ROI %</th><th>Verdict</th><th>Sample</th></tr></thead>
+            <tbody>${body}</tbody>
+        </table></div>`;
 }
 
 function renderMlPfaiAnalysis(data) {

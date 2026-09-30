@@ -142,3 +142,14 @@ def test_ml_signal_agreement_uses_result_status_not_stale_horse_scratch_flag():
     assert 'res.sp IS NOT NULL' in race_picks_where
     assert 'COALESCE(h.is_scratched, FALSE) = FALSE' not in race_picks_where
     assert 'horses.is_scratched' in route_source
+
+
+def test_ml_signal_agreement_includes_maiden_split():
+    route_source = _function_source('api_ml_signal_agreement')
+    template = Path('templates/ml_data.html').read_text()
+    assert "'maiden_split'" in route_source
+    assert 'without_maiden' in route_source
+    assert 'maiden_only' in route_source
+    assert 'renderMlMaidenSplit' in template
+    assert 'WITHOUT maiden races' in template
+    assert 'Maiden races ONLY' in template
