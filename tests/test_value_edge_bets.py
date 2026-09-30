@@ -136,10 +136,10 @@ def test_ml_data_template_has_value_edge_section():
     assert 'value_edge_performance.buckets' in template
 
 
-def test_best_bets_template_has_value_edge_section():
+def test_best_bets_template_has_no_value_edge_section():
     template = Path('templates/best_bets.html').read_text()
-    assert 'ML Value Edge Bets' in template
-    assert 'value_edge_bets' in template
+    assert 'ML Value Edge Bets' not in template
+    assert 'value_edge_bets' not in template
 
 
 def test_promote_threshold_boundary():
@@ -179,19 +179,16 @@ def test_promote_threshold_is_a_single_module_constant():
     assert APP_SOURCE.count('VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT = 10.0') == 1
 
 
-def test_best_bets_route_shows_only_horses_at_or_above_the_promote_threshold():
-    """Value edge is the gate for the Best Bets page, not one qualifier among
-    several. A component match, an 80% win probability, a sole ride or a
-    consensus badge no longer puts a horse on the page by itself — only an edge
-    of at least VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT does. Smaller edges
-    are still captured on `predictions` and reported by the ML Data buckets."""
+def test_best_bets_route_no_longer_lists_value_edge_bets():
+    """ML value edge bets were unprofitable, so they no longer put a horse on
+    the Best Bets page. Only maiden agreement does. Edges are still captured
+    on `predictions` for the ML Data buckets."""
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
-    assert "value_edge_promoted = bool(lb_fields.get('is_value_edge_promoted'))" in source
-    assert 'if value_edge_promoted or maiden_agreement:' in source
-    # The old "any one of these qualifies" gate must be gone.
-    assert 'or value_edge_promoted:' not in source
-    assert 'if matched_components or wp >= 80' not in source
+    assert 'if maiden_agreement:' in source
+    assert 'value_edge_promoted or' not in source
+    assert 'value_edge_bets' not in source
+    assert "if edge_fields.get('is_value_edge_bet'):" in source
 
 
 def test_best_bets_falls_back_to_the_stored_edge_when_the_live_fetch_is_empty():
@@ -249,39 +246,3 @@ def test_value_edge_buckets_cover_every_edge_level():
     # marking never cuts a bucket in half.
     threshold = appmod.VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT
     assert threshold in [lower for _k, _l, lower, _u in buckets]
-
-
-def test_best_bets_route_only_displays_promoted_edge_bets_but_tracks_all():
-    # The ML Value Edge Bets panel on the Best Bets page should only list
-    # horses that clear the 10pp promotion threshold, while the DB snapshot
-    # capture (used by the ML Data page's edge buckets) still fires for every
-    # horse at/above the lower 8pp threshold.
-    source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
-    source = source[:source.index('\n@app.route(', 1)]
-    assert "if edge_fields.get('is_value_edge_bet'):" in source
-    assert "if edge_fields.get('is_value_edge_promoted'):\n                        value_edge_bets.append(" in source
-    assert 'value_edge_min_threshold_pct=VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT' in source
-    assert 'value_edge_track_min_threshold_pct=VALUE_EDGE_MIN_THRESHOLD_PCT' in source
-
-
-def test_best_bets_template_shows_both_thresholds():
-    template = Path('templates/best_bets.html').read_text()
-    assert 'value_edge_min_threshold_pct' in template
-    assert 'value_edge_track_min_threshold_pct' in template
-
-
-def test_best_bets_route_also_shows_maiden_triple_agreement():
-    """Analyzer + PFAI + ML agreement in a maiden race qualifies on its own."""
-    source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
-    source = source[:source.index('\n@app.route(', 1)]
-    assert 'maiden_agreement = signal_agreement and is_maiden_race(race.race_class)' in source
-    assert 'MAIDEN_AGREEMENT_BADGE' in source
-
-
-def test_is_maiden_race_matches_maiden_and_mdn():
-    from app import is_maiden_race
-    assert is_maiden_race('Maiden Plate')
-    assert is_maiden_race('MDN-SW')
-    assert is_maiden_race('3yo mdn')
-    assert not is_maiden_race('Benchmark 64')
-    assert not is_maiden_race(None)

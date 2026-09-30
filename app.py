@@ -11213,7 +11213,6 @@ def best_bets():
     )
 
     best_bets = []
-    value_edge_bets = []
     total_horses_scanned = 0
 
     for meeting in recent_meetings:
@@ -11250,13 +11249,10 @@ def best_bets():
                         'score': horse.prediction.score
                     })
 
-                    # ── ML Value Edge Bets: independent of mode/min_score/min_gap so
-                    # every qualifying horse gets tracked, not just whichever ones this
-                    # admin visit's filters happen to keep. All horses at/above
-                    # VALUE_EDGE_MIN_THRESHOLD_PCT (8.0pp) are captured for the ML Data
-                    # page's bucketed reporting, but only horses at/above
-                    # VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT (10.0pp) are shown in
-                    # this page's ML Value Edge Bets panel. ──
+                    # ── ML value edge tracking: independent of mode/min_score/min_gap so
+                    # every qualifying horse gets captured for the ML Data page's
+                    # bucketed reporting. Value edge no longer puts a horse on this
+                    # page — it was not profitable. ──
                     # The live fetch is not the only source of an edge any more:
                     # when it comes back empty, the edge the ML scoring run
                     # already persisted from the stored odds snapshots stands in.
@@ -11270,25 +11266,6 @@ def best_bets():
                             horse.prediction.value_edge_ml_win_prob_pct = edge_fields.get('ml_fair_probability_pct')
                             horse.prediction.value_edge_price = edge_fields.get('ladbrokes_fixed_win_price')
                             horse.prediction.value_edge_captured_at = datetime.utcnow()
-                    if edge_fields.get('is_value_edge_promoted'):
-                        value_edge_bets.append({
-                            'meeting_id': meeting.id,
-                            'meeting_name': meeting.meeting_name,
-                            'track': track_name,
-                            'uploaded_at': meeting.uploaded_at,
-                            'race_id': race.id,
-                            'race_number': race.race_number,
-                            'distance': race.distance,
-                            'horse_id': horse.id,
-                            'horse_name': horse.horse_name,
-                            'jockey': horse.jockey,
-                            'trainer': horse.trainer,
-                            'barrier': horse.barrier,
-                            'ladbrokes_fixed_win_price': edge_fields.get('ladbrokes_fixed_win_price'),
-                            'ml_fair_probability_pct': edge_fields.get('ml_fair_probability_pct'),
-                            'market_implied_probability_pct': edge_fields.get('market_implied_probability_pct'),
-                            'value_edge_pct': edge_fields.get('value_edge_pct'),
-                        })
             horses_in_race.sort(key=lambda x: x['score'], reverse=True)
             if not horses_in_race:
                 continue
@@ -11367,21 +11344,10 @@ def best_bets():
                     if rank_idx > 0 else 0
                 )
 
-                # Value edge is the gate for this page, not one qualifier among
-                # several: a horse appears here only if the model's fair win
-                # probability clears the market by at least
-                # VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT (10pp). Components,
-                # win probability, a sole ride and the consensus badges are still
-                # computed and still shown on the rows that qualify — they simply
-                # no longer put a horse on the page by themselves, because a
-                # signal without a price advantage is not a bet worth taking.
-                #
-                # Everything below 10pp is still captured on `predictions` above
-                # and reported by the ML Data page's edge buckets, which is where
-                # the question "is 20 the right cutoff?" gets answered from real
-                # results rather than from what this page happens to display.
+                # Only Analyzer + PFAI + ML maiden agreement puts a horse on
+                # this page. ML value edge bets were removed as unprofitable;
+                # edges are still captured above for the ML Data page.
                 jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
-                value_edge_promoted = bool(lb_fields.get('is_value_edge_promoted'))
                 maiden_agreement = signal_agreement and is_maiden_race(race.race_class)
                 if maiden_agreement:
                     lb_fields = {
@@ -11390,7 +11356,13 @@ def best_bets():
                         'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []),
                                              'Qualified because Analyzer, PFAI and ML all rank this horse first in a maiden race.'],
                     }
-                if value_edge_promoted or maiden_agreement:
+                # Drop the value-edge badge and reason so rows don't present it as a bet signal.
+                lb_fields = {
+                    **lb_fields,
+                    'best_bet_badges': [b for b in (lb_fields.get('best_bet_badges') or []) if 'ML Value Edge' not in b],
+                    'best_bet_reasons': [r for r in (lb_fields.get('best_bet_reasons') or []) if 'fair win probability clears the market' not in r],
+                }
+                if maiden_agreement:
                     matched_components.sort(key=lambda x: x['roi'], reverse=True)
                     best_bets.append({
                         'meeting_id': meeting.id,
@@ -11425,7 +11397,6 @@ def best_bets():
 
     db.session.commit()
     best_bets.sort(key=lambda x: x['score'], reverse=True)
-    value_edge_bets.sort(key=lambda x: x['value_edge_pct'] or 0, reverse=True)
 
     meetings_with_bets = {}
     for bet in best_bets:
@@ -11460,9 +11431,6 @@ def best_bets():
         min_score=min_score,
         min_gap=min_gap,
         mode=mode,
-        value_edge_bets=value_edge_bets,
-        value_edge_min_threshold_pct=VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT,
-        value_edge_track_min_threshold_pct=VALUE_EDGE_MIN_THRESHOLD_PCT,
     )
 @app.route("/best-bets/post", methods=["POST"])
 @login_required
