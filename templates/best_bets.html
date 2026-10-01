@@ -527,11 +527,8 @@
 <!-- Page header -->
 <div class="bets-header">
   <h2>🔥 Today's Best Bets</h2>
-  <p>Horses whose ML fair win probability clears the live market by at least
-     {{ '%.0f'|format(value_edge_min_threshold_pct) }} percentage points. Component matches, win
-     probability, sole rides and the consensus badges are shown on the rows that qualify, but a
-     horse without that price advantage is not listed here — every smaller edge is still tracked
-     on the ML Data page.</p>
+  <p>Maiden races where Analyzer, PFAI and ML all rank the same horse first. Component matches,
+     win probability, sole rides and the consensus badges are shown on the rows that qualify.</p>
 </div>
 
 <!-- Stat tiles -->
@@ -647,71 +644,15 @@
   </div>
 </div>
 
-<!-- ML Value Edge Bets — additive section; does not replace or filter any existing signal above -->
-<div class="components-card">
-  <div class="components-card-header">
-    <h5>💎 ML Value Edge Bets</h5>
-    <span class="components-count-badge">{{ value_edge_bets|length }}</span>
-  </div>
-  <div style="padding:14px 18px;">
-    <p class="text-muted" style="font-size:12px;margin-bottom:12px;">
-      Horses where the model's fair win probability clears the market's implied probability by at least
-      {{ '%.1f'|format(value_edge_min_threshold_pct) }} percentage points. This is the same set as the best bets
-      list below — that list is now gated on the same threshold — and these are eligible for Telegram &amp; Twitter.
-      Every horse at {{ '%.1f'|format(value_edge_track_min_threshold_pct) }}pp or better is still logged as its own
-      tracked bet type, and every measured edge of any size is bucketed on the ML Data page, which is where the
-      {{ '%.0f'|format(value_edge_min_threshold_pct) }}pp cutoff gets tested against real results.
-    </p>
-    {% if value_edge_bets %}
-    <div class="table-responsive">
-      <table class="bets-table">
-        <thead>
-          <tr>
-            <th>Horse</th><th>Race</th><th>Track</th><th>Time</th><th>Ladbrokes</th><th>Model Win %</th><th>Edge</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for bet in value_edge_bets %}
-          <tr class="row-signal">
-            <td>
-              <div class="horse-name">{{ bet.horse_name }}</div>
-            </td>
-            <td><span class="race-pill">Race {{ bet.race_number }}</span></td>
-            <td>{{ bet.track or bet.meeting_name }}</td>
-            <td>{{ bet.uploaded_at.strftime('%I:%M %p') if bet.uploaded_at else '—' }}</td>
-            <td>
-              {% if bet.ladbrokes_fixed_win_price %}
-                ${{ '%.2f'|format(bet.ladbrokes_fixed_win_price) }}
-              {% else %}
-                <span class="text-muted">Unavailable</span>
-              {% endif %}
-            </td>
-            <td>{% if bet.ml_fair_probability_pct is not none %}{{ '%.1f'|format(bet.ml_fair_probability_pct) }}%{% else %}—{% endif %}</td>
-            <td><span class="badge bg-success">+{{ '%.1f'|format(bet.value_edge_pct) }}pp</span></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <p class="text-muted" style="font-size:13px;margin:0;">No horses in this window currently clear the value-edge threshold.</p>
-    {% endif %}
-  </div>
-</div>
-
 <!-- Best bets / empty state -->
 {% if total_bets == 0 %}
 <div class="no-bets-alert">
   <h4>No Signals Found</h4>
-  <p>No horse in the last {{ hours_back }} hours clears the
-     {{ '%.0f'|format(value_edge_min_threshold_pct) }}pp value-edge threshold{% if mode == 'top_pick' %} as top pick{% elif mode == 'non_top_pick' %} as a non-top-pick signal{% endif %}.
-     That is a normal result: a {{ '%.0f'|format(value_edge_min_threshold_pct) }}pp edge is a high bar,
-     and on many cards nothing reaches it.</p>
+  <p>No maiden race in the last {{ hours_back }} hours has Analyzer, PFAI and ML all agreeing on
+     the top pick{% if mode == 'non_top_pick' %} — non-top-pick mode cannot show these, as they are always the top pick{% endif %}.</p>
   <p style="margin-bottom:4px;">Check:</p>
   <ul>
-    <li>The meeting has been scored — Edge and Kelly Stake are written by the ML scoring run</li>
-    <li>Live odds are flowing (odds_ingest) — no market price means no edge to measure</li>
-    <li>The ML Data page's edge buckets, to see what the smaller edges are doing</li>
+    <li>The meeting has been scored by the ML run</li>
     <li>Increasing the time window</li>
   </ul>
 </div>

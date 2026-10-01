@@ -96,7 +96,7 @@ def is_maiden_race(race_class):
 
 # Analyzer + PFAI + ML all picking the same horse is a losing bet overall but
 # profitable in maiden races (ML Data > Maiden Race Split), so that combination
-# qualifies a horse for Best Bets on its own, with or without a value edge.
+# is the only thing that qualifies a horse for Best Bets.
 MAIDEN_AGREEMENT_BADGE = '🏇 Maiden Agreement (Analyzer + PFAI + ML)'
 
 BEST_BETS_LADBROKES_STALE_SECONDS = max(90, ODDS_CACHE_TTL * 3)
@@ -107,15 +107,11 @@ LADBROKES_UNAVAILABLE_RUNNER_STATUSES = {"scratched", "closed", "inactive", "una
 # from the live Ladbrokes price, in percentage points) required for a horse to
 # qualify as an "ML Value Edge" bet. 8.0pp matches the 0.08 threshold that
 # backtest.py's VALUE_EDGE_THRESHOLDS diagnostic found to be the strongest-
-# performing cutoff. Single source of truth for the Best Bets page section,
-# the pre-race tracking capture, and the ML Data page — change this one value
-# to re-calibrate all three.
+# performing cutoff. Single source of truth for the pre-race tracking capture
+# and the ML Data page.
 VALUE_EDGE_MIN_THRESHOLD_PCT = 8.0
 
-# ML Value Edge bets at or above this edge are strong enough to also be
-# promoted into the normal Best Bets section for a meeting/race — making them
-# checkbox-selectable and eligible for the Telegram/Twitter "Post Selected
-# Bets" flow alongside the Analyzer/PFAI/ML-driven picks.
+# The edge the ML Data page marks as the bettable band in its edge buckets.
 VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT = 10.0
 
 
@@ -182,16 +178,8 @@ def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_
     ml_rank = {h.id: i + 1 for i, h in enumerate(ml_ranked)}
     ml_gap = (ml_ranked[0].prediction.ml_score - ml_ranked[1].prediction.ml_score) if len(ml_ranked) > 1 else None
     market, market_state = _rank_active_ladbrokes_market(odds_payload, horses)
-    # ML-only fair win probability book (normalised ml_score share of the race),
-    # used solely to compute each horse's Value Edge over the live market below.
-    # Independent of the qualitative sweet-spot/consensus/gap badges above —
-    # never added to `badges`/`cnt` so it can't change their combination logic.
-    ml_book = _derive_ml_race_book(
-        horses,
-        lambda h: None if getattr(h, 'is_scratched', False) or not getattr(h, 'prediction', None) else h.prediction.ml_score,
-    )
     out = {}
-    for idx, h in enumerate(horses):
+    for h in horses:
         m = market.get(h.id, {})
         is_ml_top_fav = ml_rank.get(h.id) == 1 and m.get('is_favourite') and market_state.get('available')
         full = analyzer_rank.get(h.id) == pfai_rank.get(h.id) == ml_rank.get(h.id) == 1 and m.get('is_favourite') and market_state.get('available')
@@ -206,19 +194,6 @@ def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_
             badges.append('★★★★ ML Market Agreement + 20 Gap'); reasons.append(f"Qualified because the ML top pick is the Ladbrokes favourite with a {ml_gap:.1f}-point ML gap.")
         cnt=len(badges)
 
-        # ── Value Edge: model fair win probability minus market-implied probability ──
-        book_entry = ml_book.get(idx)
-        market_implied_pct = (100.0 / m.get('price')) if (market_state.get('available') and m.get('price')) else None
-        ml_fair_probability_pct = round(book_entry['ml_fair_probability'] * 100.0, 2) if book_entry else None
-        value_edge_pct = (
-            round(ml_fair_probability_pct - market_implied_pct, 2)
-            if ml_fair_probability_pct is not None and market_implied_pct is not None else None
-        )
-        is_value_edge_bet = bool(value_edge_pct is not None and value_edge_pct >= VALUE_EDGE_MIN_THRESHOLD_PCT)
-        is_value_edge_promoted = bool(value_edge_pct is not None and value_edge_pct >= VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT)
-        if is_value_edge_promoted:
-            badges.append(f'💎 ML Value Edge +{value_edge_pct:.1f}pp'); reasons.append(f"Qualified because the model's fair win probability clears the market by {value_edge_pct:.1f} percentage points.")
-
         out[h.id]={
             'ladbrokes_fixed_win_price': m.get('price'), 'ladbrokes_market_rank': m.get('market_rank'),
             'is_ladbrokes_favourite': bool(m.get('is_favourite')), 'is_joint_ladbrokes_favourite': bool(m.get('is_joint_favourite')),
@@ -230,49 +205,8 @@ def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_
             'best_bet_confidence_level': 'Elite Consensus Best Bet' if cnt==3 else ('Strong Consensus Best Bet' if cnt==2 else (badges[0] if cnt==1 else None)),
             'best_bet_reasons': reasons if reasons else ([market_state.get('reason')] if not market_state.get('available') else []),
             'best_bet_badges': badges,
-            'ml_fair_probability_pct': ml_fair_probability_pct,
-            'market_implied_probability_pct': round(market_implied_pct, 2) if market_implied_pct is not None else None,
-            'value_edge_pct': value_edge_pct,
-            'is_value_edge_bet': is_value_edge_bet,
-            'is_value_edge_promoted': is_value_edge_promoted,
         }
     return out
-
-def _value_edge_fields_with_stored_fallback(edge_fields, prediction):
-    """Live value-edge fields, backfilled from the edge already persisted on `predictions`.
-
-    evaluate_ladbrokes_best_bet_signals can only produce an edge when the
-    in-request Ladbrokes fetch returns a price. The ML scoring run computes the
-    same edge from the `live_odds_snapshots` rows odds_ingest.py writes, and
-    persists it — so when the direct fetch comes back with nothing, that stored
-    edge is the better answer available, not a reason to treat the horse as
-    having no edge at all.
-
-    Returns a new dict; never mutates `edge_fields`, and never overwrites a live
-    edge with a stored one.
-    """
-    fields = dict(edge_fields or {})
-    if fields.get('value_edge_pct') is not None or prediction is None:
-        return fields
-
-    stored_edge = getattr(prediction, 'value_edge_pct', None)
-    if stored_edge is None:
-        return fields
-
-    stored_edge = float(stored_edge)
-    fields['value_edge_pct'] = stored_edge
-    fields['value_edge_source'] = 'stored'
-    if fields.get('ml_fair_probability_pct') is None:
-        fields['ml_fair_probability_pct'] = getattr(prediction, 'value_edge_ml_win_prob_pct', None)
-    if fields.get('ladbrokes_fixed_win_price') is None:
-        fields['ladbrokes_fixed_win_price'] = getattr(prediction, 'value_edge_price', None)
-    if fields.get('market_implied_probability_pct') is None:
-        price = fields.get('ladbrokes_fixed_win_price')
-        fields['market_implied_probability_pct'] = round(100.0 / float(price), 2) if price else None
-    fields['is_value_edge_bet'] = stored_edge >= VALUE_EDGE_MIN_THRESHOLD_PCT
-    fields['is_value_edge_promoted'] = stored_edge >= VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT
-    return fields
-
 
 import logging
 import sys
@@ -11200,10 +11134,6 @@ def best_bets():
                 Prediction.win_probability,
                 Prediction.notes,
                 Prediction.ml_score,
-                Prediction.value_edge_pct,
-                Prediction.value_edge_ml_win_prob_pct,
-                Prediction.value_edge_price,
-                Prediction.value_edge_captured_at,
                 Prediction.ladbrokes_signal_mask,
             ),
         )
@@ -11213,7 +11143,6 @@ def best_bets():
     )
 
     best_bets = []
-    value_edge_bets = []
     total_horses_scanned = 0
 
     for meeting in recent_meetings:
@@ -11249,46 +11178,6 @@ def best_bets():
                         'horse': horse,
                         'score': horse.prediction.score
                     })
-
-                    # ── ML Value Edge Bets: independent of mode/min_score/min_gap so
-                    # every qualifying horse gets tracked, not just whichever ones this
-                    # admin visit's filters happen to keep. All horses at/above
-                    # VALUE_EDGE_MIN_THRESHOLD_PCT (8.0pp) are captured for the ML Data
-                    # page's bucketed reporting, but only horses at/above
-                    # VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT (10.0pp) are shown in
-                    # this page's ML Value Edge Bets panel. ──
-                    # The live fetch is not the only source of an edge any more:
-                    # when it comes back empty, the edge the ML scoring run
-                    # already persisted from the stored odds snapshots stands in.
-                    edge_fields = _value_edge_fields_with_stored_fallback(
-                        ladbrokes_signal_fields.get(horse.id, {}), horse.prediction,
-                    )
-                    ladbrokes_signal_fields[horse.id] = edge_fields
-                    if edge_fields.get('is_value_edge_bet'):
-                        if horse.prediction.value_edge_captured_at is None:
-                            horse.prediction.value_edge_pct = edge_fields.get('value_edge_pct')
-                            horse.prediction.value_edge_ml_win_prob_pct = edge_fields.get('ml_fair_probability_pct')
-                            horse.prediction.value_edge_price = edge_fields.get('ladbrokes_fixed_win_price')
-                            horse.prediction.value_edge_captured_at = datetime.utcnow()
-                    if edge_fields.get('is_value_edge_promoted'):
-                        value_edge_bets.append({
-                            'meeting_id': meeting.id,
-                            'meeting_name': meeting.meeting_name,
-                            'track': track_name,
-                            'uploaded_at': meeting.uploaded_at,
-                            'race_id': race.id,
-                            'race_number': race.race_number,
-                            'distance': race.distance,
-                            'horse_id': horse.id,
-                            'horse_name': horse.horse_name,
-                            'jockey': horse.jockey,
-                            'trainer': horse.trainer,
-                            'barrier': horse.barrier,
-                            'ladbrokes_fixed_win_price': edge_fields.get('ladbrokes_fixed_win_price'),
-                            'ml_fair_probability_pct': edge_fields.get('ml_fair_probability_pct'),
-                            'market_implied_probability_pct': edge_fields.get('market_implied_probability_pct'),
-                            'value_edge_pct': edge_fields.get('value_edge_pct'),
-                        })
             horses_in_race.sort(key=lambda x: x['score'], reverse=True)
             if not horses_in_race:
                 continue
@@ -11367,21 +11256,11 @@ def best_bets():
                     if rank_idx > 0 else 0
                 )
 
-                # Value edge is the gate for this page, not one qualifier among
-                # several: a horse appears here only if the model's fair win
-                # probability clears the market by at least
-                # VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT (10pp). Components,
-                # win probability, a sole ride and the consensus badges are still
-                # computed and still shown on the rows that qualify — they simply
-                # no longer put a horse on the page by themselves, because a
-                # signal without a price advantage is not a bet worth taking.
-                #
-                # Everything below 10pp is still captured on `predictions` above
-                # and reported by the ML Data page's edge buckets, which is where
-                # the question "is 20 the right cutoff?" gets answered from real
-                # results rather than from what this page happens to display.
+                # Only maiden agreement picks qualify: Analyzer, PFAI and ML all
+                # rank the horse first in a maiden race. Components, win
+                # probability, sole rides and the consensus badges are still
+                # shown on the rows that qualify.
                 jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
-                value_edge_promoted = bool(lb_fields.get('is_value_edge_promoted'))
                 maiden_agreement = signal_agreement and is_maiden_race(race.race_class)
                 if maiden_agreement:
                     lb_fields = {
@@ -11390,7 +11269,7 @@ def best_bets():
                         'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []),
                                              'Qualified because Analyzer, PFAI and ML all rank this horse first in a maiden race.'],
                     }
-                if value_edge_promoted or maiden_agreement:
+                if maiden_agreement:
                     matched_components.sort(key=lambda x: x['roi'], reverse=True)
                     best_bets.append({
                         'meeting_id': meeting.id,
@@ -11425,7 +11304,6 @@ def best_bets():
 
     db.session.commit()
     best_bets.sort(key=lambda x: x['score'], reverse=True)
-    value_edge_bets.sort(key=lambda x: x['value_edge_pct'] or 0, reverse=True)
 
     meetings_with_bets = {}
     for bet in best_bets:
@@ -11460,9 +11338,6 @@ def best_bets():
         min_score=min_score,
         min_gap=min_gap,
         mode=mode,
-        value_edge_bets=value_edge_bets,
-        value_edge_min_threshold_pct=VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT,
-        value_edge_track_min_threshold_pct=VALUE_EDGE_MIN_THRESHOLD_PCT,
     )
 @app.route("/best-bets/post", methods=["POST"])
 @login_required
