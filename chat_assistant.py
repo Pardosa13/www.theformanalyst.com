@@ -14,7 +14,6 @@ import re
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
-from itertools import product
 
 from sqlalchemy import or_, text
 
@@ -22,7 +21,7 @@ from models import db, Meeting, Race, Horse, Prediction, Result
 
 STAKE = 10.0
 MAX_TOOL_ROUNDS = 6
-MAX_TOOL_RESULT_CHARS = 15000
+MAX_TOOL_RESULT_CHARS = 40000
 HISTORY_MESSAGES = 12
 SETTLED_CACHE_SECONDS = 600
 
@@ -35,13 +34,24 @@ Scores on the site:
 - Assessed odds: the site's fair price for a runner. A market price longer than the assessed odds is an overlay.
 - "All signals agree" means Analyzer, PFAI and ML all rank the same runner first in the race.
 
+Form data on every runner:
+- last10: the horse's last ten finishes, most recent on the right (x = spell, 0 = finished 10th or worse).
+- Records read "starts:wins-seconds-thirds", e.g. "6:2-1-0". There are records for career, firm, good, soft,
+  heavy and synthetic tracks, this track, this distance, track and distance, first up and second up.
+- The track condition is stored as a category (firm, good, soft, heavy, synthetic), not a number. If the user
+  gives a rating such as "Heavy 10", take it as given. The scores were already worked out for the stored condition.
+- For wet-track questions, use each runner's soft and heavy records alongside the scores. Treat a record of
+  fewer than 3 starts as thin evidence and say so.
+
 How to answer:
 - Every number you give must come from a tool result in this conversation. Never estimate, recall or invent a figure, price, horse name or result.
-- If no tool covers the question (for example sectional times, track ratings or weather), say the assistant can't look that up yet. Don't guess.
+- If no tool covers the question (for example weather forecasts or sectional times), say the assistant can't look that up yet. Don't guess.
 - Statistics are over all settled runners, with profit and ROI at starting price on level $10 stakes. Say how many runners a figure is based on, and call a sample under 50 runners small.
 - A high strike rate is not the same as a profit. Lead with ROI when the question is about betting.
 - Use today's date (given with each question) for "today", "tomorrow" and "this weekend".
 - For a quaddie, use the get_quaddie tool. It takes the last four races of the meeting.
+- For questions about a whole meeting ("best bets on the card", "top wet-trackers"), use get_meeting_runners
+  once rather than calling get_race_card for every race.
 - Only admins can see Best Bets. If get_best_bets is not available to you, say Best Bets is an admin page.
 - Write in plain Australian English. Be brief: a short answer, then a small table or list when it helps. Use Markdown.
 - When you suggest a bet, add one short line that betting carries risk. Don't repeat it in every message."""
@@ -49,6 +59,7 @@ How to answer:
 STATUS_LABELS = {
     'find_meetings': 'Finding meetings…',
     'get_race_card': 'Reading the race card…',
+    'get_meeting_runners': 'Reading the whole meeting…',
     'get_quaddie': 'Building quaddie legs…',
     'model_performance': 'Checking model results…',
     'people_stats': 'Checking trainer/jockey results…',
@@ -83,10 +94,18 @@ TOOLS = [
         'track': {'type': 'string', 'description': 'Part of the track name, e.g. "Flemington"'},
     }),
     _tool('get_race_card', 'One race: every runner with Analyzer, ML and PFAI scores and ranks, assessed odds, '
-          'live Ladbrokes win price when the race has not run, and the result once it has.', {
+          'last ten starts, career/track/distance/condition records, live Ladbrokes win price when the race has '
+          'not run, and the result once it has.', {
               'meeting_id': {'type': 'integer'},
               'race_number': {'type': 'integer'},
           }, required=('meeting_id', 'race_number')),
+    _tool('get_meeting_runners', 'Every race at a meeting in one call: each runner\'s Analyzer, ML and PFAI ranks, '
+          'assessed odds, last ten starts, and its record on a track condition (the race\'s own condition by '
+          'default). Use this for whole-card questions.', {
+              'meeting_id': {'type': 'integer'},
+              'condition': {'type': 'string', 'enum': ['firm', 'good', 'soft', 'heavy', 'synthetic'],
+                            'description': 'Record to show. Default: each race\'s stored condition.'},
+          }, required=('meeting_id',)),
     _tool('get_quaddie', 'Quaddie selections for a meeting: the last four races, top runners per leg by model score, '
           'and the number of combinations.', {
               'meeting_id': {'type': 'integer'},
@@ -141,6 +160,49 @@ def _parse_price(value):
         return price if price > 0 else None
     except (TypeError, ValueError):
         return None
+
+
+CONDITIONS = ('firm', 'good', 'soft', 'heavy', 'synthetic')
+_RECORD_FIELDS = [
+    ('career', 'horse record'), ('firm', 'horse record firm'), ('good', 'horse record good'),
+    ('soft', 'horse record soft'), ('heavy', 'horse record heavy'), ('synthetic', 'horse record synthetic'),
+    ('track', 'horse record track'), ('distance', 'horse record distance'),
+    ('track_distance', 'horse record track distance'),
+    ('first_up', 'horse record first up'), ('second_up', 'horse record second up'),
+]
+
+
+def parse_record(value):
+    """'6:2-1-0' -> {'record': '6:2-1-0', 'starts': 6, 'wins': 2, 'places': 3, ...}; None if absent."""
+    parts = re.split(r'[:\-]', str(value or '').strip())
+    if len(parts) != 4:
+        return None
+    try:
+        starts, wins, seconds, thirds = (int(float(p)) for p in parts)
+    except ValueError:
+        return None
+    places = wins + seconds + thirds
+    return {
+        'record': f'{starts}:{wins}-{seconds}-{thirds}', 'starts': starts, 'wins': wins, 'places': places,
+        'win_pct': round(wins / starts * 100) if starts else None,
+        'place_pct': round(places / starts * 100) if starts else None,
+    }
+
+
+def condition_key(value):
+    """Map a stored track condition ('Heavy', 'heavy 10', 'Soft7') to a record key."""
+    text_value = str(value or '').lower()
+    return next((c for c in CONDITIONS if c in text_value), None)
+
+
+def runner_form(horse):
+    csv_data = horse.csv_data if isinstance(horse.csv_data, dict) else {}
+    records = {}
+    for key, field in _RECORD_FIELDS:
+        parsed = parse_record(csv_data.get(field))
+        if parsed:
+            records[key] = parsed['record']
+    return {'last10': (csv_data.get('horse last10') or horse.form or '').strip() or None, 'records': records}
 
 
 def summarise(runners):
@@ -244,7 +306,16 @@ def _live_prices(meeting, race_number):
         return {}
 
 
-def get_race_card(meeting_id, race_number):
+def _condition_notes(notes, cond):
+    """The Analyzer's own lines about today's track condition (admins see notes on the site)."""
+    if not notes or not cond:
+        return None
+    lines = [l.strip() for l in notes.splitlines()
+             if cond in l.lower() and ('rate' in l.lower() or 'runs' in l.lower() or 'data' in l.lower())]
+    return lines[:4] or None
+
+
+def get_race_card(meeting_id, race_number, show_notes=False):
     from app import parse_pfai_score_from_horse, top_signal_horse_ids, signals_all_agree_top, is_maiden_race
     from ladbrokes import normalize_runner_name
 
@@ -271,12 +342,16 @@ def get_race_card(meeting_id, race_number):
     pfai_rank = ranks(pfai)
     top_ids = top_signal_horse_ids(race.horses)
 
+    cond = condition_key(race.track_condition)
     runners = []
     for h in active:
         p = h.prediction
         res = results.get(h.id)
+        form = runner_form(h)
         runners.append({
             'horse': h.horse_name, 'barrier': h.barrier, 'jockey': h.jockey, 'trainer': h.trainer,
+            'last10': form['last10'], 'records': form['records'],
+            'condition_notes': _condition_notes(p.notes, cond) if (p and show_notes) else None,
             'analyzer_score': round(p.score, 1) if p and p.score is not None else None,
             'analyzer_rank': analyzer_rank.get(h.id),
             'ml_score': round(p.ml_score, 1) if p and p.ml_score is not None else None,
@@ -295,10 +370,51 @@ def get_race_card(meeting_id, race_number):
         'date': meeting.date.isoformat() if meeting.date else None,
         'race_number': race.race_number, 'distance': race.distance, 'class': race.race_class,
         'is_maiden': is_maiden_race(race.race_class), 'track_condition': race.track_condition,
+        'condition_record_key': cond,
         'has_run': has_run, 'live_prices_available': bool(live),
         'scratched': [h.horse_name for h in race.horses if h.is_scratched],
         'runners': runners,
     }
+
+
+def get_meeting_runners(meeting_id, condition=None):
+    from app import parse_pfai_score_from_horse, top_signal_horse_ids, signals_all_agree_top
+
+    meeting = db.session.get(Meeting, meeting_id)
+    if not meeting:
+        return {'error': 'Meeting not found'}
+
+    def ranks(values):
+        ordered = sorted((v, hid) for hid, v in values.items() if v is not None)[::-1]
+        return {hid: i + 1 for i, (_, hid) in enumerate(ordered)}
+
+    races = []
+    for race in sorted(meeting.races, key=lambda r: r.race_number):
+        active = [h for h in race.horses if not h.is_scratched and h.prediction]
+        cond = condition or condition_key(race.track_condition)
+        a_rank = ranks({h.id: h.prediction.score for h in active})
+        m_rank = ranks({h.id: h.prediction.ml_score for h in active})
+        p_rank = ranks({h.id: parse_pfai_score_from_horse(h, h.prediction) for h in active})
+        top_ids = top_signal_horse_ids(race.horses)
+        runners = []
+        for h in active:
+            form = runner_form(h)
+            cond_rec = parse_record((h.csv_data or {}).get(f'horse record {cond}')) if cond else None
+            runners.append({
+                'horse': h.horse_name, 'barrier': h.barrier,
+                'ranks': {'analyzer': a_rank.get(h.id), 'ml': m_rank.get(h.id), 'pfai': p_rank.get(h.id)},
+                'assessed_odds': h.prediction.predicted_odds,
+                'all_agree': signals_all_agree_top(h.id, top_ids),
+                'last10': form['last10'],
+                'condition_record': cond_rec['record'] if cond_rec else '0:0-0-0',
+                'condition_win_pct': cond_rec['win_pct'] if cond_rec else None,
+                'condition_place_pct': cond_rec['place_pct'] if cond_rec else None,
+            })
+        runners.sort(key=lambda r: (r['ranks']['ml'] or 99, r['ranks']['analyzer'] or 99))
+        races.append({'race_number': race.race_number, 'distance': race.distance, 'class': race.race_class,
+                      'track_condition': race.track_condition, 'record_shown': cond, 'runners': runners})
+    return {'meeting': meeting.meeting_name, 'meeting_id': meeting.id,
+            'date': meeting.date.isoformat() if meeting.date else None, 'races': races}
 
 
 def get_quaddie(meeting_id, per_leg=3, model='ml'):
@@ -495,11 +611,12 @@ def get_best_bets(date=None, today=None):
 # ── Input checking and dispatch ─────────────────────────────────────────────
 
 _INT_ARGS = {'meeting_id', 'race_number', 'per_leg', 'days', 'min_runners', 'min_starts'}
-_STR_ARGS = {'date', 'track', 'name', 'horse', 'kind', 'model', 'group_by', 'sort_by', 'source'}
+_STR_ARGS = {'date', 'track', 'name', 'horse', 'kind', 'model', 'group_by', 'sort_by', 'source', 'condition'}
 _ENUMS = {'kind': {'trainer', 'jockey'}, 'model': {'ml', 'analyzer'}, 'group_by': {'rank', 'score_band'},
-          'sort_by': {'roi', 'strike_rate', 'wins'}, 'source': {'ml', 'analyzer'}}
+          'sort_by': {'roi', 'strike_rate', 'wins'}, 'source': {'ml', 'analyzer'}, 'condition': set(CONDITIONS)}
 _HANDLERS = {
     'find_meetings': find_meetings, 'get_race_card': get_race_card, 'get_quaddie': get_quaddie,
+    'get_meeting_runners': get_meeting_runners,
     'model_performance': model_performance, 'people_stats': people_stats, 'value_analysis': value_analysis,
     'component_performance': component_performance, 'track_specialists': track_specialists,
     'horse_profile_stats': horse_profile_stats, 'class_change_stats': class_change_stats,
@@ -545,6 +662,8 @@ def run_tool(name, raw_input, user, today):
     try:
         if name == 'get_best_bets':
             return get_best_bets(today=today, **args)
+        if name == 'get_race_card':
+            return get_race_card(show_notes=bool(getattr(user, 'is_admin', False)), **args)
         return _HANDLERS[name](**args)
     except Exception as e:  # a failed lookup should not end the conversation
         db.session.rollback()
