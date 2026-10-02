@@ -21,7 +21,8 @@ from models import db, Meeting, Race, Horse, Prediction, Result
 
 STAKE = 10.0
 MAX_TOOL_ROUNDS = 6
-MAX_TOOL_RESULT_CHARS = 40000
+MAX_TOOL_RESULT_CHARS = 60000
+MAX_NOTES_CHARS = 3000
 HISTORY_MESSAGES = 12
 SETTLED_CACHE_SECONDS = 600
 
@@ -42,6 +43,12 @@ Form data on every runner:
   gives a rating such as "Heavy 10", take it as given. The scores were already worked out for the stored condition.
 - For wet-track questions, use each runner's soft and heavy records alongside the scores. Treat a record of
   fewer than 3 starts as thin evidence and say so.
+- speed_map: where the runner is expected to settle (LEADER, ONPACE, MIDFIELD, BACKMARKER).
+- rail: "True" or metres out (e.g. "+6m"). A wider rail makes the track narrower and helps on-pace runners.
+- pace_bias: the meeting's track bias setting, -2 (strongly favours backmarkers) to +2 (strongly favours leaders),
+  0 neutral. The scores already include the rail and pace bias.
+- analyzer_notes (admins only): the Analyzer's full working for a runner, one line per factor with the points it
+  added or took away. Quote from it when explaining why a horse rates well or badly.
 
 How to answer:
 - Every number you give must come from a tool result in this conversation. Never estimate, recall or invent a figure, price, horse name or result.
@@ -94,14 +101,16 @@ TOOLS = [
         'track': {'type': 'string', 'description': 'Part of the track name, e.g. "Flemington"'},
     }),
     _tool('get_race_card', 'One race: every runner with Analyzer, ML and PFAI scores and ranks, assessed odds, '
-          'last ten starts, career/track/distance/condition records, live Ladbrokes win price when the race has '
-          'not run, and the result once it has.', {
+          'last ten starts, speed map position, career/track/distance/condition records, the meeting\'s rail and '
+          'pace bias, live Ladbrokes win price when the race has not run, the result once it has, and (admins '
+          'only) the Analyzer\'s full notes for each runner.', {
               'meeting_id': {'type': 'integer'},
               'race_number': {'type': 'integer'},
           }, required=('meeting_id', 'race_number')),
-    _tool('get_meeting_runners', 'Every race at a meeting in one call: each runner\'s Analyzer, ML and PFAI ranks, '
-          'assessed odds, last ten starts, and its record on a track condition (the race\'s own condition by '
-          'default). Use this for whole-card questions.', {
+    _tool('get_meeting_runners', 'Every race at a meeting in one call: rail and pace bias, then each runner\'s '
+          'Analyzer, ML and PFAI ranks, assessed odds, speed map position, last ten starts, and its firm/good/soft/'
+          'heavy/synthetic records, highlighting the race\'s own condition (or a chosen one). Use this for '
+          'whole-card questions.', {
               'meeting_id': {'type': 'integer'},
               'condition': {'type': 'string', 'enum': ['firm', 'good', 'soft', 'heavy', 'synthetic'],
                             'description': 'Record to show. Default: each race\'s stored condition.'},
@@ -202,7 +211,25 @@ def runner_form(horse):
         parsed = parse_record(csv_data.get(field))
         if parsed:
             records[key] = parsed['record']
-    return {'last10': (csv_data.get('horse last10') or horse.form or '').strip() or None, 'records': records}
+    return {
+        'last10': (csv_data.get('horse last10') or horse.form or '').strip() or None,
+        'speed_map': (csv_data.get('runningPosition') or '').strip().upper() or None,
+        'records': records,
+    }
+
+
+def track_setup(meeting):
+    """Rail and pace bias as the site stores them on the meeting."""
+    rail = meeting.rail_position or 0
+    return {'rail': 'True' if rail == 0 else f'+{rail}m', 'pace_bias': meeting.pace_bias or 0}
+
+
+def full_notes(notes):
+    """The Analyzer's full working, trimmed to a sane length."""
+    text_value = (notes or '').strip()
+    if len(text_value) > MAX_NOTES_CHARS:
+        text_value = text_value[:MAX_NOTES_CHARS] + '\n…(notes truncated)'
+    return text_value or None
 
 
 def summarise(runners):
@@ -306,15 +333,6 @@ def _live_prices(meeting, race_number):
         return {}
 
 
-def _condition_notes(notes, cond):
-    """The Analyzer's own lines about today's track condition (admins see notes on the site)."""
-    if not notes or not cond:
-        return None
-    lines = [l.strip() for l in notes.splitlines()
-             if cond in l.lower() and ('rate' in l.lower() or 'runs' in l.lower() or 'data' in l.lower())]
-    return lines[:4] or None
-
-
 def get_race_card(meeting_id, race_number, show_notes=False):
     from app import parse_pfai_score_from_horse, top_signal_horse_ids, signals_all_agree_top, is_maiden_race
     from ladbrokes import normalize_runner_name
@@ -350,8 +368,8 @@ def get_race_card(meeting_id, race_number, show_notes=False):
         form = runner_form(h)
         runners.append({
             'horse': h.horse_name, 'barrier': h.barrier, 'jockey': h.jockey, 'trainer': h.trainer,
-            'last10': form['last10'], 'records': form['records'],
-            'condition_notes': _condition_notes(p.notes, cond) if (p and show_notes) else None,
+            'last10': form['last10'], 'speed_map': form['speed_map'], 'records': form['records'],
+            'analyzer_notes': full_notes(p.notes) if (p and show_notes) else None,
             'analyzer_score': round(p.score, 1) if p and p.score is not None else None,
             'analyzer_rank': analyzer_rank.get(h.id),
             'ml_score': round(p.ml_score, 1) if p and p.ml_score is not None else None,
@@ -370,7 +388,7 @@ def get_race_card(meeting_id, race_number, show_notes=False):
         'date': meeting.date.isoformat() if meeting.date else None,
         'race_number': race.race_number, 'distance': race.distance, 'class': race.race_class,
         'is_maiden': is_maiden_race(race.race_class), 'track_condition': race.track_condition,
-        'condition_record_key': cond,
+        'condition_record_key': cond, **track_setup(meeting),
         'has_run': has_run, 'live_prices_available': bool(live),
         'scratched': [h.horse_name for h in race.horses if h.is_scratched],
         'runners': runners,
@@ -405,7 +423,8 @@ def get_meeting_runners(meeting_id, condition=None):
                 'ranks': {'analyzer': a_rank.get(h.id), 'ml': m_rank.get(h.id), 'pfai': p_rank.get(h.id)},
                 'assessed_odds': h.prediction.predicted_odds,
                 'all_agree': signals_all_agree_top(h.id, top_ids),
-                'last10': form['last10'],
+                'last10': form['last10'], 'speed_map': form['speed_map'],
+                'conditions': {c: form['records'][c] for c in CONDITIONS if c in form['records']},
                 'condition_record': cond_rec['record'] if cond_rec else '0:0-0-0',
                 'condition_win_pct': cond_rec['win_pct'] if cond_rec else None,
                 'condition_place_pct': cond_rec['place_pct'] if cond_rec else None,
@@ -414,7 +433,7 @@ def get_meeting_runners(meeting_id, condition=None):
         races.append({'race_number': race.race_number, 'distance': race.distance, 'class': race.race_class,
                       'track_condition': race.track_condition, 'record_shown': cond, 'runners': runners})
     return {'meeting': meeting.meeting_name, 'meeting_id': meeting.id,
-            'date': meeting.date.isoformat() if meeting.date else None, 'races': races}
+            'date': meeting.date.isoformat() if meeting.date else None, **track_setup(meeting), 'races': races}
 
 
 def get_quaddie(meeting_id, per_leg=3, model='ml'):
