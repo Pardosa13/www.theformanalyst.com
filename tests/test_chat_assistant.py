@@ -6,6 +6,7 @@ analysis ignored losers, quaddies used races 5-8 and kept scratched runners,
 and admin-only data was not gated.
 """
 import json
+import re
 import uuid
 from datetime import date
 from types import SimpleNamespace
@@ -64,7 +65,7 @@ def seeded():
         db.session.add(owner)
         db.session.flush()
         meeting = Meeting(user_id=owner.id, meeting_name=f'2026-10-02_Testtrack_{uuid.uuid4().hex[:4]}',
-                          track='Testtrack', date=TODAY)
+                          track='Testtrack', date=TODAY, rail_position=6, pace_bias=1)
         db.session.add(meeting)
         db.session.flush()
         for race_no in range(1, 6):
@@ -80,6 +81,7 @@ def seeded():
             ]:
                 h = Horse(race_id=race.id, horse_name=f'{name}{race_no}', is_scratched=scratched,
                           csv_data={'horse age': '3', 'horse sex': 'Mare', 'horse last10': 'x2131',
+                                    'runningPosition': 'LEADER' if name == 'A' else 'BACKMARKER',
                                     'horse record': '12:4-2-1', 'horse record heavy': '4:2-1-0' if name == 'A' else '3:0-0-1',
                                     'horse record soft': '5:1-1-1'})
                 db.session.add(h)
@@ -262,11 +264,14 @@ def test_race_card_carries_condition_records_and_form(seeded, monkeypatch):
     a2 = next(r for r in card['runners'] if r['horse'] == 'A2')
     assert card['condition_record_key'] == 'heavy'
     assert a2['records']['heavy'] == '4:2-1-0' and a2['records']['soft'] == '5:1-1-1'
-    assert a2['last10'] == 'x2131'
-    assert a2['condition_notes'] is None  # Analyzer notes are admin-only on the site
+    assert a2['last10'] == 'x2131' and a2['speed_map'] == 'LEADER'
+    assert set(a2['records']) >= {'career', 'soft', 'heavy'}
+    assert card['rail'] == '+6m' and card['pace_bias'] == 1
+    assert a2['analyzer_notes'] is None  # Analyzer notes are admin-only on the site
     admin_a2 = next(r for r in admin_card['runners'] if r['horse'] == 'A2')
-    assert admin_a2['condition_notes'] == ['+ 10.0 : Strong win rate (50%) on heavy',
-                                           '+ 6.0 : Good podium rate (75%) on heavy']
+    # Admins get the full working, not just the condition lines.
+    assert admin_a2['analyzer_notes'].splitlines() == [
+        '+ 10.0 : Strong win rate (50%) on heavy', '+ 6.0 : Good podium rate (75%) on heavy', '+ 3.0 : Barrier']
 
 
 def test_meeting_runners_shows_every_race_with_heavy_records(seeded):
@@ -277,6 +282,8 @@ def test_meeting_runners_shows_every_race_with_heavy_records(seeded):
     a1 = next(r for r in out['races'][0]['runners'] if r['horse'] == 'A1')
     assert out['races'][0]['record_shown'] == 'heavy'
     assert a1['condition_record'] == '4:2-1-0' and a1['condition_win_pct'] == 50
+    assert a1['conditions'] == {'soft': '5:1-1-1', 'heavy': '4:2-1-0'}
+    assert a1['speed_map'] == 'LEADER' and out['rail'] == '+6m' and out['pace_bias'] == 1
     assert soft['races'][0]['runners'][0]['condition_record'] == '5:1-1-1'
     assert 'C5' not in [r['horse'] for r in out['races'][4]['runners']]
 
@@ -284,7 +291,8 @@ def test_meeting_runners_shows_every_race_with_heavy_records(seeded):
 def test_full_meeting_fits_in_one_tool_result():
     # A ten-race card of 16 runners each must not be cut off mid-list.
     runner = {'horse': 'Some Long Horse Name', 'barrier': 12, 'ranks': {'analyzer': 10, 'ml': 10, 'pfai': 10},
-              'assessed_odds': '$12.50', 'all_agree': False, 'last10': 'x1234x5678',
+              'assessed_odds': '$12.50', 'all_agree': False, 'last10': 'x1234x5678', 'speed_map': 'BACKMARKER',
+              'conditions': {c: '12:3-2-1' for c in ca.CONDITIONS},
               'condition_record': '12:3-2-1', 'condition_win_pct': 25, 'condition_place_pct': 50}
     payload = {'races': [{'race_number': n, 'distance': '1200', 'class': 'Benchmark 78', 'track_condition': 'heavy',
                           'record_shown': 'heavy', 'runners': [runner] * 16} for n in range(1, 11)]}
@@ -294,3 +302,70 @@ def test_full_meeting_fits_in_one_tool_result():
 def test_prompt_no_longer_claims_track_data_is_missing():
     assert 'track ratings' not in ca.SYSTEM_PROMPT
     assert 'heavy' in ca.SYSTEM_PROMPT and 'Heavy 10' in ca.SYSTEM_PROMPT
+    assert 'rail' in ca.SYSTEM_PROMPT and 'pace_bias' in ca.SYSTEM_PROMPT and 'analyzer_notes' in ca.SYSTEM_PROMPT
+
+
+def test_long_notes_are_trimmed_not_dropped():
+    long_notes = '+ 1.0 : factor\n' * 1000
+    out = ca.full_notes(long_notes)
+    assert out.startswith('+ 1.0 : factor') and out.endswith('(notes truncated)')
+    assert len(out) <= ca.MAX_NOTES_CHARS + 30
+
+
+# ── Site-wide data access ──────────────────────────────────────────────────
+
+def test_every_site_feed_maps_to_a_real_get_route():
+    adapter = appmod.app.url_map.bind('localhost')
+    for name, (path, params, about) in ca.SITE_FEEDS.items():
+        url = path.format(meeting_id=1, race_id=1, fighter_name='Someone')
+        endpoint, _ = adapter.match(url, method='GET')
+        assert endpoint in appmod.app.view_functions, name
+        for placeholder in re.findall(r'{(\w+)}', path):
+            assert placeholder in params, f'{name} must accept {placeholder}'
+
+
+def test_private_and_debug_feeds_are_not_exposed():
+    paths = ' '.join(p for p, _, _ in ca.SITE_FEEDS.values())
+    for hidden in ('budget-tracker', '/api/debug/', 'results-debug', 'headshot', 'silks', '/api/chat'):
+        assert hidden not in paths
+
+
+def _user(is_admin):
+    with appmod.app.app_context():
+        u = User(username=f'feed-{uuid.uuid4().hex[:8]}', email=f'{uuid.uuid4().hex[:8]}@example.com', is_admin=is_admin)
+        u.set_password('x')
+        db.session.add(u)
+        db.session.commit()
+        return u.id
+
+
+def _call_feed(user_id, feed, params=None):
+    with appmod.app.test_request_context('/api/chat', method='POST'):
+        user = db.session.get(User, user_id)
+        return ca.run_tool('get_site_data', {'feed': feed, 'params': params or {}}, user, TODAY)
+
+
+def test_site_feed_returns_the_pages_json(seeded):
+    out = _call_feed(_user(False), 'race_animation_meetings', {'limit': 5})
+    assert 'error' not in out, out
+
+
+def test_admin_only_feeds_refuse_regular_users_and_serve_admins():
+    regular = _call_feed(_user(False), 'bet_tracker_summary')
+    assert 'admin' in regular.get('error', '')
+    admin = _call_feed(_user(True), 'bet_tracker_summary')
+    assert 'error' not in admin, admin
+
+
+def test_site_feed_rejects_unknown_params_and_feeds():
+    uid = _user(False)
+    assert 'unknown params' in _call_feed(uid, 'afl_ladder', {'drop_table': 'x'})['error']
+    assert 'error' in _call_feed(uid, 'no_such_feed')
+    assert 'needs meeting_id' in _call_feed(uid, 'meeting_sectionals')['error']
+
+
+def test_backtest_tool_is_admin_only():
+    regular = SimpleNamespace(is_admin=False)
+    names = [t['name'] for t in ca.tools_for(regular)]
+    assert 'get_site_data' in names and 'get_backtest_summary' not in names
+    assert 'get_backtest_summary' in [t['name'] for t in ca.tools_for(SimpleNamespace(is_admin=True))]
