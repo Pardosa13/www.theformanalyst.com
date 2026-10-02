@@ -11514,830 +11514,82 @@ def test_telegram():
         
     # ----- CHAT SYSTEM ROUTES -----
 
-RACING_SYSTEM_PROMPT = """You are an expert horse racing analyst with direct access to The Form Analyst database through tools.
-
-You can call these tools to answer user questions:
-1. query_database - Find meetings, horses, results, or calculate statistics
-2. calculate_quaddie - Generate optimal quaddie combinations based on scores
-3. analyze_patterns - Discover patterns in historical performance, components, and horse characteristics
-
-When users ask questions:
-- Call the appropriate tools to get data
-- Analyze the results intelligently
-- Provide specific, actionable recommendations
-- Explain your reasoning
-
-For quaddie questions: Use calculate_quaddie to get top selections, explain why they're chosen
-For pattern analysis: Use analyze_patterns to find what's working/not working
-For specific data: Use query_database with appropriate filters
-
-Available pattern analysis types:
-- score_performance: How different score ranges perform
-- trainer_stats: Trainer performance analysis
-- jockey_stats: Jockey performance analysis  
-- track_specialists: Horses that excel at specific tracks
-- overlays: Value bets where predictions beat market
-- horse_characteristics: Age/sex combination patterns (e.g., 3YO Mares)
-- component_performance: Which scoring components are profitable
-- class_drop_patterns: Performance by class change magnitude
-
-Be proactive - if you need more data to answer properly, call multiple tools.
-Keep responses concise unless detailed analysis is requested.
-Always remind users that gambling involves risk."""
-
-def execute_tool(tool_name, tool_input, user_id):
-    """Execute tool calls from Claude"""
-    
-    if tool_name == "query_database":
-        query_type = tool_input.get("query_type")
-        filters = tool_input.get("filters", {})
-        
-        if query_type == "meetings":
-            query = Meeting.query
-            if filters.get("meeting_name"):
-                query = query.filter(Meeting.meeting_name.like(f"%{filters['meeting_name']}%"))
-            if filters.get("date"):
-                query = query.filter(Meeting.meeting_name.like(f"{filters['date']}%"))
-            meetings = query.order_by(Meeting.uploaded_at.desc()).limit(50).all()
-            return [{"name": m.meeting_name, "race_count": len(m.races)} for m in meetings]
-        
-        elif query_type == "horses":
-            query = db.session.query(Horse, Race, Meeting, Prediction).join(
-                Race, Horse.race_id == Race.id
-            ).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).outerjoin(
-                Prediction, Horse.id == Prediction.horse_id
-            )
-            
-            if filters.get("meeting_name"):
-                query = query.filter(Meeting.meeting_name == filters["meeting_name"])
-            if filters.get("min_score"):
-                query = query.filter(Prediction.score >= filters["min_score"])
-            if filters.get("race_number"):
-                query = query.filter(Race.race_number == filters["race_number"])
-                
-            horses = query.limit(100).all()
-            return [{
-                "horse": h.horse_name,
-                "race": r.race_number,
-                "meeting": m.meeting_name,
-                "score": p.score if p else None,
-                "predicted_odds": p.predicted_odds if p else None,
-                "jockey": h.jockey,
-                "trainer": h.trainer,
-                "barrier": h.barrier
-            } for h, r, m, p in horses]
-        
-        elif query_type == "results":
-            results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
-                Horse, Result.horse_id == Horse.id
-            ).outerjoin(
-                Prediction, Horse.id == Prediction.horse_id
-            ).join(
-                Race, Horse.race_id == Race.id
-            ).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).filter(Result.finish_position > 0)
-            
-            if filters.get("won_only"):
-                results = results.filter(Result.finish_position == 1)
-            if filters.get("min_score"):
-                results = results.filter(Prediction.score >= filters["min_score"])
-            if filters.get("meeting_name"):
-                results = results.filter(Meeting.meeting_name.like(f"%{filters['meeting_name']}%"))
-                
-            results = results.order_by(Result.recorded_at.desc()).limit(1000).all()
-            
-            return [{
-                "meeting": m.meeting_name,
-                "race": r.race_number,
-                "horse": h.horse_name,
-                "position": res.finish_position,
-                "sp": res.sp,
-                "score": p.score if p else None,
-                "predicted_odds": p.predicted_odds if p else None
-            } for res, h, r, m, p in results]
-        
-        elif query_type == "statistics":
-            results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
-                Horse, Result.horse_id == Horse.id
-            ).join(
-                Race, Horse.race_id == Race.id
-            ).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).outerjoin(
-                Prediction, Horse.id == Prediction.horse_id
-            ).filter(Result.finish_position > 0).all()
-            
-            unique_races = set()
-            wins = 0
-            places = 0
-            high_score_wins = 0
-            high_score_total = 0
-            
-            for res, h, race, m, p in results:
-                race_key = f"{m.id}_{race.race_number}"
-                
-                if race_key not in unique_races:
-                    unique_races.add(race_key)
-                    
-                    if res.finish_position == 1:
-                        wins += 1
-                    if res.finish_position <= 3:
-                        places += 1
-                    
-                    if p and p.score >= 80:
-                        high_score_total += 1
-                        if res.finish_position == 1:
-                            high_score_wins += 1
-            
-            total = len(unique_races)
-            
-            return {
-                "total_races": total,
-                "wins": wins,
-                "strike_rate": round(wins / total * 100, 1) if total > 0 else 0,
-                "place_rate": round(places / total * 100, 1) if total > 0 else 0,
-                "high_score_strike": round(high_score_wins / high_score_total * 100, 1) if high_score_total > 0 else 0
-            }
-    
-    elif tool_name == "calculate_quaddie":
-        meeting_name = tool_input.get("meeting_name")
-        min_score = tool_input.get("min_score", 70)
-        
-        meeting = Meeting.query.filter_by(meeting_name=meeting_name).first()
-        if not meeting:
-            return {"error": "Meeting not found"}
-        
-        quaddie_races = [r for r in meeting.races if 5 <= r.race_number <= 8]
-        
-        if len(quaddie_races) < 4:
-            return {"error": "Not enough races for quaddie (need races 5-8)"}
-        
-        combinations = []
-        for race in quaddie_races[:4]:
-            top_horses = sorted(
-                [h for h in race.horses if h.prediction and h.prediction.score >= min_score],
-                key=lambda h: h.prediction.score,
-                reverse=True
-            )[:3]
-            
-            combinations.append([{
-                "horse": h.horse_name,
-                "score": h.prediction.score,
-                "odds": h.prediction.predicted_odds,
-                "barrier": h.barrier
-            } for h in top_horses])
-        
-        return {
-            "meeting": meeting_name,
-            "races": [r.race_number for r in quaddie_races[:4]],
-            "selections": combinations
-        }
-    
-    elif tool_name == "analyze_patterns":
-        analysis_type = tool_input.get("analysis_type")
-        
-        if analysis_type == "score_performance":
-            results = db.session.query(Result, Prediction, Horse, Race, Meeting).join(
-                Horse, Result.horse_id == Horse.id
-            ).join(
-                Race, Horse.race_id == Race.id
-            ).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).outerjoin(
-                Prediction, Horse.id == Prediction.horse_id
-            ).filter(Result.finish_position > 0).all()
-            
-            score_ranges = {
-                "100+": {"wins": 0, "total": 0},
-                "80-99": {"wins": 0, "total": 0},
-                "60-79": {"wins": 0, "total": 0},
-                "40-59": {"wins": 0, "total": 0},
-                "<40": {"wins": 0, "total": 0}
-            }
-            
-            races_seen = {key: set() for key in score_ranges.keys()}
-            
-            for r, p, h, race, m in results:
-                if not p:
-                    continue
-                    
-                score = p.score
-                if score >= 100:
-                    key = "100+"
-                elif score >= 80:
-                    key = "80-99"
-                elif score >= 60:
-                    key = "60-79"
-                elif score >= 40:
-                    key = "40-59"
-                else:
-                    key = "<40"
-                
-                race_key = f"{m.id}_{race.race_number}"
-                
-                if race_key not in races_seen[key]:
-                    races_seen[key].add(race_key)
-                    score_ranges[key]["total"] += 1
-                    if r.finish_position == 1:
-                        score_ranges[key]["wins"] += 1
-            
-            for key in score_ranges:
-                total = score_ranges[key]["total"]
-                wins = score_ranges[key]["wins"]
-                score_ranges[key]["strike_rate"] = round(wins / total * 100, 1) if total > 0 else 0
-            
-            return score_ranges
-        
-        elif analysis_type == "overlays":
-            results = db.session.query(Result, Prediction, Horse, Meeting, Race).join(
-                Horse, Result.horse_id == Horse.id
-            ).join(
-                Prediction, Horse.id == Prediction.horse_id
-            ).join(
-                Race, Horse.race_id == Race.id
-            ).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).filter(Result.finish_position > 0).filter(Result.finish_position == 1).all()
-            
-            races_seen = set()
-            overlays = []
-            
-            for r, p, h, m, race in results:
-                race_key = f"{m.id}_{race.race_number}"
-                
-                if race_key in races_seen:
-                    continue
-                    
-                races_seen.add(race_key)
-                
-                if p.predicted_odds and r.sp:
-                    try:
-                        predicted = float(str(p.predicted_odds).replace('$', '').strip())
-                        if predicted < r.sp:
-                            overlay_percent = ((r.sp - predicted) / predicted) * 100
-                            overlays.append({
-                                "horse": h.horse_name,
-                                "meeting": m.meeting_name,
-                                "race": race.race_number,
-                                "predicted": predicted,
-                                "sp": r.sp,
-                                "overlay": round(overlay_percent, 1),
-                                "score": p.score
-                            })
-                    except (ValueError, AttributeError):
-                        continue
-            
-            return sorted(overlays, key=lambda x: x["overlay"], reverse=True)[:20]
-        
-        elif analysis_type == "horse_characteristics":
-            results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
-                Horse, Result.horse_id == Horse.id
-            ).join(
-                Race, Horse.race_id == Race.id
-            ).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).join(
-                Prediction, Horse.id == Prediction.horse_id
-            ).filter(Result.finish_position > 0).all()
-            
-            patterns = {}
-            races_seen = {}
-            
-            for r, h, race, m, p in results:
-                csv_data = h.csv_data or {}
-                age = csv_data.get('horse age')
-                sex = csv_data.get('horse sex')
-                
-                if not age or not sex:
-                    continue
-                
-                pattern_key = f"{age}yo {sex}"
-                race_key = f"{m.id}_{race.race_number}"
-                
-                if pattern_key not in patterns:
-                    patterns[pattern_key] = {
-                        "wins": 0,
-                        "total": 0,
-                        "total_profit": 0,
-                        "stake": 0
-                    }
-                    races_seen[pattern_key] = set()
-                
-                if race_key not in races_seen[pattern_key]:
-                    races_seen[pattern_key].add(race_key)
-                    patterns[pattern_key]["total"] += 1
-                    patterns[pattern_key]["stake"] += 10
-                    
-                    if r.finish_position == 1:
-                        patterns[pattern_key]["wins"] += 1
-                        if r.sp:
-                            patterns[pattern_key]["total_profit"] += (r.sp * 10 - 10)
-                    else:
-                        patterns[pattern_key]["total_profit"] -= 10
-            
-            pattern_list = []
-            for pattern, stats in patterns.items():
-                if stats["total"] >= 10:
-                    strike_rate = (stats["wins"] / stats["total"]) * 100
-                    roi = (stats["total_profit"] / stats["stake"]) * 100
-                    
-                    pattern_list.append({
-                        "pattern": pattern,
-                        "wins": stats["wins"],
-                        "total": stats["total"],
-                        "strike_rate": round(strike_rate, 1),
-                        "roi": round(roi, 1),
-                        "profit": round(stats["total_profit"], 2)
-                    })
-            
-            return sorted(pattern_list, key=lambda x: x["roi"], reverse=True)[:30]
-        
-        elif analysis_type == "trainer_stats":
-            results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
-                Horse, Result.horse_id == Horse.id
-            ).join(
-                Race, Horse.race_id == Race.id
-            ).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).outerjoin(
-                Prediction, Horse.id == Prediction.horse_id
-            ).filter(Result.finish_position > 0).all()
-            
-            trainer_stats = {}
-            races_seen = {}
-            
-            for r, h, race, m, p in results:
-                trainer = h.trainer
-                race_key = f"{m.id}_{race.race_number}"
-                
-                if trainer not in trainer_stats:
-                    trainer_stats[trainer] = {"wins": 0, "total": 0, "places": 0}
-                    races_seen[trainer] = set()
-                
-                if race_key not in races_seen[trainer]:
-                    races_seen[trainer].add(race_key)
-                    trainer_stats[trainer]["total"] += 1
-                    if r.finish_position == 1:
-                        trainer_stats[trainer]["wins"] += 1
-                    if r.finish_position <= 3:
-                        trainer_stats[trainer]["places"] += 1
-            
-            trainer_list = []
-            for trainer, stats in trainer_stats.items():
-                if stats["total"] >= 10:
-                    trainer_list.append({
-                        "trainer": trainer,
-                        "wins": stats["wins"],
-                        "total": stats["total"],
-                        "strike_rate": round(stats["wins"] / stats["total"] * 100, 1),
-                        "place_rate": round(stats["places"] / stats["total"] * 100, 1)
-                    })
-            
-            return sorted(trainer_list, key=lambda x: x["strike_rate"], reverse=True)[:20]
-        
-        elif analysis_type == "jockey_stats":
-            results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
-                Horse, Result.horse_id == Horse.id
-            ).join(
-                Race, Horse.race_id == Race.id
-            ).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).outerjoin(
-                Prediction, Horse.id == Prediction.horse_id
-            ).filter(Result.finish_position > 0).all()
-            
-            jockey_stats = {}
-            races_seen = {}
-            
-            for r, h, race, m, p in results:
-                jockey = h.jockey
-                race_key = f"{m.id}_{race.race_number}"
-                
-                if jockey not in jockey_stats:
-                    jockey_stats[jockey] = {"wins": 0, "total": 0, "places": 0}
-                    races_seen[jockey] = set()
-                
-                if race_key not in races_seen[jockey]:
-                    races_seen[jockey].add(race_key)
-                    jockey_stats[jockey]["total"] += 1
-                    if r.finish_position == 1:
-                        jockey_stats[jockey]["wins"] += 1
-                    if r.finish_position <= 3:
-                        jockey_stats[jockey]["places"] += 1
-            
-            jockey_list = []
-            for jockey, stats in jockey_stats.items():
-                if stats["total"] >= 10:
-                    jockey_list.append({
-                        "jockey": jockey,
-                        "wins": stats["wins"],
-                        "total": stats["total"],
-                        "strike_rate": round(stats["wins"] / stats["total"] * 100, 1),
-                        "place_rate": round(stats["places"] / stats["total"] * 100, 1)
-                    })
-            
-            return sorted(jockey_list, key=lambda x: x["strike_rate"], reverse=True)[:20]
-        
-        elif analysis_type == "track_specialists":
-            results = db.session.query(Result, Horse, Meeting, Race, Prediction).join(
-                Horse, Result.horse_id == Horse.id
-            ).join(
-                Race, Horse.race_id == Race.id
-            ).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).outerjoin(
-                Prediction, Horse.id == Prediction.horse_id
-            ).filter(Result.finish_position > 0).all()
-            
-            horse_track_stats = {}
-            races_seen = {}
-            
-            for r, h, m, race, p in results:
-                track = m.meeting_name.split('_')[1] if '_' in m.meeting_name else 'Unknown'
-                key = f"{h.horse_name}_{track}"
-                race_key = f"{m.id}_{race.race_number}"
-                
-                if key not in horse_track_stats:
-                    horse_track_stats[key] = {
-                        "horse": h.horse_name,
-                        "track": track,
-                        "wins": 0,
-                        "total": 0
-                    }
-                    races_seen[key] = set()
-                
-                if race_key not in races_seen[key]:
-                    races_seen[key].add(race_key)
-                    horse_track_stats[key]["total"] += 1
-                    if r.finish_position == 1:
-                        horse_track_stats[key]["wins"] += 1
-            
-            specialists = []
-            for stats in horse_track_stats.values():
-                if stats["total"] >= 3:
-                    strike_rate = stats["wins"] / stats["total"] * 100
-                    if strike_rate >= 50:
-                        specialists.append({
-                            "horse": stats["horse"],
-                            "track": stats["track"],
-                            "wins": stats["wins"],
-                            "total": stats["total"],
-                            "strike_rate": round(strike_rate, 1)
-                        })
-            
-            return sorted(specialists, key=lambda x: x["strike_rate"], reverse=True)[:20]
-        
-        elif analysis_type == "component_performance":
-            results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
-                Horse, Result.horse_id == Horse.id
-            ).join(
-                Race, Horse.race_id == Race.id
-            ).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).join(
-                Prediction, Horse.id == Prediction.horse_id
-            ).filter(Result.finish_position > 0).all()
-            
-            component_stats = {}
-            races_seen = {}
-            
-            for r, h, race, m, p in results:
-                if not p.notes:
-                    continue
-                
-                race_key = f"{m.id}_{race.race_number}"
-                
-                lines = p.notes.split('\n')
-                for line in lines:
-                    if ':' in line:
-                        parts = line.split(':', 1)
-                        if len(parts) == 2:
-                            score_part = parts[0].strip()
-                            component_name = parts[1].strip()
-                            
-                            if any(skip in component_name.lower() for skip in ['total', 'specialist bonus', 'sectional weighted', 'condition multiplier', 'sectional weight', '└─', 'adj:', 'ℹ️']):
-                                continue
-                            
-                            if component_name not in component_stats:
-                                component_stats[component_name] = {
-                                    "appearances": 0,
-                                    "wins": 0,
-                                    "total_profit": 0,
-                                    "stake": 0
-                                }
-                                races_seen[component_name] = set()
-                            
-                            if race_key not in races_seen[component_name]:
-                                races_seen[component_name].add(race_key)
-                                component_stats[component_name]["appearances"] += 1
-                                component_stats[component_name]["stake"] += 10
-                                
-                                if r.finish_position == 1:
-                                    component_stats[component_name]["wins"] += 1
-                                    if r.sp:
-                                        component_stats[component_name]["total_profit"] += (r.sp * 10 - 10)
-                                else:
-                                    component_stats[component_name]["total_profit"] -= 10
-            
-            component_list = []
-            for comp_name, stats in component_stats.items():
-                if stats["appearances"] >= 5:
-                    strike_rate = (stats["wins"] / stats["appearances"]) * 100
-                    roi = (stats["total_profit"] / stats["stake"]) * 100
-                    
-                    component_list.append({
-                        "component": comp_name,
-                        "appearances": stats["appearances"],
-                        "wins": stats["wins"],
-                        "strike_rate": round(strike_rate, 1),
-                        "roi": round(roi, 1),
-                        "profit": round(stats["total_profit"], 2)
-                    })
-            
-            return sorted(component_list, key=lambda x: x["roi"], reverse=True)[:50]
-        
-        elif analysis_type == "class_drop_patterns":
-            results = db.session.query(Result, Horse, Race, Meeting, Prediction).join(
-                Horse, Result.horse_id == Horse.id
-            ).join(
-                Race, Horse.race_id == Race.id
-            ).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).join(
-                Prediction, Horse.id == Prediction.horse_id
-            ).filter(Result.finish_position > 0).all()
-            
-            class_patterns = {
-                "Major Drop (30+)": {"wins": 0, "total": 0, "profit": 0, "races_seen": set()},
-                "Significant Drop (20-29)": {"wins": 0, "total": 0, "profit": 0, "races_seen": set()},
-                "Moderate Drop (10-19)": {"wins": 0, "total": 0, "profit": 0, "races_seen": set()},
-                "Small Drop (1-9)": {"wins": 0, "total": 0, "profit": 0, "races_seen": set()},
-                "Same Class": {"wins": 0, "total": 0, "profit": 0, "races_seen": set()},
-                "Small Rise (1-9)": {"wins": 0, "total": 0, "profit": 0, "races_seen": set()},
-                "Moderate Rise (10-19)": {"wins": 0, "total": 0, "profit": 0, "races_seen": set()},
-                "Significant Rise (20+)": {"wins": 0, "total": 0, "profit": 0, "races_seen": set()}
-            }
-            
-            for r, h, race, m, p in results:
-                race_key = f"{m.id}_{race.race_number}"
-                
-                if p.notes and ("Stepping DOWN" in p.notes or "Stepping UP" in p.notes):
-                    import re
-                    for line in p.notes.split('\n'):
-                        if "Stepping DOWN" in line or "Stepping UP" in line:
-                            match = re.search(r'(DOWN|UP)\s+([\d.]+)\s+class points', line)
-                            if match:
-                                direction = match.group(1)
-                                points = float(match.group(2))
-                                
-                                if direction == "DOWN":
-                                    if points >= 30:
-                                        category = "Major Drop (30+)"
-                                    elif points >= 20:
-                                        category = "Significant Drop (20-29)"
-                                    elif points >= 10:
-                                        category = "Moderate Drop (10-19)"
-                                    else:
-                                        category = "Small Drop (1-9)"
-                                else:
-                                    if points >= 20:
-                                        category = "Significant Rise (20+)"
-                                    elif points >= 10:
-                                        category = "Moderate Rise (10-19)"
-                                    else:
-                                        category = "Small Rise (1-9)"
-                                
-                                if race_key not in class_patterns[category]["races_seen"]:
-                                    class_patterns[category]["races_seen"].add(race_key)
-                                    class_patterns[category]["total"] += 1
-                                    if r.finish_position == 1:
-                                        class_patterns[category]["wins"] += 1
-                                        if r.sp:
-                                            class_patterns[category]["profit"] += (r.sp * 10 - 10)
-                                    else:
-                                        class_patterns[category]["profit"] -= 10
-                                break
-                else:
-                    category = "Same Class"
-                    if race_key not in class_patterns[category]["races_seen"]:
-                        class_patterns[category]["races_seen"].add(race_key)
-                        class_patterns[category]["total"] += 1
-                        if r.finish_position == 1:
-                            class_patterns[category]["wins"] += 1
-                            if r.sp:
-                                class_patterns[category]["profit"] += (r.sp * 10 - 10)
-                        else:
-                            class_patterns[category]["profit"] -= 10
-            
-            result_list = []
-            for category, stats in class_patterns.items():
-                if stats["total"] > 0:
-                    strike_rate = (stats["wins"] / stats["total"]) * 100
-                    roi = (stats["profit"] / (stats["total"] * 10)) * 100
-                    
-                    result_list.append({
-                        "category": category,
-                        "wins": stats["wins"],
-                        "total": stats["total"],
-                        "strike_rate": round(strike_rate, 1),
-                        "roi": round(roi, 1),
-                        "profit": round(stats["profit"], 2)
-                    })
-            
-            return result_list
-    
-    return {"error": "Unknown tool or analysis type"}
-
 CHAT_MODEL = os.environ.get('CHAT_MODEL', 'claude-opus-5-5')
 
 
-def _chat_completion(tools, messages):
-    """One chat-assistant model call. If the model declines a request, the
-    API retries it on a fallback model inside the same call."""
-    return client.beta.messages.create(
-        model=CHAT_MODEL,
-        max_tokens=16000,
-        system=RACING_SYSTEM_PROMPT,
-        tools=tools,
-        messages=messages,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-    )
+def _chat_today():
+    return datetime.now(MELBOURNE_TZ).date()
 
 
 @app.route('/api/chat', methods=['POST'])
 @limiter.limit("10 per minute")
 def chat():
+    """Stream the assistant's reply as Server-Sent Events.
+
+    Events are JSON lines: {"type": "text"|"status"|"error"|"done", ...}.
+    """
+    import chat_assistant
+    from flask import Response, stream_with_context
+
     if not current_user.is_authenticated:
         return jsonify({'error': 'Please log in to use chat'}), 401
-    
-    try:
-        user_message = request.json.get('message', '').strip()
-        
-        if not user_message:
-            return jsonify({'error': 'Message cannot be empty'}), 400
-        
-        if len(user_message) > 500:
-            return jsonify({'error': 'Message too long (max 500 characters)'}), 400
-        
-        user_id = current_user.id
-        
-        if 'chat_session_id' not in session:
-            session['chat_session_id'] = str(uuid.uuid4())
-        
-        chat_session_id = session['chat_session_id']
-        
-        from models import ChatMessage
-        user_msg = ChatMessage(
-            user_id=user_id,
-            role='user',
-            content=user_message,
-            session_id=chat_session_id
-        )
-        db.session.add(user_msg)
-        db.session.commit()
-        
-        history = ChatMessage.query.filter_by(
-            user_id=user_id,
-            session_id=chat_session_id
-        ).order_by(ChatMessage.timestamp.desc()).limit(10).all()
-        
-        history = list(reversed(history))
-        
-        messages = []
-        for msg in history:
-            messages.append({
-                "role": msg.role,
-                "content": msg.content
-            })
-        
-        tools = [
-            {
-                "name": "query_database",
-                "description": "Execute SQL query on the racing database to find specific horses, races, results, or statistics",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "query_type": {
-                            "type": "string",
-                            "enum": ["meetings", "horses", "results", "statistics"],
-                            "description": "Type of query to run"
-                        },
-                        "filters": {
-                            "type": "object",
-                            "description": "Filters like meeting_name, date, track, min_score, race_number, won_only"
-                        }
-                    },
-                    "required": ["query_type"]
-                }
-            },
-            {
-                "name": "calculate_quaddie",
-                "description": "Calculate best quaddie combinations for a meeting (races 5-8) based on scores and overlays",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "meeting_name": {
-                            "type": "string",
-                            "description": "Full meeting name like '260131_Caulfield'"
-                        },
-                        "min_score": {
-                            "type": "number",
-                            "description": "Minimum score threshold for selections",
-                            "default": 70
-                        },
-                        "max_combinations": {
-                            "type": "integer",
-                            "description": "Maximum number of combinations to return",
-                            "default": 10
-                        }
-                    },
-                    "required": ["meeting_name"]
-                }
-            },
-            {
-                "name": "analyze_patterns",
-                "description": "Analyze historical results to find patterns in performance, components, and horse characteristics",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "analysis_type": {
-                            "type": "string",
-                            "enum": [
-                                "score_performance",
-                                "trainer_stats",
-                                "jockey_stats",
-                                "track_specialists",
-                                "overlays",
-                                "horse_characteristics",
-                                "component_performance",
-                                "class_drop_patterns"
-                            ],
-                            "description": "Type of pattern analysis: score_performance, trainer_stats, jockey_stats, track_specialists, overlays, horse_characteristics (age/sex combos), component_performance (scoring component ROI), class_drop_patterns"
-                        }
-                    },
-                    "required": ["analysis_type"]
-                }
-            }
-        ]
-        
-        response = _chat_completion(tools, messages)
-        
-        assistant_response = ""
-        conversation_messages = messages.copy()
-        
-        while response.stop_reason == "tool_use":
-            tool_results = []
-            
-            for content_block in response.content:
-                if content_block.type == "tool_use":
-                    tool_name = content_block.name
-                    tool_input = content_block.input
-                    tool_use_id = content_block.id
-                    
-                    print(f"Tool called: {tool_name} with input: {tool_input}")
-                    
-                    result = execute_tool(tool_name, tool_input, user_id)
-                    
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "content": str(result)
-                    })
-            
-            conversation_messages.append({"role": "assistant", "content": response.content})
-            conversation_messages.append({"role": "user", "content": tool_results})
-            
-            response = _chat_completion(tools, conversation_messages)
-        
-        for content_block in response.content:
-            if content_block.type == 'text':
-                assistant_response += content_block.text
-        if response.stop_reason == 'refusal' and not assistant_response:
-            assistant_response = "Sorry, I can't help with that one. Try rephrasing the question."
-        
-        assistant_msg = ChatMessage(
-            user_id=user_id,
-            role='assistant',
-            content=assistant_response,
-            session_id=chat_session_id
-        )
-        db.session.add(assistant_msg)
-        db.session.commit()
-        
-        return jsonify({
-            'response': assistant_response,
-            'message_count': len(conversation_messages)
-        })
-    
-    except Exception as e:
-        print(f"Chat error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': 'Failed to process message'}), 500
+
+    user_message = ((request.get_json(silent=True) or {}).get('message') or '').strip()
+    if not user_message:
+        return jsonify({'error': 'Message cannot be empty'}), 400
+    if len(user_message) > 1000:
+        return jsonify({'error': 'Message too long (max 1000 characters)'}), 400
+
+    user = current_user._get_current_object()
+    if 'chat_session_id' not in session:
+        session['chat_session_id'] = _latest_chat_session_id(user.id) or str(uuid.uuid4())
+    chat_session_id = session['chat_session_id']
+
+    db.session.add(ChatMessage(user_id=user.id, role='user', content=user_message, session_id=chat_session_id))
+    db.session.commit()
+
+    history = [(m.role, m.content) for m in reversed(
+        ChatMessage.query.filter_by(user_id=user.id, session_id=chat_session_id)
+        .order_by(ChatMessage.timestamp.desc(), ChatMessage.id.desc())
+        .limit(chat_assistant.HISTORY_MESSAGES).all()
+    )]
+    today = _chat_today()
+
+    def sse(event):
+        return f"data: {json.dumps(event)}\n\n"
+
+    def generate():
+        reply = []
+        try:
+            for event in chat_assistant.stream_reply(client, CHAT_MODEL, history, user, today):
+                if event['type'] == 'text':
+                    reply.append(event['text'])
+                yield sse(event)
+        except Exception as e:
+            logger.error(f"Chat error: {e}", exc_info=True)
+            yield sse({'type': 'error', 'text': 'Sorry, something went wrong. Please try again.'})
+        text_reply = ''.join(reply).strip()
+        if text_reply:
+            try:
+                db.session.add(ChatMessage(user_id=user.id, role='assistant', content=text_reply,
+                                           session_id=chat_session_id))
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Chat save failed: {e}", exc_info=True)
+        yield sse({'type': 'done'})
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
+def _latest_chat_session_id(user_id):
+    """The user's most recent conversation, so chat history survives logging out."""
+    latest = (ChatMessage.query.filter_by(user_id=user_id)
+              .filter(ChatMessage.session_id.isnot(None))
+              .order_by(ChatMessage.timestamp.desc(), ChatMessage.id.desc()).first())
+    return latest.session_id if latest else None
+
 
 @app.route('/api/chat/history', methods=['GET'])
 def get_chat_history():
@@ -12345,16 +11597,17 @@ def get_chat_history():
         return jsonify({'error': 'Please log in'}), 401
     
     user_id = current_user.id
-    chat_session_id = session.get('chat_session_id')
-    
+    chat_session_id = session.get('chat_session_id') or _latest_chat_session_id(user_id)
+
     if not chat_session_id:
         return jsonify({'messages': []})
-    
-    from models import ChatMessage
-    messages = ChatMessage.query.filter_by(
+    session['chat_session_id'] = chat_session_id
+
+    # The latest 20 messages, oldest first.
+    messages = list(reversed(ChatMessage.query.filter_by(
         user_id=user_id,
         session_id=chat_session_id
-    ).order_by(ChatMessage.timestamp.asc()).limit(20).all()
+    ).order_by(ChatMessage.timestamp.desc(), ChatMessage.id.desc()).limit(20).all()))
     
     return jsonify({
         'messages': [{
