@@ -6,7 +6,6 @@ ML_DATA_ROUTES = [
     'api_jurisdiction_strength',
     'api_state_performance',
     'api_score_analysis',
-    'api_component_analysis',
     'api_external_factors',
     'api_probability_calibration',
     'api_price_analysis',
@@ -55,9 +54,14 @@ def test_ml_performance_stats_accepts_filters_and_limits():
 
 
 def test_ml_specific_analytics_use_ml_score_for_ranking():
+    # Component analysis is built nightly by backtest.py; the route serves
+    # the ML-ranked copy (payload['ml_source']) when source=ml.
     component_source = _function_source('api_component_analysis')
-    assert 'Prediction.ml_score' in component_source
-    assert 'ranking_score = (ml_score or 0) if use_ml' in component_source
+    assert "request.args.get('source', '') == 'ml'" in component_source
+    assert "payload.get('ml_source')" in component_source
+    backtest_source = Path('backtest.py').read_text()
+    assert 'ranking_score = ml_scores[int(row.horse_id)]' in backtest_source
+    assert "component_analysis_payload['ml_source'] = run_full_component_analysis(" in backtest_source
 
     price_source = _function_source('api_price_analysis')
     assert 'Prediction.ml_score if use_ml else Prediction.score' in price_source
