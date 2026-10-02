@@ -269,16 +269,22 @@ limiter = Limiter(
 # Configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///formanalyst.db')
 
-# A guessable secret key lets anyone forge a login cookie, so production
-# (a Postgres DATABASE_URL) refuses to start without one. Local dev gets a
-# random per-process key instead.
+# A guessable secret key lets anyone forge a login cookie, so there is no
+# public fallback. If SECRET_KEY is missing, derive one from DATABASE_URL:
+# it is private (it holds the database password), and every worker and
+# restart sees the same value, so logins keep working. The site must never
+# fail to start over this; set SECRET_KEY in Railway to silence the warning.
 _secret_key = os.environ.get('SECRET_KEY')
 if not _secret_key:
-    if app.config['SQLALCHEMY_DATABASE_URI'].startswith(('postgres://', 'postgresql://')):
-        raise RuntimeError('SECRET_KEY environment variable must be set in production')
-    import secrets as _secrets
-    _secret_key = _secrets.token_hex(32)
-    print('⚠ SECRET_KEY not set - using a random key (sessions reset on restart)')
+    import hashlib as _hashlib
+    _db_url = os.environ.get('DATABASE_URL')
+    if _db_url:
+        _secret_key = _hashlib.sha256(('flask-secret-key:' + _db_url).encode()).hexdigest()
+        print('⚠ SECRET_KEY not set - using a key derived from DATABASE_URL. Set SECRET_KEY in Railway.')
+    else:
+        import secrets as _secrets
+        _secret_key = _secrets.token_hex(32)
+        print('⚠ SECRET_KEY not set - using a random key (sessions reset on restart)')
 app.secret_key = _secret_key
 
 _https_only = os.environ.get('SESSION_COOKIE_SECURE', '').lower() in ('1', 'true', 'yes') or bool(os.environ.get('RAILWAY_ENVIRONMENT'))

@@ -113,3 +113,22 @@ def test_login_attempts_are_rate_limited():
         ]
     assert statuses[:10] == [302] * 10
     assert statuses[10] == 429
+
+
+def test_app_starts_without_secret_key_in_production():
+    # A missing SECRET_KEY once crashed every worker on Railway. The app must
+    # boot, and the derived key must be stable and never the old placeholder.
+    import os
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k != 'SECRET_KEY'}
+    env['DATABASE_URL'] = 'sqlite:///:memory:'
+    code = "import app; print(app.app.secret_key)"
+    runs = [subprocess.run([sys.executable, '-c', code], env=env, capture_output=True, text=True, timeout=120)
+            for _ in range(2)]
+    for r in runs:
+        assert r.returncode == 0, r.stderr[-2000:]
+    keys = [r.stdout.strip().splitlines()[-1] for r in runs]
+    assert keys[0] == keys[1]
+    assert keys[0] != 'your-secret-key-change-in-production'
