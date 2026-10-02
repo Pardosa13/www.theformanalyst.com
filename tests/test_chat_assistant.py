@@ -6,6 +6,7 @@ analysis ignored losers, quaddies used races 5-8 and kept scratched runners,
 and admin-only data was not gated.
 """
 import json
+import re
 import uuid
 from datetime import date
 from types import SimpleNamespace
@@ -309,3 +310,62 @@ def test_long_notes_are_trimmed_not_dropped():
     out = ca.full_notes(long_notes)
     assert out.startswith('+ 1.0 : factor') and out.endswith('(notes truncated)')
     assert len(out) <= ca.MAX_NOTES_CHARS + 30
+
+
+# ── Site-wide data access ──────────────────────────────────────────────────
+
+def test_every_site_feed_maps_to_a_real_get_route():
+    adapter = appmod.app.url_map.bind('localhost')
+    for name, (path, params, about) in ca.SITE_FEEDS.items():
+        url = path.format(meeting_id=1, race_id=1, fighter_name='Someone')
+        endpoint, _ = adapter.match(url, method='GET')
+        assert endpoint in appmod.app.view_functions, name
+        for placeholder in re.findall(r'{(\w+)}', path):
+            assert placeholder in params, f'{name} must accept {placeholder}'
+
+
+def test_private_and_debug_feeds_are_not_exposed():
+    paths = ' '.join(p for p, _, _ in ca.SITE_FEEDS.values())
+    for hidden in ('budget-tracker', '/api/debug/', 'results-debug', 'headshot', 'silks', '/api/chat'):
+        assert hidden not in paths
+
+
+def _user(is_admin):
+    with appmod.app.app_context():
+        u = User(username=f'feed-{uuid.uuid4().hex[:8]}', email=f'{uuid.uuid4().hex[:8]}@example.com', is_admin=is_admin)
+        u.set_password('x')
+        db.session.add(u)
+        db.session.commit()
+        return u.id
+
+
+def _call_feed(user_id, feed, params=None):
+    with appmod.app.test_request_context('/api/chat', method='POST'):
+        user = db.session.get(User, user_id)
+        return ca.run_tool('get_site_data', {'feed': feed, 'params': params or {}}, user, TODAY)
+
+
+def test_site_feed_returns_the_pages_json(seeded):
+    out = _call_feed(_user(False), 'race_animation_meetings', {'limit': 5})
+    assert 'error' not in out, out
+
+
+def test_admin_only_feeds_refuse_regular_users_and_serve_admins():
+    regular = _call_feed(_user(False), 'bet_tracker_summary')
+    assert 'admin' in regular.get('error', '')
+    admin = _call_feed(_user(True), 'bet_tracker_summary')
+    assert 'error' not in admin, admin
+
+
+def test_site_feed_rejects_unknown_params_and_feeds():
+    uid = _user(False)
+    assert 'unknown params' in _call_feed(uid, 'afl_ladder', {'drop_table': 'x'})['error']
+    assert 'error' in _call_feed(uid, 'no_such_feed')
+    assert 'needs meeting_id' in _call_feed(uid, 'meeting_sectionals')['error']
+
+
+def test_backtest_tool_is_admin_only():
+    regular = SimpleNamespace(is_admin=False)
+    names = [t['name'] for t in ca.tools_for(regular)]
+    assert 'get_site_data' in names and 'get_backtest_summary' not in names
+    assert 'get_backtest_summary' in [t['name'] for t in ca.tools_for(SimpleNamespace(is_admin=True))]

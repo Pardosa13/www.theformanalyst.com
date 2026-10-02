@@ -52,11 +52,14 @@ Form data on every runner:
 
 How to answer:
 - Every number you give must come from a tool result in this conversation. Never estimate, recall or invent a figure, price, horse name or result.
-- If no tool covers the question (for example weather forecasts or sectional times), say the assistant can't look that up yet. Don't guess.
+- If no tool covers the question (for example weather forecasts), say the assistant can't look that up yet. Don't guess.
 - Statistics are over all settled runners, with profit and ROI at starting price on level $10 stakes. Say how many runners a figure is based on, and call a sample under 50 runners small.
 - A high strike rate is not the same as a profit. Lead with ROI when the question is about betting.
 - Use today's date (given with each question) for "today", "tomorrow" and "this weekend".
 - For a quaddie, use the get_quaddie tool. It takes the last four races of the meeting.
+- Everything else on the site (Data and ML Data analytics, sectionals, the ML shadow model, Race Animations,
+  the Bet Tracker, the AFL and UFC hubs) is reachable through get_site_data. Use it before saying something
+  can't be looked up. Admins also have get_backtest_summary for the Backtest page.
 - For questions about a whole meeting ("best bets on the card", "top wet-trackers"), use get_meeting_runners
   once rather than calling get_race_card for every race.
 - Only admins can see Best Bets. If get_best_bets is not available to you, say Best Bets is an admin page.
@@ -76,6 +79,8 @@ STATUS_LABELS = {
     'horse_profile_stats': 'Checking age and sex results…',
     'class_change_stats': 'Checking class changes…',
     'get_best_bets': 'Finding Best Bets…',
+    'get_site_data': 'Reading site data…',
+    'get_backtest_summary': 'Reading the backtest…',
 }
 
 
@@ -150,6 +155,117 @@ TOOLS = [
     _tool('class_change_stats', 'Results for horses stepping up or down in class, from the Analyzer notes.', {'days': DAYS}),
 ]
 
+# ── Every read-only data feed the site's pages use ────────────────────────
+# name: (path, query params, what it holds). Path params like {meeting_id} are
+# filled from params. Feeds keep their own permission checks: the admin-only
+# Data, ML Data, ML Shadow and Bet Tracker feeds refuse non-admins. Left out on
+# purpose: debug/diagnostic feeds, images, live PuntingForm calls, and the
+# private household budget tracker.
+_DATA = ['date_from', 'date_to', 'limit', 'source', 'track']
+SITE_FEEDS = {
+    # Racing analytics (Data and ML Data pages; source=ml for the ML version)
+    'score_analysis': ('/api/data/score-analysis', _DATA + ['min_score'], 'Strike rate and ROI by score band'),
+    'state_performance': ('/api/data/state-performance', _DATA + ['min_score'], 'Results by state'),
+    'jurisdiction_strength': ('/api/data/jurisdiction-strength', ['source'], 'Strength of form by jurisdiction'),
+    'component_analysis': ('/api/data/component-analysis', ['source'], 'Scoring component ROI, lift and stacking'),
+    'external_factors': ('/api/data/external-factors', _DATA, 'Barrier, weight, distance, class and other factors'),
+    'price_analysis': ('/api/data/price-analysis', _DATA + ['min_score', 'top_n'], 'Results by starting price band'),
+    'probability_calibration': ('/api/data/probability-calibration', _DATA, 'Predicted vs actual win rates'),
+    'pnl_over_time': ('/api/data/pnl-over-time', _DATA, 'Cumulative profit and loss'),
+    'monthly_performance': ('/api/data/monthly-performance', _DATA, 'Results by month'),
+    'sole_leader_analysis': ('/api/data/sole-leader-analysis', _DATA, 'Races with a sole speed-map leader'),
+    'field_size': ('/api/data/field-size', _DATA, 'Results by number of runners'),
+    'days_since_run': ('/api/data/days-since-run', _DATA, 'Results by days since last start'),
+    'market_divergence': ('/api/data/market-divergence', _DATA, 'Where the model and the market disagree'),
+    'ml_signal_agreement': ('/api/data/ml-signal-agreement', ['date_from', 'date_to', 'limit', 'track'],
+                            'Races where Analyzer, PFAI and ML agree on the top pick'),
+    'pfai_analysis': ('/api/data/pfai-analysis', ['source'], 'How PFAI ratings perform'),
+    'combination_analysis': ('/api/data/combination-analysis', _DATA + ['min_appearances'],
+                             'Profitable single factors and combinations across all runners'),
+    'betting_filters': ('/api/data/betting-filters', _DATA, 'Results of betting filter rules'),
+    'race_tempo_analysis': ('/api/data/race-tempo-analysis', _DATA, 'Results by race tempo / speed map shape'),
+    'staking_strategy_analyzer': ('/api/data/staking-strategy-analysis',
+                                  ['bankroll', 'date_from', 'date_to', 'limit', 'min_score', 'track'],
+                                  'Staking strategies on Analyzer picks'),
+    'staking_strategy_ml': ('/api/ml-data/staking-strategy-analysis', ['bankroll', 'date_from', 'date_to', 'limit', 'track'],
+                            'Staking strategies on ML picks, including Kelly'),
+    # Meetings, results, sectionals
+    'completed_results': ('/api/results/complete', [], 'Meetings with results entered'),
+    'meeting_sectionals': ('/api/meeting/{meeting_id}/sectionals', ['meeting_id'], "Each runner's recent sectional times"),
+    'race_pfai_sectionals': ('/api/race/{race_id}/pfai-sectionals', ['race_id'], 'PFAI sectional rankings for a race'),
+    'next_to_go': ('/api/ladbrokes/next-to-go', [], 'Upcoming races (Next To Go ticker)'),
+    # ML shadow page
+    'ml_shadow_global_stats': ('/api/ml-shadow/global-stats', [], 'Shadow ML model overall results'),
+    'ml_shadow_meeting_results': ('/api/ml-shadow/results/{meeting_id}', ['meeting_id'], 'Shadow ML results for a meeting'),
+    # Race Animations & Predictions page
+    'race_animation_meetings': ('/api/race-animation/meetings', ['limit'], 'Meetings available on the Race Animations page'),
+    'race_animation_races': ('/api/race-animation/meeting/{meeting_id}/races', ['meeting_id'], 'Races in a meeting (with race ids)'),
+    'race_animation_race': ('/api/race-animation/race/{race_id}', ['race_id', 'norm', 'prices'],
+                            'Composite prediction score and predicted race shape for one race'),
+    'race_animation_accuracy': ('/api/race-animation/accuracy', ['days', 'norm'], 'How the composite score has performed'),
+    'race_animation_calibration_drift': ('/api/race-animation/calibration-drift', ['days', 'group', 'norm'],
+                                         'Where missed winners would move the weighting'),
+    'race_animation_tune': ('/api/race-animation/tune', ['criterion', 'days', 'norm', 'scope'], 'Best weighting by history'),
+    'race_animation_calibrate': ('/api/race-animation/race/{race_id}/calibrate', ['race_id', 'horse_id', 'lock', 'norm'],
+                                 'What weighting would have rated a given runner top'),
+    # Bet Tracker (admin)
+    'bet_tracker_summary': ('/api/bet-tracker/summary', ['range'], 'Logged bets: profit, ROI, strike rate'),
+    'bet_tracker_monthly': ('/api/bet-tracker/monthly', ['range'], 'Logged bets: profit by month'),
+    'bet_tracker_chart': ('/api/bet-tracker/chart', ['range'], 'Logged bets: running profit'),
+    'bet_tracker_bets': ('/api/bet-tracker/bets', [], 'Every logged bet'),
+    # AFL Hub
+    'afl_fixtures': ('/api/afl/fixtures', ['round', 'year'], 'AFL fixtures'),
+    'afl_ladder': ('/api/afl/ladder', ['round', 'year'], 'AFL ladder'),
+    'afl_match_predictions': ('/api/afl/match-predictions', ['round', 'year'], 'Model match predictions'),
+    'afl_match_markets': ('/api/afl/match-markets', ['year'], 'Match markets and prices'),
+    'afl_command_centre': ('/api/afl/command-centre', ['year'], 'AFL round overview'),
+    'afl_matchup_intel': ('/api/afl/matchup-intel', ['year'], 'Matchup insights'),
+    'afl_betting_edges': ('/api/afl/betting-edges', ['min_edge', 'year'], 'AFL bets with model edge'),
+    'afl_value_finder': ('/api/afl/value-finder', ['away', 'home', 'market', 'max_line', 'min_edge', 'min_games',
+                                                  'min_line', 'round', 'year'], 'Player prop value finder'),
+    'afl_model_selections': ('/api/afl/model-selections', ['limit', 'market', 'min_edge', 'status', 'year'],
+                             'AFL model selections'),
+    'afl_ml_current_selections': ('/api/afl/ml-current-selections', [], 'Current AFL ML selections'),
+    'afl_model_performance': ('/api/afl/model-performance', ['year'], 'AFL model results'),
+    'afl_results_analysis': ('/api/afl/results-analysis', ['limit', 'year'], 'AFL results analysis'),
+    'afl_props': ('/api/afl/props', ['away_team', 'home_team', 'market', 'max_line', 'min_line'], 'Player prop lines'),
+    'afl_match_props': ('/api/afl/match-props', ['away', 'home'], 'Props for one match'),
+    'afl_sgm_legs': ('/api/afl/sgm-legs', ['away', 'home', 'market', 'round', 'year'], 'Same-game multi legs'),
+    'afl_disposal_lines': ('/api/afl/disposal-lines', ['away', 'home', 'year'], 'Disposal hit rates by line'),
+    'afl_player_stats': ('/api/afl/player-stats', ['limit', 'name', 'season', 'stat', 'team'], 'Player stats'),
+    'afl_player_detail': ('/api/afl/player-detail', ['name', 'player_id', 'season', 'team'], 'One player in detail'),
+    'afl_player_game_log': ('/api/afl/player-game-log', ['limit', 'name', 'player_id', 'season', 'team'], 'Game-by-game log'),
+    'afl_player_home_away': ('/api/afl/player-home-away', ['name', 'player_id', 'season_from', 'team'], 'Home vs away'),
+    'afl_player_vs_opponent': ('/api/afl/player-vs-opponent', ['name', 'opponent', 'player_id', 'season_from', 'team'],
+                               'Player against one opponent'),
+    'afl_player_vs_venue': ('/api/afl/player-vs-venue', ['player_id', 'season_from', 'venue'], 'Player at one venue'),
+    'afl_team_players': ('/api/afl/team-players', ['limit', 'season', 'stat', 'team'], "A team's players"),
+    'afl_team_summary': ('/api/afl/team-summary', ['season', 'team'], 'Team summary'),
+    # UFC Hub
+    'mma_events': ('/api/mma/events', [], 'Upcoming UFC events, fights and predictions'),
+    'mma_edge_finder': ('/api/mma/edge-finder', ['min_edge'], 'UFC bets with model edge'),
+    'mma_fighter': ('/api/mma/fighter/{fighter_name}', ['fighter_name'], 'One fighter\'s stats'),
+}
+
+
+def _site_data_description():
+    lines = ['Read any data feed behind the site\'s pages, exactly as the page shows it. Pick a feed and pass its '
+             'params (all optional except ids in the path). Dates are YYYY-MM-DD; source is "ml" or "analyzer". '
+             'Use limit/track/date params to keep big feeds small. Admin-only feeds refuse other users. Feeds:']
+    for name, (path, params, about) in SITE_FEEDS.items():
+        lines.append(f'- {name}: {about}' + (f' [{", ".join(params)}]' if params else ''))
+    return '\n'.join(lines)
+
+
+SITE_DATA_TOOL = _tool('get_site_data', _site_data_description(), {
+    'feed': {'type': 'string', 'enum': list(SITE_FEEDS)},
+    'params': {'type': 'object', 'description': 'Feed parameters, e.g. {"source": "ml", "track": "Flemington"}.'},
+}, required=('feed',))
+
+BACKTEST_TOOL = _tool(
+    'get_backtest_summary', 'Admin only. The Backtest page: latest nightly run and recent runs, feature importance, '
+    'component ROI, momentum analysis and the grid-searched models.', {})
+
 BEST_BETS_TOOL = _tool(
     'get_best_bets', 'Admin only. Today\'s Best Bets qualifiers by the model rule: maiden races where Analyzer, '
     'PFAI and ML all rank the same runner first. Live Ladbrokes market badges are on the Best Bets page.', {
@@ -158,7 +274,8 @@ BEST_BETS_TOOL = _tool(
 
 
 def tools_for(user):
-    return TOOLS + ([BEST_BETS_TOOL] if getattr(user, 'is_admin', False) else [])
+    admin = [BEST_BETS_TOOL, BACKTEST_TOOL] if getattr(user, 'is_admin', False) else []
+    return TOOLS + [SITE_DATA_TOOL] + admin
 
 
 # ── Shared helpers ──────────────────────────────────────────────────────────
@@ -627,12 +744,79 @@ def get_best_bets(date=None, today=None):
             'picks': picks}
 
 
+def get_site_data(feed, params, user):
+    """Call a site feed's own view function as this user and return its JSON."""
+    from flask import current_app
+    from flask_login import login_user
+
+    path, allowed, _ = SITE_FEEDS[feed]
+    params = params or {}
+    if not isinstance(params, dict):
+        return {'error': 'params must be an object'}
+    unknown = [k for k in params if k not in allowed]
+    if unknown:
+        return {'error': f'unknown params for {feed}: {unknown}; allowed: {allowed}'}
+    clean = {}
+    for k, v in params.items():
+        if v is None:
+            continue
+        if isinstance(v, bool) or not isinstance(v, (str, int, float)):
+            return {'error': f'{k} must be text or a number'}
+        clean[k] = str(v).strip()
+    path_args = {k: clean.pop(k) for k in re.findall(r'{(\w+)}', path) if k in clean}
+    missing = [k for k in re.findall(r'{(\w+)}', path) if k not in path_args]
+    if missing:
+        return {'error': f'{feed} needs {", ".join(missing)}'}
+    url = path.format(**path_args)
+
+    adapter = current_app.url_map.bind('localhost')
+    endpoint, view_args = adapter.match(url, method='GET')
+    with current_app.test_request_context(url, method='GET', query_string=clean):
+        login_user(user)
+        rv = current_app.view_functions[endpoint](**view_args)
+        resp = current_app.make_response(rv)
+    if resp.status_code in (301, 302, 303, 307, 401, 403):
+        return {'error': 'This feed is not available to your account (admin only).'}
+    data = resp.get_json(silent=True)
+    if data is None:
+        return {'error': f'{feed} returned no data (status {resp.status_code})'}
+    if resp.status_code >= 400:
+        return {'error': data.get('error') if isinstance(data, dict) else f'status {resp.status_code}'}
+    return data
+
+
+def get_backtest_summary():
+    def rows(sql, **params):
+        return [dict(r._mapping) for r in db.session.execute(text(sql), params).fetchall()]
+
+    runs = rows('SELECT * FROM backtest_runs ORDER BY id DESC LIMIT 5')
+    if not runs:
+        return {'error': 'No backtest runs yet.'}
+    latest = runs[0]
+    out = {'latest_run': latest, 'recent_runs': runs[1:]}
+    if latest.get('status') == 'complete':
+        rid = latest['id']
+        for key, sql in [
+            ('feature_importance', 'SELECT * FROM backtest_feature_importance WHERE run_id = :rid ORDER BY importance_rank ASC LIMIT 20'),
+            ('component_roi', 'SELECT * FROM backtest_component_analysis WHERE run_id = :rid ORDER BY ABS(roi) DESC LIMIT 20'),
+            ('momentum', 'SELECT * FROM backtest_momentum_analysis WHERE run_id = :rid ORDER BY roi DESC LIMIT 20'),
+            ('grid_search_models', 'SELECT * FROM backtest_rf_models WHERE run_id = :rid ORDER BY model_rank ASC LIMIT 5'),
+        ]:
+            try:
+                out[key] = rows(sql, rid=rid)
+            except Exception:
+                db.session.rollback()
+                out[key] = []
+    return out
+
+
 # ── Input checking and dispatch ─────────────────────────────────────────────
 
 _INT_ARGS = {'meeting_id', 'race_number', 'per_leg', 'days', 'min_runners', 'min_starts'}
-_STR_ARGS = {'date', 'track', 'name', 'horse', 'kind', 'model', 'group_by', 'sort_by', 'source', 'condition'}
+_STR_ARGS = {'date', 'track', 'name', 'horse', 'kind', 'model', 'group_by', 'sort_by', 'source', 'condition', 'feed'}
 _ENUMS = {'kind': {'trainer', 'jockey'}, 'model': {'ml', 'analyzer'}, 'group_by': {'rank', 'score_band'},
-          'sort_by': {'roi', 'strike_rate', 'wins'}, 'source': {'ml', 'analyzer'}, 'condition': set(CONDITIONS)}
+          'sort_by': {'roi', 'strike_rate', 'wins'}, 'source': {'ml', 'analyzer'}, 'condition': set(CONDITIONS),
+          'feed': set(SITE_FEEDS)}
 _HANDLERS = {
     'find_meetings': find_meetings, 'get_race_card': get_race_card, 'get_quaddie': get_quaddie,
     'get_meeting_runners': get_meeting_runners,
@@ -681,6 +865,10 @@ def run_tool(name, raw_input, user, today):
     try:
         if name == 'get_best_bets':
             return get_best_bets(today=today, **args)
+        if name == 'get_backtest_summary':
+            return get_backtest_summary()
+        if name == 'get_site_data':
+            return get_site_data(args['feed'], (raw_input or {}).get('params'), user)
         if name == 'get_race_card':
             return get_race_card(show_notes=bool(getattr(user, 'is_admin', False)), **args)
         return _HANDLERS[name](**args)
