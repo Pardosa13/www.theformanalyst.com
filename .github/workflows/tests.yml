@@ -1,0 +1,33 @@
+name: Tests
+
+# The repository has ~40 test files but nothing ran them, so a change could
+# break scoring, staking or the race engine and still deploy. This runs the
+# whole suite on every push and pull request. No secrets are needed: the
+# tests use SQLite and stubbed network calls.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # analyzer.js and the race-engine tests run under Node.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run tests
+        run: python -m pytest tests test_strike_rate_matching.py -q

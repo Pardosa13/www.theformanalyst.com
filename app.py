@@ -8,7 +8,7 @@ import subprocess
 import csv
 import io
 import math
-from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, session
+from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, session, abort
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
 from datetime import datetime, date
@@ -167,7 +167,7 @@ def _rank_active_ladbrokes_market(odds_payload, internal_horses):
 
 
 def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_info=None):
-    """Return per-horse live Ladbrokes Best Bets fields; never uses results.sp/post-race prices."""
+    """Return per-horse live Ladbrokes Best Bets fields; never uses post-race starting prices."""
     horses = list(getattr(race, 'horses', []) or [])
     active_with_pred = [h for h in horses if not getattr(h, 'is_scratched', False) and getattr(h, 'prediction', None)]
     analyzer_ranked = sorted(active_with_pred, key=lambda h: (h.prediction.score or 0), reverse=True)
@@ -257,25 +257,74 @@ app = Flask(__name__)
 client = Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
 
 # Initialize rate limiter
+# RATELIMIT_STORAGE_URI (e.g. a Redis URL) shares counts across gunicorn
+# workers; the in-memory default gives each worker its own count.
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri=os.environ.get('RATELIMIT_STORAGE_URI', 'memory://'),
 )
 
 # Configuration
-app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///formanalyst.db')
+
+# A guessable secret key lets anyone forge a login cookie, so production
+# (a Postgres DATABASE_URL) refuses to start without one. Local dev gets a
+# random per-process key instead.
+_secret_key = os.environ.get('SECRET_KEY')
+if not _secret_key:
+    if app.config['SQLALCHEMY_DATABASE_URI'].startswith(('postgres://', 'postgresql://')):
+        raise RuntimeError('SECRET_KEY environment variable must be set in production')
+    import secrets as _secrets
+    _secret_key = _secrets.token_hex(32)
+    print('⚠ SECRET_KEY not set - using a random key (sessions reset on restart)')
+app.secret_key = _secret_key
+
+_https_only = os.environ.get('SESSION_COOKIE_SECURE', '').lower() in ('1', 'true', 'yes') or bool(os.environ.get('RAILWAY_ENVIRONMENT'))
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=_https_only,
+    REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SAMESITE='Lax',
+    REMEMBER_COOKIE_SECURE=_https_only,
+)
+
+
+_UNSAFE_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
+
+
+@app.before_request
+def reject_cross_site_writes():
+    """Block forged cross-site form posts and fetches.
+
+    Browsers send Origin (or at least Referer) on every POST. If either names
+    a different host than this site, another page is submitting on behalf of
+    a logged-in user, so refuse it. Requests carrying neither header (scripts,
+    the test client) are not browser-forged and pass through.
+    """
+    if request.method not in _UNSAFE_METHODS:
+        return None
+    from urllib.parse import urlparse
+    source = request.headers.get('Origin') or request.headers.get('Referer')
+    if not source:
+        return None
+    if source == 'null' or urlparse(source).netloc != request.host:
+        return jsonify({'success': False, 'error': 'Cross-site request blocked'}), 403
+    return None
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 
-# Database connection pooling to reduce memory
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_size': int(os.environ.get('SQLALCHEMY_POOL_SIZE', 5)),
-    'max_overflow': int(os.environ.get('SQLALCHEMY_MAX_OVERFLOW', 2)),
-    'pool_recycle': 3600,
-    'pool_pre_ping': True
-}
+# Database connection pooling to reduce memory. SQLite (local dev, tests)
+# uses its own pool that rejects these sizing options.
+if not app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_size': int(os.environ.get('SQLALCHEMY_POOL_SIZE', 5)),
+        'max_overflow': int(os.environ.get('SQLALCHEMY_MAX_OVERFLOW', 2)),
+        'pool_recycle': 3600,
+        'pool_pre_ping': True
+    }
 
 # Fix for postgres:// vs postgresql:// (Railway uses postgres://)
 if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
@@ -316,7 +365,6 @@ login_manager.login_view = "login"
 login_manager.init_app(app)
 
 register_afl_routes(app, db)
-print([r.rule for r in app.url_map.iter_rules() if 'headshot' in r.rule])
 register_mma_routes(app, db)
 register_ml_shadow_routes(app, db)
 register_bet_tracker_routes(app, db)
@@ -648,17 +696,21 @@ with app.app_context():
     except Exception as e:
         print(f"Budget Tracker seed check: {e}")
 
-    # Create default admin if doesn't exist
+    # Create default admin if doesn't exist. Never fall back to a known
+    # password: without ADMIN_PASSWORD the account is simply not created.
     admin = User.query.filter_by(username='admin').first()
-    if not admin:
+    admin_password = os.environ.get('ADMIN_PASSWORD')
+    if not admin and admin_password:
         admin = User(
             username='admin',
             email='admin@theformanalyst.com',
             is_admin=True
         )
-        admin.set_password(os.environ.get('ADMIN_PASSWORD', 'changeme123'))
+        admin.set_password(admin_password)
         db.session.add(admin)
         db.session.commit()
+    elif not admin:
+        print('⚠ No admin user and ADMIN_PASSWORD not set - default admin not created')
 
 # ----- Analyzer Integration -----
 def run_analyzer(csv_data, track_condition, is_advanced=False, strike_rate_data=None):
@@ -715,13 +767,7 @@ def run_analyzer(csv_data, track_condition, is_advanced=False, strike_rate_data=
         if result.returncode != 0:
             raise Exception(f"Analyzer error: {result.stderr}")
 
-        parsed_results = json.loads(result.stdout)
-        if parsed_results:
-            print("=== FIRST RESULT FROM ANALYZER ===")
-            print(json.dumps(parsed_results[0], indent=2))
-            print("===================================")
-
-        return parsed_results
+        return json.loads(result.stdout)
 
     except subprocess.TimeoutExpired:
         raise Exception("Analysis timed out (>60 seconds)")
@@ -1761,6 +1807,7 @@ def home():
 
 
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute; 50 per hour", methods=["POST"])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for(default_landing_endpoint(current_user)))
@@ -3749,6 +3796,8 @@ def api_get_speedmaps(meeting_id, race_number):
 @app.route("/api/debug/meeting/<int:meeting_id>/positions", methods=["GET"])
 @login_required
 def debug_positions(meeting_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin only'}), 403
     races = Race.query.filter_by(meeting_id=meeting_id).all()
     result = []
     for race in races:
@@ -3766,6 +3815,8 @@ def debug_positions(meeting_id):
 @app.route("/api/debug/horse/<int:horse_id>", methods=["GET"])
 @login_required  
 def debug_horse(horse_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin only'}), 403
     try:
         horse = Horse.query.get_or_404(horse_id)
         result = {
@@ -4822,6 +4873,8 @@ def fetch_automatic_results(meeting_id):
 def mark_scratched_and_complete(meeting_id):
     """Mark all remaining horses as scratched and complete the meeting"""
     meeting = Meeting.query.get_or_404(meeting_id)
+    if not can_edit_meeting(meeting):
+        return jsonify({'success': False, 'error': 'Only the meeting owner or an admin can complete this meeting'}), 403
     
     try:
         scratched_count = 0
@@ -4910,6 +4963,11 @@ def history():
     return render_template('history.html', meetings=meetings, meetings_json=json.dumps(meetings_json))
 
 
+def can_edit_meeting(meeting):
+    """Everyone may view a meeting; only its owner or an admin may change it."""
+    return current_user.is_admin or meeting.user_id == current_user.id
+
+
 @app.route("/meeting/<int:meeting_id>")
 @login_required
 def view_meeting(meeting_id):
@@ -4929,6 +4987,8 @@ def view_meeting(meeting_id):
 def toggle_horse_scratch(horse_id):
     """Toggle scratch status and recalculate remaining runners' odds/probabilities"""
     horse = Horse.query.get_or_404(horse_id)
+    if not can_edit_meeting(horse.race.meeting):
+        return jsonify({'success': False, 'error': 'Only the meeting owner or an admin can change scratchings'}), 403
     horse.is_scratched = not horse.is_scratched
     db.session.commit()
 
@@ -4964,6 +5024,8 @@ def toggle_horse_scratch(horse_id):
 @login_required
 def update_meeting_bias(meeting_id):
     meeting = Meeting.query.get_or_404(meeting_id)
+    if not can_edit_meeting(meeting):
+        return jsonify({'success': False, 'error': 'Only the meeting owner or an admin can change track bias'}), 403
     data = request.get_json()
     new_bias = int(data.get('pace_bias', 0))
 
@@ -5201,6 +5263,9 @@ def api_results_complete():
 def results_entry(meeting_id):
     """Form to enter results for a meeting"""
     meeting = Meeting.query.get_or_404(meeting_id)
+    if not can_edit_meeting(meeting):
+        flash("You don't have permission to enter results for this meeting", "danger")
+        return redirect(url_for("history"))
     results = get_meeting_results(meeting_id)
     
     # Add result data to each horse
@@ -5232,6 +5297,9 @@ def results_entry(meeting_id):
 def save_results(meeting_id):
     """Save results for a race"""
     meeting = Meeting.query.get_or_404(meeting_id)
+    if not can_edit_meeting(meeting):
+        flash("You don't have permission to enter results for this meeting", "danger")
+        return redirect(url_for("history"))
     
     race_number = request.form.get('race_number', type=int)
     
@@ -11056,7 +11124,7 @@ def backtest():
     )
 
 
-@app.route('/backtest/run-now')
+@app.route('/backtest/run-now', methods=['POST'])
 @login_required
 def backtest_run_now():
     """Trigger a manual backtest run (admin only)."""
@@ -12064,6 +12132,23 @@ def execute_tool(tool_name, tool_input, user_id):
     
     return {"error": "Unknown tool or analysis type"}
 
+CHAT_MODEL = os.environ.get('CHAT_MODEL', 'claude-opus-5-5')
+
+
+def _chat_completion(tools, messages):
+    """One chat-assistant model call. If the model declines a request, the
+    API retries it on a fallback model inside the same call."""
+    return client.beta.messages.create(
+        model=CHAT_MODEL,
+        max_tokens=16000,
+        system=RACING_SYSTEM_PROMPT,
+        tools=tools,
+        messages=messages,
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",
+    )
+
+
 @app.route('/api/chat', methods=['POST'])
 @limiter.limit("10 per minute")
 def chat():
@@ -12180,13 +12265,7 @@ def chat():
             }
         ]
         
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=4096,
-            system=RACING_SYSTEM_PROMPT,
-            tools=tools,
-            messages=messages
-        )
+        response = _chat_completion(tools, messages)
         
         assistant_response = ""
         conversation_messages = messages.copy()
@@ -12213,17 +12292,13 @@ def chat():
             conversation_messages.append({"role": "assistant", "content": response.content})
             conversation_messages.append({"role": "user", "content": tool_results})
             
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=4096,
-                system=RACING_SYSTEM_PROMPT,
-                tools=tools,
-                messages=conversation_messages
-            )
+            response = _chat_completion(tools, conversation_messages)
         
         for content_block in response.content:
-            if hasattr(content_block, 'text'):
+            if content_block.type == 'text':
                 assistant_response += content_block.text
+        if response.stop_reason == 'refusal' and not assistant_response:
+            assistant_response = "Sorry, I can't help with that one. Try rephrasing the question."
         
         assistant_msg = ChatMessage(
             user_id=user_id,
@@ -12282,6 +12357,8 @@ def new_chat_session():
 @app.route('/export-all-data')
 @login_required
 def export_all_data():
+    if not current_user.is_admin:
+        abort(403)
     import io
     import csv
     import zipfile
@@ -12312,8 +12389,10 @@ def export_all_data():
 @login_required
 def download_best_model():
     """Download the best RF model — loaded from DB, filesystem fallback."""
+    if not current_user.is_admin:
+        abort(403)
     import io
-    from flask import send_file, abort
+    from flask import send_file
     from sqlalchemy import text as sa_text
 
     # Try DB first (active Champion only; never blindly serve the newest nightly Challenger)

@@ -1,16 +1,21 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 
 def test_afl_debug_pipeline_command_exits_zero_and_prints_status():
+    # Other test modules set DATABASE_URL to stub databases at import time;
+    # the subprocess must not inherit them or it depends on test order.
+    env = {k: v for k, v in os.environ.items() if k not in ("DATABASE_URL", "SQLALCHEMY_DATABASE_URI")}
     result = subprocess.run(
         [sys.executable, "afl_backtest.py", "--debug-pipeline"],
         text=True,
         capture_output=True,
         check=False,
         timeout=20,
+        env=env,
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)

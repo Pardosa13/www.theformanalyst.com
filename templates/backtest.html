@@ -553,10 +553,12 @@
         <p class="bt-subtitle">Random Forest + Component ROI Analysis · Runs nightly at 2am</p>
     </div>
     {% if current_user.is_admin %}
-    <a href="{{ url_for('backtest_run_now') }}" class="btn btn-primary"
-       onclick="return confirm('Trigger a manual backtest run now? This may take several minutes.')">
-        <i class="bi bi-play-circle"></i> Run Now
-    </a>
+    <form method="POST" action="{{ url_for('backtest_run_now') }}"
+          onsubmit="return confirm('Trigger a manual backtest run now? This may take several minutes.')">
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-play-circle"></i> Run Now
+        </button>
+    </form>
     {% endif %}
 </div>
 
@@ -568,9 +570,11 @@
     <p>The backtest job runs automatically every night at 2am. You can also trigger a manual run using the button above.</p>
     {% if current_user.is_admin %}
     <div style="margin-top: 1.5rem;">
-        <a href="{{ url_for('backtest_run_now') }}" class="btn btn-primary">
-            <i class="bi bi-play-circle"></i> Run First Backtest
-        </a>
+        <form method="POST" action="{{ url_for('backtest_run_now') }}">
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-play-circle"></i> Run First Backtest
+            </button>
+        </form>
     </div>
     {% endif %}
 </div>

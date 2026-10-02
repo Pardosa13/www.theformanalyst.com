@@ -10,7 +10,7 @@ gunicorn==21.2.0
 requests
 tweepy
 gevent==24.11.1
-anthropic
+anthropic>=1.11,<2
 Flask-Limiter
 scikit-learn==1.6.0
 pandas==2.2.2

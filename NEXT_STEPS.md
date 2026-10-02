@@ -79,7 +79,7 @@ I've created a complete Flask web application for **The Form Analyst** (theforma
 - **app.py** - Main Flask app, all routes
 - **models.py** - Database structure
 - **auth.py** - Login/logout logic
-- **analyzer.py** - Python wrapper for your algorithm
+- **analyzer.js** - your algorithm (run by app.py via Node)
 - **analyzer.js** - YOUR ALGORITHM (needs your v27 code) ⚠️
 
 ### Configuration:
