@@ -68,7 +68,8 @@ def seeded():
         db.session.add(meeting)
         db.session.flush()
         for race_no in range(1, 6):
-            race = Race(meeting_id=meeting.id, race_number=race_no, race_class='Maiden' if race_no == 5 else 'BM64')
+            race = Race(meeting_id=meeting.id, race_number=race_no, race_class='Maiden' if race_no == 5 else 'BM64',
+                        track_condition='heavy')
             db.session.add(race)
             db.session.flush()
             # Runner A: top ML pick, wins at $4. B: second, loses. C: scratched in race 5.
@@ -78,10 +79,13 @@ def seeded():
                 ('C', 99.0, 99.0, 0 if race_no == 5 else 6, None if race_no == 5 else 20.0, '$9.00', race_no == 5),
             ]:
                 h = Horse(race_id=race.id, horse_name=f'{name}{race_no}', is_scratched=scratched,
-                          csv_data={'horse age': '3', 'horse sex': 'Mare'})
+                          csv_data={'horse age': '3', 'horse sex': 'Mare', 'horse last10': 'x2131',
+                                    'horse record': '12:4-2-1', 'horse record heavy': '4:2-1-0' if name == 'A' else '3:0-0-1',
+                                    'horse record soft': '5:1-1-1'})
                 db.session.add(h)
                 db.session.flush()
-                db.session.add(Prediction(horse_id=h.id, score=score, ml_score=ml, predicted_odds=odds))
+                db.session.add(Prediction(horse_id=h.id, score=score, ml_score=ml, predicted_odds=odds,
+                                          notes='+ 10.0 : Strong win rate (50%) on heavy\n+ 6.0 : Good podium rate (75%) on heavy\n+ 3.0 : Barrier'))
                 db.session.add(Result(horse_id=h.id, finish_position=finish, sp=sp))
         db.session.commit()
         ca._settled_cache.update(rows=None)
@@ -246,3 +250,47 @@ def test_chat_route_streams_and_saves_the_reply(monkeypatch):
     assert later['messages'] == history['messages']
     with appmod.app.app_context():
         assert ChatMessage.query.filter_by(user_id=user_id).count() == 2
+
+
+# ── Wet-track form (a Heavy-track question once got "the site has no wet form") ──
+
+def test_race_card_carries_condition_records_and_form(seeded, monkeypatch):
+    monkeypatch.setattr(ca, '_live_prices', lambda *a: {})
+    with appmod.app.app_context():
+        card = ca.get_race_card(seeded.meeting_id, 2)
+        admin_card = ca.get_race_card(seeded.meeting_id, 2, show_notes=True)
+    a2 = next(r for r in card['runners'] if r['horse'] == 'A2')
+    assert card['condition_record_key'] == 'heavy'
+    assert a2['records']['heavy'] == '4:2-1-0' and a2['records']['soft'] == '5:1-1-1'
+    assert a2['last10'] == 'x2131'
+    assert a2['condition_notes'] is None  # Analyzer notes are admin-only on the site
+    admin_a2 = next(r for r in admin_card['runners'] if r['horse'] == 'A2')
+    assert admin_a2['condition_notes'] == ['+ 10.0 : Strong win rate (50%) on heavy',
+                                           '+ 6.0 : Good podium rate (75%) on heavy']
+
+
+def test_meeting_runners_shows_every_race_with_heavy_records(seeded):
+    with appmod.app.app_context():
+        out = ca.get_meeting_runners(seeded.meeting_id)
+        soft = ca.get_meeting_runners(seeded.meeting_id, condition='soft')
+    assert [r['race_number'] for r in out['races']] == [1, 2, 3, 4, 5]
+    a1 = next(r for r in out['races'][0]['runners'] if r['horse'] == 'A1')
+    assert out['races'][0]['record_shown'] == 'heavy'
+    assert a1['condition_record'] == '4:2-1-0' and a1['condition_win_pct'] == 50
+    assert soft['races'][0]['runners'][0]['condition_record'] == '5:1-1-1'
+    assert 'C5' not in [r['horse'] for r in out['races'][4]['runners']]
+
+
+def test_full_meeting_fits_in_one_tool_result():
+    # A ten-race card of 16 runners each must not be cut off mid-list.
+    runner = {'horse': 'Some Long Horse Name', 'barrier': 12, 'ranks': {'analyzer': 10, 'ml': 10, 'pfai': 10},
+              'assessed_odds': '$12.50', 'all_agree': False, 'last10': 'x1234x5678',
+              'condition_record': '12:3-2-1', 'condition_win_pct': 25, 'condition_place_pct': 50}
+    payload = {'races': [{'race_number': n, 'distance': '1200', 'class': 'Benchmark 78', 'track_condition': 'heavy',
+                          'record_shown': 'heavy', 'runners': [runner] * 16} for n in range(1, 11)]}
+    assert 'truncated' not in ca._to_tool_content(payload)
+
+
+def test_prompt_no_longer_claims_track_data_is_missing():
+    assert 'track ratings' not in ca.SYSTEM_PROMPT
+    assert 'heavy' in ca.SYSTEM_PROMPT and 'Heavy 10' in ca.SYSTEM_PROMPT
