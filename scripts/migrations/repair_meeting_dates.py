@@ -19,8 +19,8 @@ deliberately conservative:
   * dry-run by default — nothing is written without --apply.
 
 Usage:
-    DATABASE_URL=postgresql://...  python migrate_repair_meeting_dates.py
-    DATABASE_URL=postgresql://...  python migrate_repair_meeting_dates.py --apply
+    DATABASE_URL=postgresql://...  python scripts/migrations/repair_meeting_dates.py
+    DATABASE_URL=postgresql://...  python scripts/migrations/repair_meeting_dates.py --apply
 """
 import argparse
 import os

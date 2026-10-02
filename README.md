@@ -52,9 +52,30 @@ The same tests run on every push and pull request (`.github/workflows/tests.yml`
 - ✅ Cross-site form posts blocked (Origin/Referer check)
 - ✅ Database export and model download are admin only
 
-## Support
+## Repository layout
 
-See **DEPLOYMENT.md** for detailed instructions.
+```
+Front end   templates/         every page (HTML, page CSS and JS)
+            static/            shared browser scripts and icons
+Back end    app.py             the Flask app
+            models.py          database tables
+            analyzer.js        scoring algorithm (run via Node)
+            *.py (root)        racing, ML, AFL, MMA and tracker modules
+            scripts/           one-off audits, repairs and migrations
+            migrations/        database schema migrations
+Tests       tests/
+Docs        docs/              front end, back end, deployment, security
+```
+
+Python modules stay in the root because Railway starts the app from there.
+
+## Documentation
+
+Start at **[docs/README.md](docs/README.md)**:
+
+- [Front end guide](docs/frontend/README.md): pages, scripts, design rules
+- [Back end guide](docs/backend/README.md): what each Python file does
+- [Deployment guide](docs/deployment/deployment-guide.md)
 
 ## License
 

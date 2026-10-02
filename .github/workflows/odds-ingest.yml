@@ -46,7 +46,7 @@ name: Live Odds Ingest
 #
 # If a long-running Railway worker service is available, `python odds_ingest.py
 # --loop` there is strictly better (no per-run startup cost, no scheduler
-# delay) and this workflow can be disabled. See DEPLOYMENT.md.
+# delay) and this workflow can be disabled. See docs/deployment/deployment-guide.md.
 
 on:
   schedule:

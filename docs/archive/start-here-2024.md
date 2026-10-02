@@ -1,3 +1,7 @@
+> **Archived.** Original 2024 setup notes, kept for history. Parts are out of date
+> (for example, `analyzer.js` is no longer a placeholder). For current steps see
+> [the deployment guide](../deployment/deployment-guide.md) and the root README.
+
 # 🏇 The Form Analyst - Complete Web Application
 
 ## Welcome!
@@ -11,7 +15,7 @@ Your horse racing analysis platform is ready to deploy. This folder contains eve
 ### Documentation (Read First!)
 1. **START_HERE.md** ← You are here
 2. **NEXT_STEPS.md** - Your immediate action items
-3. **DEPLOYMENT.md** - Complete deployment guide
+3. **docs/deployment/deployment-guide.md** - Complete deployment guide
 4. **README.md** - Technical overview
 
 ### Application Files
@@ -78,7 +82,7 @@ Follow these steps in order:
 - [ ] Read this file (START_HERE.md)
 - [ ] Read NEXT_STEPS.md
 - [ ] Copy your algorithm to analyzer.js
-- [ ] Review DEPLOYMENT.md
+- [ ] Review docs/deployment/deployment-guide.md
 
 ### Phase 2: Upload to GitHub (15 minutes)
 - [ ] Create GitHub account
@@ -169,7 +173,7 @@ Your application includes:
 
 1. **Read NEXT_STEPS.md** - Detailed action items
 2. **Integrate your algorithm** - Copy to analyzer.js
-3. **Read DEPLOYMENT.md** - Step-by-step deployment guide
+3. **Read docs/deployment/deployment-guide.md** - Step-by-step deployment guide
 4. **Deploy and test** - Follow the guide
 5. **Create accounts** - Invite your friends
 6. **Start using it!** - Analyze races
@@ -181,7 +185,7 @@ Your application includes:
 **If you get stuck:**
 
 1. **Check the docs:**
-   - DEPLOYMENT.md has detailed troubleshooting
+   - docs/deployment/deployment-guide.md has detailed troubleshooting
    - Common errors and solutions included
 
 2. **Check Railway logs:**
@@ -221,7 +225,7 @@ Where are you in the process?
 → Create account and upload code
 
 ### 🟡 **Railway Deployment**
-→ Follow DEPLOYMENT.md step-by-step
+→ Follow docs/deployment/deployment-guide.md step-by-step
 
 ### 🟡 **Domain Connection**
 → Update DNS, wait for propagation
@@ -240,7 +244,7 @@ Where are you in the process?
 theformanalyst/
 ├── START_HERE.md         ← Entry point (you are here)
 ├── NEXT_STEPS.md         ← Immediate action items
-├── DEPLOYMENT.md         ← Detailed deployment guide
+├── docs/deployment/deployment-guide.md         ← Detailed deployment guide
 ├── README.md             ← Technical overview
 │
 ├── app.py                ← Main Flask application
@@ -285,7 +289,7 @@ Beyond basic functionality:
 
 👉 **Open NEXT_STEPS.md** and start with algorithm integration
 
-Then follow the deployment guide in DEPLOYMENT.md.
+Then follow the deployment guide in docs/deployment/deployment-guide.md.
 
 **You're ready to launch! 🚀**
 
