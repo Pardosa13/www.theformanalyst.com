@@ -989,13 +989,13 @@ body.modal-open .main-container {
 
         <div id="chat-messages">
             <div class="message assistant welcome-message">
-                <p>👋 G'day! I'm your racing form assistant.</p>
-                <p>Ask me about:</p>
+                <p>👋 G'day! I'm your racing form assistant. I answer from the site's own data.</p>
+                <p>Try:</p>
                 <ul>
-                    <li>How to interpret form data</li>
-                    <li>Sectional times & track conditions</li>
-                    <li>Jockey/trainer statistics</li>
-                    <li>Betting strategies</li>
+                    <li>"Show me Flemington race 7 today"</li>
+                    <li>"Quaddie picks for Randwick"</li>
+                    <li>"How do ML top picks go?"</li>
+                    <li>"Best trainers by ROI this year"</li>
                 </ul>
             </div>
         </div>
@@ -1005,7 +1005,7 @@ body.modal-open .main-container {
         </div>
 
         <div id="chat-input-area">
-            <input type="text" id="user-input" placeholder="Ask about racing form..." maxlength="500">
+            <input type="text" id="user-input" placeholder="Ask about racing form..." maxlength="1000">
             <button id="send-btn">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
@@ -1142,6 +1142,14 @@ body.modal-open .main-container {
         border-bottom-left-radius: 4px;
     }
     .message.assistant ul { margin: 6px 0; padding-left: 18px; }
+    .message.assistant p { margin: 0 0 6px; }
+    .message.assistant p:last-child { margin-bottom: 0; }
+    .message.assistant ol { margin: 6px 0; padding-left: 20px; }
+    .message.assistant table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 12px; display: block; overflow-x: auto; }
+    .message.assistant th, .message.assistant td { padding: 4px 6px; border-bottom: 1px solid var(--border-mid); text-align: left; white-space: nowrap; }
+    .message.assistant th { color: var(--text-primary); font-weight: 600; }
+    .message.assistant code { font-family: 'DM Mono', monospace; font-size: 12px; }
+    .message.status { margin-right: auto; font-size: 12px; color: var(--text-muted); font-style: italic; background: none; padding: 2px 4px; }
     .message.assistant li { margin: 3px 0; color: var(--text-secondary); }
     .message.error {
         background: rgba(245,158,11,0.10);
@@ -1250,10 +1258,18 @@ body.modal-open .main-container {
         }
         #chat-toggle { bottom: 16px; right: 16px; width: 52px; height: 52px; }
     }
+    /* Keep the open chat box above the Next To Go ticker, which otherwise
+       covers its input and Send button. */
+    body.has-next-to-go #chatbot-container {
+        bottom: calc(var(--next-to-go-height) + env(safe-area-inset-bottom, 0px) + 12px);
+        max-height: calc(100vh - var(--next-to-go-height) - env(safe-area-inset-bottom, 0px) - 110px);
+    }
     </style>
 
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"></script>
     <script>
-    /* ── Chat JS: 100% identical logic to original ── */
+    /* Chat widget: streams replies from /api/chat and renders them as sanitised Markdown. */
     let chatOpen = false;
     let isTyping = false;
 
@@ -1291,10 +1307,23 @@ body.modal-open .main-container {
         }
     });
 
+    const WELCOME_HTML = chatMessages.querySelector('.welcome-message').outerHTML;
+
+    // Assistant replies are Markdown. Render, then sanitise: the text can
+    // contain horse names and anything a user typed.
+    function renderMarkdown(text) {
+        if (window.marked && window.DOMPurify) {
+            return DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
+        }
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML.replace(/\n/g, '<br>');
+    }
+
     async function sendMessage() {
         const message = userInput.value.trim();
         if (!message || isTyping) return;
-        if (message.length > 500) { showError('Message too long (max 500 characters)'); return; }
+        if (message.length > 1000) { showError('Message too long (max 1000 characters)'); return; }
 
         addMessageToChat('user', message);
         userInput.value = '';
@@ -1302,20 +1331,67 @@ body.modal-open .main-container {
         typingIndicator.style.display = 'block';
         scrollToBottom();
 
+        let replyDiv = null;
+        let replyText = '';
+        let statusDiv = null;
+        const clearStatus = () => { if (statusDiv) { statusDiv.remove(); statusDiv = null; } };
+
         try {
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: message })
             });
-            const data = await response.json();
-            typingIndicator.style.display = 'none';
             if (!response.ok) {
+                let data = {};
+                try { data = await response.json(); } catch (e) {}
                 if (response.status === 429) showRateLimitWarning();
                 throw new Error(data.error || 'Failed to get response');
             }
-            addMessageToChat('assistant', data.response);
+
+            // Server-Sent Events over the POST response: "data: {json}\n\n".
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let cut;
+                while ((cut = buffer.indexOf('\n\n')) !== -1) {
+                    const line = buffer.slice(0, cut).trim();
+                    buffer = buffer.slice(cut + 2);
+                    if (!line.startsWith('data:')) continue;
+                    const event = JSON.parse(line.slice(5));
+                    if (event.type === 'text') {
+                        typingIndicator.style.display = 'none';
+                        clearStatus();
+                        if (!replyDiv) replyDiv = addMessageToChat('assistant', '');
+                        replyText += event.text;
+                        replyDiv.innerHTML = renderMarkdown(replyText);
+                        scrollToBottom();
+                    } else if (event.type === 'status') {
+                        typingIndicator.style.display = 'none';
+                        if (!statusDiv) {
+                            statusDiv = document.createElement('div');
+                            statusDiv.className = 'message status';
+                            chatMessages.appendChild(statusDiv);
+                        }
+                        statusDiv.textContent = event.text;
+                        scrollToBottom();
+                    } else if (event.type === 'error') {
+                        clearStatus();
+                        addMessageToChat('error', event.text);
+                    }
+                }
+            }
+            clearStatus();
+            typingIndicator.style.display = 'none';
+            if (!replyDiv && !chatMessages.querySelector('.message.error:last-child')) {
+                addMessageToChat('error', 'No answer came back. Please try again.');
+            }
         } catch (error) {
+            clearStatus();
             typingIndicator.style.display = 'none';
             addMessageToChat('error', error.message || 'Connection error. Please try again.');
         } finally {
@@ -1326,16 +1402,18 @@ body.modal-open .main-container {
     function addMessageToChat(role, text) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
-        const formattedText = text
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-            .replace(/\n/g, '<br>');
-        messageDiv.innerHTML = formattedText;
+        if (role === 'assistant') {
+            messageDiv.innerHTML = renderMarkdown(text);
+        } else {
+            messageDiv.textContent = text;  // user and error text is never HTML
+        }
         if (role === 'user') {
             const welcomeMsg = chatMessages.querySelector('.welcome-message');
             if (welcomeMsg) welcomeMsg.remove();
         }
         chatMessages.appendChild(messageDiv);
         scrollToBottom();
+        return messageDiv;
     }
 
     function scrollToBottom() { chatMessages.scrollTop = chatMessages.scrollHeight; }
@@ -1361,16 +1439,7 @@ body.modal-open .main-container {
         try {
             await fetch('/api/chat/new', { method: 'POST' });
             chatMessages.innerHTML = `
-                <div class="message assistant welcome-message">
-                    <p>👋 G'day! I'm your racing form assistant.</p>
-                    <p>Ask me about:</p>
-                    <ul>
-                        <li>How to interpret form data</li>
-                        <li>Sectional times & track conditions</li>
-                        <li>Jockey/trainer statistics</li>
-                        <li>Betting strategies</li>
-                    </ul>
-                </div>`;
+${WELCOME_HTML}`;
         } catch (error) { showError('Failed to start new conversation'); }
     });
     </script>
