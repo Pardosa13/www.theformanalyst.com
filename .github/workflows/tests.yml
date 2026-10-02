@@ -5,8 +5,11 @@ name: Tests
 # whole suite on every push and pull request. No secrets are needed: the
 # tests use SQLite and stubbed network calls.
 
+# Runs once per pull request, and once when it merges into main. Running on
+# every branch push as well tested each change three times over.
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
