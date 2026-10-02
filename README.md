@@ -21,52 +21,24 @@ Professional horse racing analysis web application with protected algorithm and 
 - **Hosting:** Railway.app
 - **Domain:** theformanalyst.com
 
-## Quick Start
+## Required environment variables
 
-### 1. Complete Your Algorithm
-Open `analyzer.js` and copy your full scoring algorithm from v27.html (see DEPLOYMENT.md)
+Set these in Railway before deploying:
 
-### 2. Deploy
-Follow the step-by-step guide in **DEPLOYMENT.md**
+- `DATABASE_URL` - Postgres connection string
+- `SECRET_KEY` - long random string; the app refuses to start in production without it
+- `ADMIN_PASSWORD` - password for the first `admin` user; no admin is created without it
+- `ANTHROPIC_API_KEY` - for the chat assistant
+- Optional: `RATELIMIT_STORAGE_URI` (e.g. a Redis URL) so rate limits are shared across workers
 
-### 3. Create Users
-Login as admin and create accounts for your friends
-
-## File Structure
+## Running the tests
 
 ```
-theformanalyst/
-├── app.py              # Main Flask application
-├── models.py           # Database models
-├── auth.py             # Authentication
-├── analyzer.py         # Analysis engine
-├── analyzer.js         # YOUR ALGORITHM (copy from v27)
-├── requirements.txt    # Python dependencies
-├── package.json        # Node.js dependencies
-├── .env.example        # Environment variables template
-├── templates/          # HTML pages
-│   ├── base.html
-│   ├── login.html
-│   ├── dashboard.html
-│   ├── admin.html
-│   ├── history.html
-│   └── meeting.html
-└── static/            # CSS, JS, images
+pip install -r requirements.txt pytest
+python -m pytest tests
 ```
 
-## Important: Algorithm Integration
-
-**Before deploying**, you MUST copy your actual algorithm from v27.html into `analyzer.js`. 
-
-The current `analyzer.js` is a placeholder. Your scoring functions need to be integrated for the application to work properly.
-
-## Admin Access
-
-Default admin credentials (change these!):
-- Username: `admin`
-- Password: `changeme123`
-
-Set these via environment variables in Railway.
+The same tests run on every push and pull request (`.github/workflows/tests.yml`).
 
 ## Security
 
@@ -76,14 +48,15 @@ Set these via environment variables in Railway.
 - ✅ Private GitHub repository
 - ✅ Invite-only user system
 - ✅ Admin-controlled access
+- ✅ Login attempts rate limited
+- ✅ Cross-site form posts blocked (Origin/Referer check)
+- ✅ Database export and model download are admin only
 
 ## Support
 
 See **DEPLOYMENT.md** for detailed instructions.
-force deploy
 
 ## License
 
 Proprietary - All rights reserved.  
 © 2024 Partington Probability Ltd
-force deploy

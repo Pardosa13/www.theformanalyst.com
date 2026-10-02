@@ -18,7 +18,7 @@ Your horse racing analysis platform is ready to deploy. This folder contains eve
 - **app.py** - Main Flask application
 - **models.py** - Database models  
 - **auth.py** - User authentication
-- **analyzer.py** - Analysis engine wrapper
+- **analyzer.js** - Analysis engine (run by app.py via Node)
 - **analyzer.js** - **YOUR ALGORITHM GOES HERE** ⚠️
 - **requirements.txt** - Python dependencies
 - **package.json** - Node.js dependencies
@@ -246,7 +246,7 @@ theformanalyst/
 ├── app.py                ← Main Flask application
 ├── models.py             ← Database structure
 ├── auth.py               ← Login/authentication
-├── analyzer.py           ← Analysis wrapper
+├── analyzer.js           ← Analysis engine
 ├── analyzer.js           ← YOUR ALGORITHM (integrate v27)
 │
 ├── requirements.txt      ← Python packages
