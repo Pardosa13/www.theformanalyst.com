@@ -852,18 +852,21 @@ def test_r_workflow_uses_afltables_with_fryzigg_fallback():
     with open(r_script_path, encoding="utf-8") as f:
         r_source = f.read()
 
-    # Check for afltables as primary source (double-quoted, as used in the R script)
-    assert 'source = "afltables"' in r_source, (
-        "scripts/fetch_afl_2026_stats.R does not use source = \"afltables\"; "
-        "fryzigg has been returning 0 rows for 2026 since April 25"
+    # fryzigg is primary because it keeps native match_id/player_id values
+    # that settlement joins rely on; afltables is the fallback when fryzigg
+    # returns nothing (as it did for a stretch of 2026). Both must be present.
+    assert 'source = "fryzigg"' in r_source, (
+        "scripts/fetch_afl_2026_stats.R must try source = \"fryzigg\""
     )
-    # fryzigg may still appear as a fallback — that is fine.
-    # Verify afltables appears before fryzigg (primary, not just present).
-    afltables_pos = r_source.find('source = "afltables"')
+    assert 'source = "afltables"' in r_source, (
+        "scripts/fetch_afl_2026_stats.R must fall back to source = \"afltables\" "
+        "when fryzigg returns no rows"
+    )
     fryzigg_pos = r_source.find('source = "fryzigg"')
-    assert afltables_pos < fryzigg_pos, (
-        "afltables must appear before fryzigg in scripts/fetch_afl_2026_stats.R "
-        "(afltables is the primary source, fryzigg is the fallback)"
+    afltables_pos = r_source.find('source = "afltables"')
+    assert fryzigg_pos < afltables_pos, (
+        "fryzigg must be tried before afltables in scripts/fetch_afl_2026_stats.R "
+        "(fryzigg keeps native IDs; afltables is the fallback)"
     )
 
     # The workflow must invoke the R script file (not inline Rscript -e).
@@ -1763,9 +1766,17 @@ def test_value_finder_diagnostic_script_proves_finn_osullivan_average():
     output = os.popen(f"{sys.executable} {script}").read()
     assert "Finn O’Sullivan" in output
     assert "canonical=finnosullivan" in output
-    assert "disposals=[19, 30, 28, 21, 26, 37, 35, 32, 27, 26]" in output
-    assert "season_avg=28.1" in output
     assert "Finn Callaghan" in output
+
+    # data/afl_2026_stats.csv is refreshed weekly, so the game list grows.
+    # Check the printed season average is the true mean of the printed games
+    # rather than pinning one week's numbers.
+    line = next(l for l in output.splitlines() if "canonical=finnosullivan" in l)
+    disposals = [int(x) for x in re.search(r"disposals=\[([^\]]*)\]", line).group(1).split(",")]
+    season_avg = float(re.search(r"season_avg=([\d.]+)", line).group(1))
+    row_count = int(re.search(r"row_count=(\d+)", line).group(1))
+    assert len(disposals) == row_count >= 10
+    assert season_avg == round(sum(disposals) / len(disposals), 1)
 
 
 # Model sanity checks for AFL value finder / SGM calculations
