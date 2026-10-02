@@ -6177,8 +6177,30 @@ def write_results(run_id, feature_recommendations, component_results,
 # Ported 1:1 from app.py's former api_component_analysis() live route —
 # see notes_parsing.py for the shared notes-parsing / bucketing helpers.
 # ─────────────────────────────────────────────
-def run_full_component_analysis(df):
-    log.info("Running full component analysis (nightly, all history)...")
+def load_ml_scores():
+    """Return {horse_id: ml_score} for every prediction the ML model scored."""
+    with engine.connect() as conn:
+        rows = conn.execute(text(
+            "SELECT horse_id, ml_score FROM predictions WHERE ml_score IS NOT NULL"
+        )).fetchall()
+    return {int(horse_id): float(ml_score) for horse_id, ml_score in rows}
+
+
+def run_full_component_analysis(df, ml_scores=None):
+    """Nightly component analysis over all settled races.
+
+    With ml_scores ({horse_id: ml_score}) the analysis is the ML Data page's
+    version: only ML-scored runners are included and they are ranked by ML
+    score instead of analyzer score, as the live route did before it moved
+    here. Components are still parsed from the analyzer notes.
+    """
+    use_ml = ml_scores is not None
+    if use_ml:
+        df = df[df['horse_id'].isin(ml_scores.keys())]
+    log.info(
+        "Running full component analysis (nightly, all history, source=%s)...",
+        'ml' if use_ml else 'analyzer',
+    )
     stake = 10.0
 
     # ── Group horse-races by race_id ────────────────────────────────────
@@ -6187,10 +6209,13 @@ def run_full_component_analysis(df):
         notes = row.analyzer_notes
         notes = notes if isinstance(notes, str) else ''
 
-        parsed_score = parse_analyzer_score(notes)
-        base_score = row.analyzer_score
-        base_score = float(base_score) if pd.notna(base_score) else 0.0
-        ranking_score = parsed_score if parsed_score is not None else base_score
+        if use_ml:
+            ranking_score = ml_scores[int(row.horse_id)]
+        else:
+            parsed_score = parse_analyzer_score(notes)
+            base_score = row.analyzer_score
+            base_score = float(base_score) if pd.notna(base_score) else 0.0
+            ranking_score = parsed_score if parsed_score is not None else base_score
 
         finish_pos = int(row.finish_position) if pd.notna(row.finish_position) else 0
         sp = float(row.sp) if pd.notna(row.sp) else 0.0
@@ -6985,6 +7010,14 @@ def main():
 
         try:
             component_analysis_payload = run_full_component_analysis(df)
+            # The ML Data page's version, ranked by ML score. Stored inside the
+            # same cache row so both pages always come from one nightly run.
+            try:
+                component_analysis_payload['ml_source'] = run_full_component_analysis(
+                    df, ml_scores=load_ml_scores()
+                )
+            except Exception as e:
+                log.warning(f"ML component analysis (nightly) failed (non-fatal): {e}", exc_info=True)
             write_component_analysis_cache(component_analysis_payload, run_id)
         except Exception as e:
             log.warning(f"Full component analysis (nightly) failed (non-fatal): {e}", exc_info=True)

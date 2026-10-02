@@ -7389,6 +7389,19 @@ def api_component_analysis():
     payload = row[0]
     if isinstance(payload, str):
         payload = json.loads(payload)
+
+    # The ML Data page asks for source=ml: serve the nightly ML-ranked version,
+    # never the analyzer one. Until the first nightly run that builds it,
+    # return the empty shape rather than the wrong numbers.
+    use_ml = request.args.get('source', '') == 'ml'
+    if use_ml:
+        ml_payload = payload.get('ml_source')
+        if not ml_payload:
+            return jsonify({**empty, 'pending': True})
+        payload = ml_payload
+    else:
+        payload.pop('ml_source', None)
+
     payload['last_updated'] = row[1].isoformat() if row[1] else None
     return jsonify(payload)
 
