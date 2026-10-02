@@ -22,9 +22,9 @@ One-time setup (Railway)
 Run migration to add nullable columns
 - Run locally (recommended for testing):
   - export SQLALCHEMY_DATABASE_URI="postgresql://user:pass@host/db"
-  - python migrate_add_result_columns.py
+  - python scripts/migrations/add_result_columns.py
 - On Railway (one-off run):
-  - Use Railway "Run" / "New Run" UI and run: python migrate_add_result_columns.py
+  - Use Railway "Run" / "New Run" UI and run: python scripts/migrations/add_result_columns.py
 
 Enable and test
 1. Set BETFAIR_ENABLED=true (only after credentials and migrations done).
@@ -38,5 +38,5 @@ Security
 - If a credential is exposed, rotate it at Betfair immediately.
 
 Notes for maintainers
-- If your table/column names differ from assumptions here (horses/races), adapt `betfair_service.py`, `admin/betfair_mapping.py`, and `migrate_add_result_columns.py`.
+- If your table/column names differ from assumptions here (horses/races), adapt `betfair_service.py`, `admin/betfair_mapping.py`, and `scripts/migrations/add_result_columns.py`.
 - The simple mapping logic uses fuzzy matching (rapidfuzz). Tweak thresholds and audit logs as needed.

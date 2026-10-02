@@ -1,7 +1,10 @@
 # PostgREST endpoint is publicly readable — action required
 
-**Status: open. Not fixable from this repository** — PostgREST runs as its own
-Railway service, so the fix is in Railway and in the database's role grants.
+**Status: step 1 appears done.** On 2026-10-02 the public URL returned
+`404 Not Found`, so the public route looks closed. Steps 2-4 (rotate passwords,
+fix grants, delete the service) can't be checked from this repository —
+PostgREST runs as its own Railway service, so the fix is in Railway and in the
+database's role grants.
 
 ## What was found
 

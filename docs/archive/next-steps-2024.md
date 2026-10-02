@@ -1,3 +1,7 @@
+> **Archived.** Original 2024 setup notes, kept for history. Parts are out of date
+> (for example, `analyzer.js` is no longer a placeholder). For current steps see
+> [the deployment guide](../deployment/deployment-guide.md) and the root README.
+
 # 🎉 Your Web Application is Built!
 
 ## What You Have
@@ -51,7 +55,7 @@ I've created a complete Flask web application for **The Form Analyst** (theforma
 - Sign up with GitHub
 - Create new project from your repository
 - Add PostgreSQL database
-- Set environment variables (see DEPLOYMENT.md)
+- Set environment variables (see docs/deployment/deployment-guide.md)
 - Wait for deployment (3-5 minutes)
 
 ### 4. Connect Your Domain
@@ -98,7 +102,7 @@ I've created a complete Flask web application for **The Form Analyst** (theforma
 
 ### Documentation:
 - **README.md** - Project overview
-- **DEPLOYMENT.md** - Detailed deployment guide (READ THIS!)
+- **docs/deployment/deployment-guide.md** - Detailed deployment guide (READ THIS!)
 - **NEXT_STEPS.md** - This file
 
 ---
@@ -159,7 +163,7 @@ python app.py
 ## Support
 
 If you get stuck:
-1. Read DEPLOYMENT.md carefully
+1. Read docs/deployment/deployment-guide.md carefully
 2. Check Railway logs for errors
 3. Come back to Claude with specific error messages
 4. I can help debug and fix issues
@@ -210,4 +214,4 @@ Before going live:
 
 ---
 
-**Ready to deploy? Start with DEPLOYMENT.md!** 🚀
+**Ready to deploy? Start with docs/deployment/deployment-guide.md!** 🚀
