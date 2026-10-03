@@ -30,7 +30,8 @@ SYSTEM_PROMPT = """You are the Racing Form Assistant for The Form Analyst, an Au
 
 Scores on the site:
 - Analyzer score: the site's original rules-based rating. Higher is better.
-- ML score: the machine-learning model's rating, the site's main model. Higher is better.
+- ML score: the machine-learning model's rating, the site's main model. Higher is better. It is a 0-100 ranking within the race (top runner 100, bottom 0), not a chance of winning.
+- ML win probability: the machine-learning model's chance of the runner winning, in percent; a race's runners add up to about 100. Use this, not the ML score, for any question about chances or value.
 - PFAI: PuntingForm's AI rating, an outside opinion. Higher is better.
 - Assessed odds: the site's fair price for a runner. A market price longer than the assessed odds is an overlay.
 - "All signals agree" means Analyzer, PFAI and ML all rank the same runner first in the race.
@@ -490,6 +491,10 @@ def get_race_card(meeting_id, race_number, show_notes=False):
             'analyzer_score': round(p.score, 1) if p and p.score is not None else None,
             'analyzer_rank': analyzer_rank.get(h.id),
             'ml_score': round(p.ml_score, 1) if p and p.ml_score is not None else None,
+            'ml_win_probability_pct': (
+                round(p.ml_win_probability * 100.0, 1)
+                if p and getattr(p, 'ml_win_probability', None) is not None else None
+            ),
             'ml_rank': ml_rank.get(h.id),
             'pfai': pfai.get(h.id), 'pfai_rank': pfai_rank.get(h.id),
             'assessed_odds': p.predicted_odds if p else None,

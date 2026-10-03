@@ -29,7 +29,9 @@ from sqlalchemy import text
 # (module path '__main__') — see model_classes.py for why. Must happen
 # before load_model() is ever called.
 import model_classes  # noqa: F401
-from model_classes import MARKET_BLEND_ALPHA_ATTR, solve_joint_kelly
+from model_classes import (
+    MARKET_BLEND_ALPHA_ATTR, RaceConditionalLogit, race_conditional_logit, solve_joint_kelly,
+)
 from market_probability import blend_probabilities, fair_probabilities
 
 log = logging.getLogger(__name__)
@@ -1156,6 +1158,29 @@ def _predict_raw_scores(model, X):
     return model.predict(X), 'predict'
 
 
+def race_win_probabilities(model, raw_outputs):
+    """One race's win probabilities from the champion's raw per-runner outputs.
+
+    Returns `(probabilities, source)`; the probabilities sum to 1.0 across the
+    runners passed in, which must be exactly one race's active field.
+
+    A champion trained with the race-level conditional logit
+    (model_classes.RaceConditionalLogit) has already produced them, with the
+    beta it was validated with. An older champion has not: its outputs are
+    per-horse numbers that do not sum to 1, and the only reading of them that
+    needs nothing it does not have is the conditional logit at beta = 1.0 —
+    each output divided by the race total. Either way the result is the
+    model's own probability, with nothing stretched or re-scaled for display.
+    """
+    outputs = np.asarray(raw_outputs, dtype=float)
+    # For a RaceConditionalLogit this renormalisation is a no-op up to
+    # rounding (its output is already a race book) and guards the sum-to-1
+    # invariant the stake solver relies on; for anything older it IS the
+    # conversion.
+    source = 'conditional_logit' if isinstance(model, RaceConditionalLogit) else 'renormalised_legacy_artifact'
+    return race_conditional_logit(outputs, ['__race__'] * len(outputs), 1.0), source
+
+
 # ── Live lookups for the 2026-07 audit features ──────────────────────────────
 
 def _rollback_after_failed_query(db_session, what):
@@ -1477,7 +1502,7 @@ def _blend_race_with_live_market(raw_preds, horse_ids, live_odds, blend_alpha):
     return out, {'priced_runners': priced, 'applied': True}
 
 
-def predict_meeting(meeting_id, db_session, strike_rate_data=None):
+def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probabilities=False):
     """
     Generate ML scores for all non-scratched horses in a meeting.
 
@@ -1485,17 +1510,27 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         meeting_id: int
         db_session: SQLAlchemy session
         strike_rate_data: optional dict {'jockeys': {...}, 'trainers': {...}}
+        return_probabilities: also return each race's win probabilities
 
     Returns:
         dict {horse_id: ml_score}  — higher = model likes this horse more
         Also returns {race_id: {horse_id: ml_score}} for per-race ranking
+        With return_probabilities=True, a third value
+        {race_id: {horse_id: win_probability}}: the model's own race win
+        probabilities (0-1, summing to 1 per race), after the validated market
+        blend. These — never ml_score — are what value edge and Kelly staking
+        must be computed from: ml_score is stretched onto 0-100 per race for
+        display, which pins the last runner to 0 and inflates the leaders.
     """
     from models import Meeting, Race, Horse
+
+    def _empty():
+        return ({}, {}, {}) if return_probabilities else ({}, {})
 
     meeting = db_session.query(Meeting).get(meeting_id)
     if not meeting:
         log.error(f"Meeting {meeting_id} not found.")
-        return {}, {}
+        return _empty()
 
     try:
         model = load_model()
@@ -1511,7 +1546,7 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         raise
     except FileNotFoundError as e:
         log.error(str(e))
-        return {}, {}
+        return _empty()
     model_features = _model_feature_names(model) or FEATURE_NAMES
     log.info(
         "ML_PREDICTION_ACTIVE_MODEL meeting=%s model_id=%s training_run_id=%s active_algorithm=%s model_name=%s active=%s class=%s has_predict_proba=%s feature_count=%s artifact_path=%s model_version=%s selection_metrics=%s",
@@ -1549,6 +1584,7 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
 
     all_scores   = {}   # horse_id -> ml_score
     by_race      = {}   # race_id  -> {horse_id: ml_score}
+    probabilities_by_race = {}   # race_id -> {horse_id: race win probability}
 
     races = db_session.query(Race).filter_by(meeting_id=meeting_id).all()
 
@@ -1640,14 +1676,21 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
             log.error(f"Model prediction failed for race {race.race_number}: {ex}")
             continue
 
+        # The model's race win probabilities: one number per runner, summing to
+        # 1 across this race's active field. Everything that means "how likely
+        # is this horse to win" — the ML book, value edge, Kelly stakes — is
+        # read from these, never from ml_score below.
+        win_probabilities, probability_source = race_win_probabilities(model, raw_preds)
+
         # Blend the model's opinion with the market's, if this champion won
         # validation with a blend. This is the ONLY place the live blend is
         # applied: everything downstream (the displayed book, Kelly staking,
-        # value edge) reads the ml_score derived from these probabilities, so
-        # blending again anywhere else would apply the market twice.
-        raw_preds, blend_diagnostics = _blend_race_with_live_market(
-            raw_preds, horse_ids, live_odds, blend_alpha,
+        # value edge) reads these probabilities, so blending again anywhere
+        # else would apply the market twice.
+        win_probabilities, blend_diagnostics = _blend_race_with_live_market(
+            win_probabilities, horse_ids, live_odds, blend_alpha,
         )
+        win_probabilities = np.asarray(win_probabilities, dtype=float)
         if blend_diagnostics:
             log.info(
                 "ML_LIVE_MARKET_BLEND meeting=%s race=%s alpha=%.2f runners=%s priced=%s applied=%s",
@@ -1655,6 +1698,11 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
                 blend_diagnostics['priced_runners'], blend_diagnostics['applied'],
             )
 
+        # ml_score: a 0-100 ranking score for display and sorting only. The
+        # min-max stretch puts the top runner at 100 and the bottom at 0, which
+        # is fine for ordering a race and meaningless as a probability — which
+        # is why the probabilities above are returned and stored separately.
+        raw_preds = win_probabilities
         min_p = raw_preds.min()
         max_p = raw_preds.max()
         if max_p > min_p:
@@ -1666,10 +1714,13 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
                 race.race_number, meeting_id, min_p,
             )
         log.info(
-            "ML predict race %s meeting %s method=%s raw_min=%s raw_max=%s normalised_min=%s normalised_max=%s runners=%s",
+            "ML predict race %s meeting %s method=%s probability_source=%s probability_sum=%.6f "
+            "raw_min=%s raw_max=%s normalised_min=%s normalised_max=%s runners=%s",
             race.race_number,
             meeting_id,
             prediction_method,
+            probability_source,
+            float(win_probabilities.sum()),
             float(min_p),
             float(max_p),
             float(normalised.min()),
@@ -1678,13 +1729,18 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None):
         )
 
         race_scores = {}
-        for horse_id, score in zip(horse_ids, normalised):
+        race_probabilities = {}
+        for horse_id, score, probability in zip(horse_ids, normalised, win_probabilities):
             ml_score = round(float(score), 2)
             all_scores[horse_id]  = ml_score
             race_scores[horse_id] = ml_score
+            race_probabilities[horse_id] = float(probability)
 
         by_race[race.id] = race_scores
+        probabilities_by_race[race.id] = race_probabilities
 
+    if return_probabilities:
+        return all_scores, by_race, probabilities_by_race
     return all_scores, by_race
 
 
@@ -1709,8 +1765,8 @@ def compute_kelly_stakes_for_race(predictions, market_alpha=None):
     That is deliberate, and it is the one thing to get right here: the blend
     belongs at the single point where the model's probabilities are produced
     (predict_meeting), not at each place they are consumed. Blending here as
-    well would apply the market twice — once through the ml_score the caller
-    derived its probability from, and once more on the way in — which is not a
+    well would apply the market twice — once inside the stored probability the
+    caller read, and once more on the way in — which is not a
     stronger blend, it is a different and unvalidated one. Pass an explicit
     alpha only when handing in RAW model probabilities that have not been
     through predict_meeting.
@@ -1792,17 +1848,18 @@ def compute_kelly_stakes_for_race(predictions, market_alpha=None):
 
 
 def derive_ml_fair_probabilities(scores):
-    """Fair win probabilities from one race's ml_score values.
+    """LEGACY: each runner's share of the race's total ml_score.
 
-    Returns a list aligned with `scores`, holding each runner's share of the
-    race's total ml_score, or None for a runner that cannot be given one.
+    Kept only for races scored before the model's own probabilities were
+    stored (predictions.ml_win_probability), where nothing better exists. It
+    is NOT a win probability: ml_score is min-max stretched per race, which
+    pins the bottom runner to 0 and hands its share to the leaders — a 28%
+    favourite in a ten-runner field comes out near 33%, a 40% favourite in a
+    five-runner field near 53%. Use race_fair_probabilities, which prefers
+    the stored probabilities and only falls back to this.
 
-    This is the single definition of "the model's fair win probability" used by
-    the ML meeting book, the value edge and the Kelly solver, so those three can
-    never disagree about what the model thinks. A non-positive or unusable score
-    yields None and is left out of the denominator, exactly as the ML meeting
-    book has always done: ml_score is min-max normalised per race, so the
-    bottom-ranked runner scores 0.0 and simply has no fair price to quote.
+    Returns a list aligned with `scores`; a non-positive or unusable score
+    yields None and is left out of the denominator.
     """
     cleaned = []
     for score in scores:
@@ -1819,8 +1876,51 @@ def derive_ml_fair_probabilities(scores):
     return [(value / total) if value is not None else None for value in cleaned]
 
 
+# Where a race's fair probabilities came from. Only MODEL probabilities may
+# size a stake or strike a value edge; the legacy share exists so pages showing
+# races scored before this change still have something to display.
+PROBABILITY_SOURCE_MODEL = 'model'
+PROBABILITY_SOURCE_LEGACY = 'legacy_ml_score_share'
+
+
+def _positive_probability(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) and value > 0 else None
+
+
+def race_fair_probabilities(probabilities, scores=None):
+    """The model's fair win probabilities for one race's runners.
+
+    probabilities: the stored race win probabilities
+    (predictions.ml_win_probability), aligned with the runners; None for a
+    runner with none (scratched, or scored before probabilities were stored).
+    scores: the same runners' ml_score values, used only when NO runner has a
+    stored probability.
+
+    Returns `(fair_probabilities, source)`. With stored probabilities they are
+    renormalised over the runners that have one — which is exactly how a
+    conditional logit treats a late scratching: the scratched runner's share is
+    spread over the field in proportion. source is PROBABILITY_SOURCE_MODEL,
+    PROBABILITY_SOURCE_LEGACY when only ml_score was available, or None when
+    neither was.
+    """
+    cleaned = [_positive_probability(value) for value in (probabilities or [])]
+    total = sum(value for value in cleaned if value is not None)
+    if total > 0:
+        return [(value / total) if value is not None else None for value in cleaned], PROBABILITY_SOURCE_MODEL
+    if scores is None:
+        return [None] * len(cleaned), None
+    legacy = derive_ml_fair_probabilities(scores)
+    if any(value is not None for value in legacy):
+        return legacy, PROBABILITY_SOURCE_LEGACY
+    return legacy, None
+
+
 def _market_implied_probability_pct(price):
-    """Market's implied win probability, in percentage points, from a price."""
+    """Raw 100/price, in percentage points — the bookmaker's margin included."""
     try:
         price = float(price)
     except (TypeError, ValueError):
@@ -1828,7 +1928,48 @@ def _market_implied_probability_pct(price):
     return (100.0 / price) if price > 1.0 else None
 
 
-def compute_live_market_edges_for_meeting(meeting_id, db_session, scores_by_race=None):
+MARKET_PROBABILITY_METHOD_SHIN = 'shin_flb_corrected'
+MARKET_PROBABILITY_METHOD_NORMALISED = 'normalised_underround'
+MARKET_PROBABILITY_METHOD_RAW = 'raw_implied_incomplete_book'
+
+
+def live_market_probabilities(prices):
+    """The market's fair win probability for each of one race's ACTIVE runners.
+
+    prices: live decimal prices aligned with the race's active (unscratched)
+    runners; None where a runner has no usable price.
+
+    Returns `(probabilities, method)` with probabilities as fractions (None
+    where unpriced). When EVERY active runner is priced, the whole book goes
+    through market_probability.fair_probabilities — Shin's correction, which
+    takes out the bookmaker's margin and the favourite-longshot bias, the same
+    reading of a price the nightly validation uses for A/E, the market blend
+    and the value-edge diagnostic. That is what makes a live edge and a
+    validated edge the same quantity.
+
+    When the book is incomplete it falls back to raw 1/price, deliberately.
+    Shin decomposes ONE book: run on a partial one, the missing runners' share
+    is handed to the priced ones and every priced runner looks likelier than
+    the market really thinks it is. Raw 1/price still carries the margin, so
+    an edge measured against it is understated — the safe direction to be
+    wrong in while a race is only partly priced.
+    """
+    prices = list(prices or [])
+    raw = []
+    for price in prices:
+        implied_pct = _market_implied_probability_pct(price)
+        raw.append(None if implied_pct is None else implied_pct / 100.0)
+    if len(prices) < 2 or any(value is None for value in raw):
+        return raw, MARKET_PROBABILITY_METHOD_RAW
+    fair, z = fair_probabilities([float(price) for price in prices], return_z=True)
+    if any(value is None for value in fair):
+        return raw, MARKET_PROBABILITY_METHOD_RAW
+    method = MARKET_PROBABILITY_METHOD_SHIN if z is not None else MARKET_PROBABILITY_METHOD_NORMALISED
+    return [float(value) for value in fair], method
+
+
+def compute_live_market_edges_for_meeting(meeting_id, db_session, scores_by_race=None,
+                                          probabilities_by_race=None):
     """Per-runner value edge and joint-Kelly stake for every race in a meeting.
 
     Reads the live market from `live_odds_snapshots` (what odds_ingest.py
@@ -1836,16 +1977,28 @@ def compute_live_market_edges_for_meeting(meeting_id, db_session, scores_by_race
     the ingest cron reaches — which is the only place a live price is known to
     exist for this deployment.
 
-    `scores_by_race` is predict_meeting's second return value. Pass it to price
-    the scores that were just computed; omit it to price whatever ml_score
-    values are already persisted on `predictions` (used when re-pricing a
-    meeting that was scored earlier).
+    `probabilities_by_race` is predict_meeting's third return value (with
+    return_probabilities=True): the model's own race win probabilities. Pass it
+    to price what was just scored; omit it to price the probabilities already
+    persisted on `predictions.ml_win_probability` (used when re-pricing a
+    meeting that was scored earlier). `scores_by_race` is accepted for callers
+    that still pass it, and is only used to report — never to price — a race
+    scored before probabilities were stored.
+
+    A race with no stored model probabilities is NOT priced off ml_score: its
+    priced runners still get rows, with no edge and a zero stake, so a stake
+    left over from an earlier (wrong) pricing is cleared rather than kept.
+    Re-scoring the meeting gives it real probabilities.
 
     Returns `(edges, diagnostics)`.
 
     `edges` is {horse_id: {...}} covering every runner with a live price, with:
         ml_fair_probability_pct   model's fair win probability, percentage points
-        market_implied_probability_pct  100/price
+        market_implied_probability_pct  the market's fair probability, in points:
+                                  Shin-corrected when every active runner is
+                                  priced, raw 100/price otherwise (see
+                                  live_market_probabilities)
+        market_probability_method which of those two it is
         value_edge_pct            the first minus the second, in points; the
                                   number the Best Bets threshold and the ML Data
                                   buckets are both defined on
@@ -1872,6 +2025,8 @@ def compute_live_market_edges_for_meeting(meeting_id, db_session, scores_by_race
         'runners_with_edge': 0,
         'runners_backed': 0,
         'races_failed': 0,
+        'races_without_model_probabilities': 0,
+        'races_market_shin_corrected': 0,
     }
     if not races:
         return {}, diagnostics
@@ -1893,31 +2048,52 @@ def compute_live_market_edges_for_meeting(meeting_id, db_session, scores_by_race
             if not active:
                 continue
 
+            race_probabilities = (probabilities_by_race or {}).get(race.id) or {}
             race_scores = (scores_by_race or {}).get(race.id) or {}
             horse_ids = []
+            probabilities = []
             scores = []
             for horse in active:
+                prediction = getattr(horse, 'prediction', None)
+                probability = race_probabilities.get(horse.id)
+                if probability is None and not race_probabilities:
+                    probability = getattr(prediction, 'ml_win_probability', None) if prediction else None
                 score = race_scores.get(horse.id)
                 if score is None:
-                    prediction = getattr(horse, 'prediction', None)
                     score = getattr(prediction, 'ml_score', None) if prediction else None
                 horse_ids.append(horse.id)
+                probabilities.append(probability)
                 scores.append(score)
 
-            fair_probabilities_list = derive_ml_fair_probabilities(scores)
+            fair_probabilities_list, probability_source = race_fair_probabilities(probabilities, scores)
+            if probability_source != PROBABILITY_SOURCE_MODEL:
+                if probability_source == PROBABILITY_SOURCE_LEGACY:
+                    diagnostics['races_without_model_probabilities'] += 1
+                    log.warning(
+                        "ML_VALUE_EDGE_NO_MODEL_PROBABILITIES meeting=%s race=%s — scored before win "
+                        "probabilities were stored, so no edge or stake is quoted (ml_score is a display "
+                        "ranking, not a probability). Re-score the meeting to price it.",
+                        meeting_id, getattr(race, 'race_number', None),
+                    )
+                fair_probabilities_list = [None] * len(horse_ids)
+
+            prices = [(live_odds.get(horse_id) or {}).get('odds') for horse_id in horse_ids]
+            market_list, market_method = live_market_probabilities(prices)
 
             priced = []
-            for horse_id, fair_probability in zip(horse_ids, fair_probabilities_list):
-                price = (live_odds.get(horse_id) or {}).get('odds')
-                implied_pct = _market_implied_probability_pct(price)
-                if implied_pct is None:
+            for horse_id, fair_probability, price, market_probability in zip(
+                horse_ids, fair_probabilities_list, prices, market_list,
+            ):
+                if market_probability is None:
                     continue
-                priced.append((horse_id, fair_probability, float(price), implied_pct))
+                priced.append((horse_id, fair_probability, float(price), market_probability * 100.0))
 
             if not priced:
                 continue
             diagnostics['races_priced'] += 1
             diagnostics['runners_priced'] += len(priced)
+            if market_method == MARKET_PROBABILITY_METHOD_SHIN:
+                diagnostics['races_market_shin_corrected'] += 1
 
             # Only runners the model can quote a probability for can be staked;
             # an unquotable runner still gets its row so a stake left over from
@@ -1941,6 +2117,7 @@ def compute_live_market_edges_for_meeting(meeting_id, db_session, scores_by_race
                 edges[horse_id] = {
                     'ml_fair_probability_pct': fair_pct,
                     'market_implied_probability_pct': round(implied_pct, 2),
+                    'market_probability_method': market_method,
                     'value_edge_pct': value_edge_pct,
                     'market_price': price,
                     'kelly_stake_pct': stake,
@@ -1960,10 +2137,12 @@ def compute_live_market_edges_for_meeting(meeting_id, db_session, scores_by_race
 
     log.info(
         "ML_VALUE_EDGE_COMPUTED meeting=%s races=%s races_priced=%s runners_priced=%s "
-        "runners_with_edge=%s runners_backed=%s races_failed=%s",
+        "runners_with_edge=%s runners_backed=%s races_failed=%s "
+        "races_without_model_probabilities=%s races_market_shin_corrected=%s",
         meeting_id, diagnostics['races'], diagnostics['races_priced'],
         diagnostics['runners_priced'], diagnostics['runners_with_edge'],
         diagnostics['runners_backed'], diagnostics['races_failed'],
+        diagnostics['races_without_model_probabilities'], diagnostics['races_market_shin_corrected'],
     )
     return edges, diagnostics
 

@@ -142,7 +142,9 @@ def _score_meeting_ml(db, meeting_id):
     from models import Prediction
 
     try:
-        all_scores, by_race = predict_meeting(meeting_id, db.session)
+        all_scores, by_race, probabilities_by_race = predict_meeting(
+            meeting_id, db.session, return_probabilities=True,
+        )
     except NoActiveChampionError:
         # Reported as an ordinary unsuccessful result, not an exception: with no
         # champion this is the expected outcome for every meeting on the card,
@@ -162,11 +164,21 @@ def _score_meeting_ml(db, meeting_id):
             'reason': 'No scores generated — model may not be loaded or meeting has no active horses.',
         }
 
+    # ml_score (display ranking) and ml_win_probability (the model's race win
+    # probability) are written together: they are two readings of one scoring
+    # pass, and a row carrying a new score beside an old probability would
+    # price the race off a model that no longer ranks it that way.
+    win_probabilities = {
+        horse_id: probability
+        for race_probabilities in (probabilities_by_race or {}).values()
+        for horse_id, probability in race_probabilities.items()
+    }
     updated = 0
     for horse_id, ml_score in all_scores.items():
         pred = Prediction.query.filter_by(horse_id=horse_id).first()
         if pred:
             pred.ml_score = ml_score
+            pred.ml_win_probability = win_probabilities.get(horse_id)
             updated += 1
 
     # The scores are committed BEFORE pricing, not alongside it. Pricing reads
@@ -186,6 +198,7 @@ def _score_meeting_ml(db, meeting_id):
     try:
         edges, market_diagnostics = compute_live_market_edges_for_meeting(
             meeting_id, db.session, scores_by_race=by_race,
+            probabilities_by_race=probabilities_by_race,
         )
         priced = persist_live_market_edges(edges, db.session)
         db.session.commit()
@@ -213,8 +226,8 @@ def _score_meeting_ml(db, meeting_id):
 def _reprice_meeting_market(db, meeting_id):
     """Refresh value edge and Kelly stake for an already-scored meeting.
 
-    Re-uses the ml_score values already on `predictions` and prices them
-    against the newest `live_odds_snapshots` rows. Returns
+    Re-uses the win probabilities already on `predictions` (ml_win_probability)
+    and prices them against the newest `live_odds_snapshots` rows. Returns
     (predictions_updated, error_message) — the error is returned rather than
     raised so one meeting that cannot be priced does not abort a bulk pass.
     """
@@ -250,6 +263,35 @@ def _ml_scored_meeting_ids(db):
         WHERE p.ml_score IS NOT NULL
     """)).fetchall()
     return {r[0] for r in rows}
+
+def _meetings_needing_win_probabilities(db):
+    """Meeting ids scored before win probabilities were stored, still unresulted.
+
+    Such a meeting has ml_score on its runners but no ml_win_probability, so
+    value edge and Kelly cannot price it (ml_score is a display ranking, not a
+    probability). While at least one active runner is still unresulted the
+    race has not been run and a fresh scoring pass is the right fix. A meeting
+    whose results are all in is left exactly as it was scored: re-scoring it
+    with today's champion would rewrite the historical record.
+    """
+    try:
+        rows = db.session.execute(text("""
+            SELECT DISTINCT rc.meeting_id
+            FROM predictions p
+            JOIN horses h ON h.id = p.horse_id
+            JOIN races rc ON rc.id = h.race_id
+            LEFT JOIN results r ON r.horse_id = h.id
+            WHERE p.ml_score IS NOT NULL
+              AND p.ml_win_probability IS NULL
+              AND COALESCE(h.is_scratched, FALSE) = FALSE
+              AND r.id IS NULL
+        """)).fetchall()
+    except Exception as exc:
+        db.session.rollback()
+        log.warning("Could not check which meetings lack stored win probabilities: %s", exc)
+        return set()
+    return {r[0] for r in rows}
+
 
 def _unsettled_puntingform_meetings_sql():
     """Return SQL for PuntingForm meetings that still have active runners without results.
@@ -351,12 +393,16 @@ def register_ml_shadow_routes(app, db):
         try:
             meetings = _visible_ml_shadow_meetings_query().all()
             scored_ids = _ml_scored_meeting_ids(db)
+            # Scored, but before probabilities were stored, and not yet run:
+            # these are re-scored rather than skipped, or they could never be
+            # priced again.
+            needs_probabilities = _meetings_needing_win_probabilities(db)
             details = []
             generated = 0
             skipped = 0
 
             for meeting in meetings:
-                if meeting.id in scored_ids:
+                if meeting.id in scored_ids and meeting.id not in needs_probabilities:
                     # The ml_scores stand, but the market they were priced
                     # against has moved on, so the value edge and Kelly stake
                     # are re-derived from the newest snapshots. Skipping this

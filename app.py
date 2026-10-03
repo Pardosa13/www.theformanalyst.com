@@ -540,6 +540,21 @@ with app.app_context():
     except Exception as e:
         print(f"Kelly stake migration check: {e}")
 
+    # The model's own race win probability, stored beside ml_score so edge,
+    # Kelly and the ML book never have to reconstruct it from the 0-100
+    # display score. Same snapshot-column pattern as above.
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        predictions_columns = {col['name'] for col in inspector.get_columns('predictions')}
+        if 'ml_win_probability' not in predictions_columns:
+            with db.engine.connect() as conn:
+                conn.execute(text('ALTER TABLE predictions ADD COLUMN ml_win_probability FLOAT'))
+                conn.commit()
+            print("Added ml_win_probability column to predictions table")
+    except Exception as e:
+        print(f"ML win probability migration check: {e}")
+
     try:
         from sqlalchemy import inspect, text
         inspector = inspect(db.engine)
@@ -1763,6 +1778,10 @@ def get_meeting_results(meeting_id):
                 'base_probability': pred.base_probability if pred else '',
                 'notes': pred.notes if pred else '',
                 'ml_score': pred.ml_score if pred else None,
+                # The model's stored race win probability (0-1). Distinct from
+                # 'ml_win_probability', which the ML meeting view fills with the
+                # formatted 110%-book display string.
+                'ml_model_win_probability': getattr(pred, 'ml_win_probability', None) if pred else None,
                 'is_scratched': horse.is_scratched,
                 'is_best_bet': is_best_bet,
                 'best_bet_reasons': best_bet_reasons if is_best_bet else [],
@@ -1770,6 +1789,7 @@ def get_meeting_results(meeting_id):
                 'prediction': type('P', (), {
                     'score': pred.score if pred else 0,
                     'ml_score': pred.ml_score if pred else None,
+                    'ml_win_probability': getattr(pred, 'ml_win_probability', None),
                     'predicted_odds': pred.predicted_odds if pred else '',
                     'win_probability': pred.win_probability if pred else '',
                     'notes': pred.notes if pred else '',
@@ -3385,6 +3405,8 @@ def _build_ml_staking_selections(track_filter='', date_from='', date_to='', limi
             'stored_probability': getattr(row, 'stored_probability', None),
         })
 
+    from ml_predict import PROBABILITY_SOURCE_MODEL
+
     out = []
     source_counts = {'stored': 0, 'derived': 0}
     for r in base:
@@ -3392,25 +3414,27 @@ def _build_ml_staking_selections(track_filter='', date_from='', date_to='', limi
         idx = next((i for i, h in enumerate(runners) if h['horse_id'] == r['top_ml_horse_id']), None)
         if idx is None:
             continue
-        top_runner = runners[idx]
-        stored_probability = _parse_probability_percent(top_runner.get('stored_probability'))
-        if stored_probability is not None:
+        # The stored probabilities are the model's own race book, renormalised
+        # over the runners still in the race. Only a race scored before they
+        # were stored falls back to the share-of-ml_score book, and is counted
+        # as derived so the response says how much of the replay rests on it.
+        book = _derive_ml_race_book(
+            runners, lambda h: h['ml_score'],
+            probability_getter=lambda h: _parse_probability_percent(h.get('stored_probability')),
+        )
+        if idx not in book:
+            continue
+        if book[idx]['probability_source'] == PROBABILITY_SOURCE_MODEL:
             source_counts['stored'] += 1
-            out.append({**r, 'probability': stored_probability, 'probability_source_field': f'predictions.{stored_probability_column}'})
-            continue
-
-        # Fallback only: if no canonical stored ML probability exists for this
-        # selection, derive the same ML 110% assessed market probability used by
-        # the ML meeting view from persisted ml_score values.
-        book = _derive_ml_race_book(runners, lambda h: h['ml_score'])
-        if idx is None or idx not in book:
-            continue
-        source_counts['derived'] += 1
+            probability_source_field = f'predictions.{stored_probability_column}'
+        else:
+            source_counts['derived'] += 1
+            probability_source_field = 'derived from ML 110% market probabilities'
         out.append({
             **r,
             'probability': book[idx]['ml_probability_110'],
             'kelly_probability': book[idx]['ml_fair_probability'],
-            'probability_source_field': 'derived from ML 110% market probabilities',
+            'probability_source_field': probability_source_field,
         })
 
     if stored_probability_column and source_counts['derived']:
@@ -5932,6 +5956,13 @@ def _ml_model_summary_from_row(row):
         'strike_rate': strike_rate,
         'bets': bets,
         'log_loss': metrics.get('log_loss'),
+        # Race-level probability quality: mean -log P(actual winner) per race,
+        # and the same relative to the FLB-corrected market (negative = the
+        # model's race probabilities beat the market's). The v8 Champion Score
+        # term. None on rows measured before it existed.
+        'race_log_loss': metrics.get('race_log_loss'),
+        'race_log_loss_vs_market': metrics.get('race_log_loss_vs_market'),
+        'race_calibration_beta': (metrics.get('race_calibration') or {}).get('beta'),
         'brier_score': metrics.get('brier_score'),
         'calibration': metrics.get('calibration') or {},
         'validation_period': metrics.get('validation_period') or {},
@@ -6049,6 +6080,9 @@ def ml_data_analytics():
             active_model_metadata['strike_rate'] = champion_backtest.get('strike_rate')
             active_model_metadata['bets'] = champion_backtest.get('bets')
             active_model_metadata['champion_score'] = champion_backtest.get('champion_score')
+            active_model_metadata['race_log_loss'] = champion_backtest.get('race_log_loss')
+            active_model_metadata['race_log_loss_vs_market'] = champion_backtest.get('race_log_loss_vs_market')
+            active_model_metadata['race_calibration_beta'] = champion_backtest.get('race_calibration_beta')
             # The formula that produced champion_score, so the page can refuse to
             # present it as comparable with a challenger scored by another rule.
             active_model_metadata['scoring_formula_version'] = champion_backtest.get('scoring_formula_version')
@@ -6166,20 +6200,31 @@ def ml_meetings():
 
 
 
-def _derive_ml_race_book(runners, score_getter):
-    """Derive ML-only 110% book values from per-runner ml_score values.
+def _derive_ml_race_book(runners, score_getter, probability_getter=None):
+    """Derive ML-only 110% book values for one race's runners.
 
     Returns a mapping of runner index to fair probability, 110% probability
-    percentage, and assessed odds. This mirrors the ML meeting page logic and
-    intentionally does not use Analyzer predicted_odds or win_probability.
+    percentage, assessed odds and where the fair probability came from. This
+    mirrors the ML meeting page logic and intentionally does not use Analyzer
+    predicted_odds or win_probability.
+
+    probability_getter returns a runner's stored race win probability
+    (predictions.ml_win_probability, 0-1) or None. Those are the model's own
+    probabilities and are used whenever the race has any; they are
+    renormalised over the runners that have one, so a late scratching spreads
+    its share over the field. Only a race scored before probabilities were
+    stored falls back to each runner's share of ml_score, and its entries say
+    so ('probability_source'): that share is not a probability, and nothing
+    that sizes a stake or strikes a value edge may read it as one.
     """
-    from ml_predict import derive_ml_fair_probabilities
+    from ml_predict import race_fair_probabilities
 
     # One definition of "the model's fair win probability", shared with the
     # value edge and the Kelly solver in ml_predict, so the book shown on the
     # page and the edge/stake computed against it cannot drift apart.
-    fair_probabilities_list = derive_ml_fair_probabilities(
-        [score_getter(runner) for runner in runners]
+    stored = [probability_getter(runner) for runner in runners] if probability_getter else [None] * len(runners)
+    fair_probabilities_list, probability_source = race_fair_probabilities(
+        stored, [score_getter(runner) for runner in runners],
     )
 
     book = {}
@@ -6193,6 +6238,7 @@ def _derive_ml_race_book(runners, score_getter):
             'ml_probability_110': probability_110,
             'ml_probability_110_pct': probability_110_pct,
             'ml_assessed_odds': (1 / probability_110) if probability_110 > 0 else None,
+            'probability_source': probability_source,
         }
     return book
 
@@ -6263,7 +6309,7 @@ def _apply_joint_kelly_stakes(race, meeting, track_name, date_str):
     This never touches the model's ranking — only the stake beside it.
     """
     from types import SimpleNamespace
-    from ml_predict import compute_kelly_stakes_for_race
+    from ml_predict import compute_kelly_stakes_for_race, live_market_probabilities
 
     race['kelly_market_available'] = False
     for horse in race['horses']:
@@ -6305,7 +6351,20 @@ def _apply_joint_kelly_stakes(race, meeting, track_name, date_str):
     }
     # The same price that sized the stake also settles the value edge, so both
     # are derived here rather than leaving the edge to be filled in client-side
-    # from a second fetch that may never land.
+    # from a second fetch that may never land. The market side of the edge is
+    # the market's FAIR probability — Shin-corrected over the whole active
+    # field when every runner is priced, raw 100/price otherwise — the same
+    # reading compute_live_market_edges_for_meeting and the nightly
+    # validation use (ml_predict.live_market_probabilities).
+    active_horses = [horse for horse in race['horses'] if not horse.get('is_scratched')]
+    market_list, _market_method = live_market_probabilities([
+        _coerce_price((market.get(horse.get('horse_id')) or {}).get('price'))
+        for horse in active_horses
+    ])
+    market_pct_by_horse = {
+        horse.get('horse_id'): (probability * 100.0 if probability is not None else None)
+        for horse, probability in zip(active_horses, market_list)
+    }
     edges = {}
     for horse in race['horses']:
         horse_id = horse.get('horse_id')
@@ -6315,7 +6374,9 @@ def _apply_joint_kelly_stakes(race, meeting, track_name, date_str):
         fair_pct = horse.get('ml_fair_probability_pct')
         if price is None or fair_pct is None or horse.get('is_scratched'):
             continue
-        implied_pct = 100.0 / price
+        implied_pct = market_pct_by_horse.get(horse_id)
+        if implied_pct is None:
+            continue
         horse['ladbrokes_fixed_win_price'] = price
         horse['market_implied_probability_pct'] = round(implied_pct, 2)
         horse['value_edge_pct'] = round(float(fair_pct) - implied_pct, 2)
@@ -6339,6 +6400,8 @@ def _apply_joint_kelly_stakes(race, meeting, track_name, date_str):
 @login_required
 def ml_view_meeting(meeting_id):
     """View a meeting ranked by ML scores."""
+    from ml_predict import PROBABILITY_SOURCE_MODEL
+
     meeting = Meeting.query.get_or_404(meeting_id)
     results = get_meeting_results(meeting_id)
     track_name = _track_from_meeting(meeting)
@@ -6366,7 +6429,11 @@ def ml_view_meeting(meeting_id):
             reverse=True
         )
 
-        ml_book = _derive_ml_race_book(race['horses'], lambda h: None if h.get('is_scratched') else h.get('ml_score'))
+        ml_book = _derive_ml_race_book(
+            race['horses'],
+            lambda h: None if h.get('is_scratched') else h.get('ml_score'),
+            probability_getter=lambda h: None if h.get('is_scratched') else h.get('ml_model_win_probability'),
+        )
 
         for idx, horse in enumerate(race['horses']):
             horse['ml_assessed_odds'] = ''
@@ -6380,10 +6447,14 @@ def ml_view_meeting(meeting_id):
             horse['ml_win_probability'] = f"{book_entry['ml_probability_110_pct']:.1f}%"
             horse['ml_assessed_odds'] = f"${book_entry['ml_assessed_odds']:.2f}"
             # Raw (non-overround) fair win probability, used client-side to
-            # compute this horse's edge over the live market once Ladbrokes
-            # odds are polled in — kept separate from ml_win_probability
-            # above, which is inflated by the 110% book for odds display.
-            horse['ml_fair_probability_pct'] = round(book_entry['ml_fair_probability'] * 100.0, 2)
+            # compute this horse's edge and Kelly stake against the live market
+            # once Ladbrokes odds are polled in — kept separate from
+            # ml_win_probability above, which is inflated by the 110% book for
+            # odds display. Only the model's own stored probability is handed
+            # over: a race scored before those were stored shows its legacy
+            # book for display, but quotes no edge and no stake off it.
+            if book_entry['probability_source'] == PROBABILITY_SOURCE_MODEL:
+                horse['ml_fair_probability_pct'] = round(book_entry['ml_fair_probability'] * 100.0, 2)
 
         # Only races the stored market could not price fall back to fetching a
         # bookmaker live inside the request — the slower, less reliable path
@@ -7800,6 +7871,7 @@ def api_probability_calibration():
         Race.race_number,
         Prediction.win_probability,
         Prediction.ml_score,
+        Prediction.ml_win_probability,
         Result.finish_position
     ).join(Race,       Race.meeting_id      == Meeting.id
     ).join(Horse,      Horse.race_id        == Race.id
@@ -7827,11 +7899,14 @@ def api_probability_calibration():
 
     races = defaultdict(list)
     race_keys_ordered = []
-    for meeting_id, race_num, win_prob, ml_score, finish_pos in rows:
+    for meeting_id, race_num, win_prob, ml_score, ml_win_probability, finish_pos in rows:
         key = (meeting_id, race_num)
         if key not in races:
             race_keys_ordered.append(key)
-        races[key].append({'win_prob': win_prob, 'ml_score': ml_score, 'finish_pos': finish_pos})
+        races[key].append({
+            'win_prob': win_prob, 'ml_score': ml_score,
+            'ml_win_probability': ml_win_probability, 'finish_pos': finish_pos,
+        })
 
     if limit_param != 'all':
         limit = int(limit_param) if str(limit_param).isdigit() else 200
@@ -7858,7 +7933,9 @@ def api_probability_calibration():
     for key, horse_list in races.items():
         if key not in allowed:
             continue
-        ml_book = _derive_ml_race_book(horse_list, lambda h: h['ml_score']) if use_ml else {}
+        ml_book = _derive_ml_race_book(
+            horse_list, lambda h: h['ml_score'], probability_getter=lambda h: h['ml_win_probability'],
+        ) if use_ml else {}
         for idx, h in enumerate(horse_list):
             if use_ml:
                 book_entry = ml_book.get(idx)
@@ -8047,7 +8124,10 @@ def api_price_analysis():
             reverse=True
         )
 
-        ml_book = _derive_ml_race_book(horses_sorted, lambda h: h['prediction'].ml_score) if use_ml else {}
+        ml_book = _derive_ml_race_book(
+            horses_sorted, lambda h: h['prediction'].ml_score,
+            probability_getter=lambda h: getattr(h['prediction'], 'ml_win_probability', None),
+        ) if use_ml else {}
 
         # ── Top-N picks overlay ───────────────────────────────────────────────
         for rank_idx, runner in enumerate(horses_sorted[:top_n]):
@@ -10863,7 +10943,8 @@ def api_betting_filters():
         Prediction.predicted_odds,
         Result.finish_position,
         Result.sp,
-        Prediction.ml_score
+        Prediction.ml_score,
+        Prediction.ml_win_probability
     ).join(Race,       Race.meeting_id      == Meeting.id
     ).join(Horse,      Horse.race_id        == Race.id
     ).join(Prediction, Prediction.horse_id  == Horse.id
@@ -10925,7 +11006,9 @@ def api_betting_filters():
     for key, horses in races_map.items():
         top = max(horses, key=lambda x: (x.ml_score or 0) if use_ml else (x[4] or 0))
         if use_ml:
-            ml_book = _derive_ml_race_book(horses, lambda h: h.ml_score)
+            ml_book = _derive_ml_race_book(
+                horses, lambda h: h.ml_score, probability_getter=lambda h: h.ml_win_probability,
+            )
             top_idx = horses.index(top)
             book_entry = ml_book.get(top_idx)
             if not book_entry:

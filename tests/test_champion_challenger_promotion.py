@@ -197,6 +197,8 @@ def champion_row(champion_score=10.0, fold_rois=None):
         "roi": 4.0,
         "strike_rate": 22.0,
         "log_loss": 0.6,
+        "race_log_loss": 2.0,
+        "race_log_loss_vs_market": 0.05,
         "brier_score": 0.2,
         "calibration": {"expected_calibration_error": 0.01},
         "stability": {"roi_last_100": 4.0, "roi_last_250": 4.0},
@@ -253,6 +255,8 @@ def metrics(selection_score=11.0, roi=5.0, strike_rate=20.0, bets=150, walk_forw
         "bankroll_growth": 1.1,
         "volatility": 0.7,
         "log_loss": 0.6,
+        "race_log_loss": 2.0,
+        "race_log_loss_vs_market": 0.05,
         "brier_score": 0.2,
         "calibration": {"expected_calibration_error": 0.01},
         "stability": {"roi_last_100": roi, "roi_last_250": roi},
@@ -832,7 +836,8 @@ def _setup_heal_env(monkeypatch, conn, meeting_dates=None, walk_forward_result=N
 
 
 def test_check_active_champion_staleness_self_heals_without_rollback(monkeypatch):
-    champion_metrics = {"selection_score": 10.0, "roi": 4.0, "strike_rate": 18.0}
+    champion_metrics = {"selection_score": 10.0, "roi": 4.0, "strike_rate": 18.0,
+                        "race_log_loss": 2.0, "race_log_loss_vs_market": 0.05}
     conn = FakeHealConnection(
         champion_row=(101, json.dumps(champion_metrics)),
         pkl_bytes=_pkl_bytes(DummySavedModel()),
@@ -883,9 +888,11 @@ def test_champion_carrying_pre_joint_kelly_metrics_is_fully_re_validated(monkeyp
 
 
 def test_check_active_champion_staleness_self_heals_and_rolls_back(monkeypatch):
-    champion_metrics = {"selection_score": 10.0, "roi": 4.0, "strike_rate": 18.0}
+    champion_metrics = {"selection_score": 10.0, "roi": 4.0, "strike_rate": 18.0,
+                        "race_log_loss": 2.0, "race_log_loss_vs_market": 0.05}
     rejected_metrics = {
         "roi": 50.0, "strike_rate": 40.0,
+        "race_log_loss": 2.0, "race_log_loss_vs_market": 0.05,
         "walk_forward": {"folds": [{"roi": 50.0, "bets": 50}, {"roi": 55.0, "bets": 50}], "roi_std": 0.1},
     }
     rejected_row = (555, "random_forest", "RF Challenger", 5.0, json.dumps(rejected_metrics), _pkl_bytes(DummySavedModel()))
@@ -1088,6 +1095,7 @@ def test_featureless_model_cannot_be_activated_by_direct_rollback(monkeypatch):
     activate an unusable model."""
     eligible_metrics = {
         "roi": 5.0, "strike_rate": 20.0, "log_loss": 0.6, "brier_score": 0.2,
+        "race_log_loss": 2.0, "race_log_loss_vs_market": 0.05,
         "calibration": {"expected_calibration_error": 0.01},
         "stability": {"roi_last_100": 5.0, "roi_last_250": 5.0},
         "scoring_formula_version": backtest.SCORING_FORMULA_VERSION,
@@ -1591,3 +1599,58 @@ def test_fallback_promotion_prefers_no_champion_over_the_best_of_a_stale_field(m
 
     assert len(rollback_calls) == 1
     assert rollback_calls[0][0] == 90, "the current-era candidate must win over a higher-scoring stale one"
+
+
+def test_champion_measured_before_race_log_loss_is_fully_re_validated(monkeypatch):
+    """The v8 Champion Score reads the race-level log loss. A champion stored
+    before that metric existed has no such number, and bolting walk-forward
+    folds onto its old metrics would leave it scored by the legacy per-horse
+    term while every challenger is scored by the race-level one — so its raw
+    metrics are rebuilt from a full re-validation."""
+    champion_metrics = {"selection_score": 10.0, "roi": 4.0, "strike_rate": 18.0}
+    conn = FakeHealConnection(
+        champion_row=(101, json.dumps(champion_metrics)),
+        pkl_bytes=_pkl_bytes(DummyScoringModel()),
+        is_active=True,
+        rejected_rows=[],
+    )
+    _setup_heal_env(monkeypatch, conn)
+
+    backtest.check_active_champion_staleness(run_id=42)
+
+    updated_metrics = json.loads(conn.updated_champion["metrics"])
+    assert "race_log_loss" in updated_metrics
+    assert "race_log_loss_vs_market" in updated_metrics
+    assert updated_metrics["scoring_formula_version"] == backtest.SCORING_FORMULA_VERSION
+
+
+def test_rollback_ignores_challengers_measured_before_race_log_loss(monkeypatch):
+    """A rejected challenger with no race-level log loss on record can only be
+    scored by the legacy rule, so however well it scores it is not a fair
+    rollback target on Champion Score."""
+    champion_metrics = {"selection_score": 10.0, "roi": 4.0, "strike_rate": 18.0,
+                        "race_log_loss": 2.0, "race_log_loss_vs_market": 0.05}
+    legacy_rejected_metrics = {
+        "roi": 50.0, "strike_rate": 40.0,
+        "walk_forward": {"folds": [{"roi": 50.0, "bets": 50}, {"roi": 55.0, "bets": 50}], "roi_std": 0.1},
+    }
+    rejected_row = (555, "random_forest", "Legacy RF", 5.0, json.dumps(legacy_rejected_metrics),
+                    _pkl_bytes(DummySavedModel()))
+    conn = FakeHealConnection(
+        champion_row=(101, json.dumps(champion_metrics)),
+        pkl_bytes=_pkl_bytes(DummySavedModel()),
+        is_active=True,
+        rejected_rows=[rejected_row],
+    )
+    _setup_heal_env(monkeypatch, conn)
+
+    rollback_calls = []
+    monkeypatch.setattr(
+        backtest, "rollback_to_champion",
+        lambda model_id, reason='': rollback_calls.append((model_id, reason)),
+    )
+
+    backtest.check_active_champion_staleness(run_id=42)
+
+    assert rollback_calls == []
+    assert conn.updated_champion is not None

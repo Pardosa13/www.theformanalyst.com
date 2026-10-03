@@ -117,7 +117,16 @@ class Prediction(db.Model):
     notes = db.Column(db.Text)
     calculated_at = db.Column(db.DateTime, default=datetime.utcnow)
     best_bet_flagged_at = db.Column(db.DateTime, nullable=True)  # NEW: Track when this appeared on Best Bets
+    # Display ranking score: the model's probabilities stretched onto 0-100
+    # within each race (top runner 100, bottom 0). For ordering only — never a
+    # probability. See ml_win_probability.
     ml_score = db.Column(db.Float, nullable=True)
+    # The model's own race win probability for this runner (0-1, summing to 1
+    # across the race's field at scoring time, after any validated market
+    # blend). The only number value edge, Kelly staking and the ML book may
+    # read as "how likely is this horse to win". NULL for runners scored before
+    # it was stored; those races are not priced until re-scored.
+    ml_win_probability = db.Column(db.Float, nullable=True)
     # Snapshot of the live, pre-race Ladbrokes badges shown on Best Bets.  The
     # bit mask is 1=sweet spot, 2=full consensus and 4=20+ ML gap.
     ladbrokes_signal_mask = db.Column(db.Integer, nullable=False, default=0)

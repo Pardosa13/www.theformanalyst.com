@@ -64,7 +64,7 @@ def _metrics():
 def test_scoring_formula_version_records_the_change():
     # A change to how selection_score is computed must invalidate every stored
     # model, which is what a new version string triggers.
-    assert backtest.SCORING_FORMULA_VERSION == 'champion_score_v7_flb_corrected_ae'
+    assert backtest.SCORING_FORMULA_VERSION == 'champion_score_v8_race_log_loss'
 
 
 def test_a_e_ratio_is_measured_against_corrected_probabilities():

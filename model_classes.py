@@ -320,6 +320,341 @@ if _main_module is not None and not hasattr(_main_module, 'RaceGroupedRanker'):
 
 
 # ─────────────────────────────────────────────
+# CONDITIONAL LOGIT (RACE-LEVEL CALIBRATION)
+# ─────────────────────────────────────────────
+# A model's per-runner output is not a race probability, however it was
+# produced:
+#
+#   * a pointwise classifier scores each runner alone, so its numbers do not
+#     sum to 1 across a field and know nothing about who else is running;
+#   * a ranker's softmax does sum to 1, but the ranker was trained on the
+#     ORDER of runners, never on how confident to be, so the spread of its
+#     softmax (too sharp or too flat) is an accident of the score scale.
+#
+# Dividing by the race total fixes the first problem and not the second.
+# What fixes both is the first stage of Benter's (1994) model: a conditional
+# logit fitted on races the model has not seen,
+#
+#     P(runner i wins race r) = exp(beta * x_i) / sum_{j in r} exp(beta * x_j)
+#
+# where x_i = log(model output for i). beta is chosen to maximise the
+# likelihood of the runners that actually won, so it is measured on whole
+# races rather than on horses in isolation. beta = 1 is plain "divide by the
+# race total"; beta > 1 means the model was too timid and is sharpened;
+# beta < 1 means it was overconfident and is flattened. Because everything is
+# expressed per race, a late scratching is handled by simply renormalising
+# over the runners left — no refit needed.
+
+CONDITIONAL_LOGIT_PROBABILITY_FLOOR = 1e-6
+# Wide enough for any honest model, narrow enough that a degenerate
+# calibration slice cannot push the output to one-horse certainty or to a
+# uniform field.
+CONDITIONAL_LOGIT_BETA_BOUNDS = (0.05, 5.0)
+# Fewer winning races than this is too little evidence to move beta away from
+# 1.0 (plain renormalisation), so beta stays there and the reason is recorded.
+CONDITIONAL_LOGIT_MIN_RACES = 30
+CONDITIONAL_LOGIT_CALIBRATION_FRACTION = 0.2
+
+
+def _race_codes(race_ids):
+    """Integer race code per row, plus the number of races."""
+    keys = [str(r) for r in race_ids]
+    lookup = {}
+    codes = np.empty(len(keys), dtype=int)
+    for position, key in enumerate(keys):
+        codes[position] = lookup.setdefault(key, len(lookup))
+    return codes, len(lookup)
+
+
+def _grouped_log_softmax(values, codes, n_groups):
+    """log softmax of `values` within each group, vectorised."""
+    group_max = np.full(n_groups, -np.inf)
+    np.maximum.at(group_max, codes, values)
+    shifted = values - group_max[codes]
+    group_sum = np.zeros(n_groups)
+    np.add.at(group_sum, codes, np.exp(shifted))
+    return shifted - np.log(group_sum[codes])
+
+
+def _log_model_outputs(base_probabilities):
+    """log of a model's per-runner outputs, floored so log is always finite.
+
+    A non-finite or non-positive output is treated as the floor: it is a
+    runner the model gives no chance, not a runner to drop, because dropping
+    it would hand its share of the race to everyone else.
+    """
+    values = np.asarray(base_probabilities, dtype=float)
+    values = np.where(np.isfinite(values), values, CONDITIONAL_LOGIT_PROBABILITY_FLOOR)
+    return np.log(np.clip(values, CONDITIONAL_LOGIT_PROBABILITY_FLOOR, None))
+
+
+def race_conditional_logit(base_probabilities, race_ids, beta=1.0):
+    """Race win probabilities from per-runner model outputs and a fitted beta.
+
+    Returns an array aligned with the input that sums to exactly 1.0 within
+    each race. beta = 1.0 reduces to dividing each output by its race total.
+    """
+    values = _log_model_outputs(base_probabilities)
+    if values.size == 0:
+        return values
+    codes, n_groups = _race_codes(race_ids)
+    return np.exp(_grouped_log_softmax(float(beta) * values, codes, n_groups))
+
+
+def _winner_rows(won, codes, n_groups):
+    """Row index of each race's single winner, for races that have exactly one.
+
+    Races with no recorded winner or a dead heat carry no clean answer to
+    "which runner won", and a one-runner race carries no information about the
+    field at all — all three are left out of the likelihood.
+    """
+    won = np.asarray(won, dtype=float)
+    winners = np.zeros(n_groups)
+    np.add.at(winners, codes, (won == 1).astype(float))
+    runners = np.bincount(codes, minlength=n_groups)
+    usable = (winners == 1) & (runners >= 2)
+    rows = np.flatnonzero((won == 1) & usable[codes])
+    return rows, usable
+
+
+def race_winner_log_loss(probabilities, won, race_ids):
+    """Mean of -log P(actual winner) over races, after renormalising each race.
+
+    This is the race-level proper scoring rule: it rewards exactly one thing,
+    putting probability on the runner that won. Each race is renormalised
+    first, so a model whose raw outputs do not sum to 1 is scored on the
+    probabilities it implies rather than penalised for its scale.
+
+    Returns `(mean_log_loss, n_races)`, or `(None, 0)` when no race qualifies.
+    """
+    probabilities = np.asarray(probabilities, dtype=float)
+    if probabilities.size == 0:
+        return None, 0
+    codes, n_groups = _race_codes(race_ids)
+    rows, _usable = _winner_rows(won, codes, n_groups)
+    if rows.size == 0:
+        return None, 0
+    log_probabilities = _grouped_log_softmax(_log_model_outputs(probabilities), codes, n_groups)
+    return float(-np.mean(log_probabilities[rows])), int(rows.size)
+
+
+def fit_conditional_logit_beta(base_probabilities, won, race_ids,
+                               bounds=CONDITIONAL_LOGIT_BETA_BOUNDS,
+                               min_races=CONDITIONAL_LOGIT_MIN_RACES):
+    """Maximum-likelihood beta for race_conditional_logit on held-out races.
+
+    The conditional logit log-likelihood is concave in beta, so a bounded
+    one-dimensional search finds the global optimum. Returns a dict with the
+    chosen beta, how many races it was fitted on, and the mean winner log loss
+    at the fitted beta and at beta = 1.0, so the improvement it bought can be
+    read straight off the artifact.
+    """
+    values = _log_model_outputs(base_probabilities)
+    codes, n_groups = _race_codes(race_ids)
+    rows, _usable = _winner_rows(won, codes, n_groups)
+    n_races = int(rows.size)
+
+    def mean_log_loss(beta):
+        log_probabilities = _grouped_log_softmax(beta * values, codes, n_groups)
+        return float(-np.mean(log_probabilities[rows]))
+
+    if n_races < min_races:
+        return {
+            'beta': 1.0,
+            'races': n_races,
+            'status': 'insufficient_races',
+            'log_loss': mean_log_loss(1.0) if n_races else None,
+            'identity_log_loss': mean_log_loss(1.0) if n_races else None,
+        }
+
+    from scipy.optimize import minimize_scalar
+
+    result = minimize_scalar(mean_log_loss, bounds=bounds, method='bounded',
+                             options={'xatol': 1e-4})
+    beta = float(result.x) if result.success and np.isfinite(result.x) else 1.0
+    identity = mean_log_loss(1.0)
+    fitted = mean_log_loss(beta)
+    if fitted > identity:
+        # Bounded search should never do worse than a point inside its own
+        # bounds, but if it ever does, plain renormalisation is the safe answer.
+        beta, fitted = 1.0, identity
+    return {
+        'beta': beta,
+        'races': n_races,
+        'status': 'fitted',
+        'log_loss': fitted,
+        'identity_log_loss': identity,
+    }
+
+
+def _per_runner_outputs(model, X, race_ids):
+    """A fitted model's per-runner output, with its race grouping armed.
+
+    The grouping only matters for race-aware models (a ranker, an ensemble
+    holding one), and set_race_context is a no-op for everything else.
+    """
+    set_race_context(model, race_ids)
+    try:
+        if hasattr(model, 'predict_proba'):
+            proba = np.asarray(model.predict_proba(X), dtype=float)
+            return proba[:, 1] if proba.ndim == 2 and proba.shape[1] > 1 else proba.ravel()
+        return np.asarray(model.predict(X), dtype=float)
+    finally:
+        set_race_context(model, None)
+
+
+def _take_rows(data, rows):
+    return data.iloc[rows] if hasattr(data, 'iloc') else np.asarray(data)[rows]
+
+
+class RaceConditionalLogit(BaseEstimator):
+    """Any candidate model, with a conditional logit fitted on top of it.
+
+    fit() holds back the most recent `calibration_fraction` of races, fits the
+    wrapped model on the earlier ones, and fits beta on how that model did on
+    the held-back races — races it never saw. With refit_full (the default)
+    the wrapped model is then refitted on every race, so the shipped model
+    still learns from the most recent form; beta is kept from the held-out
+    fit. That is the same trade CalibratedClassifierCV(ensemble=False) makes.
+
+    Rows must arrive in chronological order, as everywhere else in this
+    pipeline: the calibration races are the LAST ones by first appearance.
+
+    Like RaceGroupedRanker, fit() needs to know the race of every row — from
+    race_ids= or a prior set_race_context() — and refuses to guess. predict
+    with no context treats X as one race, which is what ml_predict's per-race
+    scoring loop wants.
+    """
+
+    def __init__(self, estimator, calibration_fraction=CONDITIONAL_LOGIT_CALIBRATION_FRACTION,
+                 min_calibration_races=CONDITIONAL_LOGIT_MIN_RACES, refit_full=True):
+        self.estimator = estimator
+        self.calibration_fraction = calibration_fraction
+        self.min_calibration_races = min_calibration_races
+        self.refit_full = refit_full
+
+    def set_race_context(self, race_ids):
+        self._race_context = None if race_ids is None else [str(r) for r in race_ids]
+        return self
+
+    def _race_ids_for(self, n_rows, explicit=None):
+        if explicit is not None:
+            return [str(r) for r in explicit]
+        context = getattr(self, '_race_context', None)
+        if context is not None and len(context) == n_rows:
+            return context
+        return None
+
+    @staticmethod
+    def _fit_member(model, X, y, race_ids):
+        set_race_context(model, race_ids)
+        try:
+            model.fit(X, y)
+        finally:
+            set_race_context(model, None)
+        return model
+
+    def fit(self, X, y, race_ids=None):
+        resolved = self._race_ids_for(len(X), race_ids)
+        if resolved is None:
+            raise ValueError(
+                "RaceConditionalLogit.fit needs the race each row belongs to. Pass "
+                "race_ids=, or call set_race_context() first. beta is a race-level "
+                "quantity and cannot be fitted without races."
+            )
+        try:
+            self.feature_names_in_ = np.asarray(list(X.columns)) if hasattr(X, 'columns') else None
+
+            race_order = []
+            seen = set()
+            for race_id in resolved:
+                if race_id not in seen:
+                    seen.add(race_id)
+                    race_order.append(race_id)
+            n_races = len(race_order)
+            n_calibration = int(np.floor(n_races * float(self.calibration_fraction)))
+            enough = (
+                n_calibration >= self.min_calibration_races
+                and (n_races - n_calibration) >= self.min_calibration_races
+            )
+
+            if not enough:
+                self.estimator_ = self._fit_member(clone(self.estimator), X, y, resolved)
+                self.beta_ = 1.0
+                self.calibration_ = {
+                    'beta': 1.0, 'races': 0, 'status': 'insufficient_races',
+                    'log_loss': None, 'identity_log_loss': None,
+                    'total_races': n_races,
+                }
+                return self
+
+            calibration_races = set(race_order[n_races - n_calibration:])
+            in_calibration = np.array([race_id in calibration_races for race_id in resolved])
+            train_rows = np.flatnonzero(~in_calibration)
+            calibration_rows = np.flatnonzero(in_calibration)
+            train_race_ids = [resolved[i] for i in train_rows]
+            calibration_race_ids = [resolved[i] for i in calibration_rows]
+            y_calibration = np.asarray(_take_rows(y, calibration_rows), dtype=float)
+
+            held_out_model = self._fit_member(
+                clone(self.estimator), _take_rows(X, train_rows), _take_rows(y, train_rows), train_race_ids,
+            )
+            outputs = _per_runner_outputs(held_out_model, _take_rows(X, calibration_rows), calibration_race_ids)
+            fit = fit_conditional_logit_beta(
+                outputs, y_calibration, calibration_race_ids, min_races=self.min_calibration_races,
+            )
+
+            if self.refit_full:
+                self.estimator_ = self._fit_member(clone(self.estimator), X, y, resolved)
+            else:
+                self.estimator_ = held_out_model
+            self.beta_ = float(fit['beta'])
+            self.calibration_ = {**fit, 'total_races': n_races, 'refit_full': bool(self.refit_full)}
+            return self
+        finally:
+            self.set_race_context(None)
+
+    def predict_win_probabilities(self, X, race_ids=None):
+        resolved = self._race_ids_for(len(X), race_ids)
+        if resolved is None:
+            resolved = ['__single_race__'] * len(X)
+        try:
+            outputs = _per_runner_outputs(self.estimator_, X, resolved)
+            return race_conditional_logit(outputs, resolved, self.beta_)
+        finally:
+            # Same rule as RaceGroupedRanker: the context describes one call.
+            self.set_race_context(None)
+
+    def predict(self, X):
+        return self.predict_win_probabilities(X)
+
+    def predict_proba(self, X):
+        probabilities = self.predict_win_probabilities(X)
+        return np.column_stack([1.0 - probabilities, probabilities])
+
+
+if _main_module is not None and not hasattr(_main_module, 'RaceConditionalLogit'):
+    _main_module.RaceConditionalLogit = RaceConditionalLogit
+
+
+def race_normalised_win_probabilities(model, X, race_ids=None):
+    """Race win probabilities from ANY model artifact, old or new.
+
+    A RaceConditionalLogit already returns them. Anything older — a bare
+    classifier, a ranker, a ConsensusRegressor of either — is given the
+    conditional logit at beta = 1.0, i.e. its outputs divided by the race
+    total: the one calibration-free reading that still sums to 1 per race.
+    race_ids=None treats X as a single race.
+    """
+    if race_ids is None:
+        race_ids = ['__single_race__'] * len(X)
+    race_ids = [str(r) for r in race_ids]
+    if isinstance(model, RaceConditionalLogit):
+        return model.predict_win_probabilities(X, race_ids=race_ids)
+    return race_conditional_logit(_per_runner_outputs(model, X, race_ids), race_ids, 1.0)
+
+
+# ─────────────────────────────────────────────
 # JOINT (MULTI-OUTCOME) KELLY STAKING
 # ─────────────────────────────────────────────
 # backtest.py's validation bankroll simulation and ml_predict.py's live stake

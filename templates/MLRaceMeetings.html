@@ -2935,7 +2935,69 @@ var edgeHighlightEnabled = false;
 var edgeSortEnabled = false;
 var _edgeOriginalOrder = {}; // raceNumber -> array of <tr> in server (score) order
 
-function updateEdgeCell(row, horseOdds) {
+// ── Market fair probability — port of market_probability.fair_probabilities
+// (Shin 1992/93) and ml_predict.live_market_probabilities. The server prices
+// edges against the market's FAIR probability: the bookmaker's margin and the
+// favourite-longshot bias taken out of the whole book at once. A live poll
+// must read the price the same way, or a repainted edge would disagree with
+// the one the server stored for the very same price.
+var SHIN_MAX_ITERATIONS = 100;
+var SHIN_CONVERGENCE_TOL = 1e-10;
+
+function shinFairProbabilities(prices) {
+    var raw = prices.map(function(price) { return 1 / price; });
+    var book = raw.reduce(function(sum, value) { return sum + value; }, 0);
+    var naive = raw.map(function(value) { return value / book; });
+    // An underround (or exactly fair) book has no margin to attribute: naive
+    // normalisation is the answer there, as on the server.
+    if (book <= 1 + SHIN_CONVERGENCE_TOL) return naive;
+
+    function impliedSum(z) {
+        if (z >= 1 - 1e-12) return 1;
+        return raw.reduce(function(sum, value) {
+            var inner = Math.sqrt((z * z) + (4 * (1 - z) * value * value / book));
+            return sum + ((inner - z) / (2 * (1 - z)));
+        }, 0);
+    }
+
+    var low = 0, high = 1 - 1e-9, z = null;
+    for (var i = 0; i < SHIN_MAX_ITERATIONS; i++) {
+        var mid = 0.5 * (low + high);
+        var value = impliedSum(mid);
+        if (Math.abs(value - 1) < SHIN_CONVERGENCE_TOL) { z = mid; break; }
+        if (value > 1) { low = mid; } else { high = mid; }
+        if ((high - low) < SHIN_CONVERGENCE_TOL) break;
+    }
+    if (z === null) {
+        var candidate = 0.5 * (low + high);
+        if (Math.abs(impliedSum(candidate) - 1) > 1e-6) return naive;
+        z = candidate;
+    }
+    var fair = raw.map(function(value) {
+        var inner = Math.sqrt((z * z) + (4 * (1 - z) * value * value / book));
+        return (inner - z) / (2 * (1 - z));
+    });
+    var total = fair.reduce(function(sum, value) { return sum + value; }, 0);
+    if (!isFinite(total) || total <= 0) return naive;
+    return fair.map(function(value) { return value / total; });
+}
+
+// prices: one entry per ACTIVE runner in the race, NaN where unpriced.
+// Returns market probability percentages aligned with it (NaN where
+// unpriced). Shin only runs on a complete book: on a partial one it would
+// hand the missing runners' share to the priced ones and overstate them, so
+// a partly priced race falls back to raw 100/price, which understates edge —
+// the safe direction to be wrong in.
+function marketFairPcts(prices) {
+    var usable = prices.map(function(price) { return isFinite(price) && price > 1; });
+    var complete = prices.length >= 2 && usable.every(Boolean);
+    if (!complete) {
+        return prices.map(function(price, i) { return usable[i] ? 100 / price : NaN; });
+    }
+    return shinFairProbabilities(prices).map(function(probability) { return probability * 100; });
+}
+
+function updateEdgeCell(row, horseOdds, marketPct) {
     var edgeCell = row.querySelector('.edge-cell .edge-value');
     if (!edgeCell) return;
 
@@ -2951,7 +3013,7 @@ function updateEdgeCell(row, horseOdds) {
         return;
     }
 
-    var impliedPct = 100 / price;
+    var impliedPct = (marketPct !== undefined && isFinite(marketPct)) ? marketPct : 100 / price;
     var edge = mlProbPct - impliedPct;
     row.dataset.edge = edge;
 
@@ -3188,6 +3250,23 @@ function toggleEdgeSort() {
         // decided inside a per-row pass the way the edge can.
         var kellyEntries = [];
 
+        // The market's fair probability is a property of the whole book, so
+        // it is solved once per race from every active runner's price before
+        // any row's edge is painted.
+        var activeRows = [];
+        var activePrices = [];
+        raceCard.querySelectorAll('tbody tr').forEach(function(row) {
+            if (row.classList.contains('horse-scratched')) return;
+            var activeNameCell = row.cells[1];
+            var activeNameSpan = activeNameCell ? activeNameCell.querySelector(HORSE_NAME_SELECTOR) : null;
+            var activeOdds = activeNameSpan ? odds[lbNorm(activeNameSpan.textContent)] : null;
+            activeRows.push(row);
+            activePrices.push(activeOdds && activeOdds.win ? parseFloat(activeOdds.win) : NaN);
+        });
+        var activeMarketPcts = marketFairPcts(activePrices);
+        var marketPctByRow = new Map();
+        activeRows.forEach(function(row, i) { marketPctByRow.set(row, activeMarketPcts[i]); });
+
         raceCard.querySelectorAll('tbody tr').forEach(function(row) {
             var nameCell = row.cells[1]; // td:nth-child(2) — horse name + silk
             var oddsCell = row.cells[4]; // td:nth-child(5) — dedicated Ladbrokes Price column
@@ -3200,11 +3279,11 @@ function toggleEdgeSort() {
 
             var horseOdds = odds[normName];
 
-            // ── 0. VALUE EDGE — model fair win% minus market implied% ──
+            // ── 0. VALUE EDGE — model fair win% minus market fair win% ──
             // Display-only: every row keeps its edge cell updated (or reset
             // to "—" when the market price isn't available yet); nothing is
             // ever hidden or filtered out based on this value.
-            updateEdgeCell(row, horseOdds);
+            updateEdgeCell(row, horseOdds, marketPctByRow.get(row));
 
             // ── 0b. KELLY STAKE INPUT ─────────────────────────────────
             // Same price and same fair probability the edge above was just
