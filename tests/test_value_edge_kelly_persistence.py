@@ -68,9 +68,10 @@ def test_a_race_with_no_usable_scores_yields_no_probabilities():
 # ── Fakes: just enough ORM surface for the pricing pass ──────────────────────
 
 class _Prediction:
-    def __init__(self, horse_id, ml_score):
+    def __init__(self, horse_id, ml_score, ml_win_probability=None):
         self.horse_id = horse_id
         self.ml_score = ml_score
+        self.ml_win_probability = ml_win_probability
         self.value_edge_pct = None
         self.value_edge_ml_win_prob_pct = None
         self.value_edge_price = None
@@ -78,12 +79,20 @@ class _Prediction:
         self.kelly_stake_pct = None
 
 
+# Sentinel: by default a fake runner's stored win probability is its ml_score
+# read as percentage points, so the fixtures below describe a race the model
+# rates 40/30/20/10% exactly as they read.
+_FROM_SCORE = object()
+
+
 class _Horse:
-    def __init__(self, horse_id, ml_score, is_scratched=False):
+    def __init__(self, horse_id, ml_score, is_scratched=False, probability=_FROM_SCORE):
         self.id = horse_id
         self.horse_name = f"Horse {horse_id}"
         self.is_scratched = is_scratched
-        self.prediction = _Prediction(horse_id, ml_score)
+        if probability is _FROM_SCORE:
+            probability = (ml_score / 100.0) if ml_score else None
+        self.prediction = _Prediction(horse_id, ml_score, probability)
 
 
 class _Race:
@@ -182,12 +191,17 @@ def _one_race_meeting(monkeypatch, scores_and_prices, **kwargs):
 
 # ── The pricing pass ─────────────────────────────────────────────────────────
 
+def _fair_market_pct(prices):
+    from market_probability import fair_probabilities
+    return [p * 100.0 for p in fair_probabilities(prices)]
+
+
 def test_every_priced_runner_gets_an_edge_and_a_stake(monkeypatch):
-    # 40/30/20/10 of a 100-point book -> fair 40/30/20/10%.
-    # Prices imply 20/40/8.3/28.6% -> edges +20.0 / -10.0 / +11.67 / -18.57pp.
-    session, _race = _one_race_meeting(monkeypatch, [
-        (40.0, 5.00), (30.0, 2.50), (20.0, 12.00), (10.0, 3.50),
-    ])
+    # The model's stored probabilities are 40/30/20/10%. Every runner is
+    # priced, so the market side is the whole book's fair probability
+    # (market_probability.fair_probabilities), not raw 100/price.
+    prices = [5.00, 2.50, 12.00, 3.50]
+    session, _race = _one_race_meeting(monkeypatch, list(zip([40.0, 30.0, 20.0, 10.0], prices)))
     edges, diagnostics = ml_predict.compute_live_market_edges_for_meeting(1, session)
 
     assert diagnostics['races_priced'] == 1
@@ -195,10 +209,11 @@ def test_every_priced_runner_gets_an_edge_and_a_stake(monkeypatch):
     assert diagnostics['runners_with_edge'] == 4
     assert diagnostics['races_failed'] == 0
 
-    assert edges[1]['value_edge_pct'] == 20.0
-    assert edges[2]['value_edge_pct'] == -10.0
-    assert edges[3]['value_edge_pct'] == 11.67
-    assert edges[4]['value_edge_pct'] == -18.57
+    market = _fair_market_pct(prices)
+    for horse_id, model_pct in zip((1, 2, 3, 4), (40.0, 30.0, 20.0, 10.0)):
+        assert edges[horse_id]['ml_fair_probability_pct'] == model_pct
+        assert edges[horse_id]['market_implied_probability_pct'] == round(market[horse_id - 1], 2)
+        assert abs(edges[horse_id]['value_edge_pct'] - (model_pct - market[horse_id - 1])) <= 0.01
 
     # The two runners the model rates above the market are the ones staked.
     assert edges[1]['kelly_stake_pct'] > 0
@@ -210,7 +225,7 @@ def test_every_priced_runner_gets_an_edge_and_a_stake(monkeypatch):
 def test_a_negative_edge_is_recorded_rather_than_dropped(monkeypatch):
     """"The model rates this one below the market" is a real answer the ML Data
     buckets need — it is the control group the 20pp cutoff is judged against."""
-    session, _race = _one_race_meeting(monkeypatch, [(30.0, 2.50), (70.0, 1.20)])
+    session, _race = _one_race_meeting(monkeypatch, [(30.0, 2.20), (70.0, 1.20)])
     edges, _diagnostics = ml_predict.compute_live_market_edges_for_meeting(1, session)
     assert edges[1]['value_edge_pct'] < 0
     assert edges[1]['kelly_stake_pct'] == 0.0
@@ -296,7 +311,8 @@ def test_persist_writes_both_columns_onto_the_prediction_rows(monkeypatch):
 
     assert updated == 3
     by_id = {p.horse_id: p for p in session.predictions}
-    assert by_id[1].value_edge_pct == 20.0
+    assert by_id[1].value_edge_pct == edges[1]['value_edge_pct']
+    assert by_id[1].value_edge_pct > 0
     assert by_id[1].value_edge_price == 5.00
     assert by_id[1].value_edge_ml_win_prob_pct == 40.0
     assert by_id[1].value_edge_captured_at is not None

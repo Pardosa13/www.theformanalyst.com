@@ -83,8 +83,8 @@ from strike_rate_matching import (
     get_sr_win_pct, get_sr_win_pct_asof, log_match_stats, normalize_name,
 )
 from model_classes import (
-    MARKET_BLEND_ALPHA_ATTR, ConsensusRegressor, RaceGroupedRanker,
-    set_race_context, solve_joint_kelly,
+    MARKET_BLEND_ALPHA_ATTR, ConsensusRegressor, RaceConditionalLogit, RaceGroupedRanker,
+    race_winner_log_loss, set_race_context, solve_joint_kelly,
 )
 from book_quality import SUSPICIOUS_OVERROUND, unusable_race_ids
 from market_probability import (
@@ -2774,7 +2774,7 @@ MIN_WALK_FORWARD_FOLDS = int(os.environ.get('ML_MIN_WALK_FORWARD_FOLDS', '2'))
 # of) the fixed Champion Score edge above.
 PROMOTION_MAX_BOOTSTRAP_P_VALUE = float(os.environ.get('ML_PROMOTION_MAX_P_VALUE', '0.25'))
 MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
-SCORING_FORMULA_VERSION = 'champion_score_v7_flb_corrected_ae'
+SCORING_FORMULA_VERSION = 'champion_score_v8_race_log_loss'
 # Sanity bound for a recomputed Champion Score, used only by the fallback
 # promotion path. Every real score on record sits in the low-to-mid 40s, so
 # this is roughly 4x headroom over anything legitimately observed — wide
@@ -2787,6 +2787,7 @@ REQUIRED_SELECTION_METRIC_COMPONENTS = (
     'roi',
     'strike_rate',
     'log_loss',
+    'race_log_loss',
     'brier_score',
     'calibration',
     'stability',
@@ -3126,7 +3127,21 @@ def _selection_score_from_metrics(metrics, force_recompute=False):
     else:
         blended_roi = (0.3 * holdout_roi) + (0.7 * walk_forward_mean_roi)
     walk_forward_penalty = float(walk_forward.get('roi_std', 0.0) or 0.0)
-    calibration_penalty = (float(metrics.get('log_loss', 0.0) or 0.0) * 10.0) + (float(metrics.get('brier_score', 0.0) or 0.0) * 25.0) + (float(calibration.get('expected_calibration_error', 0.0) or 0.0) * 100.0)
+    # Probability quality is judged on whole races: how much of each race the
+    # model gave the runner that actually won, measured against what the
+    # FLB-corrected market gave that same runner (race_log_loss_vs_market,
+    # nats per race; negative = better than the market). Per-horse log loss
+    # scored every runner as its own yes/no question, which is not what a race
+    # is — one winner, everyone else losing to it. It is still used for a
+    # record that predates the race-level metric, so such a record is scored
+    # by the rule it was measured under rather than handed a free zero; the
+    # version bump means any such record is re-validated before it competes.
+    race_log_loss_gap = metrics.get('race_log_loss_vs_market')
+    if race_log_loss_gap is not None and np.isfinite(float(race_log_loss_gap)):
+        probability_penalty = float(race_log_loss_gap) * 10.0
+    else:
+        probability_penalty = float(metrics.get('log_loss', 0.0) or 0.0) * 10.0
+    calibration_penalty = probability_penalty + (float(metrics.get('brier_score', 0.0) or 0.0) * 25.0) + (float(calibration.get('expected_calibration_error', 0.0) or 0.0) * 100.0)
     # Joint Kelly bankroll growth measures something ROI and A/E cannot: what
     # the model's edge is worth once stakes are sized by the confidence it
     # actually expresses, across every runner it would back rather than the top
@@ -3184,8 +3199,10 @@ def _promotion_rule_text():
         "market probabilities rather than raw 1/SP) "
         "+ 5*joint-Kelly bankroll growth (clamped to [-1.0, 5.0], and scored as 0 for a "
         "kelly_staking record predating the joint solver) - 0.02*joint-Kelly max drawdown % "
-        "(-10 more if the Kelly simulation went bust) - calibration penalties "
-        "(log loss, Brier score, expected calibration error) - stability penalty - walk-forward cross-fold ROI-std penalty; "
+        "(-10 more if the Kelly simulation went bust) - 10*race-level log loss versus the FLB-corrected "
+        "market (mean -log P(actual winner) per race, model minus market, so beating the market's own "
+        "probabilities adds to the score) - calibration penalties "
+        "(Brier score, expected calibration error) - stability penalty - walk-forward cross-fold ROI-std penalty; "
         "a model with no walk-forward evidence gets no credit for its holdout ROI beyond a 0.3x weight. "
         "ROI alone is never sufficient, and a negative ROI is not by itself disqualifying."
     )
@@ -3511,14 +3528,12 @@ def _blend_with_market(pred, fair_market_probs, race_ids, blend_alpha):
     function so the holdout evaluation, the per-fold walk-forward evaluation
     and the selection-frame builder cannot drift apart on what "blended" means.
 
-    Note what the blend does beyond mixing in the market: it renormalises each
-    race to sum to 1.0. The base candidates emit independent per-horse
-    probabilities that do NOT sum to 1 across a field, so a blended variant is
-    also a race-normalised variant. That is inherent to the Benter
-    log-combination, not an accident of this implementation — but it means a
-    blended candidate's calibration metrics differ from its base for two
-    reasons at once, which is worth remembering when reading the two side by
-    side.
+    The blend renormalises each race to sum to 1.0. Every candidate is now
+    race-calibrated before it gets here (RaceConditionalLogit), so its own
+    probabilities already sum to 1 and the renormalisation only absorbs the
+    market's share — a blended variant differs from its base by the market and
+    nothing else. An artifact from before that wrapper existed still emits
+    per-horse numbers, and for it the renormalisation is doing both jobs.
     """
     if blend_alpha is None or float(blend_alpha) >= NO_BLEND_ALPHA:
         return pred
@@ -3526,6 +3541,59 @@ def _blend_with_market(pred, fair_market_probs, race_ids, blend_alpha):
         blend_probabilities_by_race(pred, list(fair_market_probs), list(race_ids), blend_alpha),
         1e-6, 1 - 1e-6,
     )
+
+
+def _race_level_log_loss_metrics(eval_df, fair_market_probs):
+    """How much probability the model put on the horses that actually won.
+
+    Per-horse log loss and Brier score treat every runner as its own yes/no
+    question, which is not the question a race asks: exactly one runner wins,
+    and a model is only as good as the share of the race it gave that runner.
+    The race-level log loss is the mean of -log P(winner) over races, with each
+    race renormalised first, so it is a proper scoring rule for "who wins this
+    race" whatever scale the model's raw outputs are on.
+
+    The same number is computed for the FLB-corrected market on the same races
+    (those whose winner has a usable SP), and the difference is reported as
+    race_log_loss_vs_market: below zero, the model's probabilities beat the
+    market's own; above zero, they are worse. That difference is what the
+    Champion Score reads, because the absolute number moves with field sizes
+    and would otherwise favour whichever validation window had smaller fields.
+    """
+    race_log_loss, races = race_winner_log_loss(
+        eval_df['pred'].to_numpy(dtype=float), eval_df['won'].to_numpy(dtype=int), eval_df['race_id'].tolist(),
+    )
+    out = {
+        'race_log_loss': race_log_loss,
+        'race_log_loss_races': races,
+        'market_race_log_loss': None,
+        'race_log_loss_vs_market': None,
+        'race_log_loss_comparison_races': 0,
+    }
+    market = pd.Series(fair_market_probs, index=eval_df.index, dtype=float)
+    winner_priced = eval_df['won'].eq(1) & market.notna()
+    comparable_races = set(eval_df.loc[winner_priced, 'race_id'])
+    if not comparable_races:
+        return out
+    keep = eval_df['race_id'].isin(comparable_races)
+    subset = eval_df.loc[keep]
+    model_log_loss, comparison_races = race_winner_log_loss(
+        subset['pred'].to_numpy(dtype=float), subset['won'].to_numpy(dtype=int), subset['race_id'].tolist(),
+    )
+    # An unpriced runner is given (effectively) no market chance; the winner
+    # of every race kept here is priced, so that cannot flatter the market.
+    market_log_loss, _ = race_winner_log_loss(
+        market.loc[keep].fillna(0.0).to_numpy(dtype=float), subset['won'].to_numpy(dtype=int),
+        subset['race_id'].tolist(),
+    )
+    if model_log_loss is None or market_log_loss is None:
+        return out
+    out.update({
+        'market_race_log_loss': market_log_loss,
+        'race_log_loss_vs_market': float(model_log_loss - market_log_loss),
+        'race_log_loss_comparison_races': comparison_races,
+    })
+    return out
 
 
 def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val, blend_alpha=None):
@@ -3621,6 +3689,7 @@ def evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val, 
         'last_250': window_metrics(250),
         'last_500': window_metrics(500),
         'kelly_staking': _simulate_joint_kelly_staking(eval_df),
+        **_race_level_log_loss_metrics(eval_df, fair_market_probs),
         'log_loss': float(log_loss(np.asarray(y_won_val, dtype=int), pred, labels=[0, 1])),
         'brier_score': float(brier_score_loss(np.asarray(y_won_val, dtype=int), pred)),
         'calibration': _calibration_summary(y_won_val, pred),
@@ -3652,10 +3721,15 @@ def _clone_for_fold_fit(model, fold_y_train, n_calib_splits=3):
     classes.
     """
     cloned = clone(model)
+    minority_count = int(pd.Series(fold_y_train).value_counts().min())
+    k = max(2, min(n_calib_splits, minority_count))
     if isinstance(cloned, CalibratedClassifierCV):
-        minority_count = int(pd.Series(fold_y_train).value_counts().min())
-        k = max(2, min(n_calib_splits, minority_count))
         cloned.set_params(cv=StratifiedKFold(n_splits=k, shuffle=False))
+    elif isinstance(cloned, RaceConditionalLogit) and isinstance(cloned.estimator, CalibratedClassifierCV):
+        # Every candidate is now wrapped in the race-level conditional logit,
+        # so the CalibratedClassifierCV this guard exists for sits one level
+        # down. Same fix, reached through the wrapper's own parameter.
+        cloned.set_params(estimator__cv=StratifiedKFold(n_splits=k, shuffle=False))
     return cloned
 
 
@@ -3789,6 +3863,8 @@ def _walk_forward_metrics_for_alphas(model, X_all, y_won_all, sp_all, race_ids_a
                     'bets': fold_metrics['number_of_bets'],
                     'roi': fold_metrics['roi'],
                     'strike_rate': fold_metrics['strike_rate'],
+                    'race_log_loss': fold_metrics.get('race_log_loss'),
+                    'race_log_loss_vs_market': fold_metrics.get('race_log_loss_vs_market'),
                     # Carried per fold so Kelly growth can be read for variance
                     # across folds, not just as one holdout number.
                     'kelly_staking': fold_metrics.get('kelly_staking'),
@@ -3913,12 +3989,18 @@ def _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val, blend_alp
         'won': np.asarray(y_won_val, dtype=int),
         'sp': np.asarray(sp_val, dtype=float),
     })
+    # Solved over the WHOLE field before the top pick is taken: Shin's method
+    # decomposes one race's book, so a runner's fair market probability is not
+    # defined without its rivals. Carried on the selection rows so the
+    # value-edge diagnostic measures edge against the same market reading the
+    # A/E ratio and live value edge use.
+    frame['market_prob'] = _flb_market_probabilities(frame)
     if blend_alpha is not None and float(blend_alpha) < NO_BLEND_ALPHA:
         # The selection frame drives the RF-vs-challenger comparison and the
         # value-edge diagnostic, so a blended candidate has to be compared on
         # the picks it would actually make, not on its base model's.
         frame['pred'] = _blend_with_market(
-            frame['pred'].to_numpy(dtype=float), _flb_market_probabilities(frame),
+            frame['pred'].to_numpy(dtype=float), frame['market_prob'],
             race_ids_val, blend_alpha,
         )
     return frame.loc[frame.groupby('race_id')['pred'].idxmax()].set_index('race_id')
@@ -3933,7 +4015,8 @@ def _profit_from_selection_rows(rows):
 
 # Candidate minimum-edge thresholds for the value/odds-aware filtering
 # diagnostic below: "edge" = model's predicted win probability minus the
-# market-implied probability (1/SP) of that same selection. 0.0 is the
+# FLB-corrected market probability of that same selection — the same market
+# reading live value edge uses (ml_predict.live_market_probabilities). 0.0 is the
 # current no-filter baseline (kept first so callers can read it as the
 # reference row); the rest span from a small edge to a fairly demanding one.
 VALUE_EDGE_THRESHOLDS = (0.0, 0.02, 0.03, 0.05, 0.08)
@@ -3942,8 +4025,9 @@ VALUE_EDGE_THRESHOLDS = (0.0, 0.02, 0.03, 0.05, 0.08)
 def _value_edge_backtest(selections):
     """Diagnostic-only: how would this model's own validation-set ROI change
     if a race were only bet when the top pick's edge over the market (model
-    probability minus 1/SP) clears a threshold, instead of always betting the
-    single highest-probability runner in every race?
+    probability minus FLB-corrected market probability) clears a threshold,
+    instead of always betting the single highest-probability runner in every
+    race?
 
     Does NOT change `selections`, the model's selection_score, or which
     candidate wins the competition — this exists purely to quantify the
@@ -3953,7 +4037,13 @@ def _value_edge_backtest(selections):
     """
     if selections is None or selections.empty:
         return {'thresholds': [], 'best_threshold': None}
-    market_implied_prob = 1.0 / selections['sp'].clip(lower=1.0001)
+    raw_implied_prob = 1.0 / selections['sp'].clip(lower=1.0001)
+    if 'market_prob' in selections:
+        # Fair (Shin) probability where the race could be solved; raw 1/SP
+        # only for a selection whose own price was unusable.
+        market_implied_prob = selections['market_prob'].fillna(raw_implied_prob)
+    else:
+        market_implied_prob = raw_implied_prob
     edge = selections['pred'] - market_implied_prob
     rows = []
     for threshold in VALUE_EDGE_THRESHOLDS:
@@ -4170,6 +4260,9 @@ def _blended_candidate(result, walk_forward_by_alpha, fold_boundaries,
     metrics['market_blend_alpha_selected_on'] = 'walk_forward_mean_roi_minus_roi_std'
     metrics['market_blend_alpha_search'] = search_rows
     metrics['market_blend_base_model_type'] = model_type
+    # Same fitted estimator, so the same race-level calibration underneath it.
+    if result['metrics'].get('race_calibration'):
+        metrics['race_calibration'] = result['metrics']['race_calibration']
     metrics['market_blend_odds_source'] = 'closing_sp_shin_corrected'
     return {
         'model_type': f'{model_type}_blended',
@@ -4413,7 +4506,10 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     #
     # Its raw output is not a probability, so RaceGroupedRanker converts it with
     # a per-race softmax (the Plackett-Luce first-place probability) before
-    # anything downstream sees it. That is what lets it feed
+    # anything downstream sees it. A pairwise ranking loss never learns how
+    # confident to be, so the spread of that softmax is arbitrary; the
+    # RaceConditionalLogit wrapper applied to every candidate below fits it
+    # against actual winners. Together they let it feed
     # evaluate_model_on_validation, Kelly staking, the market blend and the
     # consensus ensemble with no special-casing in any of them.
     #
@@ -4438,6 +4534,19 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         len(set(race_ids_train)), len(set(race_ids_val)),
     )
 
+    # Race-level calibration for every candidate. Whatever a candidate emits —
+    # an independent per-horse probability, or a ranker's softmax whose spread
+    # nobody trained — becomes a race win probability through a conditional
+    # logit whose beta is fitted on races that candidate never trained on
+    # (model_classes.RaceConditionalLogit). From here on every candidate's
+    # numbers sum to 1 within a race and are tuned against actual winners,
+    # which is what the A/E ratio, the market blend and joint Kelly staking all
+    # assume they are being given. Wrapped here, after tuning, so Optuna still
+    # searches the bare model and every downstream path — the holdout, the
+    # walk-forward folds, the ensembles, the saved artifact — gets the
+    # calibrated one without knowing it.
+    candidates = {mt: RaceConditionalLogit(model) for mt, model in candidates.items()}
+
     fitted = {}
     results = []
     selection_frames = {}
@@ -4445,6 +4554,14 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         try:
             _fit_candidate(model, X_train, y_won[train_mask], race_ids=race_ids_train)
             metrics = evaluate_model_on_validation(model, X_val, y_won_val, race_ids_val, sp_val)
+            metrics['race_calibration'] = dict(getattr(model, 'calibration_', None) or {})
+            log.info(
+                "Race-level conditional logit for %s: beta=%.3f status=%s calibration_races=%s "
+                "winner_log_loss=%s (beta=1.0 would have been %s)",
+                mt, float(getattr(model, 'beta_', 1.0)), metrics['race_calibration'].get('status'),
+                metrics['race_calibration'].get('races'),
+                metrics['race_calibration'].get('log_loss'), metrics['race_calibration'].get('identity_log_loss'),
+            )
             selection_frames[mt] = _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val)
             fitted[mt] = model
             results.append({'model_type': mt, 'model_name': mt.replace('_', ' ').title(), 'model': model, 'metrics': metrics})
@@ -4511,14 +4628,11 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     # candidate competes standalone: only the standalone configuration was
     # holdout-validated, so it must not silently change ensemble behaviour.
     #
-    # The ranker IS included. Worth knowing when reading its weight: its
-    # probabilities sum to 1 within a race (the softmax makes them a proper
-    # book) while the pointwise members' do not, so on a big field its numbers
-    # sit lower than theirs at the same level of confidence. The consensus is a
-    # weighted average, so that scale difference shifts the blend toward the
-    # pointwise members — it does not break the ranking, and the ensemble
-    # variants compete on Champion Score like everything else, but it is the
-    # reason a ranker's contribution is not simply "one vote in n".
+    # The ranker IS included. Every member is a RaceConditionalLogit, so every
+    # member's probabilities already sum to 1 within a race and the weighted
+    # average of them does too: the consensus is a mixture of race books, and
+    # no member's vote is shrunk or inflated by the scale its raw outputs
+    # happened to come out on.
     ensemble_eligible = {mt: model for mt, model in fitted.items() if mt != 'mlp'}
     if len(ensemble_eligible) > 1:
         ensemble_members = list(ensemble_eligible.items())
@@ -5260,7 +5374,7 @@ def rollback_to_champion(model_id, reason='Manual Champion rollback'):
              current_id, model_id, reason)
 
 
-def _best_rejected_challenger(conn, exclude_id, expected_features=None):
+def _best_rejected_challenger(conn, exclude_id, expected_features=None, require_race_log_loss=True):
     """Best-scoring previously-rejected challenger, rescored under the CURRENT
     formula (mirrors save_best_model_to_db's force_recompute treatment of a
     stored champion) so this is a fair, up-to-date comparison rather than
@@ -5299,6 +5413,19 @@ def _best_rejected_challenger(conn, exclude_id, expected_features=None):
             if candidate_features is None or list(candidate_features) != list(expected_features):
                 skipped_stale_features.append(row[0])
                 continue
+        if require_race_log_loss and metrics and 'race_log_loss' not in metrics:
+            # Measured before the race-level log loss existed, so the current
+            # formula can only score it with the legacy per-horse term — a
+            # different rule from the one every live challenger is held to.
+            # Unmeasured under today's rule means not eligible to roll back to
+            # on SCORE. Replacing a champion that cannot score at all is a
+            # different question (any usable model beats an unusable one), so
+            # that caller passes require_race_log_loss=False.
+            log.info(
+                "Rejected-challenger row id=%s skipped for rollback: no race-level log loss on record.",
+                row[0],
+            )
+            continue
         score = _selection_score_from_metrics(metrics, force_recompute=True) if metrics else row[3]
         if score is None:
             continue
@@ -5355,6 +5482,7 @@ def _replace_unusable_champion(conn, champion_id, current_features, is_active, r
 
     best_challenger = _best_rejected_challenger(
         conn, exclude_id=champion_id, expected_features=current_features,
+        require_race_log_loss=False,
     )
 
     if best_challenger and is_active:
@@ -5548,13 +5676,17 @@ def _heal_stale_champion(champion_id, champion_metrics, run_id=None):
         # neutral zero for the Kelly term, which is no advantage to correct.
         stored_kelly = champion_metrics.get('kelly_staking') or {}
         stale_kelly_plan = bool(stored_kelly) and 'avg_horses_backed_per_race' not in stored_kelly
-        if 'roi' not in champion_metrics or stale_kelly_plan:
+        # A champion measured before race-level log loss existed is in the same
+        # position again: the Champion Score now reads a number it never had.
+        missing_race_log_loss = 'race_log_loss' not in champion_metrics
+        if 'roi' not in champion_metrics or stale_kelly_plan or missing_race_log_loss:
             log.info(
                 "Self-heal: champion id=%s needs its raw metric components rebuilt "
-                "(missing_raw_components=%s, kelly_staking_predates_joint_solver=%s) — running a full "
+                "(missing_raw_components=%s, kelly_staking_predates_joint_solver=%s, "
+                "missing_race_log_loss=%s) — running a full "
                 "out-of-sample re-validation (not just a walk-forward re-test) on the same "
                 "chronological holdout Track E challengers use...",
-                champion_id, 'roi' not in champion_metrics, stale_kelly_plan,
+                champion_id, 'roi' not in champion_metrics, stale_kelly_plan, missing_race_log_loss,
             )
             cutoff = dates_ordered.quantile(0.8)
             train_mask = dates_ordered <= cutoff

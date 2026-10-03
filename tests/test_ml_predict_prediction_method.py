@@ -25,7 +25,22 @@ def test_predict_meeting_uses_prediction_helper_and_preserves_race_normalisation
     assert 'model.predict(X)' not in source
     assert '((raw_preds - min_p) / (max_p - min_p)) * 100' in source
     assert 'np.full_like(raw_preds, 50.0)' in source
-    assert 'method=%s raw_min=%s raw_max=%s normalised_min=%s normalised_max=%s' in source
+    assert 'method=%s probability_source=%s probability_sum=%.6f' in source
+    assert 'raw_min=%s raw_max=%s normalised_min=%s normalised_max=%s' in source
+
+
+def test_predict_meeting_returns_model_probabilities_not_the_display_score():
+    """ml_score is a 0-100 display stretch. Value edge and Kelly need the
+    model's own race win probabilities, which must be produced from the raw
+    model output and blended BEFORE the display stretch is applied."""
+    source = _function_source('predict_meeting')
+    produce = 'win_probabilities, probability_source = race_win_probabilities(model, raw_preds)'
+    blend = '_blend_race_with_live_market(\n            win_probabilities,'
+    stretch = '((raw_preds - min_p) / (max_p - min_p)) * 100'
+    assert produce in source
+    assert blend in source
+    assert source.index(produce) < source.index(blend) < source.index(stretch)
+    assert 'return all_scores, by_race, probabilities_by_race' in source
 
 
 def test_predict_meeting_logs_feature_diagnostics_immediately_before_scoring():

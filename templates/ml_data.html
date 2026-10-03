@@ -362,6 +362,11 @@
       <div class="active-model-value">{{ '%.1f%%'|format(active_model_metadata.get('roi')) if active_model_metadata.get('roi') is not none else 'Unknown' }} / {{ '%.1f%%'|format(active_model_metadata.get('strike_rate')) if active_model_metadata.get('strike_rate') is not none else 'Unknown' }}</div>
     </div>
     <div class="active-model-field">
+      <div class="active-model-label">Race Log Loss vs Market</div>
+      <div class="active-model-value">{% if active_model_metadata.get('race_log_loss_vs_market') is not none %}{{ '%+.3f'|format(active_model_metadata.get('race_log_loss_vs_market')) }}{% else %}Not measured{% endif %}</div>
+      <div class="score-formula-note">mean -log P(winner) per race, model minus market; below 0 beats the market{% if active_model_metadata.get('race_calibration_beta') is not none %} · beta {{ '%.2f'|format(active_model_metadata.get('race_calibration_beta')) }}{% endif %}</div>
+    </div>
+    <div class="active-model-field">
       <div class="active-model-label">Champion Scope</div>
       <div class="active-model-value">{% if active_model_metadata.selected_overall_champion %}Selected overall champion{% else %}Best of algorithm type / fallback{% endif %}</div>
     </div>
@@ -388,7 +393,7 @@
       <span class="mono">{{ active_model_metadata.scoring_formula_version or 'an unrecorded formula' }}</span>
       and this run by
       <span class="mono">{{ latest_challenger.scoring_formula_version or 'an unrecorded formula' }}</span>.
-      The scoring rule has changed five times; each change shifts every score by a
+      The scoring rule has changed several times; each change shifts every score by a
       fixed offset, so the difference between these numbers is mostly the formula,
       not the models. Compare ROI, strike rate and the walk-forward folds instead.
     </div>
@@ -418,6 +423,11 @@
       <div class="active-model-field">
         <div class="active-model-label">ROI / Strike Rate</div>
         <div class="active-model-value">{{ '%.1f%%'|format(latest_challenger.roi) if latest_challenger.roi is not none else 'Unknown' }} / {{ '%.1f%%'|format(latest_challenger.strike_rate) if latest_challenger.strike_rate is not none else 'Unknown' }}</div>
+      </div>
+      <div class="active-model-field">
+        <div class="active-model-label">Race Log Loss vs Market</div>
+        <div class="active-model-value">{% if latest_challenger.race_log_loss_vs_market is not none %}{{ '%+.3f'|format(latest_challenger.race_log_loss_vs_market) }}{% else %}Not measured{% endif %}</div>
+        <div class="score-formula-note">mean -log P(winner) per race, model minus market; below 0 beats the market{% if latest_challenger.race_calibration_beta is not none %} · beta {{ '%.2f'|format(latest_challenger.race_calibration_beta) }}{% endif %}</div>
       </div>
       <div class="active-model-field">
         <div class="active-model-label">Decision Reason</div>
