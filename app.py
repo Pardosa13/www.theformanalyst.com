@@ -96,7 +96,8 @@ def is_maiden_race(race_class):
 
 # Analyzer + PFAI + ML all picking the same horse is a losing bet overall but
 # profitable in maiden races (ML Data > Maiden Race Split), so that combination
-# is the only thing that qualifies a horse for Best Bets.
+# qualifies a horse for Best Bets. So does that same agreement when the horse
+# is also the live Ladbrokes favourite (Full Model + Market Consensus).
 MAIDEN_AGREEMENT_BADGE = '🏇 Maiden Agreement (Analyzer + PFAI + ML)'
 
 BEST_BETS_LADBROKES_STALE_SECONDS = max(90, ODDS_CACHE_TTL * 3)
@@ -11343,12 +11344,14 @@ def best_bets():
                     if rank_idx > 0 else 0
                 )
 
-                # Only maiden agreement picks qualify: Analyzer, PFAI and ML all
-                # rank the horse first in a maiden race. Components, win
-                # probability, sole rides and the consensus badges are still
-                # shown on the rows that qualify.
+                # Two ways to qualify: Analyzer, PFAI and ML all rank the horse
+                # first in a maiden race, or all rank it first and it is the
+                # live Ladbrokes favourite. Components, win probability, sole
+                # rides and the consensus badges are still shown on the rows
+                # that qualify.
                 jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
                 maiden_agreement = signal_agreement and is_maiden_race(race.race_class)
+                favourite_agreement = signal_agreement and bool(lb_fields.get('is_full_model_market_consensus'))
                 if maiden_agreement:
                     lb_fields = {
                         **lb_fields,
@@ -11356,7 +11359,7 @@ def best_bets():
                         'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []),
                                              'Qualified because Analyzer, PFAI and ML all rank this horse first in a maiden race.'],
                     }
-                if maiden_agreement:
+                if maiden_agreement or favourite_agreement:
                     matched_components.sort(key=lambda x: x['roi'], reverse=True)
                     best_bets.append({
                         'meeting_id': meeting.id,
@@ -11386,6 +11389,7 @@ def best_bets():
                         'high_confidence': wp >= 80,
                         'signal_agreement': signal_agreement,
                         'is_maiden_agreement': maiden_agreement,
+                        'is_favourite_agreement': favourite_agreement,
                         **lb_fields,
                     })
 
