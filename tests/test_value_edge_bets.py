@@ -74,6 +74,13 @@ def test_best_bets_route_also_shows_maiden_triple_agreement():
     assert 'MAIDEN_AGREEMENT_BADGE' in source
 
 
+def test_best_bets_route_also_shows_favourite_triple_agreement():
+    """Analyzer + PFAI + ML agreement on the Ladbrokes favourite qualifies too."""
+    source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
+    source = source[:source.index('\n@app.route(', 1)]
+    assert "favourite_agreement = signal_agreement and bool(lb_fields.get('is_full_model_market_consensus'))" in source
+
+
 def test_is_maiden_race_matches_maiden_and_mdn():
     from app import is_maiden_race
     assert is_maiden_race('Maiden Plate')
@@ -89,7 +96,7 @@ def test_best_bets_page_has_no_value_edge():
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
     assert 'value_edge' not in source
-    assert 'if maiden_agreement:' in source
+    assert 'if maiden_agreement or favourite_agreement:' in source
     signals = APP_SOURCE[APP_SOURCE.index('def evaluate_ladbrokes_best_bet_signals('):]
     signals = signals[:signals.index('\n\n\n', 1)]
     assert 'value_edge' not in signals

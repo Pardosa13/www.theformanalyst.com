@@ -527,7 +527,8 @@
 <!-- Page header -->
 <div class="bets-header">
   <h2>🔥 Today's Best Bets</h2>
-  <p>Maiden races where Analyzer, PFAI and ML all rank the same horse first. Component matches,
+  <p>Analyzer, PFAI and ML all rank the same horse first, in a maiden race or with that horse
+     the Ladbrokes favourite. Component matches,
      win probability, sole rides and the consensus badges are shown on the rows that qualify.</p>
 </div>
 
@@ -648,8 +649,8 @@
 {% if total_bets == 0 %}
 <div class="no-bets-alert">
   <h4>No Signals Found</h4>
-  <p>No maiden race in the last {{ hours_back }} hours has Analyzer, PFAI and ML all agreeing on
-     the top pick{% if mode == 'non_top_pick' %} — non-top-pick mode cannot show these, as they are always the top pick{% endif %}.</p>
+  <p>No race in the last {{ hours_back }} hours has Analyzer, PFAI and ML all agreeing on
+     a top pick that is in a maiden race or is the Ladbrokes favourite{% if mode == 'non_top_pick' %} — non-top-pick mode cannot show these, as they are always the top pick{% endif %}.</p>
   <p style="margin-bottom:4px;">Check:</p>
   <ul>
     <li>The meeting has been scored by the ML run</li>
