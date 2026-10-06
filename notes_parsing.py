@@ -58,7 +58,10 @@ _NOTES_COMPONENT_PATTERNS = [
     (r'\+\s*5\.0\s*:\s*Strong win rate.*at this track\b', 'Track Win Rate - Strong (36-50%)'),
     (r'\+\s*4\.0\s*:\s*Good win rate.*at this track\b', 'Track Win Rate - Good (26-35%)'),
     (r'\+\s*2\.0\s*:\s*Moderate win rate.*at this track\b', 'Track Win Rate - Moderate (16-25%)'),
-    (r'\+\s*1\.0\s*:\s*Low win rate.*at this track\b', 'Track Win Rate - Low (1-15%)'),
+    # Same line only, and never the track+distance line: with DOTALL a bare
+    # `.*at this track\b` also caught low track+distance and low distance
+    # records, so this and Track+Distance Win Rate - Low always fired together.
+    (r'\+\s*1\.0\s*:\s*Low win rate[^\n]*at this track(?!\+)\b', 'Track Win Rate - Low (1-15%)'),
     (r'\+\s*0\.0\s*:\s*No wins at this track\b', 'Track Win Rate - No Wins'),
     (r'\+\s*0\.0\s*:\s*No runs at this track\b', 'Track - No Runs'),
 
@@ -77,7 +80,7 @@ _NOTES_COMPONENT_PATTERNS = [
     (r'\+\s*7\.0\s*:\s*Strong win rate.*at this track\+distance', 'Track+Distance Win Rate - Strong'),
     (r'\+\s*5\.0\s*:\s*Good win rate.*at this track\+distance', 'Track+Distance Win Rate - Good'),
     (r'\+\s*3\.0\s*:\s*Moderate win rate.*at this track\+distance', 'Track+Distance Win Rate - Moderate'),
-    (r'\+\s*1\.0\s*:\s*Low win rate.*at this track\+distance', 'Track+Distance Win Rate - Low'),
+    (r'\+\s*1\.0\s*:\s*Low win rate[^\n]*at this track\+distance', 'Track+Distance Win Rate - Low'),
     (r'\+\s*0\.0\s*:\s*No wins at this track\+distance', 'Track+Distance Win Rate - No Wins'),
     (r'\+\s*0\.0\s*:\s*No runs at this track\+distance', 'Track+Distance - No Runs'),
 
@@ -257,7 +260,6 @@ _NOTES_COMPONENT_PATTERNS = [
     (r'Ran places:\s*1st\s+1st\s+1st', 'Ran places: 1st 1st 1st'),
     (r'5yo Mare', '5yo Mare'),
     (r'Ran places:\s*3rd\s+2nd', 'Ran places: 3rd 2nd'),
-    (r'Elite career win rate', 'Elite career win rate'),
     (r'Ran places:\s*1st', 'Ran places: 1st'),
     (r'Ran places:\s*2nd\s+1st', 'Ran places: 2nd 1st'),
     (r'Ran places:\s*2nd\s+2nd', 'Ran places: 2nd 2nd'),

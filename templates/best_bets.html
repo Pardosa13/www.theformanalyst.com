@@ -387,6 +387,19 @@
     text-transform: uppercase;
     vertical-align: middle;
   }
+  .edge-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 6px;
+    background: rgba(249, 115, 22, 0.14);
+    border: 1px solid rgba(249, 115, 22, 0.45);
+    color: #fdba74;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 800;
+    vertical-align: middle;
+  }
   .bets-table tbody tr:last-child { border-bottom: none; }
   .bets-table tbody tr:hover {
     background: rgba(102,126,234,0.1) !important;
@@ -527,8 +540,8 @@
 <!-- Page header -->
 <div class="bets-header">
   <h2>🔥 Today's Best Bets</h2>
-  <p>Analyzer, PFAI and ML all rank the same horse first, in a maiden race or with that horse
-     the Ladbrokes favourite. Component matches,
+  <p>Analyzer, PFAI and ML all rank the same horse first, in a maiden race, with that horse
+     the Ladbrokes favourite, or with a 🔥 Proven Edge signal. Component matches,
      win probability, sole rides and the consensus badges are shown on the rows that qualify.</p>
 </div>
 
@@ -650,7 +663,7 @@
 <div class="no-bets-alert">
   <h4>No Signals Found</h4>
   <p>No race in the last {{ hours_back }} hours has Analyzer, PFAI and ML all agreeing on
-     a top pick that is in a maiden race or is the Ladbrokes favourite{% if mode == 'non_top_pick' %} — non-top-pick mode cannot show these, as they are always the top pick{% endif %}.</p>
+     a top pick that is in a maiden race, is the Ladbrokes favourite or has a Proven Edge signal{% if mode == 'non_top_pick' %} — non-top-pick mode cannot show these, as they are always the top pick{% endif %}.</p>
   <p style="margin-bottom:4px;">Check:</p>
   <ul>
     <li>The meeting has been scored by the ML run</li>
@@ -709,12 +722,12 @@
                 <td>
   <div class="horse-name">
     {{ bet.horse_name }}
-    {% if bet.high_confidence %}
-    <span class="badge bg-warning text-dark ms-1" style="font-size:10px;padding:2px 6px;vertical-align:middle;">🎯 80%+</span>
-    {% endif %}
     {% if bet.signal_agreement %}
     <span class="signal-agreement-badge" title="Analyzer, PFAI and ML all rank this horse top">⚡ 3-Way Agree</span>
     {% endif %}
+    {% for label, signals in (bet.edge_badges or {}).items() %}
+    <span class="edge-badge" title="{{ signals|join(' · ') }}">{{ label }}</span>
+    {% endfor %}
   </div>
   <div class="horse-form">{{ bet.form }}</div>
 </td>
@@ -778,6 +791,14 @@
                   {% endif %}
                   {% for badge in bet.best_bet_badges or [] %}
                   <div style="margin-top:4px;"><span class="badge bg-warning text-dark">{{ badge }}</span></div>
+                  {% endfor %}
+                  {% for label, signals in (bet.edge_badges or {}).items() %}
+                  <div style="margin-top:4px;">
+                    <span class="edge-badge" style="margin-left:0;">{{ label }}</span>
+                    {% for signal in signals %}
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">{{ signal }}</div>
+                    {% endfor %}
+                  </div>
                   {% endfor %}
                   <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
                     Analyzer #{{ bet.analyzer_rank or '—' }} · PFAI #{{ bet.pfai_rank or '—' }} · ML #{{ bet.ml_rank or '—' }}{% if bet.ml_score is defined and bet.ml_score is not none %} · ML {{ bet.ml_score|round(1) }}{% endif %}{% if bet.ml_score_gap is defined and bet.ml_score_gap is not none %} · Gap {{ bet.ml_score_gap|round(1) }}{% endif %}

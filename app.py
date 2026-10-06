@@ -100,6 +100,90 @@ def is_maiden_race(race_class):
 # is also the live Ladbrokes favourite (Full Model + Market Consensus).
 MAIDEN_AGREEMENT_BADGE = '🏇 Maiden Agreement (Analyzer + PFAI + ML)'
 
+# Component-ROI badges shown on 3-way agreement horses. Names must match the
+# component names emitted by notes_parsing.parse_notes_components exactly.
+PROVEN_EDGE_BADGE = '🔥 Proven Edge'
+PROVEN_EDGE_PLUS_BADGE = '🔥🔥 Proven Edge+'
+WATCH_BADGE = '👀 Watch'
+PROVEN_EDGE_REASON = 'Qualified via Proven Edge'
+
+PROVEN_EDGE_COMPONENTS = (
+    'Trainer - Hot Form (L100 22%+ SR)',
+    'Weight vs Field - Below (2-3kg)',
+    'Career Win Rate - Elite 40%+',
+    'Weight Change - Dropped 3kg+',
+    'Running Position - Backmarker Mile',
+)
+WATCH_COMPONENTS = (
+    'Running Position - Midfield Staying',
+    'Interstate State Move - SA → VIC',
+)
+
+
+def _is_4yo_gelding(horse):
+    csv_data = getattr(horse, 'csv_data', None) or {}
+    if not isinstance(csv_data, dict):
+        return False
+    try:
+        age = int(float(csv_data.get('horse age')))
+    except (TypeError, ValueError):
+        return False
+    sex = str(csv_data.get('horse sex') or '').strip().lower()
+    return age == 4 and sex in ('gelding', 'g')
+
+
+def evaluate_component_edge_badges(horse, component_names):
+    """Return {badge_label: [signals]} for the Proven Edge / Watch badges.
+
+    At most one badge of each type; Proven Edge+ replaces Proven Edge.
+    """
+    names = set(component_names)
+    badges = {}
+
+    plus_signals = []
+    if 'Career Win Rate - Elite 40%+' in names and _is_4yo_gelding(horse):
+        plus_signals.append('Career Win Rate - Elite 40%+ + 4yo Gelding')
+    if 'Weight vs Field - Below (2-3kg)' in names and 'Track Win Rate - Exceptional (51%+)' in names:
+        plus_signals.append('Weight vs Field - Below (2-3kg) + Track Win Rate - Exceptional (51%+)')
+    if plus_signals:
+        badges[PROVEN_EDGE_PLUS_BADGE] = plus_signals
+    else:
+        edge_signals = [name for name in PROVEN_EDGE_COMPONENTS if name in names]
+        if edge_signals:
+            badges[PROVEN_EDGE_BADGE] = edge_signals
+
+    watch_signals = []
+    if 'Second Up - Has Won Second Up' in names and 'Specialist - Undefeated Condition' in names:
+        watch_signals.append('Second Up - Has Won Second Up + Specialist - Undefeated Condition')
+    watch_signals.extend(name for name in WATCH_COMPONENTS if name in names)
+    if watch_signals:
+        badges[WATCH_BADGE] = watch_signals
+    return badges
+
+
+def merge_best_bet_tracking(prediction, routes, edge_badges):
+    """Record which routes qualified this Best Bet and which badges it had.
+
+    Values only ever grow (like ladbrokes_signal_mask), so a route seen
+    pre-race is kept after the market closes.
+    """
+    old_routes = {r for r in (prediction.best_bet_routes or '').split(',') if r}
+    new_routes = old_routes | set(routes)
+    try:
+        old_badges = json.loads(prediction.best_bet_badges or '{}')
+    except (TypeError, ValueError):
+        old_badges = {}
+    new_badges = {label: list(signals) for label, signals in old_badges.items()}
+    for label, signals in edge_badges.items():
+        merged = new_badges.setdefault(label, [])
+        merged.extend(s for s in signals if s not in merged)
+    if new_routes != old_routes:
+        prediction.best_bet_routes = ','.join(sorted(new_routes))
+    if new_badges != old_badges:
+        prediction.best_bet_badges = json.dumps(new_badges, ensure_ascii=False)
+    if not prediction.best_bet_qualified_at:
+        prediction.best_bet_qualified_at = datetime.utcnow()
+
 BEST_BETS_LADBROKES_STALE_SECONDS = max(90, ODDS_CACHE_TTL * 3)
 LADBROKES_CLOSED_MARKET_STATUSES = {"closed", "final", "finalised", "abandoned", "resulted", "interim", "live", "jumped", "error"}
 LADBROKES_UNAVAILABLE_RUNNER_STATUSES = {"scratched", "closed", "inactive", "unavailable", "late scratching"}
@@ -503,6 +587,28 @@ with app.app_context():
                 print("Added Ladbrokes signal snapshot columns to predictions table")
     except Exception as e:
         print(f"Ladbrokes signal migration check: {e}")
+
+    # Best Bets route + badge tracking, so ROI can be split per route/badge.
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        predictions_columns = {col['name'] for col in inspector.get_columns('predictions')}
+        tracking_columns = {
+            'best_bet_routes': 'VARCHAR(100)',
+            'best_bet_badges': 'TEXT',
+            'best_bet_qualified_at': 'TIMESTAMP',
+        }
+        with db.engine.connect() as conn:
+            changed = False
+            for column_name, column_type in tracking_columns.items():
+                if column_name not in predictions_columns:
+                    conn.execute(text(f'ALTER TABLE predictions ADD COLUMN {column_name} {column_type}'))
+                    changed = True
+            if changed:
+                conn.commit()
+                print("Added Best Bets route/badge tracking columns to predictions table")
+    except Exception as e:
+        print(f"Best Bets tracking migration check: {e}")
 
     # Persist live ML Value Edge bet snapshots so they can be settled later,
     # same pattern as the Ladbrokes badge snapshot columns above.
@@ -11306,6 +11412,9 @@ def best_bets():
                 Prediction.notes,
                 Prediction.ml_score,
                 Prediction.ladbrokes_signal_mask,
+                Prediction.best_bet_routes,
+                Prediction.best_bet_badges,
+                Prediction.best_bet_qualified_at,
             ),
         )
         .filter(Meeting.uploaded_at >= cutoff)
@@ -11390,12 +11499,6 @@ def best_bets():
                     horse.prediction.ladbrokes_signal_price = lb_fields.get('ladbrokes_fixed_win_price')
                     horse.prediction.ladbrokes_signals_captured_at = datetime.utcnow()
 
-                # Parse win probability for high confidence flag
-                try:
-                    wp = float(str(horse.prediction.win_probability or '0').replace('%', '').strip())
-                except (ValueError, TypeError):
-                    wp = 0.0
-
                 components = parse_notes_component_matches(horse.prediction.notes)
                 matched_components = []
                 for match in components.values():
@@ -11427,14 +11530,27 @@ def best_bets():
                     if rank_idx > 0 else 0
                 )
 
-                # Two ways to qualify: Analyzer, PFAI and ML all rank the horse
-                # first in a maiden race, or all rank it first and it is the
-                # live Ladbrokes favourite. Components, win probability, sole
-                # rides and the consensus badges are still shown on the rows
-                # that qualify.
+                # Three ways to qualify, all needing Analyzer, PFAI and ML to
+                # rank the horse first: in a maiden race, as the live Ladbrokes
+                # favourite, or with a Proven Edge / Proven Edge+ badge. Watch
+                # badges never qualify a horse. Components, win probability,
+                # sole rides and the consensus badges are still shown on the
+                # rows that qualify.
                 jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
                 maiden_agreement = signal_agreement and is_maiden_race(race.race_class)
                 favourite_agreement = signal_agreement and bool(lb_fields.get('is_full_model_market_consensus'))
+                edge_badges = (
+                    evaluate_component_edge_badges(horse, [match['name'] for match in components.values()])
+                    if signal_agreement else {}
+                )
+                proven_edge_agreement = signal_agreement and (
+                    PROVEN_EDGE_BADGE in edge_badges or PROVEN_EDGE_PLUS_BADGE in edge_badges
+                )
+                routes = [route for route, hit in (
+                    ('maiden', maiden_agreement),
+                    ('favourite', favourite_agreement),
+                    ('proven_edge', proven_edge_agreement),
+                ) if hit]
                 if maiden_agreement:
                     lb_fields = {
                         **lb_fields,
@@ -11442,7 +11558,13 @@ def best_bets():
                         'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []),
                                              'Qualified because Analyzer, PFAI and ML all rank this horse first in a maiden race.'],
                     }
-                if maiden_agreement or favourite_agreement:
+                if proven_edge_agreement:
+                    lb_fields = {
+                        **lb_fields,
+                        'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []), PROVEN_EDGE_REASON],
+                    }
+                if routes:
+                    merge_best_bet_tracking(horse.prediction, routes, edge_badges)
                     matched_components.sort(key=lambda x: x['roi'], reverse=True)
                     best_bets.append({
                         'meeting_id': meeting.id,
@@ -11469,10 +11591,12 @@ def best_bets():
                         'form': horse.form,
                         'is_top_pick': is_top_pick,
                         'rank_in_race': rank_in_race,
-                        'high_confidence': wp >= 80,
                         'signal_agreement': signal_agreement,
                         'is_maiden_agreement': maiden_agreement,
                         'is_favourite_agreement': favourite_agreement,
+                        'is_proven_edge_agreement': proven_edge_agreement,
+                        'best_bet_routes': routes,
+                        'edge_badges': edge_badges,
                         **lb_fields,
                     })
 

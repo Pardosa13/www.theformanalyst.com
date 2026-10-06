@@ -92,11 +92,14 @@ def test_is_maiden_race_matches_maiden_and_mdn():
 
 def test_best_bets_page_has_no_value_edge():
     """Value edge is gone from the Best Bets page: no panel, no gate, no badge,
-    no capture. Only maiden agreement qualifies a horse."""
+    no capture. Only maiden, favourite or Proven Edge agreement qualifies a horse."""
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
     assert 'value_edge' not in source
-    assert 'if maiden_agreement or favourite_agreement:' in source
+    assert "('maiden', maiden_agreement)" in source
+    assert "('favourite', favourite_agreement)" in source
+    assert "('proven_edge', proven_edge_agreement)" in source
+    assert 'if routes:' in source
     signals = APP_SOURCE[APP_SOURCE.index('def evaluate_ladbrokes_best_bet_signals('):]
     signals = signals[:signals.index('\n\n\n', 1)]
     assert 'value_edge' not in signals
