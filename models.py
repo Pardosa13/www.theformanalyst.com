@@ -132,6 +132,11 @@ class Prediction(db.Model):
     ladbrokes_signal_mask = db.Column(db.Integer, nullable=False, default=0)
     ladbrokes_signal_price = db.Column(db.Float, nullable=True)
     ladbrokes_signals_captured_at = db.Column(db.DateTime, nullable=True)
+    # Best Bets tracking: comma list of the routes that qualified the horse
+    # (maiden, favourite, proven_edge) and a JSON map of badge -> signals.
+    best_bet_routes = db.Column(db.String(100), nullable=True)
+    best_bet_badges = db.Column(db.Text, nullable=True)
+    best_bet_qualified_at = db.Column(db.DateTime, nullable=True)
     # ML Value Edge tracking: captured once, pre-race, the first time this horse's
     # model-vs-market edge cleared VALUE_EDGE_MIN_THRESHOLD_PCT (app.py). Never
     # overwritten afterwards, so this is an honest pre-race snapshot rather than
