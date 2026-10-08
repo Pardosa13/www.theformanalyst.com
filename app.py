@@ -3622,8 +3622,14 @@ LADBROKES_SIGNAL_COHORTS = (
 
 
 def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_to="", limit_param="all", stake=10.0):
-    """Settle captured pre-race Ladbrokes badge cohorts at a flat win stake."""
-    query = db.session.query(Prediction, Result).join(Horse, Prediction.horse_id == Horse.id).join(
+    """Settle captured pre-race Ladbrokes badge cohorts at a flat win stake.
+
+    Each cohort also carries a chronological ``history`` of every settled bet
+    with its running P&L, which feeds the cumulative chart under the table.
+    """
+    query = db.session.query(
+        Prediction, Result, Meeting.uploaded_at, Meeting.meeting_name, Race.race_number
+    ).join(Horse, Prediction.horse_id == Horse.id).join(
         Race, Horse.race_id == Race.id
     ).join(Meeting, Race.meeting_id == Meeting.id).join(Result, Result.horse_id == Horse.id).filter(
         Prediction.ladbrokes_signal_mask > 0,
@@ -3643,19 +3649,38 @@ def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_t
 
     performance = []
     for key, label, required_mask, exact in LADBROKES_SIGNAL_COHORTS:
-        selections = [
-            result for prediction, result in rows
-            if ((prediction.ladbrokes_signal_mask or 0) == required_mask if exact else
-                (prediction.ladbrokes_signal_mask or 0) & required_mask)
+        matched = [
+            row for row in rows
+            if ((row[0].ladbrokes_signal_mask or 0) == required_mask if exact else
+                (row[0].ladbrokes_signal_mask or 0) & required_mask)
         ]
+        selections = [row[1] for row in matched]
         bets = len(selections)
         wins = sum(result.finish_position == 1 for result in selections)
         total_staked = bets * stake
         total_return = sum(stake * float(result.sp) for result in selections if result.finish_position == 1)
         profit = total_return - total_staked
+
+        # Rows come back newest first; the chart wants oldest first.
+        history = []
+        cumulative = 0.0
+        for _prediction, result, uploaded_at, meeting_name, race_number in reversed(matched):
+            won = result.finish_position == 1
+            bet_profit = stake * float(result.sp) - stake if won else -stake
+            cumulative += bet_profit
+            history.append({
+                'date': uploaded_at.strftime('%Y-%m-%d') if uploaded_at else '',
+                'meeting': meeting_name or '',
+                'race': race_number,
+                'won': won,
+                'profit': round(bet_profit, 2),
+                'cumulative': round(cumulative, 2),
+            })
+
         performance.append({
             'key': key,
             'label': label,
+            'history': history,
             'bets': bets,
             'wins': wins,
             'strike_rate': wins / bets * 100 if bets else 0.0,
@@ -6242,24 +6267,11 @@ def ml_data_analytics():
         db.session.rollback()
         logger.warning("Error calculating Ladbrokes signal performance: %s", e, exc_info=True)
 
-    value_edge_performance = None
-    try:
-        value_edge_performance = calculate_value_edge_performance(
-            track_filter=track_filter, date_from=date_from, date_to=date_to, limit_param=limit_param
-        )
-    except Exception as e:
-        db.session.rollback()
-        # Logged with a stack trace, not a one-line warning: an empty Value Edge
-        # panel is indistinguishable from "no bets settled yet" on the page, so
-        # the log is the only place the difference can show up.
-        logger.warning("Error calculating ML Value Edge performance: %s", e, exc_info=True)
-
     return render_template("ml_data.html",
         champion_scores_comparable=champion_scores_comparable(
             active_model_metadata, latest_challenger),
         ml_performance_stats=ml_performance_stats,
         ladbrokes_signal_performance=ladbrokes_signal_performance,
-        value_edge_performance=value_edge_performance,
         value_edge_min_threshold_pct=VALUE_EDGE_MIN_THRESHOLD_PCT,
         active_model_metadata=active_model_metadata,
         active_model_metadata_error=active_model_metadata_error,

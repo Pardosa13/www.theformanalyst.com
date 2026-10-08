@@ -313,20 +313,3 @@ def test_sizing_gain_holds_selection_constant(monkeypatch):
 
     # Kelly put 5% on the winner and 1% on the loser, so it beat flat here.
     assert kelly['roi'] > kelly['flat_roi_same_bets']
-
-
-def test_ml_data_shows_both_tables_and_the_sizing_comparison():
-    assert 'Flat $10 vs Kelly Staking' in ML_DATA_TEMPLATE
-    assert 'Same bets, sized by Kelly' in ML_DATA_TEMPLATE
-    assert 'value_edge_performance.kelly_bankroll' in ML_DATA_TEMPLATE
-    assert 'kelly_rows_staked' in ML_DATA_TEMPLATE
-    # The comparison itself, not two tables the reader has to diff by eye — and
-    # against the same-selection baseline, not the flat cohort's own ROI.
-    assert 'cohort.kelly.roi - cohort.kelly.flat_roi_same_bets' in ML_DATA_TEMPLATE
-    assert 'cohort.kelly.roi - cohort.roi' not in ML_DATA_TEMPLATE
-    assert 'Sizing Gain' in ML_DATA_TEMPLATE
-    # The flat table is still there, unreplaced.
-    assert 'All Value Edge Bets' in ML_DATA_TEMPLATE
-    assert 'value_edge_performance.overall.total_staked' in ML_DATA_TEMPLATE
-    # And it does not repeat the reason for No Bet that cannot actually happen.
-    assert 'a rival in the same race outranks' not in ML_DATA_TEMPLATE

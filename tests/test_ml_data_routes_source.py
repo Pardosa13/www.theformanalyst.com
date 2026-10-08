@@ -100,6 +100,8 @@ def test_ml_data_page_includes_flat_stake_ladbrokes_signal_performance():
     assert 'Elite Consensus &amp; ML Market Best Bets ($10 Win)' in template
     assert 'Strike Rate' in template
     assert 'ROI' in template
+    assert "'history': history" in stats_source
+    assert 'ladbrokesSignalPnlChart' in template
 
 
 def test_best_bets_persists_pre_race_ladbrokes_signal_snapshot():

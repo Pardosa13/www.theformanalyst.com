@@ -553,146 +553,11 @@
           </tbody>
         </table>
       </div>
-    </div>
-  </div>
-</div>
-
-<!-- ML Value Edge Bets — tracked independently of the badge cohorts above. -->
-<div class="section-card">
-  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlValueEdgeBets" aria-expanded="true">
-    <h5>💎 ML Value Edge Bets — Flat $10 vs Kelly Staking</h5><i class="bi bi-chevron-down"></i>
-  </div>
-  <div id="mlValueEdgeBets" class="collapse show">
-    <div class="card-body">
-      <p class="text-muted mb-3">
-        Every runner whose model-vs-market edge was measured pre-race, bucketed by the size of that edge and
-        settled as $10 win bets on the recorded result SP — not just the ones big enough to bet. Best Bets shows
-        only the {{ "%.0f"|format(value_edge_performance.best_bets_threshold_pct if value_edge_performance else 20) }}pp+
-        bucket; the rows underneath it are what that cutoff passed on. Compare their strike rate and ROI to judge
-        whether {{ "%.0f"|format(value_edge_performance.best_bets_threshold_pct if value_edge_performance else 20) }}pp
-        is the right cutoff, too conservative or too aggressive. The below-0pp row is the control: if the edge
-        measures anything real, it should be the worst cohort on the table.
-      </p>
-      {% if value_edge_performance and value_edge_performance.overall.bets %}
-      <div class="table-responsive">
-        <table class="table table-striped">
-          <thead>
-            <tr><th>Cohort</th><th>Bets</th><th>Wins</th><th>Strike Rate</th><th>Avg Edge</th><th>Staked</th><th>Return</th><th>Profit</th><th>ROI</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>All Value Edge Bets</strong></td>
-              <td>{{ value_edge_performance.overall.bets }}</td>
-              <td>{{ value_edge_performance.overall.wins }}</td>
-              <td>{{ "%.1f"|format(value_edge_performance.overall.strike_rate) }}%</td>
-              <td>{{ "%.1f"|format(value_edge_performance.overall.avg_edge_pct) }}pp</td>
-              <td>${{ "%.2f"|format(value_edge_performance.overall.total_staked) }}</td>
-              <td>${{ "%.2f"|format(value_edge_performance.overall.total_return) }}</td>
-              <td class="{% if value_edge_performance.overall.profit >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(value_edge_performance.overall.profit) }}</td>
-              <td class="{% if value_edge_performance.overall.roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(value_edge_performance.overall.roi) }}%</td>
-            </tr>
-            {% if value_edge_performance.at_best_bets_threshold %}
-            <tr>
-              <td><strong>Shown on Best Bets ({{ "%.0f"|format(value_edge_performance.best_bets_threshold_pct) }}pp+)</strong></td>
-              <td>{{ value_edge_performance.at_best_bets_threshold.bets }}</td>
-              <td>{{ value_edge_performance.at_best_bets_threshold.wins }}</td>
-              <td>{{ "%.1f"|format(value_edge_performance.at_best_bets_threshold.strike_rate) }}%</td>
-              <td>{{ "%.1f"|format(value_edge_performance.at_best_bets_threshold.avg_edge_pct) }}pp</td>
-              <td>${{ "%.2f"|format(value_edge_performance.at_best_bets_threshold.total_staked) }}</td>
-              <td>${{ "%.2f"|format(value_edge_performance.at_best_bets_threshold.total_return) }}</td>
-              <td class="{% if value_edge_performance.at_best_bets_threshold.profit >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(value_edge_performance.at_best_bets_threshold.profit) }}</td>
-              <td class="{% if value_edge_performance.at_best_bets_threshold.roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(value_edge_performance.at_best_bets_threshold.roi) }}%</td>
-            </tr>
-            {% endif %}
-            {% for bucket in value_edge_performance.buckets %}
-            <tr>
-              <td>Edge {{ bucket.label }}{% if bucket.is_best_bets_bucket %} <span class="badge bg-success">on Best Bets</span>{% endif %}</td>
-              <td>{{ bucket.bets }}</td>
-              <td>{{ bucket.wins }}</td>
-              <td>{{ "%.1f"|format(bucket.strike_rate) }}%</td>
-              <td>{{ "%.1f"|format(bucket.avg_edge_pct) }}pp</td>
-              <td>${{ "%.2f"|format(bucket.total_staked) }}</td>
-              <td>${{ "%.2f"|format(bucket.total_return) }}</td>
-              <td class="{% if bucket.profit >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(bucket.profit) }}</td>
-              <td class="{% if bucket.roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(bucket.roi) }}%</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Kelly-staked cohort — identical rows, identical filters, sized by
-           predictions.kelly_stake_pct instead of a flat ticket. This is the
-           side-by-side the flat table above cannot answer on its own: whether
-           sizing by edge beats betting the same amount every time. -->
-      <hr class="my-4">
-      <h6 class="mb-2">📐 Same bets, sized by Kelly (${{ "%.0f"|format(value_edge_performance.kelly_bankroll) }} bankroll)</h6>
-      <p class="text-muted mb-3">
-        The very same cohorts, settled at <code>kelly_stake_pct</code> of a fixed
-        ${{ "%.0f"|format(value_edge_performance.kelly_bankroll) }} bankroll instead of a flat
-        ${{ "%.0f"|format(value_edge_performance.flat_stake) }} a bet. The bankroll is held constant rather than
-        compounded, so each bet stays independent and the only thing that changes between the two tables is
-        how much went on each one. Bet counts are lower here on purpose: the joint Kelly solve stakes a runner
-        only when its price beats what the model rates it, so everything at a non-positive edge lands in
-        <em>No Bet</em> — a bet never placed, not a bet that lost.
-      </p>
-      <p class="text-muted mb-3">
-        <strong>Sizing Gain</strong> is the answer to "is Kelly worth it": Kelly's ROI minus the ROI those
-        <em>same</em> bets would have returned at a flat ${{ "%.0f"|format(value_edge_performance.flat_stake) }}.
-        It holds the selections constant and isolates bet sizing, which comparing against the table above
-        cannot do — that cohort also carries every runner Kelly declined. Positive means backing the bigger
-        edges harder paid; negative means flat staking would have done better on the same bets.
-      </p>
-      {% if value_edge_performance.kelly_rows_staked %}
-      <div class="table-responsive">
-        <table class="table table-striped">
-          <thead>
-            <tr><th>Cohort</th><th>Bets</th><th>No Bet</th><th>Wins</th><th>Strike Rate</th><th>Avg Stake</th><th>Staked</th><th>Return</th><th>Profit</th><th>ROI</th><th title="Kelly ROI minus what the same bets would have returned flat-staked. Isolates bet sizing from bet selection.">Sizing Gain</th></tr>
-          </thead>
-          <tbody>
-            {% macro kelly_row(label, cohort, badge) %}
-            <tr>
-              <td>{{ label|safe }}{% if badge %} <span class="badge bg-success">on Best Bets</span>{% endif %}</td>
-              <td>{{ cohort.kelly.bets }}</td>
-              <td class="text-muted">{{ cohort.kelly.no_bet }}</td>
-              <td>{{ cohort.kelly.wins }}</td>
-              <td>{{ "%.1f"|format(cohort.kelly.strike_rate) }}%</td>
-              <td>${{ "%.2f"|format(cohort.kelly.avg_stake) }} <span class="text-muted">({{ "%.2f"|format(cohort.kelly.avg_stake_pct) }}%)</span></td>
-              <td>${{ "%.2f"|format(cohort.kelly.total_staked) }}</td>
-              <td>${{ "%.2f"|format(cohort.kelly.total_return) }}</td>
-              <td class="{% if cohort.kelly.profit >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(cohort.kelly.profit) }}</td>
-              <td class="{% if cohort.kelly.roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(cohort.kelly.roi) }}%</td>
-              {# The whole point of the table: Kelly's ROI minus the ROI of the
-                 SAME bets flat-staked, not minus the flat cohort's — that one
-                 covers a different set of runners, so the difference would be
-                 selection and sizing mixed together. Blank when Kelly placed no
-                 bet here, because there is nothing to compare. #}
-              <td class="{% if cohort.kelly.bets == 0 %}text-muted{% elif cohort.kelly.roi >= cohort.kelly.flat_roi_same_bets %}profit{% else %}loss{% endif %}"
-                  title="{% if cohort.kelly.bets %}Kelly {{ "%+.1f"|format(cohort.kelly.roi) }}% vs {{ "%+.1f"|format(cohort.kelly.flat_roi_same_bets) }}% flat over the same {{ cohort.kelly.bets }} bet{{ '' if cohort.kelly.bets == 1 else 's' }} (${{ "%.2f"|format(cohort.kelly.flat_staked_same_bets) }} flat turnover).{% else %}Kelly staked nothing in this cohort, so there is nothing to compare.{% endif %}">
-                {% if cohort.kelly.bets %}{{ "%+.1f"|format(cohort.kelly.roi - cohort.kelly.flat_roi_same_bets) }}pp{% else %}—{% endif %}
-              </td>
-            </tr>
-            {% endmacro %}
-
-            {{ kelly_row('<strong>All Value Edge Bets</strong>', value_edge_performance.overall, false) }}
-            {% if value_edge_performance.at_best_bets_threshold %}
-            {{ kelly_row('<strong>Shown on Best Bets (' ~ "%.0f"|format(value_edge_performance.best_bets_threshold_pct) ~ 'pp+)</strong>', value_edge_performance.at_best_bets_threshold, false) }}
-            {% endif %}
-            {% for bucket in value_edge_performance.buckets %}
-            {{ kelly_row('Edge ' ~ bucket.label, bucket, bucket.is_best_bets_bucket) }}
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <p class="text-muted mb-0">
-        No Kelly-staked bets to settle yet — every settled runner in the cohorts above has
-        <code>kelly_stake_pct = 0</code>, meaning the joint solve declined them all. That is a statement about
-        staking, not about results: the flat table above still shows how those same runners performed.
-      </p>
-      {% endif %}
-      {% else %}
-      <p class="text-muted mb-0">No settled Value Edge bets yet — results will populate here once flagged pre-race bets have run their race.</p>
+      {% if ladbrokes_signal_performance and ladbrokes_signal_performance|selectattr('bets')|list %}
+      <h6 class="mt-4 mb-1" style="color:var(--ml-accent)">Cumulative P&amp;L by Signal</h6>
+      <p class="text-muted mb-2" style="font-size:12px">Running profit of $10 flat win bets, one line per signal, oldest bet on the left.</p>
+      <canvas id="ladbrokesSignalPnlChart" height="160"></canvas>
+      <script type="application/json" id="ladbrokesSignalHistory">{{ ladbrokes_signal_performance|tojson }}</script>
       {% endif %}
     </div>
   </div>
@@ -892,6 +757,58 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g" crossorigin="anonymous"></script>
 <script>
+(function renderLadbrokesSignalPnl() {
+    const dataEl = document.getElementById('ladbrokesSignalHistory');
+    const canvas = document.getElementById('ladbrokesSignalPnlChart');
+    if (!dataEl || !canvas || typeof Chart === 'undefined') return;
+    const signals = JSON.parse(dataEl.textContent).filter(s => s.history && s.history.length);
+    const colours = ['#facc15', '#00e5b0', '#60a5fa', '#c084fc'];
+    new Chart(canvas, {
+        type: 'line',
+        data: {
+            datasets: signals.map((s, i) => ({
+                label: s.label,
+                data: s.history.map((h, n) => ({ x: n + 1, y: h.cumulative })),
+                borderColor: colours[i % colours.length],
+                backgroundColor: colours[i % colours.length],
+                borderWidth: 2,
+                fill: false,
+                tension: 0.3,
+                pointRadius: s.history.length > 60 ? 0 : 2,
+                pointHoverRadius: 5,
+            }))
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'nearest', intersect: false },
+            scales: {
+                x: {
+                    type: 'linear',
+                    title: { display: true, text: 'Bet number', color: '#9090a8' },
+                    ticks: { color: '#9090a8', font: { size: 10 }, precision: 0 },
+                    grid: { display: false }
+                },
+                y: {
+                    ticks: { color: '#9090a8', font: { size: 11 }, callback: v => '$' + v.toFixed(0) },
+                    grid: { color: 'rgba(255,255,255,0.05)' }
+                }
+            },
+            plugins: {
+                legend: { labels: { color: '#c8c8d8', boxWidth: 12, font: { size: 11 } } },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ` ${ctx.dataset.label}: $${ctx.parsed.y.toFixed(2)}`,
+                        afterLabel: ctx => {
+                            const h = signals[ctx.datasetIndex].history[ctx.dataIndex];
+                            return ` ${h.date} | R${h.race} ${h.meeting} | ${h.won ? 'WON' : 'Lost'} ${h.profit >= 0 ? '+' : ''}$${h.profit.toFixed(2)}`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+})();
+
 const loadedSections = new Set();
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[char]));
 
