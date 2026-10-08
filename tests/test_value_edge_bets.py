@@ -20,19 +20,14 @@ def test_calculate_value_edge_performance_buckets_and_stake():
     assert 'avg_edge_pct' in source
 
 
-def test_ml_data_route_wires_value_edge_performance():
+def test_ml_data_route_no_longer_shows_value_edge_performance():
     start = APP_SOURCE.index('def ml_data_analytics(')
     end = APP_SOURCE.index('\n@app.route(', start)
     source = APP_SOURCE[start:end]
-    assert 'calculate_value_edge_performance(' in source
-    assert 'value_edge_performance=value_edge_performance' in source
-
-
-def test_ml_data_template_has_value_edge_section():
+    assert 'calculate_value_edge_performance(' not in source
     template = Path('templates/ml_data.html').read_text()
-    assert 'ML Value Edge Bets' in template
-    assert 'value_edge_performance.overall' in template
-    assert 'value_edge_performance.buckets' in template
+    assert 'ML Value Edge Bets' not in template
+    assert 'Same bets, sized by Kelly' not in template
 
 
 def test_promote_threshold_is_a_single_module_constant():
