@@ -772,7 +772,7 @@
     if (!dataEl || !canvas || typeof Chart === 'undefined') return;
     const signals = JSON.parse(dataEl.textContent).filter(s => s.history && s.history.length);
     if (!signals.length) return;
-    const colours = ['#facc15', '#00e5b0', '#60a5fa', '#c084fc'];
+    const colours = ['#facc15', '#00e5b0', '#60a5fa', '#c084fc', '#fb923c'];
     const buttonsEl = document.getElementById('signalPnlButtons');
     const totalEl = document.getElementById('signalPnlTotal');
     const betsEl = document.getElementById('signalPnlBets');

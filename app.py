@@ -3620,6 +3620,12 @@ LADBROKES_SIGNAL_COHORTS = (
     ('gap_20', '★★★★ ML Market Agreement + 20 Gap', 4, False),
 )
 
+# Best Bets routes tracked alongside the Ladbrokes badges. These come from
+# Prediction.best_bet_routes rather than the Ladbrokes mask.
+BEST_BET_ROUTE_COHORTS = (
+    ('proven_edge', '🔥 Proven Edge Best Bet', 'proven_edge'),
+)
+
 
 def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_to="", limit_param="all", stake=10.0):
     """Settle captured pre-race Ladbrokes badge cohorts at a flat win stake.
@@ -3632,7 +3638,10 @@ def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_t
     ).join(Horse, Prediction.horse_id == Horse.id).join(
         Race, Horse.race_id == Race.id
     ).join(Meeting, Race.meeting_id == Meeting.id).join(Result, Result.horse_id == Horse.id).filter(
-        Prediction.ladbrokes_signal_mask > 0,
+        db.or_(
+            Prediction.ladbrokes_signal_mask > 0,
+            *[Prediction.best_bet_routes.like(f'%{route}%') for _key, _label, route in BEST_BET_ROUTE_COHORTS],
+        ),
         Result.finish_position > 0,
         Result.sp.isnot(None),
     )
@@ -3647,13 +3656,26 @@ def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_t
         limit = int(limit_param) if str(limit_param).isdigit() else 200
         rows = rows[:limit]
 
+    def mask_matcher(required_mask, exact):
+        def matches(prediction):
+            mask = prediction.ladbrokes_signal_mask or 0
+            return mask == required_mask if exact else bool(mask & required_mask)
+        return matches
+
+    def route_matcher(route):
+        return lambda prediction: route in (prediction.best_bet_routes or '').split(',')
+
+    cohorts = [
+        (key, label, mask_matcher(required_mask, exact))
+        for key, label, required_mask, exact in LADBROKES_SIGNAL_COHORTS
+    ] + [
+        (key, label, route_matcher(route))
+        for key, label, route in BEST_BET_ROUTE_COHORTS
+    ]
+
     performance = []
-    for key, label, required_mask, exact in LADBROKES_SIGNAL_COHORTS:
-        matched = [
-            row for row in rows
-            if ((row[0].ladbrokes_signal_mask or 0) == required_mask if exact else
-                (row[0].ladbrokes_signal_mask or 0) & required_mask)
-        ]
+    for key, label, matches in cohorts:
+        matched = [row for row in rows if matches(row[0])]
         selections = [row[1] for row in matched]
         bets = len(selections)
         wins = sum(result.finish_position == 1 for result in selections)
