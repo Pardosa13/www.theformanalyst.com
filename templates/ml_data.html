@@ -554,9 +554,18 @@
         </table>
       </div>
       {% if ladbrokes_signal_performance and ladbrokes_signal_performance|selectattr('bets')|list %}
-      <h6 class="mt-4 mb-1" style="color:var(--ml-accent)">Cumulative P&amp;L by Signal</h6>
-      <p class="text-muted mb-2" style="font-size:12px">Running profit of $10 flat win bets, one line per signal, oldest bet on the left.</p>
-      <canvas id="ladbrokesSignalPnlChart" height="160"></canvas>
+      <div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+        <div>
+          <h5 style="margin:0;color:var(--ml-accent)">Cumulative P&amp;L by Signal</h5>
+          <p class="text-muted" style="font-size:12px;margin:0" id="signalPnlSubtitle">$10 flat win bets</p>
+        </div>
+        <div style="text-align:right">
+          <span id="signalPnlTotal" style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace"></span>
+          <div id="signalPnlBets" style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em"></div>
+        </div>
+      </div>
+      <div id="signalPnlButtons" class="d-flex flex-wrap gap-2 mb-3"></div>
+      <canvas id="ladbrokesSignalPnlChart" height="140"></canvas>
       <script type="application/json" id="ladbrokesSignalHistory">{{ ladbrokes_signal_performance|tojson }}</script>
       {% endif %}
     </div>
@@ -762,51 +771,104 @@
     const canvas = document.getElementById('ladbrokesSignalPnlChart');
     if (!dataEl || !canvas || typeof Chart === 'undefined') return;
     const signals = JSON.parse(dataEl.textContent).filter(s => s.history && s.history.length);
+    if (!signals.length) return;
     const colours = ['#facc15', '#00e5b0', '#60a5fa', '#c084fc'];
-    new Chart(canvas, {
-        type: 'line',
-        data: {
-            datasets: signals.map((s, i) => ({
-                label: s.label,
-                data: s.history.map((h, n) => ({ x: n + 1, y: h.cumulative })),
-                borderColor: colours[i % colours.length],
-                backgroundColor: colours[i % colours.length],
-                borderWidth: 2,
-                fill: false,
-                tension: 0.3,
-                pointRadius: s.history.length > 60 ? 0 : 2,
-                pointHoverRadius: 5,
-            }))
-        },
-        options: {
-            responsive: true,
-            interaction: { mode: 'nearest', intersect: false },
-            scales: {
-                x: {
-                    type: 'linear',
-                    title: { display: true, text: 'Bet number', color: '#9090a8' },
-                    ticks: { color: '#9090a8', font: { size: 10 }, precision: 0 },
-                    grid: { display: false }
+    const buttonsEl = document.getElementById('signalPnlButtons');
+    const totalEl = document.getElementById('signalPnlTotal');
+    const betsEl = document.getElementById('signalPnlBets');
+    const subtitleEl = document.getElementById('signalPnlSubtitle');
+    let chart = null;
+
+    const money = v => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toFixed(2)}`;
+
+    function datasetFor(s, i, single) {
+        const final = s.history[s.history.length - 1].cumulative;
+        const colour = single ? (final >= 0 ? '#00e5b0' : '#f87171') : colours[i % colours.length];
+        return {
+            label: s.label,
+            data: s.history.map((h, n) => ({ x: n + 1, y: h.cumulative })),
+            borderColor: colour,
+            backgroundColor: single ? (final >= 0 ? 'rgba(0,229,176,0.10)' : 'rgba(248,113,113,0.10)') : colour,
+            borderWidth: 2,
+            fill: single,
+            tension: 0.3,
+            pointRadius: s.history.length > 60 ? 0 : 3,
+            pointHoverRadius: 5,
+        };
+    }
+
+    function show(index) {
+        const single = index !== 'all';
+        const shown = single ? [signals[index]] : signals;
+        if (single) {
+            const s = signals[index];
+            const final = s.history[s.history.length - 1].cumulative;
+            totalEl.textContent = money(final);
+            totalEl.style.color = final >= 0 ? '#00e5b0' : '#f87171';
+            betsEl.textContent = `${s.history.length} bets`;
+            subtitleEl.textContent = '$10 flat win bets on this signal';
+        } else {
+            totalEl.textContent = '';
+            betsEl.textContent = `${signals.length} signals`;
+            subtitleEl.textContent = 'All signals compared — oldest bet on the left';
+        }
+        buttonsEl.querySelectorAll('button').forEach(b => {
+            const active = b.dataset.index === String(index);
+            b.className = 'btn btn-sm ' + (active ? 'btn-light' : 'btn-outline-secondary');
+        });
+
+        if (chart) chart.destroy();
+        chart = new Chart(canvas, {
+            type: 'line',
+            data: { datasets: shown.map((s, i) => datasetFor(s, single ? index : i, single)) },
+            options: {
+                responsive: true,
+                interaction: { mode: 'nearest', intersect: false },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        title: { display: true, text: 'Bet number', color: '#9090a8' },
+                        ticks: { color: '#9090a8', font: { size: 10 }, precision: 0 },
+                        grid: { display: false }
+                    },
+                    y: {
+                        ticks: { color: '#9090a8', font: { size: 11 }, callback: v => '$' + v.toFixed(0) },
+                        grid: { color: ctx => ctx.tick.value === 0 ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.05)' }
+                    }
                 },
-                y: {
-                    ticks: { color: '#9090a8', font: { size: 11 }, callback: v => '$' + v.toFixed(0) },
-                    grid: { color: 'rgba(255,255,255,0.05)' }
-                }
-            },
-            plugins: {
-                legend: { labels: { color: '#c8c8d8', boxWidth: 12, font: { size: 11 } } },
-                tooltip: {
-                    callbacks: {
-                        label: ctx => ` ${ctx.dataset.label}: $${ctx.parsed.y.toFixed(2)}`,
-                        afterLabel: ctx => {
-                            const h = signals[ctx.datasetIndex].history[ctx.dataIndex];
-                            return ` ${h.date} | R${h.race} ${h.meeting} | ${h.won ? 'WON' : 'Lost'} ${h.profit >= 0 ? '+' : ''}$${h.profit.toFixed(2)}`;
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => ` ${ctx.dataset.label}: ${money(ctx.parsed.y)}`,
+                            afterLabel: ctx => {
+                                const h = shown[ctx.datasetIndex].history[ctx.dataIndex];
+                                return ` ${h.date} | R${h.race} ${h.meeting} | ${h.won ? 'WON' : 'Lost'} ${money(h.profit)}`;
+                            }
                         }
                     }
                 }
             }
+        });
+    }
+
+    const addButton = (label, index) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.index = String(index);
+        b.style.fontSize = '12px';
+        if (index !== 'all') {
+            const dot = document.createElement('span');
+            dot.style.cssText = `display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;background:${colours[index % colours.length]}`;
+            b.appendChild(dot);
         }
-    });
+        b.appendChild(document.createTextNode(label));
+        b.addEventListener('click', () => show(index));
+        buttonsEl.appendChild(b);
+    };
+    signals.forEach((s, i) => addButton(s.label, i));
+    if (signals.length > 1) addButton('Compare all', 'all');
+    show(0);
 })();
 
 const loadedSections = new Set();
