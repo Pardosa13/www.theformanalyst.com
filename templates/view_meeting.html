@@ -1303,19 +1303,160 @@ details pre {
   color: var(--accent) !important;
 }
 
-/* ── Print styles (unchanged logic) ── */
+/* ── Printable race guide (PDF) ──
+   The guide below is hidden on screen. When printing, everything else
+   is hidden and only the guide is shown, laid out for A4 paper. */
+.tfa-print-guide { display: none; }
+
 @media print {
-  nav, .btn, .vm-back-link, details summary, .chart-controls, .sectional-section {
-    display: none !important;
+  @page {
+    size: A4 portrait;
+    margin: 14mm 12mm 16mm;
+    @bottom-left  { content: "The Form Analyst · Race Guide"; font: 600 7.5pt 'Outfit', sans-serif; color: #8a8fa3; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 600 7.5pt 'Outfit', sans-serif; color: #8a8fa3; }
   }
-  details[open] pre { display: block !important; }
-  body { background: white; }
-  .vm-race-card {
-    break-inside: avoid;
-    page-break-inside: avoid;
-    box-shadow: none;
-    border: 1px solid #ddd;
+
+  html, body {
+    background: #fff !important;
+    color: #14161f !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
+  body > *:not(.main-container) { display: none !important; }
+  .main-container { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+  .main-container > *:not(.tfa-print-guide) { display: none !important; }
+
+  .tfa-print-guide {
+    display: block !important;
+    font-family: 'Outfit', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 9pt;
+    line-height: 1.35;
+    color: #14161f;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .tfa-print-guide * { box-sizing: border-box; }
+
+  /* Cover band */
+  .pg-cover {
+    background: linear-gradient(120deg, #1b1d3a 0%, #3a2f6b 55%, #5b3f8f 100%);
+    color: #fff;
+    border-radius: 10px;
+    padding: 16px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+  }
+  .pg-brand { display: flex; align-items: center; gap: 8px; font-size: 8pt; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #c9c3ff; }
+  .pg-brand img { height: 18px; width: auto; border-radius: 4px; }
+  .pg-cover h1 { margin: 8px 0 2px; font-size: 22pt; font-weight: 700; line-height: 1.1; color: #fff; }
+  .pg-cover .pg-sub { font-size: 9.5pt; color: #e3defa; }
+  .pg-cover-stats { display: flex; gap: 8px; }
+  .pg-stat { background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.22); border-radius: 8px; padding: 7px 11px; min-width: 74px; text-align: center; }
+  .pg-stat-label { font-size: 6.5pt; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #c9c3ff; }
+  .pg-stat-value { font-size: 12pt; font-weight: 700; color: #fff; margin-top: 2px; }
+
+  /* Section headings */
+  .pg-section-title {
+    margin: 16px 0 7px;
+    font-size: 8pt;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #5b3f8f;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pg-section-title::after { content: ""; flex: 1; height: 1px; background: #dcdcea; }
+
+  /* Tables */
+  .pg-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+  .pg-table thead { display: table-header-group; }
+  .pg-table th {
+    background: #f1f0f8;
+    color: #4a4d63;
+    font-size: 6.8pt;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: left;
+    padding: 5px 7px;
+    border-bottom: 1.5px solid #c9c6e0;
+  }
+  .pg-table td { padding: 5px 7px; border-bottom: 1px solid #e8e8f0; vertical-align: middle; }
+  .pg-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .pg-table tbody tr:nth-child(even) td { background: #fafafd; }
+  .pg-num { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pg-ctr { text-align: center !important; }
+  .pg-mono { font-family: 'DM Mono', ui-monospace, monospace; font-size: 8pt; letter-spacing: 0.02em; }
+  .pg-muted { color: #6b6f85; }
+  .pg-strong { font-weight: 700; }
+
+  /* Best bets */
+  .pg-bets { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
+  .pg-bet { border: 1px solid #e3d9b0; background: #fffaf0; border-left: 3px solid #d4a017; border-radius: 6px; padding: 7px 10px; break-inside: avoid; }
+  .pg-bet-head { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; }
+  .pg-bet-why { font-size: 7.5pt; color: #6b6f85; margin-top: 2px; }
+
+  /* Race pages */
+  .pg-race { break-before: page; page-break-before: always; }
+  .pg-race-head {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid #dcdcea;
+    border-radius: 9px;
+    overflow: hidden;
+    margin-bottom: 9px;
+  }
+  .pg-race-no {
+    background: linear-gradient(160deg, #3a2f6b, #5b3f8f);
+    color: #fff;
+    padding: 8px 14px;
+    text-align: center;
+    min-width: 62px;
+  }
+  .pg-race-no small { display: block; font-size: 6.5pt; letter-spacing: 0.14em; color: #c9c3ff; font-weight: 700; }
+  .pg-race-no span { font-size: 20pt; font-weight: 700; line-height: 1; }
+  .pg-race-info { flex: 1; padding: 8px 14px; display: flex; flex-direction: column; justify-content: center; }
+  .pg-race-title { font-size: 12pt; font-weight: 700; color: #14161f; }
+  .pg-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+  .pg-chip { font-size: 7pt; font-weight: 600; color: #4a4d63; background: #f1f0f8; border: 1px solid #dcdcea; border-radius: 999px; padding: 1px 8px; }
+  .pg-chip-warn { background: #fff4e5; border-color: #f2c48d; color: #8a4b08; }
+  .pg-race-meet { padding: 8px 14px; text-align: right; font-size: 7.5pt; color: #6b6f85; display: flex; flex-direction: column; justify-content: center; border-left: 1px solid #ececf4; }
+
+  /* Verdict strip */
+  .pg-verdict { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-bottom: 9px; }
+  .pg-pick { border: 1px solid #dcdcea; border-radius: 7px; padding: 6px 10px; break-inside: avoid; }
+  .pg-pick-1 { border-color: #b9a6e8; background: #f6f2ff; border-top: 3px solid #5b3f8f; }
+  .pg-pick-2, .pg-pick-3 { border-top: 3px solid #b8bccc; }
+  .pg-pick-label { font-size: 6.5pt; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6b6f85; }
+  .pg-pick-name { font-size: 10.5pt; font-weight: 700; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pg-pick-meta { font-size: 7.5pt; color: #4a4d63; margin-top: 1px; }
+
+  /* Runner table extras */
+  .pg-rank { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 7.5pt; font-weight: 700; background: #ececf4; color: #4a4d63; }
+  .pg-rank-1 { background: #5b3f8f; color: #fff; }
+  .pg-rank-2 { background: #8d86b5; color: #fff; }
+  .pg-rank-3 { background: #b8b3d6; color: #1b1d3a; }
+  .pg-horse { font-weight: 700; font-size: 9pt; }
+  .pg-conn { font-size: 7pt; color: #6b6f85; margin-top: 1px; }
+  .pg-tag { display: inline-block; font-size: 6.3pt; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 3px; padding: 1px 5px; margin-left: 5px; vertical-align: 1px; }
+  .pg-tag-bet { background: #fbefc9; color: #7a5a00; border: 1px solid #e6cf7d; }
+  .pg-tag-ml { background: #e7f5ef; color: #0c6b48; border: 1px solid #a6dcc3; }
+  .pg-bar { display: flex; align-items: center; gap: 6px; }
+  .pg-bar-track { flex: 1; height: 5px; background: #ececf4; border-radius: 3px; overflow: hidden; min-width: 46px; }
+  .pg-bar-fill { height: 100%; background: linear-gradient(90deg, #8d86b5, #5b3f8f); border-radius: 3px; }
+  .pg-bar-val { font-weight: 700; min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
+  .pg-row-top td { background: #f6f2ff !important; }
+  .pg-scr td { color: #9a9db0; }
+  .pg-scr .pg-horse { text-decoration: line-through; font-weight: 600; }
+
+  .pg-adjust { margin-top: 8px; font-size: 7.5pt; color: #4a4d63; background: #f6f6fb; border: 1px solid #e3e3ee; border-radius: 6px; padding: 5px 9px; }
+  .pg-note { margin-top: 8px; font-size: 7.5pt; color: #8a4b08; background: #fff4e5; border: 1px solid #f2c48d; border-radius: 6px; padding: 5px 9px; }
+
+  .pg-footer-note { margin-top: 14px; font-size: 7pt; color: #8a8fa3; border-top: 1px solid #e3e3ee; padding-top: 6px; }
 }
 
 /* ── Responsive ── */
@@ -1451,7 +1592,7 @@ function updateScratchings(meetingId) {
         });
 }
 </script>
-    <button onclick="window.print()" class="btn btn-primary">📄 Print / Save PDF</button>
+    <button onclick="printRaceGuide()" class="btn btn-primary" title="Opens your print dialog. Choose 'Save as PDF' to download.">📄 Download Race Guide (PDF)</button>
   </div>
 </div>
 
@@ -1706,6 +1847,221 @@ function updateScratchings(meetingId) {
 </div>
 {% endfor %}
 
+<!-- ══ Printable race guide — only shown when printing / saving as PDF ══ -->
+{% set guide_date = meeting.date or meeting.uploaded_at %}
+{% if meeting.pace_bias == -2 %}{% set guide_bias = "Strong backmarker" %}
+{% elif meeting.pace_bias == -1 %}{% set guide_bias = "Slight backmarker" %}
+{% elif meeting.pace_bias == 1 %}{% set guide_bias = "Slight leader" %}
+{% elif meeting.pace_bias == 2 %}{% set guide_bias = "Leaders' paradise" %}
+{% else %}{% set guide_bias = "Neutral" %}{% endif %}
+{% set guide_rail = ("+" ~ meeting.rail_position ~ "m") if meeting.rail_position and meeting.rail_position > 0 else "True" %}
+<div class="tfa-print-guide" aria-hidden="true">
+
+  <header class="pg-cover">
+    <div>
+      <div class="pg-brand">
+        <img src="{{ url_for('static', filename='apple-touch-icon.png') }}" alt="">
+        The Form Analyst · Race Guide
+      </div>
+      <h1>{{ meeting.meeting_name }}</h1>
+      <div class="pg-sub">
+        {% if guide_date %}{{ guide_date.strftime('%A %-d %B %Y') }}{% endif %}
+        {% if meeting.track %} · {{ meeting.track }}{% endif %}
+      </div>
+    </div>
+    <div class="pg-cover-stats">
+      <div class="pg-stat"><div class="pg-stat-label">Races</div><div class="pg-stat-value">{{ results.races|length }}</div></div>
+      <div class="pg-stat"><div class="pg-stat-label">Rail</div><div class="pg-stat-value">{{ guide_rail }}</div></div>
+      <div class="pg-stat"><div class="pg-stat-label">Bias</div><div class="pg-stat-value" style="font-size:9pt;">{{ guide_bias }}</div></div>
+    </div>
+  </header>
+
+  <!-- Selections at a glance -->
+  <div class="pg-section-title">Selections at a glance</div>
+  <table class="pg-table">
+    <thead>
+      <tr>
+        <th class="pg-ctr" style="width:34px;">Race</th>
+        <th>Distance / Class</th>
+        <th>Top Pick</th>
+        <th>Next Best</th>
+        <th class="pg-num">Score</th>
+        <th class="pg-num">Margin</th>
+        <th class="pg-num">Rated</th>
+        <th class="pg-num">Win %</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for race in results.races %}
+      {% set active = race.horses|rejectattr('is_scratched')|list %}
+      <tr>
+        <td class="pg-ctr pg-strong">R{{ race.race_number }}</td>
+        <td>
+          {{ race.distance or '—' }}
+          {% if race.race_class %}<div class="pg-conn">{{ race.race_class }}</div>{% endif %}
+        </td>
+        {% if active|length > 0 %}
+        <td class="pg-strong">
+          {{ active[0].horse_name }}{% if active[0].barrier %} <span class="pg-muted" style="font-weight:500;">({{ active[0].barrier }})</span>{% endif %}
+          {% if active[0].is_best_bet %}<span class="pg-tag pg-tag-bet">Best Bet</span>{% endif %}
+        </td>
+        <td>{% if active|length > 1 %}{{ active[1].horse_name }}{% else %}<span class="pg-muted">—</span>{% endif %}</td>
+        <td class="pg-num pg-strong">{{ "%.1f"|format(active[0].score or 0) }}</td>
+        <td class="pg-num">{% if active|length > 1 %}{{ "%.1f"|format((active[0].score or 0) - (active[1].score or 0)) }}{% else %}—{% endif %}</td>
+        <td class="pg-num">{{ active[0].odds or '—' }}</td>
+        <td class="pg-num">{{ active[0].win_probability or '—' }}</td>
+        {% else %}
+        <td colspan="6" class="pg-muted">No rated runners</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <!-- Best bets -->
+  {% set bets = namespace(items=[]) %}
+  {% for race in results.races %}{% for h in race.horses if h.is_best_bet and not h.is_scratched %}
+    {% set bets.items = bets.items + [{'race': race.race_number, 'h': h}] %}
+  {% endfor %}{% endfor %}
+  {% if bets.items %}
+  <div class="pg-section-title">Best bets</div>
+  <div class="pg-bets">
+    {% for b in bets.items %}
+    <div class="pg-bet">
+      <div class="pg-bet-head">
+        <span>R{{ b.race }} · {{ b.h.horse_name }}</span>
+        <span>{{ b.h.odds or '' }}</span>
+      </div>
+      {% if b.h.best_bet_reasons %}<div class="pg-bet-why">{{ b.h.best_bet_reasons|join(' · ') }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="pg-footer-note">
+    Scores, rated odds and win chances come from The Form Analyst model at the time this guide was made
+    ({{ meeting.uploaded_at.strftime('%-d %b %Y, %H:%M') }}). Check scratchings and market prices before betting.
+    Gamble responsibly — for free, confidential support call Gambling Help on 1800 858 858.
+  </div>
+
+  <!-- One page per race -->
+  {% for race in results.races %}
+  {% set active = race.horses|rejectattr('is_scratched')|list %}
+  {% set scratched = race.horses|selectattr('is_scratched')|list %}
+  {% set top_score = (active[0].score or 0) if active else 0 %}
+  {% set ml_ranked = active|rejectattr('ml_score', 'none')|sort(attribute='ml_score', reverse=true)|list %}
+  {% set ml_top_id = ml_ranked[0].horse_id if ml_ranked else none %}
+  <section class="pg-race">
+
+    <div class="pg-race-head">
+      <div class="pg-race-no"><small>RACE</small><span>{{ race.race_number }}</span></div>
+      <div class="pg-race-info">
+        <div class="pg-race-title">{{ meeting.meeting_name }}</div>
+        <div class="pg-chips">
+          {% if race.distance %}<span class="pg-chip">{{ race.distance }}</span>{% endif %}
+          {% if race.race_class %}<span class="pg-chip">{{ race.race_class }}</span>{% endif %}
+          {% if race.track_condition %}<span class="pg-chip">Track: {{ race.track_condition|capitalize }}</span>{% endif %}
+          <span class="pg-chip">{{ active|length }} runners{% if scratched %} · {{ scratched|length }} scr{% endif %}</span>
+          {% if race.race_class and 'Maiden' in race.race_class %}<span class="pg-chip pg-chip-warn">Maiden</span>{% endif %}
+        </div>
+      </div>
+      <div class="pg-race-meet">
+        {% if guide_date %}<div>{{ guide_date.strftime('%a %-d %b %Y') }}</div>{% endif %}
+        <div>Rail {{ guide_rail }} · Bias {{ guide_bias }}</div>
+      </div>
+    </div>
+
+    {% if active %}
+    <div class="pg-verdict">
+      {% for h in active[:3] %}
+      <div class="pg-pick pg-pick-{{ loop.index }}">
+        <div class="pg-pick-label">{% if loop.index == 1 %}Top pick{% elif loop.index == 2 %}Second{% else %}Third{% endif %}</div>
+        <div class="pg-pick-name">{{ h.horse_name }}</div>
+        <div class="pg-pick-meta">
+          {{ "%.1f"|format(h.score or 0) }} pts
+          {% if h.odds %} · {{ h.odds }}{% endif %}
+          {% if h.win_probability %} · {{ h.win_probability }}{% endif %}
+          {% if loop.index == 1 and active|length > 1 %} · +{{ "%.1f"|format((h.score or 0) - (active[1].score or 0)) }} clear{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <table class="pg-table">
+      <thead>
+        <tr>
+          <th class="pg-ctr" style="width:30px;">#</th>
+          <th>Runner</th>
+          <th class="pg-ctr" style="width:34px;">Bar</th>
+          <th class="pg-num" style="width:44px;">Wt</th>
+          <th style="width:62px;">Form</th>
+          <th style="width:120px;">Score</th>
+          <th class="pg-num" style="width:54px;">Rated</th>
+          <th class="pg-num" style="width:48px;">Win %</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in active %}
+        {% set pct = ((h.score or 0) / top_score * 100) if top_score > 0 else 0 %}
+        <tr class="{% if loop.index == 1 %}pg-row-top{% endif %}">
+          <td class="pg-ctr"><span class="pg-rank{% if loop.index <= 3 %} pg-rank-{{ loop.index }}{% endif %}">{{ loop.index }}</span></td>
+          <td>
+            <span class="pg-horse">{{ h.horse_name }}</span>
+            {% if h.is_best_bet %}<span class="pg-tag pg-tag-bet">Best Bet</span>{% endif %}
+            {% if ml_top_id is not none and h.horse_id == ml_top_id %}<span class="pg-tag pg-tag-ml">ML pick</span>{% endif %}
+            <div class="pg-conn">
+              {% if h.jockey %}J: {{ h.jockey }}{% endif %}{% if h.jockey and h.trainer %} · {% endif %}{% if h.trainer %}T: {{ h.trainer }}{% endif %}
+            </div>
+          </td>
+          <td class="pg-ctr">{{ h.barrier or '—' }}</td>
+          <td class="pg-num">{% if h.weight %}{{ h.weight }}{% else %}—{% endif %}</td>
+          <td class="pg-mono">{{ h.form or '—' }}</td>
+          <td>
+            <div class="pg-bar">
+              <div class="pg-bar-track"><div class="pg-bar-fill" style="width:{{ [[pct, 0]|max, 100]|min }}%;"></div></div>
+              <span class="pg-bar-val">{{ "%.1f"|format(h.score or 0) }}</span>
+            </div>
+          </td>
+          <td class="pg-num pg-strong">{{ h.odds or '—' }}</td>
+          <td class="pg-num">{{ h.win_probability or '—' }}</td>
+        </tr>
+        {% endfor %}
+        {% for h in scratched %}
+        <tr class="pg-scr">
+          <td class="pg-ctr">SCR</td>
+          <td><span class="pg-horse">{{ h.horse_name }}</span></td>
+          <td class="pg-ctr">{{ h.barrier or '—' }}</td>
+          <td colspan="5" class="pg-muted">Scratched</td>
+        </tr>
+        {% endfor %}
+        {% if not race.horses %}
+        <tr><td colspan="8" class="pg-muted">No runners analysed for this race.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+
+    {% if race.race_class and 'Maiden' in race.race_class %}
+    <div class="pg-note">Maiden race — some runners have no past form and may not appear in the ratings.</div>
+    {% endif %}
+    {% if meeting.pace_bias != 0 or (meeting.rail_position and meeting.rail_position > 0) %}
+    <div class="pg-adjust">Track adjustments applied to scores: rail {{ guide_rail }}, pace bias {{ guide_bias|lower }}.</div>
+    {% endif %}
+  </section>
+  {% endfor %}
+
+</div>
+
+<script>
+// Print only the race guide and give the saved PDF a tidy file name.
+function printRaceGuide() {
+  const original = document.title;
+  document.title = {{ ("Race Guide - " ~ meeting.meeting_name)|tojson }};
+  const restore = () => { document.title = original; window.removeEventListener('afterprint', restore); };
+  window.addEventListener('afterprint', restore);
+  window.print();
+}
+</script>
 <!-- Back to top -->
 <div class="vm-back-top">
   <a href="#">↑ Back to Top</a>
