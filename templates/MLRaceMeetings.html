@@ -1347,21 +1347,6 @@ details pre {
   color: var(--accent) !important;
 }
 
-/* ── Print styles (unchanged logic) ── */
-@media print {
-  nav, .btn, .vm-back-link, details summary, .chart-controls, .sectional-section {
-    display: none !important;
-  }
-  details[open] pre { display: block !important; }
-  body { background: white; }
-  .vm-race-card {
-    break-inside: avoid;
-    page-break-inside: avoid;
-    box-shadow: none;
-    border: 1px solid #ddd;
-  }
-}
-
 /* ── Responsive ── */
 
 @media (prefers-reduced-motion: reduce) {
@@ -1499,7 +1484,7 @@ function updateScratchings(meetingId) {
         });
 }
 </script>
-    <button onclick="window.print()" class="btn btn-primary">📄 Print / Save PDF</button>
+    <button onclick="printRaceGuide()" class="btn btn-primary" title="Opens your print dialog. Choose 'Save as PDF' to download.">📄 Download Race Guide (PDF)</button>
   </div>
 </div>
 
@@ -1817,6 +1802,9 @@ function updateScratchings(meetingId) {
 
 </div>
 {% endfor %}
+
+{% set guide_mode = 'ml' %}
+{% include '_race_guide_print.html' %}
 
 <!-- Back to top -->
 <div class="vm-back-top">
