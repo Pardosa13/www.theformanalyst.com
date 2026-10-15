@@ -47,20 +47,14 @@ BASE_URL = 'https://betfair-datascientists.github.io/data/assets/ANZ_Thoroughbre
 FIRST_MONTH = (2026, 2)
 FILE_TZ = ZoneInfo('Australia/Sydney')
 MIN_NAME_OVERLAP = 0.5   # share of a market's runners whose names must match one race
-FUZZY_NAME_RATIO = 0.8   # name similarity accepted when the TAB number also agrees
 SAMPLE = 15              # examples printed per problem type
 
 
 # ─────────────────────────────────────────────
 # Names and times
 # ─────────────────────────────────────────────
-def clean_name(name):
-    """'Milly's Clever Too (NZ)' -> 'millys clever too'. Betfair drops apostrophes."""
-    s = str(name or '').lower().strip()
-    s = re.sub(r"\((nz|aus|ire|gb|usa|fr|ger|jpn|saf|arg|chi|brz)\)\s*$", '', s)
-    s = re.sub(r"[’'`]", '', s)
-    s = re.sub(r'[^a-z0-9]+', ' ', s)
-    return s.strip()
+# Shared with the results job and the odds poller (runner_names.py).
+from runner_names import FieldMatcher, clean_name, same_horse  # noqa: E402,F401
 
 
 def clean_track(name):
@@ -70,15 +64,6 @@ def clean_track(name):
 def tracks_match(a, b):
     a, b = clean_track(a), clean_track(b)
     return bool(a and b) and (a == b or a.startswith(b) or b.startswith(a) or a in b or b in a)
-
-
-def same_horse(a, b):
-    """Two cleaned names that are clearly the same horse (used only when TAB numbers agree)."""
-    if not a or not b:
-        return False
-    if a.startswith(b) or b.startswith(a):
-        return True
-    return difflib.SequenceMatcher(None, a, b).ratio() >= FUZZY_NAME_RATIO
 
 
 def to_utc(day, clock):
@@ -235,6 +220,7 @@ def load_our_races(conn, first_day, last_day):
 
     index = defaultdict(list)
     for race in races.values():
+        race['field'] = FieldMatcher(race['runners'])
         index[race['key']].append(race)
     return index
 
@@ -287,15 +273,8 @@ def match_market(runners, candidates):
 
 
 def match_runner(row, race):
-    """(our runner, method) or (None, None)."""
-    name = clean_name(row['SELECTION_NAME'])
-    runner = race['by_name'].get(name)
-    if runner:
-        return runner, 'name'
-    tab_runner = race['by_tab'].get(to_int(row['TAB_NUMBER']))
-    if tab_runner and same_horse(name, tab_runner['clean']):
-        return tab_runner, 'tab+similar'
-    return None, None
+    """(our runner, method) or (None, None). Shared rules: TAB number first, then name."""
+    return race['field'].match(row['SELECTION_NAME'], row['TAB_NUMBER'])
 
 
 def price_row(row, file_name, race, runner, method):
@@ -552,7 +531,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--rematch', action='store_true', help='Re-link files that were already loaded.')
     args = parser.parse_args(argv)
-    run(get_engine(), rematch=args.rematch)
+    # BSP_REMATCH=1 on the Railway service does the same as --rematch.
+    run(get_engine(), rematch=args.rematch or os.environ.get('BSP_REMATCH') == '1')
 
 
 if __name__ == '__main__':

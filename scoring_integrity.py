@@ -303,11 +303,16 @@ _PER_RACE_SQL = """
 """
 _BETFAIR_COLUMNS = """
            COUNT(*) FILTER (WHERE bp.won AND COALESCE(r.finish_position, -1) <> 1) AS bf_wrong_winner,
-           COUNT(*) FILTER (WHERE bp.id IS NOT NULL AND r.finish_position = 0) AS bf_ran_but_scratched
+           COUNT(*) FILTER (WHERE bp.id IS NOT NULL AND r.finish_position = 0) AS bf_ran_but_scratched,
+           -- Runners Betfair says started in this race that we have no horse for
+           -- (mostly rows the old CSV reader dropped): our field is incomplete.
+           MAX((SELECT COUNT(*) FROM betfair_prices bx
+                WHERE bx.race_id = h.race_id AND bx.horse_id IS NULL)) AS bf_missing_runners
 """
 _NO_BETFAIR_COLUMNS = """
            0 AS bf_wrong_winner,
-           0 AS bf_ran_but_scratched
+           0 AS bf_ran_but_scratched,
+           0 AS bf_missing_runners
 """
 _INCOMPLETE_EXPR = """(
         (per_race.resulted > 0
@@ -316,6 +321,7 @@ _INCOMPLETE_EXPR = """(
               OR per_race.blank_sp > 0))
         OR per_race.bf_wrong_winner > 0
         OR per_race.bf_ran_but_scratched > 0
+        OR per_race.bf_missing_runners > 0
     )"""
 RESULTS_INCOMPLETE_SQL = """
 WITH per_race AS ({per_race})

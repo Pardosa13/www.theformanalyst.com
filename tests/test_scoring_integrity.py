@@ -146,6 +146,17 @@ def test_log_score_change_rejects_unknown_reason():
 
 
 # ── Every stats query skips incomplete races ─────────────────────────────
+def test_parse_csv_keeps_rows_with_quoted_commas():
+    import os
+    os.environ.setdefault('PUNTINGFORM_API_KEY', 'test-key')
+    import app
+    rows = app.parseCSV('race number,horse name,gear\n1,Alpha,\n1,"Tom, Dick","Tongue tie, bit"\n')
+    assert [r['horse name'] for r in rows] == ['Alpha', 'Tom, Dick']
+    rebuilt = app.rebuildCSV(rows)
+    assert app.parseCSV(rebuilt) == rows
+    assert '"Tom, Dick"' in rebuilt
+
+
 def test_every_results_join_in_app_filters_incomplete_races():
     source = Path('app.py').read_text()
     lines = source.splitlines()
@@ -329,9 +340,18 @@ def test_betfair_disagreement_flags_races_on_postgres():
                 conn.execute(text("INSERT INTO results (horse_id, finish_position, sp) VALUES (:h, :f, :sp)"),
                              {'h': hid, 'f': finish, 'sp': sp if finish else None})
                 _bf(conn, race_id, hid, won, 2.0, hid)
+        # race 5: clean results, but Betfair has a starter we have no horse for
+        conn.execute(text("INSERT INTO races (id, meeting_id, race_number) VALUES (5, 1, 5)"))
+        for n in range(2):
+            hid = 50 + n
+            conn.execute(text("INSERT INTO horses (id, race_id, horse_name) VALUES (:h, 5, 'x')"), {'h': hid})
+            conn.execute(text("INSERT INTO results (horse_id, finish_position, sp) VALUES (:h, :f, 2.0)"),
+                         {'h': hid, 'f': 1 if n == 0 else 2})
+            _bf(conn, 5, hid, n == 0, 2.0, hid)
+        _bf(conn, 5, None, False, 9.0, 599)
         si.refresh_results_incomplete_flags(conn)
         flags = dict(conn.execute(text('SELECT id, results_incomplete FROM races')).fetchall())
-    assert flags == {1: False, 2: True, 3: True, 4: True}
+    assert flags == {1: False, 2: True, 3: True, 4: True, 5: True}
     db.metadata.drop_all(engine)
 
 

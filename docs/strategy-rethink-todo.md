@@ -13,9 +13,9 @@ Things decided but parked for a later phase. Tick them off as they land.
   and can fill history.
 
 ## Phase 6 follow-ups
-- [ ] Show "provisional" on the meeting page and add a rating/rail form that
+- [x] Show "provisional" on the meeting page and add a rating/rail form that
   calls `POST /api/meetings/<id>/set-conditions` (endpoint exists).
-- [ ] Set `TELEGRAM_ADMIN_CHAT_ID` (and `TELEGRAM_BOT_TOKEN`) on the Daily
+- [x] Set `TELEGRAM_ADMIN_CHAT_ID` (and `TELEGRAM_BOT_TOKEN`) on the Daily
   Racing Run service so alerts reach James privately.
 
 ## Data quality
@@ -28,7 +28,7 @@ Things decided but parked for a later phase. Tick them off as they land.
   to mid-September, so it may have started earlier.
 
 ## Shared name matcher
-- [ ] **One horse-name matcher for results, odds and BSP imports.** Today each
+- [x] **One horse-name matcher for results, odds and BSP imports.** Done: `runner_names.py`. Today each
   import cleans names its own way: `ladbrokes.normalize_runner_name`
   (apostrophe -> space), `bsp_import.clean_name` (apostrophe dropped, country
   suffix removed), and the old results paths (lowercase only). Odds runs miss
@@ -45,13 +45,21 @@ Things decided but parked for a later phase. Tick them off as they land.
   (incomplete flags) and the price for Phase 5 backtests.
 - ML judged only on forward data (ml_scored_at before the jump), 8+ weeks.
 
+## Missing runners (fixed 16 Oct 2026)
+- [x] **The CSV reader dropped runners.** `parseCSV` split on every comma, so
+  any row with a quoted comma (a name, gear or comment) was silently thrown
+  away, and the runner never reached the database. That is why 3,148 Betfair
+  runners had no horse in our races. Fixed with the csv module (reader and
+  writer). Past races missing a runner are now flagged incomplete (Betfair
+  shows a starter we have no horse for); the lost runners cannot be recovered.
+
 ## Cleanup
-- [ ] **8 flaky tests in `tests/test_security_hardening.py`.** They fail only in
+- [x] **8 flaky tests in `tests/test_security_hardening.py`.** Fixed: another module dropped the shared in-memory tables. They fail only in
   a full `pytest tests` run and pass on their own: test isolation (shared
   in-memory SQLite / app import order), not a security regression.
 
 ## Open questions
-- [ ] **Runners with no PFAI are not blended.** `analyzer.js` blends 25%
+- [x] ~~Runners with no PFAI are not blended.~~ Dropped: every runner has PFAI. `analyzer.js` blends 25%
   analyzer + 75% PFAI only when PFAI >= 40. Anyone else keeps the pure analyzer
   score, which is on a different scale. Report first (see SQL in the Phase 1
   follow-up), fix later.

@@ -1410,8 +1410,59 @@ details pre {
     <p><strong>Analyzed:</strong> {{ meeting.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</p>
     <p><strong>Total Races:</strong> {{ results.races|length }}</p>
     <p><strong>Rail Position:</strong> {% if meeting.rail_position and meeting.rail_position > 0 %}+{{ meeting.rail_position }}m out{% else %}True Rail{% endif %}</p>
+    {% set _ratings = meeting.races|map(attribute='track_condition')|select|list %}
+    <p><strong>Track Rating:</strong> {{ (_ratings[-1] if _ratings else 'unknown')|capitalize }}
+      {% if meeting.provisional %}
+        <span title="PuntingForm had no official rating or rail when this meeting was imported. An expected or default value is being used."
+              style="margin-left:6px; padding:2px 8px; border-radius:6px; background:#f59e0b; color:#111; font-size:11px; font-weight:800; letter-spacing:0.04em;">PROVISIONAL</span>
+      {% elif meeting.condition_source == 'manual' %}
+        <span style="margin-left:6px; font-size:11px; color:var(--text-muted);">(set by hand)</span>
+      {% endif %}
+    </p>
   </div>
   <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+
+    {% if current_user.is_authenticated and (current_user.is_admin or meeting.user_id == current_user.id) %}
+    <!-- Track rating & rail override -->
+    <div style="background:var(--bg-elevated); border:1px solid var(--border-mid); border-radius:10px; padding:12px 16px;">
+      <div style="font-size:12px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px;">
+        🌦️ Rating &amp; Rail
+      </div>
+      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+        <select id="override-rating" style="padding:6px 8px; border-radius:7px; border:1.5px solid var(--border-mid); background:var(--bg-surface); color:var(--text-primary); font-size:12px;">
+          {% for r in ['firm', 'good', 'soft', 'heavy', 'synthetic'] %}
+            <option value="{{ r }}" {% if _ratings and _ratings[-1] == r %}selected{% endif %}>{{ r|capitalize }}</option>
+          {% endfor %}
+        </select>
+        <select id="override-rail" style="padding:6px 8px; border-radius:7px; border:1.5px solid var(--border-mid); background:var(--bg-surface); color:var(--text-primary); font-size:12px;">
+          {% for m in range(0, 16) %}
+            <option value="{{ m }}" {% if (meeting.rail_position or 0) == m %}selected{% endif %}>{{ 'True' if m == 0 else '+' ~ m ~ 'm' }}</option>
+          {% endfor %}
+        </select>
+        <button id="override-conditions-btn" onclick="setMeetingConditions({{ meeting.id }})"
+                style="padding:7px 11px; border-radius:7px; border:1.5px solid var(--border-mid); background:var(--bg-surface); color:var(--text-primary); font-size:12px; font-weight:700; cursor:pointer;">
+          Save &amp; rescore
+        </button>
+      </div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:6px;">Rescores races that have not started. The daily run will keep your setting.</div>
+    </div>
+    <script>
+    function setMeetingConditions(meetingId) {
+      const btn = document.getElementById('override-conditions-btn');
+      const rating = document.getElementById('override-rating').value;
+      const rail = document.getElementById('override-rail').value;
+      if (!confirm('Set track rating to ' + rating + ' and rail to ' + (rail === '0' ? 'True' : '+' + rail + 'm') + ', then rescore races that have not started?')) return;
+      btn.disabled = true; btn.textContent = 'Rescoring…';
+      fetch('/api/meetings/' + meetingId + '/set-conditions', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({track_condition: rating, rail_position: parseInt(rail, 10)})
+      }).then(r => r.json()).then(data => {
+        if (data.success) { alert(data.message || 'Saved.'); location.reload(); }
+        else { alert('Failed: ' + (data.error || 'unknown error')); btn.disabled = false; btn.textContent = 'Save & rescore'; }
+      }).catch(err => { alert('Failed: ' + err); btn.disabled = false; btn.textContent = 'Save & rescore'; });
+    }
+    </script>
+    {% endif %}
 
     <!-- Track Bias Control -->
     <div style="background:var(--bg-elevated); border:1px solid var(--border-mid); border-radius:10px; padding:12px 16px;">
