@@ -137,21 +137,28 @@ def match(pf_runner, our_runners):
 def save_result(conn, runner, finish, sp, recorded_by):
     """Insert or update one runner's result. Returns 'created' or 'updated'.
 
-    A known SP is never replaced by NULL.
+    Never creates a second result row for a horse: the database is checked
+    first, and the new id is remembered on `runner`. A known SP is never
+    replaced by NULL.
     """
-    if runner['result_id']:
+    result_id = runner['result_id'] or conn.execute(
+        text('SELECT id FROM results WHERE horse_id = :horse_id ORDER BY id LIMIT 1'),
+        {'horse_id': runner['horse_id']},
+    ).scalar()
+    if result_id:
         conn.execute(text("""
             UPDATE results SET finish_position = :finish, sp = COALESCE(:sp, sp),
                    recorded_at = NOW(), recorded_by = COALESCE(:by, recorded_by)
             WHERE id = :id
-        """), {'finish': finish, 'sp': sp, 'by': recorded_by, 'id': runner['result_id']})
+        """), {'finish': finish, 'sp': sp, 'by': recorded_by, 'id': result_id})
+        runner['result_id'] = result_id
         return 'updated'
-    else:
-        conn.execute(text("""
-            INSERT INTO results (horse_id, finish_position, sp, recorded_at, recorded_by)
-            VALUES (:horse_id, :finish, :sp, NOW(), :by)
-        """), {'horse_id': runner['horse_id'], 'finish': finish, 'sp': sp, 'by': recorded_by})
-        return 'created'
+    runner['result_id'] = conn.execute(text("""
+        INSERT INTO results (horse_id, finish_position, sp, recorded_at, recorded_by)
+        VALUES (:horse_id, :finish, :sp, NOW(), :by)
+        RETURNING id
+    """), {'horse_id': runner['horse_id'], 'finish': finish, 'sp': sp, 'by': recorded_by}).scalar()
+    return 'created'
 
 
 def load_runners(conn, meeting_id):
@@ -164,8 +171,15 @@ def load_runners(conn, meeting_id):
         WHERE r.meeting_id = :meeting_id
     """), {'meeting_id': meeting_id}).mappings().all()
     races = {}
+    seen_horses = set()
     for row in rows:
-        races.setdefault(row['race_number'], {'race_id': row['race_id'], 'runners': []})['runners'].append({
+        if row['horse_id'] in seen_horses:
+            continue  # a horse with several result rows: keep one
+        seen_horses.add(row['horse_id'])
+        races.setdefault(row['race_number'], {'race_id': row['race_id'], 'race_ids': set(), 'runners': []})
+        race = races[row['race_number']]
+        race['race_ids'].add(row['race_id'])
+        race['runners'].append({
             'horse_id': row['horse_id'], 'name': row['horse_name'], 'clean': clean_name(row['horse_name']),
             'tab': to_int(row['tab']), 'is_scratched': row['is_scratched'], 'result_id': row['result_id'],
             'finish_position': row['finish_position'], 'sp': row['sp'],
@@ -180,7 +194,8 @@ def settle_meeting(conn, meeting, pf, recorded_by=None):
     connection inside the caller's transaction; the caller commits.
     """
     summary = {'meeting_id': meeting['id'], 'meeting_name': meeting['meeting_name'], 'source': None,
-               'races_resulted': 0, 'saved': 0, 'created': 0, 'updated': 0, 'no_sp': 0, 'marked_scratched': [], 'unmatched': [],
+               'races_resulted': 0, 'saved': 0, 'created': 0, 'updated': 0, 'no_sp': 0,
+               'duplicate_races': [], 'marked_scratched': [], 'unmatched': [],
                'match_methods': {}}
     day = meeting_day(meeting.get('date'), meeting['meeting_name'])
     track = meeting.get('puntingform_id') or track_of(meeting['meeting_name'], None)
@@ -195,12 +210,22 @@ def settle_meeting(conn, meeting, pf, recorded_by=None):
 
     ours = load_runners(conn, meeting['id'])
     touched_race_ids = []
+    done_races = set()
     for pf_race in pf_races:
         race = ours.get(pf_race['race_no'])
         if not race or not any((r['position'] or 0) > 0 for r in pf_race['runners']):
             continue  # not our race, or not run yet
+        if pf_race['race_no'] in done_races:
+            log.warning('%s: race %s came back twice from the feed; using the first copy',
+                        meeting['meeting_name'], pf_race['race_no'])
+            continue
+        done_races.add(pf_race['race_no'])
+        if len(race['race_ids']) > 1:
+            log.warning('%s: race %s has %s race rows in our database (%s)', meeting['meeting_name'],
+                        pf_race['race_no'], len(race['race_ids']), sorted(race['race_ids']))
+            summary['duplicate_races'].append(pf_race['race_no'])
         summary['races_resulted'] += 1
-        touched_race_ids.append(race['race_id'])
+        touched_race_ids.extend(race['race_ids'])
         seen = set()
         for pf_runner in pf_race['runners']:
             runner, method = match(pf_runner, race['runners'])
@@ -221,6 +246,7 @@ def settle_meeting(conn, meeting, pf, recorded_by=None):
         for runner in race['runners']:
             if runner['horse_id'] in seen or runner['result_id']:
                 continue
+            seen.add(runner['horse_id'])
             summary[save_result(conn, runner, 0, None, recorded_by)] += 1
             summary['marked_scratched'].append(
                 f"R{pf_race['race_no']} #{runner['tab']} {runner['name']}"
@@ -257,9 +283,11 @@ def meetings_to_settle(conn, days, meeting_id=None):
 
 
 def log_summary(summary):
-    log.info('%s [%s] %s: %s races, %s runners saved (%s without SP), match %s',
+    log.info('%s [%s] %s: %s races, %s results saved (%s new, %s updated, %s without SP), '
+             '%s marked scratched, match %s',
              summary['meeting_name'], summary['source'], summary['status'], summary['races_resulted'],
-             summary['saved'], summary['no_sp'], summary['match_methods'])
+             summary['saved'], summary['created'], summary['updated'], summary['no_sp'],
+             len(summary['marked_scratched']), summary['match_methods'])
     for item in summary['marked_scratched']:
         log.info('   marked scratched (not in official results): %s', item)
     for item in summary['unmatched']:

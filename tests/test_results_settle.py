@@ -98,3 +98,42 @@ def test_settle_meeting_on_postgres():
         again = rs.settle_meeting(conn, meeting, pf)
     assert again['created'] == 0 and again['marked_scratched'] == []
     db.metadata.drop_all(engine)
+
+
+@pytest.mark.skipif(not PG_URL, reason='set TEST_POSTGRES_URL to run against Postgres')
+def test_settle_never_writes_a_second_result_row():
+    import psycopg2
+    if not hasattr(psycopg2, 'paramstyle'):
+        pytest.skip('psycopg2 is stubbed out by another test module in this run')
+    from sqlalchemy import create_engine, text
+    from models import db
+
+    engine = create_engine(PG_URL)
+    db.metadata.drop_all(engine)
+    db.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO users (id, username, email, password_hash) VALUES (1,'u','u@x','x')"))
+        conn.execute(text("INSERT INTO meetings (id, user_id, meeting_name, puntingform_id) "
+                          "VALUES (1, 1, '261001_Scone', 'Scone')"))
+        conn.execute(text("INSERT INTO races (id, meeting_id, race_number) VALUES (10, 1, 1)"))
+        for hid, name, tab in ((1, 'Alpha', 1), (2, 'Beta', 2), (3, 'Emergency', 15), (4, 'Old Dupes', 4)):
+            conn.execute(text("INSERT INTO horses (id, race_id, horse_name, csv_data) VALUES (:h, 10, :n, :cd)"),
+                         {'h': hid, 'n': name, 'cd': json.dumps({'horse number': str(tab)})})
+        # A horse that already has two result rows from the old buttons.
+        conn.execute(text("INSERT INTO results (horse_id, finish_position, sp) VALUES (4, 5, 30.0), (4, 5, 30.0)"))
+
+    race = {'RaceNumber': 1, 'Runners': [
+        {'Name': 'Alpha', 'TabNo': 1, 'Position': 1, 'Price_SP': 2.0},
+        {'Name': 'Beta', 'TabNo': 2, 'Position': 2, 'Price_SP': 5.0},
+        {'Name': 'Old Dupes', 'TabNo': 4, 'Position': 3, 'Price_SP': 30.0},
+    ]}
+    pf = FakePF([race, race])  # the feed repeats the race
+    meeting = {'id': 1, 'meeting_name': '261001_Scone', 'date': None, 'puntingform_id': 'Scone'}
+    for _ in range(3):  # and the job runs three times
+        with engine.begin() as conn:
+            rs.settle_meeting(conn, meeting, pf)
+
+    with engine.connect() as conn:
+        counts = dict(conn.execute(text('SELECT horse_id, count(*) FROM results GROUP BY horse_id')).fetchall())
+    assert counts == {1: 1, 2: 1, 3: 1, 4: 2}  # nothing new duplicated; old dupes left as they were
+    db.metadata.drop_all(engine)
