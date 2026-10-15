@@ -222,3 +222,61 @@ def test_results_incomplete_flag_on_postgres():
         assert si.refresh_results_incomplete_flags(conn) == 0
         assert si.refresh_results_incomplete_flags(conn, race_ids=[2]) == 0
     db.metadata.drop_all(engine)
+
+
+# ── ML results only count when scored before the jump ───────────────────
+def test_ml_stat_helpers_require_pre_race_scores():
+    source = Path('app.py').read_text()
+    start = source.index('def _filter_ml_predictions')
+    end = source.index('def _build_ml_performance_race_results', start)
+    assert source[start:end].count('ml_pre_race_clause(Prediction, Race)') == 2
+
+
+def test_ml_raw_sql_stats_require_pre_race_scores():
+    app_source = Path('app.py').read_text()
+    assert app_source.count("ml_pre_race_sql('p'") >= 4
+    assert "ml_pre_race_sql('p', 'rc')" in Path('ml_shadow_routes.py').read_text()
+    backtest = Path('backtest.py').read_text()
+    start = backtest.index('def load_ml_scores')
+    assert 'p.ml_scored_at < r.start_time_utc' in backtest[start:start + 800]
+
+
+def test_ml_pre_race_sql_shape():
+    assert si.ml_pre_race_sql('p', 'rc') == (
+        '(p.ml_scored_at IS NOT NULL AND rc.start_time_utc IS NOT NULL '
+        'AND p.ml_scored_at < rc.start_time_utc)'
+    )
+
+
+@pytest.mark.skipif(not PG_URL, reason='set TEST_POSTGRES_URL to run against Postgres')
+def test_start_time_backfill_and_ml_filter_on_postgres():
+    import psycopg2
+    if not hasattr(psycopg2, 'paramstyle'):
+        pytest.skip('psycopg2 is stubbed out by another test module in this run')
+    from sqlalchemy import create_engine, text
+    from models import db
+
+    engine = create_engine(PG_URL)
+    db.metadata.drop_all(engine)
+    db.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO users (id, username, email, password_hash) VALUES (1,'u','u@x','x')"))
+        conn.execute(text("INSERT INTO meetings (id, user_id, meeting_name) VALUES (1, 1, '261101_Test')"))
+        conn.execute(text("INSERT INTO races (id, meeting_id, race_number) VALUES (1, 1, 1), (2, 1, 2)"))
+        for hid, rid, start, scored in ((1, 1, '14:35', '2026-11-01 02:00'),   # before 03:35 UTC jump
+                                        (2, 2, '12:00', '2026-11-01 02:00'),   # after 01:00 UTC jump
+                                        (3, 2, '12:00', None)):
+            conn.execute(text("INSERT INTO horses (id, race_id, horse_name, csv_data) VALUES (:h, :r, 'x', :cd)"),
+                         {'h': hid, 'r': rid, 'cd': '{"start time": "%s"}' % start})
+            conn.execute(text("INSERT INTO predictions (horse_id, score, ml_score, ml_scored_at, ladbrokes_signal_mask) "
+                              "VALUES (:h, 1, 50, :s, 0)"), {'h': hid, 's': scored})
+        assert si.backfill_race_start_times(conn) == 2
+        assert si.backfill_race_start_times(conn) == 0
+        starts = dict(conn.execute(text('SELECT id, start_time_utc FROM races')).fetchall())
+        assert starts[1] == datetime(2026, 11, 1, 3, 35)
+        counted = conn.execute(text(
+            f"SELECT h.id FROM predictions p JOIN horses h ON h.id = p.horse_id JOIN races r ON r.id = h.race_id "
+            f"WHERE {si.ml_pre_race_sql('p', 'r')}"
+        )).scalars().all()
+        assert counted == [1]
+    db.metadata.drop_all(engine)
