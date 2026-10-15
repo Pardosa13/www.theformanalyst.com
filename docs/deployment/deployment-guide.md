@@ -176,27 +176,17 @@ SELECT COUNT(*) AS rows, MAX(captured_at) AS newest FROM live_odds_snapshots;
 hours old, the poller has stopped and live scoring is quietly degrading to
 model-only prices.
 
-**Then keep it running.** Pick one:
+**Then keep it running.** Production runs it as the Railway cron service
+"Horse Racing Odds Scraper" (start command `python odds_ingest.py`, schedule
+`*/5 0-12,23 * * *` UTC: every 5 minutes, roughly 10am to midnight Melbourne).
+Each run is a single pass over races inside the lookahead window. That service
+is the only poller: the old GitHub Actions copy was removed because it never
+had a `DATABASE_URL` secret and so never ran, and two pollers would double
+every insert into an insert-only table.
 
-**Option A: a Railway worker service (preferred).** Add a second service on the
-same repo and database with the start command:
-
-```bash
-python odds_ingest.py --loop
-```
-
-No per-run startup cost and no scheduler delay, so it really does poll every
-`ODDS_INGEST_INTERVAL_SECONDS` (default 180).
-
-**Option B: the GitHub Actions workflow** (`.github/workflows/odds-ingest.yml`,
-already in the repo). It fires every 15 minutes and each run holds its own
-3-minute poll loop for ~13 minutes via `--duration-seconds`, because GitHub's
-scheduler cannot be relied on to fire every few minutes itself. It needs the
-`DATABASE_URL` repository secret. Use **Run workflow** on the Actions tab to
-bootstrap production immediately instead of waiting for the next window.
-
-Run one of these, not both: two pollers double every insert into an
-insert-only table.
+If the schedule is ever changed, check it is still every few minutes. From
+mid-September to 15 Oct 2026 it was accidentally set to `0 2 * * *` (once a
+day), which left almost every race without a fresh price.
 
 **What happens if you skip this:** live scoring keeps working. It logs
 `ML_LIVE_ODDS_LOADED ... runners_with_fresh_price=0` and scores every meeting
