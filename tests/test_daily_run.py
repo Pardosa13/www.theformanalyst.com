@@ -82,3 +82,38 @@ def test_rescore_uses_rating_of_races_still_to_run():
     impl = impl[:impl.index('\ndef ', 10)]
     assert 'all_races[0].track_condition if all_races else \'good\'' not in impl
     assert 'open_races' in impl
+
+
+class _Resp:
+    def __init__(self, ok, status, payload):
+        self.ok, self.status_code, self._payload, self.text = ok, status, payload, str(payload)
+
+    def json(self):
+        return self._payload
+
+
+def test_alert_logs_telegram_refusal_without_leaking_token(monkeypatch, caplog):
+    monkeypatch.setenv('TELEGRAM_BOT_TOKEN', '123:SECRET')
+    monkeypatch.setenv('TELEGRAM_ADMIN_CHAT_ID', '42')
+    monkeypatch.setattr(dr.requests, 'post', lambda *a, **k: _Resp(False, 401, {'description': 'Unauthorized'}))
+    with caplog.at_level('INFO'):
+        assert dr.alert('hello') is False
+    assert 'Unauthorized' in caplog.text and 'SECRET' not in caplog.text
+
+
+def test_alert_reports_unresolved_reference(monkeypatch, caplog):
+    monkeypatch.setenv('TELEGRAM_BOT_TOKEN', '${{www.theformanalyst.com.TELEGRAM_BOT_TOKEN}}')
+    monkeypatch.setenv('TELEGRAM_ADMIN_CHAT_ID', '42')
+    assert dr.alert('hello') is False
+    assert 'no usable TELEGRAM_BOT_TOKEN' in caplog.text
+
+
+def test_alert_network_error_does_not_log_url(monkeypatch, caplog):
+    monkeypatch.setenv('TELEGRAM_BOT_TOKEN', '123:SECRET')
+    monkeypatch.setenv('TELEGRAM_ADMIN_CHAT_ID', '42')
+
+    def boom(*a, **k):
+        raise ConnectionError('https://api.telegram.org/bot123:SECRET/sendMessage')
+    monkeypatch.setattr(dr.requests, 'post', boom)
+    assert dr.alert('hello') is False
+    assert 'SECRET' not in caplog.text
