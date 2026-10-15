@@ -174,8 +174,8 @@ def test_backtest_training_query_filters_incomplete_races():
 
 def test_update_scratchings_never_deletes_predictions():
     source = Path('app.py').read_text()
-    start = source.index('def update_scratchings')
-    end = source.index('def ', start + 30)
+    start = source.index('def _update_scratchings_impl')
+    end = source.index('\ndef ', start + 30)
     body = source[start:end]
     assert 'db.session.delete' not in body
     assert 'race_has_started(race, meeting)' in body

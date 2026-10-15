@@ -1,0 +1,84 @@
+"""Daily automation: reading PuntingForm's track rating and rail, and the safety rules."""
+from pathlib import Path
+
+import pytest
+
+import daily_run as dr
+
+
+@pytest.mark.parametrize('text_value, number, surface, expected', [
+    ('Good 4', None, None, 'good'),
+    (None, 3, None, 'good'),
+    ('Soft 5', 5, None, 'soft'),
+    ('Soft 7', None, None, 'soft'),
+    ('Heavy 8', 8, None, 'heavy'),
+    ('Firm 2', None, None, 'firm'),
+    ('Synthetic', None, None, 'synthetic'),
+    ('Good 4', 4, 'Polytrack', 'synthetic'),
+    ('', None, None, None),
+])
+def test_rating_word(text_value, number, surface, expected):
+    assert dr.rating_word(text_value, number, surface) == expected
+
+
+@pytest.mark.parametrize('value, expected', [
+    ('True', 0), ('true position entire circuit', 0), ('+3m', 3), ('Out 6m entire circuit', 6),
+    (4, 4), ('', None), (None, None), ('n/a', None),
+])
+def test_rail_metres(value, expected):
+    assert dr.rail_metres(value) == expected
+
+
+def test_resolve_uses_conditions_when_complete(monkeypatch):
+    monkeypatch.setattr(dr, 'expected_from_form', lambda *a: pytest.fail('should not need the fallback'))
+    assert dr.resolve_conditions({'trackCondition': 'Soft 6', 'rail': '+2m'}, 'k', 1) == ('soft', 2, 'conditions')
+
+
+def test_resolve_falls_back_to_expected_then_default(monkeypatch):
+    monkeypatch.setattr(dr, 'expected_from_form', lambda *a: ('good', 3))
+    assert dr.resolve_conditions(None, 'k', 1) == ('good', 3, 'expected')
+    monkeypatch.setattr(dr, 'expected_from_form', lambda *a: (None, None))
+    assert dr.resolve_conditions({'trackCondition': 'Heavy 9'}, 'k', 1) == ('heavy', 0, 'default')
+
+
+def test_conditions_lookup_by_id_then_track():
+    item = {'meetingId': 77, 'track': 'Flemington'}
+    table = {'77': item, 'track:flemington': item}
+    assert dr.conditions_for(table, 77, 'x') is item
+    assert dr.conditions_for(table, 1, 'FLEMINGTON ') is item
+    assert dr.conditions_for(table, 1, 'Randwick') is None
+
+
+def test_abandoned_flag_reads_pf_spelling():
+    assert dr.is_abandoned({'abandonded': True}) and dr.is_abandoned({'abandoned': 'true'})
+    assert not dr.is_abandoned({'abandonded': False}) and not dr.is_abandoned(None)
+
+
+def test_scratch_signature_changes_only_when_scratchings_change():
+    v1 = lambda data, track: (set(data.get(track, [])), [], True)
+    v2 = lambda items, track: (set(), [])
+    a = dr.scratch_signature({'Scone': [(1, 3)]}, [], 'Scone', v1, v2)
+    assert a == dr.scratch_signature({'Scone': [(1, 3)]}, [], 'Scone', v1, v2)
+    assert a != dr.scratch_signature({'Scone': [(1, 3), (2, 5)]}, [], 'Scone', v1, v2)
+
+
+def test_alert_without_chat_id_only_logs(monkeypatch):
+    monkeypatch.delenv('TELEGRAM_ADMIN_CHAT_ID', raising=False)
+    assert dr.alert('test') is False
+
+
+def test_import_button_and_automation_share_one_import_function():
+    source = Path('app.py').read_text()
+    route = source[source.index('def api_import_meeting'):source.index('def import_meeting_from_pf')]
+    assert 'import_meeting_from_pf(' in route
+    core = source[source.index('def import_meeting_from_pf'):source.index('@app.route("/import-from-api")')]
+    for web_only in ('request.', 'jsonify(', 'current_user'):
+        assert web_only not in core
+
+
+def test_rescore_uses_rating_of_races_still_to_run():
+    source = Path('app.py').read_text()
+    impl = source[source.index('def _update_scratchings_impl'):]
+    impl = impl[:impl.index('\ndef ', 10)]
+    assert 'all_races[0].track_condition if all_races else \'good\'' not in impl
+    assert 'open_races' in impl
