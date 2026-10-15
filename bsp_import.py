@@ -539,7 +539,10 @@ def run(engine, rematch=False, today=None, fetch=download):
                      file_name, len(rows), markets, matched_markets, matched_runners)
     with engine.begin() as conn:
         updated = sync_derived(conn)
-    log.info('results.bsp updated on %s rows', updated)
+        # Betfair is the check on our results: flag races where they disagree.
+        from scoring_integrity import refresh_results_incomplete_flags
+        flagged = refresh_results_incomplete_flags(conn)
+    log.info('results.bsp updated on %s rows; incomplete-results flag changed on %s races', updated, flagged)
     print_report(report)
     return report
 

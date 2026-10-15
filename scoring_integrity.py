@@ -240,42 +240,65 @@ def log_score_change(session, pred, race_id, reason, before, detail=None):
 # ─────────────────────────────────────────────
 # Incomplete results
 # ─────────────────────────────────────────────
-RESULTS_INCOMPLETE_SQL = """
-WITH per_race AS (
+# One row per race. With Betfair data loaded, a race is also flagged when
+# Betfair disagrees with our results: Betfair's winner is not our finish 1, a
+# runner that started on Betfair is finish 0 (scratched) in ours, or a runner
+# with a finish has no SP.
+_PER_RACE_SQL = """
     SELECT h.race_id,
            COUNT(*) FILTER (
                WHERE NOT COALESCE(h.is_scratched, FALSE)
                  AND COALESCE(r.finish_position, -1) <> 0
            ) AS starters,
            COUNT(*) FILTER (WHERE r.finish_position >= 1) AS resulted,
-           COALESCE(SUM(1.0 / r.sp) FILTER (WHERE r.finish_position >= 1 AND r.sp > 1), 0) * 100 AS market_pct
+           COALESCE(SUM(1.0 / r.sp) FILTER (WHERE r.finish_position >= 1 AND r.sp > 1), 0) * 100 AS market_pct,
+           COUNT(*) FILTER (WHERE r.finish_position >= 1 AND (r.sp IS NULL OR r.sp <= 1)) AS blank_sp,
+           {betfair_columns}
     FROM horses h
     LEFT JOIN results r ON r.horse_id = h.id
+    {betfair_join}
     {where}
     GROUP BY h.race_id
-)
+"""
+_BETFAIR_COLUMNS = """
+           COUNT(*) FILTER (WHERE bp.won AND COALESCE(r.finish_position, -1) <> 1) AS bf_wrong_winner,
+           COUNT(*) FILTER (WHERE bp.id IS NOT NULL AND r.finish_position = 0) AS bf_ran_but_scratched
+"""
+_NO_BETFAIR_COLUMNS = """
+           0 AS bf_wrong_winner,
+           0 AS bf_ran_but_scratched
+"""
+_INCOMPLETE_EXPR = """(
+        (per_race.resulted > 0
+         AND (per_race.resulted < per_race.starters * :min_share
+              OR per_race.market_pct < :min_market_pct
+              OR per_race.blank_sp > 0))
+        OR per_race.bf_wrong_winner > 0
+        OR per_race.bf_ran_but_scratched > 0
+    )"""
+RESULTS_INCOMPLETE_SQL = """
+WITH per_race AS ({per_race})
 UPDATE races
-SET results_incomplete = (
-        per_race.resulted > 0
-        AND (per_race.resulted < per_race.starters * :min_share
-             OR per_race.market_pct < :min_market_pct)
-    )
+SET results_incomplete = """ + _INCOMPLETE_EXPR + """
 FROM per_race
 WHERE races.id = per_race.race_id
-  AND races.results_incomplete IS DISTINCT FROM (
-        per_race.resulted > 0
-        AND (per_race.resulted < per_race.starters * :min_share
-             OR per_race.market_pct < :min_market_pct)
-  )
+  AND races.results_incomplete IS DISTINCT FROM """ + _INCOMPLETE_EXPR + """
 """
+
+
+def _has_betfair_prices(conn):
+    return conn.execute(text("SELECT to_regclass('betfair_prices') IS NOT NULL")).scalar()
 
 
 def refresh_results_incomplete_flags(conn, race_ids=None):
     """Recompute races.results_incomplete. All races, or just `race_ids`. Returns rows changed.
 
     A race is flagged when it has some results but fewer than 80% of its
-    starters have a finish, or the recorded SPs sum to under 95%. Races with
-    no results at all are left unflagged: they are simply not resulted yet.
+    starters have a finish, the recorded SPs sum to under 95%, or a runner
+    with a finish has no SP. Once Betfair data is loaded (bsp_import.py) it is
+    also flagged when Betfair disagrees with us: a different winner, or a
+    runner that started on Betfair recorded as scratched. Races with no
+    results and no Betfair disagreement are left unflagged.
     """
     params = {
         'min_share': RESULTS_MIN_SHARE_OF_STARTERS,
@@ -288,7 +311,13 @@ def refresh_results_incomplete_flags(conn, race_ids=None):
             return 0
         where = 'WHERE h.race_id = ANY(:race_ids)'
         params['race_ids'] = race_ids
-    result = conn.execute(text(RESULTS_INCOMPLETE_SQL.format(where=where)), params)
+    if _has_betfair_prices(conn):
+        per_race = _PER_RACE_SQL.format(betfair_columns=_BETFAIR_COLUMNS,
+                                        betfair_join='LEFT JOIN betfair_prices bp ON bp.horse_id = h.id',
+                                        where=where)
+    else:
+        per_race = _PER_RACE_SQL.format(betfair_columns=_NO_BETFAIR_COLUMNS, betfair_join='', where=where)
+    result = conn.execute(text(RESULTS_INCOMPLETE_SQL.format(per_race=per_race)), params)
     return result.rowcount or 0
 
 
@@ -357,3 +386,80 @@ def backfill_race_start_times(conn):
     if updates:
         conn.execute(text('UPDATE races SET start_time_utc = :start WHERE id = :id AND start_time_utc IS NULL'), updates)
     return len(updates)
+
+
+# ─────────────────────────────────────────────
+# One result row per horse
+# ─────────────────────────────────────────────
+DEDUPE_LOCK_KEY = 731_204_455  # any constant; serialises the two web workers
+
+
+def dedupe_results(conn):
+    """Keep one results row per horse and enforce it with a unique constraint.
+
+    Postgres only. Runs under an advisory lock so both web workers can call it
+    at startup. For each horse with several rows, keeps the row that agrees
+    with Betfair's result (finish 1 for Betfair's winner, finish 2-5 for a
+    loser) when there is one, otherwise the most recently recorded. Every
+    removed row is copied to results_dedupe_backup first, with the id of the
+    row that was kept, so the clean-up can be undone. Returns rows removed.
+    """
+    conn.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': DEDUPE_LOCK_KEY})
+    has_constraint = conn.execute(text("""
+        SELECT 1 FROM pg_index i
+        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+        WHERE i.indrelid = 'results'::regclass AND i.indisunique AND i.indnatts = 1
+          AND a.attname = 'horse_id'
+    """)).scalar()
+    if has_constraint:
+        return 0
+
+    if _has_betfair_prices(conn):
+        betfair_select = ', bf.won'
+        betfair_join = """LEFT JOIN LATERAL (
+                SELECT won FROM betfair_prices WHERE horse_id = r.horse_id ORDER BY id LIMIT 1
+            ) bf ON TRUE"""
+        # Rows that agree with Betfair sort first.
+        betfair_order = """CASE
+                WHEN d.won IS NULL THEN 1
+                WHEN d.won AND d.finish_position = 1 THEN 0
+                WHEN NOT d.won AND d.finish_position BETWEEN 2 AND 5 THEN 0
+                ELSE 1
+            END,"""
+    else:
+        betfair_select = betfair_join = betfair_order = ''
+
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS results_dedupe_backup (
+            id INTEGER, horse_id INTEGER, finish_position INTEGER, sp FLOAT, bsp FLOAT,
+            recorded_at TIMESTAMP, recorded_by INTEGER,
+            kept_result_id INTEGER, removed_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+    """))
+    conn.execute(text(
+        'CREATE TEMP TABLE results_dedupe_plan (id INTEGER, kept_id INTEGER, rn BIGINT) ON COMMIT DROP'
+    ))
+    conn.execute(text(f"""
+        INSERT INTO results_dedupe_plan (id, kept_id, rn)
+        SELECT d.id, FIRST_VALUE(d.id) OVER w, ROW_NUMBER() OVER w
+        FROM (
+            SELECT r.id, r.horse_id, r.finish_position, r.recorded_at {betfair_select}
+            FROM results r
+            {betfair_join}
+            WHERE r.horse_id IN (SELECT horse_id FROM results GROUP BY horse_id HAVING COUNT(*) > 1)
+        ) d
+        WINDOW w AS (PARTITION BY d.horse_id ORDER BY {betfair_order}
+                     d.recorded_at DESC NULLS LAST, d.id DESC)
+    """))
+    conn.execute(text("""
+        INSERT INTO results_dedupe_backup
+            (id, horse_id, finish_position, sp, bsp, recorded_at, recorded_by, kept_result_id)
+        SELECT r.id, r.horse_id, r.finish_position, r.sp, r.bsp, r.recorded_at, r.recorded_by, p.kept_id
+        FROM results r JOIN results_dedupe_plan p ON p.id = r.id
+        WHERE p.rn > 1
+    """))
+    removed = conn.execute(text(
+        'DELETE FROM results WHERE id IN (SELECT id FROM results_dedupe_plan WHERE rn > 1)'
+    )).rowcount
+    conn.execute(text('ALTER TABLE results ADD CONSTRAINT uq_results_horse_id UNIQUE (horse_id)'))
+    return removed or 0
