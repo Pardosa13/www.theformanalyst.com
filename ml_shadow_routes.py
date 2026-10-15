@@ -53,69 +53,22 @@ def _settle_meeting_results(db, meeting, recorded_by):
     if not date_str:
         return {'meeting_id': meeting.id, 'meeting_name': meeting.meeting_name, 'status': 'skipped', 'reason': 'missing meeting date'}
 
-    pf_service = PuntingFormService()
-    response = pf_service.get_results(meeting.puntingform_id, date_str)
-    if response.get('IsError'):
-        return {'meeting_id': meeting.id, 'meeting_name': meeting.meeting_name, 'status': 'pending', 'reason': 'results not available'}
-
-    races_results = response.get('RaceDetails') or response.get('Result') or []
-    if not races_results:
-        return {'meeting_id': meeting.id, 'meeting_name': meeting.meeting_name, 'status': 'pending', 'reason': 'no race results returned'}
-
-    updated = created = matched = 0
-    for race_result in races_results:
-        race_num = race_result.get('RaceNumber') or race_result.get('RaceNo') or race_result.get('Race')
-        race = Race.query.filter_by(meeting_id=meeting.id, race_number=race_num).first()
-        if not race:
-            continue
-
-        horses_by_name = {_normalise_runner_name(h.horse_name): h for h in race.horses}
-        for runner in race_result.get('Runners', []) or []:
-            horse_name = runner.get('Name') or runner.get('Horse') or runner.get('RunnerName')
-            horse = horses_by_name.get(_normalise_runner_name(horse_name))
-            if not horse:
-                continue
-
-            finish_pos = runner.get('Position') or runner.get('FinishPosition') or runner.get('Place') or 0
-            try:
-                finish_pos = int(finish_pos or 0)
-            except (TypeError, ValueError):
-                finish_pos = 0
-            if finish_pos > 4:
-                finish_pos = 5
-
-            sp = runner.get('Price_SP') or runner.get('SP') or runner.get('StartingPrice')
-            try:
-                sp = float(sp) if sp not in (None, '') else None
-            except (TypeError, ValueError):
-                sp = None
-
-            matched += 1
-            if horse.result:
-                horse.result.finish_position = finish_pos
-                horse.result.sp = sp
-                horse.result.recorded_at = datetime.utcnow()
-                horse.result.recorded_by = recorded_by
-                updated += 1
-            else:
-                db.session.add(Result(
-                    horse_id=horse.id,
-                    finish_position=finish_pos,
-                    sp=sp,
-                    recorded_by=recorded_by,
-                ))
-                created += 1
-
-    from scoring_integrity import refresh_meeting_results_flags
-    refresh_meeting_results_flags(db.session, meeting.id)
-
+    # Shared with the results cron and the results page (results_settle.py).
+    from results_settle import settle_meeting
+    summary = settle_meeting(db.session.connection(), {
+        'id': meeting.id, 'meeting_name': meeting.meeting_name,
+        'date': meeting.date, 'puntingform_id': meeting.puntingform_id,
+    }, PuntingFormService(), recorded_by=recorded_by)
+    if not summary['races_resulted']:
+        return {'meeting_id': meeting.id, 'meeting_name': meeting.meeting_name, 'status': 'pending',
+                'reason': 'results not available'}
     return {
         'meeting_id': meeting.id,
         'meeting_name': meeting.meeting_name,
-        'status': 'settled' if matched else 'pending',
-        'matched': matched,
-        'created': created,
-        'updated': updated,
+        'status': 'settled',
+        'matched': summary['saved'],
+        'created': summary['created'],
+        'updated': summary['updated'],
     }
 
 

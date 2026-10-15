@@ -673,6 +673,9 @@ with app.app_context():
                 'start_time_utc': 'TIMESTAMP',
                 'results_incomplete': 'BOOLEAN NOT NULL DEFAULT FALSE',
             },
+            'results': {
+                'bsp': 'FLOAT',
+            },
             'predictions': {
                 'ml_scored_at': 'TIMESTAMP',
                 'analyzer_raw_score': 'FLOAT',
@@ -5079,80 +5082,23 @@ def fetch_automatic_results(meeting_id):
             flash("⚠️ Could not determine meeting date", "warning")
             return redirect(url_for('results_entry', meeting_id=meeting_id))
         
-        # Fetch results using V1 method (track_name + date)
-        results_response = pf_service.get_results(track_name, date_str)
-        
-        # Check for errors
-        if results_response.get('IsError'):
+        # Shared with the results cron (results_settle.py): V2 results matched
+        # on TAB number, V1 fallback, missing SP stored as NULL not 0.
+        from results_settle import settle_meeting
+        summary = settle_meeting(db.session.connection(), {
+            'id': meeting.id, 'meeting_name': meeting.meeting_name,
+            'date': meeting.date, 'puntingform_id': track_name,
+        }, pf_service, recorded_by=current_user.id)
+        if not summary['races_resulted']:
             flash("⚠️ Results not yet available for this meeting", "warning")
             return redirect(url_for('results_entry', meeting_id=meeting_id))
-        
-        # V1 API returns format: {"Result": [{"RaceNumber": 1, "Runners": [...]}]}
-        races_results = results_response.get('RaceDetails', [])
-        
-        if not races_results:
-            flash("⚠️ No results available yet", "warning")
-            return redirect(url_for('results_entry', meeting_id=meeting_id))
-        
-        horses_updated = 0
-        
-        # Process each race's results
-        for race_result in races_results:
-            race_num = race_result.get('RaceNumber')
-            runners = race_result.get('Runners', [])
-            
-            # Find the race in our database
-            race = Race.query.filter_by(
-                meeting_id=meeting_id,
-                race_number=race_num
-            ).first()
-            
-            if not race:
-                continue
-            
-            # Process each runner
-            for runner in runners:
-                horse_name = runner.get('Name', '').strip()
-                finish_pos = runner.get('Position', 0)
-                sp = runner.get('Price_SP', 0)
-                
-                if not horse_name:
-                    continue
-                
-                # Handle unplaced horses (5th or worse)
-                if finish_pos > 4:
-                    finish_pos = 5
-                elif finish_pos == 0:
-                    finish_pos = 0
-                
-                # Find horse by name (case-insensitive)
-                horse = Horse.query.filter(
-                    Horse.race_id == race.id,
-                    db.func.lower(Horse.horse_name) == horse_name.lower()
-                ).first()
-                
-                if not horse:
-                    continue
-                
-                # Create or update result
-                if horse.result:
-                    horse.result.finish_position = finish_pos
-                    horse.result.sp = sp
-                    horse.result.recorded_at = datetime.utcnow()
-                    horse.result.recorded_by = current_user.id
-                else:
-                    result = Result(
-                        horse_id=horse.id,
-                        finish_position=finish_pos,
-                        sp=sp,
-                        recorded_by=current_user.id
-                    )
-                    db.session.add(result)
-                
-                horses_updated += 1
-        
-        refresh_meeting_results_flags(db.session, meeting_id)
+        horses_updated = summary['saved']
+        if summary['unmatched']:
+            flash(f"⚠️ {len(summary['unmatched'])} result row(s) could not be matched to a runner: "
+                  + '; '.join(summary['unmatched'][:5]), "warning")
+
         db.session.commit()
+        db.session.expire_all()
         flash(f"✓ Auto-fetched results for {horses_updated} horses from PuntingForm", "success")
 
         # The feed does not always price every runner. Say so now, per race, so a

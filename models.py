@@ -203,6 +203,8 @@ class Result(db.Model):
     horse_id = db.Column(db.Integer, db.ForeignKey('horses.id'), nullable=False)
     finish_position = db.Column(db.Integer, nullable=False)  # 0=scratched, 1-4=placed, 5=unplaced
     sp = db.Column(db.Float, nullable=True)  # NULL for scratched horses
+    # Betfair Starting Price, from the monthly Betfair data files (bsp_import.py).
+    bsp = db.Column(db.Float, nullable=True)
     recorded_at = db.Column(db.DateTime, default=datetime.utcnow)
     recorded_by = db.Column(db.Integer, db.ForeignKey('users.id'))
     
