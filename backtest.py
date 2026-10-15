@@ -6316,7 +6316,12 @@ def load_ml_scores():
     """Return {horse_id: ml_score} for every prediction the ML model scored."""
     with engine.connect() as conn:
         rows = conn.execute(text(
-            "SELECT horse_id, ml_score FROM predictions WHERE ml_score IS NOT NULL"
+            "SELECT p.horse_id, p.ml_score FROM predictions p "
+            "JOIN horses h ON h.id = p.horse_id JOIN races r ON r.id = h.race_id "
+            "WHERE p.ml_score IS NOT NULL "
+            # Only ML scores written before the race started count.
+            "AND p.ml_scored_at IS NOT NULL AND r.start_time_utc IS NOT NULL "
+            "AND p.ml_scored_at < r.start_time_utc"
         )).fetchall()
     return {int(horse_id): float(ml_score) for horse_id, ml_score in rows}
 

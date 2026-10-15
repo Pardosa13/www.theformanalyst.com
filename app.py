@@ -705,6 +705,17 @@ with app.app_context():
         except Exception as e:
             print(f"Results-incomplete flag refresh failed: {e}")
 
+        # Scheduled start for every race that lacks one. ML stats only count
+        # scores written before it (see scoring_integrity.ml_pre_race_sql).
+        try:
+            from scoring_integrity import backfill_race_start_times
+            with db.engine.begin() as conn:
+                filled = backfill_race_start_times(conn)
+            if filled:
+                print(f"Filled start_time_utc on {filled} race(s)")
+        except Exception as e:
+            print(f"Race start time backfill failed: {e}")
+
     try:
         from sqlalchemy import inspect, text
         inspector = inspect(db.engine)
@@ -886,7 +897,10 @@ with app.app_context():
 # ----- Analyzer Integration -----
 from scoring_integrity import (
     log_score_change,
+    ml_pre_race_clause,
+    ml_pre_race_sql,
     race_has_started,
+    race_start_utc,
     refresh_meeting_results_flags,
     reprice_race,
     snapshot,
@@ -1782,6 +1796,8 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
         reprice_race(race_predictions)
         for prediction in race_predictions:
             log_score_change(db.session, prediction, race.id, 'upload', snapshot(None))
+        db.session.flush()
+        race_start_utc(race, meeting, allow_network=False)
 
     # ==========================================
     # SAVE SCRATCHED HORSES WITH ZERO SCORES
@@ -3175,12 +3191,17 @@ def dashboard():
 
 
 def _filter_ml_predictions(query):
-    """Limit ML performance analytics to verified rows with real ML scores."""
-    return query.filter(Prediction.ml_score.isnot(None))
+    """Limit ML performance analytics to real ML scores written before the race started.
+
+    The query must already join Race.
+    """
+    return query.filter(Prediction.ml_score.isnot(None), ml_pre_race_clause(Prediction, Race))
 
 def _join_ml_predictions_for_race_ids(query):
-    """Limit race-id discovery to races represented in verified persisted ML results."""
-    return query.join(Prediction, Prediction.horse_id == Horse.id).filter(Prediction.ml_score.isnot(None))
+    """Limit race-id discovery to races with ML scores written before the race started."""
+    return query.join(Prediction, Prediction.horse_id == Horse.id).filter(
+        Prediction.ml_score.isnot(None), ml_pre_race_clause(Prediction, Race)
+    )
 
 def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""):
     """Return settled ML race results ordered exactly like the Machine Learning page."""
@@ -3215,6 +3236,7 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
         JOIN meetings m ON m.id = rc.meeting_id
         JOIN results r ON r.horse_id = h.id
         WHERE p.ml_score IS NOT NULL
+          AND {ml_pre_race_sql('p', 'rc')}
           AND rc.results_incomplete IS NOT TRUE
           AND COALESCE(h.is_scratched, FALSE) = FALSE
           AND r.finish_position IS NOT NULL
@@ -3580,6 +3602,7 @@ def _build_ml_staking_selections(track_filter='', date_from='', date_to='', limi
         JOIN races rc ON rc.id = h.race_id
         WHERE rc.id IN :race_ids
           AND p.ml_score IS NOT NULL
+          AND {ml_pre_race_sql('p', 'rc')}
           AND COALESCE(h.is_scratched, FALSE) = FALSE
     """).bindparams(bindparam('race_ids', expanding=True))
     rows = db.session.execute(ml_probability_sql, {'race_ids': race_ids}).fetchall()
@@ -3857,6 +3880,8 @@ def calculate_value_edge_performance(track_filter="", date_from="", date_to="", 
         Race, Horse.race_id == Race.id
     ).join(Meeting, Race.meeting_id == Meeting.id).join(Result, Result.horse_id == Horse.id).filter(
         Prediction.value_edge_captured_at.isnot(None),
+        Race.start_time_utc.isnot(None),
+        Prediction.value_edge_captured_at < Race.start_time_utc,
         Result.finish_position > 0,
         Race.results_incomplete.isnot(True),
         Result.sp.isnot(None),
@@ -9321,7 +9346,7 @@ def _get_ml_top_selection_observations(track_filter='', date_from='', date_to=''
           SELECT r.id race_id, MAX(COALESCE(m.date::timestamp, m.uploaded_at)) race_date, MAX(r.race_number) race_number
           FROM races r JOIN meetings m ON m.id=r.meeting_id JOIN horses h ON h.race_id=r.id
           JOIN predictions p ON p.horse_id=h.id JOIN results res ON res.horse_id=h.id
-          WHERE res.finish_position > 0 AND res.sp IS NOT NULL AND p.ml_score IS NOT NULL AND r.results_incomplete IS NOT TRUE {extra_where}
+          WHERE res.finish_position > 0 AND res.sp IS NOT NULL AND p.ml_score IS NOT NULL AND r.results_incomplete IS NOT TRUE AND {ml_pre_race_sql('p', 'r')} {extra_where}
           GROUP BY r.id ORDER BY race_date DESC NULLS LAST, race_number DESC, race_id DESC {limit_clause}
         ), ranked AS (
           SELECT r.id race_id, m.meeting_name, COALESCE(m.track, m.meeting_name) jurisdiction,
@@ -9338,7 +9363,7 @@ def _get_ml_top_selection_observations(track_filter='', date_from='', date_to=''
             LEAD(p.ml_score) OVER (PARTITION BY r.id ORDER BY p.ml_score DESC NULLS LAST, h.id ASC) second_ml_score
           FROM eligible_races er JOIN races r ON r.id=er.race_id JOIN meetings m ON m.id=r.meeting_id
           JOIN horses h ON h.race_id=r.id JOIN predictions p ON p.horse_id=h.id JOIN results res ON res.horse_id=h.id
-          WHERE res.finish_position > 0 AND res.sp IS NOT NULL AND p.ml_score IS NOT NULL AND r.results_incomplete IS NOT TRUE {extra_where}
+          WHERE res.finish_position > 0 AND res.sp IS NOT NULL AND p.ml_score IS NOT NULL AND r.results_incomplete IS NOT TRUE AND {ml_pre_race_sql('p', 'r')} {extra_where}
         )
         SELECT *, (ml_score - second_ml_score) ml_score_gap FROM ranked WHERE ml_rank=1
         ORDER BY race_id DESC

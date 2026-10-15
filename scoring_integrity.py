@@ -306,3 +306,54 @@ def refresh_meeting_results_flags(session, meeting_id):
     )]
     session.flush()
     return refresh_results_incomplete_flags(conn, race_ids)
+
+
+# ─────────────────────────────────────────────
+# ML results only count when scored before the jump
+# ─────────────────────────────────────────────
+def ml_pre_race_sql(pred_alias='p', race_alias='r'):
+    """SQL condition: this ML score was written before the race's scheduled start.
+
+    Rows with no ml_scored_at (everything scored before the timestamp existed)
+    or no known start time do not count: there is no proof they are pre-race.
+    """
+    p, r = pred_alias, race_alias
+    return (f"({p}.ml_scored_at IS NOT NULL AND {r}.start_time_utc IS NOT NULL "
+            f"AND {p}.ml_scored_at < {r}.start_time_utc)")
+
+
+def ml_pre_race_clause(prediction_model, race_model):
+    """The same condition as ml_pre_race_sql, for ORM queries that join Race."""
+    from sqlalchemy import and_
+    return and_(
+        prediction_model.ml_scored_at.isnot(None),
+        race_model.start_time_utc.isnot(None),
+        prediction_model.ml_scored_at < race_model.start_time_utc,
+    )
+
+
+def backfill_race_start_times(conn):
+    """Fill races.start_time_utc from the CSV 'start time' where it is missing. Returns rows filled.
+
+    Uses the same Melbourne-time reading as csv_start_time_utc, which can only
+    place a race earlier than it really ran, never later.
+    """
+    rows = conn.execute(text("""
+        SELECT DISTINCT ON (r.id) r.id, m.date, m.meeting_name, h.csv_data->>'start time' AS start_time
+        FROM races r
+        JOIN meetings m ON m.id = r.meeting_id
+        JOIN horses h ON h.race_id = r.id
+        WHERE r.start_time_utc IS NULL
+          AND COALESCE(h.csv_data->>'start time', '') <> ''
+        ORDER BY r.id, h.id
+    """)).fetchall()
+    updates = []
+    for race_id, day, meeting_name, start_text in rows:
+        meeting = type('M', (), {'date': day, 'meeting_name': meeting_name})()
+        race = type('R', (), {'horses': [type('H', (), {'csv_data': {'start time': start_text}})()]})()
+        start = csv_start_time_utc(race, meeting)
+        if start is not None:
+            updates.append({'id': race_id, 'start': start})
+    if updates:
+        conn.execute(text('UPDATE races SET start_time_utc = :start WHERE id = :id AND start_time_utc IS NULL'), updates)
+    return len(updates)

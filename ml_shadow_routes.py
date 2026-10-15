@@ -179,7 +179,7 @@ def _score_meeting_ml(db, meeting_id):
     # Races that have already started keep the ML scores they had at the jump.
     from datetime import datetime
     from models import Race
-    from scoring_integrity import log_score_change, race_has_started, snapshot
+    from scoring_integrity import log_score_change, race_has_started, race_start_utc, snapshot
 
     open_race_ids = set()
     races_skipped = []
@@ -192,6 +192,9 @@ def _score_meeting_ml(db, meeting_id):
             races_skipped.append({'race_number': race.race_number, 'reason': started_reason})
         else:
             open_race_ids.add(race_id)
+            # ML stats only count scores written before this time, so make
+            # sure the race has one stored even when it is days away.
+            race_start_utc(race, race.meeting, allow_network=False)
     horse_race = {
         horse_id: race_id
         for race_id, race_scores in by_race.items()
@@ -621,6 +624,7 @@ def register_ml_shadow_routes(app, db):
             return jsonify({'error': 'Admin only'}), 403
 
         try:
+            from scoring_integrity import ml_pre_race_sql
             rows = db.session.execute(text(f"""
                 SELECT
                     rc.id AS race_id,
@@ -639,6 +643,7 @@ def register_ml_shadow_routes(app, db):
                 JOIN meetings m ON m.id = rc.meeting_id
                 JOIN results r ON r.horse_id = h.id
                 WHERE p.ml_score IS NOT NULL
+                  AND {ml_pre_race_sql('p', 'rc')}
                   AND rc.results_incomplete IS NOT TRUE
                   AND COALESCE(h.is_scratched, FALSE) = FALSE
                   AND r.finish_position IS NOT NULL
