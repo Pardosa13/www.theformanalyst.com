@@ -306,34 +306,47 @@ logger = logging.getLogger(__name__)
 
 # ===== CSV HELPER FUNCTIONS FOR API SECTIONAL INJECTION =====
 def parseCSV(csv_string):
-    """Parse CSV string into list of dicts"""
-    lines = csv_string.strip().split('\n')
-    if not lines:
+    """Parse CSV string into list of dicts.
+
+    Uses the csv module so quoted fields (a comma in a gear note, a comment or
+    a name) stay in one column. The old split-on-every-comma version silently
+    dropped any such row, and with it the runner.
+    """
+    import csv as _csv
+    import io as _io
+    text_value = (csv_string or '').strip()
+    if not text_value:
         return []
-    
-    headers = [h.strip() for h in lines[0].split(',')]
+    reader = _csv.reader(_io.StringIO(text_value))
+    try:
+        headers = [h.strip() for h in next(reader)]
+    except StopIteration:
+        return []
     rows = []
-    
-    for line in lines[1:]:
-        values = [v.strip() for v in line.split(',')]
+    for values in reader:
         if len(values) == len(headers):
-            row = dict(zip(headers, values))
-            rows.append(row)
-    
+            rows.append({h: v.strip() for h, v in zip(headers, values)})
     return rows
 
 def rebuildCSV(rows):
-    """Rebuild CSV string from list of dicts"""
+    """Rebuild CSV string from list of dicts.
+
+    Fields are quoted when they contain a comma or quote, and line breaks
+    inside a field become spaces, so analyzer.js (one record per line) reads
+    every row back.
+    """
+    import csv as _csv
+    import io as _io
     if not rows:
         return ""
-    
     headers = list(rows[0].keys())
-    csv_lines = [','.join(headers)]
-    
+    out = _io.StringIO()
+    writer = _csv.writer(out, lineterminator='\n')
+    writer.writerow(headers)
     for row in rows:
-        csv_lines.append(','.join(str(row.get(h, '')) for h in headers))
-    
-    return '\n'.join(csv_lines)
+        writer.writerow([str(row.get(h, '') if row.get(h) is not None else '').replace('\r', ' ').replace('\n', ' ')
+                         for h in headers])
+    return out.getvalue().rstrip('\n')
 # ===== END CSV HELPERS =====
 
 app = Flask(__name__)

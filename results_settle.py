@@ -28,7 +28,8 @@ from datetime import date, timedelta
 import requests
 from sqlalchemy import create_engine, text
 
-from bsp_import import clean_name, meeting_day, same_horse, track_of, to_int
+from bsp_import import meeting_day, track_of, to_int
+from runner_names import FieldMatcher, clean_name
 from scoring_integrity import melbourne_today, refresh_results_incomplete_flags
 
 log = logging.getLogger('results_settle')
@@ -122,16 +123,8 @@ def fetch_results(pf, day, track):
 # Matching and saving
 # ─────────────────────────────────────────────
 def match(pf_runner, our_runners):
-    """Our runner for one PuntingForm result row: TAB (name must agree), else name."""
-    name = clean_name(pf_runner['name'])
-    if pf_runner['tab'] is not None:
-        by_tab = next((r for r in our_runners if r['tab'] == pf_runner['tab']), None)
-        if by_tab and (not name or same_horse(name, by_tab['clean'])):
-            return by_tab, 'tab'
-    by_name = next((r for r in our_runners if r['clean'] == name), None)
-    if by_name:
-        return by_name, 'name'
-    return None, None
+    """Our runner for one PuntingForm result row. Shared rules (runner_names): TAB first, then name."""
+    return FieldMatcher(our_runners).match(pf_runner['name'], pf_runner['tab'])
 
 
 def save_result(conn, runner, finish, sp, recorded_by):

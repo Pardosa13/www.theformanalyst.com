@@ -12,6 +12,17 @@ import app as appmod
 from models import db, User, Meeting, Race, Horse
 
 
+@pytest.fixture(autouse=True)
+def _tables_exist():
+    # Other test modules point the app at a shared in-memory database and
+    # drop its tables when they finish (e.g. test_proven_edge_signal_pnl).
+    # In a full run that left these tests with no users table. Create the
+    # tables if they are missing; create_all never touches existing ones.
+    with appmod.app.app_context():
+        db.create_all()
+    yield
+
+
 @pytest.fixture()
 def client():
     appmod.app.config['TESTING'] = True

@@ -109,7 +109,7 @@ def test_import_end_to_end_on_postgres():
         assert ranks[101] == 1
 
     assert report['our_races_matched'] == 1
-    assert report['methods'] == {'name': 2, 'tab+similar': 1}
+    assert report['methods'] == {'tab': 3}  # TAB first, names agree
     assert report['ran_but_ours_scratched'] == 1
     assert report['ran_but_ours_no_sp'] == 1
     assert report['runners_unmatched'] == 1

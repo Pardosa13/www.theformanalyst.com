@@ -51,6 +51,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import create_engine, text
 
+from runner_names import FieldMatcher
 from ladbrokes import (
     MELBOURNE_TZ,
     _parse_ladbrokes_utc,
@@ -171,7 +172,8 @@ def load_upcoming_races(engine, meeting_date=None):
     with engine.connect() as conn:
         rows = conn.execute(text("""
             SELECT r.id AS race_id, r.race_number, m.id AS meeting_id,
-                   m.meeting_name, h.id AS horse_id, h.horse_name
+                   m.meeting_name, h.id AS horse_id, h.horse_name,
+                   h.csv_data->>'horse number' AS tab
             FROM races r
             JOIN meetings m ON m.id = r.meeting_id
             JOIN horses h ON h.race_id = r.id
@@ -188,7 +190,9 @@ def load_upcoming_races(engine, meeting_date=None):
             'meeting_name': row['meeting_name'],
             'track': _track_from_meeting_name(row['meeting_name']),
             'runners': {},
+            'field_runners': [],
         })
+        race['field_runners'].append({'horse_id': row['horse_id'], 'name': row['horse_name'], 'tab': row['tab']})
         name_norm = normalize_runner_name(row['horse_name'])
         if name_norm:
             # Two runners normalising to the same name in one race would make
@@ -198,6 +202,9 @@ def load_upcoming_races(engine, meeting_date=None):
                 race['runners'][name_norm] = None
             else:
                 race['runners'].setdefault(name_norm, row['horse_id'])
+    for race in races.values():
+        # Shared matcher (runner_names): TAB number first, then cleaned name.
+        race['field'] = FieldMatcher(race.pop('field_runners'))
     return list(races.values())
 
 
@@ -230,10 +237,19 @@ def snapshot_rows_for_race(race, odds_payload, captured_at):
     runners = (odds_payload or {}).get('odds') or {}
     rows = []
     priced = 0
+    field = race.get('field')
     for name_norm, runner in runners.items():
-        horse_id = race['runners'].get(name_norm)
+        if field is not None:
+            ours, _method = field.match(runner.get('name') or name_norm, runner.get('runner_number'))
+            horse_id = ours['horse_id'] if ours else None
+        else:
+            horse_id = race['runners'].get(name_norm)
         if not horse_id:
-            diagnostics.append(f"unmatched Ladbrokes runner: {runner.get('name') or name_norm}")
+            gone = bool(runner.get('is_scratched')) or runner.get('is_available') is False
+            # A scratched or emergency runner missing from our field is expected; say so.
+            diagnostics.append(
+                f"unmatched Ladbrokes runner{' (scratched/emergency)' if gone else ''}: "
+                f"#{runner.get('runner_number')} {runner.get('name') or name_norm}")
             continue
         odds = _coerce_price(runner.get('win'))
         is_scratched = bool(runner.get('is_scratched')) or runner.get('is_available') is False
@@ -299,7 +315,7 @@ def run_once(engine, meeting_date=None, lookahead_hours=DEFAULT_LOOKAHEAD_HOURS,
     summary = {
         'meeting_date': date_str, 'races_known': len(races), 'races_polled': 0,
         'races_out_of_window': 0, 'races_unmatched': 0, 'races_closed': 0,
-        'rows_stored': 0, 'runners_unmatched': 0,
+        'rows_stored': 0, 'runners_unmatched': 0, 'runners_unmatched_scratched': 0,
     }
     if not races:
         log.info("Odds ingest: no races in the database for %s — nothing to poll.", date_str)
@@ -330,7 +346,10 @@ def run_once(engine, meeting_date=None, lookahead_hours=DEFAULT_LOOKAHEAD_HOURS,
 
             summary['rows_stored'] += store_snapshots(engine, rows)
             summary['races_polled'] += 1
-            summary['runners_unmatched'] += sum(1 for d in diagnostics if d.startswith('unmatched'))
+            summary['runners_unmatched'] += sum(
+                1 for d in diagnostics if d.startswith('unmatched') and '(scratched/emergency)' not in d)
+            summary['runners_unmatched_scratched'] += sum(
+                1 for d in diagnostics if '(scratched/emergency)' in d)
         except Exception as e:
             # One race must never take down the pass — the next poll in a few
             # minutes gets another go at it.
@@ -348,10 +367,11 @@ def run_once(engine, meeting_date=None, lookahead_hours=DEFAULT_LOOKAHEAD_HOURS,
         )
     log.info(
         "Odds ingest pass for %s: races_known=%s polled=%s stored_rows=%s "
-        "out_of_window=%s unmatched_races=%s closed_or_empty=%s unmatched_runners=%s",
+        "out_of_window=%s unmatched_races=%s closed_or_empty=%s unmatched_runners=%s "
+        "unmatched_scratched_or_emergency=%s",
         date_str, summary['races_known'], summary['races_polled'], summary['rows_stored'],
         summary['races_out_of_window'], summary['races_unmatched'], summary['races_closed'],
-        summary['runners_unmatched'],
+        summary['runners_unmatched'], summary['runners_unmatched_scratched'],
     )
     return summary
 
