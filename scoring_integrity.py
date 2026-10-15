@@ -193,25 +193,26 @@ def reprice_race(predictions):
     _apply_calibration(preds, raw)
 
 
-_CALIBRATION_CACHE = {'at': 0.0, 'value': None}
+_CALIBRATION_CACHE = {}
 _CALIBRATION_TTL_SECONDS = 600
 
 
-def _latest_calibration():
-    """(method, params) from the newest calibration run, cached for 10 minutes. None if unavailable."""
+def latest_calibration(model='analyzer'):
+    """(method, params) from the newest calibration run for `model`, cached for 10 minutes. None if unavailable."""
     import time
     now = time.time()
-    if now - _CALIBRATION_CACHE['at'] < _CALIBRATION_TTL_SECONDS:
-        return _CALIBRATION_CACHE['value']
+    cached = _CALIBRATION_CACHE.get(model)
+    if cached and now - cached[0] < _CALIBRATION_TTL_SECONDS:
+        return cached[1]
     value = None
     try:
         from models import db
         from calibrate import latest_params
         with db.engine.connect() as conn:
-            value = latest_params(conn)
+            value = latest_params(conn, model)
     except Exception as exc:  # no table yet, no app context, etc.
-        log.debug('No calibration available: %s', exc)
-    _CALIBRATION_CACHE.update(at=now, value=value)
+        log.debug('No %s calibration available: %s', model, exc)
+    _CALIBRATION_CACHE[model] = (now, value)
     return value
 
 
@@ -219,7 +220,7 @@ def _apply_calibration(preds, raw):
     """Set calibrated_win_prob / calibrated_price from the latest calibration run. Never raises."""
     if not hasattr(preds[0], 'calibrated_win_prob'):
         return
-    latest = _latest_calibration()
+    latest = latest_calibration()
     if latest is None:
         return
     try:
