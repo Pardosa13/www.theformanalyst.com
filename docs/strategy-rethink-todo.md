@@ -45,6 +45,15 @@ Things decided but parked for a later phase. Tick them off as they land.
   (incomplete flags) and the price for Phase 5 backtests.
 - ML judged only on forward data (ml_scored_at before the jump), 8+ weeks.
 
+## Decisions log (16 Oct 2026)
+- Meeting pages, Best Bets and the print guide show the **calibrated fair
+  price** (no 10% margin) for the analyzer and the ML model. The stored raw
+  fields (predicted_odds, win_probability, ml_win_probability) are unchanged,
+  so stats, backtests, value edge and Kelly still read the raw numbers.
+- ML calibration uses forward data only (scored before the start). It needs
+  500 clean races; until then the ML page keeps its old 110% book price. The
+  calibration job reruns every Sunday and picks up new data.
+
 ## Missing runners (fixed 16 Oct 2026)
 - [x] **The CSV reader dropped runners.** `parseCSV` split on every comma, so
   any row with a quoted comma (a name, gear or comment) was silently thrown

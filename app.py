@@ -930,6 +930,7 @@ with app.app_context():
 
 # ----- Analyzer Integration -----
 from scoring_integrity import (
+    latest_calibration,
     log_score_change,
     ml_pre_race_clause,
     ml_pre_race_sql,
@@ -939,6 +940,21 @@ from scoring_integrity import (
     reprice_race,
     snapshot,
 )
+
+
+def _analyzer_display_price(pred):
+    """(price, win %) shown on the meeting page: the calibrated fair price when there is one.
+
+    Falls back to the raw 110%-book predicted_odds / win_probability for a
+    runner the calibration has not reached (e.g. no calibration run yet).
+    The stored raw fields stay as they are: stats and backtests read those.
+    """
+    if pred is None:
+        return '', ''
+    probability = getattr(pred, 'calibrated_win_prob', None)
+    if probability and probability > 0:
+        return f"${1 / probability:.2f}", f"{probability * 100:.1f}%"
+    return pred.predicted_odds or '', pred.win_probability or ''
 
 
 def _analyzer_split_fields(result):
@@ -1996,6 +2012,7 @@ def get_meeting_results(meeting_id):
             is_best_bet = bool(best_bet_reasons) and signals_all_agree_top(horse.id, signal_top_ids)
             if is_best_bet:
                 best_bet_reasons.append('Analyzer, PFAI and ML all agree top selection')
+            display_odds, display_probability = _analyzer_display_price(pred)
             horse_data = {
                 'horse_id': horse.id,
                 'horse_name': horse.horse_name,
@@ -2005,8 +2022,8 @@ def get_meeting_results(meeting_id):
                 'trainer': horse.trainer,
                 'form': horse.form,
                 'score': pred.score if pred else 0,
-                'odds': pred.predicted_odds if pred else '',
-                'win_probability': pred.win_probability if pred else '',
+                'odds': display_odds,
+                'win_probability': display_probability,
                 'performance_component': pred.performance_component if pred else '',
                 'base_probability': pred.base_probability if pred else '',
                 'notes': pred.notes if pred else '',
@@ -6763,6 +6780,7 @@ def ml_view_meeting(meeting_id):
     # Re-sort horses within each race by ml_score (highest first) and build
     # ML-only assessed prices/probabilities for the ML meeting view.  These
     # fields intentionally do not reuse Analyzer assessed odds or win %.
+    ml_calibration = latest_calibration('ml')
     for race in results['races']:
         race['horses'].sort(
             key=lambda h: (h.get('ml_score') or 0),
@@ -6774,6 +6792,17 @@ def ml_view_meeting(meeting_id):
             lambda h: None if h.get('is_scratched') else h.get('ml_score'),
             probability_getter=lambda h: None if h.get('is_scratched') else h.get('ml_model_win_probability'),
         )
+        # Shown price: the calibrated fair price when an ML calibration exists
+        # and the race has the model's own probabilities. Otherwise the 110% book.
+        ml_display = None
+        if ml_calibration is not None and any(
+            entry['probability_source'] == PROBABILITY_SOURCE_MODEL for entry in ml_book.values()
+        ):
+            from calibrate import ml_calibrated
+            ml_display = ml_calibrated(
+                [(ml_book.get(idx) or {}).get('ml_fair_probability') for idx in range(len(race['horses']))],
+                ml_calibration,
+            )
 
         for idx, horse in enumerate(race['horses']):
             horse['ml_assessed_odds'] = ''
@@ -6784,8 +6813,13 @@ def ml_view_meeting(meeting_id):
             if not book_entry:
                 continue
 
-            horse['ml_win_probability'] = f"{book_entry['ml_probability_110_pct']:.1f}%"
-            horse['ml_assessed_odds'] = f"${book_entry['ml_assessed_odds']:.2f}"
+            calibrated = ml_display[idx] if ml_display else None
+            if calibrated:
+                horse['ml_win_probability'] = f"{calibrated * 100:.1f}%"
+                horse['ml_assessed_odds'] = f"${1 / calibrated:.2f}"
+            else:
+                horse['ml_win_probability'] = f"{book_entry['ml_probability_110_pct']:.1f}%"
+                horse['ml_assessed_odds'] = f"${book_entry['ml_assessed_odds']:.2f}"
             # Raw (non-overround) fair win probability, used client-side to
             # compute this horse's edge and Kelly stake against the live market
             # once Ladbrokes odds are polled in — kept separate from
@@ -11823,8 +11857,8 @@ def best_bets():
                         'horse_name': horse.horse_name,
                         'score': horse.prediction.score,
                         'score_gap': horse_score_gap,
-                        'predicted_odds': horse.prediction.predicted_odds,
-                        'win_probability': horse.prediction.win_probability,
+                        'predicted_odds': _analyzer_display_price(horse.prediction)[0],
+                        'win_probability': _analyzer_display_price(horse.prediction)[1],
                         'components': matched_components,
                         'component_count': len(matched_components),
                         'jockey': horse.jockey,
@@ -11921,7 +11955,7 @@ def post_best_bets_manual():
             bets_by_meeting[meeting_name].append({
                 'race_number': race.race_number,
                 'horse_name': horse.horse_name,
-                'predicted_odds': horse.prediction.predicted_odds
+                'predicted_odds': _analyzer_display_price(horse.prediction)[0]
             })
         
         db.session.commit()

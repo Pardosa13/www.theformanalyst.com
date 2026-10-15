@@ -59,6 +59,27 @@ def test_band_table_counts_every_runner_once():
     assert sum(row['runners'] for row in table) == sum(len(r['raw']) for r in races)
 
 
+def test_ml_calibrated_keeps_missing_runners_empty_and_sums_to_one():
+    out = cal.ml_calibrated([0.5, None, 0.3, 0.2], ('power', {'b': 0.5}))
+    assert out[1] is None
+    assert sum(p for p in out if p) == pytest.approx(1.0)
+    assert out[0] < 0.5  # squashed towards the field
+
+
+def test_ml_calibrated_needs_a_calibration_and_two_runners():
+    assert cal.ml_calibrated([0.6, 0.4], None) is None
+    assert cal.ml_calibrated([0.6, None], ('power', {'b': 0.5})) is None
+
+
+def test_ml_pre_race_rule():
+    from datetime import datetime
+    start = datetime(2026, 10, 1, 5)
+    assert cal._ml_pre_race({'ml_scored_at': datetime(2026, 10, 1, 4), 'start_time_utc': start})
+    assert not cal._ml_pre_race({'ml_scored_at': datetime(2026, 10, 1, 6), 'start_time_utc': start})
+    assert not cal._ml_pre_race({'ml_scored_at': None, 'start_time_utc': start})
+    assert not cal._ml_pre_race({'ml_scored_at': datetime(2026, 10, 1, 4), 'start_time_utc': None})
+
+
 PG_URL = os.environ.get('TEST_POSTGRES_URL')
 
 
@@ -83,21 +104,31 @@ def test_run_end_to_end_on_postgres(capsys):
             mid = race['race_id'] + 1
             conn.execute(text("INSERT INTO meetings (id, user_id, meeting_name, date, auto_imported) "
                               "VALUES (:m, 1, 'x', :d, true)"), {'m': mid, 'd': race['day']})
-            conn.execute(text("INSERT INTO races (id, meeting_id, race_number) VALUES (:r, :m, 1)"),
-                         {'r': mid, 'm': mid})
+            conn.execute(text("INSERT INTO races (id, meeting_id, race_number, start_time_utc) "
+                              "VALUES (:r, :m, 1, :st)"),
+                         {'r': mid, 'm': mid, 'st': f"{race['day']} 05:00"})
             for i, (score, p) in enumerate(zip(race['scores'], race['market'])):
                 hid += 1
                 conn.execute(text("INSERT INTO horses (id, race_id, horse_name) VALUES (:h, :r, 'x')"),
                              {'h': hid, 'r': mid})
-                conn.execute(text("INSERT INTO predictions (horse_id, score, ladbrokes_signal_mask) "
-                                  "VALUES (:h, :s, 0)"), {'h': hid, 's': score})
+                # ML: the same overconfident probabilities, scored before the start
+                # except in every tenth race, which must be left out.
+                conn.execute(text("INSERT INTO predictions (horse_id, score, ladbrokes_signal_mask, "
+                                  "ml_win_probability, ml_scored_at) VALUES (:h, :s, 0, :mp, :ma)"),
+                             {'h': hid, 's': score, 'mp': race['raw'][i],
+                              'ma': f"{race['day']} {'06' if race['race_id'] % 10 == 0 else '04'}:00"})
                 conn.execute(text("INSERT INTO results (horse_id, finish_position, sp) VALUES (:h, :f, :sp)"),
                              {'h': hid, 'f': 1 if i == race['winner'] else 5, 'sp': round(1 / (p * 1.15), 2)})
     cal.run(engine)
+    cal.run(engine, 'ml')
     out = capsys.readouterr().out
-    assert 'ANALYZER CALIBRATION' in out and 'VERDICT' in out
+    assert 'ANALYZER CALIBRATION' in out and 'ML CALIBRATION' in out and 'VERDICT' in out
     with engine.connect() as conn:
-        run = conn.execute(text('SELECT * FROM calibration_runs')).mappings().one()
+        ml_run = conn.execute(text("SELECT * FROM calibration_runs WHERE model = 'ml'")).mappings().one()
+        assert ml_run['train_races'] + ml_run['test_races'] == 810  # post-start races left out
+        assert ml_run['calibrated_test_log_loss'] < ml_run['raw_test_log_loss']
+        assert cal.latest_params(conn, 'ml')[0] == ml_run['method']
+        run = conn.execute(text("SELECT * FROM calibration_runs WHERE model = 'analyzer'")).mappings().one()
         assert run['model'] == 'analyzer' and run['test_races'] > 0 and run['train_to'] < run['test_from']
         assert run['calibrated_test_log_loss'] < run['raw_test_log_loss']
         total = conn.execute(text(
