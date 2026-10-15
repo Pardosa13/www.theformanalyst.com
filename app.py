@@ -672,6 +672,12 @@ with app.app_context():
             'races': {
                 'start_time_utc': 'TIMESTAMP',
                 'results_incomplete': 'BOOLEAN NOT NULL DEFAULT FALSE',
+                'scored_rail_position': 'INTEGER',
+                'scored_at': 'TIMESTAMP',
+            },
+            'meetings': {
+                'provisional': 'BOOLEAN NOT NULL DEFAULT FALSE',
+                'condition_source': 'VARCHAR(20)',
             },
             'results': {
                 'bsp': 'FLOAT',
@@ -1762,7 +1768,9 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
             track_condition=track_condition,
             speed_maps_json=extract_race_speed_maps(speed_maps_data, race_num),
             ratings_json=extract_race_ratings(ratings_data, race_num),
-            sectionals_json=extract_race_sectionals(sectionals_data, race_num) if sectionals_data else None
+            sectionals_json=extract_race_sectionals(sectionals_data, race_num) if sectionals_data else None,
+            scored_rail_position=rail_position,
+            scored_at=datetime.utcnow(),
         )
         db.session.add(race)
         db.session.flush()
@@ -4388,247 +4396,267 @@ def api_get_scratchings(meeting_id):
 def api_import_meeting(meeting_id):
     """Import meeting from PuntingForm API with speed maps, ratings, AND sectionals"""
     try:
-        # Get date from request
-        date_str = request.form.get('date')
-        if not date_str:
-            date_str = datetime.now().strftime('%Y-%m-%d')
-        
-        # Get meetings for the specified date
-        meetings_response = pf_service.get_meetings_list(date=date_str)
-        meetings = meetings_response.get('meetings', [])
-        
-        # Find the meeting by ID
-        meeting_info = next((m for m in meetings if m['meeting_id'] == meeting_id), None)
-        
-        if not meeting_info:
-            return jsonify({'success': False, 'error': 'Meeting not found'}), 404
-        
-        track_name = meeting_info['track_name']
-        
-        # Track condition
-        track_condition = request.form.get('track_condition', 'good')
-        rail_position = int(request.form.get('rail_position', 0))
-        
-        # Generate meeting name
-        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-        meeting_name = f"{date_obj.strftime('%y%m%d')}_{track_name}"
-        
-        # ==========================================
-        # FETCH V2 API DATA BEFORE PROCESSING
-        # ==========================================
-        headers = {
-            'Authorization': f'Bearer {pf_service.api_key}',
-            'Content-Type': 'application/json'
-        }
-        
-        # Fetch sectionals/ratings (meeting-level)
-        sectionals_data = None
-        try:
-            sectionals_url = f"https://api.puntingform.com.au/v2/Ratings/MeetingRatings?meetingId={meeting_id}&apiKey={pf_service.api_key}"
-            logger.info(f"📡 Fetching sectionals/ratings for meeting {meeting_id}")
-            
-            sectionals_response = requests.get(sectionals_url, headers=headers, timeout=30)
-            
-            if sectionals_response.ok:
-                sectionals_data = sectionals_response.json()
-                logger.info(f"✅ Fetched sectionals data with {len(sectionals_data.get('payLoad', []))} runners")
-            else:
-                logger.warning(f"⚠️  Sectionals fetch failed: {sectionals_response.status_code}")
-        except Exception as e:
-            logger.warning(f"Could not fetch sectionals: {str(e)}")
-        
-        # ==========================================
-        # FETCH CSV DATA
-        # ==========================================
-        csv_data = pf_service.get_fields_csv(track_name, date_str)
-        if not csv_data:
-            return jsonify({'success': False, 'error': 'No data available for this meeting'}), 400
-
-        # ==========================================
-        # PRE-FETCH STRIKE RATES
-        # ==========================================
-        strike_rate_data = {'jockeys': {}, 'trainers': {}}
-        try:
-            strike_rate_data['jockeys']  = pf_service.get_strike_rates(date_str, 'jockey')
-            strike_rate_data['trainers'] = pf_service.get_strike_rates(date_str, 'trainer')
-            logger.info(f"✅ Strike rates: {len(strike_rate_data['jockeys'])} jockeys, {len(strike_rate_data['trainers'])} trainers")
-            logger.info(f"Sample jockey keys: {list(strike_rate_data['jockeys'].keys())[:5]}")
-            logger.info(f"Sample trainer keys: {list(strike_rate_data['trainers'].keys())[:5]}")
-        except Exception as e:
-            logger.warning(f"Strike rate pre-fetch failed (non-fatal): {str(e)}", exc_info=True)
-        # ==========================================
-
-        # ==========================================
-        # FETCH SCRATCHINGS BEFORE ANALYSIS
-        # ==========================================
-        scratched_set = set()
-        v1_scratchings_available = False
-        v2_scratched_set = set()
-        v2_scratchings_available = False
-        try:
-            scratch_data = pf_service.get_scratchings()
-            scratched_set, scratch_debug_rows, v1_scratchings_available = _extract_v1_scratchings_for_track(scratch_data, track_name)
-            logger.info(
-                "✅ Found %s explicit V1 scratchings for %s (available=%s): %s",
-                len(scratched_set),
-                track_name,
-                v1_scratchings_available,
-                scratch_debug_rows[:20],
-            )
-        except Exception as e:
-            logger.warning(f"Could not fetch V1 scratchings: {e}")
-            scratched_set = set()
-            v1_scratchings_available = False
-
-        try:
-            v2_url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
-            v2_response = requests.get(v2_url, headers={'accept': 'application/json'}, timeout=30)
-            if v2_response.ok:
-                v2_scratchings_available = True
-                v2_data = v2_response.json()
-                v2_items = v2_data.get('payLoad') if isinstance(v2_data, dict) else v2_data
-                v2_scratched_set, v2_debug_rows = _extract_v2_scratched_set(v2_items or [], track_name)
-                logger.info(
-                    "✅ Found %s explicit V2 update scratchings for %s: %s",
-                    len(v2_scratched_set),
-                    track_name,
-                    v2_debug_rows[:20],
-                )
-            else:
-                logger.warning(f"Could not fetch V2 scratchings: HTTP {v2_response.status_code}")
-        except Exception as e:
-            logger.warning(f"Could not fetch V2 scratchings: {e}")
-            v2_scratched_set = set()
-            v2_scratchings_available = False
-    
-        # ==========================================
-        # PRE-FETCH SPEED MAPS (needed before analysis for running position injection)
-        # ==========================================
-        import io as _io
-        import csv as _csv
-
-        csv_reader = _csv.DictReader(_io.StringIO(csv_data))
-        race_numbers = set()
-        for csv_row in csv_reader:
-            rn = csv_row.get('race number', '').strip()
-            if rn and rn.isdigit():
-                race_numbers.add(int(rn))
-
-        combined_speedmap = {'payLoad': []}
-        all_speedmap_data = {}  # race_number (int) -> raw speed data for DB storage
-
-        for rn in sorted(race_numbers):
-            try:
-                speed_url = f"https://api.puntingform.com.au/v2/User/Speedmaps?meetingId={meeting_id}&raceNo={rn}&apiKey={pf_service.api_key}"
-                logger.info(f"📡 Pre-fetching speed map for Race {rn}")
-                speed_response = requests.get(speed_url, headers=headers, timeout=30)
-                if speed_response.ok:
-                    speed_data = speed_response.json()
-                    if isinstance(speed_data, dict) and speed_data.get('payLoad'):
-                        all_speedmap_data[rn] = speed_data
-                        for item in speed_data.get('payLoad', []):
-                            combined_speedmap['payLoad'].append(item)
-                        logger.info(f"   ✅ Pre-fetched speed map for race {rn}")
-                    else:
-                        logger.warning(f"   ⚠️  Empty speedmap payload for race {rn}")
-                else:
-                    logger.error(f"   ❌ HTTP {speed_response.status_code} for race {rn}")
-            except Exception as e:
-                logger.warning(f"   ⚠️  Could not pre-fetch speedmap for race {rn}: {e}")
-
-        # ==========================================
-        # PROCESS AND STORE (with all V2 data including speedmaps)
-        # ==========================================
-        meeting = process_and_store_results(
-            csv_data=csv_data,
-            filename=meeting_name,
-            track_condition=track_condition,
+        date_str = request.form.get('date') or datetime.now().strftime('%Y-%m-%d')
+        meeting = import_meeting_from_pf(
+            meeting_id,
+            date_str,
+            track_condition=request.form.get('track_condition', 'good'),
+            rail_position=int(request.form.get('rail_position', 0)),
             user_id=current_user.id,
-            is_advanced=False,
-            puntingform_id=track_name,
-            speed_maps_data=combined_speedmap if combined_speedmap['payLoad'] else None,
-            ratings_data=sectionals_data,
-            sectionals_data=sectionals_data,
-            rail_position=rail_position,
-            scratched_set=scratched_set,
-            strike_rate_data=strike_rate_data,
-            v1_scratchings_available=v1_scratchings_available,
-            v2_scratched_set=v2_scratched_set,
-            v2_scratchings_available=v2_scratchings_available
         )
-
-        meeting.date = date_obj.date()
-        meeting.rail_position = rail_position
-        meeting.pace_bias = 0  # Always starts neutral
-        db.session.commit()
-
-        # ==========================================
-        # STORE SPEED MAPS ON RACE RECORDS
-        # ==========================================
-        races = Race.query.filter_by(meeting_id=meeting.id).order_by(Race.race_number).all()
-
-        for race in races:
-            if race.race_number in all_speedmap_data:
-                race.speed_maps_json = json.dumps(all_speedmap_data[race.race_number])
-                logger.info(f"   ✅ Stored speed map for race {race.race_number}")
-
-        # Store sectionals data on ALL races
-        if sectionals_data and races:
-            for race in races:
-                race.sectionals_json = json.dumps(sectionals_data)
-                race.ratings_json = json.dumps(sectionals_data)
-            logger.info("✅ Stored sectionals/ratings data on all races")
-
-        db.session.commit()
-        
-        # ==========================================
-        # FETCH AND STORE SPEED MAPS PER RACE
-        # ==========================================
-        races = Race.query.filter_by(meeting_id=meeting.id).order_by(Race.race_number).all()
-        
-        for race in races:
-            try:
-                speed_url = f"https://api.puntingform.com.au/v2/User/Speedmaps?meetingId={meeting_id}&raceNo={race.race_number}&apiKey={pf_service.api_key}"
-                
-                logger.info(f"📡 Fetching speed map for Race {race.race_number}")
-                
-                speed_response = requests.get(speed_url, headers=headers, timeout=30)
-                
-                if speed_response.ok:
-                    speed_data = speed_response.json()
-                    
-                    if isinstance(speed_data, dict) and speed_data.get('payLoad'):
-                        race.speed_maps_json = json.dumps(speed_data)
-                        logger.info(f"   ✅ Stored speed map for race {race.race_number}")
-                else:
-                    logger.error(f"   ❌ HTTP {speed_response.status_code} for race {race.race_number}")
-                    
-            except Exception as e:
-                logger.error(f"   ❌ Error for race {race.race_number}: {str(e)}")
-        
-        # Store sectionals data on ALL races
-        if sectionals_data and races:
-            for race in races:
-                race.sectionals_json = json.dumps(sectionals_data)
-                race.ratings_json = json.dumps(sectionals_data)
-            logger.info("✅ Stored sectionals/ratings data on all races")
-        
-        db.session.commit()
-        
-        logger.info(f"✓ Imported {meeting_name} with V2 API data (speed maps, ratings, sectionals)")
-        # Scratch state has already been resolved and saved inside
-        # process_and_store_results using the final V1-over-V2 official set.
-        # Do not run a second V2-only zeroing pass here, because it can
-        # re-introduce stale scratched state for runners cleared by V1.
         return jsonify({
             'success': True,
             'meeting_id': meeting.id,
             'redirect_url': url_for('view_meeting', meeting_id=meeting.id)
         })
-        
+    except LookupError as e:
+        return jsonify({'success': False, 'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         logger.error(f"Import failed: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def import_meeting_from_pf(meeting_id, date_str, track_condition='good', rail_position=0, user_id=None):
+    """Import one PuntingForm meeting: fields, ratings, sectionals, speed maps, scratchings, scores.
+
+    Shared by the dashboard import button and the daily automation
+    (daily_run.py). Returns the new Meeting. Raises LookupError when the
+    meeting is not in PuntingForm's list for that date and ValueError when it
+    has no form data.
+    """
+    # Get meetings for the specified date
+    meetings_response = pf_service.get_meetings_list(date=date_str)
+    meetings = meetings_response.get('meetings', [])
+    
+    # Find the meeting by ID
+    meeting_info = next((m for m in meetings if m['meeting_id'] == meeting_id), None)
+    
+    if not meeting_info:
+        raise LookupError('Meeting not found')
+    
+    track_name = meeting_info['track_name']
+    
+    # Generate meeting name
+    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+    meeting_name = f"{date_obj.strftime('%y%m%d')}_{track_name}"
+
+    # Never import the same meeting twice (the daily automation may already have).
+    existing = Meeting.query.filter_by(meeting_name=meeting_name, puntingform_id=track_name).first()
+    if existing:
+        raise ValueError(f'{meeting_name} is already imported (meeting {existing.id}). '
+                         'Use Update Scratchings or set the conditions on the meeting instead.')
+    
+    # ==========================================
+    # FETCH V2 API DATA BEFORE PROCESSING
+    # ==========================================
+    headers = {
+        'Authorization': f'Bearer {pf_service.api_key}',
+        'Content-Type': 'application/json'
+    }
+    
+    # Fetch sectionals/ratings (meeting-level)
+    sectionals_data = None
+    try:
+        sectionals_url = f"https://api.puntingform.com.au/v2/Ratings/MeetingRatings?meetingId={meeting_id}&apiKey={pf_service.api_key}"
+        logger.info(f"📡 Fetching sectionals/ratings for meeting {meeting_id}")
+        
+        sectionals_response = requests.get(sectionals_url, headers=headers, timeout=30)
+        
+        if sectionals_response.ok:
+            sectionals_data = sectionals_response.json()
+            logger.info(f"✅ Fetched sectionals data with {len(sectionals_data.get('payLoad', []))} runners")
+        else:
+            logger.warning(f"⚠️  Sectionals fetch failed: {sectionals_response.status_code}")
+    except Exception as e:
+        logger.warning(f"Could not fetch sectionals: {str(e)}")
+    
+    # ==========================================
+    # FETCH CSV DATA
+    # ==========================================
+    csv_data = pf_service.get_fields_csv(track_name, date_str)
+    if not csv_data:
+        raise ValueError('No data available for this meeting')
+
+    # ==========================================
+    # PRE-FETCH STRIKE RATES
+    # ==========================================
+    strike_rate_data = {'jockeys': {}, 'trainers': {}}
+    try:
+        strike_rate_data['jockeys']  = pf_service.get_strike_rates(date_str, 'jockey')
+        strike_rate_data['trainers'] = pf_service.get_strike_rates(date_str, 'trainer')
+        logger.info(f"✅ Strike rates: {len(strike_rate_data['jockeys'])} jockeys, {len(strike_rate_data['trainers'])} trainers")
+        logger.info(f"Sample jockey keys: {list(strike_rate_data['jockeys'].keys())[:5]}")
+        logger.info(f"Sample trainer keys: {list(strike_rate_data['trainers'].keys())[:5]}")
+    except Exception as e:
+        logger.warning(f"Strike rate pre-fetch failed (non-fatal): {str(e)}", exc_info=True)
+    # ==========================================
+
+    # ==========================================
+    # FETCH SCRATCHINGS BEFORE ANALYSIS
+    # ==========================================
+    scratched_set = set()
+    v1_scratchings_available = False
+    v2_scratched_set = set()
+    v2_scratchings_available = False
+    try:
+        scratch_data = pf_service.get_scratchings()
+        scratched_set, scratch_debug_rows, v1_scratchings_available = _extract_v1_scratchings_for_track(scratch_data, track_name)
+        logger.info(
+            "✅ Found %s explicit V1 scratchings for %s (available=%s): %s",
+            len(scratched_set),
+            track_name,
+            v1_scratchings_available,
+            scratch_debug_rows[:20],
+        )
+    except Exception as e:
+        logger.warning(f"Could not fetch V1 scratchings: {e}")
+        scratched_set = set()
+        v1_scratchings_available = False
+
+    try:
+        v2_url = f"https://api.puntingform.com.au/v2/Updates/Scratchings?apiKey={pf_service.api_key}"
+        v2_response = requests.get(v2_url, headers={'accept': 'application/json'}, timeout=30)
+        if v2_response.ok:
+            v2_scratchings_available = True
+            v2_data = v2_response.json()
+            v2_items = v2_data.get('payLoad') if isinstance(v2_data, dict) else v2_data
+            v2_scratched_set, v2_debug_rows = _extract_v2_scratched_set(v2_items or [], track_name)
+            logger.info(
+                "✅ Found %s explicit V2 update scratchings for %s: %s",
+                len(v2_scratched_set),
+                track_name,
+                v2_debug_rows[:20],
+            )
+        else:
+            logger.warning(f"Could not fetch V2 scratchings: HTTP {v2_response.status_code}")
+    except Exception as e:
+        logger.warning(f"Could not fetch V2 scratchings: {e}")
+        v2_scratched_set = set()
+        v2_scratchings_available = False
+
+    # ==========================================
+    # PRE-FETCH SPEED MAPS (needed before analysis for running position injection)
+    # ==========================================
+    import io as _io
+    import csv as _csv
+
+    csv_reader = _csv.DictReader(_io.StringIO(csv_data))
+    race_numbers = set()
+    for csv_row in csv_reader:
+        rn = csv_row.get('race number', '').strip()
+        if rn and rn.isdigit():
+            race_numbers.add(int(rn))
+
+    combined_speedmap = {'payLoad': []}
+    all_speedmap_data = {}  # race_number (int) -> raw speed data for DB storage
+
+    for rn in sorted(race_numbers):
+        try:
+            speed_url = f"https://api.puntingform.com.au/v2/User/Speedmaps?meetingId={meeting_id}&raceNo={rn}&apiKey={pf_service.api_key}"
+            logger.info(f"📡 Pre-fetching speed map for Race {rn}")
+            speed_response = requests.get(speed_url, headers=headers, timeout=30)
+            if speed_response.ok:
+                speed_data = speed_response.json()
+                if isinstance(speed_data, dict) and speed_data.get('payLoad'):
+                    all_speedmap_data[rn] = speed_data
+                    for item in speed_data.get('payLoad', []):
+                        combined_speedmap['payLoad'].append(item)
+                    logger.info(f"   ✅ Pre-fetched speed map for race {rn}")
+                else:
+                    logger.warning(f"   ⚠️  Empty speedmap payload for race {rn}")
+            else:
+                logger.error(f"   ❌ HTTP {speed_response.status_code} for race {rn}")
+        except Exception as e:
+            logger.warning(f"   ⚠️  Could not pre-fetch speedmap for race {rn}: {e}")
+
+    # ==========================================
+    # PROCESS AND STORE (with all V2 data including speedmaps)
+    # ==========================================
+    meeting = process_and_store_results(
+        csv_data=csv_data,
+        filename=meeting_name,
+        track_condition=track_condition,
+        user_id=user_id,
+        is_advanced=False,
+        puntingform_id=track_name,
+        speed_maps_data=combined_speedmap if combined_speedmap['payLoad'] else None,
+        ratings_data=sectionals_data,
+        sectionals_data=sectionals_data,
+        rail_position=rail_position,
+        scratched_set=scratched_set,
+        strike_rate_data=strike_rate_data,
+        v1_scratchings_available=v1_scratchings_available,
+        v2_scratched_set=v2_scratched_set,
+        v2_scratchings_available=v2_scratchings_available
+    )
+
+    meeting.date = date_obj.date()
+    meeting.rail_position = rail_position
+    meeting.pace_bias = 0  # Always starts neutral
+    db.session.commit()
+
+    # ==========================================
+    # STORE SPEED MAPS ON RACE RECORDS
+    # ==========================================
+    races = Race.query.filter_by(meeting_id=meeting.id).order_by(Race.race_number).all()
+
+    for race in races:
+        if race.race_number in all_speedmap_data:
+            race.speed_maps_json = json.dumps(all_speedmap_data[race.race_number])
+            logger.info(f"   ✅ Stored speed map for race {race.race_number}")
+
+    # Store sectionals data on ALL races
+    if sectionals_data and races:
+        for race in races:
+            race.sectionals_json = json.dumps(sectionals_data)
+            race.ratings_json = json.dumps(sectionals_data)
+        logger.info("✅ Stored sectionals/ratings data on all races")
+
+    db.session.commit()
+    
+    # ==========================================
+    # FETCH AND STORE SPEED MAPS PER RACE
+    # ==========================================
+    races = Race.query.filter_by(meeting_id=meeting.id).order_by(Race.race_number).all()
+    
+    for race in races:
+        try:
+            speed_url = f"https://api.puntingform.com.au/v2/User/Speedmaps?meetingId={meeting_id}&raceNo={race.race_number}&apiKey={pf_service.api_key}"
+            
+            logger.info(f"📡 Fetching speed map for Race {race.race_number}")
+            
+            speed_response = requests.get(speed_url, headers=headers, timeout=30)
+            
+            if speed_response.ok:
+                speed_data = speed_response.json()
+                
+                if isinstance(speed_data, dict) and speed_data.get('payLoad'):
+                    race.speed_maps_json = json.dumps(speed_data)
+                    logger.info(f"   ✅ Stored speed map for race {race.race_number}")
+            else:
+                logger.error(f"   ❌ HTTP {speed_response.status_code} for race {race.race_number}")
+                
+        except Exception as e:
+            logger.error(f"   ❌ Error for race {race.race_number}: {str(e)}")
+    
+    # Store sectionals data on ALL races
+    if sectionals_data and races:
+        for race in races:
+            race.sectionals_json = json.dumps(sectionals_data)
+            race.ratings_json = json.dumps(sectionals_data)
+        logger.info("✅ Stored sectionals/ratings data on all races")
+    
+    db.session.commit()
+    
+    logger.info(f"✓ Imported {meeting_name} with V2 API data (speed maps, ratings, sectionals)")
+    # Scratch state has already been resolved and saved inside
+    # process_and_store_results using the final V1-over-V2 official set.
+    # Do not run a second V2-only zeroing pass here, because it can
+    # re-introduce stale scratched state for runners cleared by V1.
+    return meeting
+
 
 @app.route("/import-from-api")
 @login_required
@@ -4657,6 +4685,44 @@ def meeting_scratch_debug(meeting_id):
 @login_required
 def update_scratchings(meeting_id):
     """Re-fetch fresh CSV + V2 data, exclude scratched horses, re-run analyzer, upsert predictions."""
+    return _update_scratchings_impl(meeting_id)
+
+
+@app.route("/api/meetings/<int:meeting_id>/set-conditions", methods=["POST"])
+@login_required
+def set_meeting_conditions(meeting_id):
+    """Manual override: set track rating and rail by hand, then rescore races still to run.
+
+    The daily automation never overwrites a rating set this way.
+    """
+    meeting = Meeting.query.get_or_404(meeting_id)
+    if not can_edit_meeting(meeting):
+        return jsonify({'success': False, 'error': 'Only the meeting owner or an admin can change conditions'}), 403
+    data = request.get_json(silent=True) or request.form
+    rating = str(data.get('track_condition', '')).strip().lower()
+    if rating not in ('firm', 'good', 'soft', 'heavy', 'synthetic'):
+        return jsonify({'success': False, 'error': 'track_condition must be firm, good, soft, heavy or synthetic'}), 400
+    try:
+        rail = int(data.get('rail_position', meeting.rail_position or 0))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'rail_position must be a whole number of metres'}), 400
+    if not 0 <= rail <= 15:
+        return jsonify({'success': False, 'error': 'rail_position must be 0-15'}), 400
+    meeting.rail_position = rail
+    meeting.condition_source = 'manual'
+    meeting.provisional = False
+    db.session.commit()
+    return _update_scratchings_impl(meeting_id, track_condition=rating)
+
+
+def _update_scratchings_impl(meeting_id, track_condition=None):
+    """Body of the Update Scratchings button, also called by daily_run.py.
+
+    `track_condition`, when given, is the new rating for every race that has
+    not started; it is stored on those races and used for the rescore. Returns
+    a Flask JSON response (call inside an app/request context).
+    """
+    new_track_condition = track_condition
     try:
         meeting = Meeting.query.get_or_404(meeting_id)
         headers = {
@@ -4913,7 +4979,18 @@ def update_scratchings(meeting_id):
 
         # ── 13. Rebuild CSV and run analyzer (only active horses) ──
         fresh_csv = rebuildCSV(active_csv)
-        track_condition = all_races[0].track_condition if all_races else 'good'
+        # Score with the rating of the races still to run: race 1 has often
+        # jumped by now and may carry the morning's rating.
+        open_races = [r for r in all_races if not race_has_started(r, meeting)[0]]
+        if new_track_condition:
+            for race in open_races:
+                race.track_condition = new_track_condition
+        track_condition = (
+            new_track_condition
+            or next((r.track_condition for r in open_races if r.track_condition), None)
+            or (all_races[0].track_condition if all_races else None)
+            or 'good'
+        )
 
         analysis_results = run_analyzer(fresh_csv, track_condition, False)
         if not analysis_results:
@@ -5042,6 +5119,8 @@ def update_scratchings(meeting_id):
 
             if updated_any:
                 races_updated += 1
+                race.scored_rail_position = rail_pos
+                race.scored_at = datetime.utcnow()
 
         db.session.commit()
 

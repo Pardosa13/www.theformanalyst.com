@@ -49,6 +49,11 @@ class Meeting(db.Model):
     auto_imported = db.Column(db.Boolean, default=False)  # True if imported from API
     rail_position = db.Column(db.Integer, default=0)   # 0=True, 1-15 = metres out
     pace_bias = db.Column(db.Integer, default=0)        # -2 to +2 (neg=backmarkers, pos=leaders)
+    # Daily automation (daily_run.py): True when the track rating or rail was
+    # not available from PuntingForm and a fallback was used. condition_source
+    # says where the rating came from: conditions / expected / default / manual.
+    provisional = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    condition_source = db.Column(db.String(20), nullable=True)
     
     # Relationships
     races = db.relationship('Race', backref='meeting', lazy=True, cascade='all, delete-orphan')
@@ -80,6 +85,10 @@ class Race(db.Model):
     # uploads only recorded the placegetters). Every stat, backtest and ML
     # training query skips these races. See refresh_results_incomplete_flags.
     results_incomplete = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    # Rail position and time used the last time this race's scores were
+    # written (track_condition holds the rating used).
+    scored_rail_position = db.Column(db.Integer, nullable=True)
+    scored_at = db.Column(db.DateTime, nullable=True)
     
     horses = db.relationship('Horse', backref='race', lazy=True, cascade='all, delete-orphan')
     

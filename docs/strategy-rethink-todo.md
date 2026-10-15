@@ -12,6 +12,12 @@ Things decided but parked for a later phase. Tick them off as they land.
   The Betfair BSP files carry `STATE_CODE` and `SCHEDULED_RACE_TIME` per race
   and can fill history.
 
+## Phase 6 follow-ups
+- [ ] Show "provisional" on the meeting page and add a rating/rail form that
+  calls `POST /api/meetings/<id>/set-conditions` (endpoint exists).
+- [ ] Set `TELEGRAM_ADMIN_CHAT_ID` (and `TELEGRAM_BOT_TOKEN`) on the Daily
+  Racing Run service so alerts reach James privately.
+
 ## Data quality
 - [ ] **ML market-blend data from mid-Sep to 15 Oct 2026 is low quality.** The
   Railway odds scraper ran once a day (02:00 UTC, ~1pm Melbourne) instead of
