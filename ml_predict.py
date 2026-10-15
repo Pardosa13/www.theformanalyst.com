@@ -1384,7 +1384,9 @@ def _load_breeding_win_rates(db_session):
                        SUM(CASE WHEN r.finish_position = 1 THEN 1 ELSE 0 END) AS wins
                 FROM horses h
                 JOIN results r ON r.horse_id = h.id
+                JOIN races rc ON rc.id = h.race_id
                 WHERE r.finish_position > 0
+                  AND rc.results_incomplete IS NOT TRUE
                   AND r.sp IS NOT NULL AND r.sp > 1.0
                   AND COALESCE(h.is_scratched, FALSE) = FALSE
                   AND h.csv_data->>'{key}' IS NOT NULL

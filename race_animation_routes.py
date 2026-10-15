@@ -667,6 +667,8 @@ def _history_records(limit_races: int = 400, days: int | None = None):
         rail = getattr(meeting, 'rail_position', 0) or 0
         bias = getattr(meeting, 'pace_bias', 0) or 0
         for race in meeting.races:
+            if getattr(race, 'results_incomplete', False):
+                continue
             live = [h for h in race.horses if not h.is_scratched and h.result is not None]
             if len(live) < 4:
                 continue

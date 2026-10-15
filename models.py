@@ -72,6 +72,14 @@ class Race(db.Model):
     speed_maps_json = db.Column(db.JSON, nullable=True)
     ratings_json = db.Column(db.JSON, nullable=True)
     sectionals_json = db.Column(db.JSON, nullable=True)
+
+    # Scheduled start (naive UTC). Filled from Ladbrokes or the CSV the first
+    # time a rescore asks whether the race has started. See scoring_integrity.
+    start_time_utc = db.Column(db.DateTime, nullable=True)
+    # True when the race has some results but too few to trust (most manual
+    # uploads only recorded the placegetters). Every stat, backtest and ML
+    # training query skips these races. See refresh_results_incomplete_flags.
+    results_incomplete = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
     
     horses = db.relationship('Horse', backref='race', lazy=True, cascade='all, delete-orphan')
     
@@ -150,9 +158,36 @@ class Prediction(db.Model):
     # whenever the ML meeting view is rendered pre-race. NULL or 0 means the
     # solver backed nothing here — the runner is not a value bet at that price.
     kelly_stake_pct = db.Column(db.Float, nullable=True)
+    # When ml_score / ml_win_probability were last written.
+    ml_scored_at = db.Column(db.DateTime, nullable=True)
+    # The two inputs to `score`, kept apart so we can tell which one carries
+    # an edge. analyzer_raw_score is analyzer.js's own points total before any
+    # blending; pfai_score is PuntingForm's PFAI rating (NULL when missing).
+    # `score` is 25% analyzer + 75% PFAI when PFAI >= 40, then rail/pace bias.
+    analyzer_raw_score = db.Column(db.Float, nullable=True)
+    pfai_score = db.Column(db.Float, nullable=True)
 
     def __repr__(self):
         return f'<Prediction {self.horse_id}: {self.score}>'
+
+
+class ScoreHistory(db.Model):
+    """One row per change to a runner's score, rated price or ML score."""
+    __tablename__ = 'score_history'
+
+    id = db.Column(db.Integer, primary_key=True)
+    horse_id = db.Column(db.Integer, nullable=False, index=True)
+    race_id = db.Column(db.Integer, nullable=False, index=True)
+    changed_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    # upload / scratching / pace_bias / rail / ml
+    reason = db.Column(db.String(20), nullable=False)
+    old_score = db.Column(db.Float, nullable=True)
+    new_score = db.Column(db.Float, nullable=True)
+    old_price = db.Column(db.Float, nullable=True)
+    new_price = db.Column(db.Float, nullable=True)
+    old_ml_score = db.Column(db.Float, nullable=True)
+    new_ml_score = db.Column(db.Float, nullable=True)
+    detail = db.Column(db.String(200), nullable=True)
         
 class Result(db.Model):
     """Actual race results for tracking model performance
