@@ -166,6 +166,11 @@ class Prediction(db.Model):
     # `score` is 25% analyzer + 75% PFAI when PFAI >= 40, then rail/pace bias.
     analyzer_raw_score = db.Column(db.Float, nullable=True)
     pfai_score = db.Column(db.Float, nullable=True)
+    # Phase 4 calibration (calibrate.py): the analyzer's honest win probability
+    # (race sums to 1, no margin) and the fair price 1/p. Shown only once a
+    # calibration run passes its test-set check.
+    calibrated_win_prob = db.Column(db.Float, nullable=True)
+    calibrated_price = db.Column(db.Float, nullable=True)
 
     def __repr__(self):
         return f'<Prediction {self.horse_id}: {self.score}>'
