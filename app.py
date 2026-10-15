@@ -673,6 +673,9 @@ with app.app_context():
                 'start_time_utc': 'TIMESTAMP',
                 'results_incomplete': 'BOOLEAN NOT NULL DEFAULT FALSE',
             },
+            'results': {
+                'bsp': 'FLOAT',
+            },
             'predictions': {
                 'ml_scored_at': 'TIMESTAMP',
                 'analyzer_raw_score': 'FLOAT',
