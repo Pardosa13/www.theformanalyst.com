@@ -566,6 +566,9 @@ def load_historical_data():
         WHERE r.id IS NOT NULL
           AND r.finish_position > 0
           AND h.is_scratched = FALSE
+          -- Races whose results only cover some runners (mostly manual
+          -- uploads) are not trusted for training or backtests.
+          AND rc.results_incomplete IS NOT TRUE
         ORDER BY m.date ASC, rc.id ASC, h.id ASC
     """)
 

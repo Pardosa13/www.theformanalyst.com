@@ -662,6 +662,49 @@ with app.app_context():
     except Exception as e:
         print(f"ML win probability migration check: {e}")
 
+    # Scoring integrity (Strategy Rethink Phase 1): race start times, the
+    # incomplete-results flag, ML timestamp and the analyzer/PFAI split.
+    # score_history itself is a new table, so db.create_all() above made it.
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        new_columns = {
+            'races': {
+                'start_time_utc': 'TIMESTAMP',
+                'results_incomplete': 'BOOLEAN NOT NULL DEFAULT FALSE',
+            },
+            'predictions': {
+                'ml_scored_at': 'TIMESTAMP',
+                'analyzer_raw_score': 'FLOAT',
+                'pfai_score': 'FLOAT',
+            },
+        }
+        with db.engine.connect() as conn:
+            changed = False
+            for table_name, columns in new_columns.items():
+                existing = {col['name'] for col in inspector.get_columns(table_name)}
+                for column_name, column_type in columns.items():
+                    if column_name not in existing:
+                        conn.execute(text(f'ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}'))
+                        changed = True
+            if changed:
+                conn.commit()
+                print("Added scoring integrity columns to races/predictions")
+    except Exception as e:
+        print(f"Scoring integrity migration check: {e}")
+
+    # Mark races whose results are too thin to trust. Only rows whose flag
+    # actually changes are written, so after the first boot this is a read.
+    if db.engine.dialect.name == 'postgresql':
+        try:
+            from scoring_integrity import refresh_results_incomplete_flags
+            with db.engine.begin() as conn:
+                flagged = refresh_results_incomplete_flags(conn)
+            if flagged:
+                print(f"Results-incomplete flag changed on {flagged} race(s)")
+        except Exception as e:
+            print(f"Results-incomplete flag refresh failed: {e}")
+
     try:
         from sqlalchemy import inspect, text
         inspector = inspect(db.engine)
@@ -841,6 +884,29 @@ with app.app_context():
         print('⚠ No admin user and ADMIN_PASSWORD not set - default admin not created')
 
 # ----- Analyzer Integration -----
+from scoring_integrity import (
+    log_score_change,
+    race_has_started,
+    refresh_meeting_results_flags,
+    reprice_race,
+    snapshot,
+)
+
+
+def _analyzer_split_fields(result):
+    """analyzer_raw_score / pfai_score for a Prediction, from one analyzer.js result."""
+    def _number(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    pfai = _number(result.get('pfaiScore'))
+    return {
+        'analyzer_raw_score': _number(result.get('rawScore')),
+        'pfai_score': pfai if pfai and pfai > 0 else None,
+    }
+
+
 def run_analyzer(csv_data, track_condition, is_advanced=False, strike_rate_data=None):
     input_data = {
         'csv_data': csv_data,
@@ -1674,6 +1740,7 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
         db.session.add(race)
         db.session.flush()
 
+        race_predictions = []
         for result in horses_results:
             horse_data = result['horse']
             
@@ -1705,9 +1772,16 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
                 win_probability=result.get('winProbability', ''),
                 performance_component=result.get('performanceComponent', ''),
                 base_probability=result.get('baseProbability', ''),
-                notes=result.get('notes', '')
+                notes=result.get('notes', ''),
+                **_analyzer_split_fields(result),
             )
             db.session.add(prediction)
+            race_predictions.append(prediction)
+
+        # Price off the final score (after rail bias), then log the new scores.
+        reprice_race(race_predictions)
+        for prediction in race_predictions:
+            log_score_change(db.session, prediction, race.id, 'upload', snapshot(None))
 
     # ==========================================
     # SAVE SCRATCHED HORSES WITH ZERO SCORES
@@ -2882,8 +2956,11 @@ def analyze_class_drops(stake=10.0):
         Prediction, Horse.id == Prediction.horse_id
     ).join(
         Result, Horse.id == Result.horse_id
+    ).join(
+        Race, Horse.race_id == Race.id
     ).filter(
-        Result.finish_position > 0
+        Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
     ).all()
     
     for horse, prediction, result in all_horses:
@@ -3010,7 +3087,7 @@ def dashboard():
     ).join(Horse,      Horse.race_id       == Race.id
     ).join(Prediction, Prediction.horse_id == Horse.id
     ).join(Result,     Result.horse_id     == Horse.id
-    ).filter(Result.finish_position > 0
+    ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True)
     ).order_by(Meeting.uploaded_at.desc(), Race.id.desc()
     ).all()
 
@@ -3051,9 +3128,12 @@ def dashboard():
             Horse, Prediction.horse_id == Horse.id
         ).join(
             Result, Horse.id == Result.horse_id
+        ).join(
+            Race, Horse.race_id == Race.id
         ).filter(
             Prediction.best_bet_flagged_at.isnot(None),
-            Result.finish_position > 0
+            Result.finish_position > 0,
+            Race.results_incomplete.isnot(True),
         ).limit(500).all()
 
         if bb_rows:
@@ -3135,6 +3215,7 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
         JOIN meetings m ON m.id = rc.meeting_id
         JOIN results r ON r.horse_id = h.id
         WHERE p.ml_score IS NOT NULL
+          AND rc.results_incomplete IS NOT TRUE
           AND COALESCE(h.is_scratched, FALSE) = FALSE
           AND r.finish_position IS NOT NULL
           AND r.finish_position > 0
@@ -3643,6 +3724,7 @@ def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_t
             *[Prediction.best_bet_routes.like(f'%{route}%') for _key, _label, route in BEST_BET_ROUTE_COHORTS],
         ),
         Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
         Result.sp.isnot(None),
     )
     if track_filter:
@@ -3776,6 +3858,7 @@ def calculate_value_edge_performance(track_filter="", date_from="", date_to="", 
     ).join(Meeting, Race.meeting_id == Meeting.id).join(Result, Result.horse_id == Horse.id).filter(
         Prediction.value_edge_captured_at.isnot(None),
         Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
         Result.sp.isnot(None),
     )
     if track_filter:
@@ -4808,19 +4891,21 @@ def update_scratchings(meeting_id):
                 races_data[race_num] = []
             races_data[race_num].append(result)
 
-        # ── 15. DELETE ALL existing predictions first ──
-        for race in all_races:
-            for horse in race.horses:
-                if horse.prediction:
-                    db.session.delete(horse.prediction)
-        db.session.flush()
-
-        # ── 16. Create predictions for ALL horses ──
+        # ── 15. Update predictions IN PLACE, and only for races not yet started ──
+        # Rows are never deleted: that used to wipe ml_score, best bet flags,
+        # value edge and Ladbrokes snapshots. A race that has started keeps
+        # exactly the scores it had at the jump.
         rail_pos = meeting.rail_position or 0
         pace_bias = meeting.pace_bias or 0
         races_updated = 0
+        races_skipped = []
 
         for race in all_races:
+            started, started_reason = race_has_started(race, meeting)
+            if started:
+                races_skipped.append({'race_number': race.race_number, 'reason': started_reason})
+                continue
+
             race_num_str = str(race.race_number)
             horses_results = races_data.get(race_num_str, [])
             result_lookup = {}
@@ -4830,6 +4915,8 @@ def update_scratchings(meeting_id):
                     result_lookup[normalize_runner_name(name)] = r
 
             updated_any = False
+            active_predictions = []
+            before_by_horse = {}
 
             for horse in race.horses:
                 horse_norm = normalize_runner_name(horse.horse_name)
@@ -4841,68 +4928,79 @@ def update_scratchings(meeting_id):
                 # set says the runner is active again.
                 horse.is_scratched = final_is_scratched
 
+                r = None if final_is_scratched else result_lookup.get(horse_norm)
+                if not final_is_scratched and not r:
+                    logger.warning(
+                        "No analyzer result for active runner %s R%s while refreshing scratchings",
+                        horse.horse_name,
+                        race.race_number,
+                    )
+                    # Keep its existing score in the race's pricing so the
+                    # other runners' prices still add up correctly.
+                    if horse.prediction is not None and (horse.prediction.score or 0) > 0:
+                        before_by_horse[horse.id] = snapshot(horse.prediction)
+                        active_predictions.append(horse.prediction)
+                    continue
+
+                pred = horse.prediction
+                if pred is None:
+                    pred = Prediction(horse_id=horse.id, score=0.0)
+                    db.session.add(pred)
+                    horse.prediction = pred
+                before_by_horse[horse.id] = snapshot(pred)
+
                 if final_is_scratched:
-                    # Create zero prediction for scratched horses
-                    pred = Prediction(
-                        horse_id=horse.id,
-                        score=0.0,
-                        predicted_odds='',
-                        win_probability='',
-                        performance_component='',
-                        base_probability='',
-                        notes='Scratched'
-                    )
-                    db.session.add(pred)
+                    pred.score = 0.0
+                    pred.predicted_odds = ''
+                    pred.win_probability = ''
+                    pred.performance_component = ''
+                    pred.base_probability = ''
+                    pred.notes = 'Scratched'
                     updated_any = True
-                else:
-                    # Create normal prediction for active horses
-                    r = result_lookup.get(horse_norm)
-                    if not r:
-                        logger.warning(
-                            "No analyzer result for active runner %s R%s while refreshing scratchings",
-                            horse.horse_name,
-                            race.race_number,
-                        )
-                        continue
+                    continue
 
-                    horse_data = r.get('horse', {})
-                    fresh_row = fresh_csv_lookup.get((race_num_str, horse_norm)) or horse_data
-                    horse.csv_data = fresh_row
-                    barrier_value = fresh_row.get('barrier') or fresh_row.get('horse barrier')
-                    try:
-                        horse.barrier = int(barrier_value) if barrier_value else None
-                    except (TypeError, ValueError):
-                        horse.barrier = None
-                    try:
-                        horse.weight = float(fresh_row.get('horse weight', 0)) if fresh_row.get('horse weight') else None
-                    except (TypeError, ValueError):
-                        horse.weight = None
-                    horse.jockey = fresh_row.get('horse jockey', horse.jockey)
-                    horse.trainer = fresh_row.get('horse trainer', horse.trainer)
-                    horse.form = fresh_row.get('horse last10', horse.form)
+                horse_data = r.get('horse', {})
+                fresh_row = fresh_csv_lookup.get((race_num_str, horse_norm)) or horse_data
+                horse.csv_data = fresh_row
+                barrier_value = fresh_row.get('barrier') or fresh_row.get('horse barrier')
+                try:
+                    horse.barrier = int(barrier_value) if barrier_value else None
+                except (TypeError, ValueError):
+                    horse.barrier = None
+                try:
+                    horse.weight = float(fresh_row.get('horse weight', 0)) if fresh_row.get('horse weight') else None
+                except (TypeError, ValueError):
+                    horse.weight = None
+                horse.jockey = fresh_row.get('horse jockey', horse.jockey)
+                horse.trainer = fresh_row.get('horse trainer', horse.trainer)
+                horse.form = fresh_row.get('horse last10', horse.form)
 
-                    base_score = r.get('adjustedScore', r.get('score', 0))
-                    running_position = horse_data.get('runningposition', '')
+                base_score = r.get('adjustedScore', r.get('score', 0))
+                running_position = horse_data.get('runningposition', '')
 
-                    # Apply rail bias
-                    if running_position and rail_pos:
-                        base_score = apply_track_bias(base_score, running_position, rail_pos, 0)
+                # Apply rail bias
+                if running_position and rail_pos:
+                    base_score = apply_track_bias(base_score, running_position, rail_pos, 0)
 
-                    # Apply current pace bias
-                    if running_position and pace_bias:
-                        base_score = round(base_score + _bias_adjustment(running_position, rail_pos, pace_bias), 1)
+                # Apply current pace bias
+                if running_position and pace_bias:
+                    base_score = round(base_score + _bias_adjustment(running_position, rail_pos, pace_bias), 1)
 
-                    pred = Prediction(
-                        horse_id=horse.id,
-                        score=base_score,
-                        predicted_odds=r.get('trueOdds', ''),
-                        win_probability=r.get('winProbability', ''),
-                        performance_component=r.get('performanceComponent', ''),
-                        base_probability=r.get('baseProbability', ''),
-                        notes=r.get('notes', '')
-                    )
-                    db.session.add(pred)
-                    updated_any = True
+                pred.score = base_score
+                pred.performance_component = r.get('performanceComponent', '')
+                pred.base_probability = r.get('baseProbability', '')
+                pred.notes = r.get('notes', '')
+                for field, value in _analyzer_split_fields(r).items():
+                    setattr(pred, field, value)
+                active_predictions.append(pred)
+                updated_any = True
+
+            # Price off the final scores, then log what moved.
+            reprice_race(active_predictions)
+            for horse in race.horses:
+                if horse.prediction is not None and horse.id in before_by_horse:
+                    log_score_change(db.session, horse.prediction, race.id, 'scratching',
+                                     before_by_horse[horse.id])
 
             if updated_any:
                 races_updated += 1
@@ -4918,7 +5016,12 @@ def update_scratchings(meeting_id):
             'unscratched_count': unscratched_count,
             'races_updated': races_updated,
             'total_scratched': len(all_scratched_names),
-            'message': f'Updated {scratched_count} new scratching(s), {unscratched_count} unscratched, repriced {races_updated} race(s). Total scratched: {len(all_scratched_names)}'
+            'races_skipped_started': races_skipped,
+            'message': (
+                f'Updated {scratched_count} new scratching(s), {unscratched_count} unscratched, '
+                f'repriced {races_updated} race(s). Total scratched: {len(all_scratched_names)}'
+                + (f'. Skipped {len(races_skipped)} race(s) already started.' if races_skipped else '')
+            ),
         })
 
     except Exception as e:
@@ -5023,6 +5126,7 @@ def fetch_automatic_results(meeting_id):
                 
                 horses_updated += 1
         
+        refresh_meeting_results_flags(db.session, meeting_id)
         db.session.commit()
         flash(f"✓ Auto-fetched results for {horses_updated} horses from PuntingForm", "success")
 
@@ -5082,6 +5186,7 @@ def mark_scratched_and_complete(meeting_id):
                     db.session.add(result)
                     scratched_count += 1
         
+        refresh_meeting_results_flags(db.session, meeting_id)
         db.session.commit()
         flash(f"✓ Marked {scratched_count} horses as scratched and completed meeting", "success")
         
@@ -5176,6 +5281,20 @@ def toggle_horse_scratch(horse_id):
     horse.is_scratched = not horse.is_scratched
     db.session.commit()
 
+    # The scratching itself is a fact and is always saved. Prices are only
+    # recalculated before the jump: after it, the race keeps its jump prices.
+    started, started_reason = race_has_started(horse.race)
+    if started:
+        db.session.commit()  # keeps a start time looked up just now
+        return jsonify({
+            'success': True,
+            'horse_id': horse_id,
+            'is_scratched': horse.is_scratched,
+            'horse_name': horse.horse_name,
+            'repriced': False,
+            'message': f'Scratching saved. Prices not recalculated: race {started_reason}.',
+        })
+
     # Force fresh query — don't rely on cached relationship
     active_horses = Horse.query.filter_by(
         race_id=horse.race_id,
@@ -5183,26 +5302,21 @@ def toggle_horse_scratch(horse_id):
     ).join(Prediction).all()
 
     if active_horses:
-        OVERROUND = 1.10  # 110% market
-        total_score = sum(
-            h.prediction.score for h in active_horses
-            if h.prediction and h.prediction.score > 0
-        )
+        race_horses = Horse.query.filter_by(race_id=horse.race_id).join(Prediction).all()
+        before = {h.id: snapshot(h.prediction) for h in race_horses}
+        reprice_race([h.prediction for h in active_horses])
+        for h in race_horses:
+            log_score_change(db.session, h.prediction, h.race_id, 'scratching', before[h.id],
+                             detail=f'toggled {horse.horse_name}')
 
-        for h in active_horses:
-            if total_score > 0 and h.prediction:
-                new_prob = (h.prediction.score / total_score) * 100
-                new_odds = round(1 / ((new_prob / 100) * OVERROUND), 2) if new_prob > 0 else 99.0
-                h.prediction.win_probability = f"{new_prob:.1f}%"
-                h.prediction.predicted_odds = f"${new_odds:.2f}"
-
-        db.session.commit()
+    db.session.commit()
 
     return jsonify({
         'success': True,
         'horse_id': horse_id,
         'is_scratched': horse.is_scratched,
-        'horse_name': horse.horse_name
+        'horse_name': horse.horse_name,
+        'repriced': bool(active_horses),
     })
 @app.route("/api/meeting/<int:meeting_id>/update-bias", methods=["POST"])
 @login_required
@@ -5222,8 +5336,15 @@ def update_meeting_bias(meeting_id):
 
     races = Race.query.filter_by(meeting_id=meeting_id).all()
     updated_count = 0
+    races_skipped = []
 
     for race in races:
+        # A race that has started keeps the scores it had at the jump.
+        started, started_reason = race_has_started(race, meeting)
+        if started:
+            races_skipped.append({'race_number': race.race_number, 'reason': started_reason})
+            continue
+
         position_map = {}
 
         if race.speed_maps_json:
@@ -5250,6 +5371,7 @@ def update_meeting_bias(meeting_id):
                 logger.warning(f"Could not parse speedmap for race {race.id}: {e}")
 
         active_horses = [h for h in race.horses if not h.is_scratched and h.prediction]
+        before = {h.id: snapshot(h.prediction) for h in active_horses}
 
         for h in active_horses:
             horse_name_norm = h.horse_name.strip().lower()
@@ -5266,13 +5388,10 @@ def update_meeting_bias(meeting_id):
                 h.prediction.score = round(h.prediction.score + diff, 1)
                 updated_count += 1
 
-        total_score = sum(h.prediction.score for h in active_horses if h.prediction and h.prediction.score > 0)
+        reprice_race([h.prediction for h in active_horses])
         for h in active_horses:
-            if h.prediction and total_score > 0:
-                new_prob = (h.prediction.score / total_score) * 100
-                new_odds = round(1 / (new_prob / 100), 2) if new_prob > 0 else 99.0
-                h.prediction.win_probability = f"{new_prob:.1f}%"
-                h.prediction.predicted_odds = f"${new_odds:.2f}"
+            log_score_change(db.session, h.prediction, race.id, 'pace_bias', before[h.id],
+                             detail=f'pace bias {old_bias} -> {new_bias}')
 
     db.session.commit()
     logger.info(f"✅ Updated pace_bias to {new_bias} for meeting {meeting_id}, adjusted {updated_count} horses")
@@ -5281,7 +5400,8 @@ def update_meeting_bias(meeting_id):
         'success': True,
         'meeting_id': meeting_id,
         'pace_bias': new_bias,
-        'updated_horses': updated_count
+        'updated_horses': updated_count,
+        'races_skipped_started': races_skipped,
     })
 
 
@@ -5563,6 +5683,7 @@ def save_results(meeting_id):
             )
             db.session.add(result)
     
+    refresh_meeting_results_flags(db.session, meeting_id)
     db.session.commit()
     flash(f"Race {race_number} results saved successfully", "success")
 
@@ -5861,7 +5982,7 @@ def _build_canonical_analyzer_selections(track_filter='', min_score_filter=None,
     ).join(Horse,      Horse.race_id        == Race.id
     ).join(Prediction, Prediction.horse_id  == Horse.id
     ).join(Result,     Result.horse_id      == Horse.id
-    ).filter(Result.finish_position > 0)
+    ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
     if track_filter:
         q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
@@ -5975,9 +6096,12 @@ def data_analytics():
             Horse, Prediction.horse_id == Horse.id
         ).join(
             Result, Horse.id == Result.horse_id
+        ).join(
+            Race, Horse.race_id == Race.id
         ).filter(
             Prediction.best_bet_flagged_at.isnot(None),
-            Result.finish_position > 0
+            Result.finish_position > 0,
+            Race.results_incomplete.isnot(True),
         ).limit(500).all()
 
         if best_bet_predictions:
@@ -7010,6 +7134,8 @@ def api_jurisdiction_strength():
             Horse, Horse.race_id == Race.id
         ).outerjoin(
             Result, Result.horse_id == Horse.id
+        ).filter(
+            Race.results_incomplete.isnot(True)
         ).all()
 
         for meeting_id, horse_name, horse_csv_data, is_scratched, recorded_finish_position, sp in horse_rows:
@@ -7237,7 +7363,7 @@ def api_state_performance():
             Prediction, Prediction.horse_id == Horse.id
         ).join(
             Result, Result.horse_id == Horse.id
-        ).filter(Result.finish_position > 0)
+        ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
         if use_ml:
             q = _filter_ml_predictions(q)
@@ -7335,7 +7461,7 @@ def api_score_analysis():
     ).join(Horse,      Horse.race_id        == Race.id
     ).join(Prediction, Prediction.horse_id  == Horse.id
     ).join(Result,     Result.horse_id      == Horse.id
-    ).filter(Result.finish_position > 0)
+    ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
     if use_ml:
         q = _filter_ml_predictions(q)
@@ -7637,7 +7763,7 @@ def api_external_factors():
         Meeting, Race.meeting_id == Meeting.id
     ).join(Horse, Horse.race_id == Race.id
     ).join(Result, Result.horse_id == Horse.id
-    ).filter(Result.finish_position > 0)
+    ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
     if track_filter:
         race_id_q = race_id_q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
@@ -7690,6 +7816,7 @@ def api_external_factors():
     ).join(Result,     Result.horse_id      == Horse.id
     ).filter(
         Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
         Race.id.in_(race_ids)
     )
     if use_ml:
@@ -8018,7 +8145,7 @@ def api_probability_calibration():
     ).join(Horse,      Horse.race_id        == Race.id
     ).join(Prediction, Prediction.horse_id  == Horse.id
     ).join(Result,     Result.horse_id      == Horse.id
-    ).filter(Result.finish_position > 0)
+    ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
     if not use_ml:
         q = q.filter(
@@ -8153,7 +8280,8 @@ def api_price_analysis():
     ).join(
         Result, Result.horse_id == Horse.id
     ).filter(
-        Result.finish_position > 0   # scratches already excluded here
+        Result.finish_position > 0,   # scratches already excluded here
+        Race.results_incomplete.isnot(True),
     )
 
     if track_filter:
@@ -8193,6 +8321,7 @@ def api_price_analysis():
         Meeting, Race.meeting_id == Meeting.id
     ).filter(
         Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
         Race.id.in_(recent_race_ids)
     )
 
@@ -8469,7 +8598,7 @@ def api_pnl_over_time():
     ).join(Horse,     Horse.race_id        == Race.id
     ).join(Prediction,Prediction.horse_id  == Horse.id
     ).join(Result,    Result.horse_id      == Horse.id
-    ).filter(Result.finish_position > 0)
+    ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
     if use_ml:
         q = _filter_ml_predictions(q)
@@ -8573,6 +8702,7 @@ def api_sole_leader_analysis():
         Result, Result.horse_id == Horse.id
     ).filter(
         Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
         Race.speed_maps_json.isnot(None)
     )
 
@@ -8607,6 +8737,7 @@ def api_sole_leader_analysis():
         Meeting, Race.meeting_id == Meeting.id
     ).filter(
         Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
         Race.id.in_(recent_race_ids)
     ).all()
 
@@ -8815,7 +8946,7 @@ def api_field_size():
         Horse, Horse.race_id == Race.id
     ).join(
         Result, Result.horse_id == Horse.id
-    ).filter(Result.finish_position > 0)
+    ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
     if track_filter:
         race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
@@ -8848,6 +8979,7 @@ def api_field_size():
         Meeting, Race.meeting_id == Meeting.id
     ).filter(
         Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
         Race.id.in_(recent_race_ids)
     )
     if use_ml:
@@ -8940,7 +9072,7 @@ def api_days_since_run():
         Horse, Horse.race_id == Race.id
     ).join(
         Result, Result.horse_id == Horse.id
-    ).filter(Result.finish_position > 0)
+    ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
     if track_filter:
         race_id_query = race_id_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
@@ -8971,6 +9103,7 @@ def api_days_since_run():
         Race, Horse.race_id == Race.id
     ).filter(
         Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
         Race.id.in_(recent_race_ids)
     ).all()
 
@@ -9188,7 +9321,7 @@ def _get_ml_top_selection_observations(track_filter='', date_from='', date_to=''
           SELECT r.id race_id, MAX(COALESCE(m.date::timestamp, m.uploaded_at)) race_date, MAX(r.race_number) race_number
           FROM races r JOIN meetings m ON m.id=r.meeting_id JOIN horses h ON h.race_id=r.id
           JOIN predictions p ON p.horse_id=h.id JOIN results res ON res.horse_id=h.id
-          WHERE res.finish_position > 0 AND res.sp IS NOT NULL AND p.ml_score IS NOT NULL {extra_where}
+          WHERE res.finish_position > 0 AND res.sp IS NOT NULL AND p.ml_score IS NOT NULL AND r.results_incomplete IS NOT TRUE {extra_where}
           GROUP BY r.id ORDER BY race_date DESC NULLS LAST, race_number DESC, race_id DESC {limit_clause}
         ), ranked AS (
           SELECT r.id race_id, m.meeting_name, COALESCE(m.track, m.meeting_name) jurisdiction,
@@ -9205,7 +9338,7 @@ def _get_ml_top_selection_observations(track_filter='', date_from='', date_to=''
             LEAD(p.ml_score) OVER (PARTITION BY r.id ORDER BY p.ml_score DESC NULLS LAST, h.id ASC) second_ml_score
           FROM eligible_races er JOIN races r ON r.id=er.race_id JOIN meetings m ON m.id=r.meeting_id
           JOIN horses h ON h.race_id=r.id JOIN predictions p ON p.horse_id=h.id JOIN results res ON res.horse_id=h.id
-          WHERE res.finish_position > 0 AND res.sp IS NOT NULL AND p.ml_score IS NOT NULL {extra_where}
+          WHERE res.finish_position > 0 AND res.sp IS NOT NULL AND p.ml_score IS NOT NULL AND r.results_incomplete IS NOT TRUE {extra_where}
         )
         SELECT *, (ml_score - second_ml_score) ml_score_gap FROM ranked WHERE ml_rank=1
         ORDER BY race_id DESC
@@ -9287,7 +9420,7 @@ def api_monthly_performance():
     ).join(Horse,      Horse.race_id         == Race.id
     ).join(Prediction, Prediction.horse_id   == Horse.id
     ).join(Result,     Result.horse_id       == Horse.id
-    ).filter(Result.finish_position > 0)
+    ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
     if use_ml:
         q = _filter_ml_predictions(q)
@@ -9451,6 +9584,7 @@ def api_pfai_analysis():
     ).join(Result,     Result.horse_id     == Horse.id
     ).filter(
         Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
         Prediction.notes.like('%=== PFAI BLEND ===%')
     )
     if use_ml:
@@ -9702,7 +9836,7 @@ def api_combination_analysis():
     ).join(Horse,      Horse.race_id        == Race.id
     ).join(Prediction, Prediction.horse_id  == Horse.id
     ).join(Result,     Result.horse_id      == Horse.id
-    ).filter(Result.finish_position > 0)
+    ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
     if track_filter:
         q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
@@ -10589,7 +10723,7 @@ def export_ml_data():
      .join(Meeting,    Race.meeting_id      == Meeting.id)\
      .join(Prediction, Horse.id             == Prediction.horse_id)\
      .join(Result,     Horse.id             == Result.horse_id)\
-     .filter(Result.finish_position > 0)
+     .filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
     if track_filter:
         base_query = base_query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
@@ -11049,7 +11183,7 @@ def api_betting_filters():
         Meeting, Race.meeting_id == Meeting.id
     ).join(Horse, Horse.race_id == Race.id
     ).join(Result, Result.horse_id == Horse.id
-    ).filter(Result.finish_position > 0)
+    ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
     if track_filter:
         race_id_q = race_id_q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
@@ -11092,6 +11226,7 @@ def api_betting_filters():
     ).join(Result,     Result.horse_id      == Horse.id
     ).filter(
         Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
         Race.id.in_(race_ids)
     )
     if use_ml:
@@ -11991,7 +12126,7 @@ def api_race_tempo_analysis():
         Meeting, Race.meeting_id == Meeting.id
     ).join(Horse, Horse.race_id == Race.id
     ).join(Result, Result.horse_id == Horse.id
-    ).filter(Result.finish_position > 0)
+    ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
 
     if track_filter:
         race_id_q = race_id_q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
@@ -12029,6 +12164,7 @@ def api_race_tempo_analysis():
     ).join(Result,     Result.horse_id      == Horse.id
     ).filter(
         Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
         Race.id.in_(race_ids)
     )
     if use_ml:

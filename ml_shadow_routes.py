@@ -106,6 +106,9 @@ def _settle_meeting_results(db, meeting, recorded_by):
                 ))
                 created += 1
 
+    from scoring_integrity import refresh_meeting_results_flags
+    refresh_meeting_results_flags(db.session, meeting.id)
+
     return {
         'meeting_id': meeting.id,
         'meeting_name': meeting.meeting_name,
@@ -173,12 +176,47 @@ def _score_meeting_ml(db, meeting_id):
         for race_probabilities in (probabilities_by_race or {}).values()
         for horse_id, probability in race_probabilities.items()
     }
+    # Races that have already started keep the ML scores they had at the jump.
+    from datetime import datetime
+    from models import Race
+    from scoring_integrity import log_score_change, race_has_started, snapshot
+
+    open_race_ids = set()
+    races_skipped = []
+    for race_id in by_race:
+        race = db.session.get(Race, race_id)
+        if race is None:
+            continue
+        started, started_reason = race_has_started(race)
+        if started:
+            races_skipped.append({'race_number': race.race_number, 'reason': started_reason})
+        else:
+            open_race_ids.add(race_id)
+    horse_race = {
+        horse_id: race_id
+        for race_id, race_scores in by_race.items()
+        for horse_id in race_scores
+    }
+    by_race = {race_id: scores for race_id, scores in by_race.items() if race_id in open_race_ids}
+    probabilities_by_race = {
+        race_id: probabilities
+        for race_id, probabilities in (probabilities_by_race or {}).items()
+        if race_id in open_race_ids
+    }
+
     updated = 0
+    scored_at = datetime.utcnow()
     for horse_id, ml_score in all_scores.items():
+        race_id = horse_race.get(horse_id)
+        if race_id not in open_race_ids:
+            continue
         pred = Prediction.query.filter_by(horse_id=horse_id).first()
         if pred:
+            before = snapshot(pred)
             pred.ml_score = ml_score
             pred.ml_win_probability = win_probabilities.get(horse_id)
+            pred.ml_scored_at = scored_at
+            log_score_change(db.session, pred, race_id, 'ml', before)
             updated += 1
 
     # The scores are committed BEFORE pricing, not alongside it. Pricing reads
@@ -217,6 +255,7 @@ def _score_meeting_ml(db, meeting_id):
     return {
         'success': True,
         'scored': updated,
+        'races_skipped_started': races_skipped,
         'priced': priced,
         'market': market_diagnostics,
         'market_error': market_error,
@@ -373,6 +412,7 @@ def register_ml_shadow_routes(app, db):
             return jsonify({
                 'success': True,
                 'scored': updated,
+                'races_skipped_started': score_result.get('races_skipped_started', []),
                 'priced': score_result.get('priced', 0),
                 'market': score_result.get('market') or {},
                 'market_error': score_result.get('market_error'),
@@ -599,6 +639,7 @@ def register_ml_shadow_routes(app, db):
                 JOIN meetings m ON m.id = rc.meeting_id
                 JOIN results r ON r.horse_id = h.id
                 WHERE p.ml_score IS NOT NULL
+                  AND rc.results_incomplete IS NOT TRUE
                   AND COALESCE(h.is_scratched, FALSE) = FALSE
                   AND r.finish_position IS NOT NULL
                   AND r.finish_position > 0
