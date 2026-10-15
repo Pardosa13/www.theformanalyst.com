@@ -30,6 +30,15 @@ Things decided but parked for a later phase. Tick them off as they land.
   same cleaning everywhere, TAB number first when the feed has it, name check
   as confirmation, and every miss logged.
 
+## Decisions log (15 Oct 2026)
+- Lay rule tested at Betfair BSP (clean races, Betfair winner, 8% commission):
+  analyzer -6.4% on 2,226 lays; ML only -9.7% (300), both -3.4% (399). Price
+  bands are noise. The +8.6% in the brief came from laying at bookmaker SP.
+  **Phase 3 (lay alert) parked.**
+- Site stats stay on the PuntingForm SP. Betfair data is the check on results
+  (incomplete flags) and the price for Phase 5 backtests.
+- ML judged only on forward data (ml_scored_at before the jump), 8+ weeks.
+
 ## Cleanup
 - [ ] **8 flaky tests in `tests/test_security_hardening.py`.** They fail only in
   a full `pytest tests` run and pass on their own: test isolation (shared

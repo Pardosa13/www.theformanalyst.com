@@ -680,6 +680,8 @@ with app.app_context():
                 'ml_scored_at': 'TIMESTAMP',
                 'analyzer_raw_score': 'FLOAT',
                 'pfai_score': 'FLOAT',
+                'calibrated_win_prob': 'FLOAT',
+                'calibrated_price': 'FLOAT',
             },
         }
         with db.engine.connect() as conn:

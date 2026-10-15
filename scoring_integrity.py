@@ -186,10 +186,51 @@ def reprice_race(predictions):
     # Subtracting the top score keeps exp() from overflowing; the result is identical.
     weights = [math.exp((p.score - top) / ANALYZER_STEEPNESS_K) for p in preds]
     total = sum(weights)
-    for pred, weight in zip(preds, weights):
-        probability = weight / total
+    raw = [weight / total for weight in weights]
+    for pred, probability in zip(preds, raw):
         pred.win_probability = f"{probability * ANALYZER_OVERROUND * 100:.1f}%"
         pred.predicted_odds = f"${1 / (probability * ANALYZER_OVERROUND):.2f}"
+    _apply_calibration(preds, raw)
+
+
+_CALIBRATION_CACHE = {'at': 0.0, 'value': None}
+_CALIBRATION_TTL_SECONDS = 600
+
+
+def _latest_calibration():
+    """(method, params) from the newest calibration run, cached for 10 minutes. None if unavailable."""
+    import time
+    now = time.time()
+    if now - _CALIBRATION_CACHE['at'] < _CALIBRATION_TTL_SECONDS:
+        return _CALIBRATION_CACHE['value']
+    value = None
+    try:
+        from models import db
+        from calibrate import latest_params
+        with db.engine.connect() as conn:
+            value = latest_params(conn)
+    except Exception as exc:  # no table yet, no app context, etc.
+        log.debug('No calibration available: %s', exc)
+    _CALIBRATION_CACHE.update(at=now, value=value)
+    return value
+
+
+def _apply_calibration(preds, raw):
+    """Set calibrated_win_prob / calibrated_price from the latest calibration run. Never raises."""
+    if not hasattr(preds[0], 'calibrated_win_prob'):
+        return
+    latest = _latest_calibration()
+    if latest is None:
+        return
+    try:
+        from calibrate import make_predictor
+        probs = make_predictor(*latest)(raw)
+    except Exception as exc:
+        log.warning('Calibration failed for a race: %s', exc)
+        return
+    for pred, p in zip(preds, probs):
+        pred.calibrated_win_prob = round(p, 6)
+        pred.calibrated_price = round(1 / p, 2)
 
 
 # ─────────────────────────────────────────────
