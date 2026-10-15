@@ -152,19 +152,53 @@ def resolve_conditions(item, api_key, pf_meeting_id):
 # ─────────────────────────────────────────────
 # Alerts
 # ─────────────────────────────────────────────
-def alert(message):
-    """Private Telegram message to the admin (TELEGRAM_ADMIN_CHAT_ID). Logged either way."""
-    log.warning('ALERT: %s', message)
+def alert(message, level='warning'):
+    """Private Telegram message to the admin (TELEGRAM_ADMIN_CHAT_ID). Logged either way.
+
+    Telegram's reply is logged, so a failure says why (no token, bad token,
+    chat not found). The token itself is never logged.
+    """
+    getattr(log, level)('ALERT: %s', message)
     token, chat_id = os.environ.get('TELEGRAM_BOT_TOKEN'), os.environ.get('TELEGRAM_ADMIN_CHAT_ID')
-    if not token or not chat_id:
+    if not token or token.startswith('${{'):
+        log.warning('Telegram: no usable TELEGRAM_BOT_TOKEN on this service, alert not sent')
+        return False
+    if not chat_id:
+        log.warning('Telegram: TELEGRAM_ADMIN_CHAT_ID not set, alert not sent')
         return False
     try:
         response = requests.post(f'https://api.telegram.org/bot{token}/sendMessage',
                                  json={'chat_id': chat_id, 'text': f'Form Analyst: {message}'}, timeout=15)
-        return response.ok
     except Exception as exc:
-        log.warning('Telegram alert failed: %s', exc)
+        # The exception text can contain the URL, and the URL contains the token.
+        log.warning('Telegram alert failed: %s', type(exc).__name__)
         return False
+    if response.ok:
+        log.info('Telegram: alert sent')
+        return True
+    try:
+        reason = response.json().get('description')
+    except ValueError:
+        reason = response.text[:200]
+    log.warning('Telegram: alert NOT sent, HTTP %s: %s', response.status_code, reason)
+    return False
+
+
+def morning_summary(day, summary, db):
+    """One Telegram message after the pass that imports the day's meetings."""
+    from models import Meeting
+    names = summary['imported']
+    provisional = [m.meeting_name for m in Meeting.query.filter(Meeting.meeting_name.in_(names)).all()
+                   if m.provisional] if names else []
+    lines = [f'{day:%a %d %b}: {len(names)} meeting(s) imported and scored automatically.',
+             f'ML scores written: {summary["ml_scored"]}.']
+    if summary.get('ml_note'):
+        lines.append(summary['ml_note'])
+    if provisional:
+        lines.append('PROVISIONAL (check rating/rail): ' + ', '.join(provisional))
+    if summary['errors']:
+        lines.append(f'Errors: {summary["errors"]} (see Railway logs).')
+    return alert(' '.join(lines), level='info')
 
 
 # ─────────────────────────────────────────────
@@ -368,6 +402,9 @@ def main(argv=None):
     summary = {'imported': [], 'rescored': [], 'ml_scored': 0, 'errors': 0, 'ml_note': None}
     with app.app_context():
         run_pass(app, day, summary)
+        if summary['imported']:
+            from app import db
+            morning_summary(day, summary, db)
     log.info('SUMMARY %s: imported %s %s | rescored %s %s | ML scores written %s | errors %s%s',
              day, len(summary['imported']), summary['imported'], len(summary['rescored']), summary['rescored'],
              summary['ml_scored'], summary['errors'], f" | {summary['ml_note']}" if summary['ml_note'] else '')
