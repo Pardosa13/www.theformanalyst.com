@@ -699,6 +699,16 @@ with app.app_context():
     # Mark races whose results are too thin to trust. Only rows whose flag
     # actually changes are written, so after the first boot this is a read.
     if db.engine.dialect.name == 'postgresql':
+        # One result row per horse: back up and remove duplicates once, then
+        # a unique constraint keeps it that way (no-op once it exists).
+        try:
+            from scoring_integrity import dedupe_results
+            with db.engine.begin() as conn:
+                removed = dedupe_results(conn)
+            if removed:
+                print(f"Removed {removed} duplicate result row(s); copies kept in results_dedupe_backup")
+        except Exception as e:
+            print(f"Results dedupe failed: {e}")
         try:
             from scoring_integrity import refresh_results_incomplete_flags
             with db.engine.begin() as conn:

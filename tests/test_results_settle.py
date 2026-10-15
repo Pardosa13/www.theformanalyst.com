@@ -119,7 +119,9 @@ def test_settle_never_writes_a_second_result_row():
         for hid, name, tab in ((1, 'Alpha', 1), (2, 'Beta', 2), (3, 'Emergency', 15), (4, 'Old Dupes', 4)):
             conn.execute(text("INSERT INTO horses (id, race_id, horse_name, csv_data) VALUES (:h, 10, :n, :cd)"),
                          {'h': hid, 'n': name, 'cd': json.dumps({'horse number': str(tab)})})
-        # A horse that already has two result rows from the old buttons.
+        # A horse that already has two result rows from the old buttons
+        # (possible before the unique constraint existed).
+        conn.execute(text("ALTER TABLE results DROP CONSTRAINT IF EXISTS results_horse_id_key"))
         conn.execute(text("INSERT INTO results (horse_id, finish_position, sp) VALUES (4, 5, 30.0), (4, 5, 30.0)"))
 
     race = {'RaceNumber': 1, 'Runners': [

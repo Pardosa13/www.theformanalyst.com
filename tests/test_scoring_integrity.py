@@ -280,3 +280,102 @@ def test_start_time_backfill_and_ml_filter_on_postgres():
         )).scalars().all()
         assert counted == [1]
     db.metadata.drop_all(engine)
+
+
+def _pg_engine_with_betfair():
+    import psycopg2
+    if not hasattr(psycopg2, 'paramstyle'):
+        pytest.skip('psycopg2 is stubbed out by another test module in this run')
+    from sqlalchemy import create_engine, text
+    from models import db
+    import bsp_import
+
+    engine = create_engine(PG_URL)
+    with engine.begin() as conn:
+        conn.execute(text('DROP TABLE IF EXISTS betfair_prices, betfair_import_files, results_dedupe_backup'))
+    db.metadata.drop_all(engine)
+    db.metadata.create_all(engine)
+    with engine.begin() as conn:
+        bsp_import.ensure_tables(conn)
+        conn.execute(text("INSERT INTO users (id, username, email, password_hash) VALUES (1,'u','u@x','x')"))
+        conn.execute(text("INSERT INTO meetings (id, user_id, meeting_name) VALUES (1, 1, '261001_Test')"))
+    return engine
+
+
+def _bf(conn, race_id, horse_id, won, bsp, sel):
+    from sqlalchemy import text
+    conn.execute(text(
+        "INSERT INTO betfair_prices (market_id, selection_id, meeting_date, race_id, horse_id, won, win_bsp) "
+        "VALUES (:m, :s, '2026-10-01', :r, :h, :w, :b)"
+    ), {'m': f'1.{race_id}', 's': sel, 'r': race_id, 'h': horse_id, 'w': won, 'b': bsp})
+
+
+@pytest.mark.skipif(not PG_URL, reason='set TEST_POSTGRES_URL to run against Postgres')
+def test_betfair_disagreement_flags_races_on_postgres():
+    from sqlalchemy import text
+    from models import db
+    engine = _pg_engine_with_betfair()
+    with engine.begin() as conn:
+        # race 1 clean; race 2 wrong winner; race 3 winner recorded as scratched; race 4 blank SP
+        for race_id in (1, 2, 3, 4):
+            conn.execute(text("INSERT INTO races (id, meeting_id, race_number) VALUES (:r, 1, :r)"), {'r': race_id})
+            for n in range(2):
+                hid = race_id * 10 + n
+                conn.execute(text("INSERT INTO horses (id, race_id, horse_name) VALUES (:h, :r, 'x')"),
+                             {'h': hid, 'r': race_id})
+                won = n == 0
+                finish = {1: (1, 2), 2: (2, 1), 3: (0, 1), 4: (1, 2)}[race_id][n]
+                sp = None if (race_id == 4 and n == 1) else 2.0
+                conn.execute(text("INSERT INTO results (horse_id, finish_position, sp) VALUES (:h, :f, :sp)"),
+                             {'h': hid, 'f': finish, 'sp': sp if finish else None})
+                _bf(conn, race_id, hid, won, 2.0, hid)
+        si.refresh_results_incomplete_flags(conn)
+        flags = dict(conn.execute(text('SELECT id, results_incomplete FROM races')).fetchall())
+    assert flags == {1: False, 2: True, 3: True, 4: True}
+    db.metadata.drop_all(engine)
+
+
+@pytest.mark.skipif(not PG_URL, reason='set TEST_POSTGRES_URL to run against Postgres')
+def test_dedupe_results_on_postgres():
+    from sqlalchemy import text
+    from models import db
+    engine = _pg_engine_with_betfair()
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE results DROP CONSTRAINT IF EXISTS results_horse_id_key"))
+        conn.execute(text("INSERT INTO races (id, meeting_id, race_number) VALUES (1, 1, 1)"))
+        for hid in (1, 2, 3, 4):
+            conn.execute(text("INSERT INTO horses (id, race_id, horse_name) VALUES (:h, 1, 'x')"), {'h': hid})
+        rows = [
+            # identical copies -> keep the latest
+            (1, 5, 10.0, '2026-10-01 10:00'), (1, 5, 10.0, '2026-10-01 11:00'),
+            # disagree; Betfair says won -> keep finish 1 even though it is older
+            (2, 1, 3.0, '2026-10-01 10:00'), (2, 0, None, '2026-10-01 12:00'),
+            # disagree; no Betfair row -> keep the latest
+            (3, 2, 4.0, '2026-10-01 10:00'), (3, 5, 4.0, '2026-10-01 12:00'),
+            # single row, untouched
+            (4, 3, 6.0, '2026-10-01 10:00'),
+        ]
+        for hid, finish, sp, at in rows:
+            conn.execute(text("INSERT INTO results (horse_id, finish_position, sp, recorded_at) "
+                              "VALUES (:h, :f, :sp, :at)"), {'h': hid, 'f': finish, 'sp': sp, 'at': at})
+        _bf(conn, 1, 2, True, 3.0, 2)
+        _bf(conn, 1, 1, False, 10.0, 1)
+
+    with engine.begin() as conn:
+        assert si.dedupe_results(conn) == 3
+    with engine.begin() as conn:
+        kept = {r.horse_id: (r.finish_position, str(r.recorded_at)) for r in conn.execute(text('SELECT * FROM results'))}
+        assert kept == {1: (5, '2026-10-01 11:00:00'), 2: (1, '2026-10-01 10:00:00'),
+                        3: (5, '2026-10-01 12:00:00'), 4: (3, '2026-10-01 10:00:00')}
+        backup = conn.execute(text('SELECT horse_id, finish_position, kept_result_id FROM results_dedupe_backup')).fetchall()
+        assert sorted(b.horse_id for b in backup) == [1, 2, 3]
+        # The constraint is in place, so a second row is refused.
+        import sqlalchemy
+        with pytest.raises(sqlalchemy.exc.IntegrityError):
+            with conn.begin_nested():
+                conn.execute(text("INSERT INTO results (horse_id, finish_position) VALUES (4, 1)"))
+    with engine.begin() as conn:
+        assert si.dedupe_results(conn) == 0  # second run is a no-op
+    with engine.begin() as conn:
+        conn.execute(text('DROP TABLE IF EXISTS betfair_prices, betfair_import_files, results_dedupe_backup'))
+    db.metadata.drop_all(engine)
