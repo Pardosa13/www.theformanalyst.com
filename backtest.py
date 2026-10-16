@@ -4006,7 +4006,11 @@ def _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val, blend_alp
             frame['pred'].to_numpy(dtype=float), frame['market_prob'],
             race_ids_val, blend_alpha,
         )
-    return frame.loc[frame.groupby('race_id')['pred'].idxmax()].set_index('race_id')
+    top = frame.loc[frame.groupby('race_id')['pred'].idxmax()].set_index('race_id')
+    # The whole field rides along so the all-runner value diagnostic can bet
+    # any runner the model rates above its price, not just the top pick.
+    top.attrs['field'] = frame
+    return top
 
 
 def _profit_from_selection_rows(rows):
@@ -4070,6 +4074,59 @@ def _value_edge_backtest(selections):
     candidates = [r for r in rows if r['min_edge'] > 0.0 and r['bets'] >= MIN_VALIDATION_BETS]
     best_threshold = max(candidates, key=lambda r: r['roi_pct'])['min_edge'] if candidates else None
     return {'thresholds': rows, 'best_threshold': best_threshold}
+
+
+def _field_value_backtest(field):
+    """Diagnostic-only: bet EVERY runner whose edge over the market clears a
+    threshold, not just each race's top pick. This is how value betting is
+    done in practice: a 10/1 shot the model rates at 15% is a bet even when
+    the favourite is the model's top pick.
+
+    Edge is measured on race-normalised model probabilities against the same
+    FLB-corrected market reading as _value_edge_backtest. Does NOT change the
+    selection score or the champion decision.
+    """
+    if field is None or field.empty:
+        return {'thresholds': []}
+    sp = field['sp'].astype(float)
+    usable = sp.gt(1.0) & np.isfinite(sp)
+    field = field[usable]
+    if field.empty:
+        return {'thresholds': []}
+    race_total = field.groupby('race_id')['pred'].transform('sum')
+    pred = field['pred'] / race_total.where(race_total > 0)
+    raw_implied_prob = 1.0 / field['sp'].clip(lower=1.0001)
+    market = field['market_prob'].fillna(raw_implied_prob) if 'market_prob' in field else raw_implied_prob
+    edge = pred - market
+    rows = []
+    for threshold in VALUE_EDGE_THRESHOLDS:
+        if threshold <= 0.0:
+            continue
+        kept = field[edge >= threshold]
+        bets = int(len(kept))
+        if bets == 0:
+            rows.append({'min_edge': threshold, 'bets': 0, 'races': 0, 'roi_pct': 0.0,
+                         'strike_rate_pct': 0.0, 'profit_units': 0.0, 'avg_sp': 0.0})
+            continue
+        profit = np.where(kept['won'] == 1, kept['sp'] - 1.0, -1.0)
+        rows.append({
+            'min_edge': threshold,
+            'bets': bets,
+            'races': int(kept['race_id'].nunique()),
+            'roi_pct': float(np.mean(profit) * 100.0),
+            'strike_rate_pct': float(kept['won'].mean() * 100.0),
+            'profit_units': float(np.sum(profit)),
+            'avg_sp': float(kept['sp'].mean()),
+        })
+    return {'thresholds': rows}
+
+
+def _format_value_rows(rows):
+    return " | ".join(
+        "edge>={:.2f}: bets={} roi={:.1f}% sr={:.1f}%".format(
+            r['min_edge'], r['bets'], r['roi_pct'], r['strike_rate_pct'])
+        for r in rows
+    )
 
 
 def _compare_model_selections(reference_name, challenger_name, reference_selections, challenger_selections):
@@ -4916,8 +4973,20 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         result['metrics']['flb_z_summary'] = flb_z_summary
         result['metrics'] = _stamp_selection_metrics(result['metrics'])
         try:
-            result['metrics']['value_edge_analysis'] = _value_edge_backtest(
-                selection_frames.get(result['model_type'])
+            selections = selection_frames.get(result['model_type'])
+            result['metrics']['value_edge_analysis'] = _value_edge_backtest(selections)
+            field_analysis = _field_value_backtest(
+                selections.attrs.get('field') if selections is not None else None
+            )
+            result['metrics']['field_value_analysis'] = field_analysis
+            log.info(
+                "Value filter table for %s (audit only) top-pick: %s",
+                result['model_type'],
+                _format_value_rows(result['metrics']['value_edge_analysis'].get('thresholds', [])),
+            )
+            log.info(
+                "Value filter table for %s (audit only) any-runner: %s",
+                result['model_type'], _format_value_rows(field_analysis.get('thresholds', [])),
             )
         except Exception as e:
             log.warning(f"Value-edge diagnostic failed for {result['model_type']} (non-fatal): {e}")
