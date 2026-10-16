@@ -185,25 +185,50 @@ def merge_best_bet_tracking(prediction, routes, edge_badges):
         prediction.best_bet_qualified_at = datetime.utcnow()
 
 
+# Value Top Pick route: the ML top pick, when the model's win chance beats the
+# market's fair chance by at least this many points before the jump. Added on
+# 16 Oct 2026 from the live top-pick value test (ML Data page); the backtest's
+# top-pick cuts at +3 to +8 points were the only value rule that came out
+# ahead. Backing ANY runner with an edge lost 20-35%, so only the top pick
+# qualifies.
+VALUE_TOP_PICK_MIN_EDGE_PCT = 3.0
+VALUE_TOP_PICK_BADGE = '💰 Value Top Pick'
+
+
+def _value_top_pick_edge(horse, signal_top_ids):
+    """The stored pre-race edge (points) when this horse is the ML top pick
+    and the edge clears VALUE_TOP_PICK_MIN_EDGE_PCT, else None."""
+    if signal_top_ids.get('ml') != horse.id:
+        return None
+    edge = getattr(horse.prediction, 'value_edge_pct', None)
+    if edge is None or float(edge) < VALUE_TOP_PICK_MIN_EDGE_PCT:
+        return None
+    return float(edge)
+
+
 def best_bet_routes_for_horse(horse, race, signal_top_ids, components=None):
     """The Best Bets qualifying rule for one runner.
 
-    Analyzer, PFAI and ML must all rank the horse first, and then either the
-    race is a maiden or the horse carries a Proven Edge / Proven Edge+ badge.
+    Maiden and Proven Edge need Analyzer, PFAI and ML all to rank the horse
+    first, then a maiden race or a Proven Edge / Proven Edge+ badge. Value Top
+    Pick needs only the ML top pick with a big enough pre-race value edge.
     Returns (routes, edge_badges, signal_agreement). Shared by the Best Bets
     page and the daily run, so both record exactly the same routes.
     """
+    routes = []
+    edge_badges = {}
     signal_agreement = signals_all_agree_top(horse.id, signal_top_ids)
-    if not signal_agreement:
-        return [], {}, False
-    if components is None:
-        components = parse_notes_component_matches(horse.prediction.notes)
-    edge_badges = evaluate_component_edge_badges(horse, [match['name'] for match in components.values()])
-    routes = [route for route, hit in (
-        ('maiden', is_maiden_race(race.race_class)),
-        ('proven_edge', PROVEN_EDGE_BADGE in edge_badges or PROVEN_EDGE_PLUS_BADGE in edge_badges),
-    ) if hit]
-    return routes, edge_badges, True
+    if signal_agreement:
+        if components is None:
+            components = parse_notes_component_matches(horse.prediction.notes)
+        edge_badges = evaluate_component_edge_badges(horse, [match['name'] for match in components.values()])
+        routes = [route for route, hit in (
+            ('maiden', is_maiden_race(race.race_class)),
+            ('proven_edge', PROVEN_EDGE_BADGE in edge_badges or PROVEN_EDGE_PLUS_BADGE in edge_badges),
+        ) if hit]
+    if _value_top_pick_edge(horse, signal_top_ids) is not None:
+        routes.append('value_top_pick')
+    return routes, edge_badges, signal_agreement
 
 
 def record_best_bet_routes(races):
@@ -4103,7 +4128,9 @@ def calculate_top_pick_value_test(track_filter="", date_from="", date_to="", sta
     also captured before the jump. A race whose top pick had no live price has
     no edge and is left out. Flat `stake` win bets at the result SP.
     """
-    query = db.session.query(Prediction, Result, Race.id, Race.start_time_utc).join(
+    query = db.session.query(
+        Prediction, Result, Race.id, Race.start_time_utc, Meeting.meeting_name, Race.race_number
+    ).join(
         Horse, Prediction.horse_id == Horse.id
     ).join(Race, Horse.race_id == Race.id).join(Meeting, Race.meeting_id == Meeting.id).join(
         Result, Result.horse_id == Horse.id
@@ -4125,27 +4152,45 @@ def calculate_top_pick_value_test(track_filter="", date_from="", date_to="", sta
         query = query.filter(Meeting.uploaded_at <= date_to)
 
     by_race = {}
-    for prediction, result, race_id, start in query.all():
+    for prediction, result, race_id, start, meeting_name, race_number in query.all():
         best = by_race.get(race_id)
         if best is None or float(prediction.ml_win_probability) > float(best[0].ml_win_probability):
-            by_race[race_id] = (prediction, result, start)
+            by_race[race_id] = (prediction, result, start, meeting_name, race_number)
 
     picks = []
-    for prediction, result, start in by_race.values():
+    for prediction, result, start, meeting_name, race_number in by_race.values():
         if prediction.value_edge_pct is None or prediction.value_edge_captured_at is None:
             continue
         if prediction.value_edge_captured_at >= start:
             continue
-        picks.append((float(prediction.value_edge_pct), result))
+        picks.append((float(prediction.value_edge_pct), result, start, meeting_name, race_number))
+    # Oldest first, so each row's history draws left to right on the chart.
+    picks.sort(key=lambda pick: pick[2])
 
     rows = []
     for threshold in TOP_PICK_VALUE_TEST_THRESHOLDS_PCT:
-        kept = [result for edge, result in picks if edge >= threshold]
+        kept = [pick for pick in picks if pick[0] >= threshold]
         bets = len(kept)
-        wins = sum(result.finish_position == 1 for result in kept)
-        total_return = sum(stake * float(result.sp) for result in kept if result.finish_position == 1)
+        wins = sum(result.finish_position == 1 for _e, result, *_rest in kept)
+        total_return = sum(stake * float(result.sp) for _e, result, *_rest in kept if result.finish_position == 1)
         profit = total_return - bets * stake
+        history = []
+        cumulative = 0.0
+        for _edge, result, start, meeting_name, race_number in kept:
+            won = result.finish_position == 1
+            bet_profit = stake * float(result.sp) - stake if won else -stake
+            cumulative += bet_profit
+            history.append({
+                'date': start.strftime('%Y-%m-%d'),
+                'meeting': meeting_name or '',
+                'race': race_number,
+                'won': won,
+                'profit': round(bet_profit, 2),
+                'cumulative': round(cumulative, 2),
+            })
         rows.append({
+            'label': f'+{threshold:.0f} pts' if threshold > 0 else 'Any edge (0+)',
+            'history': history,
             'min_edge_pct': threshold,
             'bets': bets,
             'wins': wins,
@@ -11789,6 +11834,9 @@ def best_bets():
                 Prediction.best_bet_routes,
                 Prediction.best_bet_badges,
                 Prediction.best_bet_qualified_at,
+                Prediction.value_edge_pct,
+                Prediction.value_edge_ml_win_prob_pct,
+                Prediction.value_edge_price,
             ),
         )
         .filter(Meeting.uploaded_at >= cutoff)
@@ -11852,7 +11900,10 @@ def best_bets():
                     continue
                 if min_score and horse.prediction.score < min_score:
                     continue
-                if mode == 'top_pick' and not is_top_pick:
+                # A Value Top Pick is the ML top pick, which need not be the
+                # analyzer's, so it is shown in top-pick mode either way.
+                is_value_pick = _value_top_pick_edge(horse, signal_top_ids) is not None
+                if mode == 'top_pick' and not is_top_pick and not is_value_pick:
                     continue
                 if mode == 'non_top_pick' and is_top_pick:
                     continue
@@ -11912,6 +11963,23 @@ def best_bets():
                         **lb_fields,
                         'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []), PROVEN_EDGE_REASON],
                     }
+                if 'value_top_pick' in routes:
+                    prediction = horse.prediction
+                    edge = float(prediction.value_edge_pct)
+                    model_pct = prediction.value_edge_ml_win_prob_pct
+                    price = prediction.value_edge_price
+                    detail = (
+                        f'ML top pick: model {float(model_pct):.0f}% vs market {float(model_pct) - edge:.0f}%'
+                        + (f' at ${float(price):.2f}' if price else '')
+                        if model_pct is not None else 'ML top pick'
+                    )
+                    lb_fields = {
+                        **lb_fields,
+                        'best_bet_badges': [*(lb_fields.get('best_bet_badges') or []),
+                                            f'{VALUE_TOP_PICK_BADGE} (+{edge:.1f} pts)'],
+                        'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []),
+                                             f'Qualified via Value Top Pick. {detail}.'],
+                    }
                 if routes:
                     merge_best_bet_tracking(horse.prediction, routes, edge_badges)
                     matched_components.sort(key=lambda x: x['roi'], reverse=True)
@@ -11943,6 +12011,7 @@ def best_bets():
                         'signal_agreement': signal_agreement,
                         'is_maiden_agreement': maiden_agreement,
                         'is_proven_edge_agreement': proven_edge_agreement,
+                        'is_value_top_pick': 'value_top_pick' in routes,
                         'best_bet_routes': routes,
                         'edge_badges': edge_badges,
                         **lb_fields,

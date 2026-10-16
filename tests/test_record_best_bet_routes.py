@@ -82,3 +82,43 @@ def test_best_bets_page_and_daily_run_share_one_rule():
     run_pass = daily[daily.index('def run_pass('):]
     assert 'record_routes(db, races_to_run)' in run_pass
     assert 'record_routes(db, open_races(meeting, race_has_started))' in run_pass
+
+
+def test_value_top_pick_route_needs_ml_top_and_edge(monkeypatch):
+    monkeypatch.setattr(appmod, 'parse_notes_component_matches', lambda notes: {})
+    with appmod.app.app_context():
+        db.create_all()
+        try:
+            user = User(username='vt', email='vt@example.com', password_hash='x')
+            db.session.add(user)
+            db.session.flush()
+            meeting = Meeting(user_id=user.id, meeting_name='Test', uploaded_at=datetime(2026, 10, 17))
+            db.session.add(meeting)
+            db.session.flush()
+            race = Race(meeting_id=meeting.id, race_number=1, race_class='BM64')
+            db.session.add(race)
+            db.session.flush()
+            # ML top pick J (not the analyzer's or PFAI's top) with a 4pt edge.
+            j = _runner(race, 'J', 70, 60, 100)
+            k = _runner(race, 'K', 90, 80, 50)
+            j.prediction.value_edge_pct = 4.0
+            k.prediction.value_edge_pct = 12.0  # bigger edge, but not the ML top pick
+            db.session.commit()
+
+            appmod.record_best_bet_routes([race])
+            assert j.prediction.best_bet_routes == 'value_top_pick'
+            assert k.prediction.best_bet_routes is None
+
+            # Below the bar: no route.
+            race2 = Race(meeting_id=meeting.id, race_number=2, race_class='BM64')
+            db.session.add(race2)
+            db.session.flush()
+            m = _runner(race2, 'M', 70, 60, 100)
+            _runner(race2, 'N', 90, 80, 50)
+            m.prediction.value_edge_pct = appmod.VALUE_TOP_PICK_MIN_EDGE_PCT - 0.1
+            db.session.commit()
+            appmod.record_best_bet_routes([race2])
+            assert m.prediction.best_bet_routes is None
+        finally:
+            db.session.remove()
+            db.drop_all()
