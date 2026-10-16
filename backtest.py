@@ -3984,7 +3984,11 @@ def _optional_classifier(model_type, trial=None):
 
 
 
-def _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val, blend_alpha=None):
+def _top_selection_and_field(model, X_val, y_won_val, race_ids_val, sp_val, blend_alpha=None):
+    """(top pick per race, whole field). The whole field feeds the any-runner
+    value diagnostic; it is returned separately, never stored on the top-pick
+    frame, because pandas compares frame attrs on concat and a DataFrame there
+    makes every concat raise."""
     frame = pd.DataFrame({
         'race_id': list(race_ids_val),
         'row_id': range(len(race_ids_val)),
@@ -4007,10 +4011,12 @@ def _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val, blend_alp
             race_ids_val, blend_alpha,
         )
     top = frame.loc[frame.groupby('race_id')['pred'].idxmax()].set_index('race_id')
-    # The whole field rides along so the all-runner value diagnostic can bet
-    # any runner the model rates above its price, not just the top pick.
-    top.attrs['field'] = frame
-    return top
+    return top, frame
+
+
+def _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val, blend_alpha=None):
+    """Each race's top pick only. See _top_selection_and_field."""
+    return _top_selection_and_field(model, X_val, y_won_val, race_ids_val, sp_val, blend_alpha)[0]
 
 
 def _profit_from_selection_rows(rows):
@@ -4681,6 +4687,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     fitted = {}
     results = []
     selection_frames = {}
+    field_frames = {}
     for mt, model in candidates.items():
         try:
             _fit_candidate(model, X_train, y_won[train_mask], race_ids=race_ids_train)
@@ -4693,7 +4700,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
                 metrics['race_calibration'].get('races'),
                 metrics['race_calibration'].get('log_loss'), metrics['race_calibration'].get('identity_log_loss'),
             )
-            selection_frames[mt] = _top_selection_rows(model, X_val, y_won_val, race_ids_val, sp_val)
+            selection_frames[mt], field_frames[mt] = _top_selection_and_field(model, X_val, y_won_val, race_ids_val, sp_val)
             fitted[mt] = model
             results.append({'model_type': mt, 'model_name': mt.replace('_', ' ').title(), 'model': model, 'metrics': metrics})
         except Exception as e:
@@ -4746,7 +4753,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
                     X_val, y_won_val, race_ids_val, sp_val,
                 )
                 if blended is not None:
-                    selection_frames[blended['model_type']] = _top_selection_rows(
+                    selection_frames[blended['model_type']], field_frames[blended['model_type']] = _top_selection_and_field(
                         blended['model'], X_val, y_won_val, race_ids_val, sp_val,
                         blend_alpha=blended['blend_alpha'],
                     )
@@ -4841,7 +4848,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         _fit_candidate(ensemble, X_train, y_won[train_mask], race_ids=race_ids_train)
         metrics = evaluate_model_on_validation(ensemble, X_val, y_won_val, race_ids_val, sp_val)
         metrics['ensemble_weights'] = dict(zip([name for name, _ in ensemble_members], ensemble.weights_.tolist()))
-        selection_frames['ensemble'] = _top_selection_rows(ensemble, X_val, y_won_val, race_ids_val, sp_val)
+        selection_frames['ensemble'], field_frames['ensemble'] = _top_selection_and_field(ensemble, X_val, y_won_val, race_ids_val, sp_val)
         results.append({'model_type': 'ensemble', 'model_name': 'Ensemble / Consensus', 'model': ensemble, 'metrics': metrics})
         log.info("Ensemble member weights (OOS-error x stability x performance x fold-completion): %s", metrics['ensemble_weights'])
 
@@ -4865,7 +4872,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
                 _fit_candidate(variant, X_train, y_won[train_mask], race_ids=race_ids_train)
                 variant_metrics = evaluate_model_on_validation(variant, X_val, y_won_val, race_ids_val, sp_val)
                 variant_metrics['ensemble_weights'] = dict(zip([name for name, _ in ensemble_members], variant.weights_.tolist()))
-                selection_frames[variant_name] = _top_selection_rows(variant, X_val, y_won_val, race_ids_val, sp_val)
+                selection_frames[variant_name], field_frames[variant_name] = _top_selection_and_field(variant, X_val, y_won_val, race_ids_val, sp_val)
                 results.append({
                     'model_type': variant_name,
                     'model_name': f"Ensemble ({variant_name.replace('ensemble_', '').replace('_', ' ').title()})",
@@ -4908,7 +4915,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
                     X_val, y_won_val, race_ids_val, sp_val,
                 )
                 if blended is not None:
-                    selection_frames[blended['model_type']] = _top_selection_rows(
+                    selection_frames[blended['model_type']], field_frames[blended['model_type']] = _top_selection_and_field(
                         blended['model'], X_val, y_won_val, race_ids_val, sp_val,
                         blend_alpha=blended['blend_alpha'],
                     )
@@ -5046,9 +5053,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         try:
             selections = selection_frames.get(result['model_type'])
             result['metrics']['value_edge_analysis'] = _value_edge_backtest(selections)
-            field_analysis = _field_value_backtest(
-                selections.attrs.get('field') if selections is not None else None
-            )
+            field_analysis = _field_value_backtest(field_frames.get(result['model_type']))
             result['metrics']['field_value_analysis'] = field_analysis
             log.info(
                 "Value filter table for %s (audit only) top-pick: %s",

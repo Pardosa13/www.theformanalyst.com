@@ -1678,15 +1678,18 @@ def test_field_value_backtest_handles_missing_field():
     assert backtest._field_value_backtest(None) == {'thresholds': []}
 
 
-def test_top_selection_rows_carry_the_whole_field():
+def test_top_selection_and_field_returns_the_whole_field_separately():
     class Fixed:
         def predict_proba(self, X):
             p = numpy.asarray(X['p'], dtype=float)
             return numpy.column_stack([1 - p, p])
     X = pandas.DataFrame({'p': [0.6, 0.4, 0.7, 0.3]})
-    top = backtest._top_selection_rows(Fixed(), X, [1, 0, 0, 1], [1, 1, 2, 2], [2.0, 3.0, 1.5, 4.0])
+    top, field = backtest._top_selection_and_field(Fixed(), X, [1, 0, 0, 1], [1, 1, 2, 2], [2.0, 3.0, 1.5, 4.0])
     assert len(top) == 2
-    assert len(top.attrs['field']) == 4
+    assert len(field) == 4
+    # Run 267 died here: a DataFrame stored in .attrs made every concat raise.
+    assert not top.attrs
+    assert len(pandas.concat([top, top])) == 4
 
 
 def _retest(champion_id, score, fold_rois):
