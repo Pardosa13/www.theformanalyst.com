@@ -579,6 +579,25 @@ with app.app_context():
     except Exception as e:
         print(f"PuntingForm migration check: {e}")
 
+    # Migration: index the foreign keys that join meetings -> races -> horses ->
+    # predictions. Postgres does not index foreign keys on its own. Without
+    # these, deleting a raceday scanned the whole predictions table once per
+    # runner and timed out. They also speed up every meeting page.
+    if db.engine.dialect.name == 'postgresql':
+        for index_name, table, column in (
+            ('ix_races_meeting_id', 'races', 'meeting_id'),
+            ('ix_horses_race_id', 'horses', 'race_id'),
+            ('ix_predictions_horse_id', 'predictions', 'horse_id'),
+        ):
+            try:
+                with db.engine.begin() as conn:
+                    # Never hang startup: give up if the table is busy and retry next boot.
+                    conn.execute(text("SET LOCAL lock_timeout = '20s'"))
+                    conn.execute(text("SET LOCAL statement_timeout = '300s'"))
+                    conn.execute(text(f'CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({column})'))
+            except Exception as e:
+                logger.warning("Index %s not created this boot: %s", index_name, e)
+
     # Migration: Add Bet Tracker starting bankroll column
     try:
         from sqlalchemy import inspect, text
@@ -5688,6 +5707,10 @@ def purge_meetings(meetings):
     meeting_ids = [m.id for m in meetings]
     if not meeting_ids:
         return 0
+    if db.engine.dialect.name == 'postgresql':
+        # Fail fast with a message instead of hanging the page if the daily
+        # run is writing to these meetings at the same moment.
+        db.session.execute(text("SET LOCAL lock_timeout = '30s'"))
     race_ids = [r for (r,) in db.session.query(Race.id).filter(Race.meeting_id.in_(meeting_ids)).all()]
     existing = set(sa_inspect(db.engine).get_table_names())
 
@@ -5744,8 +5767,14 @@ def delete_meetings_for_day():
         return redirect(url_for("history"))
 
     meetings = Meeting.query.filter(Meeting.date == day).all()
-    count = purge_meetings(meetings)
-    db.session.commit()
+    try:
+        count = purge_meetings(meetings)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.exception("Raceday delete failed for %s", day)
+        flash(f"Nothing deleted: the database was busy ({type(e).__name__}). Try again in a minute.", "danger")
+        return redirect(url_for("history"))
     flash(f"Deleted {count} meeting(s) for {day:%d-%m-%y}", "success")
     return redirect(url_for("history"))
 
