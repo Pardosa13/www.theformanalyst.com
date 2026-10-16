@@ -5676,37 +5676,39 @@ def _bias_adjustment(running_position, rail_position, pace_bias):
         return -((rail_mod * 0.85) + (pace_mod * 0.85))
     return 0.0
 
-# Tables outside the ORM that point at a meeting's races or runners. Deleting a
-# meeting must clear these too, or they hold stale rows for ids that are gone.
-_MEETING_SIDE_TABLES_BY_HORSE = ('score_history', 'live_odds_snapshots')
-
-
 def purge_meetings(meetings):
     """Delete meetings with their races, runners, scores and side-table rows.
 
+    Runs as a handful of bulk SQL statements, not one ORM delete per runner:
+    a raceday has thousands of runners and the per-row version timed out.
+    Side tables are matched on race_id, the leading column of their indexes.
     Betfair prices are raw market data, so they are kept and only unlinked.
     Does not commit.
     """
     meeting_ids = [m.id for m in meetings]
     if not meeting_ids:
         return 0
-    horse_ids = [h for (h,) in db.session.query(Horse.id).join(Race, Race.id == Horse.race_id)
-                 .filter(Race.meeting_id.in_(meeting_ids)).all()]
+    race_ids = [r for (r,) in db.session.query(Race.id).filter(Race.meeting_id.in_(meeting_ids)).all()]
     existing = set(sa_inspect(db.engine).get_table_names())
-    if horse_ids:
-        ids = bindparam('ids', expanding=True)
-        for table in _MEETING_SIDE_TABLES_BY_HORSE:
-            if table in existing:
-                db.session.execute(text(f'DELETE FROM {table} WHERE horse_id IN :ids').bindparams(ids),
-                                   {'ids': horse_ids})
-        if 'betfair_prices' in existing:
-            db.session.execute(text('UPDATE betfair_prices SET horse_id = NULL, race_id = NULL '
-                                    'WHERE horse_id IN :ids').bindparams(ids), {'ids': horse_ids})
+
+    def run(sql, ids):
+        if ids:
+            db.session.execute(text(sql).bindparams(bindparam('ids', expanding=True)), {'ids': ids})
+
+    horses_in_races = 'SELECT id FROM horses WHERE race_id IN :ids'
+    run(f'DELETE FROM results WHERE horse_id IN ({horses_in_races})', race_ids)
+    run(f'DELETE FROM predictions WHERE horse_id IN ({horses_in_races})', race_ids)
+    for table in ('score_history', 'live_odds_snapshots'):
+        if table in existing:
+            run(f'DELETE FROM {table} WHERE race_id IN :ids', race_ids)
+    if 'betfair_prices' in existing:
+        run('UPDATE betfair_prices SET horse_id = NULL, race_id = NULL WHERE race_id IN :ids', race_ids)
+    run('DELETE FROM horses WHERE race_id IN :ids', race_ids)
+    run('DELETE FROM races WHERE id IN :ids', race_ids)
     if 'daily_run_state' in existing:
-        db.session.execute(text('DELETE FROM daily_run_state WHERE meeting_id IN :ids')
-                           .bindparams(bindparam('ids', expanding=True)), {'ids': meeting_ids})
-    for meeting in meetings:
-        db.session.delete(meeting)  # ORM cascade: races, horses, predictions, results
+        run('DELETE FROM daily_run_state WHERE meeting_id IN :ids', meeting_ids)
+    run('DELETE FROM meetings WHERE id IN :ids', meeting_ids)
+    db.session.expunge_all()  # drop stale ORM copies of the deleted rows
     return len(meeting_ids)
 
 
