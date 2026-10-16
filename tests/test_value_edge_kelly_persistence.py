@@ -322,6 +322,20 @@ def test_persist_writes_both_columns_onto_the_prediction_rows(monkeypatch):
     assert by_id[2].kelly_stake_pct == 0.0
 
 
+def test_persist_stamps_the_edge_with_when_the_price_was_seen(monkeypatch):
+    # A re-price just after the jump can still read a pre-race price. The edge
+    # must carry that price's time, not the write time, or every tracker that
+    # checks "captured before the jump" would drop a genuine pre-race bet.
+    session, _race = _one_race_meeting(monkeypatch, [(40.0, 5.00), (60.0, 2.00)])
+    edges, _diagnostics = ml_predict.compute_live_market_edges_for_meeting(1, session)
+    ml_predict.persist_live_market_edges(edges, session)
+
+    by_id = {p.horse_id: p for p in session.predictions}
+    seen = edges[1]['captured_at'].astimezone(timezone.utc).replace(tzinfo=None)
+    assert by_id[1].value_edge_captured_at == seen
+    assert by_id[1].value_edge_captured_at.tzinfo is None
+
+
 def test_persist_is_a_no_op_when_nothing_was_priced(monkeypatch):
     session, _race = _one_race_meeting(monkeypatch, [(40.0, None)])
     assert ml_predict.persist_live_market_edges({}, session) == 0
