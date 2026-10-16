@@ -4121,6 +4121,77 @@ def _field_value_backtest(field):
     return {'thresholds': rows}
 
 
+def _load_active_champion_artifact():
+    """(id, model) for the active champion, or None if there is none."""
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT id, pkl_data FROM backtest_best_model
+            WHERE is_active = TRUE
+            ORDER BY promoted_at DESC NULLS LAST, updated_at DESC, id DESC
+            LIMIT 1
+        """)).fetchone()
+    if not row or not row[1]:
+        return None
+    return row[0], joblib.load(io.BytesIO(row[1]))
+
+
+def _retest_champion_recipe(X, y_won, sp_values, race_ids, X_train, y_won_train, race_ids_train,
+                            X_val, y_won_val, race_ids_val, sp_val, fold_boundaries, champion=None):
+    """Score the active champion on tonight's data, the same way every
+    challenger is scored.
+
+    The champion's stored score was measured once, on the races and data it
+    had back then. Tonight's challengers are measured on different races and
+    cleaner data (results flags, recovered runners, one name matcher), so the
+    two numbers are not comparable, and the paired fold test pairs different
+    date ranges. This re-fits the champion's recipe on tonight's training
+    split and folds, so both sides are judged on the same races.
+
+    The artifact itself is never scored directly: it was trained on races that
+    now sit inside tonight's holdout, so it would be marking its own homework.
+    It keeps its stored market-blend weight, the one live scoring uses.
+
+    Returns None when there is no champion, or its features no longer match
+    tonight's columns (the stored score is then used, as before).
+    """
+    loaded = champion if champion is not None else _load_active_champion_artifact()
+    if loaded is None:
+        return None
+    champion_id, model = loaded
+    expected_features = _stored_feature_list(model)
+    if expected_features is None or list(expected_features) != list(X.columns):
+        log.warning(
+            "Champion re-test skipped for id=%s: its feature list does not match tonight's columns; "
+            "the stored Champion Score is used instead.", champion_id,
+        )
+        return None
+    alpha = getattr(model, MARKET_BLEND_ALPHA_ATTR, None)
+    try:
+        alpha = float(alpha) if alpha is not None else None
+    except (TypeError, ValueError):
+        alpha = None
+    if alpha is not None and not (0.0 <= alpha < NO_BLEND_ALPHA):
+        alpha = None
+
+    recipe = _clone_for_fold_fit(model, y_won_train)
+    _fit_candidate(recipe, X_train, y_won_train, race_ids=race_ids_train)
+    metrics = evaluate_model_on_validation(recipe, X_val, y_won_val, race_ids_val, sp_val, blend_alpha=alpha)
+    walk_forward = _walk_forward_metrics_for_model(recipe, X, y_won, sp_values, race_ids, blend_alpha=alpha)
+    walk_forward['fold_boundaries'] = fold_boundaries
+    metrics['walk_forward'] = walk_forward
+    if alpha is not None:
+        metrics['market_blend_alpha'] = alpha
+    metrics = _stamp_selection_metrics(metrics)
+    score = _selection_score_from_metrics(metrics, force_recompute=True)
+    log.info(
+        "Champion re-test on tonight's data: id=%s alpha=%s score=%.3f roi=%.1f%% sr=%.1f%% bets=%s fold_rois=%s",
+        champion_id, f"{alpha:.2f}" if alpha is not None else "none", score, metrics['roi'],
+        metrics['strike_rate'], metrics['number_of_bets'],
+        [round(float(f.get('roi', 0.0)), 1) for f in walk_forward.get('folds', [])],
+    )
+    return {'champion_id': champion_id, 'score': score, 'metrics': metrics}
+
+
 def _format_value_rows(rows):
     return " | ".join(
         "edge>={:.2f}: bets={} roi={:.1f}% sr={:.1f}%".format(
@@ -4991,6 +5062,19 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
         except Exception as e:
             log.warning(f"Value-edge diagnostic failed for {result['model_type']} (non-fatal): {e}")
 
+    try:
+        retest = _retest_champion_recipe(
+            X, y_won, sp_values, race_ids, X_train, y_won[train_mask], race_ids_train,
+            X_val, y_won_val, race_ids_val, sp_val, fold_boundaries,
+        )
+        if retest is not None:
+            retest['metrics']['validation_period'] = validation_period
+            retest['metrics']['jockey_snapshot_coverage_pct'] = run_snapshot_coverage.get('jockey_snapshot_coverage_pct')
+            retest['metrics']['trainer_snapshot_coverage_pct'] = run_snapshot_coverage.get('trainer_snapshot_coverage_pct')
+            best['metrics']['champion_retest'] = retest
+    except Exception as e:
+        log.warning(f"Champion re-test on tonight's data failed (non-fatal, stored score used): {e}")
+
     best_analysis = (best['metrics'].get('value_edge_analysis') or {})
     baseline_row = next((r for r in best_analysis.get('thresholds', []) if r['min_edge'] == 0.0), None)
     best_threshold = best_analysis.get('best_threshold')
@@ -5119,6 +5203,23 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
         else:
             champion_score = float(champion[9]) if champion and champion[9] is not None else None
 
+        # Tonight's re-test of the champion, on the same races and folds as this
+        # challenger (see _retest_champion_recipe). When present it replaces the
+        # stored numbers for the comparison only; the stored row is untouched.
+        retest = (validation_metrics or {}).get('champion_retest') or {}
+        champion_compare_metrics = champion_metrics
+        if (champion is not None and not champion_permanently_broken
+                and retest.get('champion_id') == champion[0] and retest.get('metrics')
+                and _walk_forward_fold_count(retest['metrics']) >= MIN_WALK_FORWARD_FOLDS):
+            log.info(
+                "Champion id=%s compared on tonight's re-test: score %s -> %.3f",
+                champion[0], f"{champion_score:.3f}" if champion_score is not None else "n/a", retest['score'],
+            )
+            champion_compare_metrics = retest['metrics']
+            champion_score = retest['score']
+            champion_roi = champion_compare_metrics.get('roi', champion_roi)
+            champion_sr = champion_compare_metrics.get('strike_rate', champion_sr)
+
         # Hard invariant: an active champion must carry >= MIN_WALK_FORWARD_FOLDS
         # of walk-forward validation in its stored metadata (see Champion 74,
         # promoted before walk-forward evaluation existed, whose un-penalised
@@ -5189,7 +5290,7 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
         ]
         champion_fold_rois = [
             float(f.get('roi', 0.0) or 0.0)
-            for f in (champion_metrics.get('walk_forward') or {}).get('folds', [])
+            for f in (champion_compare_metrics.get('walk_forward') or {}).get('folds', [])
             if f.get('bets', 0)
         ]
         bootstrap_p_value = _paired_bootstrap_p_value(challenger_fold_rois, champion_fold_rois)
@@ -5225,7 +5326,7 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
         # non-overlapping comparison visible instead of silent.
         windows_comparable, window_note = _validation_windows_overlap_note(
             challenger_window=(validation_metrics or {}).get('validation_period'),
-            champion_window=champion_metrics.get('validation_period'),
+            champion_window=champion_compare_metrics.get('validation_period'),
         )
         if not windows_comparable:
             log.warning(

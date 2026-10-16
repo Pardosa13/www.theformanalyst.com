@@ -1687,3 +1687,89 @@ def test_top_selection_rows_carry_the_whole_field():
     top = backtest._top_selection_rows(Fixed(), X, [1, 0, 0, 1], [1, 1, 2, 2], [2.0, 3.0, 1.5, 4.0])
     assert len(top) == 2
     assert len(top.attrs['field']) == 4
+
+
+def _retest(champion_id, score, fold_rois):
+    data = metrics(selection_score=score)
+    data["walk_forward"] = {
+        "folds": [{"roi": r, "strike_rate": 20.0, "bets": 50} for r in fold_rois],
+        "roi_std": 0.5,
+    }
+    return {"champion_id": champion_id, "score": score, "metrics": data}
+
+
+def test_champion_is_judged_on_tonights_retest_not_its_frozen_score(monkeypatch, tmp_path):
+    # Stored score 20 would beat the challenger's 13. Re-tested on tonight's
+    # races the champion only scores 5, so the challenger must win.
+    conn = FakeConnection(champion=champion_row(20.0))
+    challenger = metrics(selection_score=13.0)
+    challenger["champion_retest"] = _retest(101, 5.0, [1.0, 2.0])
+
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, challenger)
+
+    assert conn.activated_challenger["id"] == conn.challenger_id
+    assert "beat Champion Score 5.000" in conn.activated_challenger["reason"]
+
+
+def test_retest_for_a_different_champion_is_ignored(monkeypatch, tmp_path):
+    conn = FakeConnection(champion=champion_row(20.0))
+    challenger = metrics(selection_score=13.0)
+    challenger["champion_retest"] = _retest(999, 5.0, [1.0, 2.0])
+
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, challenger)
+
+    assert conn.activated_challenger is None
+    assert "did not beat Champion Score 20.000" in conn.rejected_challenger["reason"]
+
+
+def test_retest_without_enough_folds_is_ignored(monkeypatch, tmp_path):
+    conn = FakeConnection(champion=champion_row(20.0))
+    challenger = metrics(selection_score=13.0)
+    challenger["champion_retest"] = _retest(101, 5.0, [1.0])
+
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, challenger)
+
+    assert conn.activated_challenger is None
+
+
+def test_retest_refits_the_recipe_and_keeps_the_champions_blend_weight(monkeypatch):
+    class Champion:
+        feature_names_in_ = ["a", "b"]
+    champion = Champion()
+    setattr(champion, backtest.MARKET_BLEND_ALPHA_ATTR, 0.3)
+    refit = object()
+    seen = {}
+
+    monkeypatch.setattr(backtest, "_clone_for_fold_fit", lambda model, y: refit)
+    monkeypatch.setattr(backtest, "_fit_candidate", lambda model, X, y, race_ids=None: seen.setdefault("fit", model))
+
+    def fake_eval(model, X_val, y_val, race_ids_val, sp_val, blend_alpha=None):
+        seen["eval"] = (model, blend_alpha)
+        return {"roi": -5.0, "strike_rate": 30.0, "number_of_bets": 150}
+
+    def fake_wf(model, X, y, sp, race_ids, blend_alpha=None):
+        seen["wf"] = (model, blend_alpha)
+        return {"folds": [{"roi": -4.0, "bets": 50}, {"roi": -6.0, "bets": 50}], "roi_std": 1.0, "n_splits": 2}
+
+    monkeypatch.setattr(backtest, "evaluate_model_on_validation", fake_eval)
+    monkeypatch.setattr(backtest, "_walk_forward_metrics_for_model", fake_wf)
+
+    X = pandas.DataFrame({"a": [1.0], "b": [2.0]})
+    result = backtest._retest_champion_recipe(
+        X, None, None, None, X, None, None, X, None, None, None, [], champion=(163, champion),
+    )
+
+    assert result["champion_id"] == 163
+    assert seen["fit"] is refit
+    assert seen["eval"] == (refit, 0.3)
+    assert seen["wf"] == (refit, 0.3)
+    assert result["metrics"]["walk_forward"]["folds"][0]["roi"] == -4.0
+
+
+def test_retest_skipped_when_champion_features_do_not_match():
+    class Champion:
+        feature_names_in_ = ["old_feature"]
+    X = pandas.DataFrame({"a": [1.0]})
+    assert backtest._retest_champion_recipe(
+        X, None, None, None, X, None, None, X, None, None, None, [], champion=(163, Champion()),
+    ) is None
