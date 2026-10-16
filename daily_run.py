@@ -17,6 +17,8 @@ date and is safe to repeat:
   4. Score ML for any race still to run that has no ML scores yet.
   5. Otherwise re-price ML value edge and Kelly stake against the newest live
      odds, so the edge stored at the jump is at most one pass old.
+  6. Record Best Bets routes (Maiden Agreement, Proven Edge) for every race
+     still to run, so the route chart counts every race.
 
 Track rating and rail used for every race are stored on the race
 (races.track_condition, scored_rail_position, scored_at).
@@ -295,6 +297,21 @@ def reprice_ml(db, meeting):
         log.info('ML re-priced %s: %s runner(s)', meeting.meeting_name, updated)
 
 
+def record_routes(db, races):
+    """Save Best Bets routes (Maiden Agreement, Proven Edge) for races still to
+    run, so the ML Data route chart counts every race, not only the ones
+    someone opened the Best Bets page for. Never fatal."""
+    from app import record_best_bet_routes
+    try:
+        recorded = record_best_bet_routes(races)
+        db.session.commit()
+        if recorded:
+            log.info('Best Bets routes recorded: %s runner(s)', recorded)
+    except Exception:
+        db.session.rollback()
+        log.exception('Recording Best Bets routes failed')
+
+
 def run_pass(app, day, summary):
     from app import (_extract_v1_scratchings_for_track, _extract_v2_scratched_set,
                      _update_scratchings_impl, db, import_meeting_from_pf, pf_service)
@@ -349,6 +366,7 @@ def run_pass(app, day, summary):
                 set_signature(db, meeting.id, scratch_signature(
                     v1_scratch, v2_items, track, _extract_v1_scratchings_for_track, _extract_v2_scratched_set))
                 score_ml(db, meeting, summary)
+                record_routes(db, open_races(meeting, race_has_started))
                 if meeting.provisional:
                     alert(f'{name} imported as PROVISIONAL: rating {rating}, rail {rail}m from {source}. '
                           'Check it and fix on the dashboard if needed.')
@@ -397,6 +415,7 @@ def run_pass(app, day, summary):
                 score_ml(db, meeting, summary)
             else:
                 reprice_ml(db, meeting)
+            record_routes(db, races_to_run)
         except Exception as exc:
             db.session.rollback()
             log.exception('Daily run failed for %s', name)

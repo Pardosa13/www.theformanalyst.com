@@ -135,3 +135,21 @@ def test_reprice_failure_is_logged_not_raised(monkeypatch, caplog):
     with caplog.at_level('WARNING'):
         dr.reprice_ml(None, meeting)
     assert 'ML re-price failed for 261017_Flemington: no live market' in caplog.text
+
+
+def test_route_recording_failure_is_logged_not_raised(monkeypatch, caplog):
+    import sys
+    import types
+
+    def boom(races):
+        raise RuntimeError('db gone')
+    fake_app = types.ModuleType('app')
+    fake_app.record_best_bet_routes = boom
+    monkeypatch.setitem(sys.modules, 'app', fake_app)
+    rolled_back = []
+    db = types.SimpleNamespace(session=types.SimpleNamespace(
+        commit=lambda: None, rollback=lambda: rolled_back.append(True)))
+    with caplog.at_level('ERROR'):
+        dr.record_routes(db, [])
+    assert rolled_back == [True]
+    assert 'Recording Best Bets routes failed' in caplog.text

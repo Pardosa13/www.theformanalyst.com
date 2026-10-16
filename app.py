@@ -184,6 +184,46 @@ def merge_best_bet_tracking(prediction, routes, edge_badges):
     if not prediction.best_bet_qualified_at:
         prediction.best_bet_qualified_at = datetime.utcnow()
 
+
+def best_bet_routes_for_horse(horse, race, signal_top_ids, components=None):
+    """The Best Bets qualifying rule for one runner.
+
+    Analyzer, PFAI and ML must all rank the horse first, and then either the
+    race is a maiden or the horse carries a Proven Edge / Proven Edge+ badge.
+    Returns (routes, edge_badges, signal_agreement). Shared by the Best Bets
+    page and the daily run, so both record exactly the same routes.
+    """
+    signal_agreement = signals_all_agree_top(horse.id, signal_top_ids)
+    if not signal_agreement:
+        return [], {}, False
+    if components is None:
+        components = parse_notes_component_matches(horse.prediction.notes)
+    edge_badges = evaluate_component_edge_badges(horse, [match['name'] for match in components.values()])
+    routes = [route for route, hit in (
+        ('maiden', is_maiden_race(race.race_class)),
+        ('proven_edge', PROVEN_EDGE_BADGE in edge_badges or PROVEN_EDGE_PLUS_BADGE in edge_badges),
+    ) if hit]
+    return routes, edge_badges, True
+
+
+def record_best_bet_routes(races):
+    """Save the Best Bets routes of every qualifying runner in `races`.
+
+    Callers pass only races still to run, so every route saved is a pre-race
+    one. Returns how many runners qualified. The caller commits.
+    """
+    recorded = 0
+    for race in races:
+        signal_top_ids = top_signal_horse_ids(race.horses)
+        for horse in race.horses:
+            if getattr(horse, 'is_scratched', False) or not getattr(horse, 'prediction', None):
+                continue
+            routes, edge_badges, _agreement = best_bet_routes_for_horse(horse, race, signal_top_ids)
+            if routes:
+                merge_best_bet_tracking(horse.prediction, routes, edge_badges)
+                recorded += 1
+    return recorded
+
 BEST_BETS_LADBROKES_STALE_SECONDS = max(90, ODDS_CACHE_TTL * 3)
 LADBROKES_CLOSED_MARKET_STATUSES = {"closed", "final", "finalised", "abandoned", "resulted", "interim", "live", "jumped", "error"}
 LADBROKES_UNAVAILABLE_RUNNER_STATUSES = {"scratched", "closed", "inactive", "unavailable", "late scratching"}
@@ -11817,7 +11857,6 @@ def best_bets():
                 if mode == 'non_top_pick' and is_top_pick:
                     continue
 
-                signal_agreement = signals_all_agree_top(horse.id, signal_top_ids)
                 lb_fields = ladbrokes_signal_fields.get(horse.id, {})
 
                 components = parse_notes_component_matches(horse.prediction.notes)
@@ -11853,22 +11892,14 @@ def best_bets():
 
                 # Two ways to qualify, both needing Analyzer, PFAI and ML to
                 # rank the horse first: in a maiden race, or with a Proven Edge
-                # / Proven Edge+ badge. Watch badges never qualify a horse. The
-                # favourite route was removed on 16 Oct 2026: over all history
-                # it returned -10.5%, the same as backing every favourite.
+                # / Proven Edge+ badge (best_bet_routes_for_horse). The daily
+                # run records the same routes for every race still to run.
                 jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
-                maiden_agreement = signal_agreement and is_maiden_race(race.race_class)
-                edge_badges = (
-                    evaluate_component_edge_badges(horse, [match['name'] for match in components.values()])
-                    if signal_agreement else {}
+                routes, edge_badges, signal_agreement = best_bet_routes_for_horse(
+                    horse, race, signal_top_ids, components
                 )
-                proven_edge_agreement = signal_agreement and (
-                    PROVEN_EDGE_BADGE in edge_badges or PROVEN_EDGE_PLUS_BADGE in edge_badges
-                )
-                routes = [route for route, hit in (
-                    ('maiden', maiden_agreement),
-                    ('proven_edge', proven_edge_agreement),
-                ) if hit]
+                maiden_agreement = 'maiden' in routes
+                proven_edge_agreement = 'proven_edge' in routes
                 if maiden_agreement:
                     lb_fields = {
                         **lb_fields,
