@@ -24,22 +24,19 @@ def evaluate(price=3.0, other_price=5.0, gap=20, fav='A', scratched_b=False, sta
     return appmod.evaluate_ladbrokes_best_bet_signals(race, SimpleNamespace(), odds)[1]
 
 
-def test_ml_favourite_sweet_spot_boundaries():
-    assert evaluate(price=2.50)['is_ml_market_sweet_spot']
-    assert evaluate(price=3.99)['is_ml_market_sweet_spot']
-    assert not evaluate(price=2.49)['is_ml_market_sweet_spot']
-    assert not evaluate(price=4.00)['is_ml_market_sweet_spot']
-
-
-def test_full_model_consensus_requires_ladbrokes_favourite():
-    assert evaluate(price=3.0)['is_full_model_market_consensus']
-    assert not evaluate(price=3.0, fav='B')['is_full_model_market_consensus']
-
-
-def test_ml_gap_rule_boundary_and_market_favourite():
-    assert evaluate(gap=20)['is_ml_market_gap_20']
-    assert not evaluate(gap=19.9)['is_ml_market_gap_20']
-    assert not evaluate(gap=25, fav='B')['is_ml_market_gap_20']
+def test_favourite_badges_are_gone():
+    """Sweet Spot, Full Model + Market Consensus, 20 Gap and Elite were removed
+    on 16 Oct 2026: over all history they lost 7-12%, no better than backing
+    every favourite. The evaluator now returns market context only."""
+    got = evaluate(price=3.0, gap=25)
+    for key in ('is_ml_market_sweet_spot', 'is_full_model_market_consensus', 'is_ml_market_gap_20',
+                'best_bet_signal_count', 'best_bet_confidence_level'):
+        assert key not in got
+    assert got['best_bet_badges'] == []
+    assert got['ladbrokes_fixed_win_price'] == 3.0
+    assert got['is_ladbrokes_favourite']
+    assert got['analyzer_rank'] == got['pfai_rank'] == got['ml_rank'] == 1
+    assert got['ml_score_gap'] == 25
 
 
 def test_joint_favourites_and_scratched_removed_before_ranking():
@@ -49,20 +46,17 @@ def test_joint_favourites_and_scratched_removed_before_ranking():
     assert scratched_other['ladbrokes_market_rank'] == 1
 
 
-def test_missing_stale_unmatched_and_closed_market_do_not_qualify():
-    assert evaluate(missing=True)['best_bet_signal_count'] == 0
-    assert evaluate(age=appmod.BEST_BETS_LADBROKES_STALE_SECONDS + 1)['best_bet_signal_count'] == 0
-    assert evaluate(status='Closed')['best_bet_signal_count'] == 0
+def test_missing_stale_unmatched_and_closed_market_report_why():
+    assert evaluate(missing=True)['ladbrokes_fixed_win_price'] is None
+    assert evaluate(age=appmod.BEST_BETS_LADBROKES_STALE_SECONDS + 1)['best_bet_reasons']
+    assert evaluate(status='Closed')['best_bet_reasons']
     a = horse(1, 'Alpha Star', 100, 100, 80); b = horse(2, 'Beta Boy', 90, 90, 60)
     race = SimpleNamespace(horses=[a,b])
     odds = {'status':'Open','odds': {appmod.normalize_runner_name('Other Horse'):{'name':'Other Horse','win':2.0}}}
-    assert appmod.evaluate_ladbrokes_best_bet_signals(race, SimpleNamespace(), odds)[1]['best_bet_signal_count'] == 0
+    assert appmod.evaluate_ladbrokes_best_bet_signals(race, SimpleNamespace(), odds)[1]['ladbrokes_fixed_win_price'] is None
 
 
-def test_multiple_signals_one_row_and_no_results_sp_source():
-    got = evaluate(price=3.0, gap=25)
-    assert got['best_bet_signal_count'] == 3
-    assert got['best_bet_confidence_level'] == 'Elite Consensus Best Bet'
+def test_evaluator_never_reads_results_sp():
     import inspect
     src = inspect.getsource(appmod.evaluate_ladbrokes_best_bet_signals)
     assert 'results.sp' not in src and '.sp' not in src
