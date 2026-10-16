@@ -2189,7 +2189,17 @@ def persist_live_market_edges(edges, db_session):
             prediction.value_edge_pct = fields['value_edge_pct']
             prediction.value_edge_ml_win_prob_pct = fields['ml_fair_probability_pct']
             prediction.value_edge_price = fields['market_price']
-            prediction.value_edge_captured_at = captured_at
+            # When the PRICE was seen, not when it was written: a re-price just
+            # after the jump can still read a pre-race price (up to
+            # LIVE_ODDS_MAX_AGE_SECONDS old), and stamping it "now" would make a
+            # pre-race edge look post-race to every tracker that checks.
+            price_seen_at = fields.get('captured_at')
+            if isinstance(price_seen_at, datetime):
+                if price_seen_at.tzinfo is not None:
+                    price_seen_at = price_seen_at.astimezone(timezone.utc).replace(tzinfo=None)
+                prediction.value_edge_captured_at = price_seen_at
+            else:
+                prediction.value_edge_captured_at = captured_at
         updated += 1
 
     log.info(

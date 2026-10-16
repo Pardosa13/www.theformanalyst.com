@@ -4076,6 +4076,82 @@ def calculate_value_edge_performance(track_filter="", date_from="", date_to="", 
     }
 
 
+# Live test of the one value rule the backtest found worth watching: back the
+# ML model's top pick only when its edge over the market clears a bar. Backing
+# ANY runner with an edge lost 20-35% in the backtest, so it is not tracked
+# here. Starts on 16 Oct 2026: before that the odds scraper ran once a day, so
+# most "edges" were priced off the model alone (docs/strategy-rethink-todo.md).
+TOP_PICK_VALUE_TEST_START = datetime(2026, 10, 16)
+TOP_PICK_VALUE_TEST_THRESHOLDS_PCT = (0.0, 2.0, 3.0, 5.0, 8.0)
+
+
+def calculate_top_pick_value_test(track_filter="", date_from="", date_to="", stake=10.0):
+    """Settle the ML top pick of each race, cut by its pre-race value edge.
+
+    Top pick = the runner with the highest ml_win_probability, scored before
+    the jump. Its edge is value_edge_pct (model fair % minus market fair %),
+    also captured before the jump. A race whose top pick had no live price has
+    no edge and is left out. Flat `stake` win bets at the result SP.
+    """
+    query = db.session.query(Prediction, Result, Race.id, Race.start_time_utc).join(
+        Horse, Prediction.horse_id == Horse.id
+    ).join(Race, Horse.race_id == Race.id).join(Meeting, Race.meeting_id == Meeting.id).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(
+        Prediction.ml_win_probability.isnot(None),
+        Prediction.ml_scored_at.isnot(None),
+        Race.start_time_utc.isnot(None),
+        Race.start_time_utc >= TOP_PICK_VALUE_TEST_START,
+        Prediction.ml_scored_at < Race.start_time_utc,
+        Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
+        Result.sp.isnot(None),
+    )
+    if track_filter:
+        query = query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        query = query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        query = query.filter(Meeting.uploaded_at <= date_to)
+
+    by_race = {}
+    for prediction, result, race_id, start in query.all():
+        best = by_race.get(race_id)
+        if best is None or float(prediction.ml_win_probability) > float(best[0].ml_win_probability):
+            by_race[race_id] = (prediction, result, start)
+
+    picks = []
+    for prediction, result, start in by_race.values():
+        if prediction.value_edge_pct is None or prediction.value_edge_captured_at is None:
+            continue
+        if prediction.value_edge_captured_at >= start:
+            continue
+        picks.append((float(prediction.value_edge_pct), result))
+
+    rows = []
+    for threshold in TOP_PICK_VALUE_TEST_THRESHOLDS_PCT:
+        kept = [result for edge, result in picks if edge >= threshold]
+        bets = len(kept)
+        wins = sum(result.finish_position == 1 for result in kept)
+        total_return = sum(stake * float(result.sp) for result in kept if result.finish_position == 1)
+        profit = total_return - bets * stake
+        rows.append({
+            'min_edge_pct': threshold,
+            'bets': bets,
+            'wins': wins,
+            'strike_rate': wins / bets * 100 if bets else 0.0,
+            'profit': profit,
+            'roi': profit / (bets * stake) * 100 if bets else 0.0,
+        })
+    return {
+        'rows': rows,
+        'races_with_top_pick': len(by_race),
+        'races_priced': len(picks),
+        'start_date': TOP_PICK_VALUE_TEST_START.date().isoformat(),
+        'stake': stake,
+    }
+
+
 # ----- PuntingForm API Routes -----
 
 @app.route("/api/meetings/today")
@@ -6505,7 +6581,17 @@ def ml_data_analytics():
         db.session.rollback()
         logger.warning("Error calculating Ladbrokes signal performance: %s", e, exc_info=True)
 
+    top_pick_value_test = None
+    try:
+        top_pick_value_test = calculate_top_pick_value_test(
+            track_filter=track_filter, date_from=date_from, date_to=date_to
+        )
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("Error calculating top-pick value test: %s", e, exc_info=True)
+
     return render_template("ml_data.html",
+        top_pick_value_test=top_pick_value_test,
         champion_scores_comparable=champion_scores_comparable(
             active_model_metadata, latest_challenger),
         ml_performance_stats=ml_performance_stats,

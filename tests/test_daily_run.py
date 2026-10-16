@@ -117,3 +117,21 @@ def test_alert_network_error_does_not_log_url(monkeypatch, caplog):
     monkeypatch.setattr(dr.requests, 'post', boom)
     assert dr.alert('hello') is False
     assert 'SECRET' not in caplog.text
+
+
+def test_each_pass_reprices_scored_meetings_with_races_to_run():
+    source = Path('daily_run.py').read_text()
+    body = source[source.index('def run_pass('):]
+    assert "elif needs_ml(db, races_to_run):\n                score_ml(db, meeting, summary)\n            else:\n                reprice_ml(db, meeting)" in body
+
+
+def test_reprice_failure_is_logged_not_raised(monkeypatch, caplog):
+    import sys
+    import types
+    fake = types.ModuleType('ml_shadow_routes')
+    fake._reprice_meeting_market = lambda db, meeting_id: (0, 'no live market')
+    monkeypatch.setitem(sys.modules, 'ml_shadow_routes', fake)
+    meeting = types.SimpleNamespace(id=7, meeting_name='261017_Flemington')
+    with caplog.at_level('WARNING'):
+        dr.reprice_ml(None, meeting)
+    assert 'ML re-price failed for 261017_Flemington: no live market' in caplog.text

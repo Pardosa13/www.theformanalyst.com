@@ -54,6 +54,15 @@ Things decided but parked for a later phase. Tick them off as they land.
   500 clean races; until then the ML page keeps its old 110% book price. The
   calibration job reruns every Sunday and picks up new data.
 
+- Backtest run 268: backing ANY runner the ML rates above its price lost 20-35%
+  for every model. Backing only the TOP PICK when it beats the price was the
+  one lead (some cuts +5% to +12% on 150-270 bets, within noise after testing
+  ~95 cuts). It is now tracked live on the ML Data page ("Live Test: Top Pick
+  When It Beats the Price"), races from 16 Oct only. Judge it after a few
+  hundred bets.
+- New ML champion #207 (LightGBM, 15% model / 85% market) replaced #163 once
+  the champion was re-tested on the same races as the challengers.
+
 ## Missing runners (fixed 16 Oct 2026)
 - [x] **The CSV reader dropped runners.** `parseCSV` split on every comma, so
   any row with a quoted comma (a name, gear or comment) was silently thrown

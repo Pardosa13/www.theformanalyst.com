@@ -15,6 +15,8 @@ date and is safe to repeat:
      touched. A meeting whose rating was set by hand (condition_source =
      'manual') keeps it.
   4. Score ML for any race still to run that has no ML scores yet.
+  5. Otherwise re-price ML value edge and Kelly stake against the newest live
+     odds, so the edge stored at the jump is at most one pass old.
 
 Track rating and rail used for every race are stored on the race
 (races.track_condition, scored_rail_position, scored_at).
@@ -277,6 +279,22 @@ def score_ml(db, meeting, summary):
         log.warning('ML not scored for %s: %s', meeting.meeting_name, result.get('reason'))
 
 
+def reprice_ml(db, meeting):
+    """Refresh value edge and Kelly stake from the newest live prices.
+
+    Scoring prices a meeting once, often hours before the jump, against
+    whatever odds existed then. Each pass re-prices it so the stored edge is at
+    most one pass old when a race starts. Never fatal: a meeting that cannot be
+    priced keeps its last edge.
+    """
+    from ml_shadow_routes import _reprice_meeting_market
+    updated, error = _reprice_meeting_market(db, meeting.id)
+    if error:
+        log.warning('ML re-price failed for %s: %s', meeting.meeting_name, error)
+    else:
+        log.info('ML re-priced %s: %s runner(s)', meeting.meeting_name, updated)
+
+
 def run_pass(app, day, summary):
     from app import (_extract_v1_scratchings_for_track, _extract_v2_scratched_set,
                      _update_scratchings_impl, db, import_meeting_from_pf, pf_service)
@@ -377,6 +395,8 @@ def run_pass(app, day, summary):
                 score_ml(db, meeting, summary)
             elif needs_ml(db, races_to_run):
                 score_ml(db, meeting, summary)
+            else:
+                reprice_ml(db, meeting)
         except Exception as exc:
             db.session.rollback()
             log.exception('Daily run failed for %s', name)
