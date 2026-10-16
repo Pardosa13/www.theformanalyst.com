@@ -1,3 +1,4 @@
+import pytest
 import json
 import os
 import pickle
@@ -1654,3 +1655,35 @@ def test_rollback_ignores_challengers_measured_before_race_log_loss(monkeypatch)
 
     assert rollback_calls == []
     assert conn.updated_champion is not None
+
+
+def test_field_value_backtest_bets_any_runner_with_an_edge():
+    # One race. The top pick (0.50) is priced fairly; the 0.30 runner is a
+    # 6.0 shot (market 0.167) and wins. Only the any-runner filter backs it.
+    field = pandas.DataFrame({
+        'race_id': [1, 1, 1],
+        'pred': [0.50, 0.30, 0.20],
+        'won': [0, 1, 0],
+        'sp': [2.0, 6.0, 4.0],
+        'market_prob': [0.50, 0.167, 0.25],
+    })
+    analysis = backtest._field_value_backtest(field)
+    rows = {row['min_edge']: row for row in analysis['thresholds']}
+    assert 0.0 not in rows
+    assert rows[0.05]['bets'] == 1
+    assert rows[0.05]['roi_pct'] == pytest.approx(500.0)
+
+
+def test_field_value_backtest_handles_missing_field():
+    assert backtest._field_value_backtest(None) == {'thresholds': []}
+
+
+def test_top_selection_rows_carry_the_whole_field():
+    class Fixed:
+        def predict_proba(self, X):
+            p = numpy.asarray(X['p'], dtype=float)
+            return numpy.column_stack([1 - p, p])
+    X = pandas.DataFrame({'p': [0.6, 0.4, 0.7, 0.3]})
+    top = backtest._top_selection_rows(Fixed(), X, [1, 0, 0, 1], [1, 1, 2, 2], [2.0, 3.0, 1.5, 4.0])
+    assert len(top) == 2
+    assert len(top.attrs['field']) == 4
