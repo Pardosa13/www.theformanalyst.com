@@ -13,8 +13,11 @@ WITH runners AS (
         p.score AS analyzer_score,
         COALESCE(
             p.pfai_score,
-            CASE WHEN COALESCE(h.csv_data->>'pfaiScore', h.csv_data->>'PFAI Score', h.csv_data->>'pfai_score') ~ '^-?[0-9]+(\.[0-9]+)?$'
-                 THEN COALESCE(h.csv_data->>'pfaiScore', h.csv_data->>'PFAI Score', h.csv_data->>'pfai_score')::float END
+            CASE WHEN COALESCE(NULLIF(h.csv_data->>'pfaiscore', ''), NULLIF(h.csv_data->>'pfaiScore', ''),
+                               NULLIF(h.csv_data->>'PFAI Score', ''), NULLIF(h.csv_data->>'pfai_score', '')) ~ '^-?[0-9]+(\.[0-9]+)?$'
+                 THEN COALESCE(NULLIF(h.csv_data->>'pfaiscore', ''), NULLIF(h.csv_data->>'pfaiScore', ''),
+                               NULLIF(h.csv_data->>'PFAI Score', ''), NULLIF(h.csv_data->>'pfai_score', ''))::float END,
+            substring(p.notes from 'PFAI Score:\s*([0-9]+\.?[0-9]*)')::float
         ) AS pfai,
         CASE WHEN p.ml_score IS NOT NULL
               AND (r.start_time_utc IS NULL OR p.ml_scored_at IS NULL OR p.ml_scored_at < r.start_time_utc)
