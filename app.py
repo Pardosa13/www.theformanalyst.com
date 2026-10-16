@@ -5676,20 +5676,75 @@ def _bias_adjustment(running_position, rail_position, pace_bias):
         return -((rail_mod * 0.85) + (pace_mod * 0.85))
     return 0.0
 
+# Tables outside the ORM that point at a meeting's races or runners. Deleting a
+# meeting must clear these too, or they hold stale rows for ids that are gone.
+_MEETING_SIDE_TABLES_BY_HORSE = ('score_history', 'live_odds_snapshots')
+
+
+def purge_meetings(meetings):
+    """Delete meetings with their races, runners, scores and side-table rows.
+
+    Betfair prices are raw market data, so they are kept and only unlinked.
+    Does not commit.
+    """
+    meeting_ids = [m.id for m in meetings]
+    if not meeting_ids:
+        return 0
+    horse_ids = [h for (h,) in db.session.query(Horse.id).join(Race, Race.id == Horse.race_id)
+                 .filter(Race.meeting_id.in_(meeting_ids)).all()]
+    existing = set(sa_inspect(db.engine).get_table_names())
+    if horse_ids:
+        ids = bindparam('ids', expanding=True)
+        for table in _MEETING_SIDE_TABLES_BY_HORSE:
+            if table in existing:
+                db.session.execute(text(f'DELETE FROM {table} WHERE horse_id IN :ids').bindparams(ids),
+                                   {'ids': horse_ids})
+        if 'betfair_prices' in existing:
+            db.session.execute(text('UPDATE betfair_prices SET horse_id = NULL, race_id = NULL '
+                                    'WHERE horse_id IN :ids').bindparams(ids), {'ids': horse_ids})
+    if 'daily_run_state' in existing:
+        db.session.execute(text('DELETE FROM daily_run_state WHERE meeting_id IN :ids')
+                           .bindparams(bindparam('ids', expanding=True)), {'ids': meeting_ids})
+    for meeting in meetings:
+        db.session.delete(meeting)  # ORM cascade: races, horses, predictions, results
+    return len(meeting_ids)
+
+
 @app.route("/meeting/<int:meeting_id>/delete", methods=["POST"])
 @login_required
 def delete_meeting(meeting_id):
     """Delete a meeting"""
     meeting = Meeting.query.get_or_404(meeting_id)
-    
+
     if meeting.user_id != current_user.id and not current_user.is_admin:
         flash("You don't have permission to delete this meeting", "danger")
         return redirect(url_for("history"))
-    
-    db.session.delete(meeting)
+
+    name = meeting.meeting_name
+    purge_meetings([meeting])
     db.session.commit()
-    
-    flash(f"Meeting '{meeting.meeting_name}' deleted", "success")
+
+    flash(f"Meeting '{name}' deleted", "success")
+    return redirect(url_for("history"))
+
+
+@app.route("/meetings/delete-day", methods=["POST"])
+@login_required
+def delete_meetings_for_day():
+    """Admin only: delete every meeting on one raceday."""
+    if not current_user.is_admin:
+        flash("Only an admin can delete a whole raceday", "danger")
+        return redirect(url_for("history"))
+    try:
+        day = datetime.strptime(request.form.get('date', ''), '%Y-%m-%d').date()
+    except ValueError:
+        flash("Pick a raceday first", "danger")
+        return redirect(url_for("history"))
+
+    meetings = Meeting.query.filter(Meeting.date == day).all()
+    count = purge_meetings(meetings)
+    db.session.commit()
+    flash(f"Deleted {count} meeting(s) for {day:%d-%m-%y}", "success")
     return redirect(url_for("history"))
 
 
