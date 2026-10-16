@@ -41,3 +41,27 @@ def test_v2_updates_used_only_when_v1_unavailable():
     assert final_set == {(3, 12)}
     assert source == "v2_updates_scratchings"
     assert conflicts_ignored == 0
+
+
+def test_scratching_in_one_race_does_not_scratch_same_horse_in_another_race():
+    """It's A Knockout ran in R1 and R3; only the R3 scratching is real."""
+    import app as appmod
+
+    items = [{'track': 'Randwick', 'raceNo': 3, 'tabNo': 9}]
+    lookup = {(1, 7): "It's A Knockout", (3, 9): "It's A Knockout"}
+    names, _ = appmod._extract_v2_scratched_names(items, 'Randwick', lookup)
+
+    assert appmod._scratch_key(3, "It's A Knockout") in names
+    assert appmod._scratch_key(1, "It's A Knockout") not in names
+    # CSV rows carry race numbers as strings; DB rows as ints. Both must match.
+    assert appmod._scratch_key('3', "IT'S A KNOCKOUT") == appmod._scratch_key(3, "It's A Knockout")
+
+
+def test_update_scratchings_matches_by_race_not_name_alone():
+    import inspect
+    import app as appmod
+
+    source = inspect.getsource(appmod._update_scratchings_impl)
+    assert 'norm in all_scratched_names' not in source
+    assert 'horse_norm in all_scratched_names' not in source
+    assert source.count('_scratch_key(') >= 5

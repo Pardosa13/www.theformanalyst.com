@@ -1355,6 +1355,16 @@ def _extract_v2_scratched_set(items, track_name):
     return scratched_set, debug_rows
 
 
+def _scratch_key(race_number, horse_name):
+    """Scratchings belong to one race. Key them by race number AND name, so a
+    horse entered in two races at a meeting is only scratched where it was."""
+    try:
+        race_part = str(int(str(race_number).strip()))
+    except (TypeError, ValueError):
+        race_part = str(race_number or '').strip()
+    return (race_part, normalize_runner_name(horse_name))
+
+
 def _extract_v2_scratched_names(items, track_name, tab_name_lookup):
     scratched_names = set()
     debug_rows = []
@@ -1388,7 +1398,7 @@ def _extract_v2_scratched_names(items, track_name, tab_name_lookup):
             'is_scratched_final': is_scratched_final,
         })
         if is_scratched_final and horse_name:
-            scratched_names.add(normalize_runner_name(horse_name))
+            scratched_names.add(_scratch_key(rn, horse_name))
     return scratched_names, debug_rows
 
 
@@ -4967,7 +4977,7 @@ def _update_scratchings_impl(meeting_id, track_condition=None):
                 for horse in race.horses:
                     tab_number = _extract_tab_number_from_csv_data(horse.csv_data if isinstance(horse.csv_data, dict) else {})
                     if (race.race_number, tab_number) in v1_scratched_set:
-                        v1_scratched_names.add(normalize_runner_name(horse.horse_name))
+                        v1_scratched_names.add(_scratch_key(race.race_number, horse.horse_name))
             scratched_names = v1_scratched_names
             scratchings_snapshot_loaded = True
             logger.info(
@@ -4983,7 +4993,7 @@ def _update_scratchings_impl(meeting_id, track_condition=None):
         for race in all_races:
             for horse in race.horses:
                 if horse.is_scratched:
-                    existing_scratched_names.add(normalize_runner_name(horse.horse_name))
+                    existing_scratched_names.add(_scratch_key(race.race_number, horse.horse_name))
 
         # Important: when an API snapshot is available, treat it as source of
         # truth so previously-scratched horses can become active again. If all
@@ -4995,9 +5005,8 @@ def _update_scratchings_impl(meeting_id, track_condition=None):
         unscratched_count = 0
         for race in all_races:
             for horse in race.horses:
-                norm = normalize_runner_name(horse.horse_name)
                 was_scratched = horse.is_scratched
-                horse.is_scratched = norm in all_scratched_names
+                horse.is_scratched = _scratch_key(race.race_number, horse.horse_name) in all_scratched_names
                 if horse.is_scratched and not was_scratched:
                     scratched_count += 1
                 elif was_scratched and not horse.is_scratched:
@@ -5061,9 +5070,10 @@ def _update_scratchings_impl(meeting_id, track_condition=None):
                 # The official snapshot is authoritative. Do not let stale
                 # scratch-like fields in the CSV keep a runner scratched after
                 # the final official set has removed them.
-                row_is_scratched = norm in all_scratched_names
+                row_is_scratched = _scratch_key(race_num, norm) in all_scratched_names
             else:
-                row_is_scratched = norm in all_scratched_names or compute_is_scratched_final(row)
+                row_is_scratched = (_scratch_key(race_num, norm) in all_scratched_names
+                                    or compute_is_scratched_final(row))
 
             if not row_is_scratched:
                 active_csv.append(row)
@@ -5198,7 +5208,7 @@ def _update_scratchings_impl(meeting_id, track_condition=None):
 
             for horse in race.horses:
                 horse_norm = normalize_runner_name(horse.horse_name)
-                final_is_scratched = horse_norm in all_scratched_names
+                final_is_scratched = _scratch_key(race.race_number, horse.horse_name) in all_scratched_names
 
                 # Actively persist the authoritative final scratch state for
                 # every runner. This clears stale DB rows (is_scratched=True,
