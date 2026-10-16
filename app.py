@@ -263,33 +263,20 @@ def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_
     ml_rank = {h.id: i + 1 for i, h in enumerate(ml_ranked)}
     ml_gap = (ml_ranked[0].prediction.ml_score - ml_ranked[1].prediction.ml_score) if len(ml_ranked) > 1 else None
     market, market_state = _rank_active_ladbrokes_market(odds_payload, horses)
+    # Market context only. The favourite badges (Sweet Spot, Full Model +
+    # Market Consensus, 20 Gap, Elite) were removed on 16 Oct 2026: over all
+    # history they lost 7-12%, no better than backing every favourite (-10%).
     out = {}
     for h in horses:
         m = market.get(h.id, {})
-        is_ml_top_fav = ml_rank.get(h.id) == 1 and m.get('is_favourite') and market_state.get('available')
-        full = analyzer_rank.get(h.id) == pfai_rank.get(h.id) == ml_rank.get(h.id) == 1 and m.get('is_favourite') and market_state.get('available')
-        sweet = bool(is_ml_top_fav and m.get('price') is not None and 2.50 <= m.get('price') <= 3.99)
-        gap20 = bool(is_ml_top_fav and ml_gap is not None and ml_gap >= 20)
-        badges=[]; reasons=[]
-        if sweet:
-            badges.append('★★★★★ ML Market Sweet Spot'); reasons.append(f"Qualified because the ML top pick is the Ladbrokes favourite at ${m.get('price'):.2f}.")
-        if full:
-            badges.append('★★★★ Full Model + Market Consensus'); reasons.append('Qualified because Analyzer, PFAI and ML all rank this horse first and it is also the Ladbrokes favourite.')
-        if gap20:
-            badges.append('★★★★ ML Market Agreement + 20 Gap'); reasons.append(f"Qualified because the ML top pick is the Ladbrokes favourite with a {ml_gap:.1f}-point ML gap.")
-        cnt=len(badges)
-
         out[h.id]={
             'ladbrokes_fixed_win_price': m.get('price'), 'ladbrokes_market_rank': m.get('market_rank'),
             'is_ladbrokes_favourite': bool(m.get('is_favourite')), 'is_joint_ladbrokes_favourite': bool(m.get('is_joint_favourite')),
             'ladbrokes_odds_updated_at': market_state.get('fetched_at') or (odds_payload or {}).get('fetched_at'),
             'analyzer_rank': analyzer_rank.get(h.id), 'pfai_rank': pfai_rank.get(h.id), 'ml_rank': ml_rank.get(h.id),
             'ml_score': h.prediction.ml_score if getattr(h, 'prediction', None) else None, 'ml_score_gap': ml_gap if ml_rank.get(h.id)==1 else None,
-            'is_ml_market_sweet_spot': sweet, 'is_full_model_market_consensus': full, 'is_ml_market_gap_20': gap20,
-            'best_bet_signal_count': cnt,
-            'best_bet_confidence_level': 'Elite Consensus Best Bet' if cnt==3 else ('Strong Consensus Best Bet' if cnt==2 else (badges[0] if cnt==1 else None)),
-            'best_bet_reasons': reasons if reasons else ([market_state.get('reason')] if not market_state.get('available') else []),
-            'best_bet_badges': badges,
+            'best_bet_reasons': [market_state.get('reason')] if not market_state.get('available') else [],
+            'best_bet_badges': [],
         }
     return out
 
@@ -3770,22 +3757,17 @@ def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", li
     return _summarise_ml_performance_races(race_results)
 
 
-LADBROKES_SIGNAL_COHORTS = (
-    ('elite', 'Elite Consensus Best Bet', 7, True),
-    ('sweet_spot', '★★★★★ ML Market Sweet Spot', 1, False),
-    ('full_consensus', '★★★★ Full Model + Market Consensus', 2, False),
-    ('gap_20', '★★★★ ML Market Agreement + 20 Gap', 4, False),
-)
-
-# Best Bets routes tracked alongside the Ladbrokes badges. These come from
-# Prediction.best_bet_routes rather than the Ladbrokes mask.
+# Best Bets routes settled on the ML Data page, from Prediction.best_bet_routes.
+# The four Ladbrokes favourite badges were dropped on 16 Oct 2026 (they lost
+# 7-12% over all history, no better than backing every favourite).
 BEST_BET_ROUTE_COHORTS = (
+    ('maiden', '🏇 Maiden Agreement Best Bet', 'maiden'),
     ('proven_edge', '🔥 Proven Edge Best Bet', 'proven_edge'),
 )
 
 
 def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_to="", limit_param="all", stake=10.0):
-    """Settle captured pre-race Ladbrokes badge cohorts at a flat win stake.
+    """Settle each Best Bets route (maiden, Proven Edge) at a flat win stake.
 
     Each cohort also carries a chronological ``history`` of every settled bet
     with its running P&L, which feeds the cumulative chart under the table.
@@ -3795,10 +3777,7 @@ def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_t
     ).join(Horse, Prediction.horse_id == Horse.id).join(
         Race, Horse.race_id == Race.id
     ).join(Meeting, Race.meeting_id == Meeting.id).join(Result, Result.horse_id == Horse.id).filter(
-        db.or_(
-            Prediction.ladbrokes_signal_mask > 0,
-            *[Prediction.best_bet_routes.like(f'%{route}%') for _key, _label, route in BEST_BET_ROUTE_COHORTS],
-        ),
+        db.or_(*[Prediction.best_bet_routes.like(f'%{route}%') for _key, _label, route in BEST_BET_ROUTE_COHORTS]),
         Result.finish_position > 0,
         Race.results_incomplete.isnot(True),
         Result.sp.isnot(None),
@@ -3814,19 +3793,10 @@ def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_t
         limit = int(limit_param) if str(limit_param).isdigit() else 200
         rows = rows[:limit]
 
-    def mask_matcher(required_mask, exact):
-        def matches(prediction):
-            mask = prediction.ladbrokes_signal_mask or 0
-            return mask == required_mask if exact else bool(mask & required_mask)
-        return matches
-
     def route_matcher(route):
         return lambda prediction: route in (prediction.best_bet_routes or '').split(',')
 
     cohorts = [
-        (key, label, mask_matcher(required_mask, exact))
-        for key, label, required_mask, exact in LADBROKES_SIGNAL_COHORTS
-    ] + [
         (key, label, route_matcher(route))
         for key, label, route in BEST_BET_ROUTE_COHORTS
     ]
@@ -11849,19 +11819,6 @@ def best_bets():
 
                 signal_agreement = signals_all_agree_top(horse.id, signal_top_ids)
                 lb_fields = ladbrokes_signal_fields.get(horse.id, {})
-                ladbrokes_signal_count = int(lb_fields.get('best_bet_signal_count') or 0)
-                signal_mask = (
-                    (1 if lb_fields.get('is_ml_market_sweet_spot') else 0)
-                    | (2 if lb_fields.get('is_full_model_market_consensus') else 0)
-                    | (4 if lb_fields.get('is_ml_market_gap_20') else 0)
-                )
-                # Keep the strongest coherent badge snapshot observed before the
-                # race; never reconstruct live market signals from closing SP.
-                old_mask = int(horse.prediction.ladbrokes_signal_mask or 0)
-                if signal_mask and signal_mask.bit_count() > old_mask.bit_count():
-                    horse.prediction.ladbrokes_signal_mask = signal_mask
-                    horse.prediction.ladbrokes_signal_price = lb_fields.get('ladbrokes_fixed_win_price')
-                    horse.prediction.ladbrokes_signals_captured_at = datetime.utcnow()
 
                 components = parse_notes_component_matches(horse.prediction.notes)
                 matched_components = []
@@ -11894,15 +11851,13 @@ def best_bets():
                     if rank_idx > 0 else 0
                 )
 
-                # Three ways to qualify, all needing Analyzer, PFAI and ML to
-                # rank the horse first: in a maiden race, as the live Ladbrokes
-                # favourite, or with a Proven Edge / Proven Edge+ badge. Watch
-                # badges never qualify a horse. Components, win probability,
-                # sole rides and the consensus badges are still shown on the
-                # rows that qualify.
+                # Two ways to qualify, both needing Analyzer, PFAI and ML to
+                # rank the horse first: in a maiden race, or with a Proven Edge
+                # / Proven Edge+ badge. Watch badges never qualify a horse. The
+                # favourite route was removed on 16 Oct 2026: over all history
+                # it returned -10.5%, the same as backing every favourite.
                 jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
                 maiden_agreement = signal_agreement and is_maiden_race(race.race_class)
-                favourite_agreement = signal_agreement and bool(lb_fields.get('is_full_model_market_consensus'))
                 edge_badges = (
                     evaluate_component_edge_badges(horse, [match['name'] for match in components.values()])
                     if signal_agreement else {}
@@ -11912,7 +11867,6 @@ def best_bets():
                 )
                 routes = [route for route, hit in (
                     ('maiden', maiden_agreement),
-                    ('favourite', favourite_agreement),
                     ('proven_edge', proven_edge_agreement),
                 ) if hit]
                 if maiden_agreement:
@@ -11957,7 +11911,6 @@ def best_bets():
                         'rank_in_race': rank_in_race,
                         'signal_agreement': signal_agreement,
                         'is_maiden_agreement': maiden_agreement,
-                        'is_favourite_agreement': favourite_agreement,
                         'is_proven_edge_agreement': proven_edge_agreement,
                         'best_bet_routes': routes,
                         'edge_badges': edge_badges,

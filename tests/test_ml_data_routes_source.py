@@ -93,24 +93,22 @@ def test_ml_data_page_includes_flat_stake_ladbrokes_signal_performance():
 
     assert 'calculate_ladbrokes_signal_performance(' in route_source
     assert "stake=10.0" in stats_source
-    assert "'Elite Consensus Best Bet', 7, True" in APP_SOURCE
-    assert "'★★★★★ ML Market Sweet Spot', 1, False" in APP_SOURCE
-    assert "'★★★★ Full Model + Market Consensus', 2, False" in APP_SOURCE
-    assert "'★★★★ ML Market Agreement + 20 Gap', 4, False" in APP_SOURCE
-    assert 'Elite Consensus &amp; ML Market Best Bets ($10 Win)' in template
+    assert "('maiden', '🏇 Maiden Agreement Best Bet', 'maiden')" in APP_SOURCE
+    assert "('proven_edge', '🔥 Proven Edge Best Bet', 'proven_edge')" in APP_SOURCE
+    assert 'LADBROKES_SIGNAL_COHORTS' not in APP_SOURCE
+    assert 'Best Bets by Route ($10 Win)' in template
     assert 'Strike Rate' in template
     assert 'ROI' in template
     assert "'history': history" in stats_source
     assert 'ladbrokesSignalPnlChart' in template
 
 
-def test_best_bets_persists_pre_race_ladbrokes_signal_snapshot():
+def test_best_bets_records_routes_not_favourite_badges():
     source = _function_source('best_bets')
 
-    assert 'ladbrokes_signal_mask' in source
-    assert 'ladbrokes_signal_price' in source
-    assert 'ladbrokes_signals_captured_at' in source
-    assert 'never reconstruct live market signals from closing SP' in source
+    # The favourite badges are no longer captured; routes still are.
+    assert 'horse.prediction.ladbrokes_signal_mask =' not in source
+    assert 'merge_best_bet_tracking(horse.prediction, routes, edge_badges)' in source
 
 
 
