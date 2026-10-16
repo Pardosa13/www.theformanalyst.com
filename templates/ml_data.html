@@ -596,6 +596,21 @@
           </tbody>
         </table>
       </div>
+      {% if top_pick_value_test.rows|selectattr('bets')|list %}
+      <div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+        <div>
+          <h5 style="margin:0;color:var(--ml-accent)">Cumulative P&amp;L by Edge</h5>
+          <p class="text-muted" style="font-size:12px;margin:0" id="valueTestPnlSubtitle">$10 flat win bets</p>
+        </div>
+        <div style="text-align:right">
+          <span id="valueTestPnlTotal" style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace"></span>
+          <div id="valueTestPnlBets" style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em"></div>
+        </div>
+      </div>
+      <div id="valueTestPnlButtons" class="d-flex flex-wrap gap-2 mb-3"></div>
+      <canvas id="valueTestPnlChart" height="140"></canvas>
+      <script type="application/json" id="valueTestHistory">{{ top_pick_value_test.rows|tojson }}</script>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -795,17 +810,19 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g" crossorigin="anonymous"></script>
 <script>
-(function renderLadbrokesSignalPnl() {
-    const dataEl = document.getElementById('ladbrokesSignalHistory');
-    const canvas = document.getElementById('ladbrokesSignalPnlChart');
+// Cumulative P&L chart, one line per signal. Shared by the Best Bets route
+// chart and the live top-pick value test chart.
+function renderSignalPnl(prefix, dataId, canvasId) {
+    const dataEl = document.getElementById(dataId);
+    const canvas = document.getElementById(canvasId);
     if (!dataEl || !canvas || typeof Chart === 'undefined') return;
     const signals = JSON.parse(dataEl.textContent).filter(s => s.history && s.history.length);
     if (!signals.length) return;
     const colours = ['#facc15', '#00e5b0', '#60a5fa', '#c084fc', '#fb923c'];
-    const buttonsEl = document.getElementById('signalPnlButtons');
-    const totalEl = document.getElementById('signalPnlTotal');
-    const betsEl = document.getElementById('signalPnlBets');
-    const subtitleEl = document.getElementById('signalPnlSubtitle');
+    const buttonsEl = document.getElementById(prefix + 'Buttons');
+    const totalEl = document.getElementById(prefix + 'Total');
+    const betsEl = document.getElementById(prefix + 'Bets');
+    const subtitleEl = document.getElementById(prefix + 'Subtitle');
     let chart = null;
 
     const money = v => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toFixed(2)}`;
@@ -898,7 +915,9 @@
     signals.forEach((s, i) => addButton(s.label, i));
     if (signals.length > 1) addButton('Compare all', 'all');
     show(0);
-})();
+}
+renderSignalPnl('signalPnl', 'ladbrokesSignalHistory', 'ladbrokesSignalPnlChart');
+renderSignalPnl('valueTestPnl', 'valueTestHistory', 'valueTestPnlChart');
 
 const loadedSections = new Set();
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[char]));

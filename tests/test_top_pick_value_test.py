@@ -84,3 +84,34 @@ def test_ml_data_page_shows_the_top_pick_value_test():
     assert 'top_pick_value_test=top_pick_value_test' in route
     template = Path('templates/ml_data.html').read_text()
     assert 'Live Test: Top Pick When It Beats the Price' in template
+
+
+def test_value_test_rows_carry_a_chart_history():
+    with appmod.app.app_context():
+        db.create_all()
+        try:
+            user = User(username='vh', email='vh@example.com', password_hash='x')
+            db.session.add(user)
+            db.session.flush()
+            meeting = Meeting(user_id=user.id, meeting_name='Hist', uploaded_at=START)
+            db.session.add(meeting)
+            db.session.flush()
+            later = _race(meeting, 2, start=START + timedelta(hours=1))
+            _runner(later, 'Later', 0.5, 6.0, 2, 3.0)
+            earlier = _race(meeting, 1)
+            _runner(earlier, 'Earlier', 0.5, 6.0, 1, 4.0)
+            db.session.commit()
+
+            rows = {r['min_edge_pct']: r for r in appmod.calculate_top_pick_value_test()['rows']}
+            history = rows[5.0]['history']
+            assert rows[5.0]['label'] == '+5 pts'
+            assert rows[0.0]['label'] == 'Any edge (0+)'
+            # Oldest first: the race-1 win, then the race-2 loss.
+            assert [h['race'] for h in history] == [1, 2]
+            assert [h['cumulative'] for h in history] == [30.0, 20.0]
+        finally:
+            db.session.remove()
+            db.drop_all()
+    template = Path('templates/ml_data.html').read_text()
+    assert "renderSignalPnl('valueTestPnl', 'valueTestHistory', 'valueTestPnlChart')" in template
+    assert 'id="valueTestPnlChart"' in template

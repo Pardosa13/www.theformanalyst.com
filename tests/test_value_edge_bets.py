@@ -90,19 +90,22 @@ def test_is_maiden_race_matches_maiden_and_mdn():
     assert not is_maiden_race(None)
 
 
-def test_best_bets_page_has_no_value_edge():
-    """Value edge is gone from the Best Bets page: no panel, no gate, no badge,
-    no capture. Only maiden, favourite or Proven Edge agreement qualifies a horse."""
+def test_best_bets_value_edge_is_top_pick_only():
+    """The any-runner value edge gate (removed 1 Oct 2026) stays gone. Since
+    16 Oct 2026 the only value route is the ML top pick with a pre-race edge of
+    at least VALUE_TOP_PICK_MIN_EDGE_PCT, read from the stored edge."""
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
-    assert 'value_edge' not in source
     assert 'best_bet_routes_for_horse(' in source
     assert 'if routes:' in source
+    assert "'value_top_pick' in routes" in source
+    assert 'VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT' not in source
+    rule = APP_SOURCE[APP_SOURCE.index('def _value_top_pick_edge('):]
+    rule = rule[:rule.index('\n\n\n', 1)]
+    assert "signal_top_ids.get('ml') != horse.id" in rule
+    assert 'VALUE_TOP_PICK_MIN_EDGE_PCT' in rule
+    assert appmod.VALUE_TOP_PICK_MIN_EDGE_PCT == 3.0
     signals = APP_SOURCE[APP_SOURCE.index('def evaluate_ladbrokes_best_bet_signals('):]
     signals = signals[:signals.index('\n\n\n', 1)]
     assert 'value_edge' not in signals
-    assert 'Value Edge' not in signals
     assert '_value_edge_fields_with_stored_fallback' not in APP_SOURCE
-    template = Path('templates/best_bets.html').read_text().lower()
-    assert 'value edge' not in template
-    assert 'value_edge' not in template
