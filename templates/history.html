@@ -306,6 +306,13 @@
 
       <button type="button" class="btn btn-sm btn-secondary" id="filterBtn" aria-pressed="false">Filter</button>
       <button type="button" class="btn btn-sm btn-secondary" id="clearBtn">Clear</button>
+      {% if current_user.is_admin %}
+      <form method="post" action="{{ url_for('delete_meetings_for_day') }}" id="deleteDayForm"
+            style="display:none;">
+        <input type="hidden" name="date" id="deleteDayDate" value="">
+        <button type="submit" class="btn btn-sm btn-danger" id="deleteDayBtn">Delete all for this day</button>
+      </form>
+      {% endif %}
     </div>
 
     {% for m in meetings %}
@@ -394,10 +401,31 @@
 
         let filtering = false;
 
+        const deleteDayForm = document.getElementById('deleteDayForm');
+
         function applyFilter(date) {
+          let shown = 0;
           for (const c of cards) {
-            c.style.display = (!date || c.dataset.meetingDate === date) ? '' : 'none';
+            const match = !date || c.dataset.meetingDate === date;
+            c.style.display = match ? '' : 'none';
+            if (match) shown++;
           }
+          // The bulk delete only appears once a single raceday is picked.
+          if (deleteDayForm) {
+            deleteDayForm.style.display = date ? 'inline' : 'none';
+            document.getElementById('deleteDayDate').value = date || '';
+            document.getElementById('deleteDayBtn').textContent =
+              date ? `Delete all ${shown} for ${formatAuDDMMYY(date)}` : 'Delete all for this day';
+          }
+        }
+
+        if (deleteDayForm) {
+          deleteDayForm.addEventListener('submit', (e) => {
+            const d = document.getElementById('deleteDayDate').value;
+            if (!d || !confirm(`Delete EVERY meeting on ${formatAuDDMMYY(d)}? This cannot be undone.`)) {
+              e.preventDefault();
+            }
+          });
         }
 
         // Auto-default to today's local date and auto-filter on load (if present)

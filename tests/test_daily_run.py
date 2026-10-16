@@ -153,3 +153,24 @@ def test_route_recording_failure_is_logged_not_raised(monkeypatch, caplog):
         dr.record_routes(db, [])
     assert rolled_back == [True]
     assert 'Recording Best Bets routes failed' in caplog.text
+
+
+def test_only_meetings_with_a_ladbrokes_market_are_imported(monkeypatch):
+    import ladbrokes
+    monkeypatch.setattr(ladbrokes, 'fetch_todays_meetings',
+                        lambda d: [{'name': 'Randwick'}, {'name': 'Wagga'}, {'name': 'Gold Coast'}])
+    tracks = dr.fetch_bookie_tracks('2026-10-17')
+    assert dr.offered_by_bookie('Randwick', tracks)
+    assert dr.offered_by_bookie('Wagga', tracks)
+    assert not dr.offered_by_bookie('Stanthorpe', tracks)
+    assert not dr.offered_by_bookie('Yea', tracks)
+    assert not dr.offered_by_bookie('Wondai', tracks)
+
+
+def test_no_ladbrokes_list_means_wait_not_import_everything(monkeypatch):
+    import ladbrokes
+    monkeypatch.setattr(ladbrokes, 'fetch_todays_meetings', lambda d: [])
+    assert dr.fetch_bookie_tracks('2026-10-17') is None
+    body = Path('daily_run.py').read_text().split('def run_pass(')[1]
+    assert body.index('if bookie_tracks is None') < body.index('import_meeting_from_pf(')
+    assert body.index('offered_by_bookie(track, bookie_tracks)') < body.index('import_meeting_from_pf(')

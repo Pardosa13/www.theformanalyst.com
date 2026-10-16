@@ -312,6 +312,22 @@ def record_routes(db, races):
         log.exception('Recording Best Bets routes failed')
 
 
+def fetch_bookie_tracks(day_str):
+    """Track names Ladbrokes offers markets on for the day, or None if the
+    list could not be fetched. Non-TAB meetings (e.g. Stanthorpe, Yea) are
+    not on it: you cannot bet them off course, so they are not imported."""
+    from ladbrokes import fetch_todays_meetings
+    meetings = fetch_todays_meetings(day_str)
+    if not meetings:
+        return None
+    return [m.get('name') or '' for m in meetings]
+
+
+def offered_by_bookie(track, bookie_tracks):
+    from ladbrokes import _venues_match
+    return any(name and _venues_match(name, track) for name in bookie_tracks)
+
+
 def run_pass(app, day, summary):
     from app import (_extract_v1_scratchings_for_track, _extract_v2_scratched_set,
                      _update_scratchings_impl, db, import_meeting_from_pf, pf_service)
@@ -344,6 +360,7 @@ def run_pass(app, day, summary):
 
     admin = User.query.filter_by(is_admin=True).order_by(User.id).first()
     prefix = day.strftime('%y%m%d')
+    bookie_tracks = fetch_bookie_tracks(day_str)
 
     for pf in pf_meetings:
         track, pf_id = pf['track_name'], pf['meeting_id']
@@ -354,6 +371,12 @@ def run_pass(app, day, summary):
             if meeting is None:
                 if is_abandoned(item):
                     log.info('%s abandoned: not imported', name)
+                    continue
+                if bookie_tracks is None:
+                    log.warning('%s not imported: Ladbrokes meetings list unavailable, retry next pass', name)
+                    continue
+                if not offered_by_bookie(track, bookie_tracks):
+                    log.info('%s not imported: no Ladbrokes market (non-TAB meeting)', name)
                     continue
                 rating, rail, source = resolve_conditions(item, pf_service.api_key, pf_id)
                 log.info('Importing %s: rating %s, rail %sm (from %s). Conditions item: %s',
