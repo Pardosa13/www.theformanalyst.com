@@ -65,8 +65,11 @@ def test_best_bets_route_also_shows_maiden_triple_agreement():
     """Analyzer + PFAI + ML agreement in a maiden race qualifies on its own."""
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
-    assert 'maiden_agreement = signal_agreement and is_maiden_race(race.race_class)' in source
+    assert "maiden_agreement = 'maiden' in routes" in source
     assert 'MAIDEN_AGREEMENT_BADGE' in source
+    rule = APP_SOURCE[APP_SOURCE.index('def best_bet_routes_for_horse('):]
+    rule = rule[:rule.index('\n\n\n', 1)]
+    assert "('maiden', is_maiden_race(race.race_class))" in rule
 
 
 def test_best_bets_has_no_favourite_route():
@@ -93,8 +96,7 @@ def test_best_bets_page_has_no_value_edge():
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
     assert 'value_edge' not in source
-    assert "('maiden', maiden_agreement)" in source
-    assert "('proven_edge', proven_edge_agreement)" in source
+    assert 'best_bet_routes_for_horse(' in source
     assert 'if routes:' in source
     signals = APP_SOURCE[APP_SOURCE.index('def evaluate_ladbrokes_best_bet_signals('):]
     signals = signals[:signals.index('\n\n\n', 1)]
