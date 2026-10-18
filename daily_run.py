@@ -475,4 +475,12 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    finally:
+        logging.shutdown()
+        sys.stdout.flush()
+        sys.stderr.flush()
+    # Exit straight away. Loading the app leaves database pools and helper
+    # threads open, which keep the Railway container (and its bill) alive.
+    os._exit(0)
