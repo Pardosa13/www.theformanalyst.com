@@ -59,11 +59,21 @@ PAST_RUN_FEATURES = [
     'pr_dry_avg_margin_l10',  # firm/good runs
     'pr_days_l1_l2',          # days between last two runs
     'pr_weight_vs_l5',        # today's weight minus average weight carried last 5
+    'pr_avg_class_l5',        # average class level of last 5 runs (see class_level)
+    'pr_class_trend',         # last start class minus average of runs 2-5 (positive = stepping up)
+    'pr_class_vs_today',      # today's class minus average of last 5 (positive = harder today)
+    'pr_prep_runs',           # runs this preparation (a 60+ day gap starts a new prep)
+    'pr_best_margin_prep',    # best margin this preparation
+    'pr_jockey_runs_l10',     # past rides on this horse by today's jockey
+    'pr_jockey_avg_margin_l10',
+    'pr_late_speed_last',     # estimated last-600m speed at last start (see _parse_run)
+    'pr_best_late_speed_l5',
 ]
 
 # Race-relative rank/vs-average derivatives (same treatment as NEW_RELATIVE_COLS).
 PAST_RUN_RELATIVE_COLS = [
     'pr_avg_margin_l3', 'pr_avg_log_sp_l5', 'pr_last_adj_speed', 'pr_best_adj_speed_l5',
+    'pr_avg_class_l5', 'pr_best_late_speed_l5',
 ]
 PAST_RUN_RELATIVE_LOWER_IS_BETTER = {'pr_avg_margin_l3', 'pr_avg_log_sp_l5'}
 
@@ -121,6 +131,38 @@ def _condition_group(text_value):
     return None
 
 
+def class_level(text_value):
+    """Class string -> rough ladder number (higher = stronger race). None if unknown.
+
+    Maiden 20, Class 1-6 -> 30-55, Benchmark/Rating N -> N, Restricted/Open
+    handicap 85-90, Listed 95, Group 3/2/1 100/105/110.
+    """
+    text_value = str(text_value or '').lower()
+    if not text_value.strip():
+        return None
+    if 'group 1' in text_value or re.search(r'\bg1\b', text_value):
+        return 110.0
+    if 'group 2' in text_value or re.search(r'\bg2\b', text_value):
+        return 105.0
+    if 'group 3' in text_value or re.search(r'\bg3\b', text_value):
+        return 100.0
+    if 'listed' in text_value or re.search(r'\blr?\b', text_value):
+        return 95.0
+    match = re.search(r'(?:bm|benchmark|rating|rst|rs)\s*(\d{2,3})', text_value)
+    if match:
+        return float(match.group(1))
+    match = re.search(r'(?:class|cl)\s*(\d)', text_value)
+    if match:
+        return 25.0 + 5.0 * int(match.group(1))
+    if 'maiden' in text_value or 'mdn' in text_value:
+        return 20.0
+    if 'open' in text_value or 'quality' in text_value:
+        return 90.0
+    if 'restricted' in text_value:
+        return 60.0
+    return None
+
+
 def _parse_run(row):
     """One past-run row -> dict, or None if it has no usable date/position."""
     run_date = parse_date(row.get('form meeting date'))
@@ -140,6 +182,18 @@ def _parse_run(row):
         speed = distance / own_seconds
         if 10.0 <= speed <= 20.0:
             adj_speed = speed
+    # 'sectional' is the race's last-600m time ('34.88sec 600m'), again the
+    # leader's not the horse's. The horse's is estimated with the finishing
+    # margin, which assumes it held its 600m position gap — rough, so the
+    # back-test decides whether it earns its place.
+    late_speed = None
+    sectional = re.match(r'\s*(\d+(?:\.\d+)?)\s*sec\s*(\d+)\s*m', str(row.get('sectional') or ''), re.I)
+    if sectional and margin is not None:
+        sect_seconds, sect_metres = float(sectional.group(1)), float(sectional.group(2))
+        if sect_seconds > 0 and sect_metres > 0:
+            speed = sect_metres / (sect_seconds + max(margin, 0.0) * SECONDS_PER_LENGTH)
+            if 12.0 <= speed <= 20.0:
+                late_speed = speed
     price = _float(row.get('form price'))
     weight = _float(row.get('form weight'))
     return {
@@ -153,6 +207,9 @@ def _parse_run(row):
         'track': _track_key(row.get('form track')),
         'condition': _condition_group(row.get('form track condition')),
         'race_id': str(row.get('race id') or '').strip(),
+        'class': class_level(row.get('form class')),
+        'jockey': normalize_name(str(row.get('form jockey') or '')),
+        'late_speed': late_speed,
     }
 
 
@@ -161,7 +218,8 @@ def _mean(values):
     return float(np.mean(values)) if values else np.nan
 
 
-def compute_past_run_features(runs, meeting_date, distance, track, weight):
+def compute_past_run_features(runs, meeting_date, distance, track, weight,
+                              today_class=None, today_jockey=None):
     """runs: parsed past runs for one horse (any order). Returns PAST_RUN_FEATURES dict."""
     features = empty_past_run_features()
     if meeting_date is not None:
@@ -222,6 +280,42 @@ def compute_past_run_features(runs, meeting_date, distance, track, weight):
     weights = [r['weight'] for r in l5 if r['weight']]
     if weight and 45 <= weight <= 70 and weights:
         features['pr_weight_vs_l5'] = weight - float(np.mean(weights))
+
+    classes_l5 = [r['class'] for r in l5 if r['class'] is not None]
+    if classes_l5:
+        features['pr_avg_class_l5'] = float(np.mean(classes_l5))
+        if today_class is not None:
+            features['pr_class_vs_today'] = today_class - features['pr_avg_class_l5']
+    if runs[0]['class'] is not None:
+        earlier = _mean(r['class'] for r in runs[1:5])
+        if not np.isnan(earlier):
+            features['pr_class_trend'] = runs[0]['class'] - earlier
+
+    # Current preparation: runs back to the first 60+ day gap. A horse
+    # resuming today (60+ days since its last run) is on 0 prep runs.
+    prep = []
+    if meeting_date is None or (meeting_date - runs[0]['date']).days < 60:
+        prep.append(runs[0])
+        for previous, run in zip(runs, runs[1:]):
+            if (previous['date'] - run['date']).days >= 60:
+                break
+            prep.append(run)
+    features['pr_prep_runs'] = float(len(prep))
+    prep_margins = [r['margin'] for r in prep if r['margin'] is not None]
+    if prep_margins:
+        features['pr_best_margin_prep'] = float(min(prep_margins))
+
+    jockey = normalize_name(str(today_jockey or ''))
+    if jockey:
+        rides = [r for r in runs if r['jockey'] == jockey]
+        features['pr_jockey_runs_l10'] = float(len(rides))
+        features['pr_jockey_avg_margin_l10'] = _mean(r['margin'] for r in rides)
+
+    if runs[0]['late_speed'] is not None:
+        features['pr_late_speed_last'] = runs[0]['late_speed']
+    late = [r['late_speed'] for r in l5 if r['late_speed'] is not None]
+    if late:
+        features['pr_best_late_speed_l5'] = float(max(late))
     return features
 
 
@@ -265,5 +359,7 @@ def past_run_features_for_meeting(csv_text):
             distance=_float(row.get('distance')),
             track=row.get('track'),
             weight=_float(row.get('horse weight')),
+            today_class=class_level(row.get('class restrictions')),
+            today_jockey=row.get('horse jockey'),
         )
     return out

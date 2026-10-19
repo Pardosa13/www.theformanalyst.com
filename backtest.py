@@ -87,6 +87,11 @@ from model_classes import (
     race_winner_log_loss, set_race_context, solve_joint_kelly,
 )
 from book_quality import SUSPICIOUS_OVERROUND, unusable_race_ids
+from pf_form import (
+    PF_FORM_FEATURES, PF_FORM_RELATIVE_COLS, PF_FORM_RELATIVE_LOWER_IS_BETTER,
+    empty_pf_form_features, meeting_features as pf_meeting_features, snapshot_usable, tab_key,
+)
+from track_bias import TRACK_BIAS_FEATURES, empty_track_bias_features, point_in_time_features
 from past_runs import (
     PAST_RUN_FEATURES, PAST_RUN_RELATIVE_COLS, PAST_RUN_RELATIVE_LOWER_IS_BETTER,
     empty_past_run_features, horse_key, past_run_features_for_meeting,
@@ -604,15 +609,59 @@ def load_historical_data():
     # races.speed_maps_json — previously unused columns). Carried inside
     # strike_rate_data so load_historical_data()'s public signature stays
     # (df, strike_rate_data) for existing callers.
-    pf_ratings_lookup, pf_speedmaps_lookup = load_pf_race_lookups()
+    pf_ratings_lookup, pf_speedmaps_lookup, pf_race_ids = load_pf_race_lookups()
     strike_rate_data['pf_ratings'] = pf_ratings_lookup
     strike_rate_data['pf_speedmaps'] = pf_speedmaps_lookup
+    strike_rate_data['pf_race_ids'] = pf_race_ids
 
     # Past runs 2-10 from each meeting's saved form file (pr_* features).
     meeting_ids = df['meeting_id'].dropna().unique().tolist() if 'meeting_id' in df.columns else []
     strike_rate_data['past_runs'] = load_past_run_lookup(meeting_ids)
+    strike_rate_data['pf_form'] = load_pf_form_lookup()
 
     return df, strike_rate_data
+
+
+def load_pf_form_lookup():
+    """{(meeting_id, race_no, tab_no): pf form features} from pf_form_snapshots.
+
+    Only races whose saved copy was captured before the race started are used
+    (pf_form.snapshot_usable). Empty until daily_run has saved some meetings;
+    the features are then NaN and median-filled.
+    """
+    lookup = {}
+    races_used = races_skipped = 0
+    try:
+        with engine.connect() as conn:
+            starts = {}
+            for meeting_id, race_number, start in conn.execute(text(
+                "SELECT rc.meeting_id, rc.race_number, rc.start_time_utc FROM races rc "
+                "JOIN pf_form_snapshots s ON s.meeting_id = rc.meeting_id"
+            )):
+                starts[(int(meeting_id), int(race_number))] = start
+            result = conn.execute(text(
+                "SELECT s.meeting_id, s.captured_at, s.form_json, s.conditions_json, m.date "
+                "FROM pf_form_snapshots s JOIN meetings m ON m.id = s.meeting_id"
+            ))
+            for meeting_id, captured_at, form_json, conditions_json, meeting_date in result:
+                try:
+                    races = json.loads(form_json) if form_json else {}
+                    conditions = json.loads(conditions_json) if conditions_json else None
+                except Exception:
+                    continue
+                for race_no in races:
+                    if not snapshot_usable(captured_at, starts.get((int(meeting_id), int(race_no)))):
+                        races_skipped += 1
+                        continue
+                    races_used += 1
+                    for tab, feats in pf_meeting_features(races, conditions, meeting_date, race_no).items():
+                        lookup[(int(meeting_id), str(int(race_no)), tab)] = tuple(
+                            feats[name] for name in PF_FORM_FEATURES)
+        log.info("Loaded PF form-feed features: %s races used, %s skipped (saved after the start), "
+                 "%s runners.", races_used, races_skipped, len(lookup))
+    except Exception as e:
+        log.info(f"No PF form-feed snapshots available yet (pf form features will be NaN): {e}")
+    return lookup
 
 
 def load_past_run_lookup(meeting_ids):
@@ -717,8 +766,14 @@ def repair_missing_meeting_dates(df):
 
 def load_pf_race_lookups():
     """Parse races.ratings_json and races.speed_maps_json into per-runner
-    lookups keyed by (PuntingForm raceId, tabNo) — the same ids csv_data
-    carries as 'race id' / 'horse number'.
+    lookups keyed by (PuntingForm raceId, tabNo).
+
+    The raceId for a runner must come from the race it is running in TODAY,
+    returned third as {(meeting_id, race_number): raceId}. csv_data's 'race id' column is NOT
+    usable for this: in the form file it is the id of each row's past run, so
+    on the latest-run row a horse carries its LAST START's race id. Keying on
+    it meant training matched other runners from that old race and live
+    scoring matched nothing.
 
     ratings_json: weight-class/time/early-time/last-N ranks+prices, predicted
     settle position, run style, pfai score/price/rank per runner.
@@ -729,38 +784,58 @@ def load_pf_race_lookups():
     """
     ratings_lookup = {}
     speedmaps_lookup = {}
+    race_ids = {}
     try:
         with engine.connect() as conn:
             result = conn.execute(text(
-                "SELECT ratings_json, speed_maps_json FROM races "
+                "SELECT meeting_id, race_number, ratings_json, speed_maps_json FROM races "
                 "WHERE ratings_json IS NOT NULL OR speed_maps_json IS NOT NULL"
             ))
-            for ratings_blob, speedmaps_blob in result:
-                try:
-                    d = ratings_blob
-                    while isinstance(d, str):
-                        d = json.loads(d)
-                    for item in ((d or {}).get('payLoad') or []):
-                        ratings_lookup[(item.get('raceId'), item.get('tabNo'))] = item
-                except Exception:
-                    pass
-                try:
-                    d = speedmaps_blob
-                    while isinstance(d, str):
-                        d = json.loads(d)
-                    for race in ((d or {}).get('payLoad') or []):
-                        rid = race.get('raceId')
-                        for item in (race.get('items') or []):
-                            speedmaps_lookup[(rid, item.get('tabNo'))] = item
-                except Exception:
-                    pass
+            for meeting_id, race_number, ratings_blob, speedmaps_blob in result:
+                r_lookup, s_lookup, pf_race_id = parse_pf_race_blobs(ratings_blob, speedmaps_blob)
+                ratings_lookup.update(r_lookup)
+                speedmaps_lookup.update(s_lookup)
+                if pf_race_id is not None and meeting_id is not None and race_number is not None:
+                    race_ids[(int(meeting_id), int(race_number))] = pf_race_id
         log.info(
-            "Loaded PuntingForm race lookups: %s ratings entries, %s speed-map entries.",
-            len(ratings_lookup), len(speedmaps_lookup),
+            "Loaded PuntingForm race lookups: %s ratings entries, %s speed-map entries, %s races.",
+            len(ratings_lookup), len(speedmaps_lookup), len(race_ids),
         )
     except Exception as e:
         log.warning(f"Could not load PuntingForm race lookups (pf_* features will be NaN): {e}")
-    return ratings_lookup, speedmaps_lookup
+    return ratings_lookup, speedmaps_lookup, race_ids
+
+
+PF_LOOKUP_VERSION = 2
+
+
+def parse_pf_race_blobs(ratings_blob, speedmaps_blob):
+    """One race's ratings_json/speed_maps_json -> (ratings, speedmaps, raceId).
+
+    Shared with ml_predict so training and live parse identically.
+    """
+    ratings_lookup, speedmaps_lookup, race_id = {}, {}, None
+    try:
+        d = ratings_blob
+        while isinstance(d, str):
+            d = json.loads(d)
+        for item in ((d or {}).get('payLoad') or []):
+            ratings_lookup[(item.get('raceId'), item.get('tabNo'))] = item
+            race_id = race_id if race_id is not None else item.get('raceId')
+    except Exception:
+        pass
+    try:
+        d = speedmaps_blob
+        while isinstance(d, str):
+            d = json.loads(d)
+        for race in ((d or {}).get('payLoad') or []):
+            rid = race.get('raceId')
+            race_id = race_id if race_id is not None else rid
+            for item in (race.get('items') or []):
+                speedmaps_lookup[(rid, item.get('tabNo'))] = item
+    except Exception:
+        pass
+    return ratings_lookup, speedmaps_lookup, race_id
 
 
 def load_strike_rate_data():
@@ -1064,7 +1139,7 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
                       jockey_sr_history=None, trainer_sr_history=None, as_of_date=None,
                       pf_ratings_lookup=None, pf_speedmaps_lookup=None,
                       jockey_extra_lookup=None, trainer_extra_lookup=None,
-                      past_run_lookup=None):
+                      past_run_lookup=None, pf_race_ids=None, pf_form_lookup=None):
     """
     Extract ML features from a horse's csv_data dict.
     Returns (features, jockey_used_dated_snapshot, trainer_used_dated_snapshot).
@@ -1409,11 +1484,13 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
         features[f'last{n}_price'] = _pf_price(cd.get(f'last{n}timeprice', cd.get(f'last{n}TimePrice')))
 
     # ── PuntingForm ratings_json per-runner features ──
+    # Today's PuntingForm race id comes from the race row (pf_race_ids), never
+    # from csv_data's 'race id' — that is the horse's last-start race.
     pf_race_id = None
     tab_no = None
     try:
-        pf_race_id = int(cd.get('race id'))
         tab_no = int(cd.get('horse number'))
+        pf_race_id = (pf_race_ids or {}).get((int(row.get('meeting_id')), int(float(cd.get('race number')))))
     except Exception:
         pass
     rating = (pf_ratings_lookup or {}).get((pf_race_id, tab_no)) if pf_race_id else None
@@ -1499,6 +1576,29 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
         past = dict(zip(PAST_RUN_FEATURES, past))
     features.update(past or empty_past_run_features())
 
+    # ── Ratings prices that were pulled but never used ──
+    features['pf_early_time_price'] = _pf_price(rating.get('earlyTimePrice')) if rating else np.nan
+    features['pf_weight_class_price'] = _pf_price(rating.get('weightClassPrice')) if rating else np.nan
+    features['pf_adj_weight_class_price'] = (
+        _pf_price(rating.get('timeAdjustedWeightClassPrice')) if rating else np.nan)
+
+    # ── Track bias (track_bias.py): filled in by the caller from results
+    # strictly before this meeting. NaN placeholders keep the column order.
+    for name in TRACK_BIAS_FEATURES:
+        features[name] = np.nan
+
+    # ── PuntingForm v2 form feed (pf_form.py), saved before the jump ──
+    pf_form = None
+    if pf_form_lookup:
+        try:
+            pf_form = pf_form_lookup.get((int(row.get('meeting_id')), str(int(float(cd.get('race number')))),
+                                          tab_key(cd.get('horse number'))))
+        except (TypeError, ValueError):
+            pf_form = None
+    if isinstance(pf_form, tuple):
+        pf_form = dict(zip(PF_FORM_FEATURES, pf_form))
+    features.update(pf_form or empty_pf_form_features())
+
     return features, jockey_used_dated_snapshot, trainer_used_dated_snapshot
 
 
@@ -1511,11 +1611,11 @@ NEW_RELATIVE_COLS = [
     'form_speed_mps', 'pf_time_rank', 'pf_weight_class_rank', 'pfai_price',
     'sm_assessed_prob', 'sm_settle', 'pf_early_time_rank',
     'opponent_quality_form',
-] + PAST_RUN_RELATIVE_COLS
+] + PAST_RUN_RELATIVE_COLS + ['tb_barrier_win_edge', 'tb_style_win_edge'] + PF_FORM_RELATIVE_COLS
 NEW_RELATIVE_LOWER_IS_BETTER = {
     'pf_time_rank', 'pf_weight_class_rank', 'pfai_price', 'sm_settle',
     'pf_early_time_rank',
-} | PAST_RUN_RELATIVE_LOWER_IS_BETTER
+} | PAST_RUN_RELATIVE_LOWER_IS_BETTER | PF_FORM_RELATIVE_LOWER_IS_BETTER
 
 
 # ─────────────────────────────────────────────
@@ -1649,6 +1749,29 @@ def _fill_point_in_time_breeding_rates(feature_rows, sire_names, dam_names,
 FORM_SCORE_DEFAULT = 0.0
 
 
+def _fill_point_in_time_track_bias(feature_rows, horse_ids, df_rows):
+    """tb_* features from every resulted runner on EARLIER dates.
+
+    Accumulates over all of df_rows (including races the book-quality gate
+    keeps out of training: their finishing order is still real), the same
+    population ml_predict._load_track_bias_stats counts live.
+    """
+    tb_rows, tb_ids = [], []
+    for _, r in df_rows.iterrows():
+        cd = r.get('csv_data') or {}
+        if isinstance(cd, str):
+            try:
+                cd = json.loads(cd)
+            except Exception:
+                cd = {}
+        when = pd.to_datetime(r.get('meeting_date'), errors='coerce')
+        tb_rows.append((None if pd.isna(when) else when.date(), cd, r.get('finish_position')))
+        tb_ids.append(r['horse_id'])
+    by_horse = dict(zip(tb_ids, point_in_time_features(tb_rows)))
+    for i, horse_id in enumerate(horse_ids):
+        feature_rows[i].update(by_horse.get(horse_id) or empty_track_bias_features())
+
+
 def _build_form_field_lookup(race_ids, horse_names, finish_positions):
     """race_id -> [(normalized_horse_name, finish_position), ...] for every
     runner in that race.
@@ -1749,6 +1872,8 @@ def build_training_set(df, strike_rate_data=None):
     pf_ratings_lookup = (strike_rate_data or {}).get('pf_ratings', {})
     pf_speedmaps_lookup = (strike_rate_data or {}).get('pf_speedmaps', {})
     past_run_lookup = (strike_rate_data or {}).get('past_runs', {})
+    pf_race_ids = (strike_rate_data or {}).get('pf_race_ids', {})
+    pf_form_lookup = (strike_rate_data or {}).get('pf_form', {})
     jockey_extra_lookup = (strike_rate_data or {}).get('jockeys_extra', {})
     trainer_extra_lookup = (strike_rate_data or {}).get('trainers_extra', {})
 
@@ -1822,7 +1947,8 @@ def build_training_set(df, strike_rate_data=None):
                 as_of_date=row.get('meeting_date'),
                 pf_ratings_lookup=pf_ratings_lookup, pf_speedmaps_lookup=pf_speedmaps_lookup,
                 jockey_extra_lookup=jockey_extra_lookup, trainer_extra_lookup=trainer_extra_lookup,
-                past_run_lookup=past_run_lookup,
+                past_run_lookup=past_run_lookup, pf_race_ids=pf_race_ids,
+                pf_form_lookup=pf_form_lookup,
             )
             finish = int(row['finish_position'])
             sp = float(row['sp']) if row['sp'] else None
@@ -1871,6 +1997,7 @@ def build_training_set(df, strike_rate_data=None):
             continue
 
     _fill_point_in_time_breeding_rates(feature_rows, sire_names, dam_names, meeting_dates, targets_won)
+    _fill_point_in_time_track_bias(feature_rows, horse_ids, df_unique)
 
     field_lookup = _build_form_field_lookup(race_ids, form_horse_names, form_finish_positions)
     per_row_form_scores, final_form_scores = _compute_point_in_time_form_scores(
@@ -3366,6 +3493,9 @@ def _attach_model_metadata(model, model_type, model_name, run_id, artifact_filen
         'market_blend_alpha': getattr(model, MARKET_BLEND_ALPHA_ATTR, None),
     }
     model._form_analyst_expected_features = list(feature_names)
+    # Trained with pf_* features keyed on today's race (see load_pf_race_lookups).
+    # Live scoring only feeds real pf_* values to models carrying this.
+    model._form_analyst_pf_lookup_version = PF_LOOKUP_VERSION
     model._form_analyst_selection_metrics = stamped_metrics
     # Same pattern as _form_analyst_feature_medians: stamp the training run's
     # jockey/trainer snapshot coverage onto the artifact itself so it travels

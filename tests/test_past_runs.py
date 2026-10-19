@@ -119,3 +119,34 @@ def test_training_and_live_extract_identical_past_run_values():
     assert names[idx:idx + len(past_runs.PAST_RUN_FEATURES)] == past_runs.PAST_RUN_FEATURES
     for col in past_runs.PAST_RUN_RELATIVE_COLS:
         assert f'{col}_race_rank' in names and f'{col}_vs_race_avg' in names
+
+
+def test_class_prep_jockey_and_late_speed():
+    header = ("meeting date,track,race number,distance,class restrictions,horse name,horse jockey,"
+              "horse weight,form meeting date,form track,form distance,form class,form jockey,"
+              "form position,form margin,form price,form time,sectional,form track condition,"
+              "form weight, race id\n")
+    rows = [
+        # last start 20 days ago at BM78 under today's jockey
+        ('30/09/26', 'BM78', 'J Bloggs', 2, 1.0, '35.00sec 600m', 1),
+        ('10/09/26', 'BM64', 'A Other', 1, 0.5, '34.80sec 600m', 2),
+        # 90-day gap before this one: previous preparation
+        ('01/06/26', 'Maiden', 'J Bloggs', 1, 3.0, '36.00sec 600m', 3),
+    ]
+    csv_text = header + ''.join(
+        f"20/10/2026,Flemington,2,1200m,BM84,Delta,J Bloggs,58,{d},Flemington,1200,{c},{j},{p},{m},"
+        f"5.0,01:10.00,{sec},Good 4,58,{rid}\n" for d, c, j, p, m, sec, rid in rows)
+    feats = past_runs.past_run_features_for_meeting(csv_text)[('2', 'delta')]
+    assert feats['pr_avg_class_l5'] == pytest.approx((78 + 64 + 20) / 3)
+    assert feats['pr_class_trend'] == pytest.approx(78 - (64 + 20) / 2)
+    assert feats['pr_class_vs_today'] == pytest.approx(84 - (78 + 64 + 20) / 3)
+    assert feats['pr_prep_runs'] == 2
+    assert feats['pr_best_margin_prep'] == pytest.approx(-0.5)
+    assert feats['pr_jockey_runs_l10'] == 2
+    assert feats['pr_late_speed_last'] == pytest.approx(600 / (35.0 + 1.0 * 0.17))
+
+
+def test_horse_resuming_today_has_no_prep_runs():
+    csv_text = HEADER + _row('Epsilon', '01/06/26', 1, 2.0, race_id='40')
+    feats = past_runs.past_run_features_for_meeting(csv_text)[('3', 'epsilon')]
+    assert feats['pr_prep_runs'] == 0

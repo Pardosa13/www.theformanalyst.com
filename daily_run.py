@@ -328,6 +328,21 @@ def offered_by_bookie(track, bookie_tracks):
     return any(name and _venues_match(name, track) for name in bookie_tracks)
 
 
+def save_pf_form(db, meeting, pf_meeting_id, conditions_item):
+    """Save PuntingForm's v2 form feed for this meeting once, before scoring.
+
+    PuntingForm only keeps 30 days, so this is the only way the ML model gets
+    in-run positions, stewards reports, gear changes and the rest for training.
+    Never fatal.
+    """
+    from app import pf_service
+    from pf_form import capture_meeting
+    try:
+        capture_meeting(db, meeting, pf_meeting_id, pf_service.api_key, conditions_item)
+    except Exception:
+        log.exception('Saving the PF form feed failed for %s', meeting.meeting_name)
+
+
 def run_pass(app, day, summary):
     from app import (_extract_v1_scratchings_for_track, _extract_v2_scratched_set,
                      _update_scratchings_impl, db, import_meeting_from_pf, pf_service)
@@ -388,6 +403,7 @@ def run_pass(app, day, summary):
                 summary['imported'].append(name)
                 set_signature(db, meeting.id, scratch_signature(
                     v1_scratch, v2_items, track, _extract_v1_scratchings_for_track, _extract_v2_scratched_set))
+                save_pf_form(db, meeting, pf_id, item)
                 score_ml(db, meeting, summary)
                 record_routes(db, open_races(meeting, race_has_started))
                 if meeting.provisional:
@@ -399,6 +415,7 @@ def run_pass(app, day, summary):
             db.session.commit()  # keeps start times looked up just now
             if not races_to_run:
                 continue
+            save_pf_form(db, meeting, pf_id, item)
 
             new_rating = None
             reasons = []
