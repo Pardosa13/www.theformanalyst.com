@@ -17,6 +17,19 @@ import logging
 from collections import Counter, defaultdict
 import numpy as np
 from strike_rate_matching import build_strike_rate_lookup, get_sr_win_pct, normalize_name
+# Bump together with backtest.PF_LOOKUP_VERSION.
+PF_LOOKUP_VERSION = 2
+
+from pf_form import (
+    PF_FORM_FEATURES, PF_FORM_RELATIVE_COLS, PF_FORM_RELATIVE_LOWER_IS_BETTER,
+    empty_pf_form_features, load_snapshot as load_pf_form_snapshot,
+    meeting_features as pf_meeting_features, snapshot_usable, tab_key,
+)
+from track_bias import TRACK_BIAS_FEATURES, TrackBiasStats, runner_inputs
+from past_runs import (
+    PAST_RUN_FEATURES, PAST_RUN_RELATIVE_COLS, PAST_RUN_RELATIVE_LOWER_IS_BETTER,
+    empty_past_run_features, horse_key, past_run_features_for_meeting,
+)
 import pandas as pd
 from datetime import datetime, timezone
 
@@ -228,7 +241,8 @@ def parse_form_time_seconds(value):
 def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_lookup=None,
                      rail_position=None, pf_ratings_lookup=None, pf_speedmaps_lookup=None,
                      jockey_extra_lookup=None, trainer_extra_lookup=None,
-                     sire_rates=None, dam_rates=None, opponent_quality_form=None):
+                     sire_rates=None, dam_rates=None, opponent_quality_form=None,
+                     past_run_lookup=None, pf_race_id=None, pf_form_lookup=None):
     """
     Extract the same raw features backtest.py trains on.
     cd = horse.csv_data dict
@@ -471,10 +485,10 @@ def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_look
         features[f'last{n}_price'] = _pf_price(cd.get(f'last{n}timeprice', cd.get(f'last{n}TimePrice')))
 
     # ── PuntingForm ratings_json per-runner features ──
-    pf_race_id = None
+    # pf_race_id is today's PuntingForm race id, passed in from the race row.
+    # csv_data's 'race id' is the horse's last-start race and must not be used.
     tab_no = None
     try:
-        pf_race_id = int(cd.get('race id'))
         tab_no = int(cd.get('horse number'))
     except Exception:
         pass
@@ -552,6 +566,32 @@ def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_look
         float(opponent_quality_form) if opponent_quality_form is not None else np.nan
     )
 
+    # ── Past runs 2-10 (past_runs.py) — must stay last, matching backtest.py ──
+    past = None
+    if past_run_lookup:
+        past = past_run_lookup.get(horse_key(cd.get('race number'), cd.get('horse name')))
+    features.update(past or empty_past_run_features())
+
+    # ── Ratings prices that were pulled but never used ──
+    features['pf_early_time_price'] = _pf_price(rating.get('earlyTimePrice')) if rating else np.nan
+    features['pf_weight_class_price'] = _pf_price(rating.get('weightClassPrice')) if rating else np.nan
+    features['pf_adj_weight_class_price'] = (
+        _pf_price(rating.get('timeAdjustedWeightClassPrice')) if rating else np.nan)
+
+    # ── Track bias (track_bias.py): filled in by the caller from results
+    # strictly before this meeting. NaN placeholders keep the column order.
+    for name in TRACK_BIAS_FEATURES:
+        features[name] = np.nan
+
+    # ── PuntingForm v2 form feed (pf_form.py) — keyed (race_no, tab_no) ──
+    pf_form = None
+    if pf_form_lookup:
+        try:
+            pf_form = pf_form_lookup.get((str(int(float(cd.get('race number')))), tab_key(cd.get('horse number'))))
+        except (TypeError, ValueError):
+            pf_form = None
+    features.update(pf_form or empty_pf_form_features())
+
     return features
 
 # Race-relative derivatives (rank within race + delta vs race average) for the
@@ -562,11 +602,11 @@ NEW_RELATIVE_COLS = [
     'form_speed_mps', 'pf_time_rank', 'pf_weight_class_rank', 'pfai_price',
     'sm_assessed_prob', 'sm_settle', 'pf_early_time_rank',
     'opponent_quality_form',
-]
+] + PAST_RUN_RELATIVE_COLS + ['tb_barrier_win_edge', 'tb_style_win_edge'] + PF_FORM_RELATIVE_COLS
 NEW_RELATIVE_LOWER_IS_BETTER = {
     'pf_time_rank', 'pf_weight_class_rank', 'pfai_price', 'sm_settle',
     'pf_early_time_rank',
-}
+} | PAST_RUN_RELATIVE_LOWER_IS_BETTER | PF_FORM_RELATIVE_LOWER_IS_BETTER
 
 
 def add_race_relative_features(feature_rows):
@@ -647,7 +687,9 @@ FEATURE_NAMES = [
     'jockey_career_a2e', 'jockey_l100_a2e', 'jockey_career_runs',
     'trainer_career_a2e', 'trainer_l100_a2e', 'trainer_career_runs',
     'sire_win_rate', 'dam_win_rate', 'opponent_quality_form',
-]
+] + PAST_RUN_FEATURES + [
+    'pf_early_time_price', 'pf_weight_class_price', 'pf_adj_weight_class_price',
+] + TRACK_BIAS_FEATURES + PF_FORM_FEATURES
 
 RACE_RELATIVE_BASE_COLS = [
     'pfai_score', 'last_sp', 'career_win_rate', 'career_podium_rate',
@@ -1259,32 +1301,48 @@ def _load_live_strike_rate_lookups(db_session):
 
 def _load_pf_race_lookups_for_meeting(races):
     """Parse ratings_json/speed_maps_json off this meeting's race rows into
-    per-runner lookups keyed by (PuntingForm raceId, tabNo) — the same ids
-    csv_data carries as 'race id' / 'horse number'. Mirrors
+    per-runner lookups keyed by (PuntingForm raceId, tabNo), plus
+    {race.id: PuntingForm raceId} for today's races. Mirrors
     backtest.load_pf_race_lookups() but scoped to one meeting's races.
     """
     ratings_lookup = {}
     speedmaps_lookup = {}
+    race_ids = {}
     for race in races:
-        try:
-            d = getattr(race, 'ratings_json', None)
-            while isinstance(d, str):
-                d = json.loads(d)
-            for item in ((d or {}).get('payLoad') or []):
-                ratings_lookup[(item.get('raceId'), item.get('tabNo'))] = item
-        except Exception:
-            pass
-        try:
-            d = getattr(race, 'speed_maps_json', None)
-            while isinstance(d, str):
-                d = json.loads(d)
-            for pf_race in ((d or {}).get('payLoad') or []):
-                rid = pf_race.get('raceId')
-                for item in (pf_race.get('items') or []):
-                    speedmaps_lookup[(rid, item.get('tabNo'))] = item
-        except Exception:
-            pass
-    return ratings_lookup, speedmaps_lookup
+        r_lookup, s_lookup, pf_race_id = _parse_pf_race_blobs(
+            getattr(race, 'ratings_json', None), getattr(race, 'speed_maps_json', None))
+        ratings_lookup.update(r_lookup)
+        speedmaps_lookup.update(s_lookup)
+        if pf_race_id is not None:
+            race_ids[getattr(race, 'id', None)] = pf_race_id
+    return ratings_lookup, speedmaps_lookup, race_ids
+
+
+def _parse_pf_race_blobs(ratings_blob, speedmaps_blob):
+    """Same parse as backtest.parse_pf_race_blobs (kept local: backtest pulls
+    in the heavy training stack)."""
+    ratings_lookup, speedmaps_lookup, race_id = {}, {}, None
+    try:
+        d = ratings_blob
+        while isinstance(d, str):
+            d = json.loads(d)
+        for item in ((d or {}).get('payLoad') or []):
+            ratings_lookup[(item.get('raceId'), item.get('tabNo'))] = item
+            race_id = race_id if race_id is not None else item.get('raceId')
+    except Exception:
+        pass
+    try:
+        d = speedmaps_blob
+        while isinstance(d, str):
+            d = json.loads(d)
+        for pf_race in ((d or {}).get('payLoad') or []):
+            rid = pf_race.get('raceId')
+            race_id = race_id if race_id is not None else rid
+            for item in (pf_race.get('items') or []):
+                speedmaps_lookup[(rid, item.get('tabNo'))] = item
+    except Exception:
+        pass
+    return ratings_lookup, speedmaps_lookup, race_id
 
 
 # ── Live pre-race market odds ────────────────────────────────────────────────
@@ -1360,6 +1418,43 @@ def _load_latest_live_odds_for_meeting(races, db_session):
         len(race_ids), len(out), stale, LIVE_ODDS_MAX_AGE_SECONDS,
     )
     return out
+
+
+def _load_track_bias_stats(db_session, meeting_date):
+    """Track bias counts from every resulted runner dated before this meeting.
+
+    Same population as backtest._fill_point_in_time_track_bias: unscratched,
+    finish recorded, race results complete. Empty stats (tb_* -> NaN ->
+    training median) if the query fails.
+    """
+    from sqlalchemy import text
+
+    stats = TrackBiasStats()
+    try:
+        rows = db_session.execute(text("""
+            SELECT h.csv_data->>'track', h.csv_data->>'distance',
+                   h.csv_data->>'horse barrier', h.csv_data->>'runningposition',
+                   COUNT(*),
+                   SUM(CASE WHEN r.finish_position = 1 THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN r.finish_position <= 3 THEN 1 ELSE 0 END)
+            FROM horses h
+            JOIN results r ON r.horse_id = h.id
+            JOIN races rc ON rc.id = h.race_id
+            JOIN meetings m ON m.id = rc.meeting_id
+            WHERE r.finish_position > 0
+              AND rc.results_incomplete IS NOT TRUE
+              AND COALESCE(h.is_scratched, FALSE) = FALSE
+              AND (m.date IS NULL OR :meeting_date IS NULL OR m.date < :meeting_date)
+            GROUP BY 1, 2, 3, 4
+        """), {'meeting_date': meeting_date}).fetchall()
+    except Exception as e:
+        log.warning("Could not load track bias history for live scoring "
+                    "(tb_* features stay NaN -> training-median fill): %s", e)
+        _rollback_after_failed_query(db_session, 'track bias')
+        return stats
+    for track, distance, barrier, style, starts, wins, places in rows:
+        stats.add_counts(track, distance, barrier, style, starts, wins, places)
+    return stats
 
 
 def _load_breeding_win_rates(db_session):
@@ -1583,6 +1678,14 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
     rail_position = getattr(meeting, 'rail_position', None)
     sire_rates, dam_rates = _load_breeding_win_rates(db_session)
     form_scores = _load_form_scores(db_session)
+    past_run_lookup = past_run_features_for_meeting(getattr(meeting, 'csv_data', None))
+    track_bias_stats = _load_track_bias_stats(db_session, getattr(meeting, 'date', None))
+    try:
+        pf_form_races, pf_form_conditions, pf_form_captured_at = load_pf_form_snapshot(db_session, meeting_id)
+    except Exception as e:
+        log.info("No saved PF form feed for meeting %s (pf form features stay NaN): %s", meeting_id, e)
+        _rollback_after_failed_query(db_session, 'pf form snapshot')
+        pf_form_races, pf_form_conditions, pf_form_captured_at = None, None, None
 
     all_scores   = {}   # horse_id -> ml_score
     by_race      = {}   # race_id  -> {horse_id: ml_score}
@@ -1590,7 +1693,14 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
 
     races = db_session.query(Race).filter_by(meeting_id=meeting_id).all()
 
-    pf_ratings_lookup, pf_speedmaps_lookup = _load_pf_race_lookups_for_meeting(races)
+    pf_ratings_lookup, pf_speedmaps_lookup, pf_race_ids = _load_pf_race_lookups_for_meeting(races)
+    if getattr(model, '_form_analyst_pf_lookup_version', 1) < PF_LOOKUP_VERSION:
+        # Models trained before the race-id fix learned pf_* from mismatched
+        # rows and have only ever been served NaN (median) for them live.
+        # Keep serving them exactly that rather than inputs they never saw.
+        log.info("ML_PF_LOOKUP_LEGACY meeting=%s: model predates the pf race-id fix; "
+                 "pf_* features left blank as before.", meeting_id)
+        pf_race_ids = {}
     # The live market's own opinion of this meeting, captured by odds_ingest.py.
     # Read once for the whole meeting rather than per race: one query beats one
     # per race, and a meeting with no snapshots at all should cost one round
@@ -1600,11 +1710,11 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
     log.info(
         "ML_PREDICTION_LIVE_LOOKUPS meeting=%s rail_position=%s pf_ratings_entries=%s "
         "pf_speedmap_entries=%s jockey_sr_loaded=%s trainer_sr_loaded=%s "
-        "jockey_extras=%s trainer_extras=%s sire_rates=%s dam_rates=%s form_scores=%s "
+        "jockey_extras=%s trainer_extras=%s sire_rates=%s dam_rates=%s form_scores=%s past_runs=%s "
         "live_odds_runners=%s",
         meeting_id, rail_position, len(pf_ratings_lookup), len(pf_speedmaps_lookup),
         bool(jockey_sr), bool(trainer_sr), len(jockey_extra), len(trainer_extra),
-        len(sire_rates), len(dam_rates), len(form_scores), len(live_odds),
+        len(sire_rates), len(dam_rates), len(form_scores), len(past_run_lookup), len(live_odds),
     )
     log.info(
         "ML_LIVE_MARKET_BLEND_CONFIG meeting=%s alpha=%.2f blending=%s "
@@ -1616,6 +1726,17 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
         active_horses = [h for h in race.horses if not h.is_scratched]
         if not active_horses:
             continue
+
+        # Same rule as training: the saved form feed only counts for a race it
+        # was captured before.
+        pf_form_lookup = {}
+        if pf_form_races and snapshot_usable(pf_form_captured_at, getattr(race, 'start_time_utc', None)):
+            race_no = str(race.race_number)
+            pf_form_lookup = {
+                (race_no, tab): feats
+                for tab, feats in pf_meeting_features(
+                    pf_form_races, pf_form_conditions, getattr(meeting, 'date', None), race_no).items()
+            }
 
         weights = []
         for h in active_horses:
@@ -1639,6 +1760,7 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
                     rail_position=rail_position,
                     pf_ratings_lookup=pf_ratings_lookup,
                     pf_speedmaps_lookup=pf_speedmaps_lookup,
+                    pf_race_id=pf_race_ids.get(race.id),
                     jockey_extra_lookup=jockey_extra,
                     trainer_extra_lookup=trainer_extra,
                     sire_rates=sire_rates,
@@ -1648,7 +1770,11 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
                     opponent_quality_form=form_scores.get(
                         normalize_name(str(horse.horse_name or ''))
                     ),
+                    past_run_lookup=past_run_lookup,
+                    pf_form_lookup=pf_form_lookup,
                 )
+
+                feats.update(track_bias_stats.features(*runner_inputs(cd)))
 
                 curr_w = feats['horse_weight']
                 feats['weight_vs_avg'] = (race_avg_weight - curr_w) if 49 <= curr_w <= 65 else 0.0

@@ -13,6 +13,7 @@ import logging
 import os
 import sys
 import types
+from datetime import date, datetime
 
 import pytest
 
@@ -27,7 +28,18 @@ import backtest
 import ml_predict
 
 
-EXPECTED_LIVE_FEATURE_COUNT = 207  # 146 legacy + 58 audit + 3 opponent-quality-form
+import past_runs
+import pf_form
+import track_bias
+
+# 146 legacy + 58 audit + 3 opponent-quality-form, then the 2026-10 blocks:
+# past runs, unused ratings prices, track bias, saved PF form feed, and the
+# race-relative rank/vs-average pair for each of their relative columns.
+EXPECTED_LIVE_FEATURE_COUNT = (
+    207 + len(past_runs.PAST_RUN_FEATURES) + 3 + len(track_bias.TRACK_BIAS_FEATURES)
+    + len(pf_form.PF_FORM_FEATURES)
+    + 2 * (len(past_runs.PAST_RUN_RELATIVE_COLS) + 2 + len(pf_form.PF_FORM_RELATIVE_COLS))
+)
 
 
 def full_csv_data(tab_no=1, jockey="John Smith", trainer="Jane Doe",
@@ -58,7 +70,9 @@ def full_csv_data(tab_no=1, jockey="John Smith", trainer="Jane Doe",
         'weight type': 'Handicap', 'age restrictions': '3+',
         'sex restrictions': 'No', 'horse number': str(tab_no),
         'last200timeprice': '4.5', 'last400timeprice': '5.5',
-        'last600timeprice': '6.5', 'race id': '901234',
+        # 'race id' in the form file is the horse's LAST START race, never
+        # today's; a different number here proves no lookup keys on it.
+        'last600timeprice': '6.5', 'race id': '555555',
         'horse sire': sire, 'horse dam': dam,
     }
 
@@ -71,6 +85,8 @@ def pf_rating(tab_no=1):
         'classChange': 1.5, 'predictedSettlePostion': 3 + tab_no,
         'averageHistoricalSettlePosition': 4.2, 'runStyle': 'MID',
         'isReliable': True, 'pfaiPrice': 5.0 + tab_no, 'pfaiRank': 1 + tab_no,
+        'earlyTimePrice': 7.0 + tab_no, 'weightClassPrice': 8.0 + tab_no,
+        'timeAdjustedWeightClassPrice': 9.0 + tab_no,
     }
 
 
@@ -88,8 +104,12 @@ PF_RATINGS = {(901234, 1): pf_rating(1), (901234, 2): pf_rating(2)}
 PF_SPEEDMAPS = {(901234, 1): pf_speedmap_item(1), (901234, 2): pf_speedmap_item(2)}
 
 
+PF_RACE_IDS = {(1667, 5): 901234}   # (meeting_id, race_number) -> today's PuntingForm raceId
+
+
 def backtest_row(cd, rail_position=3):
-    return {'csv_data': cd, 'track_condition': 'Good 4', 'rail_position': rail_position}
+    return {'csv_data': cd, 'track_condition': 'Good 4', 'rail_position': rail_position,
+            'meeting_id': 1667}
 
 
 def extract_both(cd, rail_position=3, pf_ratings=None, pf_speedmaps=None,
@@ -98,13 +118,14 @@ def extract_both(cd, rail_position=3, pf_ratings=None, pf_speedmaps=None,
         backtest_row(cd, rail_position), {}, {},
         pf_ratings_lookup=pf_ratings, pf_speedmaps_lookup=pf_speedmaps,
         jockey_extra_lookup=jockey_extras, trainer_extra_lookup=trainer_extras,
+        pf_race_ids=PF_RACE_IDS,
     )
     live = ml_predict.extract_features(
         cd, 'Good 4', {}, {},
         rail_position=rail_position,
         pf_ratings_lookup=pf_ratings, pf_speedmaps_lookup=pf_speedmaps,
         jockey_extra_lookup=jockey_extras, trainer_extra_lookup=trainer_extras,
-        sire_rates={}, dam_rates={},
+        sire_rates={}, dam_rates={}, pf_race_id=901234,
     )
     return training, live
 
@@ -154,6 +175,7 @@ def test_live_feature_contract_matches_training_columns_exactly():
             backtest_row(cd), {}, {},
             pf_ratings_lookup=PF_RATINGS, pf_speedmaps_lookup=PF_SPEEDMAPS,
             jockey_extra_lookup=JOCKEY_EXTRAS, trainer_extra_lookup=TRAINER_EXTRAS,
+            pf_race_ids=PF_RACE_IDS,
         )
         rows.append(features)
     training_rows = backtest.add_race_relative_features(rows, [1, 1])
@@ -202,16 +224,63 @@ def test_artifact_feature_contract_requires_live_generatable_features():
 
 # ── End-to-end predict_meeting diagnostics ───────────────────────────────────
 
+PAST_RUNS_CSV = (
+    "meeting date,track,race number,distance,class restrictions,horse name,horse jockey,"
+    "horse weight,form meeting date,form track,form distance,form class,form jockey,"
+    "form position,form margin,form price,form time,sectional,form track condition,"
+    "form weight, race id\n"
+    + "".join(
+        f"12/07/2026,Flemington,5,1400m,BM78,{name},John Smith,58.5,{date},Flemington,1400,"
+        f"BM70,John Smith,{pos},{margin},{price},01:24.50,35.10sec 600m,{cond},57,{rid}\n"
+        for name in ('Test Runner', 'Other Runner')
+        for date, pos, margin, price, cond, rid in (
+            ('21/06/2026', 1, 1.5, '4.6', 'Good 4', 1),
+            ('01/06/2026', 4, 2.5, '7.0', 'Soft 6', 2),
+            ('10/05/2026', 2, 0.5, '5.0', 'Heavy 8', 3),
+        )
+    )
+)
+
+
+def _pf_form_runner(tab_no, name):
+    form = {
+        'meetingDate': '2026-06-21T00:00:00', 'position': 1, 'starters': 10, 'margin': 1.5,
+        'distance': 1400, 'inRun': 'finish,1;settling_down,3;m1200,3;m800,3;m400,2;',
+        'flucs': 'opening,5.00;starting,4.60;', 'priceSP': 4.6, 'priceBF': 5.2, 'priceTAB': 4.8,
+        'stewardsReport': 'Held up in the straight.', 'isBarrierTrial': False,
+        'top4Finishers': [{'runnerName': 'Other Runner' if tab_no == 1 else 'Test Runner', 'position': 2}],
+    }
+    return pf_form.trim_runner({
+        'name': name, 'tabNo': tab_no, 'barrier': 4, 'originalBarrier': 5, 'handicap': 70,
+        'prepRuns': 2, 'gearChanges': 'Blinkers first time.',
+        'trainerJockeyA2E_Career': {'a2E': 1.1, 'strikeRate': 18.0, 'runners': 120, 'wins': 22},
+        'trainerJockeyA2E_Last100': {'a2E': 1.05, 'strikeRate': 17.0, 'runners': 100, 'wins': 17},
+        'group1Record': {'starts': 1, 'firsts': 0, 'seconds': 1, 'thirds': 0},
+        'forms': [form],
+    })
+
+
+PF_FORM_SNAPSHOT = (
+    json.dumps({'5': {'1': _pf_form_runner(1, 'Test Runner'), '2': _pf_form_runner(2, 'Other Runner')}}),
+    json.dumps({'penetrometer': '5.1', 'rainfall': 'nil last 24 hours', 'irrigation': '6mm last 24 hours',
+                'weather': 'Fine'}),
+    datetime(2026, 7, 12, 0, 0),
+)
+
+
 class FakeMeeting:
     def __init__(self):
         self.id = 1667
         self.rail_position = 3
+        self.csv_data = PAST_RUNS_CSV
+        self.date = date(2026, 7, 12)
 
 
 class FakeRace:
     def __init__(self, horses):
         self.id = 55
         self.race_number = 5
+        self.start_time_utc = datetime(2026, 7, 12, 4, 35)
         self.track_condition = 'Good 4'
         self.horses = horses
         self.ratings_json = json.dumps({'payLoad': [pf_rating(1), pf_rating(2)]})
@@ -259,6 +328,9 @@ class FakeSession:
             def fetchall(self):
                 return self.rows
 
+            def first(self):
+                return self.rows[0] if self.rows else None
+
         if 'FROM strike_rates' in sql:
             if params.get('sr_type') == 'jockey':
                 return Rows([('John Smith', 18, 100, 1.05, 1.11, 2450)])
@@ -267,6 +339,12 @@ class FakeSession:
             return Rows([('Great Sire', 40, 6)])
         if "'horse dam'" in sql:
             return Rows([('Great Dam', 12, 3)])
+        if 'FROM pf_form_snapshots' in sql:
+            return Rows([PF_FORM_SNAPSHOT])
+        if "'runningposition'" in sql:
+            return Rows([('Flemington', '1400m', '2', 'ONPACE', 40, 6, 15),
+                         ('Flemington', '1400m', '9', 'ONPACE', 30, 2, 8),
+                         ('Caulfield', '1400m', '9', 'LEADER', 50, 7, 18)])
         if 'FROM horse_form_scores' in sql:
             return Rows([('test runner', 1.75), ('other runner', -0.5)])
         raise AssertionError(f"Unhandled SQL in fake session: {sql}")
@@ -277,6 +355,7 @@ class FullContractModel:
 
     def __init__(self):
         self._form_analyst_expected_features = list(ml_predict.FEATURE_NAMES)
+        self._form_analyst_pf_lookup_version = ml_predict.PF_LOOKUP_VERSION
         self._form_analyst_expected_feature_count = len(ml_predict.FEATURE_NAMES)
         self.feature_names_in_ = np.asarray(ml_predict.FEATURE_NAMES)
         self.n_features_in_ = len(ml_predict.FEATURE_NAMES)
@@ -298,6 +377,8 @@ def test_predict_meeting_reports_zero_missing_and_zero_defaulted_features(monkey
     horses = [FakeHorse(11, full_csv_data(tab_no=1, barrier=2), 'Test Runner'),
               FakeHorse(12, full_csv_data(tab_no=2, barrier=9), 'Other Runner')]
     horses[1].csv_data['pfaiscore'] = '65.0'
+    horses[0].csv_data['horse name'] = 'Test Runner'
+    horses[1].csv_data['horse name'] = 'Other Runner'
     meeting = FakeMeeting()
     session = FakeSession(meeting, [FakeRace(horses)])
 
