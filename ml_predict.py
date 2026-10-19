@@ -17,6 +17,10 @@ import logging
 from collections import Counter, defaultdict
 import numpy as np
 from strike_rate_matching import build_strike_rate_lookup, get_sr_win_pct, normalize_name
+from past_runs import (
+    PAST_RUN_FEATURES, PAST_RUN_RELATIVE_COLS, PAST_RUN_RELATIVE_LOWER_IS_BETTER,
+    empty_past_run_features, horse_key, past_run_features_for_meeting,
+)
 import pandas as pd
 from datetime import datetime, timezone
 
@@ -228,7 +232,8 @@ def parse_form_time_seconds(value):
 def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_lookup=None,
                      rail_position=None, pf_ratings_lookup=None, pf_speedmaps_lookup=None,
                      jockey_extra_lookup=None, trainer_extra_lookup=None,
-                     sire_rates=None, dam_rates=None, opponent_quality_form=None):
+                     sire_rates=None, dam_rates=None, opponent_quality_form=None,
+                     past_run_lookup=None):
     """
     Extract the same raw features backtest.py trains on.
     cd = horse.csv_data dict
@@ -552,6 +557,12 @@ def extract_features(cd, track_condition, jockey_sr_lookup=None, trainer_sr_look
         float(opponent_quality_form) if opponent_quality_form is not None else np.nan
     )
 
+    # ── Past runs 2-10 (past_runs.py) — must stay last, matching backtest.py ──
+    past = None
+    if past_run_lookup:
+        past = past_run_lookup.get(horse_key(cd.get('race number'), cd.get('horse name')))
+    features.update(past or empty_past_run_features())
+
     return features
 
 # Race-relative derivatives (rank within race + delta vs race average) for the
@@ -562,11 +573,11 @@ NEW_RELATIVE_COLS = [
     'form_speed_mps', 'pf_time_rank', 'pf_weight_class_rank', 'pfai_price',
     'sm_assessed_prob', 'sm_settle', 'pf_early_time_rank',
     'opponent_quality_form',
-]
+] + PAST_RUN_RELATIVE_COLS
 NEW_RELATIVE_LOWER_IS_BETTER = {
     'pf_time_rank', 'pf_weight_class_rank', 'pfai_price', 'sm_settle',
     'pf_early_time_rank',
-}
+} | PAST_RUN_RELATIVE_LOWER_IS_BETTER
 
 
 def add_race_relative_features(feature_rows):
@@ -647,7 +658,7 @@ FEATURE_NAMES = [
     'jockey_career_a2e', 'jockey_l100_a2e', 'jockey_career_runs',
     'trainer_career_a2e', 'trainer_l100_a2e', 'trainer_career_runs',
     'sire_win_rate', 'dam_win_rate', 'opponent_quality_form',
-]
+] + PAST_RUN_FEATURES
 
 RACE_RELATIVE_BASE_COLS = [
     'pfai_score', 'last_sp', 'career_win_rate', 'career_podium_rate',
@@ -1583,6 +1594,7 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
     rail_position = getattr(meeting, 'rail_position', None)
     sire_rates, dam_rates = _load_breeding_win_rates(db_session)
     form_scores = _load_form_scores(db_session)
+    past_run_lookup = past_run_features_for_meeting(getattr(meeting, 'csv_data', None))
 
     all_scores   = {}   # horse_id -> ml_score
     by_race      = {}   # race_id  -> {horse_id: ml_score}
@@ -1600,11 +1612,11 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
     log.info(
         "ML_PREDICTION_LIVE_LOOKUPS meeting=%s rail_position=%s pf_ratings_entries=%s "
         "pf_speedmap_entries=%s jockey_sr_loaded=%s trainer_sr_loaded=%s "
-        "jockey_extras=%s trainer_extras=%s sire_rates=%s dam_rates=%s form_scores=%s "
+        "jockey_extras=%s trainer_extras=%s sire_rates=%s dam_rates=%s form_scores=%s past_runs=%s "
         "live_odds_runners=%s",
         meeting_id, rail_position, len(pf_ratings_lookup), len(pf_speedmaps_lookup),
         bool(jockey_sr), bool(trainer_sr), len(jockey_extra), len(trainer_extra),
-        len(sire_rates), len(dam_rates), len(form_scores), len(live_odds),
+        len(sire_rates), len(dam_rates), len(form_scores), len(past_run_lookup), len(live_odds),
     )
     log.info(
         "ML_LIVE_MARKET_BLEND_CONFIG meeting=%s alpha=%.2f blending=%s "
@@ -1648,6 +1660,7 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
                     opponent_quality_form=form_scores.get(
                         normalize_name(str(horse.horse_name or ''))
                     ),
+                    past_run_lookup=past_run_lookup,
                 )
 
                 curr_w = feats['horse_weight']

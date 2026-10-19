@@ -27,7 +27,7 @@ import backtest
 import ml_predict
 
 
-EXPECTED_LIVE_FEATURE_COUNT = 207  # 146 legacy + 58 audit + 3 opponent-quality-form
+EXPECTED_LIVE_FEATURE_COUNT = 237  # 146 legacy + 58 audit + 3 opponent-quality-form + 22 past-run + 8 past-run relative
 
 
 def full_csv_data(tab_no=1, jockey="John Smith", trainer="Jane Doe",
@@ -202,10 +202,28 @@ def test_artifact_feature_contract_requires_live_generatable_features():
 
 # ── End-to-end predict_meeting diagnostics ───────────────────────────────────
 
+PAST_RUNS_CSV = (
+    "meeting date,track,race number,distance,horse name,horse weight,form meeting date,"
+    "form track,form distance,form position,form margin,form price,form time,"
+    "form track condition,form weight, race id\n"
+    + "".join(
+        f"12/07/2026,Flemington,5,1400m,{name},58.5,{date},Flemington,1400,{pos},{margin},"
+        f"{price},01:24.50,{cond},57,{rid}\n"
+        for name in ('Test Runner', 'Other Runner')
+        for date, pos, margin, price, cond, rid in (
+            ('21/06/2026', 1, 1.5, '4.6', 'Good 4', 1),
+            ('01/06/2026', 4, 2.5, '7.0', 'Soft 6', 2),
+            ('10/05/2026', 2, 0.5, '5.0', 'Heavy 8', 3),
+        )
+    )
+)
+
+
 class FakeMeeting:
     def __init__(self):
         self.id = 1667
         self.rail_position = 3
+        self.csv_data = PAST_RUNS_CSV
 
 
 class FakeRace:
@@ -298,6 +316,8 @@ def test_predict_meeting_reports_zero_missing_and_zero_defaulted_features(monkey
     horses = [FakeHorse(11, full_csv_data(tab_no=1, barrier=2), 'Test Runner'),
               FakeHorse(12, full_csv_data(tab_no=2, barrier=9), 'Other Runner')]
     horses[1].csv_data['pfaiscore'] = '65.0'
+    horses[0].csv_data['horse name'] = 'Test Runner'
+    horses[1].csv_data['horse name'] = 'Other Runner'
     meeting = FakeMeeting()
     session = FakeSession(meeting, [FakeRace(horses)])
 

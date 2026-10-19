@@ -87,6 +87,10 @@ from model_classes import (
     race_winner_log_loss, set_race_context, solve_joint_kelly,
 )
 from book_quality import SUSPICIOUS_OVERROUND, unusable_race_ids
+from past_runs import (
+    PAST_RUN_FEATURES, PAST_RUN_RELATIVE_COLS, PAST_RUN_RELATIVE_LOWER_IS_BETTER,
+    empty_past_run_features, horse_key, past_run_features_for_meeting,
+)
 from market_probability import (
     blend_probabilities_by_race, fair_probabilities, fair_probabilities_by_race,
     summarise_z,
@@ -98,7 +102,7 @@ from notes_parsing import (
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 # ML
@@ -604,7 +608,53 @@ def load_historical_data():
     strike_rate_data['pf_ratings'] = pf_ratings_lookup
     strike_rate_data['pf_speedmaps'] = pf_speedmaps_lookup
 
+    # Past runs 2-10 from each meeting's saved form file (pr_* features).
+    meeting_ids = df['meeting_id'].dropna().unique().tolist() if 'meeting_id' in df.columns else []
+    strike_rate_data['past_runs'] = load_past_run_lookup(meeting_ids)
+
     return df, strike_rate_data
+
+
+def load_past_run_lookup(meeting_ids):
+    """{(meeting_id, race_no, normalized horse name): pr_* features}.
+
+    Reads meetings.csv_data (the saved PuntingForm form file, one row per
+    past run per horse) one meeting at a time so the whole history never sits
+    in memory at once.
+    """
+    lookup = {}
+    if not meeting_ids:
+        return lookup
+    meetings_read = meetings_with_runs = 0
+    try:
+        with engine.connect() as conn:
+            for start in range(0, len(meeting_ids), 50):
+                batch = [int(m) for m in meeting_ids[start:start + 50]]
+                result = conn.execute(
+                    text("SELECT id, csv_data FROM meetings WHERE id IN :ids").bindparams(
+                        bindparam('ids', expanding=True)),
+                    {'ids': batch},
+                )
+                for meeting_id, csv_text in result:
+                    meetings_read += 1
+                    per_horse = past_run_features_for_meeting(csv_text)
+                    if per_horse:
+                        meetings_with_runs += 1
+                    for (race_no, horse), feats in per_horse.items():
+                        # Stored as a tuple (PAST_RUN_FEATURES order): ~100k
+                        # horses as dicts would cost several times the memory.
+                        lookup[(int(meeting_id), race_no, horse)] = tuple(
+                            feats[name] for name in PAST_RUN_FEATURES)
+        n_runs_at = PAST_RUN_FEATURES.index('pr_n_runs')
+        with_runs = sum(1 for f in lookup.values() if (f[n_runs_at] or 0) > 0)
+        log.info(
+            "Loaded past-run features: %s meetings read, %s with a usable form file, "
+            "%s horses, %s with at least one past run.",
+            meetings_read, meetings_with_runs, len(lookup), with_runs,
+        )
+    except Exception as e:
+        log.warning(f"Could not load past-run features (pr_* features will be NaN): {e}")
+    return lookup
 
 
 # Manually-uploaded meetings carry their date only in the meeting_name prefix
@@ -1013,7 +1063,8 @@ def parse_form_time_seconds(value):
 def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
                       jockey_sr_history=None, trainer_sr_history=None, as_of_date=None,
                       pf_ratings_lookup=None, pf_speedmaps_lookup=None,
-                      jockey_extra_lookup=None, trainer_extra_lookup=None):
+                      jockey_extra_lookup=None, trainer_extra_lookup=None,
+                      past_run_lookup=None):
     """
     Extract ML features from a horse's csv_data dict.
     Returns (features, jockey_used_dated_snapshot, trainer_used_dated_snapshot).
@@ -1436,6 +1487,18 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
     # from insertion order, and ml_predict.FEATURE_NAMES lists it here too.
     features['opponent_quality_form'] = np.nan
 
+    # ── Past runs 2-10 (past_runs.py) — must stay last, after opponent_quality_form ──
+    past = None
+    if past_run_lookup:
+        try:
+            race_no, horse = horse_key(cd.get('race number'), cd.get('horse name') or row.get('horse_name'))
+            past = past_run_lookup.get((int(row.get('meeting_id')), race_no, horse))
+        except (TypeError, ValueError):
+            past = None
+    if isinstance(past, tuple):
+        past = dict(zip(PAST_RUN_FEATURES, past))
+    features.update(past or empty_past_run_features())
+
     return features, jockey_used_dated_snapshot, trainer_used_dated_snapshot
 
 
@@ -1448,11 +1511,11 @@ NEW_RELATIVE_COLS = [
     'form_speed_mps', 'pf_time_rank', 'pf_weight_class_rank', 'pfai_price',
     'sm_assessed_prob', 'sm_settle', 'pf_early_time_rank',
     'opponent_quality_form',
-]
+] + PAST_RUN_RELATIVE_COLS
 NEW_RELATIVE_LOWER_IS_BETTER = {
     'pf_time_rank', 'pf_weight_class_rank', 'pfai_price', 'sm_settle',
     'pf_early_time_rank',
-}
+} | PAST_RUN_RELATIVE_LOWER_IS_BETTER
 
 
 # ─────────────────────────────────────────────
@@ -1685,6 +1748,7 @@ def build_training_set(df, strike_rate_data=None):
     trainer_sr_history = (strike_rate_data or {}).get('trainers_history', {})
     pf_ratings_lookup = (strike_rate_data or {}).get('pf_ratings', {})
     pf_speedmaps_lookup = (strike_rate_data or {}).get('pf_speedmaps', {})
+    past_run_lookup = (strike_rate_data or {}).get('past_runs', {})
     jockey_extra_lookup = (strike_rate_data or {}).get('jockeys_extra', {})
     trainer_extra_lookup = (strike_rate_data or {}).get('trainers_extra', {})
 
@@ -1758,6 +1822,7 @@ def build_training_set(df, strike_rate_data=None):
                 as_of_date=row.get('meeting_date'),
                 pf_ratings_lookup=pf_ratings_lookup, pf_speedmaps_lookup=pf_speedmaps_lookup,
                 jockey_extra_lookup=jockey_extra_lookup, trainer_extra_lookup=trainer_extra_lookup,
+                past_run_lookup=past_run_lookup,
             )
             finish = int(row['finish_position'])
             sp = float(row['sp']) if row['sp'] else None
