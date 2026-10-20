@@ -1749,6 +1749,18 @@ def _fill_point_in_time_breeding_rates(feature_rows, sire_names, dam_names,
 FORM_SCORE_DEFAULT = 0.0
 
 
+def _training_medians(X):
+    """Per-column training medians used to fill gaps, never NaN themselves.
+
+    A column with no values at all in the training rows (e.g. a newly saved
+    data source that only exists for recent races) has a NaN median, and
+    filling with NaN leaves the gaps in place — which models that cannot take
+    missing values (the MLP) reject outright. Those columns are filled with 0,
+    and the same 0 is what gets persisted for live scoring.
+    """
+    return X.median(numeric_only=False).fillna(0.0)
+
+
 def _fill_point_in_time_track_bias(feature_rows, horse_ids, df_rows):
     """tb_* features from every resulted runner on EARLIER dates.
 
@@ -2191,7 +2203,7 @@ def run_random_forest(X, y_roi, y_won, meeting_dates):
 
     # Impute with the TRAINING split's own median only, then apply that same
     # value to the test split — never let X_test rows influence the fill value.
-    train_median = X_train.median()
+    train_median = _training_medians(X_train)
     X_train = X_train.fillna(train_median)
     X_test = X_test.fillna(train_median)
 
@@ -2263,8 +2275,8 @@ def run_grid_search(X, y_roi, y_won, meeting_dates):
     # Track D's own methodology. Compute it once and persist it on every saved
     # model so live scoring (ml_predict.py) can reuse these exact fill values
     # instead of defaulting missing features to 0.
-    grid_search_feature_medians = X.median().to_dict()
-    X = X.fillna(X.median())
+    grid_search_feature_medians = _training_medians(X).to_dict()
+    X = X.fillna(grid_search_feature_medians)
 
     feature_names = X.columns.tolist()
     log.info(f"Total grid features available: {len(feature_names)}")
@@ -4032,7 +4044,7 @@ def _walk_forward_metrics_for_alphas(model, X_all, y_won_all, sp_all, race_ids_a
             # Impute with this fold's own training-prefix median only, matching
             # the same never-use-future-rows rule as the main train/val split.
             fold_X_train = X_all.iloc[train_idx]
-            fold_median = fold_X_train.median()
+            fold_median = _training_medians(fold_X_train)
             fold_X_train = fold_X_train.fillna(fold_median)
             fold_X_test = X_all.iloc[test_idx].fillna(fold_median)
 
@@ -4692,7 +4704,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     # influence a fill value used to train or score against it. The same
     # median dict is persisted on every candidate below (_form_analyst_feature_medians)
     # so live scoring (ml_predict.py) reuses it instead of defaulting to 0.
-    train_median = X_train.median()
+    train_median = _training_medians(X_train)
     X_train = X_train.fillna(train_median)
     X_val = X_val.fillna(train_median)
 
