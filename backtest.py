@@ -7662,6 +7662,18 @@ def main():
         log.info(f"Best nightly model:   {best_challenger['model_type'] if best_challenger else 'random_forest_grid_fallback'}")
         log.info("=" * 80)
 
+        # Diagnostic only: which groups of inputs help (feature_ablation.py).
+        # Runs after everything that matters has been saved; never fatal and
+        # never affects promotion. FEATURE_ABLATION=0 turns it off.
+        try:
+            import feature_ablation
+            if feature_ablation.enabled():
+                feature_ablation.run_feature_ablation(
+                    X, y_won, sp_values, race_ids, meeting_dates, run_id=run_id, engine=engine,
+                )
+        except Exception as e:
+            log.warning(f"Feature ablation report failed (diagnostic only): {e}")
+
     except Exception as e:
         log.error(f"Backtest failed: {e}", exc_info=True)
         with engine.connect() as conn:
