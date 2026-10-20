@@ -172,3 +172,15 @@ def test_training_fills_track_bias_from_earlier_meetings():
     backtest._fill_point_in_time_track_bias(rows, [1, 2], df)
     assert np.isnan(rows[0]['tb_barrier_starts'])   # no earlier history
     assert rows[1]['tb_barrier_starts'] == 1
+
+
+def test_training_medians_never_leave_gaps():
+    """A column empty in every training row (new data only on recent races)
+    must not stay NaN after filling: the MLP candidate rejects any NaN."""
+    pytest.importorskip("sklearn")
+    import backtest
+
+    X = pd.DataFrame({'a': [1.0, np.nan, 3.0], 'new_source': [np.nan, np.nan, np.nan]})
+    medians = backtest._training_medians(X)
+    assert medians['a'] == 2.0 and medians['new_source'] == 0.0
+    assert not X.fillna(medians).isna().any().any()
