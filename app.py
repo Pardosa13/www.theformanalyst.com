@@ -17,7 +17,7 @@ import tweepy
 from anthropic import Anthropic
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from sqlalchemy import text, bindparam, inspect as sa_inspect
+from sqlalchemy import text, bindparam, func, inspect as sa_inspect
 from sqlalchemy.orm import defer
 import uuid
 
@@ -7242,6 +7242,10 @@ def _track_lookup_key(track_name):
     return re.sub(r'[^a-z0-9]+', '', _normalise_track_name(track_name).lower())
 
 
+# Enough of a meeting CSV to hold the header and first runner row.
+CSV_HEAD_CHARS = 50000
+
+
 def _build_track_to_state():
     track_to_state = {}
     for state, tracks in JURISDICTION_TRACKS.items():
@@ -7263,6 +7267,11 @@ def _find_csv_column(fieldnames, candidates=None, required_terms=None, excluded_
             key = re.sub(r'[^a-z0-9]+', '', candidate.lower())
             if key in normalised:
                 return normalised[key]
+
+    # No terms to match on: an exact candidate was the only way to match.
+    # (Without this, the loop below returned the first column, e.g. "horse name".)
+    if not required_terms:
+        return None
 
     required_terms = [term.lower() for term in (required_terms or [])]
     excluded_terms = [term.lower() for term in (excluded_terms or [])]
@@ -7404,12 +7413,19 @@ def api_jurisdiction_strength():
         sample_headers_without_previous_track = []
         meeting_column_map = {}
 
-        meetings_query = db.session.query(Meeting.id, Meeting.csv_data).filter(Meeting.csv_data.isnot(None))
+        # Only the header row is read below, so fetch just the start of each
+        # CSV instead of every meeting's whole file.
+        meetings_query = db.session.query(
+            Meeting.id, func.left(Meeting.csv_data, CSV_HEAD_CHARS)
+        ).filter(Meeting.csv_data.isnot(None))
         if use_ml:
-            meetings_query = meetings_query.join(Race, Race.meeting_id == Meeting.id)
-            meetings_query = meetings_query.join(Horse, Horse.race_id == Race.id)
-            meetings_query = meetings_query.join(Prediction, Prediction.horse_id == Horse.id)
-            meetings_query = _filter_ml_predictions(meetings_query).distinct()
+            # Pick ML meetings by id first; DISTINCT over the CSV text itself is slow.
+            ml_meeting_ids = _filter_ml_predictions(
+                db.session.query(Race.meeting_id)
+                .join(Horse, Horse.race_id == Race.id)
+                .join(Prediction, Prediction.horse_id == Horse.id)
+            ).distinct()
+            meetings_query = meetings_query.filter(Meeting.id.in_(ml_meeting_ids))
         meetings = meetings_query.all()
 
         for meeting_id, csv_data in meetings:
@@ -7674,7 +7690,10 @@ def api_state_performance():
         stake = 10.0
 
         meeting_state_by_id = {}
-        meeting_rows = db.session.query(Meeting.id, Meeting.meeting_name, Meeting.csv_data).all()
+        # Only the header and first row are read, so skip the rest of each CSV.
+        meeting_rows = db.session.query(
+            Meeting.id, Meeting.meeting_name, func.left(Meeting.csv_data, CSV_HEAD_CHARS)
+        ).all()
         for meeting_id, meeting_name, csv_data in meeting_rows:
             state = None
             if csv_data and str(csv_data).strip():
