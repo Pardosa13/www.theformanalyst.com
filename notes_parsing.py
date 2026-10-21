@@ -344,13 +344,16 @@ _NOTES_COMPONENT_PATTERNS = [
     (r'[+-][\d.]+\s*:\s*A/E=[\d.]+\s*\(near field average', 'Market Expectation - Neutral'),
 
     # ====== FORM TEMPO ======
-    (r'\+\s*20\.0\s*:\s*Very Fast last race',  'Form Tempo - Very Fast (2s+ faster than par)'),
-    (r'\+\s*15\.0\s*:\s*Fast last race',       'Form Tempo - Fast (1-2s faster than par)'),
-    (r'\+\s*10\.0\s*:\s*Above Par last race',  'Form Tempo - Above Par (0.3-1s faster)'),
-    (r'\+\s*5\.0\s*:\s*Par last race',         'Form Tempo - Par (±0.3s)'),
-    (r'-\s*5\.0\s*:\s*Below Par last race',    'Form Tempo - Below Par (0.3-1s slower)'),
-    (r'-\s*10\.0\s*:\s*Slow last race',        'Form Tempo - Slow (1-2s slower)'),
-    (r'-\s*15\.0\s*:\s*Very Slow last race',   'Form Tempo - Very Slow (2s+ slower)'),
+    # Any score: the bonuses were set to 0 on 2026-10-21, and older notes
+    # still carry the old values. Anchored on ':' so "Fast" never matches
+    # "Very Fast", and "Par" never matches "Above Par"/"Below Par".
+    (r'[+-]\s*[\d.]+\s*:\s*Very Fast last race',  'Form Tempo - Very Fast (2s+ faster than par)'),
+    (r'[+-]\s*[\d.]+\s*:\s*Fast last race',       'Form Tempo - Fast (1-2s faster than par)'),
+    (r'[+-]\s*[\d.]+\s*:\s*Above Par last race',  'Form Tempo - Above Par (0.3-1s faster)'),
+    (r'[+-]\s*[\d.]+\s*:\s*Par last race',        'Form Tempo - Par (±0.3s)'),
+    (r'[+-]\s*[\d.]+\s*:\s*Below Par last race',  'Form Tempo - Below Par (0.3-1s slower)'),
+    (r'[+-]\s*[\d.]+\s*:\s*Slow last race',       'Form Tempo - Slow (1-2s slower)'),
+    (r'[+-]\s*[\d.]+\s*:\s*Very Slow last race',  'Form Tempo - Very Slow (2s+ slower)'),
 
 ]
 
