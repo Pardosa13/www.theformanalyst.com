@@ -2691,7 +2691,7 @@ function renderMlPriceAnalysis(data) {
     if (data.overlay_examples && data.overlay_examples.length > 0) {
         html += '<div class="card mb-3"><div class="card-header"><h6 class="mb-0">Recent Overlay Examples</h6></div><div class="card-body"><div class="table-responsive"><table class="table table-sm table-hover"><thead><tr><th>Horse</th><th>Score</th><th>Your Price</th><th>SP</th><th>Overlay %</th><th>Result</th><th>Profit</th></tr></thead><tbody>';
         for (const ex of data.overlay_examples) {
-            html += `<tr class="${ex.won ? 'table-success' : ''}"><td><strong>${ex.horse}</strong></td><td>${ex.score.toFixed(1)}</td><td>$${ex.your_price.toFixed(2)}</td><td>$${ex.sp.toFixed(2)}</td><td class="text-success">+${ex.overlay_pct.toFixed(1)}%</td><td>${ex.won ? '✅ WON' : '❌'}</td><td class="${ex.profit >= 0 ? 'text-success' : 'text-danger'}">$${ex.profit.toFixed(2)}</td></tr>`;
+            html += `<tr class="${ex.won ? 'table-success' : ''}"><td><strong>${ex.horse}</strong></td><td>${ex.score.toFixed(1)}</td><td>$${Number(ex.ml_assessed_odds ?? ex.your_price ?? 0).toFixed(2)}</td><td>$${ex.sp.toFixed(2)}</td><td class="text-success">+${Number(ex.ml_overlay_pct ?? ex.overlay_pct ?? 0).toFixed(1)}%</td><td>${ex.won ? '✅ WON' : '❌'}</td><td class="${ex.profit >= 0 ? 'text-success' : 'text-danger'}">$${ex.profit.toFixed(2)}</td></tr>`;
         }
         html += '</tbody></table></div></div></div>';
     }
@@ -3861,7 +3861,7 @@ function renderMlRaceTempo(data) {
             <strong>💡 What to look for:</strong>
             If fast race horses (1s+ quicker than par) show meaningfully higher ROI, this is a genuine edge —
             horses coming out of genuine tempo are aerobically tested and their form is more reliable.
-            If confirmed, you could add a tempo bonus (+5 to +15 points) to analyzer.js using the <code>form time</code> field.
+            The analyzer's tempo bonuses were set to 0 on 2026-10-21 because fast horses showed no edge; only Very Slow (-15) still scores. Recheck this table before adding any bonus back.
             The "No Par Data" bucket means the track/distance/condition combo had fewer than 30 historical races in your database.
         </div>
     </div>`;

@@ -17,7 +17,8 @@ import tweepy
 from anthropic import Anthropic
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from sqlalchemy import text, bindparam, inspect as sa_inspect
+from sqlalchemy import text, bindparam, func, inspect as sa_inspect
+from sqlalchemy.orm import defer
 import uuid
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component, StrikeRate, Bet
@@ -7241,6 +7242,10 @@ def _track_lookup_key(track_name):
     return re.sub(r'[^a-z0-9]+', '', _normalise_track_name(track_name).lower())
 
 
+# Enough of a meeting CSV to hold the header and first runner row.
+CSV_HEAD_CHARS = 50000
+
+
 def _build_track_to_state():
     track_to_state = {}
     for state, tracks in JURISDICTION_TRACKS.items():
@@ -7262,6 +7267,11 @@ def _find_csv_column(fieldnames, candidates=None, required_terms=None, excluded_
             key = re.sub(r'[^a-z0-9]+', '', candidate.lower())
             if key in normalised:
                 return normalised[key]
+
+    # No terms to match on: an exact candidate was the only way to match.
+    # (Without this, the loop below returned the first column, e.g. "horse name".)
+    if not required_terms:
+        return None
 
     required_terms = [term.lower() for term in (required_terms or [])]
     excluded_terms = [term.lower() for term in (excluded_terms or [])]
@@ -7403,12 +7413,19 @@ def api_jurisdiction_strength():
         sample_headers_without_previous_track = []
         meeting_column_map = {}
 
-        meetings_query = db.session.query(Meeting.id, Meeting.csv_data).filter(Meeting.csv_data.isnot(None))
+        # Only the header row is read below, so fetch just the start of each
+        # CSV instead of every meeting's whole file.
+        meetings_query = db.session.query(
+            Meeting.id, func.left(Meeting.csv_data, CSV_HEAD_CHARS)
+        ).filter(Meeting.csv_data.isnot(None))
         if use_ml:
-            meetings_query = meetings_query.join(Race, Race.meeting_id == Meeting.id)
-            meetings_query = meetings_query.join(Horse, Horse.race_id == Race.id)
-            meetings_query = meetings_query.join(Prediction, Prediction.horse_id == Horse.id)
-            meetings_query = _filter_ml_predictions(meetings_query).distinct()
+            # Pick ML meetings by id first; DISTINCT over the CSV text itself is slow.
+            ml_meeting_ids = _filter_ml_predictions(
+                db.session.query(Race.meeting_id)
+                .join(Horse, Horse.race_id == Race.id)
+                .join(Prediction, Prediction.horse_id == Horse.id)
+            ).distinct()
+            meetings_query = meetings_query.filter(Meeting.id.in_(ml_meeting_ids))
         meetings = meetings_query.all()
 
         for meeting_id, csv_data in meetings:
@@ -7673,7 +7690,10 @@ def api_state_performance():
         stake = 10.0
 
         meeting_state_by_id = {}
-        meeting_rows = db.session.query(Meeting.id, Meeting.meeting_name, Meeting.csv_data).all()
+        # Only the header and first row are read, so skip the rest of each CSV.
+        meeting_rows = db.session.query(
+            Meeting.id, Meeting.meeting_name, func.left(Meeting.csv_data, CSV_HEAD_CHARS)
+        ).all()
         for meeting_id, meeting_name, csv_data in meeting_rows:
             state = None
             if csv_data and str(csv_data).strip():
@@ -8659,6 +8679,10 @@ def api_price_analysis():
     # ── Main query ────────────────────────────────────────────────────────────
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
+    ).options(
+        # Skip the raw CSV blobs: they are unused here and loading the
+        # meeting's whole CSV on every runner row made this time out.
+        defer(Horse.csv_data), defer(Meeting.csv_data)
     ).join(
         Prediction, Horse.id == Prediction.horse_id
     ).join(
@@ -9075,6 +9099,10 @@ def api_sole_leader_analysis():
 
     all_results = db.session.query(
         Horse, Prediction, Result, Race, Meeting
+    ).options(
+        # Skip the raw CSV blobs: they are unused here and loading the
+        # meeting's whole CSV on every runner row made this time out.
+        defer(Horse.csv_data), defer(Meeting.csv_data)
     ).join(
         Prediction, Horse.id == Prediction.horse_id
     ).join(
@@ -9317,6 +9345,10 @@ def api_field_size():
 
     q = db.session.query(
         Horse, Prediction, Result, Race, Meeting
+    ).options(
+        # Skip the raw CSV blobs: they are unused here and loading the
+        # meeting's whole CSV on every runner row made this time out.
+        defer(Horse.csv_data), defer(Meeting.csv_data)
     ).join(
         Prediction, Horse.id == Prediction.horse_id
     ).join(
@@ -10668,7 +10700,13 @@ def api_combination_analysis():
             })
 
     # ── 6. Count all 2, 3, 4 and 5 factor combinations ────────────────────────
-    combo_stats = defaultdict(lambda: {'races': 0, 'wins': 0, 'profit': 0.0})
+    # This runs ~800 times per runner, so count runs in bulk with Counter
+    # and track wins and returns for winners only. Profit is rebuilt below as
+    # (winners' returns) - (stake per losing run).
+    from collections import Counter
+    combo_races      = Counter()
+    combo_wins       = Counter()
+    combo_win_profit = defaultdict(float)
 
     for horse in tagged_horses:
         factors = sorted(horse['factors'])
@@ -10680,45 +10718,43 @@ def api_combination_analysis():
             generic  = [f for f in factors if f not in priority]
             factors  = (priority + generic)[:12]
 
-        won    = horse['won']
-        sp     = horse['sp']
-        profit = (sp * stake - stake) if won else -stake
-
-        for pair in itertools.combinations(factors, 2):
-            combo_stats[pair]['races']  += 1
-            combo_stats[pair]['wins']   += (1 if won else 0)
-            combo_stats[pair]['profit'] += profit
-
-        for triple in itertools.combinations(factors, 3):
-            combo_stats[triple]['races']  += 1
-            combo_stats[triple]['wins']   += (1 if won else 0)
-            combo_stats[triple]['profit'] += profit
-
-        for quad in itertools.combinations(factors, 4):
-            combo_stats[quad]['races']  += 1
-            combo_stats[quad]['wins']   += (1 if won else 0)
-            combo_stats[quad]['profit'] += profit
+        combos = itertools.chain(
+            itertools.combinations(factors, 2),
+            itertools.combinations(factors, 3),
+            itertools.combinations(factors, 4),
+        )
+        if horse['won']:
+            combos = list(combos)
+            win_profit = horse['sp'] * stake - stake
+            combo_wins.update(combos)
+            for combo in combos:
+                combo_win_profit[combo] += win_profit
+        combo_races.update(combos)
 
     # ── 7. Filter: positive ROI, tiered minimum appearances, sort by ROI ───────
+    # A combo with no winners can't show a profit, so it is skipped.
     results_list = []
-    for combo, stats in combo_stats.items():
-        n            = stats['races']
+    for combo, n in combo_races.items():
+        wins = combo_wins.get(combo)
+        if not wins:
+            continue
         factor_count = len(combo)
         min_n        = {2: 10, 3: 10, 4: 15, 5: 20}.get(factor_count, 10)
         if n < min_n:
             continue
-        roi = stats['profit'] / (n * stake) * 100
+        profit = combo_win_profit[combo] - stake * (n - wins)
+        roi = profit / (n * stake) * 100
         if roi <= 0:
             continue
-        sr = stats['wins'] / n * 100
+        sr = wins / n * 100
         results_list.append({
             'factors':      list(combo),
             'factor_count': factor_count,
             'races':        n,
-            'wins':         stats['wins'],
+            'wins':         wins,
             'strike_rate':  round(sr, 1),
             'roi':          round(roi, 1),
-            'profit':       round(stats['profit'], 2),
+            'profit':       round(profit, 2),
         })
 
     # Sort: highest factor count first, then by ROI descending
@@ -10875,12 +10911,15 @@ def api_combination_analysis():
         sp      = horse['sp']
         profit  = (sp * stake - stake) if won else -stake
 
-        for pair in itertools.combinations(factors, 2):
-            # Only count if BOTH factors are individually non-positive
-            if _is_not_positive(pair[0]) and _is_not_positive(pair[1]):
-                hidden_combo_stats[pair]['races']  += 1
-                hidden_combo_stats[pair]['wins']   += 1 if won else 0
-                hidden_combo_stats[pair]['profit'] += profit
+        # Only count pairs where BOTH factors are individually non-positive,
+        # so drop the positive ones before pairing (order is kept).
+        non_positive = [f for f in factors if _is_not_positive(f)]
+        win = 1 if won else 0
+        for pair in itertools.combinations(non_positive, 2):
+            stats = hidden_combo_stats[pair]
+            stats['races']  += 1
+            stats['wins']   += win
+            stats['profit'] += profit
 
     # Filter: 50+ races, positive ROI, sort by ROI
     hidden_list = []
@@ -12241,6 +12280,50 @@ def test_telegram():
     # ----- CHAT SYSTEM ROUTES -----
 
 CHAT_MODEL = os.environ.get('CHAT_MODEL', 'claude-opus-5-5')
+
+EDGE_AI_SYSTEM = (
+    "You review betting-factor results for an Australian horse racing model. "
+    "Each factor shows how horses with that trait performed at SP on $10 level stakes: "
+    "appearances, wins, strike rate and ROI. Write a short plain-English read for the "
+    "model's owner: which factors look like a real edge, which look like noise from small "
+    "samples, which losing factors to avoid, and one or two combinations worth testing. "
+    "Treat any factor under about 50 appearances as unproven. Use short headings and "
+    "bullet points. Keep it under 300 words. Do not invent numbers that are not in the data."
+)
+
+
+@app.route('/api/analytics/edge-discovery/ai-analysis', methods=['POST'])
+@login_required
+@limiter.limit("10 per hour")
+def api_edge_discovery_ai_analysis():
+    """Ask Claude to summarise the factor table from Component Analysis ("Ask Claude" button)."""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    body = request.get_json(silent=True) or {}
+    factors = body.get('factors')
+    if not isinstance(factors, list) or not factors:
+        return jsonify({'analysis': 'No factors to analyse.'}), 400
+    payload = json.dumps(
+        {'factors': factors[:50], 'metadata': body.get('metadata') or {}},
+        default=str,
+    )[:60000]
+
+    try:
+        response = client.beta.messages.create(
+            model=CHAT_MODEL, max_tokens=16000, system=EDGE_AI_SYSTEM,
+            output_config={'effort': 'low'},
+            betas=['server-side-fallback-2026-07-01'], fallbacks='default',
+            messages=[{'role': 'user', 'content': f'Factor results (JSON):\n{payload}'}],
+        )
+    except Exception:
+        logger.exception('Edge discovery AI analysis failed')
+        return jsonify({'analysis': 'Claude is unavailable right now. Try again shortly.'}), 502
+
+    if response.stop_reason == 'refusal':
+        return jsonify({'analysis': 'Claude declined to analyse this data.'})
+    text_out = ''.join(b.text for b in response.content if b.type == 'text').strip()
+    return jsonify({'analysis': text_out or 'No response'})
 
 
 def _chat_today():

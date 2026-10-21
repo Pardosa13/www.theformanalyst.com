@@ -2792,18 +2792,22 @@ function checkFormTempo(horseRow) {
     const delta = parSeconds - formSeconds;
     const sign  = delta >= 0 ? '+' : '';
 
+    // Bonuses set to 0 on 2026-10-21: on ~7,000 top picks, horses with a fast
+    // last race won no more often than par horses and returned less (the market
+    // already prices it in). Labels stay in the notes so the Data page keeps
+    // tracking each band. Only Very Slow keeps a penalty.
     if (delta >= 2.0) {
-        return [20, `+20.0 : Very Fast last race (${sign}${delta.toFixed(2)}s vs par) — aerobically tested\n`];
+        return [0, `+ 0.0 : Very Fast last race (${sign}${delta.toFixed(2)}s vs par)\n`];
     } else if (delta >= 1.0) {
-        return [15, `+15.0 : Fast last race (${sign}${delta.toFixed(2)}s vs par)\n`];
+        return [0, `+ 0.0 : Fast last race (${sign}${delta.toFixed(2)}s vs par)\n`];
     } else if (delta >= 0.3) {
-        return [10, `+10.0 : Above Par last race (${sign}${delta.toFixed(2)}s vs par)\n`];
+        return [0, `+ 0.0 : Above Par last race (${sign}${delta.toFixed(2)}s vs par)\n`];
     } else if (delta >= -0.3) {
-        return [5, `+ 5.0 : Par last race (within 0.3s of par)\n`];
+        return [0, `+ 0.0 : Par last race (within 0.3s of par)\n`];
     } else if (delta >= -1.0) {
-        return [-5, `- 5.0 : Below Par last race (${delta.toFixed(2)}s vs par)\n`];
+        return [0, `+ 0.0 : Below Par last race (${delta.toFixed(2)}s vs par)\n`];
     } else if (delta >= -2.0) {
-        return [-10, `-10.0 : Slow last race (${delta.toFixed(2)}s vs par)\n`];
+        return [0, `+ 0.0 : Slow last race (${delta.toFixed(2)}s vs par)\n`];
     } else {
         return [-15, `-15.0 : Very Slow last race (${delta.toFixed(2)}s vs par)\n`];
     }
