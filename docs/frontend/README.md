@@ -43,6 +43,7 @@ styled with Bootstrap 5 plus the site's own design tokens.
 | `ml_data.html` | ML Analytics |
 | `ml_shadow.html` | Shadow ML scoring |
 | `backtest.html` | Backtest engine |
+| `pattern_finder.html` | Pattern Finder: proven patterns, live record, today's matches |
 | `admin.html` | Users and strategy components |
 
 **Other sports and tools**

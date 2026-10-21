@@ -28,6 +28,7 @@ from afl_routes import register_afl_routes, afl_nightly_sync
 from mma_routes import register_mma_routes
 from race_animation_routes import register_race_animation_routes
 from ml_shadow_routes import register_ml_shadow_routes
+from pattern_routes import register_pattern_routes
 from bet_tracker import register_bet_tracker_routes
 from budget_tracker import register_budget_tracker_routes, is_budget_tracker_allowed, is_julz
 from notes_parsing import (
@@ -523,6 +524,7 @@ login_manager.init_app(app)
 register_afl_routes(app, db)
 register_mma_routes(app, db)
 register_ml_shadow_routes(app, db)
+register_pattern_routes(app, db)
 register_bet_tracker_routes(app, db)
 register_budget_tracker_routes(app, db)
 register_race_animation_routes(app, db)
