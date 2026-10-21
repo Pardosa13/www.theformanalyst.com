@@ -18,6 +18,7 @@ from anthropic import Anthropic
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from sqlalchemy import text, bindparam, inspect as sa_inspect
+from sqlalchemy.orm import defer
 import uuid
 
 from models import db, User, Meeting, Race, Horse, Prediction, Result, ChatMessage, Component, StrikeRate, Bet
@@ -8659,6 +8660,10 @@ def api_price_analysis():
     # ── Main query ────────────────────────────────────────────────────────────
     base_query = db.session.query(
         Horse, Prediction, Result, Race, Meeting
+    ).options(
+        # Skip the raw CSV blobs: they are unused here and loading the
+        # meeting's whole CSV on every runner row made this time out.
+        defer(Horse.csv_data), defer(Meeting.csv_data)
     ).join(
         Prediction, Horse.id == Prediction.horse_id
     ).join(
@@ -9075,6 +9080,10 @@ def api_sole_leader_analysis():
 
     all_results = db.session.query(
         Horse, Prediction, Result, Race, Meeting
+    ).options(
+        # Skip the raw CSV blobs: they are unused here and loading the
+        # meeting's whole CSV on every runner row made this time out.
+        defer(Horse.csv_data), defer(Meeting.csv_data)
     ).join(
         Prediction, Horse.id == Prediction.horse_id
     ).join(
@@ -9317,6 +9326,10 @@ def api_field_size():
 
     q = db.session.query(
         Horse, Prediction, Result, Race, Meeting
+    ).options(
+        # Skip the raw CSV blobs: they are unused here and loading the
+        # meeting's whole CSV on every runner row made this time out.
+        defer(Horse.csv_data), defer(Meeting.csv_data)
     ).join(
         Prediction, Horse.id == Prediction.horse_id
     ).join(
