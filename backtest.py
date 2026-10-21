@@ -7686,6 +7686,16 @@ def main():
         except Exception as e:
             log.warning(f"Feature ablation report failed (diagnostic only): {e}")
 
+        # Pattern Finder (pattern_finder.py): searches for betting patterns,
+        # tests them on unseen races and retires ones that stop working.
+        # Never fatal. PATTERN_FINDER=0 turns it off.
+        try:
+            import pattern_finder
+            if pattern_finder.enabled():
+                pattern_finder.run_and_save(engine)
+        except Exception as e:
+            log.warning(f"Pattern Finder failed: {e}")
+
     except Exception as e:
         log.error(f"Backtest failed: {e}", exc_info=True)
         with engine.connect() as conn:

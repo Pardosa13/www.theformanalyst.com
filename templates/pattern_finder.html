@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block title %}Pattern Finder — The Form Analyst{% endblock %}
+
+{% block extra_css %}
+<style>
+    .pf-header { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; margin-bottom:1.5rem; }
+    .pf-title { font-size:1.6rem; font-weight:700; letter-spacing:-0.02em; margin:0 0 4px; }
+    .pf-sub { color:var(--text-muted); font-size:13px; margin:0; max-width:720px; }
+    .pf-card { background:var(--bg-elevated); border:1px solid var(--border-subtle); border-radius:10px; padding:16px 18px; margin-bottom:1.25rem; }
+    .pf-card h2 { font-size:1.05rem; font-weight:700; margin:0 0 4px; }
+    .pf-card .pf-help { color:var(--text-muted); font-size:13px; margin:0 0 12px; }
+    .pf-stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; }
+    .pf-stat { background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px; padding:10px 12px; }
+    .pf-stat .k { color:var(--text-muted); font-size:12px; }
+    .pf-stat .v { font-size:1.2rem; font-weight:700; font-family:'DM Mono', monospace; }
+    .pf-table-wrap { overflow-x:auto; }
+    .pf-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .pf-table th { color:var(--text-muted); font-weight:600; text-align:left; padding:6px 8px; border-bottom:1px solid var(--border-mid); white-space:nowrap; }
+    .pf-table td { padding:8px; border-bottom:1px solid var(--border-subtle); vertical-align:top; }
+    .pf-table td.num { font-family:'DM Mono', monospace; white-space:nowrap; }
+    .pos { color:var(--success); }
+    .neg { color:var(--danger); }
+    .pf-tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; background:var(--bg-hover); color:var(--text-secondary); margin:2px 4px 2px 0; }
+    .pf-tag.jump { color:var(--warning); border:1px solid var(--warning); background:transparent; }
+    .pf-empty { color:var(--text-muted); font-size:14px; padding:6px 0; }
+    .pf-luck-good { color:var(--success); font-weight:600; }
+    .pf-luck-bad { color:var(--warning); font-weight:600; }
+</style>
+{% endblock %}
+
+{% macro roi(v) -%}
+{%- if v is none -%}–{%- else -%}<span class="{{ 'pos' if v > 0 else 'neg' if v < 0 }}">{{ '%+.1f'|format(v) }}%</span>{%- endif -%}
+{%- endmacro %}
+
+{% macro record(s) -%}
+{%- if s and s.bets -%}{{ s.bets }} bets · {{ s.strike_rate }}% won · {{ roi(s.roi) }}{%- else -%}–{%- endif -%}
+{%- endmacro %}
+
+{% block content %}
+<div class="pf-header">
+    <div>
+        <h1 class="pf-title"><i class="bi bi-search" style="color:var(--accent);"></i> Pattern Finder</h1>
+        <p class="pf-sub">Searches every past race for betting patterns that make a profit. A pattern must win on the
+            older races, then win again on newer races it has never seen, and beat a luck test. Proven patterns are
+            then tracked live and retired if they stop working. All results are flat win bets at the SP.</p>
+    </div>
+    <form method="POST" action="{{ url_for('pattern_finder_run') }}"
+          onsubmit="return confirm('Run the Pattern Finder now? It takes a few minutes.')">
+        <button type="submit" class="btn btn-primary" {{ 'disabled' if running }}>
+            <i class="bi bi-play-circle"></i> {{ 'Running…' if running else 'Run Now' }}
+        </button>
+    </form>
+</div>
+
+{% if error %}
+<div class="alert alert-warning">Could not load saved patterns yet: {{ error }}</div>
+{% endif %}
+
+{% if not report %}
+<div class="pf-card">
+    <h2>No runs yet</h2>
+    <p class="pf-help">It runs every night after the backtest. Press Run Now to start one.</p>
+</div>
+{% else %}
+<div class="pf-card">
+    <h2>Last run</h2>
+    <p class="pf-help">{{ run.created_at.strftime('%d %b %Y %H:%M') }} UTC · took {{ report.seconds }}s</p>
+    <div class="pf-stats">
+        <div class="pf-stat"><div class="k">Races</div><div class="v">{{ '{:,}'.format(report.races) }}</div></div>
+        <div class="pf-stat"><div class="k">Patterns tested</div><div class="v">{{ '{:,}'.format(report.patterns_tested) }}</div></div>
+        <div class="pf-stat"><div class="k">Passed first check</div><div class="v">{{ report.passed_search }}</div></div>
+        <div class="pf-stat"><div class="k">Proven this run</div><div class="v">{{ report.proven_this_run }}</div></div>
+    </div>
+    <p class="pf-help" style="margin-top:12px;">
+        Searched races {{ report.first_date }} to {{ report.unseen_from }}.
+        Tested on unseen races {{ report.unseen_from }} to {{ report.last_date }}.
+    </p>
+    {% if luck_summary %}
+    <p class="pf-help" style="margin:0;">
+        <strong>Luck check:</strong> on made-up results with no edge at all, an average of
+        {{ luck_summary.passed_search }} patterns passed the first check and
+        <span class="{{ 'pf-luck-good' if luck_summary.proven < 0.5 else 'pf-luck-bad' }}">{{ luck_summary.proven }} got proven</span>
+        ({{ luck_summary.runs }} runs). Real data: {{ report.passed_search }} and {{ report.proven_this_run }}.
+    </p>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="pf-card">
+    <h2>Today's matches</h2>
+    <p class="pf-help">Runners in races still to start that match a proven pattern. Orange tags must be checked at the jump.</p>
+    {% if matches %}
+    <div class="pf-table-wrap">
+        <table class="pf-table">
+            <thead><tr><th>Race</th><th>Horse</th><th>Pattern</th></tr></thead>
+            <tbody>
+            {% for m in matches %}
+                <tr>
+                    <td>{{ m.meeting_name }} R{{ m.race_number }}
+                        {% if m.start_time_utc %}<br><span class="pf-help">{{ m.start_time_utc.strftime('%H:%M') }} UTC</span>{% endif %}</td>
+                    <td><strong>{{ m.horse_name }}</strong></td>
+                    <td>{{ m.rule_label }}
+                        {% for j in m.check_at_jump %}<br><span class="pf-tag jump">Check: {{ j }}</span>{% endfor %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="pf-empty">No matches in races still to run.</div>
+    {% endif %}
+</div>
+
+<div class="pf-card">
+    <h2>Proven patterns</h2>
+    <p class="pf-help">Won on the search races and again on unseen races. "Since proven" is the live record on races run after that.</p>
+    {% if proven %}
+    <div class="pf-table-wrap">
+        <table class="pf-table">
+            <thead><tr><th>Pattern</th><th>Search races</th><th>Unseen races</th><th>Since proven</th></tr></thead>
+            <tbody>
+            {% for r in proven %}
+                <tr>
+                    <td><strong>{{ r.label }}</strong><br><span class="pf-help">Proven {{ r.proven_at.strftime('%d %b %Y') if r.proven_at }}</span></td>
+                    <td class="num">{{ record(r.history.search) }}</td>
+                    <td class="num">{{ record(r.history.test) }}{% if r.history.test and r.history.test.bsp_roi is defined %}<br><span class="pf-help">Betfair SP {{ roi(r.history.test.bsp_roi) }}</span>{% endif %}</td>
+                    <td class="num">{{ record(r.live) if r.live and r.live.bets else 'No bets yet' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="pf-empty">No proven patterns yet. That is normal: the market is hard to beat, and the tests are strict on purpose.</div>
+    {% endif %}
+</div>
+
+{% if report and report.near_misses %}
+<div class="pf-card">
+    <h2>Near misses</h2>
+    <p class="pf-help">Passed the first check but not the unseen-races test. Not bets. Shown so you can see what failed.</p>
+    <div class="pf-table-wrap">
+        <table class="pf-table">
+            <thead><tr><th>Pattern</th><th>Search races</th><th>Unseen races</th></tr></thead>
+            <tbody>
+            {% for r in report.near_misses %}
+                <tr>
+                    <td>{{ r.label }}</td>
+                    <td class="num">{{ record(r.search) }}</td>
+                    <td class="num">{{ record(r.test) }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<div class="pf-card">
+    <h2>Retired patterns</h2>
+    <p class="pf-help">Were proven, then stopped working on new races. They are never brought back automatically.</p>
+    {% if retired %}
+    <div class="pf-table-wrap">
+        <table class="pf-table">
+            <thead><tr><th>Pattern</th><th>Since proven</th><th>Why retired</th></tr></thead>
+            <tbody>
+            {% for r in retired %}
+                <tr>
+                    <td>{{ r.label }}<br><span class="pf-help">Retired {{ r.retired_at.strftime('%d %b %Y') if r.retired_at }}</span></td>
+                    <td class="num">{{ record(r.live) }}</td>
+                    <td>{{ r.retire_reason }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="pf-empty">None retired.</div>
+    {% endif %}
+</div>
+{% endblock %}

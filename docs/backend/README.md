@@ -36,6 +36,8 @@ repository root because Railway starts the app from there (`gunicorn app:app`).
 | `ml_shadow_routes.py` | Shadow ML pages and APIs |
 | `model_classes.py` | Shared model classes and Kelly staking maths |
 | `models/` | Saved model files |
+| `pattern_finder.py` | Pattern Finder: searches past races for profitable betting patterns, tests them on unseen races and a luck check, retires ones that stop working (nightly, after the backtest) |
+| `pattern_routes.py` | Pattern Finder page |
 
 ## Race Animations
 

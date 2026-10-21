@@ -437,3 +437,43 @@ class ChatMessage(db.Model):
     
     def __repr__(self):
         return f'<ChatMessage {self.role}: {self.content[:30]}...>'
+
+
+class PatternRule(db.Model):
+    """A betting pattern found by pattern_finder.py.
+
+    status: proven (passed the unseen-races test, now tracked live) or
+    retired (stopped working on races run after it was proven). Retired
+    rules are never brought back automatically.
+    """
+    __tablename__ = 'pattern_rules'
+
+    id = db.Column(db.Integer, primary_key=True)
+    # Sorted condition keys joined by ' & ': the same pattern always gets the same key.
+    rule_key = db.Column(db.String(500), unique=True, nullable=False)
+    conditions_json = db.Column(db.Text, nullable=False)
+    label = db.Column(db.String(500), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='proven')
+    proven_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Last race date in the data the rule was proven on. Live record = races after it.
+    proven_through = db.Column(db.Date, nullable=True)
+    retired_at = db.Column(db.DateTime, nullable=True)
+    retire_reason = db.Column(db.String(300), nullable=True)
+    # Frozen at proving: {"discovery": {...}, "test": {...}}
+    history_json = db.Column(db.Text, nullable=True)
+    # Refreshed every run: results on races after proven_through.
+    live_json = db.Column(db.Text, nullable=True)
+    last_checked_at = db.Column(db.DateTime, nullable=True)
+
+    def __repr__(self):
+        return f'<PatternRule {self.id} {self.status}: {self.label[:40]}>'
+
+
+class PatternFinderRun(db.Model):
+    """One run of pattern_finder.py: what was searched and what came out."""
+    __tablename__ = 'pattern_finder_runs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(20), nullable=False, default='complete')
+    report_json = db.Column(db.Text, nullable=True)
