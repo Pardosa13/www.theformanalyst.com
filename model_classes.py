@@ -24,6 +24,22 @@ import numpy as np
 # exists twice is a name that can drift. alpha travels with the pkl exactly
 # like _form_analyst_feature_medians does.
 MARKET_BLEND_ALPHA_ATTR = '_form_analyst_market_blend_alpha'
+# Benter's second weight (on the market), stamped beside alpha when the blend
+# was fitted with two free weights. Absent on older artifacts, which keep the
+# single-alpha meaning (market weight = 1 - alpha).
+MARKET_BLEND_BETA_ATTR = '_form_analyst_market_blend_beta'
+
+
+def model_blend_spec(model):
+    """The market-blend spec a model artifact carries: (a, b), alpha, or None.
+
+    Feed the result to market_probability.blend_weights / blend_probabilities.
+    """
+    alpha = getattr(model, MARKET_BLEND_ALPHA_ATTR, None)
+    beta = getattr(model, MARKET_BLEND_BETA_ATTR, None)
+    if alpha is not None and beta is not None:
+        return (alpha, beta)
+    return alpha
 
 
 class ConsensusRegressor(BaseEstimator, RegressorMixin):
@@ -485,6 +501,66 @@ def fit_conditional_logit_beta(base_probabilities, won, race_ids,
         'log_loss': fitted,
         'identity_log_loss': identity,
     }
+
+
+BENTER_WEIGHT_BOUNDS = (0.0, 3.0)
+
+
+def fit_benter_blend(model_probabilities, market_probabilities, won, race_ids,
+                     min_races=CONDITIONAL_LOGIT_MIN_RACES):
+    """Benter's second stage: fit p ∝ exp(a·log model + b·log market) per race.
+
+    Both weights are free (bounded to BENTER_WEIGHT_BOUNDS), unlike the old
+    single alpha where b = 1 - a. a + b < 1 flattens an overconfident pair;
+    a small a with b near 1 says "mostly trust the market". Fitted by maximum
+    race-winner likelihood on races the model did not train on.
+
+    Only races where every runner has a market probability are used: an
+    unpriced runner has no log market term to weight.
+
+    Returns {'a', 'b', 'races', 'status', 'log_loss', 'market_log_loss'}.
+    """
+    from scipy.optimize import minimize
+
+    model_p = np.asarray(model_probabilities, dtype=float)
+    market_p = np.asarray([np.nan if m is None else m for m in market_probabilities], dtype=float)
+    won = np.asarray(won, dtype=float)
+    race_ids = [str(r) for r in race_ids]
+    codes, n_groups = _race_codes(race_ids)
+    priced = np.isfinite(market_p) & (market_p > 0)
+    all_priced = np.ones(n_groups, dtype=bool)
+    np.logical_and.at(all_priced, codes, priced)
+    keep = all_priced[codes]
+    out = {'a': None, 'b': None, 'races': 0, 'status': 'insufficient_races',
+           'log_loss': None, 'market_log_loss': None}
+    if not keep.any():
+        return out
+    kept_ids = [race_ids[i] for i in np.flatnonzero(keep)]
+    codes, n_groups = _race_codes(kept_ids)
+    log_model = _log_model_outputs(model_p[keep])
+    log_market = _log_model_outputs(market_p[keep])
+    rows, _usable = _winner_rows(won[keep], codes, n_groups)
+    out['races'] = int(rows.size)
+    if rows.size < min_races:
+        return out
+
+    def loss(weights):
+        a, b = weights
+        log_p = _grouped_log_softmax(a * log_model + b * log_market, codes, n_groups)
+        return float(-np.mean(log_p[rows]))
+
+    best = None
+    for start in ((0.2, 0.8), (0.5, 0.5), (1.0, 0.0)):
+        result = minimize(loss, start, method='L-BFGS-B', bounds=[BENTER_WEIGHT_BOUNDS] * 2)
+        if np.all(np.isfinite(result.x)) and (best is None or result.fun < best.fun):
+            best = result
+    out['market_log_loss'] = loss((0.0, 1.0))
+    if best is None:
+        out['status'] = 'failed'
+        return out
+    a, b = float(best.x[0]), float(best.x[1])
+    out.update({'a': a, 'b': b, 'status': 'fitted', 'log_loss': loss((a, b))})
+    return out
 
 
 def _per_runner_outputs(model, X, race_ids):

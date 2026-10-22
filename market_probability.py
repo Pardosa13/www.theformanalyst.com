@@ -275,6 +275,46 @@ def summarise_z(z_values, label="", warn=True):
 BLEND_PROB_FLOOR = 1e-6
 
 
+# Benter's two free weights (log p = a log model + b log market) may not leave
+# this range: a fit outside it is a sign of a broken fit, not of a real signal.
+BLEND_WEIGHT_MAX = 3.0
+
+
+def blend_weights(spec):
+    """A market-blend spec -> (model weight a, market weight b), or None for "no blend".
+
+    spec is either the old single alpha (a number: a = alpha, b = 1 - alpha,
+    clamped to [0, 1]; 1.0 or above means "ignore the market") or Benter's pair
+    (a, b) fitted freely. With a + b below 1 the blend is flatter than either
+    input (it shrinks an overconfident model); above 1 it is sharper.
+    Anything unusable degrades to None (pure model), never to a guess.
+    """
+    if spec is None:
+        return None
+    if isinstance(spec, (tuple, list)):
+        if len(spec) != 2:
+            return None
+        try:
+            a, b = float(spec[0]), float(spec[1])
+        except (TypeError, ValueError):
+            return None
+        if not (np.isfinite(a) and np.isfinite(b)):
+            return None
+        if not (0.0 <= a <= BLEND_WEIGHT_MAX and 0.0 <= b <= BLEND_WEIGHT_MAX):
+            return None
+        if abs(a - 1.0) < 1e-9 and abs(b) < 1e-9:
+            return None
+        return a, b
+    try:
+        alpha = float(spec)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(alpha) or alpha >= 1.0:
+        return None
+    alpha = max(0.0, alpha)
+    return alpha, 1.0 - alpha
+
+
 def blend_probabilities(model_probs, market_probs, alpha):
     """Geometric (log-space) blend of model and market probabilities.
 
@@ -291,13 +331,8 @@ def blend_probabilities(model_probs, market_probs, alpha):
     in range, but a corrupted stored alpha on a model artifact must degrade to
     "pure model" rather than produce an extrapolated blend nobody validated.
     """
-    try:
-        alpha = float(alpha)
-    except (TypeError, ValueError):
-        alpha = 1.0
-    if not np.isfinite(alpha):
-        alpha = 1.0
-    alpha = min(1.0, max(0.0, alpha))
+    weights = blend_weights(alpha)
+    model_weight, market_weight = weights if weights is not None else (1.0, 0.0)
 
     model = np.asarray(
         [np.nan if p is None else p for p in (model_probs or [])], dtype=float
@@ -322,10 +357,13 @@ def blend_probabilities(model_probs, market_probs, alpha):
     # still blend. Mixing the two in one race is fine — the renormalisation
     # below puts them back on a common scale.
     blend_mask = model_valid & np.isfinite(market) & (market > 0)
-    log_blend = np.array(log_model, copy=True)
+    # An unpriced runner is scaled as if the market agreed with the model, so
+    # it stays on the same footing as its priced rivals ((a + b) = 1 for the
+    # old single-alpha blend, which leaves its model probability untouched).
+    log_blend = log_model * (model_weight + market_weight)
     if blend_mask.any():
         log_market = np.log(np.clip(market[blend_mask], BLEND_PROB_FLOOR, 1.0))
-        log_blend[blend_mask] = (alpha * log_model[blend_mask]) + ((1.0 - alpha) * log_market)
+        log_blend[blend_mask] = (model_weight * log_model[blend_mask]) + (market_weight * log_market)
 
     # Subtract the max before exponentiating (standard log-sum-exp shift): the
     # blend's logs are unnormalised, and on a large field they can sit low

@@ -1769,8 +1769,9 @@ def test_retest_refits_the_recipe_and_keeps_the_champions_blend_weight(monkeypat
 
     assert result["champion_id"] == 163
     assert seen["fit"] is refit
-    assert seen["eval"] == (refit, 0.3)
-    assert seen["wf"] == (refit, 0.3)
+    # An old single alpha is carried as its (model, market) weight pair.
+    assert seen["eval"][0] is refit and seen["eval"][1] == pytest.approx((0.3, 0.7))
+    assert seen["wf"][0] is refit and seen["wf"][1] == pytest.approx((0.3, 0.7))
     assert result["metrics"]["walk_forward"]["folds"][0]["roi"] == -4.0
 
 

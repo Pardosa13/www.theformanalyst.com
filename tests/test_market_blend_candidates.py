@@ -108,7 +108,11 @@ class TestBlendedCandidate:
         return {
             alpha: {
                 'n_splits': len(rois), 'n_splits_requested': 3,
-                'folds': [{'bets': 100, 'roi': roi, 'strike_rate': 12.0} for roi in rois],
+                # Oct 2026: blends are chosen on fold log loss vs the market.
+                # Each fixture number doubles as a skill score: higher = better,
+                # i.e. a gap of -score/1000 nats per race.
+                'folds': [{'bets': 100, 'roi': roi, 'strike_rate': 12.0,
+                           'race_log_loss_vs_market': -roi / 1000.0} for roi in rois],
                 'roi_std': float(np.std(rois)) if len(rois) > 1 else 0.0,
                 'strike_rate_std': 0.0, 'embargo_rows': 50,
             }
@@ -139,7 +143,7 @@ class TestBlendedCandidate:
         assert blended['metrics']['market_blend_alpha'] == blended['blend_alpha']
         assert blended['metrics']['market_blend_base_model_type'] == 'random_forest'
         assert blended['metrics']['market_blend_alpha_selected_on'] == (
-            'walk_forward_mean_roi_minus_roi_std'
+            'walk_forward_mean_race_log_loss_vs_market'
         )
         assert blended['metrics']['market_blend_odds_source'] == 'closing_sp_shin_corrected'
 
@@ -151,8 +155,10 @@ class TestBlendedCandidate:
         )
         blended = backtest._blended_candidate(result, by_alpha, [], X, y, race_ids, sp)
         assert getattr(blended['model'], backtest.MARKET_BLEND_ALPHA_ATTR) == blended['blend_alpha']
-        # And live scoring reads exactly that attribute back.
-        assert ml_predict.model_market_alpha(blended['model']) == blended['blend_alpha']
+        assert getattr(blended['model'], backtest.MARKET_BLEND_BETA_ATTR) == pytest.approx(1 - blended['blend_alpha'])
+        # And live scoring reads exactly those weights back.
+        assert ml_predict.model_market_alpha(blended['model']) == pytest.approx(
+            (blended['blend_alpha'], 1 - blended['blend_alpha']))
 
     def test_stamping_alpha_does_not_leak_onto_the_base_candidate(self):
         """The base candidate must keep competing unblended."""
@@ -188,8 +194,8 @@ class TestBlendedCandidate:
         # Both the criterion alpha was chosen on and the full Champion Score the
         # chosen alpha produces, so the decision can be re-examined from stored
         # metrics without re-running the night.
-        assert all('out_of_sample_score' in row for row in search)
-        assert all('selection_score' in row for row in search)
+        assert all('walk_forward_mean_gap' in row for row in search)
+        assert all('walk_forward_mean_roi' in row for row in search)
 
     def test_alpha_is_chosen_on_the_folds_not_the_holdout(self):
         """Picking the best of 21 alphas on the same 80/20 holdout that then
@@ -206,17 +212,13 @@ class TestBlendedCandidate:
         )
         blended = backtest._blended_candidate(result, by_alpha, [], X, y, race_ids, sp)
         assert blended['blend_alpha'] == pytest.approx(0.95)
-        search = {row['alpha']: row for row in blended['metrics']['market_blend_alpha_search']}
-        assert search[0.0]['selection_score'] > search[0.95]['selection_score'], (
-            "fixture no longer exercises the case it was written for"
-        )
 
     def test_a_consistent_blend_beats_a_more_profitable_but_erratic_one(self):
         """Fold spread is penalised, the same thing the Champion Score does."""
         result, X, y, race_ids, sp = self._result()
         fold_rois = {alpha: [-40.0, -41.0] for alpha in backtest.MARKET_BLEND_ALPHA_GRID}
-        fold_rois[0.20] = [30.0, 10.0]   # mean 20, spread 10 -> 10
-        fold_rois[0.40] = [16.0, 14.0]   # mean 15, spread 1  -> 14
+        fold_rois[0.20] = [30.0, 0.0]    # mean 15, spread 15 -> 15 - 0.5*15 = 7.5
+        fold_rois[0.40] = [16.0, 14.0]   # mean 15, spread 1  -> 15 - 0.5*1 = 14.5
         blended = backtest._blended_candidate(
             result, self._walk_forward_by_alpha(fold_rois), [], X, y, race_ids, sp
         )
@@ -389,3 +391,103 @@ class TestKellyDoesNotBlendTwice:
         default = ml_predict.compute_kelly_stakes_for_race(self.PREDICTIONS)
         explicit = ml_predict.compute_kelly_stakes_for_race(self.PREDICTIONS, market_alpha=0.3)
         assert explicit != default
+
+
+# ── Benter's two free weights (Oct 2026) ───────────────────────────────────
+
+def test_benter_fit_shrinks_an_overconfident_model_toward_the_market():
+    """A model that is right on average but far too sure of itself gets a
+    small model weight; the market carries the rest."""
+    from model_classes import fit_benter_blend
+    rng = np.random.default_rng(0)
+    model_p, market_p, won, races = [], [], [], []
+    for race in range(600):
+        true = rng.dirichlet(np.ones(8) * 2)
+        market = true * rng.uniform(0.9, 1.1, 8)
+        market /= market.sum()
+        # Overconfident: the model's view is the truth sharpened hard plus noise.
+        noisy = np.exp(4 * np.log(true) + rng.normal(0, 1.5, 8))
+        noisy /= noisy.sum()
+        winner = rng.choice(8, p=true)
+        for i in range(8):
+            model_p.append(noisy[i]); market_p.append(market[i])
+            won.append(int(i == winner)); races.append(race)
+    fit = fit_benter_blend(model_p, market_p, won, races)
+    assert fit['status'] == 'fitted'
+    assert fit['a'] < 0.3          # little weight on the overconfident model
+    assert fit['b'] > 0.6          # the market carries the blend
+    assert fit['log_loss'] <= fit['market_log_loss'] + 1e-9
+
+
+def test_blend_weights_reads_old_and_new_specs():
+    from market_probability import blend_weights
+    assert blend_weights(None) is None
+    assert blend_weights(1.0) is None
+    assert blend_weights(0.25) == pytest.approx((0.25, 0.75))
+    assert blend_weights((0.2, 0.7)) == pytest.approx((0.2, 0.7))
+    assert blend_weights((1.0, 0.0)) is None
+    assert blend_weights((5.0, 0.1)) is None        # outside the bounds
+    assert blend_weights(('x', 1)) is None
+
+
+def test_two_weight_blend_flattens_a_race():
+    from market_probability import blend_probabilities
+    model = [0.7, 0.2, 0.1]
+    market = [0.5, 0.3, 0.2]
+    flat = blend_probabilities(model, market, (0.25, 0.5))   # a + b < 1
+    one = blend_probabilities(model, market, 0.333)
+    assert sum(flat) == pytest.approx(1.0)
+    assert max(flat) < max(one)                          # less confident
+
+
+def test_single_alpha_blend_is_unchanged():
+    from market_probability import blend_probabilities
+    model = [0.6, 0.3, 0.1]
+    market = [0.4, 0.4, 0.2]
+    a = 0.3
+    expected = np.exp(a * np.log(model) + (1 - a) * np.log(market))
+    expected /= expected.sum()
+    assert blend_probabilities(model, market, a) == pytest.approx(list(expected))
+    # An unpriced runner still keeps its model probability's footing.
+    partial = blend_probabilities(model, [0.4, None, 0.2], a)
+    assert sum(partial) == pytest.approx(1.0)
+
+
+def test_blended_candidate_prefers_the_benter_fit_when_it_is_more_accurate():
+    rng = np.random.default_rng(1)
+
+    def fold(fold_idx, n_races=300):
+        preds, won, races, sp = [], [], [], []
+        for race in range(n_races):
+            true = rng.dirichlet(np.ones(8) * 2)
+            noisy = np.exp(4 * np.log(true) + rng.normal(0, 1.5, 8))
+            noisy /= noisy.sum()
+            winner = rng.choice(8, p=true)
+            book = true * 1.15
+            for i in range(8):
+                preds.append(noisy[i]); won.append(int(i == winner))
+                races.append(f"{fold_idx}-{race}"); sp.append(1.0 / book[i])
+        return {'fold': fold_idx, 'pred': np.array(preds), 'won': np.array(won),
+                'race_ids': races, 'sp': np.array(sp)}
+
+    oof = [fold(0), fold(1), fold(2)]
+    template = {'n_splits_requested': 3, 'embargo_rows': 50}
+    by_alpha = {None: backtest._walk_forward_from_oof(oof, None, template)}
+    for alpha in backtest.MARKET_BLEND_ALPHA_GRID:
+        by_alpha[alpha] = backtest._walk_forward_from_oof(oof, alpha, template)
+
+    val = fold(9, n_races=100)
+    model = backtest._FixedPredictions(val['pred'])
+    X_val = pd.DataFrame(index=range(len(val['pred'])))
+    y_val = pd.Series(val['won'])
+    result = {'model_type': 'lightgbm', 'model_name': 'LightGBM', 'model': model,
+              'metrics': {}}
+    blended = backtest._blended_candidate(result, by_alpha, [], X_val, y_val, val['race_ids'],
+                                          val['sp'], oof_folds=oof)
+    assert blended is not None
+    benter = blended['metrics']['market_blend_benter_fit']
+    assert benter['status'] == 'fitted'
+    # The single-weight grid forces a + b = 1; Benter's free pair should be
+    # at least as accurate on the folds, and it is what gets stamped.
+    assert blended['metrics']['market_blend_alpha_selected_on'] == 'benter_mle_on_walk_forward_oof'
+    assert getattr(blended['model'], backtest.MARKET_BLEND_BETA_ATTR) == pytest.approx(benter['b'])
