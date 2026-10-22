@@ -4239,6 +4239,118 @@ def calculate_top_pick_value_test(track_filter="", date_from="", date_to="", sta
     }
 
 
+def calculate_joint_kelly_results(track_filter="", date_from="", date_to=""):
+    """Settle the saved multi-horse (joint Kelly) stakes against results.
+
+    Every bet is `predictions.kelly_stake_pct` (a fraction of bankroll) times
+    KELLY_TRACKING_BANKROLL, on a runner the joint solver backed with a price
+    seen before the jump. The bankroll is fixed, not compounding, so each race
+    counts the same and a long run reads as plain profit.
+
+    Settled twice: at the result SP (the site's standard) and at the price the
+    stake was sized at. The stake is overwritten each time a meeting is
+    re-priced, so it is the stake at the last pre-race price seen.
+
+    Races before TOP_PICK_VALUE_TEST_START are shown but flagged: the odds
+    scraper ran once a day then, so few stakes had a fresh price.
+    """
+    bankroll = KELLY_TRACKING_BANKROLL
+    query = db.session.query(
+        Prediction, Result, Race.id, Race.start_time_utc
+    ).join(
+        Horse, Prediction.horse_id == Horse.id
+    ).join(Race, Horse.race_id == Race.id).join(Meeting, Race.meeting_id == Meeting.id).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(
+        Prediction.kelly_stake_pct > 0,
+        Prediction.value_edge_captured_at.isnot(None),
+        Race.start_time_utc.isnot(None),
+        Prediction.value_edge_captured_at < Race.start_time_utc,
+        Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
+        Result.sp.isnot(None),
+    )
+    if track_filter:
+        query = query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        query = query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        query = query.filter(Meeting.uploaded_at <= date_to)
+
+    # One entry per race: the solver often backs several runners in a race,
+    # and it is the race as a whole that wins or loses.
+    races = {}
+    for prediction, result, race_id, start in query.all():
+        stake = float(prediction.kelly_stake_pct) * bankroll
+        won = result.finish_position == 1
+        sized_price = prediction.value_edge_price
+        race = races.setdefault(race_id, {
+            'start': start, 'bets': 0, 'staked': 0.0, 'return_sp': 0.0,
+            'return_sized': 0.0, 'won': False,
+        })
+        race['bets'] += 1
+        race['staked'] += stake
+        if won:
+            race['won'] = True
+            race['return_sp'] += stake * float(result.sp)
+            price = float(sized_price) if sized_price and float(sized_price) > 1 else float(result.sp)
+            race['return_sized'] += stake * price
+
+    ordered = sorted(races.values(), key=lambda r: r['start'])
+
+    def summarise(items):
+        staked = sum(r['staked'] for r in items)
+        profit_sp = sum(r['return_sp'] for r in items) - staked
+        profit_sized = sum(r['return_sized'] for r in items) - staked
+        wins = sum(1 for r in items if r['won'])
+        peak = cumulative = max_drawdown = 0.0
+        losing_run = longest_losing_run = 0
+        for r in items:
+            cumulative += r['return_sp'] - r['staked']
+            peak = max(peak, cumulative)
+            max_drawdown = max(max_drawdown, peak - cumulative)
+            losing_run = 0 if r['won'] else losing_run + 1
+            longest_losing_run = max(longest_losing_run, losing_run)
+        return {
+            'races': len(items),
+            'bets': sum(r['bets'] for r in items),
+            'races_won': wins,
+            'race_strike_rate': wins / len(items) * 100 if items else 0.0,
+            'staked': staked,
+            'profit_sp': profit_sp,
+            'roi_sp': profit_sp / staked * 100 if staked else 0.0,
+            'profit_sized': profit_sized,
+            'roi_sized': profit_sized / staked * 100 if staked else 0.0,
+            'bankroll_growth_pct': profit_sp / bankroll * 100 if bankroll else 0.0,
+            'max_drawdown': max_drawdown,
+            'longest_losing_run': longest_losing_run,
+        }
+
+    clean = [r for r in ordered if r['start'] >= TOP_PICK_VALUE_TEST_START]
+    summary_rows = [
+        {'label': 'All time', **summarise(ordered)},
+        {'label': f'Since {TOP_PICK_VALUE_TEST_START:%d %b %Y} (fresh prices)', **summarise(clean)},
+    ]
+
+    by_month = {}
+    for r in ordered:
+        by_month.setdefault(r['start'].strftime('%Y-%m'), []).append(r)
+    months = [{'month': month, **summarise(items)} for month, items in sorted(by_month.items())]
+
+    history, cumulative = [], 0.0
+    for r in ordered:
+        cumulative += r['return_sp'] - r['staked']
+        history.append({'date': r['start'].strftime('%Y-%m-%d'), 'cumulative': round(cumulative, 2)})
+
+    return {
+        'bankroll': bankroll,
+        'summary': summary_rows,
+        'months': months,
+        'history': history,
+        'clean_start_date': TOP_PICK_VALUE_TEST_START.date().isoformat(),
+    }
+
+
 # ----- PuntingForm API Routes -----
 
 @app.route("/api/meetings/today")
@@ -6744,8 +6856,18 @@ def ml_data_analytics():
         db.session.rollback()
         logger.warning("Error calculating top-pick value test: %s", e, exc_info=True)
 
+    joint_kelly_results = None
+    try:
+        joint_kelly_results = calculate_joint_kelly_results(
+            track_filter=track_filter, date_from=date_from, date_to=date_to
+        )
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("Error calculating joint Kelly results: %s", e, exc_info=True)
+
     return render_template("ml_data.html",
         top_pick_value_test=top_pick_value_test,
+        joint_kelly_results=joint_kelly_results,
         champion_scores_comparable=champion_scores_comparable(
             active_model_metadata, latest_challenger),
         ml_performance_stats=ml_performance_stats,
