@@ -44,9 +44,10 @@ from sqlalchemy import text
 # before load_model() is ever called.
 import model_classes  # noqa: F401
 from model_classes import (
-    MARKET_BLEND_ALPHA_ATTR, RaceConditionalLogit, race_conditional_logit, solve_joint_kelly,
+    MARKET_BLEND_ALPHA_ATTR, MARKET_BLEND_BETA_ATTR, MARKET_OFFSET_COL, RaceConditionalLogit,
+    model_uses_market, race_conditional_logit, solve_joint_kelly,
 )
-from market_probability import blend_probabilities, fair_probabilities
+from market_probability import blend_probabilities, blend_weights, fair_probabilities
 
 log = logging.getLogger(__name__)
 
@@ -1542,6 +1543,20 @@ MODEL_MARKET_ALPHA_ATTR = MARKET_BLEND_ALPHA_ATTR
 DEFAULT_MARKET_ALPHA = 1.0
 
 
+def active_champion_uses_market():
+    """True when the live champion's probabilities depend on the live price
+    (a market blend, or a market-offset model). Such a champion must be
+    re-scored, not just re-priced, as prices move: the saved probability was
+    only as good as the prices available when it was scored. False when there
+    is no champion or it cannot be loaded."""
+    try:
+        model = load_model()
+    except Exception as exc:
+        log.warning("Could not load the champion to check its market use: %s", exc)
+        return False
+    return model is not None and model_uses_market(model)
+
+
 def model_market_alpha(model):
     """Validated market-blend weight stamped on a model artifact.
 
@@ -1552,6 +1567,15 @@ def model_market_alpha(model):
     raw = getattr(model, MODEL_MARKET_ALPHA_ATTR, None)
     if raw is None:
         return DEFAULT_MARKET_ALPHA
+    beta = getattr(model, MARKET_BLEND_BETA_ATTR, None)
+    if beta is not None:
+        # Benter's two free weights (backtest._blended_candidate). Returned as
+        # the (a, b) pair every blend helper understands; unusable -> no blend.
+        weights = blend_weights((raw, beta))
+        if weights is None:
+            log.warning("Ignoring unusable market blend weights (%r, %r) on active champion.", raw, beta)
+            return DEFAULT_MARKET_ALPHA
+        return weights
     try:
         alpha = float(raw)
     except (TypeError, ValueError):
@@ -1581,7 +1605,7 @@ def _blend_race_with_live_market(raw_preds, horse_ids, live_odds, blend_alpha):
     a real book: fewer than two priced runners is not a market, and blending
     against a one-horse "book" would hand that runner probability 1.0.
     """
-    if blend_alpha is None or float(blend_alpha) >= DEFAULT_MARKET_ALPHA:
+    if blend_weights(blend_alpha) is None:
         return raw_preds, None
 
     race_odds = [(live_odds.get(horse_id) or {}).get('odds') for horse_id in horse_ids]
@@ -1719,9 +1743,9 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
         len(sire_rates), len(dam_rates), len(form_scores), len(past_run_lookup), len(live_odds),
     )
     log.info(
-        "ML_LIVE_MARKET_BLEND_CONFIG meeting=%s alpha=%.2f blending=%s "
-        "(alpha=1.00 means this champion won validation without the market)",
-        meeting_id, blend_alpha, blend_alpha < DEFAULT_MARKET_ALPHA,
+        "ML_LIVE_MARKET_BLEND_CONFIG meeting=%s weights=%s blending=%s "
+        "(no blend means this champion won validation without the market)",
+        meeting_id, blend_weights(blend_alpha), blend_weights(blend_alpha) is not None,
     )
 
     for race in races:
@@ -1792,6 +1816,18 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
 
         feature_rows = add_race_relative_features(feature_rows)
         X_raw = pd.DataFrame(feature_rows)
+        if MARKET_OFFSET_COL in model_features:
+            # A market-offset champion starts from the live market's
+            # FLB-corrected probability (the starting price played that part
+            # in training). With fewer than two priced runners there is no
+            # book to read, so the column stays blank and every runner starts
+            # level; the daily run re-scores once prices arrive.
+            prices = [(live_odds.get(horse_id) or {}).get('odds') for horse_id in horse_ids]
+            if sum(1 for price in prices if price) >= 2:
+                market = fair_probabilities(prices)
+            else:
+                market = [None] * len(prices)
+            X_raw[MARKET_OFFSET_COL] = [np.nan if m is None else float(m) for m in market]
         # Leave gaps as NaN here (no fill_value) so the median-based fill below
         # applies uniformly to columns X_raw is missing entirely *and* individual
         # null cells in columns it does have.
@@ -1823,8 +1859,8 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
         win_probabilities = np.asarray(win_probabilities, dtype=float)
         if blend_diagnostics:
             log.info(
-                "ML_LIVE_MARKET_BLEND meeting=%s race=%s alpha=%.2f runners=%s priced=%s applied=%s",
-                meeting_id, race.race_number, blend_alpha, len(horse_ids),
+                "ML_LIVE_MARKET_BLEND meeting=%s race=%s weights=%s runners=%s priced=%s applied=%s",
+                meeting_id, race.race_number, blend_weights(blend_alpha), len(horse_ids),
                 blend_diagnostics['priced_runners'], blend_diagnostics['applied'],
             )
 
@@ -1935,7 +1971,7 @@ def compute_kelly_stakes_for_race(predictions, market_alpha=None):
     if not usable:
         return {}
 
-    if market_alpha is None or float(market_alpha) >= DEFAULT_MARKET_ALPHA:
+    if blend_weights(market_alpha) is None:
         # No blend: the probabilities go to the solver exactly as they arrive.
         # Running them through the blend at alpha=1.0 would still renormalise
         # them, and `predictions` is only the PRICED runners — a subset of the

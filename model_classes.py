@@ -24,6 +24,22 @@ import numpy as np
 # exists twice is a name that can drift. alpha travels with the pkl exactly
 # like _form_analyst_feature_medians does.
 MARKET_BLEND_ALPHA_ATTR = '_form_analyst_market_blend_alpha'
+# Benter's second weight (on the market), stamped beside alpha when the blend
+# was fitted with two free weights. Absent on older artifacts, which keep the
+# single-alpha meaning (market weight = 1 - alpha).
+MARKET_BLEND_BETA_ATTR = '_form_analyst_market_blend_beta'
+
+
+def model_blend_spec(model):
+    """The market-blend spec a model artifact carries: (a, b), alpha, or None.
+
+    Feed the result to market_probability.blend_weights / blend_probabilities.
+    """
+    alpha = getattr(model, MARKET_BLEND_ALPHA_ATTR, None)
+    beta = getattr(model, MARKET_BLEND_BETA_ATTR, None)
+    if alpha is not None and beta is not None:
+        return (alpha, beta)
+    return alpha
 
 
 class ConsensusRegressor(BaseEstimator, RegressorMixin):
@@ -487,6 +503,66 @@ def fit_conditional_logit_beta(base_probabilities, won, race_ids,
     }
 
 
+BENTER_WEIGHT_BOUNDS = (0.0, 3.0)
+
+
+def fit_benter_blend(model_probabilities, market_probabilities, won, race_ids,
+                     min_races=CONDITIONAL_LOGIT_MIN_RACES):
+    """Benter's second stage: fit p ∝ exp(a·log model + b·log market) per race.
+
+    Both weights are free (bounded to BENTER_WEIGHT_BOUNDS), unlike the old
+    single alpha where b = 1 - a. a + b < 1 flattens an overconfident pair;
+    a small a with b near 1 says "mostly trust the market". Fitted by maximum
+    race-winner likelihood on races the model did not train on.
+
+    Only races where every runner has a market probability are used: an
+    unpriced runner has no log market term to weight.
+
+    Returns {'a', 'b', 'races', 'status', 'log_loss', 'market_log_loss'}.
+    """
+    from scipy.optimize import minimize
+
+    model_p = np.asarray(model_probabilities, dtype=float)
+    market_p = np.asarray([np.nan if m is None else m for m in market_probabilities], dtype=float)
+    won = np.asarray(won, dtype=float)
+    race_ids = [str(r) for r in race_ids]
+    codes, n_groups = _race_codes(race_ids)
+    priced = np.isfinite(market_p) & (market_p > 0)
+    all_priced = np.ones(n_groups, dtype=bool)
+    np.logical_and.at(all_priced, codes, priced)
+    keep = all_priced[codes]
+    out = {'a': None, 'b': None, 'races': 0, 'status': 'insufficient_races',
+           'log_loss': None, 'market_log_loss': None}
+    if not keep.any():
+        return out
+    kept_ids = [race_ids[i] for i in np.flatnonzero(keep)]
+    codes, n_groups = _race_codes(kept_ids)
+    log_model = _log_model_outputs(model_p[keep])
+    log_market = _log_model_outputs(market_p[keep])
+    rows, _usable = _winner_rows(won[keep], codes, n_groups)
+    out['races'] = int(rows.size)
+    if rows.size < min_races:
+        return out
+
+    def loss(weights):
+        a, b = weights
+        log_p = _grouped_log_softmax(a * log_model + b * log_market, codes, n_groups)
+        return float(-np.mean(log_p[rows]))
+
+    best = None
+    for start in ((0.2, 0.8), (0.5, 0.5), (1.0, 0.0)):
+        result = minimize(loss, start, method='L-BFGS-B', bounds=[BENTER_WEIGHT_BOUNDS] * 2)
+        if np.all(np.isfinite(result.x)) and (best is None or result.fun < best.fun):
+            best = result
+    out['market_log_loss'] = loss((0.0, 1.0))
+    if best is None:
+        out['status'] = 'failed'
+        return out
+    a, b = float(best.x[0]), float(best.x[1])
+    out.update({'a': a, 'b': b, 'status': 'fitted', 'log_loss': loss((a, b))})
+    return out
+
+
 def _per_runner_outputs(model, X, race_ids):
     """A fitted model's per-runner output, with its race grouping armed.
 
@@ -635,6 +711,165 @@ class RaceConditionalLogit(BaseEstimator):
 
 if _main_module is not None and not hasattr(_main_module, 'RaceConditionalLogit'):
     _main_module.RaceConditionalLogit = RaceConditionalLogit
+
+
+# ── Lean model: fewer inputs ───────────────────────────────────────────────
+
+class LeanLightGBMClassifier(BaseEstimator):
+    """LightGBM on a small set of inputs chosen inside fit().
+
+    With 300+ inputs and a few thousand races, many inputs only teach a model
+    noise. This drops `drop_columns` (the groups the nightly ablation report
+    marked DROP), then keeps the `top_k` inputs a quick LightGBM fit on THIS
+    training data finds most useful (by gain). Selection never sees the rows
+    it will be scored on: a walk-forward fold re-selects on its own training
+    prefix.
+
+    The artifact still takes the full input list (feature_names_in_), so the
+    feature contract, live scoring and champion re-tests are unchanged; the
+    unused inputs are simply ignored.
+    """
+
+    def __init__(self, top_k=60, drop_columns=(), n_estimators=300, learning_rate=0.03,
+                 num_leaves=15, min_child_samples=100, subsample=0.8, colsample_bytree=0.7,
+                 reg_lambda=5.0, random_state=42):
+        self.top_k = top_k
+        self.drop_columns = drop_columns
+        self.n_estimators = n_estimators
+        self.learning_rate = learning_rate
+        self.num_leaves = num_leaves
+        self.min_child_samples = min_child_samples
+        self.subsample = subsample
+        self.colsample_bytree = colsample_bytree
+        self.reg_lambda = reg_lambda
+        self.random_state = random_state
+
+    def _lgbm(self, n_estimators):
+        from lightgbm import LGBMClassifier
+        return LGBMClassifier(
+            n_estimators=n_estimators, learning_rate=self.learning_rate, num_leaves=self.num_leaves,
+            min_child_samples=self.min_child_samples, subsample=self.subsample, subsample_freq=1,
+            colsample_bytree=self.colsample_bytree, reg_lambda=self.reg_lambda,
+            random_state=self.random_state, n_jobs=-1, verbosity=-1, importance_type='gain',
+        )
+
+    def fit(self, X, y):
+        self.feature_names_in_ = np.asarray(list(X.columns))
+        dropped = set(self.drop_columns or ())
+        candidates = [c for c in X.columns if c not in dropped]
+        y = np.asarray(y, dtype=int)
+        if self.top_k and len(candidates) > int(self.top_k):
+            ranker = self._lgbm(150).fit(X[candidates], y)
+            gain = np.asarray(ranker.feature_importances_, dtype=float)
+            order = np.argsort(-gain, kind='stable')[:int(self.top_k)]
+            # Keep the original column order so the fit is reproducible.
+            keep = set(candidates[i] for i in order)
+            candidates = [c for c in candidates if c in keep]
+        self.kept_columns_ = list(candidates)
+        self.model_ = self._lgbm(self.n_estimators).fit(X[self.kept_columns_], y)
+        self.classes_ = np.array([0, 1])
+        return self
+
+    def predict_proba(self, X):
+        return self.model_.predict_proba(X[self.kept_columns_])
+
+    def predict(self, X):
+        return self.model_.predict(X[self.kept_columns_])
+
+
+if _main_module is not None and not hasattr(_main_module, 'LeanLightGBMClassifier'):
+    _main_module.LeanLightGBMClassifier = LeanLightGBMClassifier
+
+
+# ── Market-offset model (Benter-style residual) ────────────────────────────
+#
+# Column carrying the market's FLB-corrected win probability for each runner:
+# from the starting price in training, from the live odds feed when scoring.
+# Only the market-offset candidate reads it; every other model ignores it.
+MARKET_OFFSET_COL = 'mkt_fair_prob'
+# Stamped on an artifact whose probabilities start from the market, so the
+# daily run knows it must re-score (not just re-price) once prices move.
+USES_MARKET_OFFSET_ATTR = '_form_analyst_uses_market_offset'
+MARKET_OFFSET_PROB_BOUNDS = (1e-4, 0.98)
+
+
+class MarketOffsetClassifier(BaseEstimator):
+    """Start from the market's price, learn only where it is wrong.
+
+    LightGBM is fitted with the market's log-odds as its starting score
+    (init_score), so every tree models the correction to the market rather than
+    the whole answer. This is Benter's lesson: the public odds already hold
+    most of what form can tell you, and a model's job is the remainder.
+
+    X must carry MARKET_OFFSET_COL. It is used as the offset and dropped from
+    the inputs the trees see. A runner with no market probability (NaN) is
+    given the median of the priced runners in the same call, which for a
+    wholly unpriced race means every runner starts level and only the
+    corrections rank them.
+
+    Deliberately strongly regularised: a correction to an efficient market
+    should be small, and a big one is more likely overfitting than insight.
+    """
+
+    def __init__(self, n_estimators=300, learning_rate=0.03, num_leaves=15,
+                 min_child_samples=200, subsample=0.8, colsample_bytree=0.6,
+                 reg_lambda=10.0, random_state=42):
+        self.n_estimators = n_estimators
+        self.learning_rate = learning_rate
+        self.num_leaves = num_leaves
+        self.min_child_samples = min_child_samples
+        self.subsample = subsample
+        self.colsample_bytree = colsample_bytree
+        self.reg_lambda = reg_lambda
+        self.random_state = random_state
+
+    @staticmethod
+    def _offset(X):
+        if MARKET_OFFSET_COL not in X.columns:
+            raise ValueError(f"MarketOffsetClassifier needs a '{MARKET_OFFSET_COL}' column")
+        q = np.asarray(X[MARKET_OFFSET_COL], dtype=float)
+        known = np.isfinite(q) & (q > 0)
+        fill = float(np.median(q[known])) if known.any() else 0.1
+        q = np.where(known, q, fill)
+        q = np.clip(q, *MARKET_OFFSET_PROB_BOUNDS)
+        return np.log(q / (1.0 - q))
+
+    def _inputs(self, X):
+        return X.drop(columns=[MARKET_OFFSET_COL])
+
+    def fit(self, X, y):
+        from lightgbm import LGBMClassifier
+        self.feature_names_in_ = np.asarray(list(X.columns))
+        self.model_ = LGBMClassifier(
+            n_estimators=self.n_estimators, learning_rate=self.learning_rate,
+            num_leaves=self.num_leaves, min_child_samples=self.min_child_samples,
+            subsample=self.subsample, subsample_freq=1, colsample_bytree=self.colsample_bytree,
+            reg_lambda=self.reg_lambda, random_state=self.random_state, n_jobs=-1, verbosity=-1,
+        )
+        self.model_.fit(self._inputs(X), np.asarray(y, dtype=int), init_score=self._offset(X))
+        self.classes_ = np.array([0, 1])
+        return self
+
+    def predict_proba(self, X):
+        raw = self.model_.predict(self._inputs(X), raw_score=True) + self._offset(X)
+        p = 1.0 / (1.0 + np.exp(-raw))
+        return np.column_stack([1.0 - p, p])
+
+    def predict(self, X):
+        return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
+
+if _main_module is not None and not hasattr(_main_module, 'MarketOffsetClassifier'):
+    _main_module.MarketOffsetClassifier = MarketOffsetClassifier
+
+
+def model_uses_market(model):
+    """True when live probabilities from this artifact depend on the live price:
+    it carries a market blend, or it starts from the market (offset model)."""
+    if bool(getattr(model, USES_MARKET_OFFSET_ATTR, False)):
+        return True
+    from market_probability import blend_weights
+    return blend_weights(model_blend_spec(model)) is not None
 
 
 def race_normalised_win_probabilities(model, X, race_ids=None):

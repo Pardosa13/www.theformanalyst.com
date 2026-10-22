@@ -162,12 +162,13 @@ def _score(kelly_staking=None):
     return backtest._selection_score_from_metrics(metrics)
 
 
-def test_champion_score_rewards_kelly_growth_and_punishes_ruin():
+def test_champion_score_v9_ignores_the_kelly_simulation():
+    # v9: the Kelly simulation was ROI noise compounded, and the live Kelly
+    # table lost 25%. The score now leads on log loss vs the market and gives
+    # the simulation no say either way.
     no_kelly = _score()
-    grew = _score(_kelly_block(0.4))
-    busted = _score(_kelly_block(0.4, ruined=True))
-    assert grew > no_kelly
-    assert busted < no_kelly
+    assert _score(_kelly_block(0.4)) == pytest.approx(no_kelly)
+    assert _score(_kelly_block(0.4, ruined=True)) == pytest.approx(no_kelly)
 
 
 def test_champion_score_clamps_an_implausible_bankroll_growth():
@@ -231,7 +232,9 @@ def test_a_realistic_simulation_run_lands_well_inside_the_clamp():
     scored = _score(_kelly_block(
         result["bankroll_growth"], max_drawdown_pct=result["max_drawdown_pct"],
     ))
-    assert scored - _score() == pytest.approx(unclamped_component)
+    assert unclamped_component > 0
+    # v9 scores no Kelly term at all, so the simulation cannot move the score.
+    assert scored == pytest.approx(_score())
 
 
 def test_live_staking_allocates_identically_to_the_backtest_simulation():
