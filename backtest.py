@@ -92,6 +92,7 @@ from pf_form import (
     empty_pf_form_features, meeting_features as pf_meeting_features, snapshot_usable, tab_key,
 )
 from track_bias import TRACK_BIAS_FEATURES, empty_track_bias_features, point_in_time_features
+from race_shape import RACE_SHAPE_FEATURES, add_race_shape_features
 from past_runs import (
     PAST_RUN_FEATURES, PAST_RUN_RELATIVE_COLS, PAST_RUN_RELATIVE_LOWER_IS_BETTER,
     empty_past_run_features, horse_key, past_run_features_for_meeting,
@@ -1703,6 +1704,7 @@ def add_race_relative_features(feature_rows, race_ids):
         temp[f'{col}_race_rank'] = grouped.rank(method='min', ascending=ascending)
         temp[f'{col}_vs_race_avg'] = temp[col] - grouped.transform('mean')
 
+    add_race_shape_features(temp, race_key='race_id')
     return temp.drop(columns=['race_id']).to_dict('records')
 
 

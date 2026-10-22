@@ -60,15 +60,25 @@ PF_RATINGS_COLS = [
     'pf_early_time_rank_race_rank', 'pf_early_time_rank_vs_race_avg',
 ]
 
+# In-run columns from the form feed that belong to the pace-shape group.
+PACE_FORM_COLS = ['ir_speed_points_l3', 'ir_settle_vs_best']
+
 FEATURE_GROUPS = {
     'past_runs': _with_relative(PAST_RUN_FEATURES, PAST_RUN_RELATIVE_COLS),
     'ratings_prices': ['pf_early_time_price', 'pf_weight_class_price', 'pf_adj_weight_class_price'],
     'track_bias': _with_relative(TRACK_BIAS_FEATURES, ['tb_barrier_win_edge', 'tb_style_win_edge']),
-    'pf_form_feed': _with_relative(PF_FORM_FEATURES, PF_FORM_RELATIVE_COLS),
+    'pf_form_feed': [c for c in _with_relative(PF_FORM_FEATURES, PF_FORM_RELATIVE_COLS)
+                     if c not in PACE_FORM_COLS],
     'pf_ratings': PF_RATINGS_COLS,
+    # Late Oct 2026: first starters and weight (full history) ...
+    'debut_weight': ['rs_is_debut', 'rs_debut_share', 'rs_debut_x_share',
+                     'rs_weight_lengths', 'rs_weight_over_53_5'],
+    # ... and pace shape (needs the saved form feed, so only from 19 Oct 2026).
+    'pace_shape': PACE_FORM_COLS + ['rs_n_speed', 'rs_race_speed_total', 'rs_rival_speed_max',
+                                    'rs_lone_speed', 'rs_style_change'],
 }
 # Groups added in 2026-10 (pf_ratings existed before, so it stays in baseline).
-NEW_GROUPS = ('past_runs', 'ratings_prices', 'track_bias', 'pf_form_feed')
+NEW_GROUPS = ('past_runs', 'ratings_prices', 'track_bias', 'pf_form_feed', 'debut_weight', 'pace_shape')
 
 
 def build_variants(columns):
