@@ -81,10 +81,21 @@ FEATURE_GROUPS = {
 NEW_GROUPS = ('past_runs', 'ratings_prices', 'track_bias', 'pf_form_feed', 'debut_weight', 'pace_shape')
 
 
+# Built from the columns at run time: the vs-race-best and race-percentile
+# derivatives of the original race-relative inputs. They restate the rank and
+# vs-average columns in another form, so they are measured as one group
+# (remove-only: they are part of the baseline).
+RACE_RELATIVE_EXTRA_SUFFIXES = ('_vs_race_best', '_race_percentile')
+# A group with values on fewer rows than this cannot be judged yet; its
+# verdict is TOO_LITTLE_DATA instead of KEEP/DROP/UNCLEAR.
+MIN_COVERAGE_PCT = float(os.environ.get('ABLATION_MIN_COVERAGE_PCT', '10'))
+
+
 def build_variants(columns):
     """{variant name: column list}, every list in the training matrix's own order."""
     columns = list(columns)
     present = {g: [c for c in cols if c in set(columns)] for g, cols in FEATURE_GROUPS.items()}
+    present['race_relative_extras'] = [c for c in columns if c.endswith(RACE_RELATIVE_EXTRA_SUFFIXES)]
     new_cols = {c for g in NEW_GROUPS for c in present[g]}
     baseline = [c for c in columns if c not in new_cols]
     variants = {'baseline': baseline}
@@ -202,11 +213,15 @@ def run_feature_ablation(X, y_won, sp_values, race_ids, meeting_dates, run_id=No
     # (helps). It has to beat twice the seed-to-seed noise both ways to count.
     verdicts = {}
     threshold = 2 * max(noise or 0.0, 1e-4)
-    for group in FEATURE_GROUPS:
+    coverage = group_coverage_pct(X, present)
+    for group in present:
         add = (ll(f'+{group}') - ll('baseline')) if ll(f'+{group}') is not None and ll('baseline') is not None else None
         remove = (ll('all') - ll(f'all-{group}')) if ll(f'all-{group}') is not None and ll('all') is not None else None
         effects = [e for e in (add, remove) if e is not None]
-        if not effects or noise is None:
+        if coverage.get(group) is not None and coverage[group] < MIN_COVERAGE_PCT:
+            # Mostly blank: any difference is noise from a handful of rows.
+            verdict = 'TOO_LITTLE_DATA'
+        elif not effects or noise is None:
             verdict = 'UNCLEAR'
         elif all(e < -threshold for e in effects):
             verdict = 'KEEP'
@@ -214,9 +229,11 @@ def run_feature_ablation(X, y_won, sp_values, race_ids, meeting_dates, run_id=No
             verdict = 'DROP'
         else:
             verdict = 'UNCLEAR'
-        verdicts[group] = {'add_effect': add, 'remove_effect': remove, 'verdict': verdict}
-        lines.append(f"VERDICT {group:<16} {verdict:<8} add={add if add is None else round(add, 4)} "
-                     f"remove={remove if remove is None else round(remove, 4)} (negative = helps)")
+        verdicts[group] = {'add_effect': add, 'remove_effect': remove, 'verdict': verdict,
+                           'coverage_pct': coverage.get(group), 'n_columns': len(present[group])}
+        lines.append(f"VERDICT {group:<20} {verdict:<15} add={add if add is None else round(add, 4)} "
+                     f"remove={remove if remove is None else round(remove, 4)} "
+                     f"coverage={coverage.get(group)}% (negative = helps)")
 
     try:
         importance, top_new = _group_importance(X, y, rids, present)
@@ -252,6 +269,58 @@ def run_feature_ablation(X, y_won, sp_values, race_ids, meeting_dates, run_id=No
         except Exception as exc:
             log.warning("FEATURE_ABLATION could not save report: %s", exc)
     return report
+
+
+def group_coverage_pct(X, present):
+    """Share of rows (%) with at least one non-blank value in each group."""
+    out = {}
+    for group, cols in present.items():
+        cols = [c for c in cols if c in X.columns]
+        if not cols or len(X) == 0:
+            out[group] = None
+            continue
+        out[group] = round(100.0 * float(X[cols].notna().any(axis=1).mean()), 1)
+    return out
+
+
+def latest_report(engine):
+    """The newest saved ablation report as a dict, or None."""
+    if engine is None:
+        return None
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        row = conn.execute(text(
+            "SELECT report_json, created_at FROM feature_ablation_runs ORDER BY id DESC LIMIT 1"
+        )).first()
+    if not row or not row[0]:
+        return None
+    report = json.loads(row[0])
+    report['created_at'] = str(row[1]) if row[1] is not None else None
+    return report
+
+
+def latest_drop_columns(engine, columns):
+    """Columns in the groups the newest ablation report marked DROP.
+
+    Only a strict DROP counts (worse both ways by more than twice the seed
+    noise, on enough rows). Returns [] when there is no report.
+    """
+    try:
+        report = latest_report(engine)
+    except Exception as exc:
+        log.info("No ablation report to read (%s); the lean candidate drops nothing.", exc)
+        return []
+    if not report:
+        return []
+    _variants, present = build_variants(columns)
+    drop = []
+    for group, verdict in (report.get('verdicts') or {}).items():
+        if (verdict or {}).get('verdict') == 'DROP':
+            drop.extend(present.get(group, []))
+    if drop:
+        log.info("Ablation report run %s marks DROP: %s (%s column(s))", report.get('run_id'),
+                 [g for g, v in report['verdicts'].items() if (v or {}).get('verdict') == 'DROP'], len(drop))
+    return sorted(set(drop))
 
 
 def enabled():

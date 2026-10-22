@@ -84,7 +84,7 @@ from strike_rate_matching import (
 )
 from model_classes import (
     MARKET_BLEND_ALPHA_ATTR, MARKET_BLEND_BETA_ATTR, ConsensusRegressor, RaceConditionalLogit,
-    MARKET_OFFSET_COL, USES_MARKET_OFFSET_ATTR, MarketOffsetClassifier,
+    MARKET_OFFSET_COL, USES_MARKET_OFFSET_ATTR, LeanLightGBMClassifier, MarketOffsetClassifier,
     RaceGroupedRanker, fit_benter_blend, model_blend_spec, race_winner_log_loss, set_race_context,
     solve_joint_kelly,
 )
@@ -4726,7 +4726,8 @@ def _blended_candidate(result, walk_forward_by_alpha, fold_boundaries,
     }
 
 
-def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, df, grid_search_best_rf_params=None, baseline_roi=0.0):
+def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, df, grid_search_best_rf_params=None, baseline_roi=0.0,
+                          lean_drop_columns=None):
     """Train RF, boosted candidates and consensus on one shared unseen validation set.
 
     grid_search_best_rf_params: optional hyperparams dict (n_estimators, max_depth,
@@ -4998,6 +4999,17 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     # searches the bare model and every downstream path — the holdout, the
     # walk-forward folds, the ensembles, the saved artifact — gets the
     # calibrated one without knowing it.
+    # Lean candidate (Oct 2026): the same idea as the others with far fewer
+    # inputs. It drops the groups the last nightly ablation report marked DROP
+    # and keeps the top ML_LEAN_TOP_K inputs by gain on its own training rows
+    # (see model_classes.LeanLightGBMClassifier). Competes like any other.
+    lean_top_k = int(os.environ.get('ML_LEAN_TOP_K', '60'))
+    if lean_top_k > 0:
+        lean_drop = tuple(c for c in (lean_drop_columns or ()) if c in set(X.columns))
+        candidates['lightgbm_lean'] = LeanLightGBMClassifier(top_k=lean_top_k, drop_columns=lean_drop)
+        log.info("Track E lightgbm_lean: top_k=%s, dropping %s input(s) the ablation report marked DROP",
+                 lean_top_k, len(lean_drop))
+
     candidates = {mt: RaceConditionalLogit(model) for mt, model in candidates.items()}
 
     fitted = {}
@@ -5128,7 +5140,7 @@ def run_model_competition(X, y_roi, y_won, sp_values, race_ids, meeting_dates, d
     # average of them does too: the consensus is a mixture of race books, and
     # no member's vote is shrunk or inflated by the scale its raw outputs
     # happened to come out on.
-    ensemble_eligible = {mt: model for mt, model in fitted.items() if mt != 'mlp'}
+    ensemble_eligible = {mt: model for mt, model in fitted.items() if mt not in ('mlp', 'lightgbm_lean')}
     if len(ensemble_eligible) > 1:
         ensemble_members = list(ensemble_eligible.items())
         ensemble_weights = []
@@ -6177,6 +6189,10 @@ def _heal_stale_champion(champion_id, champion_metrics, run_id=None):
         dates_ordered = dates.iloc[order].reset_index(drop=True)
 
         expected_features = _stored_feature_list(model)
+        if expected_features is not None and list(expected_features) == list(X.columns) + [MARKET_OFFSET_COL]:
+            # A market-offset champion carries the market column on top of
+            # tonight's features; build it the same way the competition does.
+            X = _with_market_column(X, sp_values, race_ids)
         if expected_features is None:
             # HARD INVARIANT: a champion with no persisted feature list cannot
             # score a single live race (ml_predict raises before predict()).
@@ -7752,10 +7768,16 @@ def main():
                 'max_features': top_10_models[0]['max_features'],
             }
         try:
+            lean_drop_columns = []
+            try:
+                import feature_ablation
+                lean_drop_columns = feature_ablation.latest_drop_columns(engine, X.columns)
+            except Exception as e:
+                log.warning(f"Could not read the last ablation report for the lean candidate: {e}")
             best_competitor, competition_results = run_model_competition(
                 X, y_roi, y_won, sp_values, race_ids, meeting_dates, df,
                 grid_search_best_rf_params=grid_search_best_rf_params,
-                baseline_roi=baseline_roi,
+                baseline_roi=baseline_roi, lean_drop_columns=lean_drop_columns,
             )
             output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
             os.makedirs(output_dir, exist_ok=True)

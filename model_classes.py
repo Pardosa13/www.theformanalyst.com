@@ -713,6 +713,74 @@ if _main_module is not None and not hasattr(_main_module, 'RaceConditionalLogit'
     _main_module.RaceConditionalLogit = RaceConditionalLogit
 
 
+# ── Lean model: fewer inputs ───────────────────────────────────────────────
+
+class LeanLightGBMClassifier(BaseEstimator):
+    """LightGBM on a small set of inputs chosen inside fit().
+
+    With 300+ inputs and a few thousand races, many inputs only teach a model
+    noise. This drops `drop_columns` (the groups the nightly ablation report
+    marked DROP), then keeps the `top_k` inputs a quick LightGBM fit on THIS
+    training data finds most useful (by gain). Selection never sees the rows
+    it will be scored on: a walk-forward fold re-selects on its own training
+    prefix.
+
+    The artifact still takes the full input list (feature_names_in_), so the
+    feature contract, live scoring and champion re-tests are unchanged; the
+    unused inputs are simply ignored.
+    """
+
+    def __init__(self, top_k=60, drop_columns=(), n_estimators=300, learning_rate=0.03,
+                 num_leaves=15, min_child_samples=100, subsample=0.8, colsample_bytree=0.7,
+                 reg_lambda=5.0, random_state=42):
+        self.top_k = top_k
+        self.drop_columns = drop_columns
+        self.n_estimators = n_estimators
+        self.learning_rate = learning_rate
+        self.num_leaves = num_leaves
+        self.min_child_samples = min_child_samples
+        self.subsample = subsample
+        self.colsample_bytree = colsample_bytree
+        self.reg_lambda = reg_lambda
+        self.random_state = random_state
+
+    def _lgbm(self, n_estimators):
+        from lightgbm import LGBMClassifier
+        return LGBMClassifier(
+            n_estimators=n_estimators, learning_rate=self.learning_rate, num_leaves=self.num_leaves,
+            min_child_samples=self.min_child_samples, subsample=self.subsample, subsample_freq=1,
+            colsample_bytree=self.colsample_bytree, reg_lambda=self.reg_lambda,
+            random_state=self.random_state, n_jobs=-1, verbosity=-1, importance_type='gain',
+        )
+
+    def fit(self, X, y):
+        self.feature_names_in_ = np.asarray(list(X.columns))
+        dropped = set(self.drop_columns or ())
+        candidates = [c for c in X.columns if c not in dropped]
+        y = np.asarray(y, dtype=int)
+        if self.top_k and len(candidates) > int(self.top_k):
+            ranker = self._lgbm(150).fit(X[candidates], y)
+            gain = np.asarray(ranker.feature_importances_, dtype=float)
+            order = np.argsort(-gain, kind='stable')[:int(self.top_k)]
+            # Keep the original column order so the fit is reproducible.
+            keep = set(candidates[i] for i in order)
+            candidates = [c for c in candidates if c in keep]
+        self.kept_columns_ = list(candidates)
+        self.model_ = self._lgbm(self.n_estimators).fit(X[self.kept_columns_], y)
+        self.classes_ = np.array([0, 1])
+        return self
+
+    def predict_proba(self, X):
+        return self.model_.predict_proba(X[self.kept_columns_])
+
+    def predict(self, X):
+        return self.model_.predict(X[self.kept_columns_])
+
+
+if _main_module is not None and not hasattr(_main_module, 'LeanLightGBMClassifier'):
+    _main_module.LeanLightGBMClassifier = LeanLightGBMClassifier
+
+
 # ── Market-offset model (Benter-style residual) ────────────────────────────
 #
 # Column carrying the market's FLB-corrected win probability for each runner:

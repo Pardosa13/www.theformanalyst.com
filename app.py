@@ -6978,6 +6978,14 @@ def ml_data_analytics():
         db.session.rollback()
         logger.warning("Error calculating top-pick value test: %s", e, exc_info=True)
 
+    ablation_report = None
+    try:
+        import feature_ablation
+        ablation_report = feature_ablation.latest_report(db.engine)
+    except Exception as e:
+        db.session.rollback()
+        logger.info("No feature ablation report to show yet: %s", e)
+
     joint_kelly_results = None
     try:
         joint_kelly_results = calculate_joint_kelly_results(
@@ -6990,6 +6998,7 @@ def ml_data_analytics():
     return render_template("ml_data.html",
         top_pick_value_test=top_pick_value_test,
         joint_kelly_results=joint_kelly_results,
+        ablation_report=ablation_report,
         champion_scores_comparable=champion_scores_comparable(
             active_model_metadata, latest_challenger),
         ml_performance_stats=ml_performance_stats,
