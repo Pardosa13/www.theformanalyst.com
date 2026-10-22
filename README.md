@@ -80,4 +80,4 @@ Start at **[docs/README.md](docs/README.md)**:
 ## License
 
 Proprietary - All rights reserved.  
-© 2024 Partington Probability Ltd
+© 2026 Partington Probability Ltd
