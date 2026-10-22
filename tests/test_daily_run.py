@@ -122,7 +122,26 @@ def test_alert_network_error_does_not_log_url(monkeypatch, caplog):
 def test_each_pass_reprices_scored_meetings_with_races_to_run():
     source = Path('daily_run.py').read_text()
     body = source[source.index('def run_pass('):]
-    assert "elif needs_ml(db, races_to_run):\n                score_ml(db, meeting, summary)\n            else:\n                reprice_ml(db, meeting)" in body
+    assert "elif needs_ml(db, races_to_run):\n                score_ml(db, meeting, summary)\n" in body
+    assert "            else:\n                reprice_ml(db, meeting)" in body
+
+
+def test_a_market_using_champion_is_rescored_not_repriced():
+    """A blended or market-offset champion's saved probability is only as good
+    as the prices when it was scored, so each pass re-scores it."""
+    source = Path('daily_run.py').read_text()
+    body = source[source.index('def run_pass('):]
+    assert "rescore_for_market = market_rescore_enabled() and champion_uses_market()" in body
+    assert "elif rescore_for_market:" in body
+    branch = body[body.index("elif rescore_for_market:"):body.index("reprice_ml(db, meeting)")]
+    assert "score_ml(db, meeting, summary)" in branch
+
+
+def test_market_rescore_can_be_switched_off(monkeypatch):
+    monkeypatch.setenv('DAILY_RUN_RESCORE_MARKET_MODELS', '0')
+    assert dr.market_rescore_enabled() is False
+    monkeypatch.setenv('DAILY_RUN_RESCORE_MARKET_MODELS', '1')
+    assert dr.market_rescore_enabled() is True
 
 
 def test_reprice_failure_is_logged_not_raised(monkeypatch, caplog):

@@ -713,6 +713,97 @@ if _main_module is not None and not hasattr(_main_module, 'RaceConditionalLogit'
     _main_module.RaceConditionalLogit = RaceConditionalLogit
 
 
+# ── Market-offset model (Benter-style residual) ────────────────────────────
+#
+# Column carrying the market's FLB-corrected win probability for each runner:
+# from the starting price in training, from the live odds feed when scoring.
+# Only the market-offset candidate reads it; every other model ignores it.
+MARKET_OFFSET_COL = 'mkt_fair_prob'
+# Stamped on an artifact whose probabilities start from the market, so the
+# daily run knows it must re-score (not just re-price) once prices move.
+USES_MARKET_OFFSET_ATTR = '_form_analyst_uses_market_offset'
+MARKET_OFFSET_PROB_BOUNDS = (1e-4, 0.98)
+
+
+class MarketOffsetClassifier(BaseEstimator):
+    """Start from the market's price, learn only where it is wrong.
+
+    LightGBM is fitted with the market's log-odds as its starting score
+    (init_score), so every tree models the correction to the market rather than
+    the whole answer. This is Benter's lesson: the public odds already hold
+    most of what form can tell you, and a model's job is the remainder.
+
+    X must carry MARKET_OFFSET_COL. It is used as the offset and dropped from
+    the inputs the trees see. A runner with no market probability (NaN) is
+    given the median of the priced runners in the same call, which for a
+    wholly unpriced race means every runner starts level and only the
+    corrections rank them.
+
+    Deliberately strongly regularised: a correction to an efficient market
+    should be small, and a big one is more likely overfitting than insight.
+    """
+
+    def __init__(self, n_estimators=300, learning_rate=0.03, num_leaves=15,
+                 min_child_samples=200, subsample=0.8, colsample_bytree=0.6,
+                 reg_lambda=10.0, random_state=42):
+        self.n_estimators = n_estimators
+        self.learning_rate = learning_rate
+        self.num_leaves = num_leaves
+        self.min_child_samples = min_child_samples
+        self.subsample = subsample
+        self.colsample_bytree = colsample_bytree
+        self.reg_lambda = reg_lambda
+        self.random_state = random_state
+
+    @staticmethod
+    def _offset(X):
+        if MARKET_OFFSET_COL not in X.columns:
+            raise ValueError(f"MarketOffsetClassifier needs a '{MARKET_OFFSET_COL}' column")
+        q = np.asarray(X[MARKET_OFFSET_COL], dtype=float)
+        known = np.isfinite(q) & (q > 0)
+        fill = float(np.median(q[known])) if known.any() else 0.1
+        q = np.where(known, q, fill)
+        q = np.clip(q, *MARKET_OFFSET_PROB_BOUNDS)
+        return np.log(q / (1.0 - q))
+
+    def _inputs(self, X):
+        return X.drop(columns=[MARKET_OFFSET_COL])
+
+    def fit(self, X, y):
+        from lightgbm import LGBMClassifier
+        self.feature_names_in_ = np.asarray(list(X.columns))
+        self.model_ = LGBMClassifier(
+            n_estimators=self.n_estimators, learning_rate=self.learning_rate,
+            num_leaves=self.num_leaves, min_child_samples=self.min_child_samples,
+            subsample=self.subsample, subsample_freq=1, colsample_bytree=self.colsample_bytree,
+            reg_lambda=self.reg_lambda, random_state=self.random_state, n_jobs=-1, verbosity=-1,
+        )
+        self.model_.fit(self._inputs(X), np.asarray(y, dtype=int), init_score=self._offset(X))
+        self.classes_ = np.array([0, 1])
+        return self
+
+    def predict_proba(self, X):
+        raw = self.model_.predict(self._inputs(X), raw_score=True) + self._offset(X)
+        p = 1.0 / (1.0 + np.exp(-raw))
+        return np.column_stack([1.0 - p, p])
+
+    def predict(self, X):
+        return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
+
+if _main_module is not None and not hasattr(_main_module, 'MarketOffsetClassifier'):
+    _main_module.MarketOffsetClassifier = MarketOffsetClassifier
+
+
+def model_uses_market(model):
+    """True when live probabilities from this artifact depend on the live price:
+    it carries a market blend, or it starts from the market (offset model)."""
+    if bool(getattr(model, USES_MARKET_OFFSET_ATTR, False)):
+        return True
+    from market_probability import blend_weights
+    return blend_weights(model_blend_spec(model)) is not None
+
+
 def race_normalised_win_probabilities(model, X, race_ids=None):
     """Race win probabilities from ANY model artifact, old or new.
 

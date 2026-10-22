@@ -44,8 +44,8 @@ from sqlalchemy import text
 # before load_model() is ever called.
 import model_classes  # noqa: F401
 from model_classes import (
-    MARKET_BLEND_ALPHA_ATTR, MARKET_BLEND_BETA_ATTR, RaceConditionalLogit, race_conditional_logit,
-    solve_joint_kelly,
+    MARKET_BLEND_ALPHA_ATTR, MARKET_BLEND_BETA_ATTR, MARKET_OFFSET_COL, RaceConditionalLogit,
+    model_uses_market, race_conditional_logit, solve_joint_kelly,
 )
 from market_probability import blend_probabilities, blend_weights, fair_probabilities
 
@@ -1543,6 +1543,20 @@ MODEL_MARKET_ALPHA_ATTR = MARKET_BLEND_ALPHA_ATTR
 DEFAULT_MARKET_ALPHA = 1.0
 
 
+def active_champion_uses_market():
+    """True when the live champion's probabilities depend on the live price
+    (a market blend, or a market-offset model). Such a champion must be
+    re-scored, not just re-priced, as prices move: the saved probability was
+    only as good as the prices available when it was scored. False when there
+    is no champion or it cannot be loaded."""
+    try:
+        model = load_model()
+    except Exception as exc:
+        log.warning("Could not load the champion to check its market use: %s", exc)
+        return False
+    return model is not None and model_uses_market(model)
+
+
 def model_market_alpha(model):
     """Validated market-blend weight stamped on a model artifact.
 
@@ -1802,6 +1816,18 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
 
         feature_rows = add_race_relative_features(feature_rows)
         X_raw = pd.DataFrame(feature_rows)
+        if MARKET_OFFSET_COL in model_features:
+            # A market-offset champion starts from the live market's
+            # FLB-corrected probability (the starting price played that part
+            # in training). With fewer than two priced runners there is no
+            # book to read, so the column stays blank and every runner starts
+            # level; the daily run re-scores once prices arrive.
+            prices = [(live_odds.get(horse_id) or {}).get('odds') for horse_id in horse_ids]
+            if sum(1 for price in prices if price) >= 2:
+                market = fair_probabilities(prices)
+            else:
+                market = [None] * len(prices)
+            X_raw[MARKET_OFFSET_COL] = [np.nan if m is None else float(m) for m in market]
         # Leave gaps as NaN here (no fill_value) so the median-based fill below
         # applies uniformly to columns X_raw is missing entirely *and* individual
         # null cells in columns it does have.

@@ -281,6 +281,15 @@ def score_ml(db, meeting, summary):
         log.warning('ML not scored for %s: %s', meeting.meeting_name, result.get('reason'))
 
 
+def market_rescore_enabled():
+    return os.environ.get('DAILY_RUN_RESCORE_MARKET_MODELS', '1').strip().lower() not in ('0', 'false', 'no', 'off')
+
+
+def champion_uses_market():
+    from ml_predict import active_champion_uses_market
+    return active_champion_uses_market()
+
+
 def reprice_ml(db, meeting):
     """Refresh value edge and Kelly stake from the newest live prices.
 
@@ -359,6 +368,9 @@ def run_pass(app, day, summary):
 
     conditions = fetch_conditions(pf_service.api_key)
     log.info('Conditions feed: %s entries', len({id(v) for v in conditions.values()}))
+    rescore_for_market = market_rescore_enabled() and champion_uses_market()
+    if rescore_for_market:
+        log.info('Live champion uses the market: meetings are re-scored each pass, not just re-priced')
     try:
         v1_scratch = pf_service.get_scratchings()
     except Exception as exc:
@@ -452,6 +464,14 @@ def run_pass(app, day, summary):
                 summary['rescored'].append(f'{name} ({", ".join(reasons)}; {body.get("races_updated")} races)')
                 score_ml(db, meeting, summary)
             elif needs_ml(db, races_to_run):
+                score_ml(db, meeting, summary)
+            elif rescore_for_market:
+                # The saved probability was blended with (or built on) the
+                # prices available when it was scored, often hours before the
+                # jump with no fresh price at all, so the blend was skipped.
+                # Re-pricing would read that stale probability against new
+                # odds. Re-scoring rebuilds it from the newest prices; started
+                # races are never touched.
                 score_ml(db, meeting, summary)
             else:
                 reprice_ml(db, meeting)
