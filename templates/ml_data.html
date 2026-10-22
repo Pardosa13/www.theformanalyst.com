@@ -616,6 +616,67 @@
 </div>
 {% endif %}
 
+<!-- Long-run results of the saved multi-horse (joint Kelly) stakes. -->
+{% if joint_kelly_results %}
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlJointKellyResults" aria-expanded="true">
+    <h5>💰 Live Kelly Stakes: Multi-Horse Results (${{ "{:,.0f}".format(joint_kelly_results.bankroll) }} Bank)</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="mlJointKellyResults" class="collapse show">
+    <div class="card-body">
+      <p class="text-muted mb-3">Every stake the multi-horse Kelly sizer set before the jump, settled against the result. The bank stays fixed at ${{ "{:,.0f}".format(joint_kelly_results.bankroll) }} (no compounding), so each race counts the same. "At SP" uses the result SP. "At sized price" uses the price the stake was sized at. The stake is the one at the last pre-race price seen. Races before {{ joint_kelly_results.clean_start_date }} had stale prices, so trust the second row more.</p>
+      {% if joint_kelly_results.summary[0].races %}
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead><tr><th>Period</th><th>Races</th><th>Bets</th><th>Races Won</th><th>Staked</th><th>Profit (SP)</th><th>ROI (SP)</th><th>Profit (sized price)</th><th>ROI (sized price)</th><th>Bank Growth</th><th>Max Drawdown</th><th>Longest Losing Run</th></tr></thead>
+          <tbody>
+          {% for row in joint_kelly_results.summary %}
+            <tr>
+              <td><strong>{{ row.label }}</strong></td>
+              <td>{{ row.races }}</td><td>{{ row.bets }}</td>
+              <td>{{ row.races_won }} ({{ "%.1f"|format(row.race_strike_rate) }}%)</td>
+              <td>${{ "{:,.2f}".format(row.staked) }}</td>
+              <td class="{% if row.profit_sp >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(row.profit_sp) }}</td>
+              <td class="{% if row.roi_sp >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(row.roi_sp) }}%</td>
+              <td class="{% if row.profit_sized >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(row.profit_sized) }}</td>
+              <td class="{% if row.roi_sized >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(row.roi_sized) }}%</td>
+              <td class="{% if row.bankroll_growth_pct >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(row.bankroll_growth_pct) }}%</td>
+              <td>${{ "{:,.2f}".format(row.max_drawdown) }}</td>
+              <td>{{ row.longest_losing_run }} races</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <h6 class="mt-4">By month</h6>
+      <div class="table-responsive">
+        <table class="table table-sm table-striped">
+          <thead><tr><th>Month</th><th>Races</th><th>Bets</th><th>Races Won</th><th>Staked</th><th>Profit (SP)</th><th>ROI (SP)</th><th>ROI (sized price)</th></tr></thead>
+          <tbody>
+          {% for row in joint_kelly_results.months %}
+            <tr>
+              <td>{{ row.month }}</td><td>{{ row.races }}</td><td>{{ row.bets }}</td>
+              <td>{{ row.races_won }} ({{ "%.1f"|format(row.race_strike_rate) }}%)</td>
+              <td>${{ "{:,.2f}".format(row.staked) }}</td>
+              <td class="{% if row.profit_sp >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(row.profit_sp) }}</td>
+              <td class="{% if row.roi_sp >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(row.roi_sp) }}%</td>
+              <td class="{% if row.roi_sized >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(row.roi_sized) }}%</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <h6 class="mt-4">Cumulative profit at SP, race by race</h6>
+      <canvas id="jointKellyChart" height="120"></canvas>
+      <script type="application/json" id="jointKellyHistory">{{ joint_kelly_results.history|tojson }}</script>
+      {% else %}
+      <p class="text-muted">No settled Kelly stakes yet. Stakes are saved when a meeting is scored with a live price.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Accordion sections — all use source=ml -->
 
 <div class="section-card">
@@ -918,6 +979,34 @@ function renderSignalPnl(prefix, dataId, canvasId) {
 }
 renderSignalPnl('signalPnl', 'ladbrokesSignalHistory', 'ladbrokesSignalPnlChart');
 renderSignalPnl('valueTestPnl', 'valueTestHistory', 'valueTestPnlChart');
+(function renderJointKelly() {
+    const dataEl = document.getElementById('jointKellyHistory');
+    const canvas = document.getElementById('jointKellyChart');
+    if (!dataEl || !canvas) return;
+    let history = [];
+    try { history = JSON.parse(dataEl.textContent) || []; } catch (e) { return; }
+    if (!history.length) return;
+    new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels: history.map((p, i) => `${i + 1}: ${p.date}`),
+            datasets: [{
+                label: 'Cumulative profit ($, at SP)',
+                data: history.map(p => p.cumulative),
+                borderColor: '#00a37a', backgroundColor: '#00a37a',
+                pointRadius: 0, tension: .15,
+            }],
+        },
+        options: {
+            responsive: true,
+            scales: {
+                x: { ticks: { color: '#9090a8', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,.05)' } },
+                y: { ticks: { color: '#9090a8', callback: v => '$' + Number(v).toLocaleString() }, grid: { color: 'rgba(255,255,255,.05)' } },
+            },
+            plugins: { legend: { labels: { color: '#9090a8' } } },
+        },
+    });
+})();
 
 const loadedSections = new Set();
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[char]));

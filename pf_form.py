@@ -60,6 +60,9 @@ PF_FORM_FEATURES = [
     'cond_rain_mm',
     'cond_irrigation_24h_mm',
     'cond_weather',              # 0 fine, 1 overcast, 2 showers, 3 rain
+    # 2026-10 race-shape inputs (appended so earlier columns keep their order)
+    'ir_speed_points_l3',        # Quirin speed points, last 3: settled 1st 4, 2nd 2, 3rd/top quarter 1
+    'ir_settle_vs_best',         # last settle % minus its most forward settle % in runs 2-5 (negative = most forward yet)
 ]
 
 PF_FORM_RELATIVE_COLS = ['ir_avg_settle_pct_l5', 'ir_avg_late_gain_l5', 'pf_handicap_rating']
@@ -291,6 +294,24 @@ def conditions_features(item):
     return out
 
 
+def quirin_points(settle_position, starters):
+    """Professor Quirin's early-speed points for one run, from the settling position.
+
+    Quirin: 4 for leading early, 2 for disputing the lead, 1 for prominent.
+    The feed has positions, not lengths, so: settled 1st = 4, 2nd = 2, 3rd or
+    in the front quarter of the field = 1, otherwise 0. None if unreadable.
+    """
+    if not settle_position or settle_position <= 0:
+        return None
+    if settle_position == 1:
+        return 4
+    if settle_position == 2:
+        return 2
+    if settle_position == 3 or (starters and settle_position <= starters / 4):
+        return 1
+    return 0
+
+
 def runner_features(runner, meeting_date, today_barrier=None, rival_names=(), conditions=None):
     """One saved runner -> PF_FORM_FEATURES dict."""
     out = empty_pf_form_features()
@@ -348,10 +369,11 @@ def runner_features(runner, meeting_date, today_barrier=None, rival_names=(), co
             return None
         return (min(position, starters) - 1) / (starters - 1)
 
-    settle, m400, gain = [], [], []
+    settle, m400, gain, speed_points = [], [], [], []
     for f in races[:5]:
         starters = _num(f.get('starters'))
         in_run = parse_in_run(f.get('inRun'))
+        speed_points.append(quirin_points(in_run.get('settling_down'), starters))
         s_pct = pct(in_run.get('settling_down'), starters)
         m_pct = pct(in_run.get('m400'), starters)
         finish = in_run.get('finish') or _num(f.get('position'))
@@ -370,6 +392,14 @@ def runner_features(runner, meeting_date, today_barrier=None, rival_names=(), co
         vals = [v for v in values if v is not None]
         if vals:
             out[name] = float(np.mean(vals))
+    # Speed points need all of the last 3 runs read: a missing position
+    # would quietly count as "not prominent" and understate a leader.
+    last3 = speed_points[:3]
+    if last3 and all(v is not None for v in last3):
+        out['ir_speed_points_l3'] = float(sum(last3))
+    earlier = [v for v in settle[1:5] if v is not None]
+    if settle and settle[0] is not None and earlier:
+        out['ir_settle_vs_best'] = settle[0] - min(earlier)
 
     def excuse(f):
         text_value = ' '.join(str(f.get(k) or '') for k in ('stewardsReport', 'stewardsReportExt'))

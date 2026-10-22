@@ -26,6 +26,7 @@ from pf_form import (
     meeting_features as pf_meeting_features, snapshot_usable, tab_key,
 )
 from track_bias import TRACK_BIAS_FEATURES, TrackBiasStats, runner_inputs
+from race_shape import RACE_SHAPE_FEATURES, add_race_shape_features
 from past_runs import (
     PAST_RUN_FEATURES, PAST_RUN_RELATIVE_COLS, PAST_RUN_RELATIVE_LOWER_IS_BETTER,
     empty_past_run_features, horse_key, past_run_features_for_meeting,
@@ -653,6 +654,7 @@ def add_race_relative_features(feature_rows):
         temp[f'{col}_race_rank'] = temp[col].rank(method='min', ascending=ascending)
         temp[f'{col}_vs_race_avg'] = temp[col] - temp[col].mean()
 
+    add_race_shape_features(temp)
     return temp.to_dict('records')
 
 # ── Expected feature order (must match pkl training order) ────────────────────
@@ -716,7 +718,7 @@ for col in NEW_RELATIVE_COLS:
 # field_size sits between the raw features and the race-relative derivatives —
 # the same column order build_training_set()/add_race_relative_features()
 # produce in backtest.py, so this list can stand in for a training contract.
-FEATURE_NAMES = FEATURE_NAMES + ['field_size'] + RACE_RELATIVE_FEATURES + NEW_RELATIVE_FEATURES
+FEATURE_NAMES = FEATURE_NAMES + ['field_size'] + RACE_RELATIVE_FEATURES + NEW_RELATIVE_FEATURES + RACE_SHAPE_FEATURES
 
 
 def _model_feature_names(model):

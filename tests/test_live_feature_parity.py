@@ -31,6 +31,7 @@ import ml_predict
 import past_runs
 import pf_form
 import track_bias
+import race_shape
 
 # 146 legacy + 58 audit + 3 opponent-quality-form, then the 2026-10 blocks:
 # past runs, unused ratings prices, track bias, saved PF form feed, and the
@@ -39,6 +40,7 @@ EXPECTED_LIVE_FEATURE_COUNT = (
     207 + len(past_runs.PAST_RUN_FEATURES) + 3 + len(track_bias.TRACK_BIAS_FEATURES)
     + len(pf_form.PF_FORM_FEATURES)
     + 2 * (len(past_runs.PAST_RUN_RELATIVE_COLS) + 2 + len(pf_form.PF_FORM_RELATIVE_COLS))
+    + len(race_shape.RACE_SHAPE_FEATURES)
 )
 
 
@@ -256,7 +258,9 @@ def _pf_form_runner(tab_no, name):
         'trainerJockeyA2E_Career': {'a2E': 1.1, 'strikeRate': 18.0, 'runners': 120, 'wins': 22},
         'trainerJockeyA2E_Last100': {'a2E': 1.05, 'strikeRate': 17.0, 'runners': 100, 'wins': 17},
         'group1Record': {'starts': 1, 'firsts': 0, 'seconds': 1, 'thirds': 0},
-        'forms': [form],
+        # A second, earlier run so 'most forward ever' has something to compare.
+        'forms': [form, dict(form, meetingDate='2026-05-30T00:00:00',
+                             inRun='finish,4;settling_down,6;m800,5;m400,4;', position=4)],
     })
 
 
