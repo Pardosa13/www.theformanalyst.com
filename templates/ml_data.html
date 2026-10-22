@@ -628,7 +628,7 @@
       {% if joint_kelly_results.summary[0].races %}
       <div class="table-responsive">
         <table class="table table-striped">
-          <thead><tr><th>Period</th><th>Races</th><th>Bets</th><th>Races Won</th><th>Staked</th><th>Profit (SP)</th><th>ROI (SP)</th><th>Profit (sized price)</th><th>ROI (sized price)</th><th>Bank Growth</th><th>Max Drawdown</th><th>Longest Losing Run</th></tr></thead>
+          <thead><tr><th>Period</th><th>Races</th><th>Bets</th><th>Races Won</th><th>Staked</th><th>Avg Stake per Race</th><th>Profit (SP)</th><th>ROI (SP)</th><th>Profit (sized price)</th><th>ROI (sized price)</th><th>Bank Growth</th><th>Max Drawdown</th><th>Longest Losing Run</th></tr></thead>
           <tbody>
           {% for row in joint_kelly_results.summary %}
             <tr>
@@ -636,6 +636,7 @@
               <td>{{ row.races }}</td><td>{{ row.bets }}</td>
               <td>{{ row.races_won }} ({{ "%.1f"|format(row.race_strike_rate) }}%)</td>
               <td>${{ "{:,.2f}".format(row.staked) }}</td>
+              <td>{{ "%.1f"|format(row.avg_race_stake_pct) }}% of bank</td>
               <td class="{% if row.profit_sp >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(row.profit_sp) }}</td>
               <td class="{% if row.roi_sp >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(row.roi_sp) }}%</td>
               <td class="{% if row.profit_sized >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(row.profit_sized) }}</td>
@@ -647,6 +648,36 @@
           {% endfor %}
           </tbody>
         </table>
+      </div>
+      {% set ab = joint_kelly_results.all_bets %}
+      <p class="mt-2 mb-0"><strong>Across all {{ ab.bets }} bets:</strong> the model claimed an average edge of {{ "%.1f"|format(ab.avg_edge_pct or 0) }} pts over the market, staked {{ "%.1f"|format(ab.avg_stake_pct) }}% of the bank per bet, and returned {{ "%+.1f"|format(ab.kelly_roi) }}% (Kelly stakes) or {{ "%+.1f"|format(ab.flat_roi) }}% (${{ "%.0f"|format(joint_kelly_results.flat_stake) }} flat).</p>
+      <h6 class="mt-4">Where is it winning or losing?</h6>
+      <p class="text-muted" style="font-size:13px">The same bets cut different ways, settled at SP. "Flat ROI" puts ${{ "%.0f"|format(joint_kelly_results.flat_stake) }} on every bet, so one big stake can't swing a row. <strong>Luck check:</strong> how far the flat profit is from zero, allowing for how swingy the bets are. With this many rows, one or two will look good by pure chance. Under 2 = could easily be luck. 2-3 = worth watching. 3+ = strong enough to test properly on new races.</p>
+      <div class="row">
+      {% for breakdown in joint_kelly_results.breakdowns %}{% if breakdown.rows %}
+        <div class="col-lg-6">
+          <h6 class="mt-3" style="font-size:14px">{{ breakdown.title }}</h6>
+          <div class="table-responsive">
+            <table class="table table-sm table-striped">
+              <thead><tr><th></th><th>Bets</th><th>Wins</th><th>Avg Edge</th><th>Avg SP</th><th>Kelly ROI</th><th>Flat ROI</th><th>Luck Check</th></tr></thead>
+              <tbody>
+              {% for row in breakdown.rows %}
+                <tr>
+                  <td><strong>{{ row.label }}</strong></td>
+                  <td>{{ row.bets }}</td>
+                  <td>{{ row.wins }} ({{ "%.0f"|format(row.strike_rate) }}%)</td>
+                  <td>{% if row.avg_edge_pct is not none %}{{ "%.1f"|format(row.avg_edge_pct) }}{% else %}-{% endif %}</td>
+                  <td>{% if row.avg_sp %}${{ "%.2f"|format(row.avg_sp) }}{% else %}-{% endif %}</td>
+                  <td class="{% if row.kelly_roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(row.kelly_roi) }}%</td>
+                  <td class="{% if row.flat_roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(row.flat_roi) }}%</td>
+                  <td>{% if row.luck_score is none %}-{% elif row.luck_score >= 3 %}<strong class="profit">{{ "%.1f"|format(row.luck_score) }} strong</strong>{% elif row.luck_score >= 2 %}<span class="profit">{{ "%.1f"|format(row.luck_score) }} watch</span>{% else %}{{ "%.1f"|format(row.luck_score) }}{% endif %}</td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% endif %}{% endfor %}
       </div>
       <h6 class="mt-4">By month</h6>
       <div class="table-responsive">

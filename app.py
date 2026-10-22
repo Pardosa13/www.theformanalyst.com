@@ -348,6 +348,7 @@ def evaluate_ladbrokes_best_bet_signals(race, meeting, odds_payload, race_match_
     return out
 
 import logging
+import statistics
 import sys
 
 # Configure logging
@@ -4239,6 +4240,61 @@ def calculate_top_pick_value_test(track_filter="", date_from="", date_to="", sta
     }
 
 
+JOINT_KELLY_FLAT_STAKE = 10.0
+
+# Cut points for the breakdown tables: (label, lower, upper), lower inclusive.
+JOINT_KELLY_EDGE_BANDS = (('Under 2 pts', None, 2), ('2-5 pts', 2, 5), ('5-10 pts', 5, 10),
+                          ('10-20 pts', 10, 20), ('20+ pts', 20, None))
+JOINT_KELLY_PRICE_BANDS = (('Under $3', None, 3), ('$3-$5', 3, 5), ('$5-$10', 5, 10),
+                           ('$10-$20', 10, 20), ('$20+', 20, None))
+JOINT_KELLY_STAKE_BANDS = (('Under 1% of bank', None, 1), ('1-3%', 1, 3), ('3-5%', 3, 5), ('5%+', 5, None))
+JOINT_KELLY_FIELD_BANDS = (('Under 8 runners', None, 8), ('8-11', 8, 12), ('12+', 12, None))
+
+
+def _band(value, bands):
+    if value is None:
+        return None
+    for label, lower, upper in bands:
+        if (lower is None or value >= lower) and (upper is None or value < upper):
+            return label
+    return None
+
+
+def _load_joint_kelly_rows(track_filter="", date_from="", date_to=""):
+    """Every settled runner in any race where the joint Kelly sizer staked
+    something before the jump: (prediction, result, race_id, start_time_utc).
+
+    All runners, not just the staked ones, so each bet can be placed against
+    its field (model rank, field size)."""
+    staked_races = db.session.query(Race.id).join(
+        Horse, Horse.race_id == Race.id
+    ).join(Prediction, Prediction.horse_id == Horse.id).filter(
+        Prediction.kelly_stake_pct > 0,
+        Prediction.value_edge_captured_at.isnot(None),
+        Race.start_time_utc.isnot(None),
+        Prediction.value_edge_captured_at < Race.start_time_utc,
+    )
+    query = db.session.query(
+        Prediction, Result, Race.id, Race.start_time_utc
+    ).join(
+        Horse, Prediction.horse_id == Horse.id
+    ).join(Race, Horse.race_id == Race.id).join(Meeting, Race.meeting_id == Meeting.id).join(
+        Result, Result.horse_id == Horse.id
+    ).filter(
+        Race.id.in_(staked_races.scalar_subquery()),
+        Result.finish_position > 0,
+        Race.results_incomplete.isnot(True),
+        Result.sp.isnot(None),
+    )
+    if track_filter:
+        query = query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+    if date_from:
+        query = query.filter(Meeting.uploaded_at >= date_from)
+    if date_to:
+        query = query.filter(Meeting.uploaded_at <= date_to)
+    return query.all()
+
+
 def calculate_joint_kelly_results(track_filter="", date_from="", date_to=""):
     """Settle the saved multi-horse (joint Kelly) stakes against results.
 
@@ -4251,52 +4307,69 @@ def calculate_joint_kelly_results(track_filter="", date_from="", date_to=""):
     stake was sized at. The stake is overwritten each time a meeting is
     re-priced, so it is the stake at the last pre-race price seen.
 
+    Breakdowns split the same bets by claimed edge, price, model rank, stake
+    size, runners backed in the race and field size. Each also shows a $10
+    flat-stake ROI (so one big stake can't swing a row) and a luck check: the
+    flat profit divided by its standard error. Cutting the bets many ways
+    always turns up some winners by chance, so only a large luck score means
+    anything.
+
     Races before TOP_PICK_VALUE_TEST_START are shown but flagged: the odds
     scraper ran once a day then, so few stakes had a fresh price.
     """
     bankroll = KELLY_TRACKING_BANKROLL
-    query = db.session.query(
-        Prediction, Result, Race.id, Race.start_time_utc
-    ).join(
-        Horse, Prediction.horse_id == Horse.id
-    ).join(Race, Horse.race_id == Race.id).join(Meeting, Race.meeting_id == Meeting.id).join(
-        Result, Result.horse_id == Horse.id
-    ).filter(
-        Prediction.kelly_stake_pct > 0,
-        Prediction.value_edge_captured_at.isnot(None),
-        Race.start_time_utc.isnot(None),
-        Prediction.value_edge_captured_at < Race.start_time_utc,
-        Result.finish_position > 0,
-        Race.results_incomplete.isnot(True),
-        Result.sp.isnot(None),
-    )
-    if track_filter:
-        query = query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        query = query.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        query = query.filter(Meeting.uploaded_at <= date_to)
+    flat = JOINT_KELLY_FLAT_STAKE
 
-    # One entry per race: the solver often backs several runners in a race,
-    # and it is the race as a whole that wins or loses.
-    races = {}
-    for prediction, result, race_id, start in query.all():
-        stake = float(prediction.kelly_stake_pct) * bankroll
-        won = result.finish_position == 1
-        sized_price = prediction.value_edge_price
-        race = races.setdefault(race_id, {
-            'start': start, 'bets': 0, 'staked': 0.0, 'return_sp': 0.0,
-            'return_sized': 0.0, 'won': False,
-        })
-        race['bets'] += 1
-        race['staked'] += stake
-        if won:
-            race['won'] = True
-            race['return_sp'] += stake * float(result.sp)
-            price = float(sized_price) if sized_price and float(sized_price) > 1 else float(result.sp)
-            race['return_sized'] += stake * price
+    by_race = {}
+    for prediction, result, race_id, start in _load_joint_kelly_rows(track_filter, date_from, date_to):
+        by_race.setdefault(race_id, {'start': start, 'runners': []})['runners'].append((prediction, result))
 
-    ordered = sorted(races.values(), key=lambda r: r['start'])
+    races, bets = [], []
+    for race_id, entry in by_race.items():
+        start = entry['start']
+        runners = entry['runners']
+        ranked = sorted(runners, key=lambda r: -(r[0].ml_win_probability or 0.0))
+        rank_of = {id(r[0]): i + 1 for i, r in enumerate(ranked)}
+        staked = [
+            (p, r) for p, r in runners
+            if p.kelly_stake_pct is not None and float(p.kelly_stake_pct) > 0
+            and p.value_edge_captured_at is not None and p.value_edge_captured_at < start
+        ]
+        if not staked:
+            continue
+        race = {'start': start, 'bets': 0, 'staked': 0.0, 'return_sp': 0.0,
+                'return_sized': 0.0, 'won': False}
+        for prediction, result in staked:
+            stake = float(prediction.kelly_stake_pct) * bankroll
+            won = result.finish_position == 1
+            sp = float(result.sp)
+            sized = float(prediction.value_edge_price) if prediction.value_edge_price and float(prediction.value_edge_price) > 1 else None
+            race['bets'] += 1
+            race['staked'] += stake
+            if won:
+                race['won'] = True
+                race['return_sp'] += stake * sp
+                race['return_sized'] += stake * (sized or sp)
+            rank = rank_of[id(prediction)]
+            bets.append({
+                'start': start, 'stake': stake, 'won': won, 'sp': sp,
+                'edge': float(prediction.value_edge_pct) if prediction.value_edge_pct is not None else None,
+                'groups': {
+                    'edge': _band(float(prediction.value_edge_pct) if prediction.value_edge_pct is not None else None,
+                                  JOINT_KELLY_EDGE_BANDS),
+                    'price': _band(sized or sp, JOINT_KELLY_PRICE_BANDS),
+                    'rank': 'Top pick' if rank == 1 else '2nd pick' if rank == 2 else '3rd pick' if rank == 3 else '4th or lower',
+                    'stake': _band(float(prediction.kelly_stake_pct) * 100, JOINT_KELLY_STAKE_BANDS),
+                    'backed': f'{len(staked)} backed' if len(staked) < 4 else '4+ backed',
+                    'field': _band(len(runners), JOINT_KELLY_FIELD_BANDS),
+                    # Known only after the jump, so it explains results; it can't pick bets.
+                    'move': None if not sized else ('Firmed 5%+' if sp < sized * 0.95
+                                                    else 'Drifted 5%+' if sp > sized * 1.05 else 'Steady'),
+                },
+            })
+        races.append(race)
+
+    races.sort(key=lambda r: r['start'])
 
     def summarise(items):
         staked = sum(r['staked'] for r in items)
@@ -4311,12 +4384,14 @@ def calculate_joint_kelly_results(track_filter="", date_from="", date_to=""):
             max_drawdown = max(max_drawdown, peak - cumulative)
             losing_run = 0 if r['won'] else losing_run + 1
             longest_losing_run = max(longest_losing_run, losing_run)
+        n_bets = sum(r['bets'] for r in items)
         return {
             'races': len(items),
-            'bets': sum(r['bets'] for r in items),
+            'bets': n_bets,
             'races_won': wins,
             'race_strike_rate': wins / len(items) * 100 if items else 0.0,
             'staked': staked,
+            'avg_race_stake_pct': staked / len(items) / bankroll * 100 if items and bankroll else 0.0,
             'profit_sp': profit_sp,
             'roi_sp': profit_sp / staked * 100 if staked else 0.0,
             'profit_sized': profit_sized,
@@ -4326,26 +4401,73 @@ def calculate_joint_kelly_results(track_filter="", date_from="", date_to=""):
             'longest_losing_run': longest_losing_run,
         }
 
-    clean = [r for r in ordered if r['start'] >= TOP_PICK_VALUE_TEST_START]
+    def summarise_bets(items):
+        n = len(items)
+        staked = sum(b['stake'] for b in items)
+        kelly_profit = sum(b['stake'] * b['sp'] for b in items if b['won']) - staked
+        flat_returns = [(b['sp'] - 1.0) if b['won'] else -1.0 for b in items]
+        flat_profit = flat * sum(flat_returns)
+        luck_score = None
+        if n >= 2:
+            sd = statistics.stdev(flat_returns)
+            if sd > 0:
+                luck_score = statistics.mean(flat_returns) / (sd / math.sqrt(n))
+        edges = [b['edge'] for b in items if b['edge'] is not None]
+        return {
+            'bets': n,
+            'wins': sum(1 for b in items if b['won']),
+            'strike_rate': sum(1 for b in items if b['won']) / n * 100 if n else 0.0,
+            'avg_edge_pct': statistics.mean(edges) if edges else None,
+            'avg_stake_pct': staked / n / bankroll * 100 if n and bankroll else 0.0,
+            'avg_sp': statistics.mean(b['sp'] for b in items) if n else None,
+            'kelly_profit': kelly_profit,
+            'kelly_roi': kelly_profit / staked * 100 if staked else 0.0,
+            'flat_profit': flat_profit,
+            'flat_roi': flat_profit / (n * flat) * 100 if n else 0.0,
+            'luck_score': luck_score,
+        }
+
+    clean = [r for r in races if r['start'] >= TOP_PICK_VALUE_TEST_START]
     summary_rows = [
-        {'label': 'All time', **summarise(ordered)},
+        {'label': 'All time', **summarise(races)},
         {'label': f'Since {TOP_PICK_VALUE_TEST_START:%d %b %Y} (fresh prices)', **summarise(clean)},
     ]
 
     by_month = {}
-    for r in ordered:
+    for r in races:
         by_month.setdefault(r['start'].strftime('%Y-%m'), []).append(r)
     months = [{'month': month, **summarise(items)} for month, items in sorted(by_month.items())]
 
     history, cumulative = [], 0.0
-    for r in ordered:
+    for r in races:
         cumulative += r['return_sp'] - r['staked']
         history.append({'date': r['start'].strftime('%Y-%m-%d'), 'cumulative': round(cumulative, 2)})
 
+    breakdown_specs = (
+        ('edge', 'Claimed edge (model % minus market %)', [b[0] for b in JOINT_KELLY_EDGE_BANDS]),
+        ('price', 'Price', [b[0] for b in JOINT_KELLY_PRICE_BANDS]),
+        ('rank', "Model's rank in the race", ['Top pick', '2nd pick', '3rd pick', '4th or lower']),
+        ('stake', 'Stake size', [b[0] for b in JOINT_KELLY_STAKE_BANDS]),
+        ('backed', 'Horses backed in the race', ['1 backed', '2 backed', '3 backed', '4+ backed']),
+        ('field', 'Field size', [b[0] for b in JOINT_KELLY_FIELD_BANDS]),
+        ('move', 'Price move after the bet (hindsight only, cannot pick bets)', ['Firmed 5%+', 'Steady', 'Drifted 5%+']),
+    )
+    breakdowns = []
+    for key, title, order in breakdown_specs:
+        rows = []
+        for label in order:
+            items = [b for b in bets if b['groups'][key] == label]
+            if items:
+                rows.append({'label': label, **summarise_bets(items)})
+        breakdowns.append({'key': key, 'title': title, 'rows': rows})
+
     return {
         'bankroll': bankroll,
+        'flat_stake': flat,
         'summary': summary_rows,
+        'all_bets': summarise_bets(bets),
         'months': months,
+        'breakdowns': breakdowns,
         'history': history,
         'clean_start_date': TOP_PICK_VALUE_TEST_START.date().isoformat(),
     }
