@@ -14,6 +14,9 @@ The Champion Score formula changed seven times:
                                                 by race-level log loss (mean
                                                 -log P(winner)) relative to
                                                 the FLB-corrected market
+    champion_score_v9_log_loss_led              -1000 x race log loss vs the
+                                                market leads; ROI x0.1; no
+                                                Kelly term (Oct 2026)
 
 Each change shifts every score by a fixed offset. Under v2 a 35% strike rate was
 worth a flat +17.7 points to every model regardless of edge; v3 replaced that

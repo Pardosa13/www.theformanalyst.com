@@ -224,11 +224,15 @@ def champion_row(champion_score=10.0, fold_rois=None):
     # Solve for the a_e_ratio that lands the recomputed score on the value
     # each test asked for, rather than hardcoding a number that breaks again
     # the next time an unrelated term in the formula is retuned.
+    # Under v9 the score is linear in the holdout log-loss gap (folds here
+    # carry no gap, so it enters as 0.3 x gap x -1000 = -300 x gap): solve for
+    # the gap that lands the recomputed score on the value the test asked for.
+    champion_metrics["race_log_loss_vs_market"] = 0.0
     base_score = backtest._selection_score_from_metrics(
         {k: v for k, v in champion_metrics.items() if k != "selection_score"},
         force_recompute=True,
     )
-    champion_metrics["a_e_ratio"] = 1.0 + ((champion_score - base_score) / 10.0)
+    champion_metrics["race_log_loss_vs_market"] = (base_score - champion_score) / 300.0
     return [
         101,  # id
         12.0,  # validation_roi
@@ -1518,7 +1522,8 @@ def test_normal_blend_survives_when_the_folds_are_not_all_negative():
     scored = backtest._selection_score_from_metrics(mixed, force_recompute=True)
     scored_zero = backtest._selection_score_from_metrics(zero_holdout, force_recompute=True)
 
-    assert abs((scored - scored_zero) - (0.3 * 20.0)) < 1e-9
+    # v9: ROI only nudges the score, at a tenth of its old weight.
+    assert abs((scored - scored_zero) - (0.1 * 0.3 * 20.0)) < 1e-9
 
 
 # ── Fallback promotion: no model from a previous era is eligible ────────────

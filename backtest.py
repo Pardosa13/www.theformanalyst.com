@@ -2983,7 +2983,7 @@ MIN_WALK_FORWARD_FOLDS = int(os.environ.get('ML_MIN_WALK_FORWARD_FOLDS', '2'))
 # of) the fixed Champion Score edge above.
 PROMOTION_MAX_BOOTSTRAP_P_VALUE = float(os.environ.get('ML_PROMOTION_MAX_P_VALUE', '0.25'))
 MODEL_VERSION = os.environ.get('ML_MODEL_VERSION', datetime.utcnow().strftime('%Y%m%d'))
-SCORING_FORMULA_VERSION = 'champion_score_v8_race_log_loss'
+SCORING_FORMULA_VERSION = 'champion_score_v9_log_loss_led'
 # Sanity bound for a recomputed Champion Score, used only by the fallback
 # promotion path. Every real score on record sits in the low-to-mid 40s, so
 # this is roughly 4x headroom over anything legitimately observed — wide
@@ -3260,6 +3260,19 @@ def _paired_bootstrap_p_value(challenger_fold_rois, champion_fold_rois, n_resamp
     return float(np.mean(resampled_means <= 0.0))
 
 
+def _fold_market_skill(walk_forward):
+    """Per-fold skill vs the market: minus race_log_loss_vs_market (higher = better).
+
+    Folds with no bets or no log loss are skipped, keeping the order of the rest.
+    """
+    out = []
+    for fold in ((walk_forward or {}).get('folds') or []):
+        gap = fold.get('race_log_loss_vs_market')
+        if fold.get('bets', 0) and gap is not None and np.isfinite(float(gap)):
+            out.append(-float(gap))
+    return out
+
+
 def _selection_score_from_metrics(metrics, force_recompute=False):
     """Defined out-of-sample Champion Score; ROI alone must never promote.
 
@@ -3345,51 +3358,49 @@ def _selection_score_from_metrics(metrics, force_recompute=False):
     # record that predates the race-level metric, so such a record is scored
     # by the rule it was measured under rather than handed a free zero; the
     # version bump means any such record is re-validated before it competes.
-    race_log_loss_gap = metrics.get('race_log_loss_vs_market')
-    if race_log_loss_gap is not None and np.isfinite(float(race_log_loss_gap)):
-        probability_penalty = float(race_log_loss_gap) * 10.0
-    else:
-        probability_penalty = float(metrics.get('log_loss', 0.0) or 0.0) * 10.0
-    calibration_penalty = probability_penalty + (float(metrics.get('brier_score', 0.0) or 0.0) * 25.0) + (float(calibration.get('expected_calibration_error', 0.0) or 0.0) * 100.0)
-    # Joint Kelly bankroll growth measures something ROI and A/E cannot: what
-    # the model's edge is worth once stakes are sized by the confidence it
-    # actually expresses, across every runner it would back rather than the top
-    # pick alone. Drawdown is subtracted because compounding growth bought with
-    # a near-ruinous trough is not a plan anyone could follow, and an outright
-    # ruin is penalised hard enough that no amount of growth elsewhere can
-    # outrank a model that busts the bankroll.
-    kelly = metrics.get('kelly_staking') or {}
-    kelly_growth_raw = kelly.get('bankroll_growth')
-    kelly_ruined = bool(kelly.get('ruined'))
-    kelly_drawdown = float(kelly.get('max_drawdown_pct', 0.0) or 0.0)
-    # Only the joint solver's output shape may earn (or lose) Kelly points. A
-    # kelly_staking block without avg_horses_backed_per_race was written by the
-    # deleted single-bet simulator, whose bankroll_growth is a different
-    # quantity measured under different assumptions and was never read by any
-    # scoring formula before v6 — the same "predates the joint solver" test
-    # _heal_stale_champion uses. Score it as no Kelly evidence at all rather
-    # than as a clamped number that means something else. See the model 81
-    # incident: a legacy row carrying bankroll_growth=406,156,577.65 was
-    # weighted *5.0 into a Champion Score of ~2.03bn and fallback-promoted.
-    is_new_format_kelly = 'avg_horses_backed_per_race' in kelly
-    kelly_component = 0.0
-    if is_new_format_kelly and kelly_growth_raw is not None:
-        try:
-            kelly_growth = float(kelly_growth_raw)
-        except (TypeError, ValueError):
-            kelly_growth = 0.0
-        if not np.isfinite(kelly_growth):
-            kelly_growth = 0.0
-        # bankroll_growth is a fractional return (0.5 = +50%), and a joint-Kelly
-        # simulation over a validation window cannot plausibly leave this range.
-        # Clamp rather than trust an unbounded compounding result: one corrupted
-        # or degenerate simulation must never be able to dominate every other
-        # term in the score.
-        kelly_growth = max(-1.0, min(kelly_growth, 5.0))
-        kelly_component = (kelly_growth * 5.0) - (kelly_drawdown * 0.02)
-    if is_new_format_kelly and kelly_ruined:
-        kelly_component -= 10.0
-    return float(blended_roi + a_e_component + kelly_component - calibration_penalty - (0.05 * stability_penalty) - (1.0 * walk_forward_penalty))
+    # v9 (Oct 2026): accuracy against the market decides, ROI only nudges.
+    #
+    # ROI on a few hundred top-pick bets is mostly luck: the live Kelly table
+    # and run 276's alpha grid (fold scores jumping several points between
+    # neighbouring blend weights) both showed it. Race log loss vs the
+    # FLB-corrected market uses every runner in every race, so it is far less
+    # noisy, and it is the thing a model must win before any staking can work.
+    #
+    # Same out-of-sample rules as the ROI used to get: walk-forward folds count
+    # 70%, the single holdout 30%; with no folds the holdout is shrunk toward
+    # the market (x0.3); when every fold is worse than the market the holdout
+    # may lower the score but never raise it.
+    #
+    # Scale: 0.01 nats per race better than the market = +10 points.
+    # ROI is kept at a tenth (30% ROI = 3 points) so a tie still prefers the
+    # model that made money. The Kelly simulation term is gone: it was ROI
+    # noise compounded.
+    fold_gaps = [
+        float(f['race_log_loss_vs_market']) for f in (walk_forward.get('folds') or [])
+        if f.get('bets', 0) and f.get('race_log_loss_vs_market') is not None
+        and np.isfinite(float(f['race_log_loss_vs_market']))
+    ]
+    holdout_gap = metrics.get('race_log_loss_vs_market')
+    holdout_gap = float(holdout_gap) if holdout_gap is not None and np.isfinite(float(holdout_gap)) else None
+    calibration_penalty = float(calibration.get('expected_calibration_error', 0.0) or 0.0) * 100.0
+    if fold_gaps or holdout_gap is not None:
+        if fold_gaps:
+            mean_fold_gap = float(np.mean(fold_gaps))
+            if holdout_gap is None:
+                gap = mean_fold_gap
+            elif all(g > 0.0 for g in fold_gaps):
+                gap = max(mean_fold_gap, (0.3 * holdout_gap) + (0.7 * mean_fold_gap))
+            else:
+                gap = (0.3 * holdout_gap) + (0.7 * mean_fold_gap)
+        else:
+            gap = 0.3 * holdout_gap
+        gap_std = float(np.std(fold_gaps, ddof=0)) if len(fold_gaps) > 1 else 0.0
+        return float(-1000.0 * gap - 500.0 * gap_std + 0.1 * blended_roi - calibration_penalty)
+    # A record from before race-level log loss existed: score it the old way so
+    # it is not handed a free zero (the version bump re-validates it anyway).
+    probability_penalty = float(metrics.get('log_loss', 0.0) or 0.0) * 10.0
+    legacy_penalty = probability_penalty + (float(metrics.get('brier_score', 0.0) or 0.0) * 25.0) + calibration_penalty
+    return float(blended_roi + a_e_component - legacy_penalty - (0.05 * stability_penalty) - (1.0 * walk_forward_penalty))
 
 
 def _promotion_rule_text():
@@ -3401,18 +3412,14 @@ def _promotion_rule_text():
         "Neither validation ROI nor any walk-forward fold is required to be positive: the best-scoring "
         "eligible candidate by Champion Score wins promotion whether its ROI and folds are positive or "
         "negative. "
-        "Champion Score is stored internally as selection_score and equals "
-        "(0.3*holdout ROI + 0.7*mean walk-forward-fold ROI — with the holdout term dropped entirely, "
-        "leaving the mean fold ROI alone, whenever EVERY walk-forward fold is negative and the holdout "
-        "would otherwise raise the score) + 10*(A/E ratio - 1.0, where expected wins come from favourite-longshot-corrected "
-        "market probabilities rather than raw 1/SP) "
-        "+ 5*joint-Kelly bankroll growth (clamped to [-1.0, 5.0], and scored as 0 for a "
-        "kelly_staking record predating the joint solver) - 0.02*joint-Kelly max drawdown % "
-        "(-10 more if the Kelly simulation went bust) - 10*race-level log loss versus the FLB-corrected "
-        "market (mean -log P(actual winner) per race, model minus market, so beating the market's own "
-        "probabilities adds to the score) - calibration penalties "
-        "(Brier score, expected calibration error) - stability penalty - walk-forward cross-fold ROI-std penalty; "
-        "a model with no walk-forward evidence gets no credit for its holdout ROI beyond a 0.3x weight. "
+        "Champion Score is stored internally as selection_score and (v9) equals "
+        "-1000 x race-level log loss versus the FLB-corrected market (mean -log P(actual winner) per race, "
+        "model minus market; 0.3 x holdout + 0.7 x mean walk-forward fold, the holdout only able to lower "
+        "the score when every fold is worse than the market, and shrunk x0.3 with no folds) "
+        "- 500 x the cross-fold std of that gap + 0.1 x ROI (0.3 x holdout + 0.7 x mean fold) "
+        "- 100 x expected calibration error. 0.01 nats per race better than the market = +10 points. "
+        "The paired bootstrap compares fold log loss vs the market (fold ROI only when log loss is missing). "
+        "a model with no walk-forward evidence gets no credit for its holdout beyond a 0.3x weight. "
         "ROI alone is never sufficient, and a negative ROI is not by itself disqualifying."
     )
 RF_BEST_ARTIFACT_NAME = 'form_analyst_best_random_forest.pkl'
@@ -5507,7 +5514,15 @@ def save_best_model_to_db(pkl_file, combined_score, run_id, model_type='random_f
             for f in (champion_compare_metrics.get('walk_forward') or {}).get('folds', [])
             if f.get('bets', 0)
         ]
-        bootstrap_p_value = _paired_bootstrap_p_value(challenger_fold_rois, champion_fold_rois)
+        # v9: the paired test compares fold accuracy vs the market (negated so
+        # higher = better), the same thing the score now leads on. Fold ROI is
+        # the fallback only when either side has no fold log loss on record.
+        challenger_fold_skill = _fold_market_skill((validation_metrics or {}).get('walk_forward'))
+        champion_fold_skill = _fold_market_skill(champion_compare_metrics.get('walk_forward'))
+        if len(challenger_fold_skill) >= 2 and len(champion_fold_skill) >= 2:
+            bootstrap_p_value = _paired_bootstrap_p_value(challenger_fold_skill, champion_fold_skill)
+        else:
+            bootstrap_p_value = _paired_bootstrap_p_value(challenger_fold_rois, champion_fold_rois)
         # Deliberately no "at least one walk-forward fold must be positive"
         # veto here any more either. It was the last rule that could reject the
         # best-scoring eligible candidate purely on the SIGN of its results, and

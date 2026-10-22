@@ -351,7 +351,8 @@ class TestRaceLevelMetrics:
         }
         better = backtest._selection_score_from_metrics({**base, "race_log_loss_vs_market": -0.05})
         worse = backtest._selection_score_from_metrics({**base, "race_log_loss_vs_market": 0.20})
-        assert better - worse == pytest.approx(10.0 * 0.25)
+        # v9: -1000 per nat, and with no folds the holdout gap is shrunk x0.3.
+        assert better - worse == pytest.approx(1000.0 * 0.3 * 0.25)
 
     def test_a_record_without_the_race_metric_is_scored_by_the_legacy_term(self):
         base = {
@@ -363,7 +364,7 @@ class TestRaceLevelMetrics:
 
     def test_race_log_loss_is_a_required_component_under_a_new_version(self):
         assert "race_log_loss" in backtest.REQUIRED_SELECTION_METRIC_COMPONENTS
-        assert backtest.SCORING_FORMULA_VERSION == "champion_score_v8_race_log_loss"
+        assert backtest.SCORING_FORMULA_VERSION == "champion_score_v9_log_loss_led"
 
     def test_walk_forward_folds_carry_race_log_loss(self):
         source = Path("backtest.py").read_text()
