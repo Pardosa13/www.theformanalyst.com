@@ -1816,6 +1816,7 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
 
         feature_rows = add_race_relative_features(feature_rows)
         X_raw = pd.DataFrame(feature_rows)
+        offset_without_market = False
         if MARKET_OFFSET_COL in model_features:
             # A market-offset champion starts from the live market's
             # FLB-corrected probability (the starting price played that part
@@ -1827,6 +1828,7 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
                 market = fair_probabilities(prices)
             else:
                 market = [None] * len(prices)
+                offset_without_market = True
             X_raw[MARKET_OFFSET_COL] = [np.nan if m is None else float(m) for m in market]
         # Leave gaps as NaN here (no fill_value) so the median-based fill below
         # applies uniformly to columns X_raw is missing entirely *and* individual
@@ -1900,7 +1902,14 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
             ml_score = round(float(score), 2)
             all_scores[horse_id]  = ml_score
             race_scores[horse_id] = ml_score
-            race_probabilities[horse_id] = float(probability)
+            # A market-offset model with no market to start from was never
+            # trained for that case: its numbers rank the field but are not
+            # probabilities. Store none, so nothing prices an edge or a Kelly
+            # stake off them; the next pass with live prices re-scores the race.
+            race_probabilities[horse_id] = None if offset_without_market else float(probability)
+        if offset_without_market:
+            log.info("ML_MARKET_OFFSET_NO_PRICE meeting=%s race=%s: scored for ranking only, "
+                     "no win probability stored until live prices arrive", meeting_id, race.race_number)
 
         by_race[race.id] = race_scores
         probabilities_by_race[race.id] = race_probabilities
@@ -2134,6 +2143,63 @@ def live_market_probabilities(prices):
     return [float(value) for value in fair], method
 
 
+# A champion whose probabilities depend on the live price (market blend or
+# market offset) can only be priced against the price it was scored with, or
+# close to it: against a later price, its "edge" is just the price move.
+# Daily-run passes re-score every 30 minutes, so 35 minutes keeps every pass.
+MARKET_SCORE_MAX_LAG_SECONDS = float(os.environ.get('ML_MARKET_SCORE_MAX_LAG_SECONDS', '2100'))
+_CHAMPION_MARKET_CACHE = {'value': None, 'at': 0.0}
+_CHAMPION_MARKET_CACHE_SECONDS = 300.0
+
+
+def champion_depends_on_market(db_session):
+    """Does the active champion's probability depend on the live price?
+
+    Read from the champion row's metadata (no artifact load), cached for five
+    minutes. False when there is no champion or the row cannot be read.
+    """
+    import json as _json
+    import time as _time
+    from sqlalchemy import text as _text
+    now = _time.time()
+    if _CHAMPION_MARKET_CACHE['value'] is not None and now - _CHAMPION_MARKET_CACHE['at'] < _CHAMPION_MARKET_CACHE_SECONDS:
+        return _CHAMPION_MARKET_CACHE['value']
+    value = False
+    try:
+        row = db_session.execute(_text(
+            "SELECT model_type, selection_metrics FROM backtest_best_model WHERE is_active = TRUE "
+            "ORDER BY promoted_at DESC NULLS LAST, updated_at DESC, id DESC LIMIT 1"
+        )).first()
+        if row is not None:
+            metrics = row[1]
+            if isinstance(metrics, str):
+                metrics = _json.loads(metrics or '{}')
+            metrics = metrics or {}
+            alpha, beta = metrics.get('market_blend_alpha'), metrics.get('market_blend_beta')
+            spec = (alpha, beta) if alpha is not None and beta is not None else alpha
+            value = (
+                'market_offset' in str(row[0] or '')
+                or bool(metrics.get('market_offset'))
+                or blend_weights(spec) is not None
+            )
+    except Exception as exc:
+        log.warning("Could not read whether the champion uses the market: %s", exc)
+        try:
+            db_session.rollback()
+        except Exception:
+            pass
+    _CHAMPION_MARKET_CACHE.update(value=value, at=now)
+    return value
+
+
+def _naive_utc(value):
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
 def compute_live_market_edges_for_meeting(meeting_id, db_session, scores_by_race=None,
                                           probabilities_by_race=None):
     """Per-runner value edge and joint-Kelly stake for every race in a meeting.
@@ -2193,9 +2259,12 @@ def compute_live_market_edges_for_meeting(meeting_id, db_session, scores_by_race
         'races_failed': 0,
         'races_without_model_probabilities': 0,
         'races_market_shin_corrected': 0,
+        'races_scored_too_long_before_price': 0,
     }
     if not races:
         return {}, diagnostics
+    # Only stored probabilities can be stale: ones passed in were just scored.
+    check_score_age = probabilities_by_race is None and champion_depends_on_market(db_session)
 
     live_odds = _load_latest_live_odds_for_meeting(races, db_session)
     if not live_odds:
@@ -2242,6 +2311,25 @@ def compute_live_market_edges_for_meeting(meeting_id, db_session, scores_by_race
                         meeting_id, getattr(race, 'race_number', None),
                     )
                 fair_probabilities_list = [None] * len(horse_ids)
+
+            if check_score_age and probability_source == PROBABILITY_SOURCE_MODEL:
+                scored = [_naive_utc(getattr(getattr(h, 'prediction', None), 'ml_scored_at', None)) for h in active]
+                seen = [_naive_utc((live_odds.get(h) or {}).get('captured_at')) for h in horse_ids]
+                scored = [t for t in scored if t is not None]
+                seen = [t for t in seen if t is not None]
+                lag = (max(seen) - min(scored)).total_seconds() if scored and seen else None
+                if lag is None or lag > MARKET_SCORE_MAX_LAG_SECONDS:
+                    # The champion's probability already contains the price it
+                    # was scored with; against a much later price the "edge" is
+                    # just the market's move. Price nothing until re-scored.
+                    diagnostics['races_scored_too_long_before_price'] += 1
+                    log.info(
+                        "ML_VALUE_EDGE_STALE_SCORE meeting=%s race=%s lag_seconds=%s max=%s — "
+                        "market-dependent champion, so no edge or stake until the race is re-scored",
+                        meeting_id, getattr(race, 'race_number', None),
+                        None if lag is None else round(lag), MARKET_SCORE_MAX_LAG_SECONDS,
+                    )
+                    fair_probabilities_list = [None] * len(horse_ids)
 
             prices = [(live_odds.get(horse_id) or {}).get('odds') for horse_id in horse_ids]
             market_list, market_method = live_market_probabilities(prices)
