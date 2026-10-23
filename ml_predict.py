@@ -629,31 +629,38 @@ def add_race_relative_features(feature_rows):
     }
 
     temp['field_size'] = len(temp)
+    denom = (temp['field_size'] - 1).replace(0, np.nan)
 
+    # Build every new column first, then join them in one go. Adding columns
+    # one at a time makes pandas print "DataFrame is highly fragmented".
+    new = {}
     for col in relative_cols:
         if col not in temp.columns:
             continue
 
         ascending = col in lower_is_better
 
-        temp[f'{col}_race_rank'] = temp[col].rank(method='min', ascending=ascending)
-        temp[f'{col}_vs_race_avg'] = temp[col] - temp[col].mean()
+        rank = temp[col].rank(method='min', ascending=ascending)
+        new[f'{col}_race_rank'] = rank
+        new[f'{col}_vs_race_avg'] = temp[col] - temp[col].mean()
 
         if ascending:
-            temp[f'{col}_vs_race_best'] = temp[col] - temp[col].min()
+            new[f'{col}_vs_race_best'] = temp[col] - temp[col].min()
         else:
-            temp[f'{col}_vs_race_best'] = temp[col] - temp[col].max()
+            new[f'{col}_vs_race_best'] = temp[col] - temp[col].max()
 
-        denom = (temp['field_size'] - 1).replace(0, np.nan)
-        temp[f'{col}_race_percentile'] = 1.0 - ((temp[f'{col}_race_rank'] - 1) / denom)
-        temp[f'{col}_race_percentile'] = temp[f'{col}_race_percentile'].fillna(1.0)
+        new[f'{col}_race_percentile'] = (1.0 - ((rank - 1) / denom)).fillna(1.0)
 
     for col in NEW_RELATIVE_COLS:
         if col not in temp.columns:
             continue
         ascending = col in NEW_RELATIVE_LOWER_IS_BETTER
-        temp[f'{col}_race_rank'] = temp[col].rank(method='min', ascending=ascending)
-        temp[f'{col}_vs_race_avg'] = temp[col] - temp[col].mean()
+        new[f'{col}_race_rank'] = temp[col].rank(method='min', ascending=ascending)
+        new[f'{col}_vs_race_avg'] = temp[col] - temp[col].mean()
+
+    if new:
+        temp = pd.concat([temp.drop(columns=[c for c in new if c in temp.columns]),
+                          pd.DataFrame(new, index=temp.index)], axis=1)
 
     add_race_shape_features(temp)
     return temp.to_dict('records')

@@ -15,6 +15,8 @@ Training (backtest.add_race_relative_features) and live scoring
 (ml_predict.add_race_relative_features) both call add_race_shape_features on
 the same columns, so the two always compute identical values.
 """
+import warnings
+
 import numpy as np
 import pandas as pd
 
@@ -77,6 +79,14 @@ def add_race_shape_features(temp, race_key=None):
         for name in RACE_SHAPE_FEATURES:
             temp[name] = pd.Series(dtype=float)
         return temp
+    # Columns are added in place (callers rely on it), so pandas may warn the
+    # frame is fragmented. That is a speed hint only; keep it out of the logs.
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', pd.errors.PerformanceWarning)
+        return _add_race_shape_features(temp, race_key)
+
+
+def _add_race_shape_features(temp, race_key):
     groups = temp[race_key] if race_key else pd.Series(0, index=temp.index)
 
     career_runs = _col(temp, 'career_runs')

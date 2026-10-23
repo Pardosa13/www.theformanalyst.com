@@ -241,9 +241,10 @@ def settle_meeting(conn, meeting, pf, recorded_by=None):
                 continue
             seen.add(runner['horse_id'])
             summary[save_result(conn, runner, 0, None, recorded_by)] += 1
-            summary['marked_scratched'].append(
-                f"R{pf_race['race_no']} #{runner['tab']} {runner['name']}"
-                + ('' if runner['is_scratched'] else ' (was not marked scratched)'))
+            line = (f"R{pf_race['race_no']} #{runner['tab']} {runner['name']}"
+                    + ('' if runner['is_scratched'] else ' (was not marked scratched)'))
+            if line not in summary['marked_scratched']:  # older imports saved a scratched horse many times
+                summary['marked_scratched'].append(line)
 
     if touched_race_ids and conn.dialect.name == 'postgresql':
         refresh_results_incomplete_flags(conn, touched_race_ids)

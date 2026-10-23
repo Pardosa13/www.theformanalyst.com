@@ -1817,6 +1817,9 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
     )
 
     active_rows = []
+    # The form CSV has one row per past start, so a scratched horse appears
+    # many times. Save it once.
+    scratched_keys = set()
     for row in parsed_csv:
         try:
             horse_num = int(str(row.get('horse number', '')).strip())
@@ -1832,6 +1835,9 @@ def process_and_store_results(csv_data, filename, track_condition, user_id,
             row_is_scratched = compute_is_scratched_final(row)
 
         if row_is_scratched:
+            if row_key in scratched_keys:
+                continue
+            scratched_keys.add(row_key)
             scratched_rows.append(row)
             logger.info(f"✂️  Scratched: {row.get('horse name')} R{race_num} #{horse_num} source={scratch_source}")
         else:
