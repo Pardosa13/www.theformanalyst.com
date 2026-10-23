@@ -408,3 +408,84 @@ def test_the_meeting_page_renders_the_stored_edge_rather_than_waiting_on_a_poll(
     end = template.index('function toggleEdgeHighlight(', start)
     no_price_branch = template[start:end]
     assert 'delete row.dataset.edge;' not in no_price_branch
+
+
+# ── A market-dependent champion is only priced against the price it was scored with ──
+
+def _scored(race, minutes_ago):
+    when = datetime.utcnow() - timedelta(minutes=minutes_ago)
+    for horse in race.horses:
+        horse.prediction.ml_scored_at = when
+
+
+def test_market_champion_is_not_priced_off_a_stale_score(monkeypatch):
+    session, race = _one_race_meeting(monkeypatch, [(40.0, 5.00), (30.0, 2.50), (30.0, 3.50)])
+    _scored(race, minutes_ago=180)
+    monkeypatch.setattr(ml_predict, 'champion_depends_on_market', lambda _s: True)
+    edges, diagnostics = ml_predict.compute_live_market_edges_for_meeting(1, session)
+    assert diagnostics['races_scored_too_long_before_price'] == 1
+    # Priced runners still get rows, with no edge and no stake, so an old
+    # stake is cleared rather than kept.
+    assert all(e['value_edge_pct'] is None for e in edges.values())
+    assert all(e['kelly_stake_pct'] == 0.0 for e in edges.values())
+
+
+def test_market_champion_is_priced_when_freshly_scored(monkeypatch):
+    session, race = _one_race_meeting(monkeypatch, [(40.0, 5.00), (30.0, 2.50), (30.0, 3.50)])
+    _scored(race, minutes_ago=5)
+    monkeypatch.setattr(ml_predict, 'champion_depends_on_market', lambda _s: True)
+    edges, diagnostics = ml_predict.compute_live_market_edges_for_meeting(1, session)
+    assert diagnostics['races_scored_too_long_before_price'] == 0
+    assert all(e['value_edge_pct'] is not None for e in edges.values())
+
+
+def test_a_form_only_champion_is_priced_whatever_the_score_age(monkeypatch):
+    session, race = _one_race_meeting(monkeypatch, [(40.0, 5.00), (60.0, 2.00)])
+    _scored(race, minutes_ago=600)
+    monkeypatch.setattr(ml_predict, 'champion_depends_on_market', lambda _s: False)
+    edges, _diagnostics = ml_predict.compute_live_market_edges_for_meeting(1, session)
+    assert all(e['value_edge_pct'] is not None for e in edges.values())
+
+
+def test_probabilities_just_scored_are_never_treated_as_stale(monkeypatch):
+    session, race = _one_race_meeting(monkeypatch, [(40.0, 5.00), (60.0, 2.00)])
+    _scored(race, minutes_ago=600)
+    monkeypatch.setattr(ml_predict, 'champion_depends_on_market', lambda _s: True)
+    edges, _diagnostics = ml_predict.compute_live_market_edges_for_meeting(
+        1, session, probabilities_by_race={1: {1: 0.4, 2: 0.6}})
+    assert all(e['value_edge_pct'] is not None for e in edges.values())
+
+
+def test_offset_model_without_a_market_stores_no_probability():
+    source = open('ml_predict.py').read()
+    assert "race_probabilities[horse_id] = None if offset_without_market else float(probability)" in source
+
+
+def test_champion_market_check_reads_offset_and_blends(monkeypatch):
+    import json as _json
+
+    class _Row:
+        def __init__(self, model_type, metrics):
+            self._v = (model_type, _json.dumps(metrics))
+
+        def __getitem__(self, i):
+            return self._v[i]
+
+    def session_for(row):
+        class _S:
+            def execute(self, *_a, **_k):
+                class _R:
+                    def first(self):
+                        return row
+                return _R()
+        return _S()
+
+    for model_type, metrics, expected in (
+        ('market_offset_lgbm', {}, True),
+        ('lightgbm_blended', {'market_blend_alpha': 0.15}, True),
+        ('lightgbm_blended', {'market_blend_alpha': 0.05, 'market_blend_beta': 0.96}, True),
+        ('lightgbm', {}, False),
+    ):
+        ml_predict._CHAMPION_MARKET_CACHE.update(value=None, at=0.0)
+        assert ml_predict.champion_depends_on_market(session_for(_Row(model_type, metrics))) is expected
+    ml_predict._CHAMPION_MARKET_CACHE.update(value=None, at=0.0)
