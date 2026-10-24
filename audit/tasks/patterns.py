@@ -90,7 +90,7 @@ def conditions(d):
     for st in d.run_style.dropna().unique():
         add(f"run style {st}", d.run_style == st)
     # Rated price overlays (pre-race ratings vs market price)
-    for name, col in (("pfai", "pfai_price"), ("assessed", "assessed_price"), ("analyzer", "a_prob")):
+    for name, col in (("pfai", "pfai_price"), ("neural", "neural_price"), ("assessed", "assessed_price"), ("wclass", "wc_price"), ("analyzer", "a_prob")):
         ratio = (d.bsp / d[col]) if col != "a_prob" else (d.bsp * d[col])
         for lo, hi in [(0, 0.67), (0.67, 0.9), (0.9, 1.1), (1.1, 1.5), (1.5, 2.5), (2.5, 100)]:
             add(f"{name} bsp/rated {lo}-{hi}", (ratio >= lo) & (ratio < hi))

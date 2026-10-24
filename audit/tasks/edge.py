@@ -47,8 +47,11 @@ def run(ctx):
     d = d[d.mkt_p.notna() & (d.date >= pd.Timestamp("2026-02-01"))].copy()
     d["pfai_p"] = np.where(d.pfai_price > 1, 1 / d.pfai_price, np.nan)
     d["assessed_p"] = np.where(d.assessed_price > 1, 1 / d.assessed_price, np.nan)
+    d["neural_p"] = np.where(d.neural_price > 1, 1 / d.neural_price, np.nan)
+    d["wc_p"] = np.where(d.wc_price > 1, 1 / d.wc_price, np.nan)
+    d["time_p"] = np.where(d.time_price > 1, 1 / d.time_price, np.nan)
     d["sp_p"] = np.where(d.sp > 1, 1 / d.sp, np.nan)
-    signals = ["a_prob", "pfai_p", "assessed_p", "sp_p", "ml_prob"]
+    signals = ["pfai_p", "neural_p", "assessed_p", "wc_p", "time_p", "a_prob", "sp_p"]
     for sig in signals:
         # only races where every runner has the signal
         ok = d[sig].notna().groupby(d.race_id).transform("all")

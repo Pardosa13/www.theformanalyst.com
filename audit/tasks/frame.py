@@ -28,7 +28,7 @@ left join lateral (select * from predictions p where p.horse_id=ran.horse_id ord
 where not rc.results_incomplete
 """
 
-RATINGS_SQL = "select id race_id, ratings_json, speed_maps_json from races where ratings_json is not null or speed_maps_json is not null"
+RATINGS_SQL = "select id race_id, race_number, ratings_json, speed_maps_json from races where ratings_json is not null or speed_maps_json is not null"
 
 
 def _num(v):
@@ -63,10 +63,12 @@ def ratings_by_race(ctx):
     reports how many PuntingForm race ids each blob holds."""
     df = ctx.df(RATINGS_SQL)
     out, multi, total = {}, 0, 0
-    for race_id, rj, sj in df.itertuples(index=False):
+    for race_id, race_no, rj, sj in df.itertuples(index=False):
         total += 1
         d = _load_json(rj) or {}
         items = d.get("payLoad") or [] if isinstance(d, dict) else []
+        # Blobs hold the whole meeting: keep only this race's runners.
+        items = [it for it in items if str(it.get("raceNo")) == str(race_no)]
         rids = {it.get("raceId") for it in items}
         if len(rids) > 1:
             multi += 1
@@ -77,9 +79,13 @@ def ratings_by_race(ctx):
                 "time_rank": _num(it.get("timeRank")), "wc_rank": _num(it.get("weightClassRank")),
                 "settle": _num(it.get("predictedSettlePostion")), "run_style": it.get("runStyle"),
                 "class_change": _num(it.get("classChange")),
+                "neural_price": _num(it.get("neuralPrice")), "pf_score": _num(it.get("pfScore")),
+                "wc_price": _num(it.get("weightClassPrice")), "time_price": _num(it.get("timePrice")),
             })
         s = _load_json(sj) or {}
         for race in (s.get("payLoad") or [] if isinstance(s, dict) else []):
+            if race.get("raceNo") is not None and str(race.get("raceNo")) != str(race_no):
+                continue
             for it in race.get("items") or []:
                 per.setdefault(it.get("tabNo"), {}).update({
                     "assessed_price": _num(it.get("assessedPrice")), "sm_settle": _num(it.get("settle")),
@@ -106,7 +112,7 @@ def build(ctx):
     df["last_price"] = g("form price").map(_num)
     df["last_margin"] = g("form margin").map(_num)
     df["last_dist"] = g("form distance").map(_num)
-    df["last_date"] = pd.to_datetime(g("form meeting date"), errors="coerce", dayfirst=True)
+    df["last_date"] = pd.to_datetime(g("form meeting date"), errors="coerce", dayfirst=True, format="mixed")
     df["last_cond"] = g("form track condition").fillna("").astype(str)
     df["prize_money"] = g("race prizemoney").map(_num)
     df["dist"] = df["race_distance"].map(_num)
@@ -118,11 +124,12 @@ def build(ctx):
 
     pf = ratings_by_race(ctx)
     for col in ("pfai_price", "pfai_rank", "time_rank", "wc_rank", "settle", "run_style",
-                "class_change", "assessed_price", "sm_settle", "sm_speed"):
+                "class_change", "assessed_price", "sm_settle", "sm_speed",
+                "neural_price", "pf_score", "wc_price", "time_price"):
         df[col] = [(pf.get(r, {}).get(int(t)) or {}).get(col) if t == t else None
                    for r, t in zip(df.race_id, df.tab)]
     for col in ("pfai_price", "pfai_rank", "time_rank", "wc_rank", "settle", "class_change",
-                "assessed_price", "sm_settle", "sm_speed"):
+                "assessed_price", "sm_settle", "sm_speed", "neural_price", "pf_score", "wc_price", "time_price"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # Market: BSP implied probability normalised within the race.
