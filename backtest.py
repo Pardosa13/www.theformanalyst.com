@@ -95,6 +95,7 @@ from pf_form import (
 )
 from track_bias import TRACK_BIAS_FEATURES, empty_track_bias_features, point_in_time_features
 from race_shape import RACE_SHAPE_FEATURES, add_race_shape_features
+from analyzer_inputs import ANALYZER_FEATURES, NOTES_KEY as AN_NOTES_KEY, SCORE_KEY as AN_SCORE_KEY, add_analyzer_features
 from past_runs import (
     PAST_RUN_FEATURES, PAST_RUN_RELATIVE_COLS, PAST_RUN_RELATIVE_LOWER_IS_BETTER,
     empty_past_run_features, horse_key, past_run_features_for_meeting,
@@ -795,7 +796,8 @@ def load_pf_race_lookups():
                 "WHERE ratings_json IS NOT NULL OR speed_maps_json IS NOT NULL"
             ))
             for meeting_id, race_number, ratings_blob, speedmaps_blob in result:
-                r_lookup, s_lookup, pf_race_id = parse_pf_race_blobs(ratings_blob, speedmaps_blob)
+                r_lookup, s_lookup, pf_race_id = parse_pf_race_blobs(
+                    ratings_blob, speedmaps_blob, race_number=race_number)
                 ratings_lookup.update(r_lookup)
                 speedmaps_lookup.update(s_lookup)
                 if pf_race_id is not None and meeting_id is not None and race_number is not None:
@@ -809,22 +811,39 @@ def load_pf_race_lookups():
     return ratings_lookup, speedmaps_lookup, race_ids
 
 
-PF_LOOKUP_VERSION = 2
+PF_LOOKUP_VERSION = 3
 
 
-def parse_pf_race_blobs(ratings_blob, speedmaps_blob):
+def parse_pf_race_blobs(ratings_blob, speedmaps_blob, race_number=None):
     """One race's ratings_json/speed_maps_json -> (ratings, speedmaps, raceId).
+
+    ratings_json holds the WHOLE meeting's ratings (app.py stores the same
+    meeting blob on every race), so the race's PuntingForm raceId must be
+    picked by raceNo, never taken from the blob's first item: that is race
+    1's id, and keying on it gave every later race race 1's runners.
+    speed_maps_json is fetched per race, so its raceId is right on its own.
+    Pass race_number; without it the raceId is only trusted from the speed map.
 
     Shared with ml_predict so training and live parse identically.
     """
-    ratings_lookup, speedmaps_lookup, race_id = {}, {}, None
+    ratings_lookup, speedmaps_lookup = {}, {}
+    ratings_race_id, speedmap_race_id = None, None
+    try:
+        race_no = int(float(race_number)) if race_number is not None else None
+    except (TypeError, ValueError):
+        race_no = None
     try:
         d = ratings_blob
         while isinstance(d, str):
             d = json.loads(d)
         for item in ((d or {}).get('payLoad') or []):
             ratings_lookup[(item.get('raceId'), item.get('tabNo'))] = item
-            race_id = race_id if race_id is not None else item.get('raceId')
+            if ratings_race_id is None and race_no is not None:
+                try:
+                    if int(item.get('raceNo')) == race_no:
+                        ratings_race_id = item.get('raceId')
+                except (TypeError, ValueError):
+                    pass
     except Exception:
         pass
     try:
@@ -833,11 +852,17 @@ def parse_pf_race_blobs(ratings_blob, speedmaps_blob):
             d = json.loads(d)
         for race in ((d or {}).get('payLoad') or []):
             rid = race.get('raceId')
-            race_id = race_id if race_id is not None else rid
+            try:
+                matches = race_no is None or race.get('raceNo') is None or int(race.get('raceNo')) == race_no
+            except (TypeError, ValueError):
+                matches = False
+            if matches and speedmap_race_id is None:
+                speedmap_race_id = rid
             for item in (race.get('items') or []):
                 speedmaps_lookup[(rid, item.get('tabNo'))] = item
     except Exception:
         pass
+    race_id = ratings_race_id if ratings_race_id is not None else speedmap_race_id
     return ratings_lookup, speedmaps_lookup, race_id
 
 
@@ -1707,6 +1732,7 @@ def add_race_relative_features(feature_rows, race_ids):
         temp[f'{col}_vs_race_avg'] = temp[col] - grouped.transform('mean')
 
     add_race_shape_features(temp, race_key='race_id')
+    add_analyzer_features(temp, race_key='race_id')
     return temp.drop(columns=['race_id']).to_dict('records')
 
 
@@ -2001,6 +2027,10 @@ def build_training_set(df, strike_rate_data=None):
             form_horse_names.append(normalize_name(str(row['horse_name'])))
             form_finish_positions.append(finish)
 
+            # The analyzer's score and notes, turned into an_* inputs by
+            # add_analyzer_features (analyzer_inputs.py) with the race-relative ones.
+            features[AN_SCORE_KEY] = row.get('analyzer_score')
+            features[AN_NOTES_KEY] = row.get('analyzer_notes')
             feature_rows.append(features)
             targets_roi.append(roi)
             targets_won.append(won)

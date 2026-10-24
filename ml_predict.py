@@ -18,7 +18,7 @@ from collections import Counter, defaultdict
 import numpy as np
 from strike_rate_matching import build_strike_rate_lookup, get_sr_win_pct, normalize_name
 # Bump together with backtest.PF_LOOKUP_VERSION.
-PF_LOOKUP_VERSION = 2
+PF_LOOKUP_VERSION = 3
 
 from pf_form import (
     PF_FORM_FEATURES, PF_FORM_RELATIVE_COLS, PF_FORM_RELATIVE_LOWER_IS_BETTER,
@@ -27,6 +27,7 @@ from pf_form import (
 )
 from track_bias import TRACK_BIAS_FEATURES, TrackBiasStats, runner_inputs
 from race_shape import RACE_SHAPE_FEATURES, add_race_shape_features
+from analyzer_inputs import ANALYZER_FEATURES, NOTES_KEY as AN_NOTES_KEY, SCORE_KEY as AN_SCORE_KEY, add_analyzer_features
 from past_runs import (
     PAST_RUN_FEATURES, PAST_RUN_RELATIVE_COLS, PAST_RUN_RELATIVE_LOWER_IS_BETTER,
     empty_past_run_features, horse_key, past_run_features_for_meeting,
@@ -663,6 +664,7 @@ def add_race_relative_features(feature_rows):
                           pd.DataFrame(new, index=temp.index)], axis=1)
 
     add_race_shape_features(temp)
+    add_analyzer_features(temp)
     return temp.to_dict('records')
 
 # ── Expected feature order (must match pkl training order) ────────────────────
@@ -726,7 +728,7 @@ for col in NEW_RELATIVE_COLS:
 # field_size sits between the raw features and the race-relative derivatives —
 # the same column order build_training_set()/add_race_relative_features()
 # produce in backtest.py, so this list can stand in for a training contract.
-FEATURE_NAMES = FEATURE_NAMES + ['field_size'] + RACE_RELATIVE_FEATURES + NEW_RELATIVE_FEATURES + RACE_SHAPE_FEATURES
+FEATURE_NAMES = FEATURE_NAMES + ['field_size'] + RACE_RELATIVE_FEATURES + NEW_RELATIVE_FEATURES + RACE_SHAPE_FEATURES + ANALYZER_FEATURES
 
 
 def _model_feature_names(model):
@@ -1189,6 +1191,11 @@ def active_production_model_metadata(emit_log=False):
         'selected_overall_champion': selected_overall,
         'champion_status': 'Selected overall champion' if selected_overall else 'Best model for its algorithm type / fallback artifact',
         'model_class': type(model).__name__,
+        # Which PuntingForm ratings matching the model was trained with. Below
+        # PF_LOOKUP_VERSION it learned those inputs from mismatched runners and
+        # is served blanks for them live.
+        'pf_lookup_version': getattr(model, '_form_analyst_pf_lookup_version', 1),
+        'pf_lookup_current': getattr(model, '_form_analyst_pf_lookup_version', 1) >= PF_LOOKUP_VERSION,
     }
     if emit_log:
         log.info(
@@ -1320,7 +1327,8 @@ def _load_pf_race_lookups_for_meeting(races):
     race_ids = {}
     for race in races:
         r_lookup, s_lookup, pf_race_id = _parse_pf_race_blobs(
-            getattr(race, 'ratings_json', None), getattr(race, 'speed_maps_json', None))
+            getattr(race, 'ratings_json', None), getattr(race, 'speed_maps_json', None),
+            race_number=getattr(race, 'race_number', None))
         ratings_lookup.update(r_lookup)
         speedmaps_lookup.update(s_lookup)
         if pf_race_id is not None:
@@ -1328,30 +1336,56 @@ def _load_pf_race_lookups_for_meeting(races):
     return ratings_lookup, speedmaps_lookup, race_ids
 
 
-def _parse_pf_race_blobs(ratings_blob, speedmaps_blob):
-    """Same parse as backtest.parse_pf_race_blobs (kept local: backtest pulls
-    in the heavy training stack)."""
-    ratings_lookup, speedmaps_lookup, race_id = {}, {}, None
+def _parse_pf_race_blobs(ratings_blob, speedmaps_blob, race_number=None):
+    """One race's ratings_json/speed_maps_json -> (ratings, speedmaps, raceId).
+
+    ratings_json holds the WHOLE meeting's ratings (app.py stores the same
+    meeting blob on every race), so the race's PuntingForm raceId must be
+    picked by raceNo, never taken from the blob's first item: that is race
+    1's id, and keying on it gave every later race race 1's runners.
+    speed_maps_json is fetched per race, so its raceId is right on its own.
+    Pass race_number; without it the raceId is only trusted from the speed map.
+
+    Same parse as backtest.parse_pf_race_blobs (kept local: backtest pulls
+    in the heavy training stack).
+    """
+    ratings_lookup, speedmaps_lookup = {}, {}
+    ratings_race_id, speedmap_race_id = None, None
+    try:
+        race_no = int(float(race_number)) if race_number is not None else None
+    except (TypeError, ValueError):
+        race_no = None
     try:
         d = ratings_blob
         while isinstance(d, str):
             d = json.loads(d)
         for item in ((d or {}).get('payLoad') or []):
             ratings_lookup[(item.get('raceId'), item.get('tabNo'))] = item
-            race_id = race_id if race_id is not None else item.get('raceId')
+            if ratings_race_id is None and race_no is not None:
+                try:
+                    if int(item.get('raceNo')) == race_no:
+                        ratings_race_id = item.get('raceId')
+                except (TypeError, ValueError):
+                    pass
     except Exception:
         pass
     try:
         d = speedmaps_blob
         while isinstance(d, str):
             d = json.loads(d)
-        for pf_race in ((d or {}).get('payLoad') or []):
-            rid = pf_race.get('raceId')
-            race_id = race_id if race_id is not None else rid
-            for item in (pf_race.get('items') or []):
+        for race in ((d or {}).get('payLoad') or []):
+            rid = race.get('raceId')
+            try:
+                matches = race_no is None or race.get('raceNo') is None or int(race.get('raceNo')) == race_no
+            except (TypeError, ValueError):
+                matches = False
+            if matches and speedmap_race_id is None:
+                speedmap_race_id = rid
+            for item in (race.get('items') or []):
                 speedmaps_lookup[(rid, item.get('tabNo'))] = item
     except Exception:
         pass
+    race_id = ratings_race_id if ratings_race_id is not None else speedmap_race_id
     return ratings_lookup, speedmaps_lookup, race_id
 
 
@@ -1728,9 +1762,9 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
 
     pf_ratings_lookup, pf_speedmaps_lookup, pf_race_ids = _load_pf_race_lookups_for_meeting(races)
     if getattr(model, '_form_analyst_pf_lookup_version', 1) < PF_LOOKUP_VERSION:
-        # Models trained before the race-id fix learned pf_* from mismatched
-        # rows and have only ever been served NaN (median) for them live.
-        # Keep serving them exactly that rather than inputs they never saw.
+        # Models trained before a race-id fix learned pf_* from mismatched
+        # rows (v1: csv 'race id'; v2: every race keyed to race 1's raceId).
+        # Serve them blanks (median) rather than inputs they never saw.
         log.info("ML_PF_LOOKUP_LEGACY meeting=%s: model predates the pf race-id fix; "
                  "pf_* features left blank as before.", meeting_id)
         pf_race_ids = {}
@@ -1811,6 +1845,9 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
 
                 curr_w = feats['horse_weight']
                 feats['weight_vs_avg'] = (race_avg_weight - curr_w) if 49 <= curr_w <= 65 else 0.0
+                prediction = getattr(horse, 'prediction', None)
+                feats[AN_SCORE_KEY] = getattr(prediction, 'score', None)
+                feats[AN_NOTES_KEY] = getattr(prediction, 'notes', None)
 
                 feature_rows.append(feats)
                 horse_ids.append(horse.id)

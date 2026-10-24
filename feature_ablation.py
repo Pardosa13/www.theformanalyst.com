@@ -33,6 +33,7 @@ import pandas as pd
 from past_runs import PAST_RUN_FEATURES, PAST_RUN_RELATIVE_COLS
 from pf_form import PF_FORM_FEATURES, PF_FORM_RELATIVE_COLS
 from track_bias import TRACK_BIAS_FEATURES
+from analyzer_inputs import ANALYZER_FEATURES
 
 log = logging.getLogger('feature_ablation')
 
@@ -76,9 +77,13 @@ FEATURE_GROUPS = {
     # ... and pace shape (needs the saved form feed, so only from 19 Oct 2026).
     'pace_shape': PACE_FORM_COLS + ['rs_n_speed', 'rs_race_speed_total', 'rs_rival_speed_max',
                                     'rs_lone_speed', 'rs_style_change'],
+    # 24 Oct 2026: the analyzer's score, rank in the race and component
+    # families from its notes (analyzer_inputs.py). Never seen by the ML before.
+    'analyzer': list(ANALYZER_FEATURES),
 }
 # Groups added in 2026-10 (pf_ratings existed before, so it stays in baseline).
-NEW_GROUPS = ('past_runs', 'ratings_prices', 'track_bias', 'pf_form_feed', 'debut_weight', 'pace_shape')
+NEW_GROUPS = ('past_runs', 'ratings_prices', 'track_bias', 'pf_form_feed', 'debut_weight', 'pace_shape',
+              'analyzer')
 
 
 # Built from the columns at run time: the vs-race-best and race-percentile

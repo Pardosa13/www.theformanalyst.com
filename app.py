@@ -208,6 +208,13 @@ def _value_top_pick_edge(horse, signal_top_ids):
     return float(edge)
 
 
+# Routes no longer used to qualify a Best Bet (24 Oct 2026 data audit). Their
+# pre-race picks lost at SP: Value Top Pick -45% on 187 bets (and value edge
+# lost more as the claimed edge grew, across 2,000+ bets); Maiden -32% on 60.
+# Their past results stay on the ML Data page. Remove a name to bring it back.
+RETIRED_BEST_BET_ROUTES = frozenset({'maiden', 'value_top_pick'})
+
+
 def best_bet_routes_for_horse(horse, race, signal_top_ids, components=None):
     """The Best Bets qualifying rule for one runner.
 
@@ -230,6 +237,7 @@ def best_bet_routes_for_horse(horse, race, signal_top_ids, components=None):
         ) if hit]
     if _value_top_pick_edge(horse, signal_top_ids) is not None:
         routes.append('value_top_pick')
+    routes = [route for route in routes if route not in RETIRED_BEST_BET_ROUTES]
     return routes, edge_badges, signal_agreement
 
 
@@ -3292,6 +3300,7 @@ def dashboard():
             Race, Horse.race_id == Race.id
         ).filter(
             Prediction.best_bet_flagged_at.isnot(None),
+            Prediction.best_bet_flagged_at < Race.start_time_utc,
             Result.finish_position > 0,
             Race.results_incomplete.isnot(True),
         ).limit(500).all()
@@ -6662,6 +6671,7 @@ def data_analytics():
             Race, Horse.race_id == Race.id
         ).filter(
             Prediction.best_bet_flagged_at.isnot(None),
+            Prediction.best_bet_flagged_at < Race.start_time_utc,
             Result.finish_position > 0,
             Race.results_incomplete.isnot(True),
         ).limit(500).all()
@@ -6992,6 +7002,14 @@ def ml_data_analytics():
         db.session.rollback()
         logger.info("No feature ablation report to show yet: %s", e)
 
+    betfair_reality = None
+    try:
+        import betfair_check
+        betfair_reality = betfair_check.pick_type_results(db.session, date_from=date_from, date_to=date_to)
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("Error calculating Betfair reality check: %s", e, exc_info=True)
+
     joint_kelly_results = None
     try:
         joint_kelly_results = calculate_joint_kelly_results(
@@ -7002,6 +7020,7 @@ def ml_data_analytics():
         logger.warning("Error calculating joint Kelly results: %s", e, exc_info=True)
 
     return render_template("ml_data.html",
+        betfair_reality=betfair_reality,
         top_pick_value_test=top_pick_value_test,
         joint_kelly_results=joint_kelly_results,
         ablation_report=ablation_report,
@@ -12203,6 +12222,7 @@ def best_bets():
                 Race.distance,
                 Race.race_class,
                 Race.track_condition,
+                Race.start_time_utc,
             )
             .selectinload(Race.horses)
             .load_only(
@@ -12256,6 +12276,10 @@ def best_bets():
         track_name = _track_from_meeting(meeting)
         date_str = meeting.date.strftime('%Y-%m-%d') if meeting.date else None
         for race in meeting.races:
+            # Only record a Best Bet (routes, badges, qualified time) while the
+            # race is still to run, so the record never counts a pick made
+            # after the jump. Started races still show, unrecorded.
+            race_started = race_has_started(race, meeting, allow_network=False)[0]
             signal_top_ids = top_signal_horse_ids(race.horses)
             ladbrokes_signal_fields = {}
             if track_name and date_str:
@@ -12377,7 +12401,8 @@ def best_bets():
                                              f'Qualified via Value Top Pick. {detail}.'],
                     }
                 if routes:
-                    merge_best_bet_tracking(horse.prediction, routes, edge_badges)
+                    if not race_started:
+                        merge_best_bet_tracking(horse.prediction, routes, edge_badges)
                     matched_components.sort(key=lambda x: x['roi'], reverse=True)
                     best_bets.append({
                         'meeting_id': meeting.id,
@@ -12410,6 +12435,7 @@ def best_bets():
                         'is_value_top_pick': 'value_top_pick' in routes,
                         'best_bet_routes': routes,
                         'edge_badges': edge_badges,
+                        'race_started': race_started,
                         **lb_fields,
                     })
 
@@ -12439,7 +12465,16 @@ def best_bets():
 
     meetings_with_bets = dict(sorted(meetings_with_bets.items(), key=lambda x: x[0]))
 
+    best_bets_track_record = None
+    try:
+        import betfair_check
+        best_bets_track_record = betfair_check.best_bets_record(db.session)
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("Best Bets track record unavailable: %s", e, exc_info=True)
+
     return render_template("best_bets.html",
+        best_bets_track_record=best_bets_track_record,
         best_bets=best_bets,
         meetings_with_bets=meetings_with_bets,
         total_bets=len(best_bets),
@@ -12477,8 +12512,10 @@ def post_best_bets_manual():
             race = Race.query.get(horse.race_id)
             meeting = Meeting.query.get(race.meeting_id)
             
-            # Mark as flagged
-            if not horse.prediction.best_bet_flagged_at:
+            # Mark as flagged, but only before the jump: a pick posted after
+            # the race started must not count in the Best Bets record.
+            if (not horse.prediction.best_bet_flagged_at
+                    and not race_has_started(race, meeting, allow_network=False)[0]):
                 horse.prediction.best_bet_flagged_at = datetime.utcnow()
                 db.session.add(horse.prediction)
             

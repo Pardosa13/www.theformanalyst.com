@@ -32,6 +32,7 @@ import past_runs
 import pf_form
 import track_bias
 import race_shape
+import analyzer_inputs
 
 # 146 legacy + 58 audit + 3 opponent-quality-form, then the 2026-10 blocks:
 # past runs, unused ratings prices, track bias, saved PF form feed, and the
@@ -41,6 +42,7 @@ EXPECTED_LIVE_FEATURE_COUNT = (
     + len(pf_form.PF_FORM_FEATURES)
     + 2 * (len(past_runs.PAST_RUN_RELATIVE_COLS) + 2 + len(pf_form.PF_FORM_RELATIVE_COLS))
     + len(race_shape.RACE_SHAPE_FEATURES)
+    + len(analyzer_inputs.ANALYZER_FEATURES)
 )
 
 
@@ -299,6 +301,10 @@ class FakeHorse:
         self.csv_data = cd
         self.horse_name = horse_name
         self.is_scratched = False
+        # The analyzer's score and notes, so every an_* input has a value.
+        self.prediction = types.SimpleNamespace(
+            score=60.0 + horse_id,
+            notes='+20.0: Jockey hot form\n-12.0: Trainer cold\nAnalyzer Score (normalized): 55.0')
 
 
 class FakeSession:

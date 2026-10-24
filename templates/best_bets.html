@@ -540,9 +540,9 @@
 <!-- Page header -->
 <div class="bets-header">
   <h2>🔥 Today's Best Bets</h2>
-  <p>Analyzer, PFAI and ML all rank the same horse first, in a maiden race or with a
-     🔥 Proven Edge signal; or 💰 the ML top pick beats its price by 3+ points before the jump.
-     Component matches, win probability and sole rides are shown on the rows that qualify.</p>
+  <p>Analyzer, PFAI and ML all rank the same horse first, with a 🔥 Proven Edge signal.
+     Component matches, win probability and sole rides are shown on the rows that qualify.
+     The Maiden and Value Top Pick routes were retired on 24 Oct 2026 after losing money; Proven Edge is unproven too, so stake small.</p>
 </div>
 
 <!-- Stat tiles -->
@@ -564,6 +564,54 @@
     <h2>{{ hours_back }}h</h2>
   </div>
 </div>
+
+<!-- Honest track record: settled Best Bets known before the jump, at bookie SP and Betfair SP. -->
+{% if best_bets_track_record %}
+{% set rec = best_bets_track_record %}
+<div class="filter-card" style="margin-bottom:24px">
+  <h5 style="margin:0 0 6px;font-weight:700">📒 Track Record (picks made before the jump)</h5>
+  <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">
+    Flat 1-unit win bets on every settled Best Bet that was flagged or qualified before its race started.
+    Betfair SP is after {{ "%.0f"|format(rec.commission_pct) }}% commission and is the fairer test: the bookie SP carries a 20&ndash;30% margin.
+    {% if rec.excluded_after_start %}{{ rec.excluded_after_start }} picks recorded after the jump are left out.{% endif %}
+  </p>
+  {% set t = rec.total %}
+  <div class="stat-row" style="margin-bottom:14px">
+    <div class="stat-tile s-primary"><h5>Settled Bets</h5><h2>{{ t.bets }}</h2></div>
+    <div class="stat-tile s-info"><h5>Strike Rate</h5><h2>{% if t.strike_rate is not none %}{{ "%.1f"|format(t.strike_rate) }}%{% else %}&ndash;{% endif %}</h2></div>
+    <div class="stat-tile s-warning"><h5>ROI at Bookie SP</h5><h2 style="color:{% if t.roi_sp is not none and t.roi_sp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{% if t.roi_sp is not none %}{{ "%+.1f"|format(t.roi_sp) }}%{% else %}&ndash;{% endif %}</h2></div>
+    <div class="stat-tile s-success"><h5>ROI at Betfair SP ({{ t.bsp_bets }} bets)</h5><h2 style="color:{% if t.roi_bsp is not none and t.roi_bsp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{% if t.roi_bsp is not none %}{{ "%+.1f"|format(t.roi_bsp) }}%{% else %}&ndash;{% endif %}</h2></div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm" style="font-size:13px">
+      <thead><tr><th>Route</th><th>Bets</th><th>Strike rate</th><th>ROI bookie SP</th><th>ROI Betfair SP</th></tr></thead>
+      <tbody>
+      {% for r in rec.by_route %}
+        <tr><td>{{ r.key|replace('_', ' ')|title }}</td><td>{{ r.bets }}</td><td>{{ "%.1f"|format(r.strike_rate) }}%</td>
+          <td style="color:{% if r.roi_sp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{{ "%+.1f"|format(r.roi_sp) }}%</td>
+          <td style="color:{% if r.roi_bsp is not none and r.roi_bsp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{% if r.roi_bsp is not none %}{{ "%+.1f"|format(r.roi_bsp) }}% <span style="color:var(--text-muted)">({{ r.bsp_bets }})</span>{% else %}&ndash;{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <details>
+    <summary style="font-size:13px;cursor:pointer">By month</summary>
+    <div class="table-responsive">
+      <table class="table table-sm" style="font-size:13px">
+        <thead><tr><th>Month</th><th>Bets</th><th>Strike rate</th><th>ROI bookie SP</th><th>ROI Betfair SP</th></tr></thead>
+        <tbody>
+        {% for r in rec.by_month %}
+          <tr><td>{{ r.key }}</td><td>{{ r.bets }}</td><td>{{ "%.1f"|format(r.strike_rate) }}%</td>
+            <td style="color:{% if r.roi_sp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{{ "%+.1f"|format(r.roi_sp) }}%</td>
+            <td style="color:{% if r.roi_bsp is not none and r.roi_bsp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{% if r.roi_bsp is not none %}{{ "%+.1f"|format(r.roi_bsp) }}% <span style="color:var(--text-muted)">({{ r.bsp_bets }})</span>{% else %}&ndash;{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0">Data audit, Feb&ndash;Sep 2026: Best Bets lost at Betfair SP in most months, and no route has yet beaten the market on a few hundred bets. Stake small until one does.</p>
+</div>
+{% endif %}
 
 <!-- Mode toggle -->
 <div class="mode-toggle">
@@ -663,7 +711,7 @@
 <div class="no-bets-alert">
   <h4>No Signals Found</h4>
   <p>No race in the last {{ hours_back }} hours has Analyzer, PFAI and ML all agreeing on
-     a top pick that is in a maiden race or has a Proven Edge signal, and no ML top pick beat its price by 3+ points{% if mode == 'non_top_pick' %} — non-top-pick mode cannot show these, as they are always the top pick{% endif %}.</p>
+     a top pick that has a Proven Edge signal{% if mode == 'non_top_pick' %} — non-top-pick mode cannot show these, as they are always the top pick{% endif %}.</p>
   <p style="margin-bottom:4px;">Check:</p>
   <ul>
     <li>The meeting has been scored by the ML run</li>
@@ -722,6 +770,9 @@
                 <td>
   <div class="horse-name">
     {{ bet.horse_name }}
+    {% if bet.race_started %}
+    <span class="edge-badge" title="This race has started, so this pick is not recorded in the track record">Started</span>
+    {% endif %}
     {% if bet.signal_agreement %}
     <span class="signal-agreement-badge" title="Analyzer, PFAI and ML all rank this horse top">⚡ 3-Way Agree</span>
     {% endif %}
