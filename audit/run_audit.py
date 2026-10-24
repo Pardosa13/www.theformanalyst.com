@@ -97,7 +97,9 @@ def run_sql_text(ctx, text, prefix):
     if "".join(buf).strip():
         blocks.append((name, "\n".join(buf)))
     for name, sql in blocks:
-        ctx.q(name, sql)
+        body = "\n".join(l for l in sql.splitlines() if not l.strip().startswith("--")).strip()
+        if body:
+            ctx.q(name, sql)
 
 
 def main():
