@@ -572,6 +572,46 @@
   </div>
 </div>
 
+<!-- Data audit, 24 Oct 2026: every pick type settled at bookie SP and at Betfair SP. -->
+{% if active_model_metadata and active_model_metadata.pf_lookup_current is false %}
+<div class="alert alert-warning" role="alert" style="margin-bottom:16px">
+  <strong>The live model was trained on mismatched PuntingForm ratings.</strong>
+  Until 24 Oct 2026 every race after Race 1 was given the Race 1 horse's PFAI, time ranks, settle and speed map (same saddlecloth number).
+  This model is served blanks for those inputs. The next nightly retrain learns them correctly.
+</div>
+{% endif %}
+{% if betfair_reality %}
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlBetfairReality" aria-expanded="true">
+    <h5>⚖️ Reality Check: Bookie SP vs Betfair SP</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="mlBetfairReality" class="collapse show">
+    <div class="card-body">
+      <p class="text-muted mb-3">Flat 1-unit win bets. Bookie SP carries a 20&ndash;30% margin; Betfair SP is the fairest price we hold (after {{ "%.0f"|format(betfair_reality.commission_pct) }}% commission on winnings). A pick is only worth backing if it beats <strong>Every runner</strong> and the <strong>Market favourite</strong> at Betfair SP. Only picks known before the jump count. Betfair prices are loaded up to {{ betfair_reality.bsp_through or 'n/a' }}{% if filters.date_from or filters.date_to %}; date filter applied{% endif %}.</p>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead><tr><th>Pick type</th><th>Bets</th><th>Wins</th><th>Strike rate</th><th>ROI at bookie SP</th><th>Bets with Betfair SP</th><th>ROI at Betfair SP</th></tr></thead>
+          <tbody>
+          {% for row in betfair_reality.rows %}
+            <tr{% if row.key in ('all', 'favourite') %} style="font-weight:600"{% endif %}>
+              <td title="{{ row.note }}">{{ row.label }}</td>
+              <td>{{ "{:,}".format(row.bets) }}</td>
+              <td>{{ "{:,}".format(row.wins) }}</td>
+              <td>{% if row.strike_rate is not none %}{{ "%.1f"|format(row.strike_rate) }}%{% else %}&ndash;{% endif %}</td>
+              <td class="{% if row.roi_sp is not none and row.roi_sp >= 0 %}profit{% else %}loss{% endif %}">{% if row.roi_sp is not none %}{{ "%+.1f"|format(row.roi_sp) }}%{% else %}&ndash;{% endif %}</td>
+              <td>{{ "{:,}".format(row.bsp_bets) }}</td>
+              <td class="{% if row.roi_bsp is not none and row.roi_bsp >= 0 %}profit{% else %}loss{% endif %}">{% if row.roi_bsp is not none %}{{ "%+.1f"|format(row.roi_bsp) }}%{% else %}&ndash;{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="text-muted mb-0" style="font-size:12px">Audit finding (Feb&ndash;Sep 2026): no pick type beat the market at Betfair SP, and value-edge bets lost more as the claimed edge grew. Treat value edge and Kelly stakes as unproven until a row here turns positive on a few hundred bets.</p>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Live test of the backtest's best value rule: ML top pick, only when it beats the price. -->
 {% if top_pick_value_test %}
 <div class="section-card">

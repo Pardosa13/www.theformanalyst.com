@@ -1189,6 +1189,11 @@ def active_production_model_metadata(emit_log=False):
         'selected_overall_champion': selected_overall,
         'champion_status': 'Selected overall champion' if selected_overall else 'Best model for its algorithm type / fallback artifact',
         'model_class': type(model).__name__,
+        # Which PuntingForm ratings matching the model was trained with. Below
+        # PF_LOOKUP_VERSION it learned those inputs from mismatched runners and
+        # is served blanks for them live.
+        'pf_lookup_version': getattr(model, '_form_analyst_pf_lookup_version', 1),
+        'pf_lookup_current': getattr(model, '_form_analyst_pf_lookup_version', 1) >= PF_LOOKUP_VERSION,
     }
     if emit_log:
         log.info(
