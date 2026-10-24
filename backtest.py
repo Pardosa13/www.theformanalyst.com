@@ -795,7 +795,8 @@ def load_pf_race_lookups():
                 "WHERE ratings_json IS NOT NULL OR speed_maps_json IS NOT NULL"
             ))
             for meeting_id, race_number, ratings_blob, speedmaps_blob in result:
-                r_lookup, s_lookup, pf_race_id = parse_pf_race_blobs(ratings_blob, speedmaps_blob)
+                r_lookup, s_lookup, pf_race_id = parse_pf_race_blobs(
+                    ratings_blob, speedmaps_blob, race_number=race_number)
                 ratings_lookup.update(r_lookup)
                 speedmaps_lookup.update(s_lookup)
                 if pf_race_id is not None and meeting_id is not None and race_number is not None:
@@ -809,22 +810,39 @@ def load_pf_race_lookups():
     return ratings_lookup, speedmaps_lookup, race_ids
 
 
-PF_LOOKUP_VERSION = 2
+PF_LOOKUP_VERSION = 3
 
 
-def parse_pf_race_blobs(ratings_blob, speedmaps_blob):
+def parse_pf_race_blobs(ratings_blob, speedmaps_blob, race_number=None):
     """One race's ratings_json/speed_maps_json -> (ratings, speedmaps, raceId).
+
+    ratings_json holds the WHOLE meeting's ratings (app.py stores the same
+    meeting blob on every race), so the race's PuntingForm raceId must be
+    picked by raceNo, never taken from the blob's first item: that is race
+    1's id, and keying on it gave every later race race 1's runners.
+    speed_maps_json is fetched per race, so its raceId is right on its own.
+    Pass race_number; without it the raceId is only trusted from the speed map.
 
     Shared with ml_predict so training and live parse identically.
     """
-    ratings_lookup, speedmaps_lookup, race_id = {}, {}, None
+    ratings_lookup, speedmaps_lookup = {}, {}
+    ratings_race_id, speedmap_race_id = None, None
+    try:
+        race_no = int(float(race_number)) if race_number is not None else None
+    except (TypeError, ValueError):
+        race_no = None
     try:
         d = ratings_blob
         while isinstance(d, str):
             d = json.loads(d)
         for item in ((d or {}).get('payLoad') or []):
             ratings_lookup[(item.get('raceId'), item.get('tabNo'))] = item
-            race_id = race_id if race_id is not None else item.get('raceId')
+            if ratings_race_id is None and race_no is not None:
+                try:
+                    if int(item.get('raceNo')) == race_no:
+                        ratings_race_id = item.get('raceId')
+                except (TypeError, ValueError):
+                    pass
     except Exception:
         pass
     try:
@@ -833,11 +851,17 @@ def parse_pf_race_blobs(ratings_blob, speedmaps_blob):
             d = json.loads(d)
         for race in ((d or {}).get('payLoad') or []):
             rid = race.get('raceId')
-            race_id = race_id if race_id is not None else rid
+            try:
+                matches = race_no is None or race.get('raceNo') is None or int(race.get('raceNo')) == race_no
+            except (TypeError, ValueError):
+                matches = False
+            if matches and speedmap_race_id is None:
+                speedmap_race_id = rid
             for item in (race.get('items') or []):
                 speedmaps_lookup[(rid, item.get('tabNo'))] = item
     except Exception:
         pass
+    race_id = ratings_race_id if ratings_race_id is not None else speedmap_race_id
     return ratings_lookup, speedmaps_lookup, race_id
 
 
