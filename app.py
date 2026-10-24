@@ -208,6 +208,13 @@ def _value_top_pick_edge(horse, signal_top_ids):
     return float(edge)
 
 
+# Routes no longer used to qualify a Best Bet (24 Oct 2026 data audit). Their
+# pre-race picks lost at SP: Value Top Pick -45% on 187 bets (and value edge
+# lost more as the claimed edge grew, across 2,000+ bets); Maiden -32% on 60.
+# Their past results stay on the ML Data page. Remove a name to bring it back.
+RETIRED_BEST_BET_ROUTES = frozenset({'maiden', 'value_top_pick'})
+
+
 def best_bet_routes_for_horse(horse, race, signal_top_ids, components=None):
     """The Best Bets qualifying rule for one runner.
 
@@ -230,6 +237,7 @@ def best_bet_routes_for_horse(horse, race, signal_top_ids, components=None):
         ) if hit]
     if _value_top_pick_edge(horse, signal_top_ids) is not None:
         routes.append('value_top_pick')
+    routes = [route for route in routes if route not in RETIRED_BEST_BET_ROUTES]
     return routes, edge_badges, signal_agreement
 
 

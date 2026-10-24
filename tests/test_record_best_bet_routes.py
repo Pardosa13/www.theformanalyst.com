@@ -16,7 +16,7 @@ def _runner(race, name, analyzer, pfai, ml, notes='x'):
     return horse
 
 
-def test_daily_run_records_maiden_and_proven_edge_routes(monkeypatch):
+def test_daily_run_records_proven_edge_but_not_retired_maiden_route(monkeypatch):
     # Proven Edge comes from the notes; fake the parser so the test does not
     # depend on the exact analyzer note wording.
     def fake_parse(notes):
@@ -54,16 +54,18 @@ def test_daily_run_records_maiden_and_proven_edge_routes(monkeypatch):
             recorded = appmod.record_best_bet_routes([r1, r2, r3, r4])
             db.session.commit()
 
-            assert recorded == 2
-            assert a.prediction.best_bet_routes == 'maiden'
+            # Maiden is a retired route: A no longer qualifies.
+            assert 'maiden' in appmod.RETIRED_BEST_BET_ROUTES
+            assert recorded == 1
+            assert a.prediction.best_bet_routes is None
             assert c.prediction.best_bet_routes == 'proven_edge'
             assert e.prediction.best_bet_routes is None
             assert g.prediction.best_bet_routes is None
-            assert a.prediction.best_bet_qualified_at is not None
+            assert c.prediction.best_bet_qualified_at is not None
 
             # Recording again is safe: routes only grow, never duplicate.
-            appmod.record_best_bet_routes([r1])
-            assert a.prediction.best_bet_routes == 'maiden'
+            appmod.record_best_bet_routes([r2])
+            assert c.prediction.best_bet_routes == 'proven_edge'
 
             # And the ML Data chart now counts it without anyone opening Best Bets.
             assert any(cohort == 'maiden' for cohort, _l, _r in appmod.BEST_BET_ROUTE_COHORTS)
@@ -84,7 +86,13 @@ def test_best_bets_page_and_daily_run_share_one_rule():
     assert 'record_routes(db, open_races(meeting, race_has_started))' in run_pass
 
 
+def test_value_top_pick_is_retired():
+    assert 'value_top_pick' in appmod.RETIRED_BEST_BET_ROUTES
+
+
 def test_value_top_pick_route_needs_ml_top_and_edge(monkeypatch):
+    # The rule itself, with the route switched back on.
+    monkeypatch.setattr(appmod, 'RETIRED_BEST_BET_ROUTES', frozenset())
     monkeypatch.setattr(appmod, 'parse_notes_component_matches', lambda notes: {})
     with appmod.app.app_context():
         db.create_all()
