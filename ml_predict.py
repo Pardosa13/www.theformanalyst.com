@@ -27,6 +27,7 @@ from pf_form import (
 )
 from track_bias import TRACK_BIAS_FEATURES, TrackBiasStats, runner_inputs
 from race_shape import RACE_SHAPE_FEATURES, add_race_shape_features
+from analyzer_inputs import ANALYZER_FEATURES, NOTES_KEY as AN_NOTES_KEY, SCORE_KEY as AN_SCORE_KEY, add_analyzer_features
 from past_runs import (
     PAST_RUN_FEATURES, PAST_RUN_RELATIVE_COLS, PAST_RUN_RELATIVE_LOWER_IS_BETTER,
     empty_past_run_features, horse_key, past_run_features_for_meeting,
@@ -663,6 +664,7 @@ def add_race_relative_features(feature_rows):
                           pd.DataFrame(new, index=temp.index)], axis=1)
 
     add_race_shape_features(temp)
+    add_analyzer_features(temp)
     return temp.to_dict('records')
 
 # ── Expected feature order (must match pkl training order) ────────────────────
@@ -726,7 +728,7 @@ for col in NEW_RELATIVE_COLS:
 # field_size sits between the raw features and the race-relative derivatives —
 # the same column order build_training_set()/add_race_relative_features()
 # produce in backtest.py, so this list can stand in for a training contract.
-FEATURE_NAMES = FEATURE_NAMES + ['field_size'] + RACE_RELATIVE_FEATURES + NEW_RELATIVE_FEATURES + RACE_SHAPE_FEATURES
+FEATURE_NAMES = FEATURE_NAMES + ['field_size'] + RACE_RELATIVE_FEATURES + NEW_RELATIVE_FEATURES + RACE_SHAPE_FEATURES + ANALYZER_FEATURES
 
 
 def _model_feature_names(model):
@@ -1843,6 +1845,9 @@ def predict_meeting(meeting_id, db_session, strike_rate_data=None, return_probab
 
                 curr_w = feats['horse_weight']
                 feats['weight_vs_avg'] = (race_avg_weight - curr_w) if 49 <= curr_w <= 65 else 0.0
+                prediction = getattr(horse, 'prediction', None)
+                feats[AN_SCORE_KEY] = getattr(prediction, 'score', None)
+                feats[AN_NOTES_KEY] = getattr(prediction, 'notes', None)
 
                 feature_rows.append(feats)
                 horse_ids.append(horse.id)

@@ -95,6 +95,7 @@ from pf_form import (
 )
 from track_bias import TRACK_BIAS_FEATURES, empty_track_bias_features, point_in_time_features
 from race_shape import RACE_SHAPE_FEATURES, add_race_shape_features
+from analyzer_inputs import ANALYZER_FEATURES, NOTES_KEY as AN_NOTES_KEY, SCORE_KEY as AN_SCORE_KEY, add_analyzer_features
 from past_runs import (
     PAST_RUN_FEATURES, PAST_RUN_RELATIVE_COLS, PAST_RUN_RELATIVE_LOWER_IS_BETTER,
     empty_past_run_features, horse_key, past_run_features_for_meeting,
@@ -1731,6 +1732,7 @@ def add_race_relative_features(feature_rows, race_ids):
         temp[f'{col}_vs_race_avg'] = temp[col] - grouped.transform('mean')
 
     add_race_shape_features(temp, race_key='race_id')
+    add_analyzer_features(temp, race_key='race_id')
     return temp.drop(columns=['race_id']).to_dict('records')
 
 
@@ -2025,6 +2027,10 @@ def build_training_set(df, strike_rate_data=None):
             form_horse_names.append(normalize_name(str(row['horse_name'])))
             form_finish_positions.append(finish)
 
+            # The analyzer's score and notes, turned into an_* inputs by
+            # add_analyzer_features (analyzer_inputs.py) with the race-relative ones.
+            features[AN_SCORE_KEY] = row.get('analyzer_score')
+            features[AN_NOTES_KEY] = row.get('analyzer_notes')
             feature_rows.append(features)
             targets_roi.append(roi)
             targets_won.append(won)
