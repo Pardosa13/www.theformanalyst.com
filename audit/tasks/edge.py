@@ -26,7 +26,6 @@ def fit(X, race, won):
 
     def nll(w):
         s = X @ w
-        s = s - np.bincount(idx, weights=np.zeros_like(s))  # keep shape
         m = pd.Series(s).groupby(idx).transform("max").values
         e = np.exp(s - m)
         den = np.bincount(idx, weights=e)[idx]
