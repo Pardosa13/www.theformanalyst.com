@@ -328,6 +328,33 @@
     font-family: 'DM Mono', monospace;
   }
 
+
+  /* ── Track record tables (match the dark theme) ── */
+  .record-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 0; }
+  .record-table thead th {
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+    padding: 9px 8px; border-bottom: 1px solid var(--border-mid); white-space: nowrap;
+  }
+  .record-table tbody td {
+    background: transparent; color: var(--text-primary);
+    padding: 9px 8px; border-bottom: 1px solid var(--border-subtle); white-space: nowrap;
+    font-family: 'DM Mono', monospace;
+  }
+  .record-table tbody td:first-child { font-family: inherit; }
+  .record-table tbody tr:hover td { background: var(--bg-hover); }
+  .record-table tbody tr:last-child td { border-bottom: none; }
+  .record-table .pos { color: #10b981; }
+  .record-table .neg { color: #ef4444; }
+  .record-table .muted { color: var(--text-muted); }
+  @media (max-width: 600px) {
+    .record-table { font-size: 12px; }
+    .record-table thead th, .record-table tbody td { padding: 8px 6px; }
+    .record-table .cnt { display: none; }
+  }
+  .record-wrap { overflow-x: auto; border: 1px solid var(--border-subtle); border-radius: 10px; margin-bottom: 12px; }
+
   /* ── Table overrides for best bets ── */
   .bets-table { width: 100%; border-collapse: collapse; }
 
@@ -582,28 +609,28 @@
     <div class="stat-tile s-warning"><h5>ROI at Bookie SP</h5><h2 style="color:{% if t.roi_sp is not none and t.roi_sp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{% if t.roi_sp is not none %}{{ "%+.1f"|format(t.roi_sp) }}%{% else %}&ndash;{% endif %}</h2></div>
     <div class="stat-tile s-success"><h5>ROI at Betfair SP ({{ t.bsp_bets }} bets)</h5><h2 style="color:{% if t.roi_bsp is not none and t.roi_bsp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{% if t.roi_bsp is not none %}{{ "%+.1f"|format(t.roi_bsp) }}%{% else %}&ndash;{% endif %}</h2></div>
   </div>
-  <div class="table-responsive">
-    <table class="table table-sm" style="font-size:13px">
-      <thead><tr><th>Route</th><th>Bets</th><th>Strike rate</th><th>ROI bookie SP</th><th>ROI Betfair SP</th></tr></thead>
+  <div class="record-wrap">
+    <table class="record-table">
+      <thead><tr><th>Route</th><th>Bets</th><th>Win %</th><th>SP ROI</th><th>Betfair ROI</th></tr></thead>
       <tbody>
       {% for r in rec.by_route %}
-        <tr><td>{{ r.key|replace('_', ' ')|title }}</td><td>{{ r.bets }}</td><td>{{ "%.1f"|format(r.strike_rate) }}%</td>
-          <td style="color:{% if r.roi_sp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{{ "%+.1f"|format(r.roi_sp) }}%</td>
-          <td style="color:{% if r.roi_bsp is not none and r.roi_bsp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{% if r.roi_bsp is not none %}{{ "%+.1f"|format(r.roi_bsp) }}% <span style="color:var(--text-muted)">({{ r.bsp_bets }})</span>{% else %}&ndash;{% endif %}</td></tr>
+        <tr><td>{{ r.key|replace('_', ' ')|title }}{% if r.key in ('maiden', 'value_top_pick') %} <span class="muted" style="font-size:11px">(retired)</span>{% endif %}</td><td>{{ r.bets }}</td><td>{{ "%.1f"|format(r.strike_rate) }}%</td>
+          <td class="{% if r.roi_sp >= 0 %}pos{% else %}neg{% endif %}">{{ "%+.1f"|format(r.roi_sp) }}%</td>
+          <td class="{% if r.roi_bsp is not none and r.roi_bsp >= 0 %}pos{% elif r.roi_bsp is not none %}neg{% else %}muted{% endif %}">{% if r.roi_bsp is not none %}{{ "%+.1f"|format(r.roi_bsp) }}% <span class="muted cnt">({{ r.bsp_bets }})</span>{% else %}&ndash;{% endif %}</td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
   <details>
-    <summary style="font-size:13px;cursor:pointer">By month</summary>
-    <div class="table-responsive">
-      <table class="table table-sm" style="font-size:13px">
-        <thead><tr><th>Month</th><th>Bets</th><th>Strike rate</th><th>ROI bookie SP</th><th>ROI Betfair SP</th></tr></thead>
+    <summary style="font-size:13px;cursor:pointer;color:var(--accent);margin-bottom:8px">By month</summary>
+    <div class="record-wrap">
+      <table class="record-table">
+        <thead><tr><th>Month</th><th>Bets</th><th>Win %</th><th>SP ROI</th><th>Betfair ROI</th></tr></thead>
         <tbody>
         {% for r in rec.by_month %}
           <tr><td>{{ r.key }}</td><td>{{ r.bets }}</td><td>{{ "%.1f"|format(r.strike_rate) }}%</td>
-            <td style="color:{% if r.roi_sp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{{ "%+.1f"|format(r.roi_sp) }}%</td>
-            <td style="color:{% if r.roi_bsp is not none and r.roi_bsp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{% if r.roi_bsp is not none %}{{ "%+.1f"|format(r.roi_bsp) }}% <span style="color:var(--text-muted)">({{ r.bsp_bets }})</span>{% else %}&ndash;{% endif %}</td></tr>
+            <td class="{% if r.roi_sp >= 0 %}pos{% else %}neg{% endif %}">{{ "%+.1f"|format(r.roi_sp) }}%</td>
+            <td class="{% if r.roi_bsp is not none and r.roi_bsp >= 0 %}pos{% elif r.roi_bsp is not none %}neg{% else %}muted{% endif %}">{% if r.roi_bsp is not none %}{{ "%+.1f"|format(r.roi_bsp) }}% <span class="muted cnt">({{ r.bsp_bets }})</span>{% else %}&ndash;{% endif %}</td></tr>
         {% endfor %}
         </tbody>
       </table>
