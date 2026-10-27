@@ -41,7 +41,7 @@ def _moves(d, early, late, label):
         "pfai top": d.pfai_rank == 1,
         "time rank 1": d.time_rank == 1,
         "wclass rank 1": d.wc_rank == 1,
-        "ML top (scored pre-race)": (d.ml_rank == 1) & d.ml_fwd.fillna(False).astype(bool),
+        "ML top (scored pre-race)": (d.ml_rank == 1) & (d.ml_fwd == True),
     }
     rows = []
     for name, m in groups.items():
@@ -50,7 +50,8 @@ def _moves(d, early, late, label):
         if n < 30:
             continue
         ex = d.excess.values[m]
-        se = ex.std(ddof=1) / np.sqrt(n) if n > 1 else np.nan
+        ex = ex[np.isfinite(ex)]
+        se = ex.std(ddof=1) / np.sqrt(len(ex)) if len(ex) > 1 else np.nan
         rows.append((name, n, round(100 * d.mv.values[m].mean(), 2), round(100 * ex.mean(), 2),
                      round(ex.mean() / se, 2) if se else np.nan,
                      round(100 * (d.mv.values[m] > 0).mean(), 1),

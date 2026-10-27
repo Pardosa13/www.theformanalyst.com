@@ -24,15 +24,27 @@ def _rate(n, w):
     return np.where(n > 0, w / n.clip(lower=1), np.nan)
 
 
-def _target_encode(train, full, col, k=50):
-    prior = train.won.mean()
-    g = train.groupby(col)["won"].agg(["sum", "count"])
-    enc = (g["sum"] + k * prior) / (g["count"] + k)
-    return full[col].map(enc).fillna(prior)
+def _rate_before(d, col, names=None, k=50):
+    """Shrunk win rate of each `col` value using only races on EARLIER dates.
+
+    `names` looks up a different column's values (e.g. last start's jockey)
+    in the same table. No horse ever sees its own result.
+    """
+    prior = d.won.mean()
+    day = d.groupby([col, "date"])["won"].agg(["sum", "count"]).reset_index()
+    day = day.sort_values([col, "date"])
+    g = day.groupby(col)
+    day["w_before"] = g["sum"].cumsum() - day["sum"]
+    day["n_before"] = g["count"].cumsum() - day["count"]
+    day["rate"] = (day.w_before + k * prior) / (day.n_before + k)
+    look = pd.DataFrame({"key": (d[col] if names is None else names).values, "date": d.date.values, "i": np.arange(len(d))})
+    look = look.sort_values("date")
+    tab = day.rename(columns={col: "key"})[["key", "date", "rate"]].sort_values("date")
+    out = pd.merge_asof(look, tab, on="date", by="key", allow_exact_matches=True)
+    return pd.Series(out.sort_values("i")["rate"].fillna(prior).values, index=d.index)
 
 
 def features(d):
-    tr = d[d.date < SPLIT]
     f = pd.DataFrame(index=d.index)
     rr = lambda c, asc=False: d.groupby("race_id")[c].rank(ascending=asc, method="average")
     f["a_score_rank"] = rr("a_score")
@@ -64,15 +76,12 @@ def features(d):
                                    [f.rec_heavy_pct, f.rec_soft_pct, f.rec_synth_pct], f.rec_good_pct)
     f["going_code"] = pd.Categorical(going).codes
     f["sex_code"] = pd.Categorical(d.sex).codes
-    f["jockey_sr"] = _target_encode(tr, d, "jockey")
-    f["trainer_sr"] = _target_encode(tr, d, "trainer")
-    f["sire_sr"] = _target_encode(tr, d, "sire", k=100)
-    enc = tr.groupby("jockey")["won"].agg(["sum", "count"])
-    prior = tr.won.mean()
-    jmap = ((enc["sum"] + 50 * prior) / (enc["count"] + 50))
-    jmap.index = jmap.index.str.lower()
-    f["jockey_change"] = (d.jockey.fillna("").str.lower() != d.last_jockey).astype(float)
-    f["jockey_upgrade"] = f["jockey_sr"] - d.last_jockey.map(jmap).fillna(prior)
+    f["jockey_sr"] = _rate_before(d, "jockey")
+    f["trainer_sr"] = _rate_before(d, "trainer")
+    f["sire_sr"] = _rate_before(d, "sire", k=100)
+    jl = d.assign(jockey=d.jockey.fillna("").str.lower())
+    f["jockey_change"] = (jl.jockey != d.last_jockey).astype(float)
+    f["jockey_upgrade"] = _rate_before(jl, "jockey") - _rate_before(jl, "jockey", names=d.last_jockey)
     f["track_code"] = pd.Categorical(d.track).codes
     f["log_market_vol"] = np.log1p(d.market_vol)
     f["mkt_rank"] = d.bsp_rank
@@ -102,7 +111,7 @@ def fit_eval(f, d, won, label, ctx, extra=None):
     val_m = tr & (d.date >= cut).values
     params = dict(objective="binary", learning_rate=0.03, num_leaves=15, min_data_in_leaf=200,
                   feature_fraction=0.8, bagging_fraction=0.8, bagging_freq=1, lambda_l2=10.0,
-                  verbose=-1, seed=7)
+                  verbose=-1, seed=7, num_threads=6)
     cat = [c for c in ("track_code", "going_code", "sex_code") if c in cols]
     dtr = lgb.Dataset(X[fit_m], won[fit_m], init_score=init[fit_m], categorical_feature=cat, free_raw_data=False)
     dva = lgb.Dataset(X[val_m], won[val_m], init_score=init[val_m], categorical_feature=cat, reference=dtr)
