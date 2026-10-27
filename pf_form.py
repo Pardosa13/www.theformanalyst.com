@@ -99,10 +99,22 @@ def ensure_table(conn):
 
 
 def _trim_form(form):
+    # Past starts are already run, so every field is safe to keep. Gear, class,
+    # going, weight, barrier, track and jockey per past start give years of
+    # history per horse (e.g. "3rd up, blinkers off") from each saved meeting.
     keep = ('meetingDate', 'position', 'starters', 'margin', 'distance', 'inRun', 'flucs',
             'priceSP', 'priceBF', 'priceTAB', 'stewardsReport', 'stewardsReportExt',
-            'isBarrierTrial', 'prepRuns')
+            'isBarrierTrial', 'prepRuns', 'gearChanges', 'raceClass', 'trackCondition',
+            'trackConditionNumber', 'weight', 'barrier', 'jockeyClaim', 'prizeMoney',
+            'officialRaceTime', 'pfRaceTime', 'rail', 'hasSectionalData')
     out = {k: form.get(k) for k in keep if form.get(k) not in (None, '')}
+    track = form.get('track') or {}
+    if isinstance(track, dict) and track.get('name'):
+        out['track'] = track.get('name')
+        out['trackState'] = track.get('state')
+    jockey = form.get('jockey') or {}
+    if isinstance(jockey, dict) and jockey.get('fullName'):
+        out['jockey'] = jockey.get('fullName')
     out['top4'] = [[t.get('runnerName'), t.get('position')] for t in (form.get('top4Finishers') or [])]
     return out
 
