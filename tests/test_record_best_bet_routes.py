@@ -68,7 +68,7 @@ def test_daily_run_records_proven_edge_but_not_retired_maiden_route(monkeypatch)
             assert c.prediction.best_bet_routes == 'proven_edge'
 
             # And the ML Data chart now counts it without anyone opening Best Bets.
-            assert any(cohort == 'maiden' for cohort, _l, _r in appmod.BEST_BET_ROUTE_COHORTS)
+            assert any(cohort == 'proven_edge' for cohort, _l, _r in appmod.BEST_BET_ROUTE_COHORTS)
         finally:
             db.session.remove()
             db.drop_all()

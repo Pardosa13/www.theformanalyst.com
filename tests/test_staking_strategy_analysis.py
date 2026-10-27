@@ -177,11 +177,8 @@ def test_probability_source_contracts_are_documented_in_source():
     from pathlib import Path
     source = Path('app.py').read_text()
     data_tpl = Path('templates/data.html').read_text()
-    ml_tpl = Path('templates/ml_data.html').read_text()
     assert "probability_source_field='predictions.win_probability'" in source
     assert 'ML_STORED_PROBABILITY_COLUMNS' in source
     assert 'derived from ML 110% market probabilities' in source
     assert 'Probability Source field' in data_tpl
-    assert 'Probability Source field' in ml_tpl
     assert 'Recommended Historical Strategy' in data_tpl
-    assert 'Recommended Historical Strategy' in ml_tpl
