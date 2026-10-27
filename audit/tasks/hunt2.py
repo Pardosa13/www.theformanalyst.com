@@ -127,11 +127,12 @@ def _stats(M, r, v):
 
 def scan(d, names, M, ret, var, label):
     """Singles and pairs: search months then test months."""
-    ok = np.isfinite(ret)
+    var = np.asarray(var, dtype=float)
+    ok = np.isfinite(ret) & np.isfinite(var) & (var > 0) & (var < 1e4)
     tr = (d.date < SPLIT).values & ok
     te = (d.date >= SPLIT).values & ok
-    r = np.nan_to_num(ret).astype(np.float32)
-    v = np.nan_to_num(var).astype(np.float32)
+    r = np.where(ok, ret, 0).astype(np.float32)
+    v = np.where(ok, var, 0).astype(np.float32)
     Ms, Mt = M[tr], M[te]
     _, Ns, Ps, Vs = _stats(Ms, r[tr], v[tr])
     _, Nt, Pt, Vt = _stats(Mt, r[te], v[te])
