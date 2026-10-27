@@ -569,7 +569,7 @@
   <h2>🔥 Today's Best Bets</h2>
   <p>Analyzer, PFAI and ML all rank the same horse first, with a 🔥 Proven Edge signal.
      Component matches, win probability and sole rides are shown on the rows that qualify.
-     The Maiden and Value Top Pick routes were retired on 24 Oct 2026 after losing money; Proven Edge is unproven too, so stake small.</p>
+     Proven Edge is unproven, so stake small.</p>
 </div>
 
 <!-- Stat tiles -->
@@ -613,8 +613,8 @@
     <table class="record-table">
       <thead><tr><th>Route</th><th>Bets</th><th>Win %</th><th>SP ROI</th><th>Betfair ROI</th></tr></thead>
       <tbody>
-      {% for r in rec.by_route %}
-        <tr><td>{{ r.key|replace('_', ' ')|title }}{% if r.key in ('maiden', 'value_top_pick') %} <span class="muted" style="font-size:11px">(retired)</span>{% endif %}</td><td>{{ r.bets }}</td><td>{{ "%.1f"|format(r.strike_rate) }}%</td>
+      {% for r in rec.by_route if r.key not in ('maiden', 'value_top_pick') %}
+        <tr><td>{{ r.key|replace('_', ' ')|title }}</td><td>{{ r.bets }}</td><td>{{ "%.1f"|format(r.strike_rate) }}%</td>
           <td class="{% if r.roi_sp >= 0 %}pos{% else %}neg{% endif %}">{{ "%+.1f"|format(r.roi_sp) }}%</td>
           <td class="{% if r.roi_bsp is not none and r.roi_bsp >= 0 %}pos{% elif r.roi_bsp is not none %}neg{% else %}muted{% endif %}">{% if r.roi_bsp is not none %}{{ "%+.1f"|format(r.roi_bsp) }}% <span class="muted cnt">({{ r.bsp_bets }})</span>{% else %}&ndash;{% endif %}</td></tr>
       {% endfor %}

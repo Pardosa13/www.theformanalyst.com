@@ -32,7 +32,7 @@ def test_proven_edge_best_bets_get_their_own_pnl_cohort():
             _runner(race, 'Edge Winner', 0, 'proven_edge', 1, 4.0)
             # Proven Edge plus another route: loses.
             _runner(race, 'Edge Loser', 1, 'favourite,proven_edge', 3, 2.0)
-            # Not Proven Edge.
+            # Retired route: not charted.
             _runner(race, 'Maiden Only', 0, 'maiden', 1, 3.0)
             db.session.commit()
 
@@ -43,11 +43,8 @@ def test_proven_edge_best_bets_get_their_own_pnl_cohort():
             assert edge['profit'] == 20.0  # +30 win, -10 loss
             assert len(edge['history']) == 2
             assert edge['history'][-1]['cumulative'] == 20.0
-            # Maiden Agreement is its own line; it wins at $3.
-            assert performance['maiden']['bets'] == 1
-            assert performance['maiden']['profit'] == 20.0
-            # Only the two Best Bets routes are charted now.
-            assert set(performance) == {'maiden', 'proven_edge'}
+            # Maiden was removed from the site on 27 Oct 2026: only Proven Edge is charted.
+            assert set(performance) == {'proven_edge'}
         finally:
             db.session.remove()
             db.drop_all()

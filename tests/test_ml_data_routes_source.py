@@ -93,7 +93,7 @@ def test_ml_data_page_includes_flat_stake_ladbrokes_signal_performance():
 
     assert 'calculate_ladbrokes_signal_performance(' in route_source
     assert "stake=10.0" in stats_source
-    assert "('maiden', '🏇 Maiden Agreement Best Bet', 'maiden')" in APP_SOURCE
+    assert "('maiden', '🏇 Maiden Agreement Best Bet', 'maiden')" not in APP_SOURCE
     assert "('proven_edge', '🔥 Proven Edge Best Bet', 'proven_edge')" in APP_SOURCE
     assert 'LADBROKES_SIGNAL_COHORTS' not in APP_SOURCE
     assert 'Best Bets by Route ($10 Win)' in template
