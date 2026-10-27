@@ -6,6 +6,7 @@ volume-weighted average), which the audit uses for place betting and
 "did the price shorten?" tests. Nothing is written to the database.
 """
 import io
+import time
 
 import numpy as np
 import pandas as pd
@@ -26,12 +27,22 @@ COLS = {
 def load(months):
     frames = []
     for y, m in months:
-        try:
-            r = requests.get(URL.format(y=y, m=m), timeout=120)
-            if r.status_code != 200:
+        text = None
+        for attempt in range(5):  # the host drops connections now and then
+            try:
+                r = requests.get(URL.format(y=y, m=m), timeout=120)
+                if r.status_code == 200:
+                    text = r.text
+                    break
                 emit("bf_files", f"{y}-{m:02d}: HTTP {r.status_code}")
-                continue
-            df = pd.read_csv(io.StringIO(r.text), dtype=str)
+            except Exception as e:
+                emit("bf_files", f"{y}-{m:02d}: retry {attempt + 1} after {type(e).__name__}")
+            time.sleep(3 * (attempt + 1))
+        if text is None:
+            emit("bf_files", f"{y}-{m:02d}: #ERROR gave up")
+            continue
+        try:
+            df = pd.read_csv(io.StringIO(text), dtype=str)
             df = df[[c for c in COLS if c in df.columns]].rename(columns=COLS)
             frames.append(df)
             emit("bf_files", f"{y}-{m:02d}: rows={len(df)}")
