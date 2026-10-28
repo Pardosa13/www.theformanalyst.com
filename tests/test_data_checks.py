@@ -15,7 +15,16 @@ FORM_FILE = (
 )
 
 
+def _drop_check_table():
+    # data_check_runs is created by raw SQL, so drop_all() does not remove it.
+    from sqlalchemy import text
+    db.session.rollback()
+    db.session.execute(text('DROP TABLE IF EXISTS data_check_runs'))
+    db.session.commit()
+
+
 def _setup(n_good, n_bad):
+    _drop_check_table()
     user = User(username='dc', email='dc@example.com', password_hash='x')
     db.session.add(user)
     db.session.flush()
@@ -60,6 +69,7 @@ def test_check_fails_and_alerts_once_when_old_runs_are_saved():
             fails = data_checks.latest_failures(db.session)
             assert {f['name'] for f in fails} == {'last_start_position', 'last_start_date'}
         finally:
+            _drop_check_table()
             db.session.remove()
             db.drop_all()
 
@@ -74,6 +84,7 @@ def test_check_passes_on_correct_data():
             assert res['last_start_position']['ok'] and res['last_start_date']['ok']
             assert sent == [] and data_checks.latest_failures(db.session) == []
         finally:
+            _drop_check_table()
             db.session.remove()
             db.drop_all()
 
@@ -98,5 +109,6 @@ def test_repair_puts_the_newest_run_back_and_keeps_todays_fields():
             assert data_checks.backfill_once(db.session) == 0
             assert data_checks.backfill_once(db.session) == 0
         finally:
+            _drop_check_table()
             db.session.remove()
             db.drop_all()
