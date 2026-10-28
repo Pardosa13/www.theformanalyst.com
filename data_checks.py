@@ -1,7 +1,7 @@
 """Daily data checks: catch bad saved horse data the day it happens.
 
-Why: from 2 Oct to 28 Oct 2026 the scratchings refresh saved an older run as
-each horse's "last start" for about two thirds of horses. The ML scored on
+Why: from 16 Oct to 28 Oct 2026 the scratchings refresh saved an older run as
+each horse's "last start" for most horses (11-65% right a day). The ML scored on
 those wrong inputs and Best Bets picked the wrong Place Bets, and nobody
 noticed for weeks. These checks run on every daily_run pass, save the
 result, show a warning on ML Data and Best Bets, and send one Telegram alert
@@ -181,3 +181,80 @@ def latest_failures(session):
         return []
     return [{'name': r[0], 'checked': r[1], 'failed': r[2], 'pct_ok': r[3],
              'examples': json.loads(r[4] or '[]'), 'day': str(r[5])} for r in rows]
+
+
+# ─────────────────────────────────────────────
+# Repair: rebuild last-start fields from the newest past run
+# ─────────────────────────────────────────────
+BUG_START = '2026-10-01'   # bad saves seen from 16 Oct 2026; start early to be safe
+
+
+def _rows_by_horse(meeting_csv):
+    out = {}
+    if not meeting_csv:
+        return out
+    try:
+        for row in csv.DictReader(io.StringIO(meeting_csv)):
+            key = (str(row.get('race number', '')).strip(), _norm(row.get('horse name')))
+            out.setdefault(key, []).append(row)
+    except Exception as e:
+        log.warning('data_checks: could not read meeting form file: %s', e)
+    return out
+
+
+def repair_meeting(session, meeting):
+    """Copy the newest past run's fields into each horse's saved data.
+
+    Only fields that differ between a horse's past-run rows are copied (the
+    'form ...' columns and the like), so today's fields (jockey, weight,
+    barrier, injected speed map) are never touched. Returns horses changed.
+    """
+    from past_runs import parse_date
+    from models import Horse, Race
+    rows = _rows_by_horse(meeting.csv_data)
+    if not rows:
+        return 0
+    changed = 0
+    horses = session.query(Horse).join(Race, Race.id == Horse.race_id).filter(Race.meeting_id == meeting.id).all()
+    for horse in horses:
+        race_number = str(horse.race.race_number) if horse.race else ''
+        runs = rows.get((race_number, _norm(horse.horse_name)))
+        if not runs or len(runs) < 2:
+            continue
+        dated = [(parse_date(r.get('form meeting date')), r) for r in runs]
+        dated = [(d, r) for d, r in dated if d]
+        if not dated:
+            continue
+        newest = max(dated, key=lambda t: t[0])[1]
+        varying = {k for k in newest if len({str(r.get(k)) for r in runs}) > 1}
+        cd = dict(_csv(horse.csv_data))
+        if not cd:
+            continue
+        if all(str(cd.get(k)) == str(newest.get(k)) for k in varying):
+            continue
+        for k in varying:
+            cd[k] = newest.get(k)
+        horse.csv_data = cd
+        changed += 1
+    return changed
+
+
+def backfill_once(session):
+    """Repair every meeting since the bug started, once. Returns horses changed."""
+    ensure_table(session)
+    done = session.execute(text(
+        "SELECT 1 FROM data_check_runs WHERE check_name = 'repair_backfill_oct2026'")).scalar()
+    if done:
+        return 0
+    from models import Meeting
+    total = 0
+    meetings = session.query(Meeting).filter(Meeting.date >= BUG_START).all()
+    for meeting in meetings:
+        total += repair_meeting(session, meeting)
+    session.execute(text("""
+        INSERT INTO data_check_runs (check_day, check_name, checked, failed, pct_ok, ok, examples_json, alerted, updated_at)
+        VALUES (:d, 'repair_backfill_oct2026', :c, :f, NULL, TRUE, '[]', TRUE, :t)
+    """), {'d': datetime.utcnow().date(), 'c': len(meetings), 'f': total, 't': datetime.utcnow()})
+    session.commit()
+    log.info('DATA_REPAIR backfill: %s horses fixed across %s meetings since %s', total, len(meetings), BUG_START)
+    return total

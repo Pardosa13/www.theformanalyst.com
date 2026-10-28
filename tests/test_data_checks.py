@@ -76,3 +76,27 @@ def test_check_passes_on_correct_data():
         finally:
             db.session.remove()
             db.drop_all()
+
+
+def test_repair_puts_the_newest_run_back_and_keeps_todays_fields():
+    with appmod.app.app_context():
+        db.create_all()
+        try:
+            _setup(n_good=1, n_bad=1)
+            bad = Horse.query.filter_by(horse_name='Bad').first()
+            bad.csv_data = {**bad.csv_data, 'horse jockey': 'Today Jockey'}
+            db.session.commit()
+            meeting = Meeting.query.first()
+            assert data_checks.repair_meeting(db.session, meeting) == 1
+            db.session.commit()
+            fixed = Horse.query.filter_by(horse_name='Bad').first().csv_data
+            assert fixed['form position'] == '3' and fixed['form meeting date'] == '10/10/26'
+            assert fixed['horse jockey'] == 'Today Jockey'
+            # Already right: nothing to do the second time.
+            assert data_checks.repair_meeting(db.session, meeting) == 0
+            # And the backfill runs only once.
+            assert data_checks.backfill_once(db.session) == 0
+            assert data_checks.backfill_once(db.session) == 0
+        finally:
+            db.session.remove()
+            db.drop_all()
