@@ -598,7 +598,30 @@
 {% if place_bet_record %}
 <div class="filter-card" style="margin-bottom:24px">
   <h5 style="margin:0 0 6px;font-weight:700">🥉 Place Bet Record (2nd last start + 2&ndash;3kg under the field)</h5>
-  <style>.pb-wrap .profit{color:#10b981}.pb-wrap .loss{color:#ef4444}</style>
+  <style>
+    /* The shared partial uses plain Bootstrap tables (white); match the dark Track Record table. */
+    .pb-wrap .profit{color:#10b981}.pb-wrap .loss{color:#ef4444}
+    .pb-wrap p.text-muted{color:var(--text-muted)!important}
+    .pb-wrap .table-responsive{overflow-x:auto;border:1px solid var(--border-subtle);border-radius:10px;margin-bottom:12px}
+    .pb-wrap .table{
+      --bs-table-bg:transparent;--bs-table-striped-bg:transparent;--bs-table-hover-bg:var(--bg-hover);
+      --bs-table-color:var(--text-primary);--bs-table-striped-color:var(--text-primary);
+      width:100%;margin:0;font-size:13px;border-collapse:collapse;color:var(--text-primary);
+    }
+    .pb-wrap .table > :not(caption) > * > *{background:transparent!important;box-shadow:none!important;color:var(--text-primary)}
+    .pb-wrap .table thead th{
+      background:var(--bg-elevated)!important;color:var(--text-secondary);
+      font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+      padding:9px 8px;border-bottom:1px solid var(--border-mid);white-space:nowrap;
+    }
+    .pb-wrap .table tbody td{padding:9px 8px;border-bottom:1px solid var(--border-subtle);white-space:nowrap;font-family:'DM Mono',monospace}
+    .pb-wrap .table tbody td:first-child{font-family:inherit}
+    .pb-wrap .table tbody tr:last-child td{border-bottom:none}
+    .pb-wrap .table tbody tr:hover td{background:var(--bg-hover)!important}
+    .pb-wrap .table td.profit{color:#10b981!important}.pb-wrap .table td.loss{color:#ef4444!important}
+    .pb-wrap .table tbody tr > *{color:var(--text-primary)}
+    .pb-wrap summary{color:var(--accent)}
+  </style>
   <div class="pb-wrap">{% include "_place_bet_record.html" %}</div>
 </div>
 {% endif %}
