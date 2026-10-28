@@ -501,6 +501,14 @@ def main(argv=None):
     summary = {'imported': [], 'rescored': [], 'ml_scored': 0, 'errors': 0, 'ml_note': None}
     with app.app_context():
         run_pass(app, day, summary)
+        # Data checks (data_checks.py): saved horse data must match the form.
+        # Never fatal; alerts once a day while failing.
+        try:
+            from app import db as _db
+            import data_checks
+            data_checks.run_and_save(_db.session, day, alert=alert)
+        except Exception as exc:
+            log.warning('Data checks failed to run: %s', exc)
         if summary['imported']:
             from app import db
             morning_summary(day, summary, db)

@@ -6699,7 +6699,11 @@ def ml_data_analytics():
         db.session.rollback()
         logger.warning("Error calculating Betfair reality check: %s", e, exc_info=True)
 
+    import data_checks
+    data_check_failures = data_checks.latest_failures(db.session)
+
     return render_template("ml_data.html",
+        data_check_failures=data_check_failures,
         betfair_reality=betfair_reality,
         place_bet_record=place_bet_record,
         ablation_report=ablation_report,
@@ -12158,7 +12162,11 @@ def best_bets():
         db.session.rollback()
         logger.warning("Place Bet record unavailable: %s", e, exc_info=True)
 
+    import data_checks
+    data_check_failures = data_checks.latest_failures(db.session)
+
     return render_template("best_bets.html",
+        data_check_failures=data_check_failures,
         place_bet_record=place_bet_record,
         best_bets_track_record=best_bets_track_record,
         best_bets=best_bets,
