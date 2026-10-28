@@ -3280,7 +3280,7 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
         params["date_to"] = date_to
     extra_where = " AND " + " AND ".join(filters) if filters else ""
 
-    rows = db.session.execute(text(f"""
+    sql = f"""
         SELECT
             rc.id AS race_id,
             m.date AS meeting_date,
@@ -3291,12 +3291,17 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
             p.ml_score,
             h.id AS horse_id,
             r.finish_position,
-            r.sp
+            r.sp,
+            r.place_bsp,
+            s.starters
         FROM predictions p
         JOIN horses h ON h.id = p.horse_id
         JOIN races rc ON rc.id = h.race_id
         JOIN meetings m ON m.id = rc.meeting_id
         JOIN results r ON r.horse_id = h.id
+        JOIN (SELECT h2.race_id, COUNT(*) AS starters FROM horses h2
+              JOIN results r2 ON r2.horse_id = h2.id WHERE r2.finish_position > 0
+              GROUP BY h2.race_id) s ON s.race_id = rc.id
         WHERE p.ml_score IS NOT NULL
           AND {ml_pre_race_sql('p', 'rc')}
           AND rc.results_incomplete IS NOT TRUE
@@ -3305,7 +3310,13 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
           AND r.finish_position > 0
           AND r.sp IS NOT NULL
           {extra_where}
-    """), params).fetchall()
+    """
+    try:
+        rows = db.session.execute(text(sql), params).fetchall()
+    except Exception:
+        # Before bsp_import has added results.place_bsp there is no place price.
+        db.session.rollback()
+        rows = db.session.execute(text(sql.replace('r.place_bsp', 'NULL AS place_bsp')), params).fetchall()
 
     from collections import defaultdict
     races = defaultdict(list)
@@ -3328,6 +3339,10 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
             'top_ml_horse_id': top_m.horse_id,
             'finish_position': top_m.finish_position,
             'sp': float(top_m.sp or 0),
+            # Betfair place SP and whether the place bet won (3 places for 8+
+            # runners, 2 for 5-7), for the $10 place bet on the same pick.
+            'place_bsp': float(top_m.place_bsp) if top_m.place_bsp and top_m.place_bsp > 1 else None,
+            'bf_placed': top_m.finish_position <= place_bet.places_paid(int(top_m.starters or 0)),
         })
 
     race_results.sort(
@@ -3734,6 +3749,16 @@ def _summarise_ml_performance_races(race_results):
     roi = (total_profit / total_stake * 100) if total_stake else 0.0
     agree = sum(1 for r in race_results if r['top_analyzer_horse_id'] == r['top_ml_horse_id'])
 
+    # $10 place bet on the same pick at Betfair place SP, after commission.
+    # Only picks with a Betfair place price count; prices arrive monthly.
+    priced = [r for r in race_results if r.get('place_bsp')]
+    place_won = [r for r in priced if r.get('bf_placed')]
+    place_profit = sum(
+        (r['place_bsp'] - 1) * (1 - place_bet.COMMISSION) * stake if r.get('bf_placed') else -stake
+        for r in priced
+    )
+    place_staked = len(priced) * stake
+
     return {
         'selections': selections,
         'races': selections,
@@ -3747,6 +3772,13 @@ def _summarise_ml_performance_races(race_results):
         'roi': roi,
         'agree_rate': (agree / selections * 100) if selections else 0.0,
         'avg_winner_sp': (sum(winning_sps) / len(winning_sps)) if winning_sps else 0.0,
+        'place_priced_bets': len(priced),
+        'place_priced_placed': len(place_won),
+        'place_priced_rate': (len(place_won) / len(priced) * 100) if priced else None,
+        'place_profit': place_profit,
+        'place_roi': (place_profit / place_staked * 100) if place_staked else None,
+        'avg_place_bsp': (sum(r['place_bsp'] for r in priced) / len(priced)) if priced else None,
+        'avg_placed_place_bsp': (sum(r['place_bsp'] for r in place_won) / len(place_won)) if place_won else None,
     }
 
 
@@ -3777,90 +3809,6 @@ def calculate_ml_performance_stats(track_filter="", date_from="", date_to="", li
         limit = int(limit_param) if str(limit_param).isdigit() else 200
         race_results = race_results[:limit]
     return _summarise_ml_performance_races(race_results)
-
-
-# Best Bets routes settled on the ML Data page, from Prediction.best_bet_routes.
-# The four Ladbrokes favourite badges were dropped on 16 Oct 2026 (they lost
-# 7-12% over all history, no better than backing every favourite).
-BEST_BET_ROUTE_COHORTS = (
-    ('proven_edge', '🔥 Proven Edge Best Bet', 'proven_edge'),
-)
-
-
-def calculate_ladbrokes_signal_performance(track_filter="", date_from="", date_to="", limit_param="all", stake=10.0):
-    """Settle each Best Bets route (maiden, Proven Edge) at a flat win stake.
-
-    Each cohort also carries a chronological ``history`` of every settled bet
-    with its running P&L, which feeds the cumulative chart under the table.
-    """
-    query = db.session.query(
-        Prediction, Result, Meeting.uploaded_at, Meeting.meeting_name, Race.race_number
-    ).join(Horse, Prediction.horse_id == Horse.id).join(
-        Race, Horse.race_id == Race.id
-    ).join(Meeting, Race.meeting_id == Meeting.id).join(Result, Result.horse_id == Horse.id).filter(
-        db.or_(*[Prediction.best_bet_routes.like(f'%{route}%') for _key, _label, route in BEST_BET_ROUTE_COHORTS]),
-        Result.finish_position > 0,
-        Race.results_incomplete.isnot(True),
-        Result.sp.isnot(None),
-    )
-    if track_filter:
-        query = query.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-    if date_from:
-        query = query.filter(Meeting.uploaded_at >= date_from)
-    if date_to:
-        query = query.filter(Meeting.uploaded_at <= date_to)
-    rows = query.order_by(Meeting.uploaded_at.desc(), Race.id.desc()).all()
-    if limit_param != 'all':
-        limit = int(limit_param) if str(limit_param).isdigit() else 200
-        rows = rows[:limit]
-
-    def route_matcher(route):
-        return lambda prediction: route in (prediction.best_bet_routes or '').split(',')
-
-    cohorts = [
-        (key, label, route_matcher(route))
-        for key, label, route in BEST_BET_ROUTE_COHORTS
-    ]
-
-    performance = []
-    for key, label, matches in cohorts:
-        matched = [row for row in rows if matches(row[0])]
-        selections = [row[1] for row in matched]
-        bets = len(selections)
-        wins = sum(result.finish_position == 1 for result in selections)
-        total_staked = bets * stake
-        total_return = sum(stake * float(result.sp) for result in selections if result.finish_position == 1)
-        profit = total_return - total_staked
-
-        # Rows come back newest first; the chart wants oldest first.
-        history = []
-        cumulative = 0.0
-        for _prediction, result, uploaded_at, meeting_name, race_number in reversed(matched):
-            won = result.finish_position == 1
-            bet_profit = stake * float(result.sp) - stake if won else -stake
-            cumulative += bet_profit
-            history.append({
-                'date': uploaded_at.strftime('%Y-%m-%d') if uploaded_at else '',
-                'meeting': meeting_name or '',
-                'race': race_number,
-                'won': won,
-                'profit': round(bet_profit, 2),
-                'cumulative': round(cumulative, 2),
-            })
-
-        performance.append({
-            'key': key,
-            'label': label,
-            'history': history,
-            'bets': bets,
-            'wins': wins,
-            'strike_rate': wins / bets * 100 if bets else 0.0,
-            'total_staked': total_staked,
-            'total_return': total_return,
-            'profit': profit,
-            'roi': profit / total_staked * 100 if total_staked else 0.0,
-        })
-    return performance
 
 
 # Edge-size buckets for the ML Value Edge cohort breakdown: lower bound inclusive,
@@ -3897,8 +3845,7 @@ KELLY_TRACKING_BANKROLL = float(os.environ.get('ML_KELLY_TRACKING_BANKROLL', '10
 def calculate_value_edge_performance(track_filter="", date_from="", date_to="", limit_param="all", stake=10.0):
     """Settle captured pre-race ML Value Edge bets, flat-staked and Kelly-staked.
 
-    Mirrors calculate_ladbrokes_signal_performance's cohort pattern above, but
-    tracked independently via Prediction.value_edge_captured_at rather than
+    Tracked independently via Prediction.value_edge_captured_at rather than
     the qualitative ladbrokes_signal_mask badges.
 
     Every cohort is settled twice over the identical set of rows:
@@ -6546,7 +6493,6 @@ def ml_data_analytics():
     db.session.rollback()
 
     ml_performance_stats = None
-    ladbrokes_signal_performance = []
     try:
         ml_performance_stats = calculate_ml_performance_stats(
             track_filter=track_filter,
@@ -6560,14 +6506,6 @@ def ml_data_analytics():
         # rather than inheriting an aborted transaction and blanking too.
         db.session.rollback()
         logger.warning("Error calculating ML performance stats: %s", e, exc_info=True)
-
-    try:
-        ladbrokes_signal_performance = calculate_ladbrokes_signal_performance(
-            track_filter=track_filter, date_from=date_from, date_to=date_to, limit_param=limit_param
-        )
-    except Exception as e:
-        db.session.rollback()
-        logger.warning("Error calculating Ladbrokes signal performance: %s", e, exc_info=True)
 
     ablation_report = None
     try:
@@ -6603,7 +6541,6 @@ def ml_data_analytics():
         champion_scores_comparable=champion_scores_comparable(
             active_model_metadata, latest_challenger),
         ml_performance_stats=ml_performance_stats,
-        ladbrokes_signal_performance=ladbrokes_signal_performance,
         value_edge_min_threshold_pct=VALUE_EDGE_MIN_THRESHOLD_PCT,
         active_model_metadata=active_model_metadata,
         active_model_metadata_error=active_model_metadata_error,
