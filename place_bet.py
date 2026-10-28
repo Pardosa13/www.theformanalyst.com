@@ -258,47 +258,66 @@ def settled_picks(session, date_from=None, date_to=None):
                 'place_bsp': row['place_bsp'] if row['place_bsp'] and row['place_bsp'] > 1 else None,
                 'live': rule.key in recorded and pre_race,
                 'horse_id': row['horse_id'],
+                'race_id': row['race_id'],
                 'start': start,
             }))
     _add_ladbrokes_place_prices(session, [item for _rule, item in out])
     return out
 
 
-def _add_ladbrokes_place_prices(session, items):
-    """Set item['ladbrokes_place'] on placed bets that have no Betfair place price yet.
+def ladbrokes_place_prices(session, runners):
+    """{horse_id: last Ladbrokes fixed place price saved before the jump}.
 
-    It is the last Ladbrokes fixed place price saved before the jump. The chart
-    uses it as a stand-in until the monthly Betfair file arrives.
+    `runners` are dicts with race_id, horse_id and start (start_time_utc or
+    None). Runners with no saved place price are left out.
     """
-    wanted = {item['horse_id'] for item in items if item['placed'] and not item['place_bsp']}
-    for item in items:
-        item['ladbrokes_place'] = None
-    if not wanted:
-        return
-    ids = sorted(wanted)
-    prices = {}
+    runners = list(runners)
+    if not runners:
+        return {}
+    # Look up by race first: the snapshot index starts with race_id, so a
+    # horse_id-only filter would read the whole odds history.
+    pairs = sorted({(r['race_id'], r['horse_id']) for r in runners})
+    snaps = {}
     try:
-        for start in range(0, len(ids), 500):
-            chunk = ids[start:start + 500]
-            names = ', '.join(f':h{i}' for i in range(len(chunk)))
+        for first in range(0, len(pairs), 500):
+            chunk = pairs[first:first + 500]
+            params = {}
+            for i, (race_id, horse_id) in enumerate(chunk):
+                params[f'r{i}'] = race_id
+                params[f'h{i}'] = horse_id
+            races = ', '.join(f':r{i}' for i in range(len(chunk)))
+            horses = ', '.join(f':h{i}' for i in range(len(chunk)))
             rows = session.execute(text(
                 f'SELECT horse_id, place_odds, captured_at FROM live_odds_snapshots '
-                f'WHERE place_odds > 1 AND horse_id IN ({names}) ORDER BY captured_at'),
-                {f'h{i}': h for i, h in enumerate(chunk)}).mappings()
+                f'WHERE race_id IN ({races}) AND horse_id IN ({horses}) AND place_odds > 1 '
+                f'ORDER BY captured_at'), params).mappings()
             for row in rows:
-                prices.setdefault(row['horse_id'], []).append((row['captured_at'], row['place_odds']))
+                snaps.setdefault(row['horse_id'], []).append((row['captured_at'], row['place_odds']))
     except Exception:
         # No odds table (e.g. a fresh database): no stand-in prices.
         session.rollback()
-        return
+        return {}
+    prices = {}
+    for r in runners:
+        found = snaps.get(r['horse_id'], [])
+        if r.get('start'):
+            found = [s for s in found if s[0] and s[0] <= r['start']]
+        if found:
+            prices[r['horse_id']] = float(found[-1][1])
+    return prices
+
+
+def _add_ladbrokes_place_prices(session, items):
+    """Set item['ladbrokes_place'] on placed bets that have no Betfair place price yet.
+
+    The chart uses it as a stand-in until the monthly Betfair file arrives.
+    """
     for item in items:
-        if item['horse_id'] not in wanted:
-            continue
-        snaps = prices.get(item['horse_id'], [])
-        if item['start']:
-            snaps = [s for s in snaps if s[0] and s[0] <= item['start']]
-        if snaps:
-            item['ladbrokes_place'] = float(snaps[-1][1])
+        item['ladbrokes_place'] = None
+    wanted = [item for item in items if item['placed'] and not item['place_bsp']]
+    prices = ladbrokes_place_prices(session, wanted)
+    for item in wanted:
+        item['ladbrokes_place'] = prices.get(item['horse_id'])
 
 
 def _chart_profit(item):
@@ -349,8 +368,12 @@ def performance_all(session, date_from=None, date_to=None):
         items = by_rule.get(rule.key, [])
         history = _summary(items, 'Every past runner that fits')
         live = _summary([i for i in items if i['live']], f'Live, on Best Bets before the jump (from {LIVE_START:%d %b %Y})')
+        # The chart shows only live bets: picks on Best Bets before the jump,
+        # from LIVE_START, the day real money went on.
         cumulative, series, waiting = 0.0, [], 0
         for item in items:
+            if not item['live'] or item['date'] < LIVE_START.strftime('%Y-%m-%d'):
+                continue
             settled = _chart_profit(item)
             if settled is None:
                 waiting += 1

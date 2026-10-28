@@ -281,6 +281,10 @@
   .score-formula-warning strong { display:block; margin-bottom:4px; }
   .score-formula-warning .mono { font-family:ui-monospace,Menlo,monospace; font-size:11px; }
   .champion-pill { background:rgba(182,255,0,.14); color:var(--ml-lime); border:1px solid rgba(182,255,0,.32); border-radius:999px; padding:6px 10px; font-size:11px; font-weight:800; white-space:nowrap; }
+  .rule-toggle { background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border-subtle); border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; line-height: 1.4; }
+  .rule-toggle:hover { color: var(--text-primary, #fff); border-color: var(--ml-border); }
+  .rule-toggle.on { background: rgba(0,229,176,0.12); color: var(--ml-accent); border-color: var(--ml-border); }
+  .rule-toggle:not(.on) .rule-dot { opacity: .35; }
   .champion-pill.secondary { background:rgba(255,193,7,.12); color:#ffd166; border-color:rgba(255,193,7,.34); }
   .active-model-error { color:#ff8a8a; font-size:13px; margin:0; }
   /* Deliberate "no champion" state: informational, not a failure. */
@@ -522,41 +526,16 @@
     <span class="stat-val">{{ "%.2f"|format(ml_performance_stats.avg_winner_sp) }}</span>
     <div class="stat-label">Avg Price of Winners</div>
   </div>
-</div>
-<!-- The same top picks as a $10 place bet at Betfair place SP. -->
-<h5 style="margin:18px 0 6px;color:var(--ml-accent)">Same picks as a $10 place bet (Betfair place SP)</h5>
-{% if ml_performance_stats.place_priced_bets %}
-{% set ps = ml_performance_stats %}
-<div class="overview-grid">
+  {% set ps = ml_performance_stats %}
   <div class="overview-tile">
-    <span class="stat-val">{{ ps.place_priced_bets }}</span>
-    <div class="stat-label">Picks with a Place Price</div>
-  </div>
-  <div class="overview-tile">
-    <span class="stat-val">{{ "%.1f"|format(ps.place_priced_rate) }}%</span>
-    <div class="stat-label">Betfair Place Rate ({{ ps.place_priced_placed }})</div>
-  </div>
-  <div class="overview-tile">
-    <span class="stat-val">{{ "%.2f"|format(ps.avg_place_bsp) }}</span>
+    <span class="stat-val">{% if ps.avg_place_price %}{{ "%.2f"|format(ps.avg_place_price) }}{% else %}&ndash;{% endif %}</span>
     <div class="stat-label">Avg Place Price</div>
   </div>
-  <div class="overview-tile">
-    <span class="stat-val">{% if ps.avg_placed_place_bsp %}{{ "%.2f"|format(ps.avg_placed_place_bsp) }}{% else %}&ndash;{% endif %}</span>
-    <div class="stat-label">Avg Place Price When Placed</div>
-  </div>
-  <div class="overview-tile {% if ps.place_profit >= 0 %}pos{% else %}neg{% endif %}">
-    <span class="stat-val {% if ps.place_profit >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(ps.place_profit) }}</span>
-    <div class="stat-label">Place Profit ($)</div>
-  </div>
-  <div class="overview-tile {% if ps.place_roi >= 0 %}pos{% else %}neg{% endif %}">
-    <span class="stat-val {% if ps.place_roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(ps.place_roi) }}%</span>
+  <div class="overview-tile {% if ps.place_roi is not none %}{% if ps.place_roi >= 0 %}pos{% else %}neg{% endif %}{% endif %}">
+    <span class="stat-val {% if ps.place_roi is not none %}{% if ps.place_roi >= 0 %}profit{% else %}loss{% endif %}{% endif %}">{% if ps.place_roi is not none %}{{ "%+.1f"|format(ps.place_roi) }}%{% else %}&ndash;{% endif %}</span>
     <div class="stat-label">Place ROI</div>
   </div>
 </div>
-<p class="text-muted" style="font-size:12px;margin:6px 0 0">Placed = top 3 with 8+ runners, top 2 with 5&ndash;7, so this rate is lower than the top-3 rate above. After 8% commission. Betfair place prices arrive monthly, so the newest picks are not counted yet.</p>
-{% else %}
-<p class="text-muted" style="font-size:13px">No Betfair place prices loaded for these picks yet.</p>
-{% endif %}
 {% else %}
 <div class="analytics-empty">
   <h5>No ML Scores Yet</h5>
@@ -610,8 +589,11 @@
       <div id="placePnlButtons" class="d-flex flex-wrap gap-2 mb-3"></div>
       <canvas id="placeRulesPnlChart" height="140"></canvas>
       <script type="application/json" id="placeRulesHistory">{{ place_rules_record.rules|map(attribute='chart')|list|tojson }}</script>
-      <p class="text-muted mt-2" style="font-size:12px">Every settled bet is charted. A loss is &minus;$10 straight away. A place uses the Betfair place price; until that arrives, the Ladbrokes place price stands in (marked estimate in the tooltip). Tap a rule to turn it on or off. Tap All to show every rule together.
+      <p class="text-muted mt-2" style="font-size:12px">Live bets only: picks shown on Best Bets before the jump, from 28 Oct 2026. A loss is &minus;$10 straight away. A place uses the Betfair place price; until that arrives, the Ladbrokes place price stands in (marked estimate in the tooltip). Tap a rule to turn it on or off. Tap All to show every rule together.
         {% set waiting = place_rules_record.rules|map(attribute='chart.waiting')|sum %}{% if waiting %}<strong>{{ waiting }} placed bet{{ 's' if waiting != 1 }} not charted yet</strong>: no Betfair or Ladbrokes place price.{% endif %}</p>
+      {% else %}
+      <h5 class="mt-4 mb-1" style="color:var(--ml-accent)">Cumulative P&amp;L by Place Rule</h5>
+      <p class="text-muted" style="font-size:13px">No live bets settled yet. The chart starts with the first Best Bet from 28 Oct 2026 once its race is resulted.</p>
       {% endif %}
     </div>
   </div>
@@ -958,7 +940,7 @@ function renderSignalPnl(prefix, dataId, canvasId, opts) {
             : `${shown.length} rules on. Total adds them together.`;
         buttonsEl.querySelectorAll('button').forEach(b => {
             const active = b.dataset.index === 'all' ? shown.length === signals.length : on.has(Number(b.dataset.index));
-            b.className = 'btn btn-sm ' + (active ? 'btn-light' : 'btn-outline-secondary');
+            b.className = 'rule-toggle' + (active ? ' on' : '');
             b.setAttribute('aria-pressed', active ? 'true' : 'false');
         });
 
@@ -1001,9 +983,9 @@ function renderSignalPnl(prefix, dataId, canvasId, opts) {
         const b = document.createElement('button');
         b.type = 'button';
         b.dataset.index = String(index);
-        b.style.fontSize = '12px';
         if (index !== 'all') {
             const dot = document.createElement('span');
+            dot.className = 'rule-dot';
             dot.style.cssText = `display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;background:${colours[index % colours.length]}`;
             b.appendChild(dot);
         }

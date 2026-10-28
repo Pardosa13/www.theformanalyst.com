@@ -3286,6 +3286,7 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
             m.date AS meeting_date,
             m.uploaded_at AS meeting_uploaded_at,
             rc.race_number,
+            rc.start_time_utc,
             MAX(r.recorded_at) OVER (PARTITION BY rc.id) AS latest_result_at,
             p.score AS analyzer_score,
             p.ml_score,
@@ -3343,7 +3344,16 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
             # runners, 2 for 5-7), for the $10 place bet on the same pick.
             'place_bsp': float(top_m.place_bsp) if top_m.place_bsp and top_m.place_bsp > 1 else None,
             'bf_placed': top_m.finish_position <= place_bet.places_paid(int(top_m.starters or 0)),
+            'start': top_m.start_time_utc,
         })
+
+    # Until the monthly Betfair file arrives, the last Ladbrokes fixed place
+    # price before the jump stands in for the place price.
+    unpriced = [{'race_id': r['race_id'], 'horse_id': r['top_ml_horse_id'], 'start': r['start']}
+                for r in race_results if not r['place_bsp']]
+    ladbrokes = place_bet.ladbrokes_place_prices(db.session, unpriced)
+    for r in race_results:
+        r['ladbrokes_place'] = None if r['place_bsp'] else ladbrokes.get(r['top_ml_horse_id'])
 
     race_results.sort(
         key=lambda r: (
@@ -3749,15 +3759,27 @@ def _summarise_ml_performance_races(race_results):
     roi = (total_profit / total_stake * 100) if total_stake else 0.0
     agree = sum(1 for r in race_results if r['top_analyzer_horse_id'] == r['top_ml_horse_id'])
 
-    # $10 place bet on the same pick at Betfair place SP, after commission.
-    # Only picks with a Betfair place price count; prices arrive monthly.
-    priced = [r for r in race_results if r.get('place_bsp')]
-    place_won = [r for r in priced if r.get('bf_placed')]
-    place_profit = sum(
-        (r['place_bsp'] - 1) * (1 - place_bet.COMMISSION) * stake if r.get('bf_placed') else -stake
-        for r in priced
-    )
-    place_staked = len(priced) * stake
+    # $10 place bet on the same pick. A loss is -$10 whatever the price. A
+    # place pays at Betfair place SP after commission, or at the Ladbrokes
+    # fixed place price until the Betfair file arrives. A place with neither
+    # price is left out until one arrives.
+    place_bets, place_profit, place_waiting, place_prices = 0, 0.0, 0, []
+    for r in race_results:
+        price = r.get('place_bsp') or r.get('ladbrokes_place')
+        if price:
+            place_prices.append(price)
+        if not r.get('bf_placed'):
+            place_bets += 1
+            place_profit -= stake
+        elif r.get('place_bsp'):
+            place_bets += 1
+            place_profit += (r['place_bsp'] - 1) * (1 - place_bet.COMMISSION) * stake
+        elif r.get('ladbrokes_place'):
+            place_bets += 1
+            place_profit += (r['ladbrokes_place'] - 1) * stake
+        else:
+            place_waiting += 1
+    place_staked = place_bets * stake
 
     return {
         'selections': selections,
@@ -3772,13 +3794,11 @@ def _summarise_ml_performance_races(race_results):
         'roi': roi,
         'agree_rate': (agree / selections * 100) if selections else 0.0,
         'avg_winner_sp': (sum(winning_sps) / len(winning_sps)) if winning_sps else 0.0,
-        'place_priced_bets': len(priced),
-        'place_priced_placed': len(place_won),
-        'place_priced_rate': (len(place_won) / len(priced) * 100) if priced else None,
+        'place_bets': place_bets,
+        'place_waiting': place_waiting,
         'place_profit': place_profit,
         'place_roi': (place_profit / place_staked * 100) if place_staked else None,
-        'avg_place_bsp': (sum(r['place_bsp'] for r in priced) / len(priced)) if priced else None,
-        'avg_placed_place_bsp': (sum(r['place_bsp'] for r in place_won) / len(place_won)) if place_won else None,
+        'avg_place_price': (sum(place_prices) / len(place_prices)) if place_prices else None,
     }
 
 
@@ -6420,6 +6440,29 @@ def champion_model_backtest_summary(model_id=None, run_id=None):
                        model_id, run_id, exc)
         return {'error': str(exc)}
 
+
+_ML_DATA_CACHE = {}
+_ML_DATA_CACHE_SECONDS = 600
+
+
+def _ml_data_cached(name, key, compute):
+    """Run compute() at most once per 10 minutes per filter set, and log how long it took.
+
+    The ML Data page runs many whole-history queries; the timings in the log
+    (ML_DATA_TIMING) show which one is slow.
+    """
+    import time as _time
+    cache_key = (name, key)
+    hit = _ML_DATA_CACHE.get(cache_key)
+    if hit and _time.time() - hit[0] < _ML_DATA_CACHE_SECONDS:
+        return hit[1]
+    started = _time.time()
+    value = compute()
+    logger.info("ML_DATA_TIMING section=%s seconds=%.2f", name, _time.time() - started)
+    _ML_DATA_CACHE[cache_key] = (_time.time(), value)
+    return value
+
+
 @app.route("/ml-data")
 @login_required
 def ml_data_analytics():
@@ -6432,6 +6475,9 @@ def ml_data_analytics():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     limit_param = request.args.get('limit', 'all')
+    filter_key = (track_filter, date_from, date_to, limit_param)
+    import time as _time
+    page_started = _time.time()
 
     tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
@@ -6439,7 +6485,7 @@ def ml_data_analytics():
     active_model_metadata = None
     active_model_metadata_error = None
     no_active_champion = False
-    latest_challenger = latest_ml_challenger_summary()
+    latest_challenger = _ml_data_cached('latest_challenger', (), latest_ml_challenger_summary)
     try:
         # Imported inside its own try so a NoActiveChampionError handler can
         # never reference an unbound name if the import itself fails.
@@ -6482,6 +6528,8 @@ def ml_data_analytics():
         active_model_metadata_error = str(e)
         logger.warning("Unable to inspect active production ML model for ML Data page: %s", e)
 
+    logger.info("ML_DATA_TIMING section=champion_and_header seconds=%.2f", _time.time() - page_started)
+
     # The champion-metadata lookup above reads the DB inside a try/except. On
     # Postgres a statement that fails leaves the whole transaction aborted, and
     # every later query in this request raises InFailedSqlTransaction — which
@@ -6494,12 +6542,12 @@ def ml_data_analytics():
 
     ml_performance_stats = None
     try:
-        ml_performance_stats = calculate_ml_performance_stats(
+        ml_performance_stats = _ml_data_cached('ml_performance', filter_key, lambda: calculate_ml_performance_stats(
             track_filter=track_filter,
             date_from=date_from,
             date_to=date_to,
             limit_param=limit_param,
-        )
+        ))
     except Exception as e:
         # Rolled back for the same reason as above: whichever of these three
         # calculations fails, the two after it must still get a usable session
@@ -6517,7 +6565,8 @@ def ml_data_analytics():
 
     place_rules_record = None
     try:
-        place_rules_record = place_bet.performance_all(db.session, date_from=date_from or None, date_to=date_to or None)
+        place_rules_record = _ml_data_cached('place_rules', filter_key, lambda: place_bet.performance_all(
+            db.session, date_from=date_from or None, date_to=date_to or None))
     except Exception as e:
         db.session.rollback()
         logger.warning("Error calculating place rules record: %s", e, exc_info=True)
@@ -6525,13 +6574,15 @@ def ml_data_analytics():
     betfair_reality = None
     try:
         import betfair_check
-        betfair_reality = betfair_check.pick_type_results(db.session, date_from=date_from, date_to=date_to)
+        betfair_reality = _ml_data_cached('betfair_reality', filter_key, lambda: betfair_check.pick_type_results(
+            db.session, date_from=date_from, date_to=date_to))
     except Exception as e:
         db.session.rollback()
         logger.warning("Error calculating Betfair reality check: %s", e, exc_info=True)
 
     import data_checks
     data_check_failures = data_checks.latest_failures(db.session)
+    logger.info("ML_DATA_TIMING section=page_total seconds=%.2f", _time.time() - page_started)
 
     return render_template("ml_data.html",
         data_check_failures=data_check_failures,
