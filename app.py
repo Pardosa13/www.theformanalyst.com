@@ -30,6 +30,7 @@ from mma_routes import register_mma_routes
 from race_animation_routes import register_race_animation_routes
 from ml_shadow_routes import register_ml_shadow_routes
 from pattern_routes import register_pattern_routes
+import place_bet
 from bet_tracker import register_bet_tracker_routes
 from budget_tracker import register_budget_tracker_routes, is_budget_tracker_allowed, is_julz
 from notes_parsing import (
@@ -237,6 +238,9 @@ def best_bet_routes_for_horse(horse, race, signal_top_ids, components=None):
         ) if hit]
     if _value_top_pick_edge(horse, signal_top_ids) is not None:
         routes.append('value_top_pick')
+    # Place Bet: needs no 3-way agreement (place_bet.py has the rule and its test).
+    if place_bet.qualifies(horse, components):
+        routes.append(place_bet.ROUTE)
     routes = [route for route in routes if route not in RETIRED_BEST_BET_ROUTES]
     return routes, edge_badges, signal_agreement
 
@@ -6663,6 +6667,13 @@ def ml_data_analytics():
         db.session.rollback()
         logger.info("No feature ablation report to show yet: %s", e)
 
+    place_bet_record = None
+    try:
+        place_bet_record = place_bet.performance(db.session)
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("Error calculating Place Bet record: %s", e, exc_info=True)
+
     betfair_reality = None
     try:
         import betfair_check
@@ -6673,6 +6684,7 @@ def ml_data_analytics():
 
     return render_template("ml_data.html",
         betfair_reality=betfair_reality,
+        place_bet_record=place_bet_record,
         ablation_report=ablation_report,
         champion_scores_comparable=champion_scores_comparable(
             active_model_metadata, latest_challenger),
@@ -11964,7 +11976,8 @@ def best_bets():
                 # A Value Top Pick is the ML top pick, which need not be the
                 # analyzer's, so it is shown in top-pick mode either way.
                 is_value_pick = _value_top_pick_edge(horse, signal_top_ids) is not None
-                if mode == 'top_pick' and not is_top_pick and not is_value_pick:
+                is_place_pick = place_bet.qualifies(horse)
+                if mode == 'top_pick' and not is_top_pick and not is_value_pick and not is_place_pick:
                     continue
                 if mode == 'non_top_pick' and is_top_pick:
                     continue
@@ -12041,6 +12054,12 @@ def best_bets():
                         'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []),
                                              f'Qualified via Value Top Pick. {detail}.'],
                     }
+                if place_bet.ROUTE in routes:
+                    lb_fields = {
+                        **lb_fields,
+                        'best_bet_badges': [*(lb_fields.get('best_bet_badges') or []), place_bet.BADGE],
+                        'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []), place_bet.REASON],
+                    }
                 if routes:
                     if not race_started:
                         merge_best_bet_tracking(horse.prediction, routes, edge_badges)
@@ -12074,6 +12093,7 @@ def best_bets():
                         'is_maiden_agreement': maiden_agreement,
                         'is_proven_edge_agreement': proven_edge_agreement,
                         'is_value_top_pick': 'value_top_pick' in routes,
+                        'is_place_bet': place_bet.ROUTE in routes,
                         'best_bet_routes': routes,
                         'edge_badges': edge_badges,
                         'race_started': race_started,
@@ -12114,7 +12134,15 @@ def best_bets():
         db.session.rollback()
         logger.warning("Best Bets track record unavailable: %s", e, exc_info=True)
 
+    place_bet_record = None
+    try:
+        place_bet_record = place_bet.performance(db.session)
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("Place Bet record unavailable: %s", e, exc_info=True)
+
     return render_template("best_bets.html",
+        place_bet_record=place_bet_record,
         best_bets_track_record=best_bets_track_record,
         best_bets=best_bets,
         meetings_with_bets=meetings_with_bets,

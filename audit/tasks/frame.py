@@ -15,11 +15,12 @@ SQL = """
 with ran as (
   select distinct on (h.race_id, lower(trim(h.horse_name)))
          h.id horse_id, h.race_id, h.horse_name, h.barrier, h.weight, h.jockey, h.trainer, h.csv_data,
+         h.betfair_selection_id,
          r.finish_position fin, r.sp, r.bsp
   from horses h join results r on r.horse_id=h.id
   where r.finish_position>0
   order by h.race_id, lower(trim(h.horse_name)), h.is_scratched, h.id desc)
-select ran.*, rc.meeting_id, rc.race_number, rc.distance race_distance, rc.race_class, rc.track_condition,
+select ran.*, rc.meeting_id, rc.race_number, rc.market_id, rc.distance race_distance, rc.race_class, rc.track_condition,
        rc.start_time_utc, m.date meeting_date, m.meeting_name,
        p.score a_score, p.calibrated_win_prob a_prob, p.pfai_score, p.ml_win_probability ml_prob,
        (p.ml_scored_at < rc.start_time_utc) ml_fwd
@@ -56,6 +57,18 @@ def _record(s):
         return np.nan, np.nan
     n, w = int(m.group(1)), int(m.group(2))
     return n, w
+
+
+def _nth_up(last10, starts):
+    """Run number in the current preparation (1 = first up). 'x' marks a spell."""
+    s = str(last10 or "").strip().lower()
+    if not s:
+        return 1.0 if starts == 0 else np.nan
+    if "x" in s:
+        return float(len(s) - s.rindex("x"))
+    if starts == starts and starts is not None and len(s) >= starts:
+        return float(len(s) + 1)
+    return np.nan
 
 
 def ratings_by_race(ctx):
@@ -115,6 +128,20 @@ def build(ctx):
     df["last_date"] = pd.to_datetime(g("form meeting date"), errors="coerce", dayfirst=True, format="mixed")
     df["last_cond"] = g("form track condition").fillna("").astype(str)
     df["prize_money"] = g("race prizemoney").map(_num)
+    # Records as (starts, wins): track, track+distance, distance, first/second up, going.
+    for key, col in (("horse record track", "rec_track"), ("horse record track distance", "rec_trackdist"),
+                     ("horse record distance", "rec_dist"), ("horse record first up", "rec_1up"),
+                     ("horse record second up", "rec_2up"), ("horse record good", "rec_good"),
+                     ("horse record soft", "rec_soft"), ("horse record heavy", "rec_heavy"),
+                     ("horse record synthetic", "rec_synth")):
+        r = g(key).map(_record)
+        df[col + "_n"] = r.map(lambda t: t[0])
+        df[col + "_w"] = r.map(lambda t: t[1])
+    df["sire"] = g("horse sire").fillna("").astype(str).str.strip().str.lower()
+    df["last_jockey"] = g("form jockey").fillna("").astype(str).str.strip().str.lower()
+    df["last_class"] = g("form class").fillna("").astype(str)
+    df["last_weight"] = g("form weight").map(_num)
+    df["nth_up"] = [_nth_up(l, s) for l, s in zip(df["last10"], df["career_starts"])]
     df["dist"] = df["race_distance"].map(_num)
     df["date"] = pd.to_datetime(df["meeting_date"])
     df["days_since"] = (df["date"] - df["last_date"]).dt.days

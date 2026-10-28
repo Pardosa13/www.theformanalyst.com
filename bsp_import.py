@@ -167,6 +167,10 @@ def ensure_tables(conn):
         )
     """))
     conn.execute(text('ALTER TABLE results ADD COLUMN IF NOT EXISTS bsp FLOAT'))
+    # Place market (added 28 Oct 2026 for the Place Bet route).
+    conn.execute(text('ALTER TABLE betfair_prices ADD COLUMN IF NOT EXISTS place_bsp FLOAT'))
+    conn.execute(text('ALTER TABLE betfair_prices ADD COLUMN IF NOT EXISTS placed BOOLEAN'))
+    conn.execute(text('ALTER TABLE results ADD COLUMN IF NOT EXISTS place_bsp FLOAT'))
     conn.execute(text('ALTER TABLE races ADD COLUMN IF NOT EXISTS start_time_utc TIMESTAMP'))
     conn.execute(text('ALTER TABLE races ADD COLUMN IF NOT EXISTS market_id VARCHAR(255)'))
     conn.execute(text('ALTER TABLE horses ADD COLUMN IF NOT EXISTS betfair_selection_id INTEGER'))
@@ -298,6 +302,8 @@ def price_row(row, file_name, race, runner, method):
         'preplay_volume': to_float(row['WIN_PREPLAY_VOLUME']),
         'best_back_at_scheduled_off': to_float(row['BEST_AVAIL_BACK_AT_SCHEDULED_OFF']),
         'best_lay_at_scheduled_off': to_float(row['BEST_AVAIL_LAY_AT_SCHEDULED_OFF']),
+        'place_bsp': to_float(row.get('PLACE_BSP')),
+        'placed': (row.get('PLACE_RESULT') == 'WINNER') if row.get('PLACE_RESULT') else None,
         'race_id': race['race_id'] if race else None,
         'horse_id': runner['horse_id'] if runner else None,
         'match_method': method,
@@ -310,18 +316,20 @@ UPSERT_SQL = text("""
         market_id, selection_id, meeting_date, track, state, race_no, tab_number, selection_name,
         scheduled_off_utc, actual_off_utc, won, win_bsp, win_bsp_volume, preplay_last_price,
         preplay_wap, preplay_volume, best_back_at_scheduled_off, best_lay_at_scheduled_off,
-        race_id, horse_id, match_method, source_file, imported_at
+        place_bsp, placed, race_id, horse_id, match_method, source_file, imported_at
     ) VALUES (
         :market_id, :selection_id, :meeting_date, :track, :state, :race_no, :tab_number, :selection_name,
         :scheduled_off_utc, :actual_off_utc, :won, :win_bsp, :win_bsp_volume, :preplay_last_price,
         :preplay_wap, :preplay_volume, :best_back_at_scheduled_off, :best_lay_at_scheduled_off,
-        :race_id, :horse_id, :match_method, :source_file, NOW()
+        :place_bsp, :placed, :race_id, :horse_id, :match_method, :source_file, NOW()
     )
     ON CONFLICT (market_id, selection_id) DO UPDATE SET
         win_bsp = EXCLUDED.win_bsp,
         won = EXCLUDED.won,
         actual_off_utc = EXCLUDED.actual_off_utc,
         preplay_last_price = EXCLUDED.preplay_last_price,
+        place_bsp = EXCLUDED.place_bsp,
+        placed = EXCLUDED.placed,
         race_id = EXCLUDED.race_id,
         horse_id = EXCLUDED.horse_id,
         match_method = EXCLUDED.match_method,
@@ -431,6 +439,11 @@ def sync_derived(conn):
         FROM betfair_prices bp
         WHERE bp.horse_id = r.horse_id AND r.bsp IS DISTINCT FROM bp.win_bsp
     """)).rowcount
+    conn.execute(text("""
+        UPDATE results r SET place_bsp = bp.place_bsp
+        FROM betfair_prices bp
+        WHERE bp.horse_id = r.horse_id AND r.place_bsp IS DISTINCT FROM bp.place_bsp
+    """))
     return updated
 
 
@@ -501,7 +514,11 @@ def run(engine, rematch=False, today=None, fetch=download):
         with engine.begin() as conn:
             done = conn.execute(text('SELECT row_count FROM betfair_import_files WHERE file_name = :f'),
                                 {'f': file_name}).scalar()
-            if done == len(rows) and not rematch:
+            # Files loaded before place prices were saved are loaded once more.
+            has_place = conn.execute(text(
+                'SELECT 1 FROM betfair_prices WHERE source_file = :f AND place_bsp IS NOT NULL LIMIT 1'),
+                {'f': file_name}).scalar()
+            if done == len(rows) and has_place and not rematch:
                 log.info('%s already loaded (%s rows), skipping', file_name, done)
                 continue
             days = [date.fromisoformat(r['LOCAL_MEETING_DATE']) for r in rows if r.get('LOCAL_MEETING_DATE')]
