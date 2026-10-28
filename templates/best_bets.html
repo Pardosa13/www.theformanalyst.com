@@ -565,217 +565,92 @@
   }
 </style>
 
+
+<style>
+  .rule-chip {
+    display: inline-block; margin: 2px 0; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700;
+    background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.4); color: #6ee7b7;
+  }
+  .rule-checks { font-size: 11px; color: var(--text-muted); margin: 2px 0 6px; }
+  .evidence { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--text-primary); white-space: nowrap; }
+  .evidence .muted, .muted-note { color: var(--text-muted); font-size: 11px; }
+  .place-warning { color: #fbbf24; font-size: 11px; font-weight: 700; }
+  .record-table .rule-name { white-space: normal; min-width: 220px; font-family: inherit; }
+</style>
+
 <!-- Page header -->
 <div class="bets-header">
-  <h2>🔥 Today's Best Bets</h2>
-  <p>Analyzer, PFAI and ML all rank the same horse first, with a 🔥 Proven Edge signal.
-     🥉 Place Bets are different: any horse that ran 2nd last start and carries 2&ndash;3kg less than the field. Back those for a PLACE, not the win.
-     Component matches, win probability and sole rides are shown on the rows that qualify.
-     Proven Edge is unproven, so stake small.</p>
+  <h2>🥉 Best Bets &mdash; Place Bets Only</h2>
+  <p>Every pick here is a <strong>PLACE bet, not a win bet</strong>. A horse shows when it fits one of the six place rules found in the
+     28 Oct 2026 audit (Feb&ndash;Sep 2026, settled at Betfair place SP after 8% commission). Each row shows the form it was picked on, so you can check it.
+     The rules are unproven live, so stake small.</p>
 </div>
 
 <!-- Stat tiles -->
 <div class="stat-row">
-  <div class="stat-tile s-primary">
-    <h5>Total Signals</h5>
-    <h2>{{ total_bets }}</h2>
-  </div>
-  <div class="stat-tile s-info">
-    <h5>Active Components</h5>
-    <h2>{{ active_components|length }}</h2>
-  </div>
-  <div class="stat-tile s-success">
-    <h5>Horses Scanned</h5>
-    <h2>{{ total_horses_scanned }}</h2>
-  </div>
-  <div class="stat-tile s-warning">
-    <h5>Time Window</h5>
-    <h2>{{ hours_back }}h</h2>
-  </div>
+  <div class="stat-tile s-primary"><h5>Place Picks</h5><h2>{{ total_bets }}</h2></div>
+  <div class="stat-tile s-info"><h5>Place Rules</h5><h2>{{ place_rules|length }}</h2></div>
+  <div class="stat-tile s-success"><h5>Horses Scanned</h5><h2>{{ total_horses_scanned }}</h2></div>
+  <div class="stat-tile s-warning"><h5>Time Window</h5><h2>{{ hours_back }}h</h2></div>
 </div>
 
-<!-- Place Bet route: its own record, settled on the place (place_bet.py). -->
-{% if place_bet_record %}
+<!-- The six rules and their record, settled on the place (place_bet.py). -->
 <div class="filter-card" style="margin-bottom:24px">
-  <h5 style="margin:0 0 6px;font-weight:700">🥉 Place Bet Record (2nd last start + 2&ndash;3kg under the field)</h5>
-  <style>
-    /* The shared partial uses plain Bootstrap tables (white); match the dark Track Record table. */
-    .pb-wrap .profit{color:#10b981}.pb-wrap .loss{color:#ef4444}
-    .pb-wrap p.text-muted{color:var(--text-muted)!important}
-    .pb-wrap .table-responsive{overflow-x:auto;border:1px solid var(--border-subtle);border-radius:10px;margin-bottom:12px}
-    .pb-wrap .table{
-      --bs-table-bg:transparent;--bs-table-striped-bg:transparent;--bs-table-hover-bg:var(--bg-hover);
-      --bs-table-color:var(--text-primary);--bs-table-striped-color:var(--text-primary);
-      width:100%;margin:0;font-size:13px;border-collapse:collapse;color:var(--text-primary);
-    }
-    .pb-wrap .table > :not(caption) > * > *{background:transparent!important;box-shadow:none!important;color:var(--text-primary)}
-    .pb-wrap .table thead th{
-      background:var(--bg-elevated)!important;color:var(--text-secondary);
-      font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
-      padding:9px 8px;border-bottom:1px solid var(--border-mid);white-space:nowrap;
-    }
-    .pb-wrap .table tbody td{padding:9px 8px;border-bottom:1px solid var(--border-subtle);white-space:nowrap;font-family:'DM Mono',monospace}
-    .pb-wrap .table tbody td:first-child{font-family:inherit}
-    .pb-wrap .table tbody tr:last-child td{border-bottom:none}
-    .pb-wrap .table tbody tr:hover td{background:var(--bg-hover)!important}
-    .pb-wrap .table td.profit{color:#10b981!important}.pb-wrap .table td.loss{color:#ef4444!important}
-    .pb-wrap .table tbody tr > *{color:var(--text-primary)}
-    .pb-wrap summary{color:var(--accent)}
-  </style>
-  <div class="pb-wrap">{% include "_place_bet_record.html" %}</div>
-</div>
-{% endif %}
-
-<!-- Honest track record: settled Best Bets known before the jump, at bookie SP and Betfair SP. -->
-{% if best_bets_track_record %}
-{% set rec = best_bets_track_record %}
-<div class="filter-card" style="margin-bottom:24px">
-  <h5 style="margin:0 0 6px;font-weight:700">📒 Track Record (picks made before the jump)</h5>
+  <h5 style="margin:0 0 6px;font-weight:700">📒 Place Rules &amp; Record ($10 place bets)</h5>
   <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">
-    Flat 1-unit win bets on every settled Best Bet that was flagged or qualified before its race started.
-    Betfair SP is after {{ "%.0f"|format(rec.commission_pct) }}% commission and is the fairer test: the bookie SP carries a 20&ndash;30% margin.
-    {% if rec.excluded_after_start %}{{ rec.excluded_after_start }} picks recorded after the jump are left out.{% endif %}
+    &ldquo;History&rdquo; is every settled runner since February that fits the rule. &ldquo;Live&rdquo; counts only picks shown here before the jump (from 28 Oct 2026) &mdash; that is the real test.
+    Placed = top 3 with 8+ runners, top 2 with 5&ndash;7. Betfair place prices arrive monthly{% if place_rules_record and place_rules_record.place_bsp_through %} (loaded up to {{ place_rules_record.place_bsp_through }}){% endif %}, so new bets show a place % before they show a profit.
   </p>
-  {% set t = rec.total %}
-  <div class="stat-row" style="margin-bottom:14px">
-    <div class="stat-tile s-primary"><h5>Settled Bets</h5><h2>{{ t.bets }}</h2></div>
-    <div class="stat-tile s-info"><h5>Strike Rate</h5><h2>{% if t.strike_rate is not none %}{{ "%.1f"|format(t.strike_rate) }}%{% else %}&ndash;{% endif %}</h2></div>
-    <div class="stat-tile s-warning"><h5>ROI at Bookie SP</h5><h2 style="color:{% if t.roi_sp is not none and t.roi_sp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{% if t.roi_sp is not none %}{{ "%+.1f"|format(t.roi_sp) }}%{% else %}&ndash;{% endif %}</h2></div>
-    <div class="stat-tile s-success"><h5>ROI at Betfair SP ({{ t.bsp_bets }} bets)</h5><h2 style="color:{% if t.roi_bsp is not none and t.roi_bsp >= 0 %}#10b981{% else %}#ef4444{% endif %}">{% if t.roi_bsp is not none %}{{ "%+.1f"|format(t.roi_bsp) }}%{% else %}&ndash;{% endif %}</h2></div>
-  </div>
   <div class="record-wrap">
     <table class="record-table">
-      <thead><tr><th>Route</th><th>Bets</th><th>Win %</th><th>SP ROI</th><th>Betfair ROI</th></tr></thead>
+      <thead><tr><th>Rule</th><th>Feb&ndash;Sep test</th><th>History bets</th><th>Placed</th><th>ROI</th><th>Live bets</th><th>Live placed</th><th>Live ROI</th></tr></thead>
       <tbody>
-      {% for r in rec.by_route if r.key not in ('maiden', 'value_top_pick') %}
-        <tr><td>{{ r.key|replace('_', ' ')|title }}</td><td>{{ r.bets }}</td><td>{{ "%.1f"|format(r.strike_rate) }}%</td>
-          <td class="{% if r.roi_sp >= 0 %}pos{% else %}neg{% endif %}">{{ "%+.1f"|format(r.roi_sp) }}%</td>
-          <td class="{% if r.roi_bsp is not none and r.roi_bsp >= 0 %}pos{% elif r.roi_bsp is not none %}neg{% else %}muted{% endif %}">{% if r.roi_bsp is not none %}{{ "%+.1f"|format(r.roi_bsp) }}% <span class="muted cnt">({{ r.bsp_bets }})</span>{% else %}&ndash;{% endif %}</td></tr>
+      {% set rec_by_key = {} %}
+      {% if place_rules_record %}{% for r in place_rules_record.rules %}{% set _ = rec_by_key.update({r.key: r}) %}{% endfor %}{% endif %}
+      {% for rule in place_rules %}
+        {% set r = rec_by_key.get(rule.key) %}
+        <tr>
+          <td class="rule-name">{{ rule.name }}</td>
+          <td class="muted" style="white-space:normal">{{ rule.audit }}</td>
+          {% if r %}
+          <td>{{ r.history.bets }}</td>
+          <td>{{ "%.1f"|format(r.history.place_rate) }}%</td>
+          <td class="{% if r.history.roi is not none and r.history.roi >= 0 %}pos{% elif r.history.roi is not none %}neg{% else %}muted{% endif %}">{% if r.history.roi is not none %}{{ "%+.1f"|format(r.history.roi) }}%{% else %}&ndash;{% endif %}</td>
+          <td>{{ r.live.bets }}</td>
+          <td>{% if r.live.bets %}{{ "%.1f"|format(r.live.place_rate) }}%{% else %}&ndash;{% endif %}</td>
+          <td class="{% if r.live.roi is not none and r.live.roi >= 0 %}pos{% elif r.live.roi is not none %}neg{% else %}muted{% endif %}">{% if r.live.roi is not none %}{{ "%+.1f"|format(r.live.roi) }}%{% else %}&ndash;{% endif %}</td>
+          {% else %}
+          <td colspan="6" class="muted">Record unavailable</td>
+          {% endif %}
+        </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
-  <details>
-    <summary style="font-size:13px;cursor:pointer;color:var(--accent);margin-bottom:8px">By month</summary>
-    <div class="record-wrap">
-      <table class="record-table">
-        <thead><tr><th>Month</th><th>Bets</th><th>Win %</th><th>SP ROI</th><th>Betfair ROI</th></tr></thead>
-        <tbody>
-        {% for r in rec.by_month %}
-          <tr><td>{{ r.key }}</td><td>{{ r.bets }}</td><td>{{ "%.1f"|format(r.strike_rate) }}%</td>
-            <td class="{% if r.roi_sp >= 0 %}pos{% else %}neg{% endif %}">{{ "%+.1f"|format(r.roi_sp) }}%</td>
-            <td class="{% if r.roi_bsp is not none and r.roi_bsp >= 0 %}pos{% elif r.roi_bsp is not none %}neg{% else %}muted{% endif %}">{% if r.roi_bsp is not none %}{{ "%+.1f"|format(r.roi_bsp) }}% <span class="muted cnt">({{ r.bsp_bets }})</span>{% else %}&ndash;{% endif %}</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </details>
-  <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0">Data audit, Feb&ndash;Sep 2026: Best Bets lost at Betfair SP in most months, and no route has yet beaten the market on a few hundred bets. Stake small until one does.</p>
-</div>
-{% endif %}
-
-<!-- Mode toggle -->
-<div class="mode-toggle">
-  <span class="mode-label">Mode:</span>
-
-  {# Build current query params without mode so we can override it #}
-  {% set base_params = [] %}
-  {% if hours_back %}{% set _ = base_params.append('hours=' ~ hours_back) %}{% endif %}
-  {% if min_score %}{% set _ = base_params.append('min_score=' ~ min_score) %}{% endif %}
-  {% if min_gap %}{% set _ = base_params.append('min_gap=' ~ min_gap) %}{% endif %}
-  {% set base_qs = base_params | join('&') %}
-
-  <a href="{{ url_for('best_bets') }}{% if base_qs %}?{{ base_qs }}&mode=all{% else %}?mode=all{% endif %}"
-     class="mode-btn {% if mode == 'all' %}active{% endif %}">
-    🔍 All Signals
-  </a>
-  <a href="{{ url_for('best_bets') }}{% if base_qs %}?{{ base_qs }}&mode=top_pick{% else %}?mode=top_pick{% endif %}"
-     class="mode-btn {% if mode == 'top_pick' %}active{% endif %}">
-    ⭐ Top Pick Only
-  </a>
-  <a href="{{ url_for('best_bets') }}{% if base_qs %}?{{ base_qs }}&mode=non_top_pick{% else %}?mode=non_top_pick{% endif %}"
-     class="mode-btn {% if mode == 'non_top_pick' %}active{% endif %}">
-    💡 Non-Top-Pick Signals
-  </a>
-
-  <span class="mode-desc">
-    {% if mode == 'all' %}Showing all horses matching active components{% endif %}
-    {% if mode == 'top_pick' %}Showing only horses ranked #1 in their race{% endif %}
-    {% if mode == 'non_top_pick' %}Component fires but horse is NOT your top pick — possible hidden value{% endif %}
-  </span>
+  <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0">The old win routes (Proven Edge, Maiden, Analyzer + PFAI + ML agree, Value Top Pick) were removed on 28 Oct 2026: their pre-race picks lost money.</p>
 </div>
 
 <!-- Filter card -->
 <div class="filter-card">
   <form method="GET" action="{{ url_for('best_bets') }}" class="filter-form">
-    <!-- Preserve mode across filter changes -->
-    <input type="hidden" name="mode" value="{{ mode }}">
-
-    <span class="filter-label">Filters</span>
-
-    <span class="filter-label" style="margin-left:8px;">Hours Back:</span>
-    <select name="hours" class="filter-select">
-      <option value="6"  {% if hours_back == 6  %}selected{% endif %}>6 hours</option>
-      <option value="12" {% if hours_back == 12 %}selected{% endif %}>12 hours</option>
-      <option value="24" {% if hours_back == 24 %}selected{% endif %}>24 hours</option>
-      <option value="48" {% if hours_back == 48 %}selected{% endif %}>48 hours</option>
-      <option value="72" {% if hours_back == 72 %}selected{% endif %}>3 days</option>
+    <span class="filter-label">Hours Back:</span>
+    <select name="hours" class="filter-select" onchange="this.form.submit()">
+      {% for h, label in [(6, '6 hours'), (12, '12 hours'), (24, '24 hours'), (48, '48 hours'), (72, '3 days')] %}
+      <option value="{{ h }}" {% if hours_back == h %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
     </select>
-
-    <span class="filter-label">Min Score:</span>
-    <input type="number" name="min_score" class="filter-input"
-           placeholder="e.g. 100" step="1"
-           value="{{ min_score if min_score else '' }}">
-
-    <span class="filter-label">Min Gap:</span>
-    <input type="number" name="min_gap" class="filter-input"
-           placeholder="e.g. 50" step="1"
-           value="{{ min_gap if min_gap else '' }}">
-
-    <button type="submit" class="btn btn-primary">Apply</button>
-    <a href="{{ url_for('best_bets') }}" class="btn btn-secondary">Clear</a>
+    <noscript><button type="submit" class="btn btn-primary">Apply</button></noscript>
   </form>
-
-  {% if min_gap %}
-  <div class="filter-hint">
-    <span>ℹ️</span>
-    <span>Based on historical data: Score gaps of 50+ points have a 28.9% strike rate with +13.4% ROI</span>
-  </div>
-  {% endif %}
 </div>
 
-<!-- Active components -->
-<div class="components-card">
-  <div class="components-card-header">
-    <h5>Active Components</h5>
-    <span class="components-count-badge">{{ active_components|length }}</span>
-  </div>
-  <div class="components-grid">
-    {% for component in active_components %}
-    <div class="component-item">
-      <span class="component-tick">✓</span>
-      <div>
-        <div class="component-name">{{ component.component_name }}</div>
-        <div class="component-stats">
-          {{ component.strike_rate|round(1) }}% SR &nbsp;·&nbsp;
-          {{ component.roi_percentage|round(1) }}% ROI &nbsp;·&nbsp;
-          N={{ component.appearances }}
-        </div>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-</div>
-
-<!-- Best bets / empty state -->
+<!-- Place picks / empty state -->
 {% if total_bets == 0 %}
 <div class="no-bets-alert">
-  <h4>No Signals Found</h4>
-  <p>No race in the last {{ hours_back }} hours has Analyzer, PFAI and ML all agreeing on
-     a top pick that has a Proven Edge signal{% if mode == 'non_top_pick' %} — non-top-pick mode cannot show these, as they are always the top pick{% endif %}.</p>
+  <h4>No Place Picks</h4>
+  <p>No runner in meetings uploaded in the last {{ hours_back }} hours fits a place rule.</p>
   <p style="margin-bottom:4px;">Check:</p>
   <ul>
-    <li>The meeting has been scored by the ML run</li>
+    <li>The meeting has been uploaded and run through the analyzer</li>
     <li>Increasing the time window</li>
   </ul>
 </div>
@@ -784,201 +659,111 @@
 
 <form method="POST" action="{{ url_for('post_best_bets_manual') }}" id="post-best-bets-form">
   {% for meeting_name, meeting_data in meetings_with_bets.items() %}
-
   <div class="meeting-block">
     <div class="meeting-block-header">
       <h4>📍 {{ meeting_data.meeting_name }}</h4>
-      <span class="meeting-time-badge">
-        Uploaded {{ meeting_data.uploaded_at.strftime('%I:%M %p') }}
-      </span>
+      <span class="meeting-time-badge">Uploaded {{ meeting_data.uploaded_at.strftime('%I:%M %p') if meeting_data.uploaded_at else '' }}</span>
     </div>
-
     <div class="meeting-block-body">
       {% for race_num, race_data in meeting_data.races.items()|sort %}
       <div class="race-section">
-
         <div class="race-heading">
           <span class="race-num">Race {{ race_data.race_number }}</span>
           <span class="race-pill">{{ race_data.distance }}</span>
           <span class="race-pill">{{ race_data.race_class }}</span>
-          <span class="race-pill">{{ race_data.track_condition|title }}</span>
+          <span class="race-pill">{{ (race_data.track_condition or '')|title }}</span>
+          <span class="race-pill">{{ race_data.runners }} runners &middot; {{ race_data.places_paid }} place{{ 's' if race_data.places_paid != 1 }} paid</span>
+          {% if race_data.no_place_market %}<span class="place-warning">⚠️ Under 5 runners: no Betfair place market</span>{% endif %}
         </div>
-
         <div class="table-responsive">
           <table class="bets-table">
             <thead>
               <tr>
-                <th><input type="checkbox" id="select-all"></th>
+                <th><input type="checkbox" class="select-all" aria-label="Select all in this race"></th>
                 <th>Horse</th>
-                <th>Rank</th>
-                <th>Score</th>
-                <th>Gap to Above</th>
-                <th>Ladbrokes</th>
-                <th>Win %</th>
+                <th>Last Start</th>
+                <th>Place Rule(s)</th>
                 <th>Barrier</th>
                 <th>Weight</th>
                 <th>Jockey</th>
                 <th>Trainer</th>
-                <th>Signals</th>
+                <th>Ladbrokes Win</th>
               </tr>
             </thead>
             <tbody>
-              {% for bet in race_data.horses|sort(attribute='rank_in_race') %}
-              <tr class="{% if bet.is_top_pick %}row-top-pick{% else %}row-signal{% endif %}{% if bet.signal_agreement %} row-signal-agreement{% endif %}">
+              {% for bet in race_data.horses %}
+              <tr class="row-top-pick">
+                <td><input type="checkbox" name="bet_ids[]" value="{{ bet.horse_id }}" class="bet-checkbox"></td>
                 <td>
-                  <input type="checkbox" name="bet_ids[]" value="{{ bet.horse_id }}" class="bet-checkbox">
+                  <div class="horse-name">
+                    {{ bet.horse_name }}
+                    {% if bet.race_started %}<span class="edge-badge" title="This race has started, so this pick is not recorded in the live record">Started</span>{% endif %}
+                  </div>
+                  <div class="horse-form" title="Form, oldest to newest (x = spell)">Form {{ bet.last10 or '—' }}</div>
+                  <div class="muted-note">🥉 Back for a PLACE</div>
                 </td>
                 <td>
-  <div class="horse-name">
-    {{ bet.horse_name }}
-    {% if bet.race_started %}
-    <span class="edge-badge" title="This race has started, so this pick is not recorded in the track record">Started</span>
-    {% endif %}
-    {% if bet.signal_agreement %}
-    <span class="signal-agreement-badge" title="Analyzer, PFAI and ML all rank this horse top">⚡ 3-Way Agree</span>
-    {% endif %}
-    {% for label, signals in (bet.edge_badges or {}).items() %}
-    <span class="edge-badge" title="{{ signals|join(' · ') }}">{{ label }}</span>
-    {% endfor %}
-  </div>
-  <div class="horse-form">{{ bet.form }}</div>
-</td>
-                <td>
-                  {% if bet.is_top_pick %}
-                  <span class="rank-badge top-pick">⭐ #1 Pick</span>
-                  {% else %}
-                  <span class="rank-badge signal">💡 #{{ bet.rank_in_race }}</span>
-                  {% endif %}
+                  <div class="evidence">
+                    {% if bet.last_pos %}{{ bet.last_pos }}{{ {1: 'st', 2: 'nd', 3: 'rd'}.get(bet.last_pos, 'th') }}{% if bet.last_pos == 10 %} or worse{% endif %}{% else %}&ndash;{% endif %}
+                    {% if bet.last_margin is not none %}&middot; {{ '%g'|format(bet.last_margin) }}L{% endif %}
+                  </div>
+                  {% if bet.last_date %}<div class="evidence"><span class="muted">{{ bet.last_date }}</span></div>{% endif %}
                 </td>
                 <td>
-                  <span class="badge badge-lg bg-{% if bet.score >= 130 %}success{% elif bet.score >= 100 %}warning{% else %}danger{% endif %}">
-                    {{ bet.score|round(1) }}
-                  </span>
+                  {% for rule in bet.rules %}
+                  <div><span class="rule-chip" title="Feb–Sep test: {{ rule.audit }}">{{ rule.name }}</span></div>
+                  {% if rule.checks %}<div class="rule-checks">Analyzer: {{ rule.checks|join(' · ') }}</div>{% endif %}
+                  {% endfor %}
                 </td>
-                <td>
-                  {% if bet.is_top_pick %}
-                  <span class="badge badge-lg bg-{% if bet.score_gap >= 50 %}success{% elif bet.score_gap >= 30 %}warning{% else %}danger{% endif %}">
-                    +{{ bet.score_gap|round(1) }}
-                  </span>
-                  {% if bet.score_gap >= 50 %}
-                  <div class="conf-dominant">🎯 Dominant</div>
-                  {% elif bet.score_gap >= 30 %}
-                  <div class="conf-medium">⚠️ Medium</div>
-                  {% else %}
-                  <div class="conf-low">⚠️ Lower</div>
-                  {% endif %}
-                  {% else %}
-                  <span class="badge badge-lg bg-secondary">
-                    -{{ bet.score_gap|round(1) }}
-                  </span>
-                  <div style="font-size:11px; color:var(--text-muted);">behind #{{ bet.rank_in_race - 1 }}</div>
-                  {% endif %}
-                </td>
+                <td>{{ bet.barrier }}</td>
+                <td>{{ bet.weight }}kg</td>
+                <td>{{ bet.jockey }}</td>
+                <td>{{ bet.trainer }}</td>
                 <td>
                   {% if bet.ladbrokes_fixed_win_price %}
                     ${{ '%.2f'|format(bet.ladbrokes_fixed_win_price) }}
-                    <div style="font-size:11px;color:var(--text-muted);">Rank #{{ bet.ladbrokes_market_rank }}{% if bet.is_joint_ladbrokes_favourite %} joint fav{% elif bet.is_ladbrokes_favourite %} fav{% endif %}</div>
-                    <div style="font-size:10px;color:var(--text-muted);">{{ bet.ladbrokes_odds_updated_at or 'No timestamp' }}</div>
+                    <div style="font-size:11px;color:var(--text-muted);">Rank #{{ bet.ladbrokes_market_rank }}</div>
                   {% else %}
                     <span class="text-muted">Unavailable</span>
                   {% endif %}
-                </td>
-                <td>{{ bet.win_probability }}</td>
-                <td>{{ bet.barrier }}</td>
-                <td>{{ bet.weight }}kg</td>
-                <td>
-                  {{ bet.jockey }}
-                  {% if bet.jockey_sole_ride %}
-                  <div style="margin-top:3px;">
-                    <span style="background:rgba(124,58,237,0.15);border:1px solid rgba(124,58,237,0.4);color:#c4b5fd;font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;font-family:'DM Mono',monospace;">
-                      ✈️ SOLE RIDE
-                    </span>
-                  </div>
-                  {% endif %}
-                </td>
-                <td>{{ bet.trainer }}</td>
-                <td>
-                  {% for badge in bet.best_bet_badges or [] %}
-                  <div style="margin-top:4px;"><span class="badge bg-warning text-dark">{{ badge }}</span></div>
-                  {% endfor %}
-                  {% for label, signals in (bet.edge_badges or {}).items() %}
-                  <div style="margin-top:4px;">
-                    <span class="edge-badge" style="margin-left:0;">{{ label }}</span>
-                    {% for signal in signals %}
-                    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">{{ signal }}</div>
-                    {% endfor %}
-                  </div>
-                  {% endfor %}
-                  <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
-                    Analyzer #{{ bet.analyzer_rank or '—' }} · PFAI #{{ bet.pfai_rank or '—' }} · ML #{{ bet.ml_rank or '—' }}{% if bet.ml_score is defined and bet.ml_score is not none %} · ML {{ bet.ml_score|round(1) }}{% endif %}{% if bet.ml_score_gap is defined and bet.ml_score_gap is not none %} · Gap {{ bet.ml_score_gap|round(1) }}{% endif %}
-                  </div>
-                  {% for reason in bet.best_bet_reasons or [] %}
-                  <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">{{ reason }}</div>
-                  {% endfor %}
-                  <hr style="border-color:rgba(255,255,255,.12);">
-                  <span class="badge bg-primary">{{ bet.component_count }} matched</span>
-                  <button type="button" class="btn btn-sm btn-outline-info mt-1"
-                          data-bs-toggle="collapse"
-                          data-bs-target="#components-{{ bet.horse_id }}">
-                    View
-                  </button>
-                  <div id="components-{{ bet.horse_id }}" class="collapse mt-2">
-                    <ul class="list-unstyled mb-0 components-list">
-                      {% for comp in bet.components %}
-                      <li>
-                        <span class="badge bg-success">✓</span>
-                        <div>
-                          {{ comp.name }}
-                          <div class="comp-stats">
-                            ({{ comp.sr|round(1) }}% SR, {{ comp.roi|round(1) }}% ROI, N={{ comp.appearances }})
-                          </div>
-                        </div>
-                      </li>
-                      {% endfor %}
-                    </ul>
-                  </div>
                 </td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
-
       </div>
       {% endfor %}
     </div>
   </div>
-
   {% endfor %}
 </form>
-{% endif %}
 
-{% if total_bets > 0 %}
 <div class="post-btn-area">
   <button type="submit" form="post-best-bets-form" class="btn btn-success btn-lg" id="post-btn">
-    📤 Post Selected Bets to Telegram & Twitter
+    📤 Post Selected Place Bets to Telegram &amp; Twitter
   </button>
-  <p>Select bets using checkboxes, then click to post publicly</p>
+  <p>Select bets using checkboxes, then click to post publicly. Posts say PLACE bet.</p>
 </div>
-{% endif %}
 
 <script>
-document.getElementById('select-all').addEventListener('change', function() {
-    const checkboxes = document.querySelectorAll('.bet-checkbox');
-    checkboxes.forEach(cb => cb.checked = this.checked);
+document.querySelectorAll('.select-all').forEach(function (box) {
+  box.addEventListener('change', function () {
+    this.closest('table').querySelectorAll('.bet-checkbox').forEach(cb => cb.checked = this.checked);
+  });
 });
-
-document.getElementById('post-btn').addEventListener('click', function(e) {
-    const selected = document.querySelectorAll('.bet-checkbox:checked').length;
-    if (selected === 0) {
-        e.preventDefault();
-        alert('Please select at least one bet to post');
-        return;
-    }
-    if (!confirm(`Post ${selected} bet(s) to Telegram and Twitter?\n\nThis will publicly share these selections.`)) {
-        e.preventDefault();
-    }
+document.getElementById('post-btn').addEventListener('click', function (e) {
+  const selected = document.querySelectorAll('.bet-checkbox:checked').length;
+  if (selected === 0) {
+    e.preventDefault();
+    alert('Please select at least one bet to post');
+    return;
+  }
+  if (!confirm(`Post ${selected} place bet(s) to Telegram and Twitter?\n\nThis will publicly share these selections.`)) {
+    e.preventDefault();
+  }
 });
 </script>
+{% endif %}
 
 {% endblock %}

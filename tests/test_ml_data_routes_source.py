@@ -106,9 +106,11 @@ def test_ml_data_page_includes_flat_stake_ladbrokes_signal_performance():
 def test_best_bets_records_routes_not_favourite_badges():
     source = _function_source('best_bets')
 
-    # The favourite badges are no longer captured; routes still are.
+    # The favourite badges are no longer captured; the place-rule routes are.
     assert 'horse.prediction.ladbrokes_signal_mask =' not in source
-    assert 'merge_best_bet_tracking(horse.prediction, routes, edge_badges)' in source
+    assert 'place_bet.matching_rules(' in source
+    assert 'merge_best_bet_tracking(horse.prediction, routes, {})' in source
+    assert 'if not race_started:' in source
 
 
 

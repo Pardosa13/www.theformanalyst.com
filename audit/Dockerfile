@@ -9,4 +9,8 @@ WORKDIR /app
 COPY audit /app/audit
 COPY betfair_check.py /app/betfair_check.py
 COPY notes_parsing.py /app/notes_parsing.py
+# The site's own place rules and form-file reader, so routecheck tests the live code.
+COPY place_bet.py /app/place_bet.py
+COPY past_runs.py /app/past_runs.py
+COPY strike_rate_matching.py /app/strike_rate_matching.py
 CMD ["python", "-m", "audit.run_audit"]
