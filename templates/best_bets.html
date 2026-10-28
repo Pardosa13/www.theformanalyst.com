@@ -568,6 +568,7 @@
 <div class="bets-header">
   <h2>🔥 Today's Best Bets</h2>
   <p>Analyzer, PFAI and ML all rank the same horse first, with a 🔥 Proven Edge signal.
+     🥉 Place Bets are different: any horse that ran 2nd last start and carries 2&ndash;3kg less than the field. Back those for a PLACE, not the win.
      Component matches, win probability and sole rides are shown on the rows that qualify.
      Proven Edge is unproven, so stake small.</p>
 </div>
@@ -591,6 +592,15 @@
     <h2>{{ hours_back }}h</h2>
   </div>
 </div>
+
+<!-- Place Bet route: its own record, settled on the place (place_bet.py). -->
+{% if place_bet_record %}
+<div class="filter-card" style="margin-bottom:24px">
+  <h5 style="margin:0 0 6px;font-weight:700">🥉 Place Bet Record (2nd last start + 2&ndash;3kg under the field)</h5>
+  <style>.pb-wrap .profit{color:#10b981}.pb-wrap .loss{color:#ef4444}</style>
+  <div class="pb-wrap">{% include "_place_bet_record.html" %}</div>
+</div>
+{% endif %}
 
 <!-- Honest track record: settled Best Bets known before the jump, at bookie SP and Betfair SP. -->
 {% if best_bets_track_record %}

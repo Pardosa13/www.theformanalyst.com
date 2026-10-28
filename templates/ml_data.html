@@ -572,6 +572,21 @@
   </div>
 </div>
 
+<!-- Place Bet route (place_bet.py): settled on the place at Betfair place SP. -->
+{% if place_bet_record %}
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlPlaceBet" aria-expanded="true">
+    <h5>🥉 Place Bet: 2nd Last Start + 2&ndash;3kg Under the Field ($10 Place)</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="mlPlaceBet" class="collapse show">
+    <div class="card-body">
+      <p class="text-muted mb-2">The one pattern from the 27 Oct edge hunt that held up on unseen months: Feb&ndash;Jun +27% on 337 bets, Jul&ndash;Sep +52% on 202 bets. The live row is the real test.</p>
+      {% include "_place_bet_record.html" %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Data audit, 24 Oct 2026: every pick type settled at bookie SP and at Betfair SP. -->
 {% if active_model_metadata and active_model_metadata.pf_lookup_current is false %}
 <div class="alert alert-warning" role="alert" style="margin-bottom:16px">
