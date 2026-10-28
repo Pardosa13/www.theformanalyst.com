@@ -17,6 +17,7 @@ Each rule reads exactly what the audit read:
   prediction notes, the same parser the audit used
 """
 import json
+import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -25,6 +26,8 @@ from datetime import datetime
 from sqlalchemy import text
 
 from notes_parsing import parse_notes_components
+
+logger = logging.getLogger(__name__)
 
 LIVE_START = datetime(2026, 10, 28)
 COMMISSION = 0.08
@@ -261,7 +264,9 @@ def settled_picks(session, date_from=None, date_to=None):
                 'race_id': row['race_id'],
                 'start': start,
             }))
+    started = time.time()
     _add_ladbrokes_place_prices(session, [item for _rule, item in out])
+    logger.info("PLACE_RULES_TIMING ladbrokes_place_prices seconds=%.2f", time.time() - started)
     return out
 
 
@@ -289,14 +294,18 @@ def ladbrokes_place_prices(session, runners):
             horses = ', '.join(f':h{i}' for i in range(len(chunk)))
             rows = session.execute(text(
                 f'SELECT horse_id, place_odds, captured_at FROM live_odds_snapshots '
-                f'WHERE race_id IN ({races}) AND horse_id IN ({horses}) AND place_odds > 1 '
-                f'ORDER BY captured_at'), params).mappings()
+                f'WHERE race_id IN ({races}) AND horse_id IN ({horses}) AND place_odds > 1'),
+                params).mappings()
             for row in rows:
                 snaps.setdefault(row['horse_id'], []).append((row['captured_at'], row['place_odds']))
     except Exception:
         # No odds table (e.g. a fresh database): no stand-in prices.
         session.rollback()
         return {}
+    # Sorted here, not in SQL: ORDER BY captured_at let Postgres walk the
+    # captured_at index across the whole odds history (minutes per load).
+    for found in snaps.values():
+        found.sort(key=lambda s: (s[0] is None, s[0]))
     prices = {}
     for r in runners:
         found = snaps.get(r['horse_id'], [])
@@ -359,7 +368,9 @@ def performance_all(session, date_from=None, date_to=None):
     hit = _CACHE.get(cache_key)
     if hit and time.time() - hit[0] < _CACHE_SECONDS:
         return hit[1]
+    started = time.time()
     picks = settled_picks(session, date_from, date_to)
+    logger.info("PLACE_RULES_TIMING settled_picks seconds=%.2f picks=%d", time.time() - started, len(picks))
     by_rule = defaultdict(list)
     for rule, item in picks:
         by_rule[rule.key].append(item)
