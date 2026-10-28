@@ -6420,6 +6420,29 @@ def champion_model_backtest_summary(model_id=None, run_id=None):
                        model_id, run_id, exc)
         return {'error': str(exc)}
 
+
+_ML_DATA_CACHE = {}
+_ML_DATA_CACHE_SECONDS = 600
+
+
+def _ml_data_cached(name, key, compute):
+    """Run compute() at most once per 10 minutes per filter set, and log how long it took.
+
+    The ML Data page runs many whole-history queries; the timings in the log
+    (ML_DATA_TIMING) show which one is slow.
+    """
+    import time as _time
+    cache_key = (name, key)
+    hit = _ML_DATA_CACHE.get(cache_key)
+    if hit and _time.time() - hit[0] < _ML_DATA_CACHE_SECONDS:
+        return hit[1]
+    started = _time.time()
+    value = compute()
+    logger.info("ML_DATA_TIMING section=%s seconds=%.2f", name, _time.time() - started)
+    _ML_DATA_CACHE[cache_key] = (_time.time(), value)
+    return value
+
+
 @app.route("/ml-data")
 @login_required
 def ml_data_analytics():
@@ -6432,6 +6455,9 @@ def ml_data_analytics():
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     limit_param = request.args.get('limit', 'all')
+    filter_key = (track_filter, date_from, date_to, limit_param)
+    import time as _time
+    page_started = _time.time()
 
     tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
     track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
@@ -6439,7 +6465,7 @@ def ml_data_analytics():
     active_model_metadata = None
     active_model_metadata_error = None
     no_active_champion = False
-    latest_challenger = latest_ml_challenger_summary()
+    latest_challenger = _ml_data_cached('latest_challenger', (), latest_ml_challenger_summary)
     try:
         # Imported inside its own try so a NoActiveChampionError handler can
         # never reference an unbound name if the import itself fails.
@@ -6482,6 +6508,8 @@ def ml_data_analytics():
         active_model_metadata_error = str(e)
         logger.warning("Unable to inspect active production ML model for ML Data page: %s", e)
 
+    logger.info("ML_DATA_TIMING section=champion_and_header seconds=%.2f", _time.time() - page_started)
+
     # The champion-metadata lookup above reads the DB inside a try/except. On
     # Postgres a statement that fails leaves the whole transaction aborted, and
     # every later query in this request raises InFailedSqlTransaction — which
@@ -6494,12 +6522,12 @@ def ml_data_analytics():
 
     ml_performance_stats = None
     try:
-        ml_performance_stats = calculate_ml_performance_stats(
+        ml_performance_stats = _ml_data_cached('ml_performance', filter_key, lambda: calculate_ml_performance_stats(
             track_filter=track_filter,
             date_from=date_from,
             date_to=date_to,
             limit_param=limit_param,
-        )
+        ))
     except Exception as e:
         # Rolled back for the same reason as above: whichever of these three
         # calculations fails, the two after it must still get a usable session
@@ -6517,7 +6545,8 @@ def ml_data_analytics():
 
     place_rules_record = None
     try:
-        place_rules_record = place_bet.performance_all(db.session, date_from=date_from or None, date_to=date_to or None)
+        place_rules_record = _ml_data_cached('place_rules', filter_key, lambda: place_bet.performance_all(
+            db.session, date_from=date_from or None, date_to=date_to or None))
     except Exception as e:
         db.session.rollback()
         logger.warning("Error calculating place rules record: %s", e, exc_info=True)
@@ -6525,13 +6554,15 @@ def ml_data_analytics():
     betfair_reality = None
     try:
         import betfair_check
-        betfair_reality = betfair_check.pick_type_results(db.session, date_from=date_from, date_to=date_to)
+        betfair_reality = _ml_data_cached('betfair_reality', filter_key, lambda: betfair_check.pick_type_results(
+            db.session, date_from=date_from, date_to=date_to))
     except Exception as e:
         db.session.rollback()
         logger.warning("Error calculating Betfair reality check: %s", e, exc_info=True)
 
     import data_checks
     data_check_failures = data_checks.latest_failures(db.session)
+    logger.info("ML_DATA_TIMING section=page_total seconds=%.2f", _time.time() - page_started)
 
     return render_template("ml_data.html",
         data_check_failures=data_check_failures,

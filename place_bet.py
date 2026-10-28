@@ -258,6 +258,7 @@ def settled_picks(session, date_from=None, date_to=None):
                 'place_bsp': row['place_bsp'] if row['place_bsp'] and row['place_bsp'] > 1 else None,
                 'live': rule.key in recorded and pre_race,
                 'horse_id': row['horse_id'],
+                'race_id': row['race_id'],
                 'start': start,
             }))
     _add_ladbrokes_place_prices(session, [item for _rule, item in out])
@@ -275,16 +276,23 @@ def _add_ladbrokes_place_prices(session, items):
         item['ladbrokes_place'] = None
     if not wanted:
         return
-    ids = sorted(wanted)
+    # Look up by race first: the snapshot index starts with race_id, so a
+    # horse_id-only filter would read the whole odds history.
+    pairs = sorted({(item['race_id'], item['horse_id']) for item in items if item['horse_id'] in wanted})
     prices = {}
     try:
-        for start in range(0, len(ids), 500):
-            chunk = ids[start:start + 500]
-            names = ', '.join(f':h{i}' for i in range(len(chunk)))
+        for start in range(0, len(pairs), 500):
+            chunk = pairs[start:start + 500]
+            params = {}
+            for i, (race_id, horse_id) in enumerate(chunk):
+                params[f'r{i}'] = race_id
+                params[f'h{i}'] = horse_id
+            races = ', '.join(f':r{i}' for i in range(len(chunk)))
+            horses = ', '.join(f':h{i}' for i in range(len(chunk)))
             rows = session.execute(text(
                 f'SELECT horse_id, place_odds, captured_at FROM live_odds_snapshots '
-                f'WHERE place_odds > 1 AND horse_id IN ({names}) ORDER BY captured_at'),
-                {f'h{i}': h for i, h in enumerate(chunk)}).mappings()
+                f'WHERE race_id IN ({races}) AND horse_id IN ({horses}) AND place_odds > 1 '
+                f'ORDER BY captured_at'), params).mappings()
             for row in rows:
                 prices.setdefault(row['horse_id'], []).append((row['captured_at'], row['place_odds']))
     except Exception:
