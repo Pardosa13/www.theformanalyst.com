@@ -5,26 +5,27 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 import app as appmod
 
 
-def _race(fin, sp, place_bsp, placed):
-    return {'race_id': 1, 'top_analyzer_horse_id': 1, 'top_ml_horse_id': 1,
-            'finish_position': fin, 'sp': sp, 'place_bsp': place_bsp, 'bf_placed': placed}
+def _race(fin, place_bsp, placed, ladbrokes=None):
+    return {'race_id': 1, 'top_analyzer_horse_id': 1, 'top_ml_horse_id': 1, 'finish_position': fin,
+            'sp': 3.0, 'place_bsp': place_bsp, 'bf_placed': placed, 'ladbrokes_place': ladbrokes}
 
 
-def test_top_pick_place_bet_settles_at_betfair_place_sp():
+def test_top_pick_place_bet_uses_betfair_then_ladbrokes():
     stats = appmod._summarise_ml_performance_races([
-        _race(1, 3.0, 1.5, True),     # placed: (1.5 - 1) * 0.92 * 10 = +4.60
-        _race(3, 5.0, 2.0, False),    # 3rd in a 6-runner race: no place, -10
-        _race(2, 4.0, None, True),    # no place price yet: not counted
+        _race(1, 1.5, True),            # Betfair: (1.5 - 1) * 0.92 * 10 = +4.60
+        _race(3, None, False, 2.0),     # 3rd in a 6-runner race: a loss, -10
+        _race(2, None, True, 1.8),      # Ladbrokes stand-in: +8.00
+        _race(2, None, True),           # placed, no price at all: left out
     ])
-    assert stats['place_priced_bets'] == 2
-    assert stats['place_priced_placed'] == 1
-    assert round(stats['place_profit'], 2) == -5.40
-    assert round(stats['place_roi'], 1) == -27.0
-    assert stats['avg_place_bsp'] == 1.75
-    assert stats['avg_placed_place_bsp'] == 1.5
+    assert stats['place_bets'] == 3
+    assert stats['place_waiting'] == 1
+    assert round(stats['place_profit'], 2) == 2.60
+    assert round(stats['place_roi'], 1) == 8.7
+    assert round(stats['avg_place_price'], 2) == round((1.5 + 2.0 + 1.8) / 3, 2)
 
 
-def test_no_place_prices_gives_no_place_roi():
-    stats = appmod._summarise_ml_performance_races([_race(1, 3.0, None, True)])
-    assert stats['place_priced_bets'] == 0
-    assert stats['place_roi'] is None
+def test_no_place_prices_still_counts_losses():
+    stats = appmod._summarise_ml_performance_races([_race(5, None, False)])
+    assert stats['place_bets'] == 1
+    assert stats['place_profit'] == -10.0
+    assert stats['avg_place_price'] is None

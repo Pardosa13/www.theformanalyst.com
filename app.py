@@ -3286,6 +3286,7 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
             m.date AS meeting_date,
             m.uploaded_at AS meeting_uploaded_at,
             rc.race_number,
+            rc.start_time_utc,
             MAX(r.recorded_at) OVER (PARTITION BY rc.id) AS latest_result_at,
             p.score AS analyzer_score,
             p.ml_score,
@@ -3343,7 +3344,16 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
             # runners, 2 for 5-7), for the $10 place bet on the same pick.
             'place_bsp': float(top_m.place_bsp) if top_m.place_bsp and top_m.place_bsp > 1 else None,
             'bf_placed': top_m.finish_position <= place_bet.places_paid(int(top_m.starters or 0)),
+            'start': top_m.start_time_utc,
         })
+
+    # Until the monthly Betfair file arrives, the last Ladbrokes fixed place
+    # price before the jump stands in for the place price.
+    unpriced = [{'race_id': r['race_id'], 'horse_id': r['top_ml_horse_id'], 'start': r['start']}
+                for r in race_results if not r['place_bsp']]
+    ladbrokes = place_bet.ladbrokes_place_prices(db.session, unpriced)
+    for r in race_results:
+        r['ladbrokes_place'] = None if r['place_bsp'] else ladbrokes.get(r['top_ml_horse_id'])
 
     race_results.sort(
         key=lambda r: (
@@ -3749,15 +3759,27 @@ def _summarise_ml_performance_races(race_results):
     roi = (total_profit / total_stake * 100) if total_stake else 0.0
     agree = sum(1 for r in race_results if r['top_analyzer_horse_id'] == r['top_ml_horse_id'])
 
-    # $10 place bet on the same pick at Betfair place SP, after commission.
-    # Only picks with a Betfair place price count; prices arrive monthly.
-    priced = [r for r in race_results if r.get('place_bsp')]
-    place_won = [r for r in priced if r.get('bf_placed')]
-    place_profit = sum(
-        (r['place_bsp'] - 1) * (1 - place_bet.COMMISSION) * stake if r.get('bf_placed') else -stake
-        for r in priced
-    )
-    place_staked = len(priced) * stake
+    # $10 place bet on the same pick. A loss is -$10 whatever the price. A
+    # place pays at Betfair place SP after commission, or at the Ladbrokes
+    # fixed place price until the Betfair file arrives. A place with neither
+    # price is left out until one arrives.
+    place_bets, place_profit, place_waiting, place_prices = 0, 0.0, 0, []
+    for r in race_results:
+        price = r.get('place_bsp') or r.get('ladbrokes_place')
+        if price:
+            place_prices.append(price)
+        if not r.get('bf_placed'):
+            place_bets += 1
+            place_profit -= stake
+        elif r.get('place_bsp'):
+            place_bets += 1
+            place_profit += (r['place_bsp'] - 1) * (1 - place_bet.COMMISSION) * stake
+        elif r.get('ladbrokes_place'):
+            place_bets += 1
+            place_profit += (r['ladbrokes_place'] - 1) * stake
+        else:
+            place_waiting += 1
+    place_staked = place_bets * stake
 
     return {
         'selections': selections,
@@ -3772,13 +3794,11 @@ def _summarise_ml_performance_races(race_results):
         'roi': roi,
         'agree_rate': (agree / selections * 100) if selections else 0.0,
         'avg_winner_sp': (sum(winning_sps) / len(winning_sps)) if winning_sps else 0.0,
-        'place_priced_bets': len(priced),
-        'place_priced_placed': len(place_won),
-        'place_priced_rate': (len(place_won) / len(priced) * 100) if priced else None,
+        'place_bets': place_bets,
+        'place_waiting': place_waiting,
         'place_profit': place_profit,
         'place_roi': (place_profit / place_staked * 100) if place_staked else None,
-        'avg_place_bsp': (sum(r['place_bsp'] for r in priced) / len(priced)) if priced else None,
-        'avg_placed_place_bsp': (sum(r['place_bsp'] for r in place_won) / len(place_won)) if place_won else None,
+        'avg_place_price': (sum(place_prices) / len(place_prices)) if place_prices else None,
     }
 
 
