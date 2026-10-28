@@ -3280,7 +3280,7 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
         params["date_to"] = date_to
     extra_where = " AND " + " AND ".join(filters) if filters else ""
 
-    rows = db.session.execute(text(f"""
+    sql = f"""
         SELECT
             rc.id AS race_id,
             m.date AS meeting_date,
@@ -3291,12 +3291,17 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
             p.ml_score,
             h.id AS horse_id,
             r.finish_position,
-            r.sp
+            r.sp,
+            r.place_bsp,
+            s.starters
         FROM predictions p
         JOIN horses h ON h.id = p.horse_id
         JOIN races rc ON rc.id = h.race_id
         JOIN meetings m ON m.id = rc.meeting_id
         JOIN results r ON r.horse_id = h.id
+        JOIN (SELECT h2.race_id, COUNT(*) AS starters FROM horses h2
+              JOIN results r2 ON r2.horse_id = h2.id WHERE r2.finish_position > 0
+              GROUP BY h2.race_id) s ON s.race_id = rc.id
         WHERE p.ml_score IS NOT NULL
           AND {ml_pre_race_sql('p', 'rc')}
           AND rc.results_incomplete IS NOT TRUE
@@ -3305,7 +3310,13 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
           AND r.finish_position > 0
           AND r.sp IS NOT NULL
           {extra_where}
-    """), params).fetchall()
+    """
+    try:
+        rows = db.session.execute(text(sql), params).fetchall()
+    except Exception:
+        # Before bsp_import has added results.place_bsp there is no place price.
+        db.session.rollback()
+        rows = db.session.execute(text(sql.replace('r.place_bsp', 'NULL AS place_bsp')), params).fetchall()
 
     from collections import defaultdict
     races = defaultdict(list)
@@ -3328,6 +3339,10 @@ def _build_ml_performance_race_results(track_filter="", date_from="", date_to=""
             'top_ml_horse_id': top_m.horse_id,
             'finish_position': top_m.finish_position,
             'sp': float(top_m.sp or 0),
+            # Betfair place SP and whether the place bet won (3 places for 8+
+            # runners, 2 for 5-7), for the $10 place bet on the same pick.
+            'place_bsp': float(top_m.place_bsp) if top_m.place_bsp and top_m.place_bsp > 1 else None,
+            'bf_placed': top_m.finish_position <= place_bet.places_paid(int(top_m.starters or 0)),
         })
 
     race_results.sort(
@@ -3734,6 +3749,16 @@ def _summarise_ml_performance_races(race_results):
     roi = (total_profit / total_stake * 100) if total_stake else 0.0
     agree = sum(1 for r in race_results if r['top_analyzer_horse_id'] == r['top_ml_horse_id'])
 
+    # $10 place bet on the same pick at Betfair place SP, after commission.
+    # Only picks with a Betfair place price count; prices arrive monthly.
+    priced = [r for r in race_results if r.get('place_bsp')]
+    place_won = [r for r in priced if r.get('bf_placed')]
+    place_profit = sum(
+        (r['place_bsp'] - 1) * (1 - place_bet.COMMISSION) * stake if r.get('bf_placed') else -stake
+        for r in priced
+    )
+    place_staked = len(priced) * stake
+
     return {
         'selections': selections,
         'races': selections,
@@ -3747,6 +3772,13 @@ def _summarise_ml_performance_races(race_results):
         'roi': roi,
         'agree_rate': (agree / selections * 100) if selections else 0.0,
         'avg_winner_sp': (sum(winning_sps) / len(winning_sps)) if winning_sps else 0.0,
+        'place_priced_bets': len(priced),
+        'place_priced_placed': len(place_won),
+        'place_priced_rate': (len(place_won) / len(priced) * 100) if priced else None,
+        'place_profit': place_profit,
+        'place_roi': (place_profit / place_staked * 100) if place_staked else None,
+        'avg_place_bsp': (sum(r['place_bsp'] for r in priced) / len(priced)) if priced else None,
+        'avg_placed_place_bsp': (sum(r['place_bsp'] for r in place_won) / len(place_won)) if place_won else None,
     }
 
 
