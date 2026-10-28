@@ -196,3 +196,16 @@ def test_scratchings_refresh_keeps_the_latest_past_start():
     assert appmod._is_later_form_row(new, old)
     assert not appmod._is_later_form_row(old, new)
     assert appmod._is_later_form_row(old, None)
+
+
+def test_chart_counts_losses_now_and_estimates_places_until_betfair_arrives():
+    base = {'place_bsp': None, 'placed': False, 'ladbrokes_place': None}
+    # A loss is -$10 whatever the price.
+    assert place_bet._chart_profit(dict(base)) == (-10.0, False)
+    # A place with a Betfair price uses it, after commission.
+    profit, est = place_bet._chart_profit(dict(base, placed=True, place_bsp=1.5))
+    assert round(profit, 2) == 4.60 and est is False
+    # No Betfair price yet: Ladbrokes stands in, marked as an estimate.
+    assert place_bet._chart_profit(dict(base, placed=True, ladbrokes_place=1.8)) == (8.0, True)
+    # No price at all: left off the chart for now.
+    assert place_bet._chart_profit(dict(base, placed=True)) is None

@@ -257,8 +257,64 @@ def settled_picks(session, date_from=None, date_to=None):
                 'placed': row['fin'] <= places_paid(int(row['starters'] or 0)),
                 'place_bsp': row['place_bsp'] if row['place_bsp'] and row['place_bsp'] > 1 else None,
                 'live': rule.key in recorded and pre_race,
+                'horse_id': row['horse_id'],
+                'start': start,
             }))
+    _add_ladbrokes_place_prices(session, [item for _rule, item in out])
     return out
+
+
+def _add_ladbrokes_place_prices(session, items):
+    """Set item['ladbrokes_place'] on placed bets that have no Betfair place price yet.
+
+    It is the last Ladbrokes fixed place price saved before the jump. The chart
+    uses it as a stand-in until the monthly Betfair file arrives.
+    """
+    wanted = {item['horse_id'] for item in items if item['placed'] and not item['place_bsp']}
+    for item in items:
+        item['ladbrokes_place'] = None
+    if not wanted:
+        return
+    ids = sorted(wanted)
+    prices = {}
+    try:
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            names = ', '.join(f':h{i}' for i in range(len(chunk)))
+            rows = session.execute(text(
+                f'SELECT horse_id, place_odds, captured_at FROM live_odds_snapshots '
+                f'WHERE place_odds > 1 AND horse_id IN ({names}) ORDER BY captured_at'),
+                {f'h{i}': h for i, h in enumerate(chunk)}).mappings()
+            for row in rows:
+                prices.setdefault(row['horse_id'], []).append((row['captured_at'], row['place_odds']))
+    except Exception:
+        # No odds table (e.g. a fresh database): no stand-in prices.
+        session.rollback()
+        return
+    for item in items:
+        if item['horse_id'] not in wanted:
+            continue
+        snaps = prices.get(item['horse_id'], [])
+        if item['start']:
+            snaps = [s for s in snaps if s[0] and s[0] <= item['start']]
+        if snaps:
+            item['ladbrokes_place'] = float(snaps[-1][1])
+
+
+def _chart_profit(item):
+    """(profit, estimated) for one chart bet, or None while its place price is unknown.
+
+    A losing bet costs the stake whatever the price, so it counts straight away.
+    A placed bet uses the Betfair place price; until that arrives, the Ladbrokes
+    fixed place price stands in (no commission) and is marked as an estimate.
+    """
+    if item['place_bsp']:
+        return _profit(item), False
+    if not item['placed']:
+        return -STAKE, False
+    if item.get('ladbrokes_place'):
+        return (item['ladbrokes_place'] - 1) * STAKE, True
+    return None
 
 
 def _bsp_through(session):
@@ -293,15 +349,17 @@ def performance_all(session, date_from=None, date_to=None):
         items = by_rule.get(rule.key, [])
         history = _summary(items, 'Every past runner that fits')
         live = _summary([i for i in items if i['live']], f'Live, on Best Bets before the jump (from {LIVE_START:%d %b %Y})')
-        cumulative, series = 0.0, []
+        cumulative, series, waiting = 0.0, [], 0
         for item in items:
-            if not item['place_bsp']:
+            settled = _chart_profit(item)
+            if settled is None:
+                waiting += 1
                 continue
-            profit = _profit(item)
+            profit, estimated = settled
             cumulative += profit
             series.append({'date': item['date'], 'race': item['race'], 'meeting': item['meeting'],
                            'horse': item['horse'], 'won': item['placed'], 'profit': round(profit, 2),
-                           'cumulative': round(cumulative, 2)})
+                           'cumulative': round(cumulative, 2), 'estimate': estimated})
         months = defaultdict(list)
         for item in items:
             months[item['date'][:7]].append(item)
@@ -309,7 +367,7 @@ def performance_all(session, date_from=None, date_to=None):
             'key': rule.key, 'name': rule.name, 'short': rule.short, 'audit': rule.audit,
             'history': history, 'live': live,
             'months': [_summary(v, k) for k, v in sorted(months.items(), reverse=True) if k],
-            'chart': {'label': rule.short, 'history': series},
+            'chart': {'label': rule.short, 'history': series, 'waiting': waiting},
         })
     bsp_through = _bsp_through(session)
     result = {
