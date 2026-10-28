@@ -303,7 +303,8 @@ def _wf_summary(res):
     return bets, (100 * profit / bets if bets else float("nan")), (profit / np.sqrt(var) if var > 0 else float("nan"))
 
 
-def run(ctx):
+def prepare(ctx, report=True):
+    """Runners, conditions, bet returns and no-edge worlds shared by the sweep's tasks."""
     d = frame.build(ctx)
     d = d[d.mkt_p.notna() & (d.date >= START)].reset_index(drop=True)
     d = bf_files.attach(d, MONTHS)
@@ -317,19 +318,12 @@ def run(ctx):
     d["place_q"] = np.where(has_pb & (n_pb == d.field.values), np.clip(ip / book * k, 1e-4, 0.999), np.nan)
     # Place bets only where the whole race has place prices (same set for real and luck tests).
     d.loc[d.place_q.isna(), ["ret_place", "ret_place_lay"]] = np.nan
-    months = d.date.dt.to_period("M")
-    emit("sweep3", f"runners={len(d)} races={d.race_id.nunique()} {d.date.min().date()}..{d.date.max().date()} "
-                   f"place_priced={has_pb.mean():.2f} months={months.value_counts().sort_index().to_dict()}")
-    emit("sweep3", "overall ROI: back win={:.2f}% lay win={:.2f}% back place={:.2f}% lay place={:.2f}%".format(
-        100 * d.ret_bsp.mean(), 100 * d.ret_lay.mean(), 100 * np.nanmean(d.ret_place), 100 * np.nanmean(d.ret_place_lay)))
-
-    calib(ctx, d)
-    mlist = sorted(months.unique())
-    split = mlist[int(len(mlist) * 0.6)].to_timestamp()
-    try:
-        harville_part(ctx, d, split)
-    except Exception as e:
-        emit("sweep3.harville", f"#ERROR {type(e).__name__}: {e}")
+    if report:
+        months = d.date.dt.to_period("M")
+        emit("sweep3", f"runners={len(d)} races={d.race_id.nunique()} {d.date.min().date()}..{d.date.max().date()} "
+                       f"place_priced={has_pb.mean():.2f} months={months.value_counts().sort_index().to_dict()}")
+        emit("sweep3", "overall ROI: back win={:.2f}% lay win={:.2f}% back place={:.2f}% lay place={:.2f}%".format(
+            100 * d.ret_bsp.mean(), 100 * d.ret_lay.mean(), 100 * np.nanmean(d.ret_place), 100 * np.nanmean(d.ret_place_lay)))
 
     conds = {}
     conds.update(base_conditions(d))
@@ -362,6 +356,18 @@ def run(ctx):
             "back place": np.where(np.isnan(d.ret_place.values), np.nan, np.where(placed, (pb - 1) * KEEP, -1.0)),
             "lay place": np.where(np.isnan(d.ret_place.values), np.nan, np.where(placed, -(pb - 1), KEEP)),
         })
+    return d, names, M, bets, fakes
+
+
+def run(ctx):
+    d, names, M, bets, fakes = prepare(ctx)
+    calib(ctx, d)
+    mlist = sorted(d.date.dt.to_period("M").unique())
+    split = mlist[int(len(mlist) * 0.6)].to_timestamp()
+    try:
+        harville_part(ctx, d, split)
+    except Exception as e:
+        emit("sweep3.harville", f"#ERROR {type(e).__name__}: {e}")
 
     for label, (ret, var) in bets.items():
         res, seen = walk_forward(d, names, M, ret, var)
