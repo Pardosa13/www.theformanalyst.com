@@ -610,7 +610,8 @@
       <div id="placePnlButtons" class="d-flex flex-wrap gap-2 mb-3"></div>
       <canvas id="placeRulesPnlChart" height="140"></canvas>
       <script type="application/json" id="placeRulesHistory">{{ place_rules_record.rules|map(attribute='chart')|list|tojson }}</script>
-      <p class="text-muted mt-2" style="font-size:12px">Only bets with a Betfair place price are charted. Tap a rule to turn it on or off. Tap All to show every rule together.</p>
+      <p class="text-muted mt-2" style="font-size:12px">Every settled bet is charted. A loss is &minus;$10 straight away. A place uses the Betfair place price; until that arrives, the Ladbrokes place price stands in (marked estimate in the tooltip). Tap a rule to turn it on or off. Tap All to show every rule together.
+        {% set waiting = place_rules_record.rules|map(attribute='chart.waiting')|sum %}{% if waiting %}<strong>{{ waiting }} placed bet{{ 's' if waiting != 1 }} not charted yet</strong>: no Betfair or Ladbrokes place price.{% endif %}</p>
       {% endif %}
     </div>
   </div>
@@ -987,7 +988,7 @@ function renderSignalPnl(prefix, dataId, canvasId, opts) {
                             label: ctx => ` ${ctx.dataset.label}: ${money(ctx.parsed.y)}`,
                             afterLabel: ctx => {
                                 const h = shown[ctx.datasetIndex].history[ctx.dataIndex];
-                                return ` ${h.date} | R${h.race} ${h.meeting}${h.horse ? ' | ' + h.horse : ''} | ${h.won ? opts.wonWord : 'Lost'} ${money(h.profit)}`;
+                                return ` ${h.date} | R${h.race} ${h.meeting}${h.horse ? ' | ' + h.horse : ''} | ${h.won ? opts.wonWord : 'Lost'} ${money(h.profit)}${h.estimate ? ' (Ladbrokes price, estimate)' : ''}`;
                             }
                         }
                     }
