@@ -501,6 +501,26 @@ def main(argv=None):
     summary = {'imported': [], 'rescored': [], 'ml_scored': 0, 'errors': 0, 'ml_note': None}
     with app.app_context():
         run_pass(app, day, summary)
+        # Data repair + checks (data_checks.py): saved horse data must match
+        # the form. Repairs any horse whose saved last start is an older run
+        # (once for everything since 1 Oct 2026, then today's meetings every
+        # pass) and re-scores ML for races still to run. Never fatal.
+        try:
+            from app import db as _db
+            import data_checks
+            from models import Meeting
+            from scoring_integrity import race_has_started
+            data_checks.backfill_once(_db.session)
+            for meeting in Meeting.query.filter(Meeting.date == day).all():
+                if data_checks.repair_meeting(_db.session, meeting):
+                    _db.session.commit()
+                    log.info('DATA_REPAIR %s: last-start fields fixed, re-scoring ML', meeting.meeting_name)
+                    if open_races(meeting, race_has_started):
+                        score_ml(_db, meeting, summary)
+            data_checks.run_and_save(_db.session, day, alert=alert)
+        except Exception as exc:
+            _db.session.rollback()
+            log.warning('Data repair/checks failed to run: %s', exc)
         if summary['imported']:
             from app import db
             morning_summary(day, summary, db)

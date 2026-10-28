@@ -1,0 +1,13 @@
+{# Red warning when the latest daily data check failed (data_checks.py). #}
+{% if data_check_failures %}
+<div class="alert alert-danger" role="alert" style="margin-bottom:16px">
+  <strong>⚠️ Data check failed — don't trust today's picks until it's fixed.</strong>
+  {% for f in data_check_failures %}
+  <div style="margin-top:6px">
+    {% if f.name == 'last_start_position' %}Saved last-start position doesn't match the form string{% elif f.name == 'last_start_date' %}Saved last start isn't the horse's newest run{% else %}{{ f.name }}{% endif %}:
+    only {{ f.pct_ok }}% of {{ f.checked }} runners correct on {{ f.day }}.
+    {% if f.examples %}<div style="font-size:12px;opacity:.85">e.g. {{ f.examples[:3]|join(' · ') }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
