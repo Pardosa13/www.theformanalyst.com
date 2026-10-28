@@ -38,8 +38,22 @@ def _csv(horse_or_value):
 
 
 def last_start_position(horse_or_csv):
+    """Finish position at the horse's most recent start.
+
+    Read from the 'horse last10' form string, whose right-most digit is the
+    latest run ('x' marks a spell, '0' is 10th or worse). The saved
+    'form position' field held an older run for many horses (fixed 28 Oct
+    2026), so it is only a fallback.
+    """
+    csv_data = _csv(horse_or_csv)
+    last10 = str(csv_data.get('horse last10') or getattr(horse_or_csv, 'form', '') or '').strip().lower().rstrip('x')
+    if last10:
+        ch = last10[-1]
+        if ch.isdigit():
+            return 10 if ch == '0' else int(ch)
+        return None
     try:
-        return int(float(_csv(horse_or_csv).get('form position')))
+        return int(float(csv_data.get('form position')))
     except (TypeError, ValueError):
         return None
 

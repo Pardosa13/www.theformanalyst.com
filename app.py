@@ -1390,6 +1390,18 @@ def _extract_v2_scratched_set(items, track_name):
     return scratched_set, debug_rows
 
 
+def _is_later_form_row(row, current):
+    """True when `row` is a more recent past start than `current` (or there is none)."""
+    if current is None:
+        return True
+    from past_runs import parse_date
+    new_date = parse_date(row.get('form meeting date'))
+    old_date = parse_date(current.get('form meeting date'))
+    if new_date is None:
+        return False
+    return old_date is None or new_date > old_date
+
+
 def _scratch_key(race_number, horse_name):
     """Scratchings belong to one race. Key them by race number AND name, so a
     horse entered in two races at a meeting is only scratched where it was."""
@@ -5009,7 +5021,12 @@ def _update_scratchings_impl(meeting_id, track_condition=None):
             norm = normalize_runner_name(row.get('horse name', ''))
             race_num = str(row.get('race number', '')).strip()
             if race_num and norm:
-                fresh_csv_lookup[(race_num, norm)] = row
+                # One row per past start: keep the LATEST start, as the analyzer
+                # does. Keeping the last row in the file stored an older run as
+                # "last start" for most horses re-scored since March 2026.
+                key = (race_num, norm)
+                if _is_later_form_row(row, fresh_csv_lookup.get(key)):
+                    fresh_csv_lookup[key] = row
 
             if scratchings_snapshot_loaded:
                 # The official snapshot is authoritative. Do not let stale

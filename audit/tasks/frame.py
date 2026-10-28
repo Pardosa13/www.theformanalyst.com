@@ -59,6 +59,13 @@ def _record(s):
     return n, w
 
 
+def _last_from_last10(last10):
+    s = str(last10 or "").strip().lower().rstrip("x")
+    if not s or not s[-1].isdigit():
+        return np.nan
+    return 10.0 if s[-1] == "0" else float(s[-1])
+
+
 def _nth_up(last10, starts):
     """Run number in the current preparation (1 = first up). 'x' marks a spell."""
     s = str(last10 or "").strip().lower()
@@ -121,7 +128,10 @@ def build(ctx):
     rec = g("horse record").map(_record)
     df["career_starts"] = rec.map(lambda t: t[0])
     df["career_wins"] = rec.map(lambda t: t[1])
-    df["last_pos"] = g("form position").map(_num)
+    # The saved 'form position' often held an older run (bug fixed 28 Oct 2026),
+    # so last start comes from the right-most digit of the last10 string.
+    df["last_pos_saved"] = g("form position").map(_num)
+    df["last_pos"] = df["last10"].map(_last_from_last10)
     df["last_price"] = g("form price").map(_num)
     df["last_margin"] = g("form margin").map(_num)
     df["last_dist"] = g("form distance").map(_num)

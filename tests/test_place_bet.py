@@ -105,3 +105,19 @@ def test_places_paid_follow_betfair_rules():
 def test_win_track_record_leaves_place_bets_out():
     import betfair_check
     assert "place_2nd_light" in betfair_check._BEST_BET_BASE
+
+
+def test_last_start_comes_from_the_right_end_of_the_form_string():
+    # Right-most digit is the latest run; 'x' marks a spell.
+    assert place_bet.last_start_position({'horse last10': '2x3173534', 'form position': '2'}) == 4
+    assert place_bet.last_start_position({'horse last10': '22315x20262'}) == 2
+    assert place_bet.last_start_position({'horse last10': '12x'}) == 2
+    assert place_bet.last_start_position({'horse last10': '310'}) == 10
+
+
+def test_scratchings_refresh_keeps_the_latest_past_start():
+    old = {'form meeting date': '07/11/25', 'form position': '2'}
+    new = {'form meeting date': '08/10/26', 'form position': '4'}
+    assert appmod._is_later_form_row(new, old)
+    assert not appmod._is_later_form_row(old, new)
+    assert appmod._is_later_form_row(old, None)
