@@ -573,16 +573,54 @@
   </div>
 </div>
 
-<!-- Place Bet route (place_bet.py): settled on the place at Betfair place SP. -->
-{% if place_bet_record %}
+<!-- Place rules (place_bet.py): the only Best Bets. Settled on the place at Betfair place SP. -->
+{% if place_rules_record %}
 <div class="section-card">
-  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlPlaceBet" aria-expanded="true">
-    <h5>🥉 Place Bet: 2nd Last Start + 2&ndash;3kg Under the Field ($10 Place)</h5><i class="bi bi-chevron-down"></i>
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlPlaceRules" aria-expanded="true">
+    <h5>🥉 Place Rules: Every Best Bet ($10 Place, Betfair Place SP)</h5><i class="bi bi-chevron-down"></i>
   </div>
-  <div id="mlPlaceBet" class="collapse show">
+  <div id="mlPlaceRules" class="collapse show">
     <div class="card-body">
-      <p class="text-muted mb-2">The one pattern from the 27 Oct edge hunt that held up on unseen months: Feb&ndash;Jun +27% on 337 bets, Jul&ndash;Sep +52% on 202 bets. The live row is the real test.</p>
-      {% include "_place_bet_record.html" %}
+      <p class="text-muted mb-2">The six place rules from the 28 Oct 2026 audit: every condition and pair tested Feb&ndash;Sep 2026 against made-up worlds with no edge (24 place patterns passed, luck alone gave 1&ndash;5).
+        &ldquo;History&rdquo; is every settled runner that fits a rule. &ldquo;Live&rdquo; counts only picks shown on Best Bets before the jump, from 28 Oct 2026 &mdash; that is the real test.
+        Placed = top 3 with 8+ runners, top 2 with 5&ndash;7. ${{ "%.0f"|format(place_rules_record.stake) }} bets after {{ "%.0f"|format(place_rules_record.commission_pct) }}% commission.
+        Betfair place prices arrive monthly{% if place_rules_record.place_bsp_through %} (loaded up to {{ place_rules_record.place_bsp_through }}){% endif %}, so newer bets show a place % before they show a profit.</p>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead><tr><th>Rule</th><th>Feb&ndash;Sep test</th><th></th><th>Bets</th><th>Placed</th><th>Place %</th><th>Priced</th><th>Profit</th><th>ROI</th></tr></thead>
+          <tbody>
+          {% for r in place_rules_record.rules %}
+            {% for row in [r.history, r.live] %}
+            <tr>
+              {% if loop.first %}<td rowspan="2"><strong>{{ r.name }}</strong></td><td rowspan="2" class="text-muted" style="font-size:12px">{{ r.audit }}</td>{% endif %}
+              <td style="font-size:12px">{{ 'History' if loop.first else 'Live' }}</td>
+              <td>{{ row.bets }}</td><td>{{ row.placed }}</td><td>{% if row.bets %}{{ "%.1f"|format(row.place_rate) }}%{% else %}&ndash;{% endif %}</td>
+              <td>{{ row.priced_bets }}</td>
+              <td class="{% if row.priced_bets and row.profit >= 0 %}profit{% elif row.priced_bets %}loss{% endif %}">{% if row.priced_bets %}{{ "%+.2f"|format(row.profit) }}{% else %}&ndash;{% endif %}</td>
+              <td class="{% if row.roi is not none and row.roi >= 0 %}profit{% elif row.roi is not none %}loss{% endif %}">{% if row.roi is not none %}{{ "%+.1f"|format(row.roi) }}%{% else %}&ndash;{% endif %}</td>
+            </tr>
+            {% endfor %}
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% set charted = place_rules_record.rules|selectattr('chart.history')|list %}
+      {% if charted %}
+      <div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+        <div>
+          <h5 style="margin:0;color:var(--ml-accent)">Cumulative P&amp;L by Place Rule</h5>
+          <p class="text-muted" style="font-size:12px;margin:0" id="placePnlSubtitle">$10 place bets</p>
+        </div>
+        <div style="text-align:right">
+          <span id="placePnlTotal" style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace"></span>
+          <div id="placePnlBets" style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em"></div>
+        </div>
+      </div>
+      <div id="placePnlButtons" class="d-flex flex-wrap gap-2 mb-3"></div>
+      <canvas id="placeRulesPnlChart" height="140"></canvas>
+      <script type="application/json" id="placeRulesHistory">{{ place_rules_record.rules|map(attribute='chart')|list|tojson }}</script>
+      <p class="text-muted mt-2" style="font-size:12px">Only bets with a Betfair place price are charted. Pick one rule, or Compare all.</p>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -874,13 +912,14 @@
 <script>
 // Cumulative P&L chart, one line per signal. Shared by the Best Bets route
 // chart and the live top-pick value test chart.
-function renderSignalPnl(prefix, dataId, canvasId) {
+function renderSignalPnl(prefix, dataId, canvasId, opts) {
+    opts = Object.assign({ betWord: 'win', wonWord: 'WON', startAll: false }, opts || {});
     const dataEl = document.getElementById(dataId);
     const canvas = document.getElementById(canvasId);
     if (!dataEl || !canvas || typeof Chart === 'undefined') return;
     const signals = JSON.parse(dataEl.textContent).filter(s => s.history && s.history.length);
     if (!signals.length) return;
-    const colours = ['#facc15', '#00e5b0', '#60a5fa', '#c084fc', '#fb923c'];
+    const colours = ['#facc15', '#00e5b0', '#60a5fa', '#c084fc', '#fb923c', '#f472b6', '#a3e635'];
     const buttonsEl = document.getElementById(prefix + 'Buttons');
     const totalEl = document.getElementById(prefix + 'Total');
     const betsEl = document.getElementById(prefix + 'Bets');
@@ -914,11 +953,11 @@ function renderSignalPnl(prefix, dataId, canvasId) {
             totalEl.textContent = money(final);
             totalEl.style.color = final >= 0 ? '#00e5b0' : '#f87171';
             betsEl.textContent = `${s.history.length} bets`;
-            subtitleEl.textContent = '$10 flat win bets on this signal';
+            subtitleEl.textContent = `$10 flat ${opts.betWord} bets on this ${opts.betWord === 'place' ? 'rule' : 'signal'}`;
         } else {
             totalEl.textContent = '';
-            betsEl.textContent = `${signals.length} signals`;
-            subtitleEl.textContent = 'All signals compared — oldest bet on the left';
+            betsEl.textContent = `${signals.length} ${opts.betWord === 'place' ? 'rules' : 'signals'}`;
+            subtitleEl.textContent = `All ${opts.betWord === 'place' ? 'rules' : 'signals'} compared — oldest bet on the left`;
         }
         buttonsEl.querySelectorAll('button').forEach(b => {
             const active = b.dataset.index === String(index);
@@ -951,7 +990,7 @@ function renderSignalPnl(prefix, dataId, canvasId) {
                             label: ctx => ` ${ctx.dataset.label}: ${money(ctx.parsed.y)}`,
                             afterLabel: ctx => {
                                 const h = shown[ctx.datasetIndex].history[ctx.dataIndex];
-                                return ` ${h.date} | R${h.race} ${h.meeting} | ${h.won ? 'WON' : 'Lost'} ${money(h.profit)}`;
+                                return ` ${h.date} | R${h.race} ${h.meeting}${h.horse ? ' | ' + h.horse : ''} | ${h.won ? opts.wonWord : 'Lost'} ${money(h.profit)}`;
                             }
                         }
                     }
@@ -976,9 +1015,10 @@ function renderSignalPnl(prefix, dataId, canvasId) {
     };
     signals.forEach((s, i) => addButton(s.label, i));
     if (signals.length > 1) addButton('Compare all', 'all');
-    show(0);
+    show(opts.startAll && signals.length > 1 ? 'all' : 0);
 }
 renderSignalPnl('signalPnl', 'ladbrokesSignalHistory', 'ladbrokesSignalPnlChart');
+renderSignalPnl('placePnl', 'placeRulesHistory', 'placeRulesPnlChart', { betWord: 'place', wonWord: 'PLACED', startAll: true });
 
 const loadedSections = new Set();
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[char]));

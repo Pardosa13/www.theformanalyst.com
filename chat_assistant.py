@@ -268,8 +268,8 @@ BACKTEST_TOOL = _tool(
     'component ROI, momentum analysis and the grid-searched models.', {})
 
 BEST_BETS_TOOL = _tool(
-    'get_best_bets', 'Admin only. Today\'s Best Bets qualifiers by the model rule: maiden races where Analyzer, '
-    'PFAI and ML all rank the same runner first. Live Ladbrokes market badges are on the Best Bets page.', {
+    'get_best_bets', 'Admin only. Today\'s Best Bets: runners that fit one of the place rules. '
+    'Every Best Bet is a PLACE bet, never a win bet.', {
         'date': {'type': 'string', 'description': 'YYYY-MM-DD. Default today.'},
     })
 
@@ -725,7 +725,7 @@ def class_change_stats(days=None):
 
 
 def get_best_bets(date=None, today=None):
-    from app import top_signal_horse_ids, signals_all_agree_top, is_maiden_race, parse_pfai_score_from_horse
+    import place_bet
     try:
         day = datetime.strptime(date, '%Y-%m-%d').date() if date else today
     except ValueError:
@@ -733,19 +733,18 @@ def get_best_bets(date=None, today=None):
     picks = []
     for meeting in Meeting.query.filter(Meeting.date == day).all():
         for race in sorted(meeting.races, key=lambda r: r.race_number):
-            if not is_maiden_race(race.race_class):
-                continue
-            top_ids = top_signal_horse_ids(race.horses)
             for h in race.horses:
-                if not h.is_scratched and signals_all_agree_top(h.id, top_ids):
+                rules = place_bet.matching_rules(h)
+                if rules:
                     picks.append({
                         'meeting': meeting.meeting_name, 'meeting_id': meeting.id,
                         'race_number': race.race_number, 'horse': h.horse_name,
-                        'analyzer_score': h.prediction.score, 'ml_score': h.prediction.ml_score,
-                        'pfai': parse_pfai_score_from_horse(h, h.prediction),
-                        'assessed_odds': h.prediction.predicted_odds,
+                        'bet': 'PLACE (not win)',
+                        'rules': [rule.name for rule in rules],
                     })
-    return {'date': day.isoformat() if day else None, 'rule': 'maiden race, Analyzer + PFAI + ML agree on top pick',
+    return {'date': day.isoformat() if day else None,
+            'rule': 'Place bets only: runners that fit one of the place rules on the Best Bets page',
+            'rules': [{'name': rule.name, 'feb_sep_test': rule.audit} for rule in place_bet.RULES],
             'picks': picks}
 
 

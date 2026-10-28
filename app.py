@@ -97,73 +97,6 @@ def is_maiden_race(race_class):
     return bool(MAIDEN_RACE_CLASS_RE.search(race_class or ''))
 
 
-# Analyzer + PFAI + ML all picking the same horse is a losing bet overall but
-# profitable in maiden races (ML Data > Maiden Race Split), so that combination
-# qualifies a horse for Best Bets. So does that same agreement when the horse
-# is also the live Ladbrokes favourite (Full Model + Market Consensus).
-MAIDEN_AGREEMENT_BADGE = '🏇 Maiden Agreement (Analyzer + PFAI + ML)'
-
-# Component-ROI badges shown on 3-way agreement horses. Names must match the
-# component names emitted by notes_parsing.parse_notes_components exactly.
-PROVEN_EDGE_BADGE = '🔥 Proven Edge'
-PROVEN_EDGE_PLUS_BADGE = '🔥🔥 Proven Edge+'
-WATCH_BADGE = '👀 Watch'
-PROVEN_EDGE_REASON = 'Qualified via Proven Edge'
-
-PROVEN_EDGE_COMPONENTS = (
-    'Trainer - Hot Form (L100 22%+ SR)',
-    'Weight vs Field - Below (2-3kg)',
-    'Career Win Rate - Elite 40%+',
-    'Weight Change - Dropped 3kg+',
-    'Running Position - Backmarker Mile',
-)
-WATCH_COMPONENTS = (
-    'Running Position - Midfield Staying',
-    'Interstate State Move - SA → VIC',
-)
-
-
-def _is_4yo_gelding(horse):
-    csv_data = getattr(horse, 'csv_data', None) or {}
-    if not isinstance(csv_data, dict):
-        return False
-    try:
-        age = int(float(csv_data.get('horse age')))
-    except (TypeError, ValueError):
-        return False
-    sex = str(csv_data.get('horse sex') or '').strip().lower()
-    return age == 4 and sex in ('gelding', 'g')
-
-
-def evaluate_component_edge_badges(horse, component_names):
-    """Return {badge_label: [signals]} for the Proven Edge / Watch badges.
-
-    At most one badge of each type; Proven Edge+ replaces Proven Edge.
-    """
-    names = set(component_names)
-    badges = {}
-
-    plus_signals = []
-    if 'Career Win Rate - Elite 40%+' in names and _is_4yo_gelding(horse):
-        plus_signals.append('Career Win Rate - Elite 40%+ + 4yo Gelding')
-    if 'Weight vs Field - Below (2-3kg)' in names and 'Track Win Rate - Exceptional (51%+)' in names:
-        plus_signals.append('Weight vs Field - Below (2-3kg) + Track Win Rate - Exceptional (51%+)')
-    if plus_signals:
-        badges[PROVEN_EDGE_PLUS_BADGE] = plus_signals
-    else:
-        edge_signals = [name for name in PROVEN_EDGE_COMPONENTS if name in names]
-        if edge_signals:
-            badges[PROVEN_EDGE_BADGE] = edge_signals
-
-    watch_signals = []
-    if 'Second Up - Has Won Second Up' in names and 'Specialist - Undefeated Condition' in names:
-        watch_signals.append('Second Up - Has Won Second Up + Specialist - Undefeated Condition')
-    watch_signals.extend(name for name in WATCH_COMPONENTS if name in names)
-    if watch_signals:
-        badges[WATCH_BADGE] = watch_signals
-    return badges
-
-
 def merge_best_bet_tracking(prediction, routes, edge_badges):
     """Record which routes qualified this Best Bet and which badges it had.
 
@@ -188,61 +121,16 @@ def merge_best_bet_tracking(prediction, routes, edge_badges):
         prediction.best_bet_qualified_at = datetime.utcnow()
 
 
-# Value Top Pick route: the ML top pick, when the model's win chance beats the
-# market's fair chance by at least this many points before the jump. Added on
-# 16 Oct 2026 from the live top-pick value test (ML Data page); the backtest's
-# top-pick cuts at +3 to +8 points were the only value rule that came out
-# ahead. Backing ANY runner with an edge lost 20-35%, so only the top pick
-# qualifies.
-VALUE_TOP_PICK_MIN_EDGE_PCT = 3.0
-VALUE_TOP_PICK_BADGE = '💰 Value Top Pick'
+def best_bet_routes_for_horse(horse, race=None, signal_top_ids=None, components=None):
+    """The Best Bets rule for one runner: the place rules in place_bet.RULES.
 
-
-def _value_top_pick_edge(horse, signal_top_ids):
-    """The stored pre-race edge (points) when this horse is the ML top pick
-    and the edge clears VALUE_TOP_PICK_MIN_EDGE_PCT, else None."""
-    if signal_top_ids.get('ml') != horse.id:
-        return None
-    edge = getattr(horse.prediction, 'value_edge_pct', None)
-    if edge is None or float(edge) < VALUE_TOP_PICK_MIN_EDGE_PCT:
-        return None
-    return float(edge)
-
-
-# Routes no longer used to qualify a Best Bet (24 Oct 2026 data audit). Their
-# pre-race picks lost at SP: Value Top Pick -45% on 187 bets (and value edge
-# lost more as the claimed edge grew, across 2,000+ bets); Maiden -32% on 60.
-# Their past results stay on the ML Data page. Remove a name to bring it back.
-RETIRED_BEST_BET_ROUTES = frozenset({'maiden', 'value_top_pick'})
-
-
-def best_bet_routes_for_horse(horse, race, signal_top_ids, components=None):
-    """The Best Bets qualifying rule for one runner.
-
-    Maiden and Proven Edge need Analyzer, PFAI and ML all to rank the horse
-    first, then a maiden race or a Proven Edge / Proven Edge+ badge. Value Top
-    Pick needs only the ML top pick with a big enough pre-race value edge.
-    Returns (routes, edge_badges, signal_agreement). Shared by the Best Bets
-    page and the daily run, so both record exactly the same routes.
+    Every Best Bet is a PLACE bet. The old win routes (Maiden, Proven Edge,
+    3-way agreement, Value Top Pick) were removed on 28 Oct 2026: their
+    pre-race picks lost money. Returns (routes, edge_badges, signal_agreement)
+    for older callers; the last two are always empty now. Shared by the Best
+    Bets page and the daily run, so both record exactly the same routes.
     """
-    routes = []
-    edge_badges = {}
-    signal_agreement = signals_all_agree_top(horse.id, signal_top_ids)
-    if signal_agreement:
-        if components is None:
-            components = parse_notes_component_matches(horse.prediction.notes)
-        edge_badges = evaluate_component_edge_badges(horse, [match['name'] for match in components.values()])
-        routes = [route for route, hit in (
-            ('maiden', is_maiden_race(race.race_class)),
-            ('proven_edge', PROVEN_EDGE_BADGE in edge_badges or PROVEN_EDGE_PLUS_BADGE in edge_badges),
-        ) if hit]
-    if _value_top_pick_edge(horse, signal_top_ids) is not None:
-        routes.append('value_top_pick')
-    # Place Bet: needs no 3-way agreement (place_bet.py has the rule and its test).
-    if place_bet.qualifies(horse, components):
-        routes.append(place_bet.ROUTE)
-    routes = [route for route in routes if route not in RETIRED_BEST_BET_ROUTES]
-    return routes, edge_badges, signal_agreement
+    return [rule.key for rule in place_bet.matching_rules(horse)], {}, False
 
 
 def record_best_bet_routes(races):
@@ -253,11 +141,10 @@ def record_best_bet_routes(races):
     """
     recorded = 0
     for race in races:
-        signal_top_ids = top_signal_horse_ids(race.horses)
         for horse in race.horses:
             if getattr(horse, 'is_scratched', False) or not getattr(horse, 'prediction', None):
                 continue
-            routes, edge_badges, _agreement = best_bet_routes_for_horse(horse, race, signal_top_ids)
+            routes, edge_badges, _agreement = best_bet_routes_for_horse(horse, race)
             if routes:
                 merge_best_bet_tracking(horse.prediction, routes, edge_badges)
                 recorded += 1
@@ -1142,8 +1029,11 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
         message += f"🏇 *{safe_meeting_name.upper()}*\n\n"
         
         for bet in best_bets:
-            message += f"*R{bet['race_number']}: {bet['horse_name']}*\n\n"
-            message += f"💰 *Predicted Price: {bet['predicted_odds']}*\n\n"
+            message += f"*R{bet['race_number']}: {bet['horse_name']}*\n"
+            if bet.get('place_rules'):
+                message += "🥉 *PLACE bet (not the win)*\n\n"
+            else:
+                message += f"💰 *Predicted Price: {bet['predicted_odds']}*\n\n"
         
         message += "⚠️ Think. Is this a bet you really want to place? Gamble Responsibly | 1800 858 858"
         
@@ -1206,7 +1096,10 @@ def post_best_bets_to_twitter(best_bets, meeting_name):
         
         for bet in best_bets:
             message += f"R{bet['race_number']}: {bet['horse_name']}\n"
-            message += f"💰 Predicted Price: {bet['predicted_odds']}\n\n"
+            if bet.get('place_rules'):
+                message += "🥉 PLACE bet (not the win)\n\n"
+            else:
+                message += f"💰 Predicted Price: {bet['predicted_odds']}\n\n"
         
         message += "⚠️ Think. Is this a bet you really want to place? Gamble Responsibly | 1800 858 858"
         
@@ -6684,12 +6577,12 @@ def ml_data_analytics():
         db.session.rollback()
         logger.info("No feature ablation report to show yet: %s", e)
 
-    place_bet_record = None
+    place_rules_record = None
     try:
-        place_bet_record = place_bet.performance(db.session)
+        place_rules_record = place_bet.performance_all(db.session, date_from=date_from or None, date_to=date_to or None)
     except Exception as e:
         db.session.rollback()
-        logger.warning("Error calculating Place Bet record: %s", e, exc_info=True)
+        logger.warning("Error calculating place rules record: %s", e, exc_info=True)
 
     betfair_reality = None
     try:
@@ -6705,7 +6598,7 @@ def ml_data_analytics():
     return render_template("ml_data.html",
         data_check_failures=data_check_failures,
         betfair_reality=betfair_reality,
-        place_bet_record=place_bet_record,
+        place_rules_record=place_rules_record,
         ablation_report=ablation_report,
         champion_scores_comparable=champion_scores_comparable(
             active_model_metadata, latest_challenger),
@@ -11867,67 +11760,35 @@ def backtest_run_now():
 @app.route("/best-bets")
 @login_required
 def best_bets():
+    """Best Bets: only runners that fit one of the place rules (place_bet.RULES).
+
+    Every pick is a PLACE bet. Routes are recorded only while the race is
+    still to run, so the record never counts a pick made after the jump.
+    Started races still show, unrecorded.
+    """
     if not current_user.is_admin:
         flash("Access denied. Admin privileges required.", "danger")
         return redirect(url_for("history"))
-    from models import Component
     from datetime import datetime, timedelta
     from sqlalchemy.orm import load_only, selectinload
 
     hours_back = request.args.get('hours', default=12, type=int)
-    min_score = request.args.get('min_score', type=float)
-    min_gap = request.args.get('min_gap', type=float)
-    mode = request.args.get('mode', default='top_pick')
-
-    active_components = Component.query.filter_by(is_active=True).all()
-    components_by_key = build_active_component_lookup(active_components)
-    component_keys = set(components_by_key)
-
     cutoff = datetime.utcnow() - timedelta(hours=hours_back)
     recent_meetings = (
         Meeting.query
         .options(
             load_only(Meeting.id, Meeting.meeting_name, Meeting.uploaded_at, Meeting.track, Meeting.date, Meeting.puntingform_id),
             selectinload(Meeting.races)
-            .load_only(
-                Race.id,
-                Race.meeting_id,
-                Race.race_number,
-                Race.distance,
-                Race.race_class,
-                Race.track_condition,
-                Race.start_time_utc,
-            )
+            .load_only(Race.id, Race.meeting_id, Race.race_number, Race.distance, Race.race_class,
+                       Race.track_condition, Race.start_time_utc)
             .selectinload(Race.horses)
-            .load_only(
-                Horse.id,
-                Horse.race_id,
-                Horse.horse_name,
-                Horse.barrier,
-                Horse.weight,
-                Horse.jockey,
-                Horse.trainer,
-                Horse.form,
-                Horse.csv_data,
-                Horse.is_scratched,
-            )
+            .load_only(Horse.id, Horse.race_id, Horse.horse_name, Horse.barrier, Horse.weight, Horse.jockey,
+                       Horse.trainer, Horse.form, Horse.csv_data, Horse.is_scratched)
             .selectinload(Horse.prediction)
-            .load_only(
-                Prediction.id,
-                Prediction.horse_id,
-                Prediction.score,
-                Prediction.predicted_odds,
-                Prediction.win_probability,
-                Prediction.notes,
-                Prediction.ml_score,
-                Prediction.ladbrokes_signal_mask,
-                Prediction.best_bet_routes,
-                Prediction.best_bet_badges,
-                Prediction.best_bet_qualified_at,
-                Prediction.value_edge_pct,
-                Prediction.value_edge_ml_win_prob_pct,
-                Prediction.value_edge_price,
-            ),
+            .load_only(Prediction.id, Prediction.horse_id, Prediction.score, Prediction.predicted_odds,
+                       Prediction.win_probability, Prediction.notes, Prediction.ml_score,
+                       Prediction.pfai_score,
+                       Prediction.best_bet_routes, Prediction.best_bet_badges, Prediction.best_bet_qualified_at),
         )
         .filter(Meeting.uploaded_at >= cutoff)
         .order_by(Meeting.meeting_name.asc())
@@ -11936,248 +11797,98 @@ def best_bets():
 
     best_bets = []
     total_horses_scanned = 0
-
     for meeting in recent_meetings:
-
-        # Build jockey ride count across all races in this meeting
-        jockey_ride_counts = {}
-        for r in meeting.races:
-            for h in r.horses:
-                j = h.jockey or ''
-                if j:
-                    jockey_ride_counts[j] = jockey_ride_counts.get(j, 0) + 1
-
         track_name = _track_from_meeting(meeting)
         date_str = meeting.date.strftime('%Y-%m-%d') if meeting.date else None
         for race in meeting.races:
-            # Only record a Best Bet (routes, badges, qualified time) while the
-            # race is still to run, so the record never counts a pick made
-            # after the jump. Started races still show, unrecorded.
+            active = [h for h in race.horses if not getattr(h, 'is_scratched', False)]
+            total_horses_scanned += len(race.horses)
+            picks = [(h, place_bet.matching_rules(h)) for h in active]
+            picks = [(h, rules) for h, rules in picks if rules]
+            if not picks:
+                continue
             race_started = race_has_started(race, meeting, allow_network=False)[0]
-            signal_top_ids = top_signal_horse_ids(race.horses)
-            ladbrokes_signal_fields = {}
+            # Live Ladbrokes win price, shown as context only (never used to pick).
+            ladbrokes_fields = {}
             if track_name and date_str:
                 race_info = match_race_info(track_name, date_str, race.race_number)
                 if race_info and race_info.get('uuid'):
-                    ladbrokes_signal_fields = evaluate_ladbrokes_best_bet_signals(
-                        race, meeting, fetch_race_odds(race_info['uuid']), race_info
-                    )
-                else:
-                    ladbrokes_signal_fields = {h.id: {'best_bet_reasons': ['odds-unavailable'], 'best_bet_signal_count': 0} for h in race.horses}
-            else:
-                ladbrokes_signal_fields = {h.id: {'best_bet_reasons': ['odds-unavailable'], 'best_bet_signal_count': 0} for h in race.horses}
-            horses_in_race = []
-            for horse in race.horses:
-                total_horses_scanned += 1
-                if horse.prediction and not horse.is_scratched:
-                    horses_in_race.append({
-                        'horse': horse,
-                        'score': horse.prediction.score
-                    })
-            horses_in_race.sort(key=lambda x: x['score'], reverse=True)
-            if not horses_in_race:
-                continue
-
-            top_score = horses_in_race[0]['score']
-            second_score = horses_in_race[1]['score'] if len(horses_in_race) > 1 else 0
-            score_gap = top_score - second_score
-
-            for rank_idx, horse_data in enumerate(horses_in_race):
-                horse = horse_data['horse']
-                if not horse.prediction:
-                    continue
-
-                is_top_pick = (rank_idx == 0)
-                rank_in_race = rank_idx + 1
-
-                if min_gap and is_top_pick and score_gap < min_gap:
-                    continue
-                if min_score and horse.prediction.score < min_score:
-                    continue
-                # A Value Top Pick is the ML top pick, which need not be the
-                # analyzer's, so it is shown in top-pick mode either way.
-                is_value_pick = _value_top_pick_edge(horse, signal_top_ids) is not None
-                is_place_pick = place_bet.qualifies(horse)
-                if mode == 'top_pick' and not is_top_pick and not is_value_pick and not is_place_pick:
-                    continue
-                if mode == 'non_top_pick' and is_top_pick:
-                    continue
-
-                lb_fields = ladbrokes_signal_fields.get(horse.id, {})
-
-                components = parse_notes_component_matches(horse.prediction.notes)
-                matched_components = []
-                for match in components.values():
-                    comp_key = match['key']
-                    if comp_key in component_keys:
-                        comp_obj = components_by_key[comp_key]
-                        matched_components.append({
-                            'name': component_display_name_for_key(comp_key, comp_obj.component_name),
-                            'key': comp_key,
-                            'roi': comp_obj.roi_percentage,
-                            'sr': comp_obj.strike_rate,
-                            'appearances': comp_obj.appearances
-                        })
-
-                if (horse.horse_name or '').strip().lower() == 'gold decree':
-                    logger.info(
-                        "Best Bets debug Gold Decree: horse=%s notes=%r structured_component_keys=%s "
-                        "active_strategy_names=%s active_strategy_keys=%s final_matched_components=%s",
-                        horse.horse_name,
-                        horse.prediction.notes,
-                        [match['key'] for match in components.values()],
-                        [component.component_name for component in active_components],
-                        [component.component_key or normalize_component_key(component.component_name) for component in active_components],
-                        matched_components,
-                    )
-
-                horse_score_gap = score_gap if is_top_pick else (
-                    horses_in_race[rank_idx - 1]['score'] - horse.prediction.score
-                    if rank_idx > 0 else 0
-                )
-
-                # Two ways to qualify, both needing Analyzer, PFAI and ML to
-                # rank the horse first: in a maiden race, or with a Proven Edge
-                # / Proven Edge+ badge (best_bet_routes_for_horse). The daily
-                # run records the same routes for every race still to run.
-                jockey_sole = jockey_ride_counts.get(horse.jockey or '', 0) == 1
-                routes, edge_badges, signal_agreement = best_bet_routes_for_horse(
-                    horse, race, signal_top_ids, components
-                )
-                maiden_agreement = 'maiden' in routes
-                proven_edge_agreement = 'proven_edge' in routes
-                if maiden_agreement:
-                    lb_fields = {
-                        **lb_fields,
-                        'best_bet_badges': [*(lb_fields.get('best_bet_badges') or []), MAIDEN_AGREEMENT_BADGE],
-                        'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []),
-                                             'Qualified because Analyzer, PFAI and ML all rank this horse first in a maiden race.'],
-                    }
-                if proven_edge_agreement:
-                    lb_fields = {
-                        **lb_fields,
-                        'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []), PROVEN_EDGE_REASON],
-                    }
-                if 'value_top_pick' in routes:
-                    prediction = horse.prediction
-                    edge = float(prediction.value_edge_pct)
-                    model_pct = prediction.value_edge_ml_win_prob_pct
-                    price = prediction.value_edge_price
-                    detail = (
-                        f'ML top pick: model {float(model_pct):.0f}% vs market {float(model_pct) - edge:.0f}%'
-                        + (f' at ${float(price):.2f}' if price else '')
-                        if model_pct is not None else 'ML top pick'
-                    )
-                    lb_fields = {
-                        **lb_fields,
-                        'best_bet_badges': [*(lb_fields.get('best_bet_badges') or []),
-                                            f'{VALUE_TOP_PICK_BADGE} (+{edge:.1f} pts)'],
-                        'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []),
-                                             f'Qualified via Value Top Pick. {detail}.'],
-                    }
-                if place_bet.ROUTE in routes:
-                    lb_fields = {
-                        **lb_fields,
-                        'best_bet_badges': [*(lb_fields.get('best_bet_badges') or []), place_bet.BADGE],
-                        'best_bet_reasons': [*(lb_fields.get('best_bet_reasons') or []), place_bet.REASON],
-                    }
-                if routes:
-                    if not race_started:
-                        merge_best_bet_tracking(horse.prediction, routes, edge_badges)
-                    matched_components.sort(key=lambda x: x['roi'], reverse=True)
-                    best_bets.append({
-                        'meeting_id': meeting.id,
-                        'meeting_name': meeting.meeting_name,
-                        'uploaded_at': meeting.uploaded_at,
-                        'race_id': race.id,
-                        'race_number': race.race_number,
-                        'distance': race.distance,
-                        'race_class': race.race_class,
-                        'track_condition': race.track_condition,
-                        'horse_id': horse.id,
-                        'horse_name': horse.horse_name,
-                        'score': horse.prediction.score,
-                        'score_gap': horse_score_gap,
-                        'predicted_odds': _analyzer_display_price(horse.prediction)[0],
-                        'win_probability': _analyzer_display_price(horse.prediction)[1],
-                        'components': matched_components,
-                        'component_count': len(matched_components),
-                        'jockey': horse.jockey,
-                        'jockey_sole_ride': jockey_sole,
-                        'trainer': horse.trainer,
-                        'barrier': horse.barrier,
-                        'weight': horse.weight,
-                        'form': horse.form,
-                        'is_top_pick': is_top_pick,
-                        'rank_in_race': rank_in_race,
-                        'signal_agreement': signal_agreement,
-                        'is_maiden_agreement': maiden_agreement,
-                        'is_proven_edge_agreement': proven_edge_agreement,
-                        'is_value_top_pick': 'value_top_pick' in routes,
-                        'is_place_bet': place_bet.ROUTE in routes,
-                        'best_bet_routes': routes,
-                        'edge_badges': edge_badges,
-                        'race_started': race_started,
-                        **lb_fields,
-                    })
+                    ladbrokes_fields = evaluate_ladbrokes_best_bet_signals(
+                        race, meeting, fetch_race_odds(race_info['uuid']), race_info)
+            runners = len(active)
+            places = place_bet.places_paid(runners)
+            for horse, rules in picks:
+                routes = [rule.key for rule in rules]
+                if not race_started:
+                    merge_best_bet_tracking(horse.prediction, routes, {})
+                csv_data = place_bet._csv(horse)
+                components = place_bet.note_components(horse.prediction.notes)
+                lb = ladbrokes_fields.get(horse.id, {})
+                best_bets.append({
+                    'meeting_id': meeting.id,
+                    'meeting_name': meeting.meeting_name,
+                    'uploaded_at': meeting.uploaded_at,
+                    'race_id': race.id,
+                    'race_number': race.race_number,
+                    'distance': race.distance,
+                    'race_class': race.race_class,
+                    'track_condition': race.track_condition,
+                    'horse_id': horse.id,
+                    'horse_name': horse.horse_name,
+                    'barrier': horse.barrier,
+                    'weight': horse.weight,
+                    'jockey': horse.jockey,
+                    'trainer': horse.trainer,
+                    'last10': csv_data.get('horse last10') or horse.form or '',
+                    'last_pos': place_bet.last_start_position(csv_data),
+                    'last_margin': place_bet.last_start_margin(csv_data),
+                    'last_date': csv_data.get('form meeting date'),
+                    'rules': [{'key': rule.key, 'name': rule.name, 'short': rule.short, 'audit': rule.audit,
+                               'checks': [name for name in rule.components if name in components]}
+                              for rule in rules],
+                    'best_bet_routes': routes,
+                    'runners': runners,
+                    'places_paid': places,
+                    'no_place_market': runners < 5,
+                    'race_started': race_started,
+                    'ladbrokes_fixed_win_price': lb.get('ladbrokes_fixed_win_price'),
+                    'ladbrokes_market_rank': lb.get('ladbrokes_market_rank'),
+                    'ladbrokes_odds_updated_at': lb.get('ladbrokes_odds_updated_at'),
+                })
 
     db.session.commit()
-    best_bets.sort(key=lambda x: x['score'], reverse=True)
+    best_bets.sort(key=lambda b: (b['meeting_name'], b['race_number'], b['horse_name']))
 
     meetings_with_bets = {}
     for bet in best_bets:
-        meeting_key = bet['meeting_name']
-        if meeting_key not in meetings_with_bets:
-            meetings_with_bets[meeting_key] = {
-                'meeting_id': bet['meeting_id'],
-                'meeting_name': bet['meeting_name'],
-                'uploaded_at': bet['uploaded_at'],
-                'races': {}
-            }
-        race_key = bet['race_number']
-        if race_key not in meetings_with_bets[meeting_key]['races']:
-            meetings_with_bets[meeting_key]['races'][race_key] = {
-                'race_number': bet['race_number'],
-                'distance': bet['distance'],
-                'race_class': bet['race_class'],
-                'track_condition': bet['track_condition'],
-                'horses': []
-            }
-        meetings_with_bets[meeting_key]['races'][race_key]['horses'].append(bet)
+        meeting = meetings_with_bets.setdefault(bet['meeting_name'], {
+            'meeting_id': bet['meeting_id'], 'meeting_name': bet['meeting_name'],
+            'uploaded_at': bet['uploaded_at'], 'races': {}})
+        race = meeting['races'].setdefault(bet['race_number'], {
+            'race_number': bet['race_number'], 'distance': bet['distance'], 'race_class': bet['race_class'],
+            'track_condition': bet['track_condition'], 'runners': bet['runners'],
+            'places_paid': bet['places_paid'], 'no_place_market': bet['no_place_market'], 'horses': []})
+        race['horses'].append(bet)
 
-    meetings_with_bets = dict(sorted(meetings_with_bets.items(), key=lambda x: x[0]))
-
-    best_bets_track_record = None
+    place_rules_record = None
     try:
-        import betfair_check
-        best_bets_track_record = betfair_check.best_bets_record(db.session)
+        place_rules_record = place_bet.performance_all(db.session)
     except Exception as e:
         db.session.rollback()
-        logger.warning("Best Bets track record unavailable: %s", e, exc_info=True)
-
-    place_bet_record = None
-    try:
-        place_bet_record = place_bet.performance(db.session)
-    except Exception as e:
-        db.session.rollback()
-        logger.warning("Place Bet record unavailable: %s", e, exc_info=True)
+        logger.warning("Place rules record unavailable: %s", e, exc_info=True)
 
     import data_checks
     data_check_failures = data_checks.latest_failures(db.session)
 
     return render_template("best_bets.html",
         data_check_failures=data_check_failures,
-        place_bet_record=place_bet_record,
-        best_bets_track_record=best_bets_track_record,
+        place_rules=place_bet.RULES,
+        place_rules_record=place_rules_record,
         best_bets=best_bets,
         meetings_with_bets=meetings_with_bets,
         total_bets=len(best_bets),
         total_horses_scanned=total_horses_scanned,
-        active_components=active_components,
         hours_back=hours_back,
-        min_score=min_score,
-        min_gap=min_gap,
-        mode=mode,
     )
 @app.route("/best-bets/post", methods=["POST"])
 @login_required
@@ -12221,7 +11932,8 @@ def post_best_bets_manual():
             bets_by_meeting[meeting_name].append({
                 'race_number': race.race_number,
                 'horse_name': horse.horse_name,
-                'predicted_odds': _analyzer_display_price(horse.prediction)[0]
+                'predicted_odds': _analyzer_display_price(horse.prediction)[0],
+                'place_rules': [rule.short for rule in place_bet.matching_rules(horse)],
             })
         
         db.session.commit()

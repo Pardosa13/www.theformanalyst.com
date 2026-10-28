@@ -61,17 +61,6 @@ def test_value_edge_buckets_cover_every_edge_level():
     assert threshold in [lower for _k, _l, lower, _u in buckets]
 
 
-def test_best_bets_route_also_shows_maiden_triple_agreement():
-    """Analyzer + PFAI + ML agreement in a maiden race qualifies on its own."""
-    source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
-    source = source[:source.index('\n@app.route(', 1)]
-    assert "maiden_agreement = 'maiden' in routes" in source
-    assert 'MAIDEN_AGREEMENT_BADGE' in source
-    rule = APP_SOURCE[APP_SOURCE.index('def best_bet_routes_for_horse('):]
-    rule = rule[:rule.index('\n\n\n', 1)]
-    assert "('maiden', is_maiden_race(race.race_class))" in rule
-
-
 def test_best_bets_has_no_favourite_route():
     """The favourite route was removed on 16 Oct 2026 (-10.5% over all history,
     the same as backing every favourite)."""
@@ -90,22 +79,12 @@ def test_is_maiden_race_matches_maiden_and_mdn():
     assert not is_maiden_race(None)
 
 
-def test_best_bets_value_edge_is_top_pick_only():
-    """The any-runner value edge gate (removed 1 Oct 2026) stays gone. Since
-    16 Oct 2026 the only value route is the ML top pick with a pre-race edge of
-    at least VALUE_TOP_PICK_MIN_EDGE_PCT, read from the stored edge."""
+def test_best_bets_shows_only_place_rules():
+    """28 Oct 2026: Best Bets is place bets only. No maiden, value, Proven Edge
+    or 3-way agreement routes."""
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
-    assert 'best_bet_routes_for_horse(' in source
-    assert 'if routes:' in source
-    assert "'value_top_pick' in routes" in source
-    assert 'VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT' not in source
-    rule = APP_SOURCE[APP_SOURCE.index('def _value_top_pick_edge('):]
-    rule = rule[:rule.index('\n\n\n', 1)]
-    assert "signal_top_ids.get('ml') != horse.id" in rule
-    assert 'VALUE_TOP_PICK_MIN_EDGE_PCT' in rule
-    assert appmod.VALUE_TOP_PICK_MIN_EDGE_PCT == 3.0
-    signals = APP_SOURCE[APP_SOURCE.index('def evaluate_ladbrokes_best_bet_signals('):]
-    signals = signals[:signals.index('\n\n\n', 1)]
-    assert 'value_edge' not in signals
-    assert '_value_edge_fields_with_stored_fallback' not in APP_SOURCE
+    assert 'place_bet.matching_rules(' in source
+    for gone in ('maiden_agreement', 'value_top_pick', 'proven_edge', 'signal_agreement',
+                 'VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT'):
+        assert gone not in source
