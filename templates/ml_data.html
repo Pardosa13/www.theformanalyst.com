@@ -530,49 +530,6 @@
 </div>
 {% endif %}
 
-<!-- Historical performance of each Best Bets route. -->
-<div class="section-card">
-  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlLadbrokesSignals" aria-expanded="true">
-    <h5>🏅 Best Bets by Route ($10 Win)</h5><i class="bi bi-chevron-down"></i>
-  </div>
-  <div id="mlLadbrokesSignals" class="collapse show">
-    <div class="card-body">
-      <p class="text-muted mb-3">Each row treats every horse that qualified for Best Bets by that route, before the jump, as a $10 win bet settled at the recorded SP. Routes are recorded from 6 Oct 2026.</p>
-      <div class="table-responsive">
-        <table class="table table-striped">
-          <thead><tr><th>Best Bet Signal</th><th>Bets</th><th>Wins</th><th>Strike Rate</th><th>Staked</th><th>Return</th><th>Profit</th><th>ROI</th></tr></thead>
-          <tbody>
-          {% for signal in ladbrokes_signal_performance %}
-            <tr>
-              <td><strong>{{ signal.label }}</strong></td>
-              <td>{{ signal.bets }}</td><td>{{ signal.wins }}</td><td>{{ "%.1f"|format(signal.strike_rate) }}%</td>
-              <td>${{ "%.2f"|format(signal.total_staked) }}</td><td>${{ "%.2f"|format(signal.total_return) }}</td>
-              <td class="{% if signal.profit >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.2f"|format(signal.profit) }}</td>
-              <td class="{% if signal.roi >= 0 %}profit{% else %}loss{% endif %}">{{ "%+.1f"|format(signal.roi) }}%</td>
-            </tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% if ladbrokes_signal_performance and ladbrokes_signal_performance|selectattr('bets')|list %}
-      <div class="d-flex justify-content-between align-items-center mt-4 mb-2">
-        <div>
-          <h5 style="margin:0;color:var(--ml-accent)">Cumulative P&amp;L by Signal</h5>
-          <p class="text-muted" style="font-size:12px;margin:0" id="signalPnlSubtitle">$10 flat win bets</p>
-        </div>
-        <div style="text-align:right">
-          <span id="signalPnlTotal" style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace"></span>
-          <div id="signalPnlBets" style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em"></div>
-        </div>
-      </div>
-      <div id="signalPnlButtons" class="d-flex flex-wrap gap-2 mb-3"></div>
-      <canvas id="ladbrokesSignalPnlChart" height="140"></canvas>
-      <script type="application/json" id="ladbrokesSignalHistory">{{ ladbrokes_signal_performance|tojson }}</script>
-      {% endif %}
-    </div>
-  </div>
-</div>
-
 <!-- Place rules (place_bet.py): the only Best Bets. Settled on the place at Betfair place SP. -->
 {% if place_rules_record %}
 <div class="section-card">
@@ -619,7 +576,7 @@
       <div id="placePnlButtons" class="d-flex flex-wrap gap-2 mb-3"></div>
       <canvas id="placeRulesPnlChart" height="140"></canvas>
       <script type="application/json" id="placeRulesHistory">{{ place_rules_record.rules|map(attribute='chart')|list|tojson }}</script>
-      <p class="text-muted mt-2" style="font-size:12px">Only bets with a Betfair place price are charted. Pick one rule, or Compare all.</p>
+      <p class="text-muted mt-2" style="font-size:12px">Only bets with a Betfair place price are charted. Tap a rule to turn it on or off. Tap All to show every rule together.</p>
       {% endif %}
     </div>
   </div>
@@ -910,26 +867,29 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g" crossorigin="anonymous"></script>
 <script>
-// Cumulative P&L chart, one line per signal. Shared by the Best Bets route
-// chart and the live top-pick value test chart.
+// Cumulative P&L chart, one line per place rule. Each button turns its rule
+// on or off; "All" turns every rule on together.
 function renderSignalPnl(prefix, dataId, canvasId, opts) {
-    opts = Object.assign({ betWord: 'win', wonWord: 'WON', startAll: false }, opts || {});
+    opts = Object.assign({ betWord: 'place', wonWord: 'PLACED', startAll: true }, opts || {});
     const dataEl = document.getElementById(dataId);
     const canvas = document.getElementById(canvasId);
     if (!dataEl || !canvas || typeof Chart === 'undefined') return;
-    const signals = JSON.parse(dataEl.textContent).filter(s => s.history && s.history.length);
+    const signals = JSON.parse(dataEl.textContent).filter(s => s && s.history && s.history.length);
     if (!signals.length) return;
     const colours = ['#facc15', '#00e5b0', '#60a5fa', '#c084fc', '#fb923c', '#f472b6', '#a3e635'];
     const buttonsEl = document.getElementById(prefix + 'Buttons');
     const totalEl = document.getElementById(prefix + 'Total');
     const betsEl = document.getElementById(prefix + 'Bets');
     const subtitleEl = document.getElementById(prefix + 'Subtitle');
+    const on = new Set(opts.startAll ? signals.map((_, i) => i) : [0]);
     let chart = null;
 
     const money = v => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toFixed(2)}`;
+    const finalOf = s => s.history[s.history.length - 1].cumulative;
 
-    function datasetFor(s, i, single) {
-        const final = s.history[s.history.length - 1].cumulative;
+    function datasetFor(i, single) {
+        const s = signals[i];
+        const final = finalOf(s);
         const colour = single ? (final >= 0 ? '#00e5b0' : '#f87171') : colours[i % colours.length];
         return {
             label: s.label,
@@ -944,30 +904,33 @@ function renderSignalPnl(prefix, dataId, canvasId, opts) {
         };
     }
 
-    function show(index) {
-        const single = index !== 'all';
-        const shown = single ? [signals[index]] : signals;
-        if (single) {
-            const s = signals[index];
-            const final = s.history[s.history.length - 1].cumulative;
-            totalEl.textContent = money(final);
-            totalEl.style.color = final >= 0 ? '#00e5b0' : '#f87171';
-            betsEl.textContent = `${s.history.length} bets`;
-            subtitleEl.textContent = `$10 flat ${opts.betWord} bets on this ${opts.betWord === 'place' ? 'rule' : 'signal'}`;
+    function draw() {
+        const shownIdx = signals.map((_, i) => i).filter(i => on.has(i));
+        const shown = shownIdx.map(i => signals[i]);
+        const single = shown.length === 1;
+        const total = shown.reduce((sum, s) => sum + finalOf(s), 0);
+        const bets = shown.reduce((sum, s) => sum + s.history.length, 0);
+        if (shown.length) {
+            totalEl.textContent = money(total);
+            totalEl.style.color = total >= 0 ? '#00e5b0' : '#f87171';
         } else {
             totalEl.textContent = '';
-            betsEl.textContent = `${signals.length} ${opts.betWord === 'place' ? 'rules' : 'signals'}`;
-            subtitleEl.textContent = `All ${opts.betWord === 'place' ? 'rules' : 'signals'} compared — oldest bet on the left`;
         }
+        betsEl.textContent = single ? `${bets} bets` : `${bets} bets · ${shown.length} rules`;
+        subtitleEl.textContent = !shown.length ? 'No rules on. Tap a rule to show it.'
+            : single ? `$10 ${opts.betWord} bets on this rule`
+            : shown.length === signals.length ? 'All rules on. Total adds every rule together.'
+            : `${shown.length} rules on. Total adds them together.`;
         buttonsEl.querySelectorAll('button').forEach(b => {
-            const active = b.dataset.index === String(index);
+            const active = b.dataset.index === 'all' ? shown.length === signals.length : on.has(Number(b.dataset.index));
             b.className = 'btn btn-sm ' + (active ? 'btn-light' : 'btn-outline-secondary');
+            b.setAttribute('aria-pressed', active ? 'true' : 'false');
         });
 
         if (chart) chart.destroy();
         chart = new Chart(canvas, {
             type: 'line',
-            data: { datasets: shown.map((s, i) => datasetFor(s, single ? index : i, single)) },
+            data: { datasets: shownIdx.map(i => datasetFor(i, single)) },
             options: {
                 responsive: true,
                 interaction: { mode: 'nearest', intersect: false },
@@ -1010,14 +973,18 @@ function renderSignalPnl(prefix, dataId, canvasId, opts) {
             b.appendChild(dot);
         }
         b.appendChild(document.createTextNode(label));
-        b.addEventListener('click', () => show(index));
+        b.addEventListener('click', () => {
+            if (index === 'all') signals.forEach((_, i) => on.add(i));
+            else if (on.has(index)) on.delete(index);
+            else on.add(index);
+            draw();
+        });
         buttonsEl.appendChild(b);
     };
     signals.forEach((s, i) => addButton(s.label, i));
-    if (signals.length > 1) addButton('Compare all', 'all');
-    show(opts.startAll && signals.length > 1 ? 'all' : 0);
+    if (signals.length > 1) addButton('All', 'all');
+    draw();
 }
-renderSignalPnl('signalPnl', 'ladbrokesSignalHistory', 'ladbrokesSignalPnlChart');
 renderSignalPnl('placePnl', 'placeRulesHistory', 'placeRulesPnlChart', { betWord: 'place', wonWord: 'PLACED', startAll: true });
 
 const loadedSections = new Set();

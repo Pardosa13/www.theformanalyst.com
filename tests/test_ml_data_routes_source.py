@@ -86,23 +86,6 @@ def test_ml_data_page_passes_filters_to_overview_stats():
     assert 'limit_param=limit_param' in source
 
 
-def test_ml_data_page_includes_flat_stake_ladbrokes_signal_performance():
-    route_source = _function_source('ml_data_analytics')
-    stats_source = _function_source('calculate_ladbrokes_signal_performance')
-    template = Path('templates/ml_data.html').read_text()
-
-    assert 'calculate_ladbrokes_signal_performance(' in route_source
-    assert "stake=10.0" in stats_source
-    assert "('maiden', '🏇 Maiden Agreement Best Bet', 'maiden')" not in APP_SOURCE
-    assert "('proven_edge', '🔥 Proven Edge Best Bet', 'proven_edge')" in APP_SOURCE
-    assert 'LADBROKES_SIGNAL_COHORTS' not in APP_SOURCE
-    assert 'Best Bets by Route ($10 Win)' in template
-    assert 'Strike Rate' in template
-    assert 'ROI' in template
-    assert "'history': history" in stats_source
-    assert 'ladbrokesSignalPnlChart' in template
-
-
 def test_best_bets_records_routes_not_favourite_badges():
     source = _function_source('best_bets')
 
