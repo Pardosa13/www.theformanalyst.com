@@ -3765,8 +3765,9 @@ def _summarise_ml_performance_races(race_results):
     # price is left out until one arrives.
     place_bets, place_profit, place_waiting, place_prices = 0, 0.0, 0, []
     for r in race_results:
+        # Average only the prices that were actually paid out.
         price = r.get('place_bsp') or r.get('ladbrokes_place')
-        if price:
+        if price and r.get('bf_placed'):
             place_prices.append(price)
         if not r.get('bf_placed'):
             place_bets += 1
