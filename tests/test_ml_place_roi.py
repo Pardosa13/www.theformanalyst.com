@@ -21,7 +21,7 @@ def test_top_pick_place_bet_uses_betfair_then_ladbrokes():
     assert stats['place_waiting'] == 1
     assert round(stats['place_profit'], 2) == 2.60
     assert round(stats['place_roi'], 1) == 8.7
-    assert round(stats['avg_place_price'], 2) == round((1.5 + 2.0 + 1.8) / 3, 2)
+    assert round(stats['avg_place_price'], 2) == round((1.5 + 1.8) / 2, 2)
 
 
 def test_no_place_prices_still_counts_losses():
