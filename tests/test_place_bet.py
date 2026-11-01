@@ -209,3 +209,24 @@ def test_chart_counts_losses_now_and_estimates_places_until_betfair_arrives():
     assert place_bet._chart_profit(dict(base, placed=True, ladbrokes_place=1.8)) == (8.0, True)
     # No price at all: left off the chart for now.
     assert place_bet._chart_profit(dict(base, placed=True)) is None
+
+
+def test_live_roi_matches_the_chart_before_betfair_prices_arrive(monkeypatch):
+    rule = place_bet.RULES[0]
+    day = place_bet.LIVE_START.strftime('%Y-%m-%d')
+    base = {'date': day, 'meeting': 'M', 'race': 1, 'horse': 'H', 'live': True,
+            'place_bsp': None, 'ladbrokes_place': None}
+    picks = [(rule, dict(base, placed=True, ladbrokes_place=2.0)),   # +$10 estimate
+             (rule, dict(base, placed=False)),                        # -$10
+             (rule, dict(base, placed=False))]                        # -$10
+    monkeypatch.setattr(place_bet, 'settled_picks', lambda *a, **k: picks)
+    monkeypatch.setattr(place_bet, '_bsp_through', lambda s: None)
+    place_bet.clear_cache()
+    try:
+        live = {r['key']: r for r in place_bet.performance_all(None)['rules']}[rule.key]['live']
+    finally:
+        place_bet.clear_cache()
+    assert live['priced_bets'] == 3
+    assert round(live['profit'], 2) == -10.0
+    assert round(live['roi'], 1) == -33.3
+    assert live['estimate'] is True

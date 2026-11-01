@@ -394,6 +394,12 @@ def performance_all(session, date_from=None, date_to=None):
             series.append({'date': item['date'], 'race': item['race'], 'meeting': item['meeting'],
                            'horse': item['horse'], 'won': item['placed'], 'profit': round(profit, 2),
                            'cumulative': round(cumulative, 2), 'estimate': estimated})
+        # Live profit and ROI match the chart: Betfair place price where loaded,
+        # else the Ladbrokes stand-in. Otherwise live ROI stays blank for a month.
+        live['priced_bets'] = len(series)
+        live['profit'] = cumulative
+        live['roi'] = 100.0 * cumulative / (len(series) * STAKE) if series else None
+        live['estimate'] = any(p['estimate'] for p in series)
         months = defaultdict(list)
         for item in items:
             months[item['date'][:7]].append(item)
