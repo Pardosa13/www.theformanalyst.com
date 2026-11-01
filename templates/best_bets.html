@@ -576,6 +576,12 @@
   .evidence .muted, .muted-note { color: var(--text-muted); font-size: 11px; }
   .place-warning { color: #fbbf24; font-size: 11px; font-weight: 700; }
   .record-table .rule-name { white-space: normal; min-width: 220px; font-family: inherit; }
+  .rule-toggles { display: flex; flex-wrap: wrap; gap: 8px; }
+  .rule-toggle { background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border-subtle); border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; line-height: 1.4; }
+  .rule-toggle:hover { color: var(--text-primary, #fff); border-color: rgba(0,229,176,0.4); }
+  .rule-toggle.on { background: rgba(0,229,176,0.12); color: #00e5b0; border-color: rgba(0,229,176,0.4); }
+  .rule-toggle .rule-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  .rule-toggle:not(.on) .rule-dot { opacity: .35; }
 </style>
 
 <!-- Page header -->
@@ -609,7 +615,7 @@
       {% if place_rules_record %}{% for r in place_rules_record.rules %}{% set _ = rec_by_key.update({r.key: r}) %}{% endfor %}{% endif %}
       {% for rule in place_rules %}
         {% set r = rec_by_key.get(rule.key) %}
-        <tr>
+        <tr data-rules="{{ rule.key }}">
           <td class="rule-name">{{ rule.name }}</td>
           <td class="muted" style="white-space:normal">{{ rule.audit }}</td>
           {% if r %}
@@ -618,7 +624,7 @@
           <td class="{% if r.history.roi is not none and r.history.roi >= 0 %}pos{% elif r.history.roi is not none %}neg{% else %}muted{% endif %}">{% if r.history.roi is not none %}{{ "%+.1f"|format(r.history.roi) }}%{% else %}&ndash;{% endif %}</td>
           <td>{{ r.live.bets }}</td>
           <td>{% if r.live.bets %}{{ "%.1f"|format(r.live.place_rate) }}%{% else %}&ndash;{% endif %}</td>
-          <td class="{% if r.live.roi is not none and r.live.roi >= 0 %}pos{% elif r.live.roi is not none %}neg{% else %}muted{% endif %}">{% if r.live.roi is not none %}{{ "%+.1f"|format(r.live.roi) }}%{% else %}&ndash;{% endif %}</td>
+          <td class="{% if r.live.roi is not none and r.live.roi >= 0 %}pos{% elif r.live.roi is not none %}neg{% else %}muted{% endif %}">{% if r.live.roi is not none %}{{ "%+.1f"|format(r.live.roi) }}%{% if r.live.estimate %}<span title="Includes Ladbrokes place prices until Betfair prices arrive">*</span>{% endif %}{% else %}&ndash;{% endif %}</td>
           {% else %}
           <td colspan="6" class="muted">Record unavailable</td>
           {% endif %}
@@ -643,6 +649,24 @@
   </form>
 </div>
 
+<!-- Rule toggles: show or hide picks by place rule. -->
+{% if total_bets > 0 %}
+{% set rule_colours = ['#facc15', '#00e5b0', '#60a5fa', '#c084fc', '#fb923c', '#f472b6', '#a3e635'] %}
+<div class="filter-card">
+  <span class="filter-label" id="ruleToggleNote">All rules on.</span>
+  <div class="rule-toggles" id="ruleToggles" style="margin-top:8px">
+    {% for rule in place_rules %}
+    <button type="button" class="rule-toggle on" data-rule="{{ rule.key }}" aria-pressed="true"><span class="rule-dot" style="background:{{ rule_colours[loop.index0 % rule_colours|length] }}"></span>{{ rule.short }}</button>
+    {% endfor %}
+    <button type="button" class="rule-toggle on" data-rule="all" aria-pressed="true">All</button>
+  </div>
+</div>
+<div class="no-bets-alert" id="noRulePicks" style="display:none">
+  <h4>No Picks For These Rules</h4>
+  <p>Tap a rule above to show its picks.</p>
+</div>
+{% endif %}
+
 <!-- Place picks / empty state -->
 {% if total_bets == 0 %}
 <div class="no-bets-alert">
@@ -659,14 +683,14 @@
 
 <form method="POST" action="{{ url_for('post_best_bets_manual') }}" id="post-best-bets-form">
   {% for meeting_name, meeting_data in meetings_with_bets.items() %}
-  <div class="meeting-block">
+  <div class="meeting-block" data-pick-group>
     <div class="meeting-block-header">
       <h4>📍 {{ meeting_data.meeting_name }}</h4>
       <span class="meeting-time-badge">Uploaded {{ meeting_data.uploaded_at.strftime('%I:%M %p') if meeting_data.uploaded_at else '' }}</span>
     </div>
     <div class="meeting-block-body">
       {% for race_num, race_data in meeting_data.races.items()|sort %}
-      <div class="race-section">
+      <div class="race-section" data-pick-group>
         <div class="race-heading">
           <span class="race-num">Race {{ race_data.race_number }}</span>
           <span class="race-pill">{{ race_data.distance }}</span>
@@ -692,7 +716,7 @@
             </thead>
             <tbody>
               {% for bet in race_data.horses %}
-              <tr class="row-top-pick">
+              <tr class="row-top-pick" data-rules="{{ bet.rules|map(attribute='key')|join(' ') }}">
                 <td><input type="checkbox" name="bet_ids[]" value="{{ bet.horse_id }}" class="bet-checkbox"></td>
                 <td>
                   <div class="horse-name">
@@ -752,6 +776,56 @@ document.querySelectorAll('.select-all').forEach(function (box) {
     this.closest('table').querySelectorAll('.bet-checkbox').forEach(cb => cb.checked = this.checked);
   });
 });
+// Rule toggles: tap a rule to show or hide its picks. A pick shows while any
+// of its rules is on. Hidden picks are unticked so they are never posted.
+(function () {
+  const bar = document.getElementById('ruleToggles');
+  if (!bar) return;
+  const buttons = Array.from(bar.querySelectorAll('button'));
+  const keys = buttons.map(b => b.dataset.rule).filter(k => k !== 'all');
+  let on = new Set(keys);
+  try {
+    const saved = JSON.parse(localStorage.getItem('bestBetsRulesOn') || 'null');
+    if (Array.isArray(saved)) on = new Set(saved.filter(k => keys.includes(k)));
+  } catch (e) { /* storage blocked: start with all on */ }
+
+  function apply() {
+    buttons.forEach(b => {
+      const active = b.dataset.rule === 'all' ? on.size === keys.length : on.has(b.dataset.rule);
+      b.classList.toggle('on', active);
+      b.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('tr[data-rules]').forEach(tr => {
+      const show = tr.dataset.rules.split(' ').some(k => on.has(k));
+      tr.style.display = show ? '' : 'none';
+      const cb = tr.querySelector('.bet-checkbox');
+      if (cb && !show) cb.checked = false;
+    });
+    let shown = 0;
+    document.querySelectorAll('.race-section[data-pick-group]').forEach(sec => {
+      const n = Array.from(sec.querySelectorAll('tr[data-rules]')).filter(tr => tr.style.display !== 'none').length;
+      sec.style.display = n ? '' : 'none';
+      shown += n;
+    });
+    document.querySelectorAll('.meeting-block[data-pick-group]').forEach(block => {
+      const any = Array.from(block.querySelectorAll('.race-section')).some(sec => sec.style.display !== 'none');
+      block.style.display = any ? '' : 'none';
+    });
+    const empty = document.getElementById('noRulePicks');
+    if (empty) empty.style.display = shown ? 'none' : '';
+    const note = document.getElementById('ruleToggleNote');
+    if (note) note.textContent = !on.size ? 'No rules on.' : on.size === keys.length ? `All rules on. ${shown} picks.` : `${on.size} of ${keys.length} rules on. ${shown} picks.`;
+    try { localStorage.setItem('bestBetsRulesOn', JSON.stringify(Array.from(on))); } catch (e) { /* ignore */ }
+  }
+  buttons.forEach(b => b.addEventListener('click', () => {
+    const k = b.dataset.rule;
+    if (k === 'all') on = new Set(keys);
+    else if (on.has(k)) on.delete(k);
+    else on.add(k);
+    apply();
+  }));
+  apply();
+})();
 document.getElementById('post-btn').addEventListener('click', function (e) {
   const selected = document.querySelectorAll('.bet-checkbox:checked').length;
   if (selected === 0) {

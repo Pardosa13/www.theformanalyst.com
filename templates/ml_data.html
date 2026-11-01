@@ -567,7 +567,7 @@
               <td>{{ row.bets }}</td><td>{{ row.placed }}</td><td>{% if row.bets %}{{ "%.1f"|format(row.place_rate) }}%{% else %}&ndash;{% endif %}</td>
               <td>{{ row.priced_bets }}</td>
               <td class="{% if row.priced_bets and row.profit >= 0 %}profit{% elif row.priced_bets %}loss{% endif %}">{% if row.priced_bets %}{{ "%+.2f"|format(row.profit) }}{% else %}&ndash;{% endif %}</td>
-              <td class="{% if row.roi is not none and row.roi >= 0 %}profit{% elif row.roi is not none %}loss{% endif %}">{% if row.roi is not none %}{{ "%+.1f"|format(row.roi) }}%{% else %}&ndash;{% endif %}</td>
+              <td class="{% if row.roi is not none and row.roi >= 0 %}profit{% elif row.roi is not none %}loss{% endif %}">{% if row.roi is not none %}{{ "%+.1f"|format(row.roi) }}%{% if row.estimate %}<span title="Includes Ladbrokes place prices until Betfair prices arrive">*</span>{% endif %}{% else %}&ndash;{% endif %}</td>
             </tr>
             {% endfor %}
           {% endfor %}
