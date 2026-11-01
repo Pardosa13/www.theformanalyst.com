@@ -81,7 +81,7 @@ def test_settle_meeting_on_postgres():
     ])
     with engine.begin() as conn:
         meeting = rs.meetings_to_settle(conn, days=10000)[0]
-        summary = rs.settle_meeting(conn, meeting, pf)
+        summary = rs.settle_meeting(conn, meeting, pf, today=date(2026, 10, 1))
 
     assert summary['source'] == 'v1' and summary['races_resulted'] == 1
     assert summary['created'] == 3 and summary['updated'] == 1
@@ -95,8 +95,15 @@ def test_settle_meeting_on_postgres():
 
     # Re-running changes nothing new.
     with engine.begin() as conn:
-        again = rs.settle_meeting(conn, meeting, pf)
+        again = rs.settle_meeting(conn, meeting, pf, today=date(2026, 10, 1))
     assert again['created'] == 0 and again['marked_scratched'] == []
+
+    # Next day race 2 still has no finishers: it was abandoned.
+    with engine.begin() as conn:
+        later = rs.settle_meeting(conn, meeting, pf, today=date(2026, 10, 2))
+    assert later['abandoned_races'] == [2] and later['created'] == 1
+    with engine.connect() as conn:
+        assert conn.execute(text('SELECT finish_position FROM results WHERE horse_id = 5')).scalar() == 0
     db.metadata.drop_all(engine)
 
 
