@@ -9,7 +9,10 @@ Replaces the results-page routine (Auto-fetch, Mark scratched and complete):
      A missing SP is stored as NULL, never 0.
   3. Once a race has results, any of our active runners not in them are
      recorded as scratched (finish 0). Each one is logged by name.
-  4. Refresh the incomplete-results flag for the meeting.
+  4. From the day after the meeting, any of our races the feed still has no
+     finishers for was abandoned: its runners are recorded as scratched
+     (finish 0) so the meeting leaves the results page.
+  5. Refresh the incomplete-results flag for the meeting.
 
 Results come from PuntingForm's V2 /form/results feed (TAB numbers, official
 SP). The older V1 GetResults feed is the fallback. Scores and ML are never
@@ -180,7 +183,7 @@ def load_runners(conn, meeting_id):
     return races
 
 
-def settle_meeting(conn, meeting, pf, recorded_by=None):
+def settle_meeting(conn, meeting, pf, recorded_by=None, today=None):
     """Fetch and save results for one meeting. Returns a summary dict.
 
     `meeting` needs id, meeting_name, date and puntingform_id. `conn` is a
@@ -189,7 +192,7 @@ def settle_meeting(conn, meeting, pf, recorded_by=None):
     summary = {'meeting_id': meeting['id'], 'meeting_name': meeting['meeting_name'], 'source': None,
                'races_resulted': 0, 'saved': 0, 'created': 0, 'updated': 0, 'no_sp': 0,
                'duplicate_races': [], 'marked_scratched': [], 'unmatched': [],
-               'match_methods': {}}
+               'abandoned_races': [], 'match_methods': {}}
     day = meeting_day(meeting.get('date'), meeting['meeting_name'])
     track = meeting.get('puntingform_id') or track_of(meeting['meeting_name'], None)
     if not day or not track:
@@ -246,9 +249,28 @@ def settle_meeting(conn, meeting, pf, recorded_by=None):
             if line not in summary['marked_scratched']:  # older imports saved a scratched horse many times
                 summary['marked_scratched'].append(line)
 
+    # The meeting day is over and the feed has this meeting, but still no
+    # finishers for some of our races: those races were abandoned.
+    if day < (today or melbourne_today()):
+        for race_no, race in sorted(ours.items(), key=lambda kv: kv[0] or 0):
+            if race_no in done_races:
+                continue
+            waiting = [r for r in race['runners'] if not r['result_id']]
+            if not waiting:
+                continue
+            for runner in waiting:
+                summary[save_result(conn, runner, 0, None, recorded_by)] += 1
+            summary['abandoned_races'].append(race_no)
+            touched_race_ids.extend(race['race_ids'])
+
     if touched_race_ids and conn.dialect.name == 'postgresql':
         refresh_results_incomplete_flags(conn, touched_race_ids)
-    summary['status'] = 'settled' if summary['races_resulted'] else 'pending: no races run yet'
+    if summary['races_resulted']:
+        summary['status'] = 'settled'
+    elif summary['abandoned_races']:
+        summary['status'] = 'abandoned'
+    else:
+        summary['status'] = 'pending: no races run yet'
     return summary
 
 
@@ -282,6 +304,9 @@ def log_summary(summary):
              summary['meeting_name'], summary['source'], summary['status'], summary['races_resulted'],
              summary['saved'], summary['created'], summary['updated'], summary['no_sp'],
              len(summary['marked_scratched']), summary['match_methods'])
+    if summary.get('abandoned_races'):
+        log.info('   abandoned (no finishers in the feed after race day): races %s',
+                 summary['abandoned_races'])
     for item in summary['marked_scratched']:
         log.info('   marked scratched (not in official results): %s', item)
     for item in summary['unmatched']:
