@@ -335,6 +335,15 @@ def main(argv=None):
         except Exception:
             log.exception('Failed to settle %s', meeting['meeting_name'])
 
+    # Save a fresh place rules record so Best Bets and ML Data open at once.
+    try:
+        import place_bet
+        from sqlalchemy.orm import Session
+        with Session(engine) as session:
+            place_bet.refresh_stored(session)
+    except Exception:
+        log.exception('Failed to save the place rules record')
+
 
 if __name__ == '__main__':
     main()

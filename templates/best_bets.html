@@ -607,6 +607,7 @@
     &ldquo;History&rdquo; is every settled runner since February that fits the rule. &ldquo;Live&rdquo; counts only picks shown here before the jump (from 28 Oct 2026) &mdash; that is the real test.
     Placed = top 3 with 8+ runners, top 2 with 5&ndash;7. Betfair place prices arrive monthly{% if place_rules_record and place_rules_record.place_bsp_through %} (loaded up to {{ place_rules_record.place_bsp_through }}){% endif %}, so new bets show a place % before they show a profit.
   </p>
+  {% if not place_rules_record %}<p class="text-muted" style="font-size:13px">The place rules record is being worked out in the background. Refresh in a few minutes.</p>{% elif place_rules_age_min is not none %}<p class="text-muted" style="font-size:12px;margin:0 0 8px">Record updated {{ place_rules_age_min }} min ago (refreshes after each results check).</p>{% endif %}
   <div class="record-wrap">
     <table class="record-table">
       <thead><tr><th>Rule</th><th>Feb&ndash;Sep test</th><th>History bets</th><th>Placed</th><th>ROI</th><th>Live bets</th><th>Live placed</th><th>Live ROI</th></tr></thead>
