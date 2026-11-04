@@ -505,3 +505,116 @@ def clear_cache():
             os.remove(os.path.join(_CACHE_DIR, name))
     except OSError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Saved record. Working the record out reads every settled runner and takes
+# minutes, so no page does it. The results settler (every 30 minutes on race
+# days) saves a fresh copy; the pages show the saved copy at once. If the copy
+# is old, the page starts a refresh in a separate process and still shows the
+# old copy, so nobody waits.
+# ---------------------------------------------------------------------------
+_STORE_TABLE = 'place_rules_record'
+STALE_SECONDS = 45 * 60
+_REFRESH_LOCK = 742001  # Postgres advisory lock: one refresh at a time
+_last_spawn = [0.0]
+
+
+def _json_default(value):
+    from decimal import Decimal
+    if isinstance(value, Decimal):
+        return float(value)
+    return str(value)
+
+
+def _ensure_store(session):
+    session.execute(text(
+        f'CREATE TABLE IF NOT EXISTS {_STORE_TABLE} '
+        f'(id INTEGER PRIMARY KEY, computed_at FLOAT NOT NULL, payload TEXT NOT NULL)'))
+
+
+def save_record(session, result):
+    _ensure_store(session)
+    session.execute(text(f'DELETE FROM {_STORE_TABLE} WHERE id = 1'))
+    session.execute(text(f'INSERT INTO {_STORE_TABLE} (id, computed_at, payload) VALUES (1, :at, :payload)'),
+                    {'at': time.time(), 'payload': json.dumps(result, default=_json_default)})
+    session.commit()
+
+
+def stored_record(session):
+    """(saved_at_epoch_seconds, record) or None when nothing is saved yet."""
+    try:
+        row = session.execute(text(f'SELECT computed_at, payload FROM {_STORE_TABLE} WHERE id = 1')).first()
+    except Exception:
+        session.rollback()  # no table yet
+        return None
+    if not row:
+        return None
+    return float(row[0]), json.loads(row[1])
+
+
+def refresh_stored(session):
+    """Work the full record out and save it. Skips if another refresh is running (Postgres)."""
+    is_pg = session.get_bind().dialect.name == 'postgresql'
+    if is_pg and not session.execute(text('SELECT pg_try_advisory_lock(:k)'), {'k': _REFRESH_LOCK}).scalar():
+        logger.info("Place rules refresh already running elsewhere; skipped")
+        return None
+    try:
+        started = time.time()
+        clear_cache()
+        result = performance_all(session)
+        save_record(session, result)
+        logger.info("PLACE_RULES_TIMING saved_refresh seconds=%.2f", time.time() - started)
+        return result
+    finally:
+        if is_pg:
+            session.rollback()
+            session.execute(text('SELECT pg_advisory_unlock(:k)'), {'k': _REFRESH_LOCK})
+            session.commit()
+
+
+def _start_background_refresh():
+    """Run `python place_bet.py --refresh` in its own process (never inside a page request)."""
+    if time.time() - _last_spawn[0] < 10 * 60:
+        return
+    _last_spawn[0] = time.time()
+    import subprocess
+    import sys
+    try:
+        subprocess.Popen([sys.executable, os.path.abspath(__file__), '--refresh'],
+                         cwd=os.path.dirname(os.path.abspath(__file__)),
+                         start_new_session=True, stdin=subprocess.DEVNULL)
+        logger.info("Place rules refresh started in the background")
+    except Exception as e:
+        logger.warning("Could not start place rules refresh: %s", e)
+
+
+def record_for_page(session, date_from=None, date_to=None):
+    """Record for a page: (record or None, saved_at or None). Never slow for the default view.
+
+    A date-filtered view is worked out on the spot (it is rare and admin-chosen).
+    """
+    if date_from or date_to:
+        return performance_all(session, date_from=date_from, date_to=date_to), None
+    saved = stored_record(session)
+    if saved is None or time.time() - saved[0] > STALE_SECONDS:
+        _start_background_refresh()
+    if saved is None:
+        return None, None
+    return saved[1], saved[0]
+
+
+def age_minutes(saved_at):
+    return None if saved_at is None else max(0, int((time.time() - saved_at) // 60))
+
+
+if __name__ == '__main__':
+    import argparse
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+    parser = argparse.ArgumentParser(description='Save the place rules record.')
+    parser.add_argument('--refresh', action='store_true', required=True)
+    parser.parse_args()
+    from sqlalchemy.orm import Session
+    from bsp_import import get_engine
+    with Session(get_engine()) as s:
+        refresh_stored(s)

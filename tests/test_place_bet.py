@@ -276,3 +276,43 @@ def test_cached_record_is_shared_through_the_cache_file():
         assert place_bet._cache_get(('x', 'y')) == {'rules': []}
     finally:
         place_bet.clear_cache()
+
+
+def test_pages_use_the_saved_record_and_never_work_it_out(monkeypatch):
+    """Default view: the saved copy, at once. Nothing saved: no record yet, a background refresh starts."""
+    started = []
+    monkeypatch.setattr(place_bet, '_start_background_refresh', lambda: started.append(1))
+    monkeypatch.setattr(place_bet, 'performance_all', lambda *a, **k: (_ for _ in ()).throw(AssertionError('slow path')))
+    with appmod.app.app_context():
+        db.create_all()
+        try:
+            db.session.execute(place_bet.text(f'DROP TABLE IF EXISTS {place_bet._STORE_TABLE}'))
+            assert place_bet.record_for_page(db.session) == (None, None)
+            assert started == [1]
+            place_bet.save_record(db.session, {'rules': [], 'stake': 10.0})
+            record, saved_at = place_bet.record_for_page(db.session)
+            assert record == {'rules': [], 'stake': 10.0} and saved_at is not None
+            assert started == [1]  # fresh copy: no new refresh
+        finally:
+            db.session.execute(place_bet.text(f'DROP TABLE IF EXISTS {place_bet._STORE_TABLE}'))
+            db.session.commit()
+            db.session.remove()
+            db.drop_all()
+
+
+def test_refresh_saves_what_the_pages_show():
+    with appmod.app.app_context():
+        db.create_all()
+        try:
+            race = _setup()
+            _runner(race, 'Pick', {'horse last10': '52'}, LIGHT, fin=3)
+            db.session.commit()
+            fresh = place_bet.refresh_stored(db.session)
+            saved_at, saved = place_bet.stored_record(db.session)
+            assert saved['rules'] == fresh['rules']
+        finally:
+            place_bet.clear_cache()
+            db.session.execute(place_bet.text(f'DROP TABLE IF EXISTS {place_bet._STORE_TABLE}'))
+            db.session.commit()
+            db.session.remove()
+            db.drop_all()

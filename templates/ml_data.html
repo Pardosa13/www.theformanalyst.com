@@ -544,6 +544,7 @@
 {% endif %}
 
 <!-- Place rules (place_bet.py): the only Best Bets. Settled on the place at Betfair place SP. -->
+{% if not place_rules_record %}<p class="text-muted" style="font-size:13px">The place rules record is being worked out in the background. Refresh in a few minutes.</p>{% elif place_rules_age_min is not none %}<p class="text-muted" style="font-size:12px;margin:0 0 8px">Record updated {{ place_rules_age_min }} min ago (refreshes after each results check).</p>{% endif %}
 {% if place_rules_record %}
 <div class="section-card">
   <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlPlaceRules" aria-expanded="true">

@@ -6565,9 +6565,10 @@ def ml_data_analytics():
         logger.info("No feature ablation report to show yet: %s", e)
 
     place_rules_record = None
+    place_rules_saved_at = None
     try:
-        place_rules_record = _ml_data_cached('place_rules', filter_key, lambda: place_bet.performance_all(
-            db.session, date_from=date_from or None, date_to=date_to or None))
+        place_rules_record, place_rules_saved_at = place_bet.record_for_page(
+            db.session, date_from=date_from or None, date_to=date_to or None)
     except Exception as e:
         db.session.rollback()
         logger.warning("Error calculating place rules record: %s", e, exc_info=True)
@@ -6586,6 +6587,7 @@ def ml_data_analytics():
     logger.info("ML_DATA_TIMING section=page_total seconds=%.2f", _time.time() - page_started)
 
     return render_template("ml_data.html",
+        place_rules_age_min=place_bet.age_minutes(place_rules_saved_at),
         data_check_failures=data_check_failures,
         betfair_reality=betfair_reality,
         place_rules_record=place_rules_record,
@@ -11877,8 +11879,9 @@ def best_bets():
         race['horses'].append(bet)
 
     place_rules_record = None
+    place_rules_saved_at = None
     try:
-        place_rules_record = place_bet.performance_all(db.session)
+        place_rules_record, place_rules_saved_at = place_bet.record_for_page(db.session)
     except Exception as e:
         db.session.rollback()
         logger.warning("Place rules record unavailable: %s", e, exc_info=True)
@@ -11887,6 +11890,7 @@ def best_bets():
     data_check_failures = data_checks.latest_failures(db.session)
 
     return render_template("best_bets.html",
+        place_rules_age_min=place_bet.age_minutes(place_rules_saved_at),
         data_check_failures=data_check_failures,
         place_rules=place_bet.RULES,
         place_rules_record=place_rules_record,
