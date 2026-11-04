@@ -16,8 +16,12 @@ Each rule reads exactly what the audit read:
 - analyzer checks: the component names parse_notes_components() finds in the
   prediction notes, the same parser the audit used
 """
+import hashlib
 import json
 import logging
+import os
+import pickle
+import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -148,15 +152,41 @@ def rule_matches(rule, csv_data, components):
     return True
 
 
+def _form_ok(rule, csv_data):
+    """The rule's last-start checks only (cheap: no notes parsing)."""
+    if rule.last_pos is not None and last_start_position(csv_data) != rule.last_pos:
+        return False
+    if rule.max_margin is not None:
+        margin = last_start_margin(csv_data)
+        if margin is None or not margin < rule.max_margin:
+            return False
+    return True
+
+
+def rules_for(csv_data, notes):
+    """Rules a runner fits, in RULES order, given its form data and analyzer notes.
+
+    Same answer as rule_matches() for every rule. The last-start checks run
+    first, so the slow notes parser only runs when a rule can still fit.
+    """
+    if not notes:
+        return []
+    csv_data = _csv(csv_data)
+    candidates = [rule for rule in RULES if _form_ok(rule, csv_data)]
+    if not candidates:
+        return []
+    components = note_components(notes)
+    if not components:
+        return []
+    return [rule for rule in candidates if all(name in components for name in rule.components)]
+
+
 def matching_rules(horse):
     """Rules this runner fits, in RULES order. Scratched runners fit none."""
     prediction = getattr(horse, 'prediction', None)
     if prediction is None or getattr(horse, 'is_scratched', False):
         return []
-    components = note_components(prediction.notes)
-    if not components:
-        return []
-    return [rule for rule in RULES if rule_matches(rule, horse, components)]
+    return rules_for(horse, prediction.notes)
 
 
 def has_component(notes, components=None):
@@ -199,7 +229,11 @@ def _summary(rows, label):
 
 
 _BASE_SQL = """
-    SELECT h.id AS horse_id, h.race_id, h.horse_name, h.csv_data, p.notes, r.finish_position AS fin,
+    SELECT h.id AS horse_id, h.race_id, h.horse_name,
+           h.csv_data ->> 'horse last10' AS last10, h.csv_data ->> 'form margin' AS form_margin,
+           CASE WHEN h.csv_data ->> 'horse last10' IS NULL AND h.csv_data ->> 'form margin' IS NULL
+                THEN h.csv_data END AS csv_fallback,
+           p.notes, r.finish_position AS fin,
            r.place_bsp, m.date AS meeting_date, m.meeting_name, rc.race_number, rc.start_time_utc,
            p.best_bet_routes, p.best_bet_qualified_at, s.starters
     FROM horses h
@@ -244,8 +278,14 @@ def settled_picks(session, date_from=None, date_to=None):
         if row['horse_id'] in seen:
             continue
         seen.add(row['horse_id'])
-        components = note_components(row['notes'])
-        rules = [rule for rule in RULES if rule_matches(rule, row['csv_data'], components)]
+        # Only the two form fields the rules read are fetched (the whole form
+        # row is large). A row stored as a JSON string, not an object, comes
+        # back whole in csv_fallback and is read the old way.
+        if row['csv_fallback'] is not None:
+            csv_data = row['csv_fallback']
+        else:
+            csv_data = {'horse last10': row['last10'], 'form margin': row['form_margin']}
+        rules = rules_for(csv_data, row['notes'])
         if not rules:
             continue
         recorded = set((row['best_bet_routes'] or '').split(','))
@@ -357,6 +397,44 @@ def _bsp_through(session):
 
 _CACHE = {}
 _CACHE_SECONDS = 600
+# Shared by every web worker on the machine (and kept when a worker restarts),
+# so one slow rebuild serves both pages and both workers for 10 minutes.
+_CACHE_DIR = os.path.join('/dev/shm' if os.path.isdir('/dev/shm') else tempfile.gettempdir(),
+                          'formanalyst_place_rules')
+
+
+def _cache_file(cache_key):
+    name = hashlib.sha1(repr(cache_key).encode()).hexdigest()
+    return os.path.join(_CACHE_DIR, name + '.pickle')
+
+
+def _cache_get(cache_key):
+    hit = _CACHE.get(cache_key)
+    if hit and time.time() - hit[0] < _CACHE_SECONDS:
+        return hit[1]
+    try:
+        with open(_cache_file(cache_key), 'rb') as f:
+            saved_at, result = pickle.load(f)
+    except Exception:
+        return None
+    if time.time() - saved_at >= _CACHE_SECONDS:
+        return None
+    _CACHE[cache_key] = (saved_at, result)
+    return result
+
+
+def _cache_put(cache_key, result):
+    now = time.time()
+    _CACHE[cache_key] = (now, result)
+    try:
+        os.makedirs(_CACHE_DIR, exist_ok=True)
+        path = _cache_file(cache_key)
+        tmp = f'{path}.{os.getpid()}.tmp'
+        with open(tmp, 'wb') as f:
+            pickle.dump((now, result), f)
+        os.replace(tmp, path)
+    except Exception as e:
+        logger.info("Place rules cache file not written: %s", e)
 
 
 def performance_all(session, date_from=None, date_to=None):
@@ -365,9 +443,9 @@ def performance_all(session, date_from=None, date_to=None):
     Cached for 10 minutes: it reads every settled runner the rules pick.
     """
     cache_key = (str(date_from or ''), str(date_to or ''))
-    hit = _CACHE.get(cache_key)
-    if hit and time.time() - hit[0] < _CACHE_SECONDS:
-        return hit[1]
+    hit = _cache_get(cache_key)
+    if hit is not None:
+        return hit
     started = time.time()
     picks = settled_picks(session, date_from, date_to)
     logger.info("PLACE_RULES_TIMING settled_picks seconds=%.2f picks=%d", time.time() - started, len(picks))
@@ -416,9 +494,14 @@ def performance_all(session, date_from=None, date_to=None):
         'stake': STAKE,
         'commission_pct': COMMISSION * 100,
     }
-    _CACHE[cache_key] = (time.time(), result)
+    _cache_put(cache_key, result)
     return result
 
 
 def clear_cache():
     _CACHE.clear()
+    try:
+        for name in os.listdir(_CACHE_DIR):
+            os.remove(os.path.join(_CACHE_DIR, name))
+    except OSError:
+        pass

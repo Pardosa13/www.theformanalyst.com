@@ -230,3 +230,49 @@ def test_live_roi_matches_the_chart_before_betfair_prices_arrive(monkeypatch):
     assert round(live['profit'], 2) == -10.0
     assert round(live['roi'], 1) == -33.3
     assert live['estimate'] is True
+
+
+def test_quick_rule_check_gives_the_same_answer_as_the_full_check():
+    """rules_for() skips the notes parser when the form rules a runner out; it must never change the answer."""
+    import itertools
+    lines = [LIGHT, HEAVY, TRACK_PODIUM, PLACES_32, PLACES_23, TD_NO_WINS, POOR_TRACK,
+             GOING_PODIUM, BACK_SPRINT, ONPACE_MILE]
+    forms = [{}, {'horse last10': '52'}, {'horse last10': '3x51', 'form margin': '0.5'},
+             {'horse last10': '11', 'form margin': '2.0'}, {'form margin': '0.9L'}, {'horse last10': '2x'}]
+    for form in forms:
+        for combo in itertools.chain.from_iterable(itertools.combinations(lines, n) for n in (1, 2, 3)):
+            notes = '\n'.join(combo)
+            components = place_bet.note_components(notes)
+            full = [r.key for r in place_bet.RULES if place_bet.rule_matches(r, form, components)]
+            assert [r.key for r in place_bet.rules_for(form, notes)] == full
+
+
+def test_history_reads_form_saved_as_a_json_string():
+    """Old rows hold the form as a JSON string, not an object: still read in full."""
+    import json
+    with appmod.app.app_context():
+        db.create_all()
+        try:
+            place_bet.clear_cache()
+            race = _setup()
+            _runner(race, 'Pick', json.dumps({'horse last10': '52'}), LIGHT, fin=3)
+            for i in range(7):
+                _runner(race, f'O{i}', {'horse last10': '66'}, HEAVY, fin=[1, 2, 4, 5, 6, 7, 8][i])
+            db.session.commit()
+            picks = place_bet.settled_picks(db.session)
+            assert [(rule.key, item['horse']) for rule, item in picks] == [('place_2nd_light', 'Pick')]
+        finally:
+            place_bet.clear_cache()
+            db.session.remove()
+            db.drop_all()
+
+
+def test_cached_record_is_shared_through_the_cache_file():
+    """A second worker (empty memory cache) reads the saved file instead of rebuilding."""
+    place_bet.clear_cache()
+    try:
+        place_bet._cache_put(('x', 'y'), {'rules': []})
+        place_bet._CACHE.clear()
+        assert place_bet._cache_get(('x', 'y')) == {'rules': []}
+    finally:
+        place_bet.clear_cache()
