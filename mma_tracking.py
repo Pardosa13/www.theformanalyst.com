@@ -28,6 +28,7 @@ FIGHTS_SQL = """
     JOIN mma_events e ON e.id = f.event_id
     LEFT JOIN mma_predictions p ON p.fight_id = f.id
     WHERE e.is_completed = FALSE
+      AND e.date >= CURRENT_DATE - 1
       AND COALESCE(f.is_active, TRUE) = TRUE
       AND COALESCE(f.status, 'confirmed') = 'confirmed'
       AND p.predicted_winner IS NOT NULL

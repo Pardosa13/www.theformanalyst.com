@@ -710,3 +710,28 @@ def test_ufc_edge_leans_on_the_market():
     assert blended["raw_model_prob"] == 70.0
     assert 0 < blended["edge"] < 5
     assert abs(mma_data.market_anchored_probability(0.5, 0.5) - 0.5) < 1e-9
+
+
+def test_past_events_missing_results_are_reread_as_finished():
+    from datetime import date as _date
+    rows = [("e3", "UFC 330", _date(2026, 8, 15), "Las Vegas", "https://espn/e3"),
+            ("e2", "Contender Series W1", _date(2026, 8, 11), None, "https://espn/e2"),
+            ("e1", "No link", _date(2026, 8, 1), None, None)]
+    cur = _FakeCursor(fetchall=rows)
+    conn = SimpleNamespace(cursor=lambda: cur)
+    out = mma_sync.events_missing_results(conn, _date(2026, 11, 10), {"e3"})
+    assert [e["event_id"] for e in out] == ["e2"]
+    assert out[0]["is_completed"] is True and out[0]["location"] == "TBD"
+    assert "winner_name IS NULL" in cur.statements[0][0]
+
+
+def test_fight_cards_pick_events_by_date_not_the_finished_flag():
+    """Past events never marked finished sorted as upcoming and pushed this
+    week's card off the page."""
+    from pathlib import Path
+    src = Path("mma_routes.py").read_text(encoding="utf-8")
+    start = src.index("def api_mma_events")
+    query = src[start:src.index("event_rows = db.session.execute(events_sql)", start)]
+    assert "CASE WHEN is_completed = FALSE THEN 0 ELSE 1 END" not in query
+    assert "CASE WHEN date >= CURRENT_DATE - 1 THEN 0 ELSE 1 END" in query
+    assert "(is_completed OR date < CURRENT_DATE - 1) AS is_completed" in query
