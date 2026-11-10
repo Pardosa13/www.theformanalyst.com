@@ -397,6 +397,36 @@
 .mma-section { display: none; }
 .mma-section.active { display: block; }
 
+/* ── Results ──────────────────────────────────────────────── */
+.mr-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+.mr-card h4 { margin: 0 0 4px; font-size: 1.05rem; font-weight: 800; color: var(--text-primary); }
+.mr-sub { font-size: 12px; color: var(--text-muted); margin-bottom: 14px; }
+.mr-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.mr-tiles .stat-cell .val.pos { color: #34d399; }
+.mr-tiles .stat-cell .val.neg { color: #f87171; }
+.mr-note { font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; line-height: 1.5; }
+.mr-table-wrap { overflow-x: auto; }
+.mr-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mr-table th { text-align: left; color: var(--text-muted); font-weight: 700; font-size: 10px; text-transform: uppercase;
+  letter-spacing: .05em; padding: 6px 8px; border-bottom: 1px solid var(--border-mid); white-space: nowrap; }
+.mr-table td { padding: 7px 8px; border-bottom: 1px solid var(--border-subtle); color: var(--text-primary); white-space: nowrap; }
+.mr-table td.num { font-family: 'DM Mono', monospace; text-align: right; }
+.mr-table th.num { text-align: right; }
+.mr-tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; }
+.mr-tag.won { background: rgba(16,185,129,.14); color: #34d399; }
+.mr-tag.lost { background: rgba(239,68,68,.14); color: #f87171; }
+.mr-tag.pending, .mr-tag.void { background: var(--bg-elevated); color: var(--text-muted); }
+@media (max-width: 600px) {
+  .mr-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mr-card { padding: 14px; }
+}
+
 /* ── Edge Finder ──────────────────────────────────────────── */
 .edge-finder-bar {
   display: flex;
@@ -524,6 +554,7 @@
   <div class="mma-nav-tabs">
     <button class="mma-nav-tab active" onclick="switchSection('fights', this)">🥊 Fight Cards</button>
     <button class="mma-nav-tab" onclick="switchSection('edge', this)">⚡ Edge Finder</button>
+    <button class="mma-nav-tab" onclick="switchSection('results', this)">📊 Results</button>
   </div>
 
   <!-- ── SECTION: Fight Cards ─────────────────────────────── -->
@@ -547,7 +578,7 @@
         <h4 style="margin:0;font-size:1.1rem;font-weight:800;color:var(--text-primary);">
           ⚡ UFC Edge Finder
         </h4>
-        <span style="font-size:11px;color:var(--text-muted);">Model win probability vs bookmaker implied odds</span>
+        <span style="font-size:11px;color:var(--text-muted);">Our chance (mostly the market, part model) vs the bookmaker price</span>
       </div>
 
       <div id="ef-no-odds-note" class="ef-no-odds-note" style="display:none;">
@@ -580,6 +611,16 @@
     </div>
   </div>
 
+  <!-- ── SECTION: Results ─────────────────────────────────── -->
+  <div id="section-results" class="mma-section">
+    <div id="mr-content">
+      <div class="mma-loading" style="padding:40px 20px;">
+        <div class="spinner"></div>
+        <p>Loading results...</p>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- Fighter modal -->
@@ -597,6 +638,7 @@
 let allEvents = [];
 let activeEventIdx = 0;
 let _efRawData = null;
+let _mrLoaded = false;
 
 // ── Section switching ─────────────────────────────────────
 function switchSection(name, btn) {
@@ -605,6 +647,7 @@ function switchSection(name, btn) {
   document.getElementById('section-' + name).classList.add('active');
   btn.classList.add('active');
   if (name === 'edge' && !_efRawData) loadEdgeFinder();
+  if (name === 'results' && !_mrLoaded) loadResults();
 }
 
 // ── Fetch events ─────────────────────────────────────────────
@@ -957,6 +1000,99 @@ function showEmpty(msg) {
     `<div class="mma-empty">${msg}</div>`;
 }
 
+// ── Results ───────────────────────────────────────────────────
+function mrTile(val, label, cls) {
+  return `<div class="stat-cell"><div class="val ${cls || ''}">${escHtml(val)}</div><div class="lbl">${escHtml(label)}</div></div>`;
+}
+function mrPct(v) { return v == null ? '—' : `${Number(v).toFixed(1)}%`; }
+function mrDate(d) {
+  if (!d) return '—';
+  const dt = new Date(d + 'T00:00:00');
+  return isNaN(dt) ? d : dt.toLocaleDateString('en-AU', {day: 'numeric', month: 'short'});
+}
+
+async function loadResults() {
+  const el = document.getElementById('mr-content');
+  try {
+    const res = await fetch('/api/mma/results');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    _mrLoaded = true;
+    el.innerHTML = mrModelHTML(data.model || {}) + mrEdgesHTML(data.value_edges || {}, data.model_weight);
+  } catch (e) {
+    el.innerHTML = `<div class="mma-empty">Failed to load results: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function mrModelHTML(m) {
+  const w = m.with_odds || {};
+  if (!m.fights) {
+    return `<div class="mr-card"><h4>🤖 ML Predictor</h4><div class="mma-empty">No finished fights with a pre-fight prediction yet.</div></div>`;
+  }
+  const beats = w.fights && w.model_log_loss < w.market_log_loss;
+  const compare = w.fights
+    ? `On the ${w.fights} fights that had odds, the model's pick won <strong>${mrPct(w.model_pick_won_pct)}</strong> and the bookies' favourite won <strong>${mrPct(w.favourite_won_pct)}</strong>. ${beats ? 'The model has been more accurate than the market.' : 'The market has been more accurate than the model.'}`
+    : 'No finished fights with odds yet, so the model cannot be compared with the bookies.';
+  const bands = (m.by_confidence || []).map(b => `<tr>
+      <td>${escHtml(b.band)}</td><td class="num">${b.fights}</td>
+      <td class="num">${mrPct(b.model_said_pct)}</td><td class="num">${mrPct(b.won_pct)}</td></tr>`).join('');
+  const recent = (m.recent || []).map(r => `<tr>
+      <td>${escHtml(mrDate(r.event_date))}</td><td>${escHtml(r.fight)}</td>
+      <td>${escHtml(r.pick)}</td><td class="num">${mrPct(r.pick_prob)}</td>
+      <td>${escHtml(r.favourite || '—')}</td><td>${escHtml(r.winner)}</td>
+      <td><span class="mr-tag ${r.correct ? 'won' : 'lost'}">${r.correct ? 'RIGHT' : 'WRONG'}</span></td></tr>`).join('');
+  return `
+    <div class="mr-card">
+      <h4>🤖 ML Predictor</h4>
+      <div class="mr-sub">Finished fights, counting only predictions made before the event day</div>
+      <div class="mr-tiles">
+        ${mrTile(String(m.fights), 'Fights')}
+        ${mrTile(mrPct(m.pick_won_pct), 'Pick won')}
+        ${mrTile(mrPct(w.favourite_won_pct), 'Favourite won')}
+        ${mrTile(m.log_loss == null ? '—' : Number(m.log_loss).toFixed(3), 'Log loss (lower is better)')}
+      </div>
+      <div class="mr-note">${compare}</div>
+      <div class="mr-table-wrap"><table class="mr-table">
+        <thead><tr><th>Model's chance</th><th class="num">Fights</th><th class="num">Model said</th><th class="num">Pick won</th></tr></thead>
+        <tbody>${bands}</tbody></table></div>
+      <div class="mr-sub" style="margin:16px 0 6px;">Latest fights</div>
+      <div class="mr-table-wrap"><table class="mr-table">
+        <thead><tr><th>Date</th><th>Fight</th><th>Pick</th><th class="num">Chance</th><th>Favourite</th><th>Winner</th><th></th></tr></thead>
+        <tbody>${recent}</tbody></table></div>
+    </div>`;
+}
+
+function mrEdgesHTML(e, modelWeight) {
+  const pctModel = Math.round((modelWeight || 0) * 100);
+  const profit = Number(e.profit_units || 0);
+  const profitCls = profit > 0 ? 'pos' : profit < 0 ? 'neg' : '';
+  const rows = (e.recent || []).map(r => `<tr>
+      <td>${escHtml(mrDate(r.event_date))}</td><td>${escHtml(r.fighter)}</td><td>${escHtml(r.opponent || '')}</td>
+      <td class="num">$${Number(r.odds || 0).toFixed(2)}</td><td>${escHtml(r.bookmaker || '')}</td>
+      <td class="num">${r.edge == null ? '—' : (r.edge > 0 ? '+' : '') + Number(r.edge).toFixed(1) + '%'}</td>
+      <td><span class="mr-tag ${escHtml(r.status)}">${escHtml(String(r.status).toUpperCase())}</span></td>
+      <td class="num">${r.profit == null ? '—' : (r.profit > 0 ? '+' : '') + Number(r.profit).toFixed(2) + 'u'}</td></tr>`).join('');
+  const body = (e.recent || []).length
+    ? `<div class="mr-table-wrap"><table class="mr-table">
+        <thead><tr><th>Date</th><th>Fighter</th><th>Vs</th><th class="num">Odds</th><th>Bookie</th><th class="num">Edge</th><th>Result</th><th class="num">Profit</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>`
+    : '<div class="mma-empty">No value picks recorded yet. Picks are saved from the Edge Finder and the weekly sync before each fight.</div>';
+  return `
+    <div class="mr-card">
+      <h4>⚡ Value Edges</h4>
+      <div class="mr-sub">Every Edge Finder value pick, saved before the fight at the best price shown · 1 unit each</div>
+      <div class="mr-tiles">
+        ${mrTile(String(e.bets || 0), 'Settled bets')}
+        ${mrTile(mrPct(e.strike_rate), 'Strike rate')}
+        ${mrTile(`${profit > 0 ? '+' : ''}${profit.toFixed(2)}u`, 'Profit', profitCls)}
+        ${mrTile(mrPct(e.roi_pct), 'ROI', profitCls)}
+      </div>
+      <div class="mr-note">${e.pending || 0} waiting on results${e.void ? ` · ${e.void} void (no contest or cancelled)` : ''}.
+        Our chance is ${100 - pctModel}% market and ${pctModel}% model, so edges stay small.</div>
+      ${body}
+    </div>`;
+}
+
 // ── Edge Finder ───────────────────────────────────────────────
 
 async function loadEdgeFinder() {
@@ -1003,6 +1139,7 @@ function applyEdgeFilters() {
   const summary = `${allBets.length} result(s) · min edge: ${minEdge.toFixed(1)}%`;
 
   el.innerHTML = `
+    ${efTrackRecordHTML(_efRawData.track_record, _efRawData.model_weight)}
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;font-family:'DM Mono',monospace;">
       ${escHtml(summary)}
     </div>
@@ -1010,6 +1147,21 @@ function applyEdgeFilters() {
       ${allBets.map(bet => efCardHTML(bet)).join('')}
     </div>
   `;
+}
+
+// How the model's picks have really gone, so its "edges" can be judged.
+function efTrackRecordHTML(tr, modelWeight) {
+  if (!tr || !tr.fights) return '';
+  const beatsMarket = tr.model_log_loss < tr.market_log_loss;
+  const pctModel = Math.round((modelWeight || 0) * 100);
+  return `
+    <div style="background:var(--bg-elevated,rgba(255,255,255,.04));border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:var(--text-secondary,var(--text-muted));">
+      <strong style="color:var(--text-primary);">Model track record</strong> · ${tr.fights} finished fights with odds<br>
+      Model's pick won <strong>${tr.model_pick_won_pct}%</strong> · bookies' favourite won <strong>${tr.favourite_won_pct}%</strong>.
+      ${beatsMarket
+        ? 'The model has been more accurate than the market so far.'
+        : 'The market has been more accurate than the model, so "our chance" is ' + (100 - pctModel) + '% market and ' + pctModel + '% model, and edges stay small.'}
+    </div>`;
 }
 
 function efCardHTML(bet) {
@@ -1054,9 +1206,10 @@ function efCardHTML(bet) {
       </div>
       ${badges ? `<div class="ef-badges" style="margin-bottom:10px;">${badges}</div>` : ''}
       <div class="ef-prob-row">
-        <span class="ef-prob-item">Model <strong>${(bet.model_prob || 0).toFixed(1)}%</strong></span>
+        <span class="ef-prob-item" title="Mostly the market's chance, part the model's">Our chance <strong>${(bet.model_prob || 0).toFixed(1)}%</strong></span>
+        <span class="ef-prob-item">Model alone <strong>${(bet.raw_model_prob ?? bet.model_prob ?? 0).toFixed(1)}%</strong></span>
         <span class="ef-prob-item">Implied <strong>${(bet.implied_prob || 0).toFixed(1)}%</strong>${bet.devigged ? '' : ' <span title="Opponent price from this bookmaker was unavailable, so this is the raw 1/odds price (includes the bookmaker\'s vig) rather than a devigged estimate.">⚠️</span>'}</span>
-        <span class="ef-prob-item">Opponent <strong>${(bet.opponent_model_prob || 0).toFixed(1)}%</strong></span>
+        <span class="ef-prob-item">Opponent (model) <strong>${(bet.opponent_model_prob || 0).toFixed(1)}%</strong></span>
         <span class="ef-prob-item">Confidence <strong>${escHtml(bet.confidence || '')}</strong></span>
       </div>
     </div>

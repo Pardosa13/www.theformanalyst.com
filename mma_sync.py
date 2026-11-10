@@ -2584,6 +2584,15 @@ def main():
                 odds_db = SimpleNamespace(engine=odds_engine, text=text)
                 count = upsert_mma_fight_odds(odds_db, odds_rows)
                 log.info(f"  ✓ UFC odds synced: {count} rows")
+                # Save this week's value picks before the fights, for the Results tab.
+                try:
+                    import mma_tracking
+                    with odds_engine.begin() as track_conn:
+                        bets, _total = mma_tracking.load_edge_bets(track_conn)
+                        saved = mma_tracking.record_value_edges(track_conn, bets)
+                    log.info("  ✓ UFC value picks recorded: %s new (of %s priced)", saved, len(bets))
+                except Exception as track_exc:
+                    log.warning("  ✗ UFC value picks not recorded: %s", track_exc)
             else:
                 log.info("  - No UFC odds returned (no upcoming events?)")
         except Exception as exc:

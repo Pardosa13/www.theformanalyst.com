@@ -3554,6 +3554,14 @@ function loadValueFinder() {
     });
 }
 
+// The record restarted on this date: earlier picks came from a faulty rule.
+function aflRecordStartNote(start) {
+  if (!start) return '';
+  const d = new Date(start + 'T00:00:00');
+  const label = isNaN(d) ? start : d.toLocaleDateString('en-AU', {day: 'numeric', month: 'short', year: 'numeric'});
+  return `<span title="Picks saved before this date came from a rule that kept bad edges as well as good ones, so they are not counted.">Record from <strong>${esc(label)}</strong> · </span>`;
+}
+
 function loadModelTracker() {
   const summaryEl = document.getElementById('vfPerfSummary');
   const rowsEl = document.getElementById('vfTrackerRows');
@@ -3566,6 +3574,7 @@ function loadModelTracker() {
       const sr = s.total_bets ? `${safeNum(s.strike_rate, 0).toFixed(1)}%` : '—';
       const roi = s.total_bets ? `${safeNum(s.roi, 0).toFixed(1)}%` : '—';
       summaryEl.innerHTML = `
+        ${aflRecordStartNote(data.record_start)}
         Tracked performance: <strong>${s.total_bets || 0}</strong> settled picks ·
         W-L-P <strong>${s.wins || 0}-${s.losses || 0}-${s.pushes || 0}</strong> ·
         Strike <strong>${sr}</strong> ·
@@ -3722,6 +3731,7 @@ function loadAflResultsAnalysis() {
 
       // ── Summary meta line ──────────────────────────────────────
       summaryEl.innerHTML = `
+        ${aflRecordStartNote(data.record_start)}
         Captured picks: <strong>${safeNum(summary.captured_total, 0).toLocaleString()}</strong> ·
         Settled: <strong>${safeNum(summary.settled_total, 0).toLocaleString()}</strong> ·
         Pending: <strong>${safeNum(summary.pending_total, 0).toLocaleString()}</strong> ·

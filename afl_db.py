@@ -278,10 +278,37 @@ AFL_SCHEMA_STATEMENTS = [
     """,
     """
     CREATE OR REPLACE VIEW afl_match_predictions AS
+    -- Predicted margin from each team's rating over its last five games played
+    -- BEFORE the match (the same rule the match pages use). This used to rate
+    -- each team on the stats of the match itself, so for every finished game
+    -- the "prediction" contained the result, and the AFL ML model trained on it.
     WITH team_match_stats AS (
         SELECT
             ps.match_date,
-            LOWER(TRIM(ps.player_team)) AS team_key,
+            CASE LOWER(TRIM(ps.player_team))
+            WHEN 'west coast eagles' THEN 'west coast'
+            WHEN 'greater western sydney' THEN 'gws giants'
+            WHEN 'greater western sydney giants' THEN 'gws giants'
+            WHEN 'gws' THEN 'gws giants'
+            WHEN 'footscray' THEN 'western bulldogs'
+            WHEN 'brisbane' THEN 'brisbane lions'
+            WHEN 'adelaide crows' THEN 'adelaide'
+            WHEN 'carlton blues' THEN 'carlton'
+            WHEN 'collingwood magpies' THEN 'collingwood'
+            WHEN 'essendon bombers' THEN 'essendon'
+            WHEN 'fremantle dockers' THEN 'fremantle'
+            WHEN 'geelong cats' THEN 'geelong'
+            WHEN 'gold coast suns' THEN 'gold coast'
+            WHEN 'hawthorn hawks' THEN 'hawthorn'
+            WHEN 'melbourne demons' THEN 'melbourne'
+            WHEN 'north melbourne kangaroos' THEN 'north melbourne'
+            WHEN 'port adelaide power' THEN 'port adelaide'
+            WHEN 'richmond tigers' THEN 'richmond'
+            WHEN 'st kilda saints' THEN 'st kilda'
+            WHEN 'sydney swans' THEN 'sydney'
+            WHEN 'western bulldogs bulldogs' THEN 'western bulldogs'
+            WHEN 'brisbane lions lions' THEN 'brisbane lions'
+            ELSE LOWER(TRIM(ps.player_team)) END AS team_key,
             (
                 -- Scoring
                 6.00 * SUM(COALESCE(ps.goals, 0)) +
@@ -318,20 +345,99 @@ AFL_SCHEMA_STATEMENTS = [
             ) AS team_rating
         FROM afl_player_stats ps
         WHERE COALESCE(ps.player_team, '') <> ''
-        GROUP BY ps.match_date, LOWER(TRIM(ps.player_team))
+        GROUP BY ps.match_date, CASE LOWER(TRIM(ps.player_team))
+            WHEN 'west coast eagles' THEN 'west coast'
+            WHEN 'greater western sydney' THEN 'gws giants'
+            WHEN 'greater western sydney giants' THEN 'gws giants'
+            WHEN 'gws' THEN 'gws giants'
+            WHEN 'footscray' THEN 'western bulldogs'
+            WHEN 'brisbane' THEN 'brisbane lions'
+            WHEN 'adelaide crows' THEN 'adelaide'
+            WHEN 'carlton blues' THEN 'carlton'
+            WHEN 'collingwood magpies' THEN 'collingwood'
+            WHEN 'essendon bombers' THEN 'essendon'
+            WHEN 'fremantle dockers' THEN 'fremantle'
+            WHEN 'geelong cats' THEN 'geelong'
+            WHEN 'gold coast suns' THEN 'gold coast'
+            WHEN 'hawthorn hawks' THEN 'hawthorn'
+            WHEN 'melbourne demons' THEN 'melbourne'
+            WHEN 'north melbourne kangaroos' THEN 'north melbourne'
+            WHEN 'port adelaide power' THEN 'port adelaide'
+            WHEN 'richmond tigers' THEN 'richmond'
+            WHEN 'st kilda saints' THEN 'st kilda'
+            WHEN 'sydney swans' THEN 'sydney'
+            WHEN 'western bulldogs bulldogs' THEN 'western bulldogs'
+            WHEN 'brisbane lions lions' THEN 'brisbane lions'
+            ELSE LOWER(TRIM(ps.player_team)) END
+    ),
+    team_rolling AS (
+        SELECT match_date, team_key,
+               AVG(team_rating) OVER (PARTITION BY team_key ORDER BY match_date
+                                      ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS rolling_avg_5
+        FROM team_match_stats
     )
     SELECT
         g.id AS match_id,
         g.hteam AS home_team,
         g.ateam AS away_team,
-        home.team_rating - away.team_rating AS predicted_margin
+        home.rolling_avg_5 - away.rolling_avg_5 AS predicted_margin
     FROM afl_games g
-    JOIN team_match_stats home
-        ON home.match_date = g.date::DATE
-       AND home.team_key = LOWER(TRIM(g.hteam))
-    JOIN team_match_stats away
-        ON away.match_date = g.date::DATE
-       AND away.team_key = LOWER(TRIM(g.ateam))
+    LEFT JOIN LATERAL (
+        SELECT tr.rolling_avg_5 FROM team_rolling tr
+        WHERE tr.team_key = CASE LOWER(TRIM(g.hteam))
+            WHEN 'west coast eagles' THEN 'west coast'
+            WHEN 'greater western sydney' THEN 'gws giants'
+            WHEN 'greater western sydney giants' THEN 'gws giants'
+            WHEN 'gws' THEN 'gws giants'
+            WHEN 'footscray' THEN 'western bulldogs'
+            WHEN 'brisbane' THEN 'brisbane lions'
+            WHEN 'adelaide crows' THEN 'adelaide'
+            WHEN 'carlton blues' THEN 'carlton'
+            WHEN 'collingwood magpies' THEN 'collingwood'
+            WHEN 'essendon bombers' THEN 'essendon'
+            WHEN 'fremantle dockers' THEN 'fremantle'
+            WHEN 'geelong cats' THEN 'geelong'
+            WHEN 'gold coast suns' THEN 'gold coast'
+            WHEN 'hawthorn hawks' THEN 'hawthorn'
+            WHEN 'melbourne demons' THEN 'melbourne'
+            WHEN 'north melbourne kangaroos' THEN 'north melbourne'
+            WHEN 'port adelaide power' THEN 'port adelaide'
+            WHEN 'richmond tigers' THEN 'richmond'
+            WHEN 'st kilda saints' THEN 'st kilda'
+            WHEN 'sydney swans' THEN 'sydney'
+            WHEN 'western bulldogs bulldogs' THEN 'western bulldogs'
+            WHEN 'brisbane lions lions' THEN 'brisbane lions'
+            ELSE LOWER(TRIM(g.hteam)) END AND tr.match_date < g.date::DATE
+        ORDER BY tr.match_date DESC LIMIT 1
+    ) home ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT tr.rolling_avg_5 FROM team_rolling tr
+        WHERE tr.team_key = CASE LOWER(TRIM(g.ateam))
+            WHEN 'west coast eagles' THEN 'west coast'
+            WHEN 'greater western sydney' THEN 'gws giants'
+            WHEN 'greater western sydney giants' THEN 'gws giants'
+            WHEN 'gws' THEN 'gws giants'
+            WHEN 'footscray' THEN 'western bulldogs'
+            WHEN 'brisbane' THEN 'brisbane lions'
+            WHEN 'adelaide crows' THEN 'adelaide'
+            WHEN 'carlton blues' THEN 'carlton'
+            WHEN 'collingwood magpies' THEN 'collingwood'
+            WHEN 'essendon bombers' THEN 'essendon'
+            WHEN 'fremantle dockers' THEN 'fremantle'
+            WHEN 'geelong cats' THEN 'geelong'
+            WHEN 'gold coast suns' THEN 'gold coast'
+            WHEN 'hawthorn hawks' THEN 'hawthorn'
+            WHEN 'melbourne demons' THEN 'melbourne'
+            WHEN 'north melbourne kangaroos' THEN 'north melbourne'
+            WHEN 'port adelaide power' THEN 'port adelaide'
+            WHEN 'richmond tigers' THEN 'richmond'
+            WHEN 'st kilda saints' THEN 'st kilda'
+            WHEN 'sydney swans' THEN 'sydney'
+            WHEN 'western bulldogs bulldogs' THEN 'western bulldogs'
+            WHEN 'brisbane lions lions' THEN 'brisbane lions'
+            ELSE LOWER(TRIM(g.ateam)) END AND tr.match_date < g.date::DATE
+        ORDER BY tr.match_date DESC LIMIT 1
+    ) away ON TRUE
     """,
     """
     CREATE TABLE IF NOT EXISTS afl_ml_artifacts (
@@ -1401,6 +1507,7 @@ def snapshot_model_selections_from_props(
 ) -> int:
     """Create official, deduped model selections from recent prop lines."""
     from afl_data import calculate_market_edge, _normalise_prop_market, _normalise_team_name
+    import afl_calibration
     BASE_CONFIDENCE = 40.0
     SEASON_GAME_WEIGHT = 1.6
     EDGE_WEIGHT = 2.2
@@ -1513,9 +1620,11 @@ def snapshot_model_selections_from_props(
             vs_opp_avg=vs_opp_avg,
             last5_avg=last5_avg,
             player_stats=rows,
+            calibration=afl_calibration.coefficients(db, prop.get("line_type")),
         )
         edge = float(edge_data.get("edge") or 0.0)
-        model_prob = edge_data.get("model_prob")
+        # Stored chance stays the model's own, so the correction can keep refitting.
+        model_prob = edge_data.get("raw_model_prob", edge_data.get("model_prob"))
         implied_prob = edge_data.get("implied_prob")
         confidence = max(0.0, min(
             100.0,
@@ -1527,7 +1636,7 @@ def snapshot_model_selections_from_props(
         # Positive edge only. This used abs(edge), so bets the model rated as
         # WORSE than the price were saved as "value" (10,844 settled Over picks
         # with the model at 14% against a price of 26%; they lost 42%).
-        if edge < min_edge or confidence < min_confidence:
+        if edge < min_edge or confidence < min_confidence or edge_data.get("recommendation") != "value":
             continue
 
         line = float(prop.get("line") or 0.0)
