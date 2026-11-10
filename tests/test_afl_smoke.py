@@ -2094,3 +2094,21 @@ def test_afl_record_only_counts_picks_from_the_restart_date():
     assert routes.count('"record_start": AFL_RECORD_START') >= 3
     page = Path("templates/afl.html").read_text(encoding="utf-8")
     assert page.count("aflRecordStartNote(data.record_start)") == 2
+
+
+def test_unders_are_never_called_value():
+    calculate_market_edge = _import_afl_calculate_market_edge()
+    games = [{"disposals": v, "time_on_ground_percentage": 85} for v in (14, 15, 13, 16, 12, 14, 15, 13, 14, 15)]
+    under = calculate_market_edge(player_avg=14, book_line=22.5, odds=2.0, line_type="Under",
+                                  market="player_disposals", player_stats=games)
+    assert under["edge"] > 10
+    assert under["recommendation"] == "skip"
+
+
+def test_afl_ml_picks_wait_for_a_model_trained_after_the_fix():
+    routes = Path("afl_routes.py").read_text(encoding="utf-8")
+    assert 'AFL_ML_CLEAN_FROM = "2026-11-10"' in routes
+    assert '"status": "needs_retrain"' in routes
+    page = Path("templates/afl.html").read_text(encoding="utf-8")
+    assert "needs_retrain" in page and "Experimental, not a recommendation" in page
+    assert ">Confidence</span>" not in page

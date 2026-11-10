@@ -2380,6 +2380,10 @@ def get_player_last_n_games(player_stats: list[dict], n: int = 5) -> list[dict]:
 
 # Chance x price a pick must reach to count as value (see calculate_market_edge).
 VALUE_PRICE_RATIO = 1.10
+# Sides that can be called value. After the overconfidence correction, Unders
+# still lost 13% on 180 unseen picks (Overs made +8% on 326), so Unders are
+# priced and shown but never called value until a new season says otherwise.
+VALUE_SIDES = ("Over",)
 
 
 def calculate_market_edge(
@@ -2521,7 +2525,7 @@ def calculate_market_edge(
     # Value needs the chance to beat the price by 10% as well as 2 points: on
     # unseen picks, corrected Overs at chance x price >= 1.10 made +8% (326 bets).
     price_ratio = model_prob * float(odds) if odds and odds > 1 else 0.0
-    is_value = edge_pct >= 2.0 and price_ratio >= VALUE_PRICE_RATIO
+    is_value = edge_pct >= 2.0 and price_ratio >= VALUE_PRICE_RATIO and line_type in VALUE_SIDES
 
     return {
         "model_prediction": round(model_pred, 1),
