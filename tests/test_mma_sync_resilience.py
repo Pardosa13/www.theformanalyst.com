@@ -666,3 +666,32 @@ def test_prediction_uses_persisted_mma_fighter_features_when_history_unavailable
     assert len(model.seen) == 30
     assert model.seen["slpm_diff"] == 4.1 - 5.0
     assert "FEATURE_SOURCE fighter=Tracy Cortez source=mma_fighters total_fights=8 usable=true" in caplog.text
+
+
+def test_tracker_placeholder_striking_never_replaces_real_stored_stats():
+    """rebuild_stats_from_db gives every past fight placeholder striking and
+    wrestling numbers. Those must not reach the model; the tracker only
+    supplies the record (wins, streak, layoff, experience)."""
+    placeholder = {
+        'slpm': 3.5, 'sapm': 3.5, 'td_acc': 0.4, 'td_avg': 1.0, 'td_def': 0.6,
+        'kd_rate': 0.0, 'sub_rate': 0.0, 'ctrl_rate': 0.0, 'sig_str_acc': 0.45,
+        'head_pct': 0.7, 'body_pct': 0.15, 'leg_pct': 0.15, 'dist_pct': 0.8,
+        'clinch_pct': 0.1, 'ground_pct': 0.1, 'exp_time': 900, 'wins': 1, 'losses': 0,
+        'streak': 1, 'win_rate': 1.0, 'rust_days': 151, 'recent_fights_count': 1,
+        'ath_age': 0.4, 'recent_form': 'W',
+    }
+    tracker = SimpleNamespace(total_fights=1, get_stat_vector=lambda today: dict(placeholder))
+    bio = {"f1": {"glicko": 1600.0, "glicko_rd": 90.0, "slpm": 6.2, "sapm": 2.4,
+                  "td_acc": 0.5, "td_avg": 3.1, "td_def": 0.8, "kd_rate": 0.9,
+                  "sub_rate": 0.4, "ctrl_rate": 22.0, "sig_str_acc": 0.55,
+                  "streak": 3, "win_rate": 0.6, "total_fights": 5, "recent_form": "W"}}
+    default_sv = dict(placeholder, slpm=0.0, sapm=0.0, wins=0, rust_days=365)
+
+    sv = mma_sync.stat_vector_for_fighter("f1", {"f1": tracker}, bio, None, default_sv)
+    assert sv["slpm"] == 6.2 and sv["kd_rate"] == 0.9 and sv["ctrl_rate"] == 22.0
+    assert sv["wins"] == 1 and sv["rust_days"] == 151 and sv["streak"] == 1
+
+    # No stored stats: defaults for striking, the tracker's record still used.
+    sv = mma_sync.stat_vector_for_fighter("f2", {"f2": tracker}, {}, None, default_sv)
+    assert sv["slpm"] == 0.0
+    assert sv["wins"] == 1 and sv["rust_days"] == 151

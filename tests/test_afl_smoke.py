@@ -2033,3 +2033,17 @@ def test_afl_ml_tab_only_shows_bet_rows_ranked_by_ev_score():
     assert ".sort(compareAflMlBetQuality)" in source
     assert "['ml_expected_value_score']" in source
     assert "ranked best to worst by ML EV Score" in source
+
+
+def test_official_afl_picks_need_a_positive_edge_and_an_unstarted_game():
+    """Saved picks used abs(edge), so bets the model rated below the price were
+    recorded as "value", and the window reached back a day into finished games."""
+    import inspect
+    import afl_db
+    src = inspect.getsource(afl_db.snapshot_model_selections_from_props)
+    assert "abs(edge) < min_edge" not in src
+    assert "if edge < min_edge" in src
+    assert 'candidate["edge"] > existing["edge"]' in src
+    assert "p.commence_time BETWEEN :window_start AND :window_end" in src
+    assert "timedelta(days=1)" not in src
+    assert "p.line_type, p.line)" in src
