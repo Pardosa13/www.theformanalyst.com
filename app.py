@@ -4676,6 +4676,9 @@ def meeting_scratch_debug(meeting_id):
 @login_required
 def update_scratchings(meeting_id):
     """Re-fetch fresh CSV + V2 data, exclude scratched horses, re-run analyzer, upsert predictions."""
+    meeting = Meeting.query.get_or_404(meeting_id)
+    if not can_edit_meeting(meeting):
+        return jsonify({'success': False, 'error': 'Only the meeting owner or an admin can update it'}), 403
     return _update_scratchings_impl(meeting_id)
 
 
@@ -5147,6 +5150,9 @@ def _update_scratchings_impl(meeting_id, track_condition=None):
 def fetch_automatic_results(meeting_id):
     """Auto-fetch results from PuntingForm API"""
     meeting = Meeting.query.get_or_404(meeting_id)
+    if not can_edit_meeting(meeting):
+        flash("Only the meeting owner or an admin can save its results", "danger")
+        return redirect(url_for('view_meeting', meeting_id=meeting_id))
     
     if not meeting.puntingform_id:
         flash("⚠️ Meeting not imported from PuntingForm API", "warning")
