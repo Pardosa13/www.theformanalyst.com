@@ -6,7 +6,7 @@ select season, coalesce(selection_source, '?') as selection_source, count(*) as 
        round(avg(odds)::numeric, 2) as avg_odds,
        round(100.0 * avg(1.0 / nullif(odds, 0))::numeric, 1) as price_says_pct,
        round(sum(profit_units)::numeric, 1) as profit_units,
-       round(100.0 * sum(profit_units) / count(*), 1) as roi_pct
+       round((100.0 * sum(profit_units) / count(*))::numeric, 1) as roi_pct
 from afl_model_selections
 where settled_at is not null and result in ('win', 'loss') and odds > 1
 group by 1, 2 order by 1, 2;
@@ -18,7 +18,7 @@ select result, count(*) from afl_model_selections group by 1 order by 2 desc;
 select market, line_type, count(*) as bets,
        round(100.0 * avg((result = 'win')::int), 1) as win_pct,
        round(100.0 * avg(1.0 / nullif(odds, 0))::numeric, 1) as price_says_pct,
-       round(100.0 * sum(profit_units) / count(*), 1) as roi_pct
+       round((100.0 * sum(profit_units) / count(*))::numeric, 1) as roi_pct
 from afl_model_selections
 where settled_at is not null and result in ('win', 'loss') and odds > 1
 group by 1, 2 order by 3 desc;
@@ -30,7 +30,7 @@ select case when edge < 2 then 'a <2' when edge < 5 then 'b 2-5' when edge < 10 
        count(*) as bets, round(avg(model_prob)::numeric, 1) as model_says_pct,
        round(100.0 * avg(1.0 / nullif(odds, 0))::numeric, 1) as price_says_pct,
        round(100.0 * avg((result = 'win')::int), 1) as actual_win_pct,
-       round(100.0 * sum(profit_units) / count(*), 1) as roi_pct
+       round((100.0 * sum(profit_units) / count(*))::numeric, 1) as roi_pct
 from afl_model_selections
 where settled_at is not null and result in ('win', 'loss') and odds > 1
 group by 1 order by 1;
@@ -40,7 +40,7 @@ select case when confidence_score < 50 then 'a <50' when confidence_score < 65 t
             when confidence_score < 80 then 'c 65-80' else 'd 80+' end as confidence_band,
        count(*) as bets, round(100.0 * avg((result = 'win')::int), 1) as win_pct,
        round(100.0 * avg(1.0 / nullif(odds, 0))::numeric, 1) as price_says_pct,
-       round(100.0 * sum(profit_units) / count(*), 1) as roi_pct
+       round((100.0 * sum(profit_units) / count(*))::numeric, 1) as roi_pct
 from afl_model_selections
 where settled_at is not null and result in ('win', 'loss') and odds > 1
 group by 1 order by 1;
@@ -50,20 +50,20 @@ select case when odds < 1.5 then 'a <1.50' when odds < 1.8 then 'b 1.50-1.80' wh
             when odds < 2.5 then 'd 2.00-2.50' else 'e 2.50+' end as odds_band,
        count(*) as bets, round(100.0 * avg((result = 'win')::int), 1) as win_pct,
        round(100.0 * avg(1.0 / nullif(odds, 0))::numeric, 1) as price_says_pct,
-       round(100.0 * sum(profit_units) / count(*), 1) as roi_pct
+       round((100.0 * sum(profit_units) / count(*))::numeric, 1) as roi_pct
 from afl_model_selections
 where settled_at is not null and result in ('win', 'loss') and odds > 1
 group by 1 order by 1;
 
 -- @afl_by_bookmaker
 select bookmaker, count(*) as bets, round(100.0 * avg((result = 'win')::int), 1) as win_pct,
-       round(100.0 * sum(profit_units) / count(*), 1) as roi_pct
+       round((100.0 * sum(profit_units) / count(*))::numeric, 1) as roi_pct
 from afl_model_selections
 where settled_at is not null and result in ('win', 'loss') and odds > 1
 group by 1 order by 2 desc;
 
 -- @afl_by_round
-select season, round, count(*) as bets, round(100.0 * sum(profit_units) / count(*), 1) as roi_pct
+select season, round, count(*) as bets, round((100.0 * sum(profit_units) / count(*))::numeric, 1) as roi_pct
 from afl_model_selections
 where settled_at is not null and result in ('win', 'loss') and odds > 1
 group by 1, 2 order by 1, 2;
