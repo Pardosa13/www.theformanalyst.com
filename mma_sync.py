@@ -957,6 +957,44 @@ def _fetch_espn_schedule_api(year, seen_ids):
     return events
 
 
+# Past events re-read each run, so a missed week still gets its results.
+RECENT_PAST_EVENT_DAYS = 45
+# Older past events still missing results, re-read per run (oldest results last).
+MISSING_RESULTS_EVENTS_PER_RUN = 30
+
+
+def events_missing_results(conn, today, already_listed, limit=MISSING_RESULTS_EVENTS_PER_RUN):
+    """Past events never marked finished, or with an active fight and no winner.
+
+    Nov 2026: 15 events from Aug-Sep were never marked finished and 8 from
+    May-Jun had no winners stored, about 150 fights in all. They were left out
+    of the results record and the rating updates. Each run re-reads up to
+    `limit` of them, newest first, as finished events.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT e.id, e.name, e.date, e.location, e.espn_url
+            FROM mma_events e
+            WHERE e.date < %s
+              AND (COALESCE(e.is_completed, FALSE) = FALSE
+                   OR EXISTS (SELECT 1 FROM mma_fights f
+                              WHERE f.event_id = e.id AND COALESCE(f.is_active, TRUE)
+                                AND f.winner_name IS NULL))
+            ORDER BY e.date DESC
+            LIMIT %s
+        """, (today, limit + len(already_listed)))
+        rows = cur.fetchall()
+    out = []
+    for event_id, name, event_date, location, url in rows:
+        if event_id in already_listed or not url:
+            continue
+        out.append({'event_id': event_id, 'event_name': name, 'date': event_date,
+                    'location': location or 'TBD', 'url': url, 'is_completed': True})
+        if len(out) >= limit:
+            break
+    return out
+
+
 def scrape_upcoming_events():
     """Scrape ESPN UFC schedule for upcoming + most recent completed event.
 
@@ -1066,11 +1104,17 @@ def scrape_upcoming_events():
     past = [e for e in events if e['date'] < today]
     future = [e for e in events if e['date'] >= today]
 
+    # Every recent past event, not just the latest. Only the latest used to be
+    # marked finished, so when two events fell between weekly runs (a Tuesday
+    # Contender Series and a Saturday card) the older one stayed "upcoming"
+    # forever: its results were never collected and it crowded this week's
+    # card off the Fight Cards page.
+    cutoff = today - timedelta(days=RECENT_PAST_EVENT_DAYS)
+    recent_past = [e for e in past if e['date'] >= cutoff] or past[-1:]
     result = []
-    if past:
-        last = past[-1]
-        last['is_completed'] = True
-        result.append(last)
+    for e in recent_past:
+        e['is_completed'] = True
+        result.append(e)
     for e in future:
         e['is_completed'] = False
         result.append(e)
@@ -2357,6 +2401,15 @@ def main():
     # Scrape upcoming events
     log.info("Scraping ESPN schedule...")
     events = scrape_upcoming_events()
+    try:
+        backlog = events_missing_results(conn, date.today(), {e['event_id'] for e in events})
+        if backlog:
+            log.info("Re-reading %s past event(s) still missing results: %s", len(backlog),
+                     ", ".join(e['event_name'] for e in backlog))
+        events = backlog + events
+    except Exception as e:
+        conn.rollback()
+        log.warning("Could not list past events missing results: %s", e)
     log.info(f"Found {len(events)} events to process")
 
     # Pre-fetch fighter ESPN data from the scoreboard API.  The per-event

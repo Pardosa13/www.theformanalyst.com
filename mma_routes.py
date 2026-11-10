@@ -45,13 +45,19 @@ def register_mma_routes(app, db):
         try:
             from sqlalchemy import text
 
-            # Fetch upcoming + most recent completed event
+            # Upcoming events soonest first, then the most recent past ones.
+            # Chosen by DATE, not by is_completed: a past event the weekly sync
+            # never marked finished used to sort as "upcoming" and push this
+            # week's card out of the 10 shown. One day of grace covers events
+            # that run on the previous day in Australian time.
             events_sql = text("""
-                SELECT id, name, date, location, is_completed, espn_url
+                SELECT id, name, date, location,
+                       (is_completed OR date < CURRENT_DATE - 1) AS is_completed, espn_url
                 FROM mma_events
                 ORDER BY
-                    CASE WHEN is_completed = FALSE THEN 0 ELSE 1 END,
-                    date ASC
+                    CASE WHEN date >= CURRENT_DATE - 1 THEN 0 ELSE 1 END,
+                    CASE WHEN date >= CURRENT_DATE - 1 THEN date END ASC,
+                    date DESC
                 LIMIT 10
             """)
             event_rows = db.session.execute(events_sql).fetchall()
