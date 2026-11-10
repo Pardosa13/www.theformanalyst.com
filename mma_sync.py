@@ -216,13 +216,35 @@ def stat_vector_from_fighter_bio(bio, current_date=None):
     }
 
 
+# What the in-memory tracker can genuinely work out from results in Postgres.
+# The database holds no per-fight striking or wrestling numbers, so
+# rebuild_stats_from_db feeds every past fight the same placeholder values
+# (3.5 strikes a minute each way, no knockdowns, no control time). Its striking
+# and wrestling averages are therefore identical for everyone and must never
+# reach the model; those come from the real stats stored on mma_fighters.
+TRACKER_RECORD_FIELDS = (
+    'exp_time', 'wins', 'losses', 'streak', 'win_rate', 'rust_days',
+    'recent_fights_count', 'ath_age', 'recent_form',
+)
+
+
 def stat_vector_for_fighter(fid, stats_tracker, fighter_bio, current_date, default_sv):
-    if fid in stats_tracker and getattr(stats_tracker[fid], 'total_fights', 0) > 0:
-        return stats_tracker[fid].get_stat_vector(current_date)
+    """Model inputs for one fighter.
+
+    Striking/wrestling: the stored mma_fighters stats when usable, else defaults.
+    Record (wins, streak, layoff, experience): the tracker when it has the
+    fighter, since it includes fights completed after the stats were stored.
+    """
     bio = fighter_bio.get(fid, {})
     if fighter_feature_source(bio).get('usable'):
-        return stat_vector_from_fighter_bio(bio, current_date)
-    return default_sv
+        vector = stat_vector_from_fighter_bio(bio, current_date)
+    else:
+        vector = dict(default_sv)
+    if fid in stats_tracker and getattr(stats_tracker[fid], 'total_fights', 0) > 0:
+        tracked = stats_tracker[fid].get_stat_vector(current_date)
+        for key in TRACKER_RECORD_FIELDS:
+            vector[key] = tracked[key]
+    return vector
 
 
 def best_name_match_key(name, lookup):

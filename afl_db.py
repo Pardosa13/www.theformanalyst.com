@@ -1415,7 +1415,9 @@ def snapshot_model_selections_from_props(
         "player_goals": "goals",
         "player_afl_fantasy_points": "afl_fantasy_score",
     }
-    window_start = datetime.now(timezone.utc) - timedelta(days=1)
+    # Only games that have not started. The old window reached back a day, so a
+    # pick first saved after the game could be scored with that game's own stats.
+    window_start = datetime.now(timezone.utc)
     window_end = datetime.now(timezone.utc) + timedelta(days=8)
     params = {"season": season, "window_start": window_start, "window_end": window_end}
 
@@ -1424,8 +1426,10 @@ def snapshot_model_selections_from_props(
         round_filter = "AND g.round = :round_num"
         params["round_num"] = round_num
 
+    # One row per line (best odds across bookmakers). Keying without the line
+    # kept only the longest-odds alternate line for each player, not the best value.
     props_sql = db.text(f"""
-        SELECT DISTINCT ON (p.event_id, p.market, p.player_name, p.line_type)
+        SELECT DISTINCT ON (p.event_id, p.market, p.player_name, p.line_type, p.line)
             p.event_id, p.home_team, p.away_team, p.commence_time, p.bookmaker,
             p.market, p.player_name, p.line_type, p.line, p.odds,
             g.id AS match_id, g.round
@@ -1436,10 +1440,10 @@ def snapshot_model_selections_from_props(
          AND EXTRACT(YEAR FROM g.date) = :season
          {round_filter}
         WHERE EXTRACT(YEAR FROM COALESCE(p.commence_time, p.fetched_at)) = :season
-          AND COALESCE(p.commence_time, p.fetched_at) BETWEEN :window_start AND :window_end
+          AND p.commence_time BETWEEN :window_start AND :window_end
           AND p.line_type IN ('Over', 'Under')
           AND p.odds BETWEEN 1.20 AND 5.00
-        ORDER BY p.event_id, p.market, p.player_name, p.line_type, p.odds DESC, p.fetched_at DESC
+        ORDER BY p.event_id, p.market, p.player_name, p.line_type, p.line, p.odds DESC, p.fetched_at DESC
     """)
     with db.engine.connect() as conn:
         prop_rows = [dict(r) for r in conn.execute(props_sql, params).mappings().fetchall()]
@@ -1517,10 +1521,13 @@ def snapshot_model_selections_from_props(
             100.0,
             BASE_CONFIDENCE
             + min(len(season_rows), 25) * SEASON_GAME_WEIGHT
-            + min(abs(edge), 12.0) * EDGE_WEIGHT
+            + min(max(edge, 0.0), 12.0) * EDGE_WEIGHT
             + (OPPONENT_SAMPLE_BONUS if len(opp_rows) >= 3 else 0.0),
         ))
-        if abs(edge) < min_edge or confidence < min_confidence:
+        # Positive edge only. This used abs(edge), so bets the model rated as
+        # WORSE than the price were saved as "value" (10,844 settled Over picks
+        # with the model at 14% against a price of 26%; they lost 42%).
+        if edge < min_edge or confidence < min_confidence:
             continue
 
         line = float(prop.get("line") or 0.0)
@@ -1577,7 +1584,7 @@ def snapshot_model_selections_from_props(
 
         dedupe_key = (pname, market, candidate["line_type"], candidate["event_id"] or f"{candidate['home_team']}|{candidate['away_team']}")
         existing = official_by_key.get(dedupe_key)
-        if existing is None or abs(candidate["edge"]) > abs(existing["edge"]):
+        if existing is None or candidate["edge"] > existing["edge"]:
             official_by_key[dedupe_key] = candidate
 
     return upsert_model_selections(db, list(official_by_key.values()))
