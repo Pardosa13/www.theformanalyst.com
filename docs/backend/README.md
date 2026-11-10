@@ -31,12 +31,13 @@ repository root because Railway starts the app from there (`gunicorn app:app`).
 
 | File | Job |
 |---|---|
-| `backtest.py` | Nightly backtest and model training |
+| `backtest.py` | Weekly backtest and model training (Railway cron, Tuesdays 02:00 UTC) |
+| `point_in_time_rates.py` | Jockey/trainer form as it stood before each past race, so training never sees later results |
 | `ml_predict.py` | Scores runners with the active champion model |
 | `ml_shadow_routes.py` | Shadow ML pages and APIs |
 | `model_classes.py` | Shared model classes and Kelly staking maths |
 | `models/` | Saved model files |
-| `pattern_finder.py` | Pattern Finder: searches past races for profitable betting patterns, tests them on unseen races and a luck check, retires ones that stop working (nightly, after the backtest) |
+| `pattern_finder.py` | Pattern Finder: searches past races for profitable betting patterns, tests them on unseen races and a luck check, retires ones that stop working (weekly, after the backtest) |
 | `pattern_routes.py` | Pattern Finder page |
 
 ## Race Animations

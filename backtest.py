@@ -89,6 +89,7 @@ from model_classes import (
     solve_joint_kelly,
 )
 from book_quality import SUSPICIOUS_OVERROUND, unusable_race_ids
+from point_in_time_rates import fill_point_in_time_rates, race_market_probabilities
 from pf_form import (
     PF_FORM_FEATURES, PF_FORM_RELATIVE_COLS, PF_FORM_RELATIVE_LOWER_IS_BETTER,
     empty_pf_form_features, meeting_features as pf_meeting_features, snapshot_usable, tab_key,
@@ -943,28 +944,29 @@ def load_strike_rate_data():
             except Exception:
                 log.warning("No strike_rate_snapshots table or trainer history yet — trainer_sr will use the current snapshot for training too, until history accumulates.")
 
-            # Previously unused strike_rates columns: career/L100 actual-vs-
-            # expected ratios and career run counts. CURRENT snapshot only —
-            # strike_rate_snapshots has no dated history for these, so
-            # training rows see today's ratio (career-level A2E moves slowly,
-            # but treat historical backtest numbers for these features with
-            # that caveat in mind; live scoring is unaffected since "current"
-            # is correct at prediction time).
+            # Career/L100 actual-vs-expected ratios and career run counts:
+            # today's numbers only. Live scoring uses them as they are;
+            # build_training_set replaces them on every training row with
+            # values as they stood before that race (point_in_time_rates).
+            # career_wins / career_expected_wins let build_training_set take
+            # later runs back out of today's career totals (point_in_time_rates).
             for sr_type, key in (('jockey', 'jockeys_extra'), ('trainer', 'trainers_extra')):
                 try:
                     result = conn.execute(text("""
-                        SELECT name, career_actual_to_expected, last100_actual_to_expected, career_runs
+                        SELECT name, career_actual_to_expected, last100_actual_to_expected, career_runs,
+                               career_wins, career_expected_wins
                         FROM strike_rates
                         WHERE type = :sr_type
                         ORDER BY updated_at DESC
                     """), {'sr_type': sr_type})
                     lookup = {}
-                    for name, career_a2e, l100_a2e, career_runs in result.fetchall():
+                    for name, career_a2e, l100_a2e, career_runs, career_wins, career_expected in result.fetchall():
                         norm = normalize_name(str(name or ''))
                         if norm and norm not in lookup:
                             lookup[norm] = {
                                 'career_a2e': career_a2e, 'l100_a2e': l100_a2e,
-                                'career_runs': career_runs,
+                                'career_runs': career_runs, 'career_wins': career_wins,
+                                'career_expected_wins': career_expected,
                             }
                     sr_data[key] = lookup
                     log.info(f"Loaded {len(lookup)} {sr_type} A2E/career extra records.")
@@ -1183,7 +1185,9 @@ def extract_features(row, jockey_sr_lookup=None, trainer_sr_lookup=None,
     instead of the current snapshot in jockey_sr_lookup/trainer_sr_lookup, to
     avoid leaking a jockey/trainer's future form into older training rows. Falls
     back to the current snapshot when no dated entry exists yet for that
-    name/date (this only self-heals as snapshot history accumulates over time).
+    name/date; build_training_set then replaces that fallback (and the A2E /
+    career extras) with values rebuilt from earlier results only, so no
+    training row keeps today's figure (see point_in_time_rates.py).
 
     jockey_used_dated_snapshot/trainer_used_dated_snapshot: whether that
     fallback happened for this row, so callers (build_training_set) can report
@@ -1977,6 +1981,8 @@ def build_training_set(df, strike_rate_data=None):
     dam_names = []
     form_horse_names = []
     form_finish_positions = []
+    jockey_names, trainer_names = [], []
+    jockey_dated_flags, trainer_dated_flags = [], []
     snapshot_coverage_stats = {'jockey_total': 0, 'jockey_dated': 0, 'trainer_total': 0, 'trainer_dated': 0}
 
     for _, row in df_unique.iterrows():
@@ -2026,6 +2032,10 @@ def build_training_set(df, strike_rate_data=None):
             dam_names.append(normalize_name(str(cd_row.get('horse dam') or '')))
             form_horse_names.append(normalize_name(str(row['horse_name'])))
             form_finish_positions.append(finish)
+            jockey_names.append(normalize_name(str(cd_row.get('horse jockey') or '')))
+            trainer_names.append(normalize_name(str(cd_row.get('horse trainer') or '')))
+            jockey_dated_flags.append(bool(jockey_used_dated_snapshot))
+            trainer_dated_flags.append(bool(trainer_used_dated_snapshot))
 
             # The analyzer's score and notes, turned into an_* inputs by
             # add_analyzer_features (analyzer_inputs.py) with the race-relative ones.
@@ -2043,6 +2053,19 @@ def build_training_set(df, strike_rate_data=None):
             continue
 
     _fill_point_in_time_breeding_rates(feature_rows, sire_names, dam_names, meeting_dates, targets_won)
+
+    # Jockey/trainer form as it stood before each race. Without this, any row
+    # with no dated PuntingForm copy kept TODAY's numbers, which already hold
+    # the race being learned from and everything after it.
+    market_probs = race_market_probabilities(race_ids, sp_values)
+    point_in_time_stats = {}
+    for prefix, names, dated_flags, extras in (
+            ('jockey', jockey_names, jockey_dated_flags, jockey_extra_lookup),
+            ('trainer', trainer_names, trainer_dated_flags, trainer_extra_lookup)):
+        point_in_time_stats[prefix] = fill_point_in_time_rates(
+            feature_rows, names, meeting_dates, targets_won, market_probs, prefix, dated_flags, extras)
+        log.info("Point-in-time %s form: %s", prefix, point_in_time_stats[prefix])
+    build_training_set.last_point_in_time_stats = point_in_time_stats
     _fill_point_in_time_track_bias(feature_rows, horse_ids, df_unique)
 
     field_lookup = _build_form_field_lookup(race_ids, form_horse_names, form_finish_positions)
@@ -2100,18 +2123,13 @@ def build_training_set(df, strike_rate_data=None):
     # run — see check_match_rate_regression() below.
     build_training_set.last_match_stats = log_match_stats(log, jockey_sr, trainer_sr)
 
-    # strike_rate_snapshots only started accumulating on 2026-07-21 (see
-    # load_strike_rate_data's jockeys_history/trainers_history docstring), so
-    # rows dated before a given name's first snapshot still fall back to the
-    # CURRENT snapshot in extract_features rather than getting a true
-    # point-in-time value. That fallback rate shrinks night over night as
-    # history accumulates, which quietly changes how much look-ahead leakage
-    # is in the training set from one run to the next — a run-over-run
-    # validation ROI drop can be this closing, not real model decay. Logged
-    # once per run (same place as the match-rate summary above) and stashed
-    # here so main()/write_results() can persist it on backtest_runs and
-    # save_best_model_to_db can flag a big coverage gap between challenger
-    # and champion as non-comparable.
+    # strike_rate_snapshots only started accumulating on 2026-07-21, so rows
+    # dated before a name's first snapshot have no dated PuntingForm figure.
+    # Those rows used to keep TODAY's figure (a look-ahead leak); they now get
+    # the rate rebuilt from our own earlier results by fill_point_in_time_rates
+    # above. This coverage number still counts dated PuntingForm snapshots
+    # only, so it keeps its meaning on backtest_runs and in the champion
+    # comparison note; the rows it misses are no longer leaky.
     jockey_total = snapshot_coverage_stats['jockey_total']
     trainer_total = snapshot_coverage_stats['trainer_total']
     jockey_coverage_pct = (snapshot_coverage_stats['jockey_dated'] / jockey_total * 100.0) if jockey_total else 0.0
