@@ -12171,7 +12171,12 @@ def export_all_data():
         for table in tables:
             result = db.session.execute(db.text(f'SELECT * FROM "{table}"'))
             rows = result.fetchall()
-            columns = result.keys()
+            columns = list(result.keys())
+            # Password hashes never leave the database, even for admins.
+            secret = [i for i, c in enumerate(columns) if c == 'password_hash']
+            if secret:
+                columns = [c for i, c in enumerate(columns) if i not in secret]
+                rows = [[v for i, v in enumerate(r) if i not in secret] for r in rows]
             
             csv_buffer = io.StringIO()
             writer = csv.writer(csv_buffer)
