@@ -1275,7 +1275,7 @@ def register_afl_routes(app, db):
                 "summary": {},
                 "count": 0,
                 **artifact_fields,
-            }, 404)
+            }, 200)  # a normal state the page shows, not a broken request
 
         logger.info("AFL ML current selections using model artifact source=%s", artifact_source)
         try:

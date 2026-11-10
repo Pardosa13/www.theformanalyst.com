@@ -168,6 +168,10 @@ def init_mma_tables(db):
         "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS card_source VARCHAR(50) DEFAULT 'legacy'",
         "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE",
         "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
+        # Read by the fight cards and Edge Finder; until now only mma_sync added them,
+        # so a database the sync had not yet run against broke those pages.
+        "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS bout_order INTEGER",
+        "ALTER TABLE mma_fights ADD COLUMN IF NOT EXISTS card_section VARCHAR(30)",
         "UPDATE mma_fights SET card_source = 'legacy' WHERE card_source IS NULL",
         "UPDATE mma_fights SET verified = TRUE WHERE verified IS NULL AND card_source <> 'odds_api'",
         "UPDATE mma_fights SET bout_uid = 'legacy:' || event_id || ':' || id::text WHERE bout_uid IS NULL OR TRIM(bout_uid) = ''",
