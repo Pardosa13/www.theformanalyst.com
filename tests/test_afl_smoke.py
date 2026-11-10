@@ -2130,3 +2130,4 @@ def test_counting_stats_use_the_negative_binomial():
     assert 30 < res["raw_model_prob"] < 45
     # Below the mean-equals-variance line it falls back to Poisson.
     assert abs(afl_data._count_over_probability(3.0, 2.0, 2.5) - 0.5768) < 1e-3
+

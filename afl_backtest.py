@@ -668,6 +668,28 @@ def threshold_search(test: pd.DataFrame) -> dict[str, Any]:
     return best
 
 
+# The ML picks are shown only when, on test picks it never saw, backing the
+# picks it rates above its threshold beat backing every Value Finder pick by
+# this much ROI, over at least MIN_ML_TEST_PICKS bets.
+MIN_ML_TEST_PICKS = 50
+MIN_ML_ROI_GAIN = 0.02
+
+
+def compare_with_value_finder(test_df: pd.DataFrame, threshold: float) -> dict[str, Any]:
+    profit = pd.to_numeric(test_df["profit_units"], errors="coerce").fillna(0.0)
+    chosen = test_df["ml_bet_probability"] >= threshold
+    all_roi = float(profit.sum() / len(test_df)) if len(test_df) else 0.0
+    ml_n = int(chosen.sum())
+    ml_roi = float(profit[chosen].sum() / ml_n) if ml_n else 0.0
+    beats = ml_n >= MIN_ML_TEST_PICKS and ml_roi >= all_roi + MIN_ML_ROI_GAIN and ml_roi > 0
+    return {
+        "threshold": round(float(threshold), 2),
+        "value_finder_picks": int(len(test_df)), "value_finder_roi": round(all_roi, 4),
+        "ml_picks": ml_n, "ml_roi": round(ml_roi, 4),
+        "beats_value_finder": bool(beats),
+    }
+
+
 def train() -> dict[str, Any]:
     require_dependencies()
     e = engine()
@@ -677,6 +699,12 @@ def train() -> dict[str, Any]:
     raw_df = load_selections(e, settled=True)
     LOG.info("AFL_TRAIN_ROWS_LOADED rows=%s", len(raw_df))
     log_dataframe_diagnostics("settled_loaded", raw_df, ["profit_units", "result", "odds", "settled_at"])
+    # Only picks the Value Finder would show: positive edge. Before 10 Nov 2026
+    # picks were saved on abs(edge), so negative-edge picks (the model rating the
+    # bet below the price) were tracked too; they are never shown again, so the
+    # model must not learn from them.
+    raw_df = raw_df[pd.to_numeric(raw_df.get("edge"), errors="coerce") > 0].copy()
+    LOG.info("AFL_TRAIN_ROWS_POSITIVE_EDGE rows=%s", len(raw_df))
     df = add_safe_features(e, raw_df)
     log_dataframe_diagnostics("settled_with_features", df)
     if len(df) < 50:
@@ -691,6 +719,11 @@ def train() -> dict[str, Any]:
     df = df.sort_values(["_order_date", "season", "round", "id"])
     split_idx = max(1, int(len(df) * 0.80))
     train_df, test_df = df.iloc[:split_idx].copy(), df.iloc[split_idx:].copy()
+    # The betting threshold is chosen on the last 20% of the TRAINING picks, then
+    # judged on the test picks. It used to be chosen on the test picks themselves,
+    # which flatters whatever threshold happens to fit them.
+    pick_idx = max(1, int(len(train_df) * 0.80))
+    fit_df, pick_df = train_df.iloc[:pick_idx].copy(), train_df.iloc[pick_idx:].copy()
     if test_df.empty or train_df["target"].nunique() < 2:
         raise SystemExit("Chronological split did not leave enough train/test class diversity")
     numeric, categorical = feature_columns(df)
@@ -707,10 +740,18 @@ def train() -> dict[str, Any]:
         LOG.warning("HistGradientBoosting failed (%s); falling back to RandomForest", exc)
         pipe = Pipeline([("preprocess", pre), ("model", RandomForestClassifier(n_estimators=300, min_samples_leaf=10, random_state=42, n_jobs=-1, class_weight="balanced_subsample"))])
         pipe.fit(train_df[numeric + categorical], train_df["target"])
+    # Threshold from a model fitted without the pick slice, scored on that slice.
+    if fit_df["target"].nunique() >= 2 and len(pick_df):
+        from sklearn.base import clone as _clone
+        pick_pipe = _clone(pipe).fit(fit_df[numeric + categorical], fit_df["target"])
+        pick_df["ml_bet_probability"] = pick_pipe.predict_proba(pick_df[numeric + categorical])[:, 1]
+        threshold = threshold_search(pick_df)
+    else:
+        threshold = {"threshold": 0.50, "profit_units": 0, "roi": 0, "selections": 0}
     test_df["ml_bet_probability"] = pipe.predict_proba(test_df[numeric + categorical])[:, 1]
     test_df["ml_expected_value"] = test_df["ml_bet_probability"] * (pd.to_numeric(test_df["odds"], errors="coerce") - 1.0) - (1.0 - test_df["ml_bet_probability"])
-    threshold = threshold_search(test_df)
     summary = summarise(test_df)
+    summary["vs_value_finder"] = compare_with_value_finder(test_df, threshold["threshold"])
     summary["training_rows"] = int(len(train_df)); summary["test_rows"] = int(len(test_df))
     try:
         summary["roc_auc"] = round(float(roc_auc_score(test_df["target"], test_df["ml_bet_probability"])), 4)

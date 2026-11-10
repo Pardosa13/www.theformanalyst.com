@@ -1292,6 +1292,24 @@ def register_afl_routes(app, db):
                 **artifact_fields,
             }, 200)
 
+        vs = ((artifact or {}).get("validation_summary") or {}).get("vs_value_finder") or {}
+        if not vs.get("beats_value_finder"):
+            if vs:
+                detail = (f"On {vs.get('value_finder_picks', 0)} test picks it never saw, backing every Value Finder "
+                          f"pick returned {100 * float(vs.get('value_finder_roi') or 0):+.1f}%; the ML model's "
+                          f"{vs.get('ml_picks', 0)} picks returned {100 * float(vs.get('ml_roi') or 0):+.1f}%.")
+            else:
+                detail = "This model was trained before the comparison with the Value Finder existed."
+            return safe_json_response({
+                "ok": True,
+                "status": "not_better",
+                "message": ("The AFL ML model has not beaten the plain Value Finder, so its picks are hidden. "
+                            + detail),
+                "vs_value_finder": vs,
+                "rows": [], "selections": [], "summary": {}, "count": 0,
+                **artifact_fields,
+            }, 200)
+
         logger.info("AFL ML current selections using model artifact source=%s", artifact_source)
         try:
             scored = score_current(emit=False)

@@ -2092,7 +2092,7 @@ function loadAflMachineLearningSelections() {
           throw new Error(`Invalid JSON returned by AFL ML endpoint: ${e.message}`);
         }
       }
-      if (['missing_model', 'needs_retrain', 'no_data', 'error'].includes(data.status)) return data;
+      if (['missing_model', 'needs_retrain', 'not_better', 'no_data', 'error'].includes(data.status)) return data;
       if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
       return data;
     })
@@ -2101,6 +2101,12 @@ function loadAflMachineLearningSelections() {
         _aflMlLastRenderedBets = [];
         if (summary) summary.textContent = 'AFL Machine Learning model status: missing model.';
         wrap.innerHTML = `<div class="props-banner"><i class="bi bi-exclamation-triangle-fill"></i> ${esc(data.message || 'AFL Machine Learning model has not been trained yet. Run training on Railway first.')}</div>`;
+        return;
+      }
+      if (data.status === 'not_better') {
+        _aflMlLastRenderedBets = [];
+        if (summary) summary.textContent = 'AFL Machine Learning model status: not better than the Value Finder yet.';
+        wrap.innerHTML = `<div class="props-banner"><i class="bi bi-hourglass-split"></i> ${esc(data.message || 'The AFL ML model has not beaten the Value Finder, so its picks are hidden.')}</div>`;
         return;
       }
       if (data.status === 'needs_retrain') {
