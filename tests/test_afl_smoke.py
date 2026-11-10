@@ -2112,3 +2112,21 @@ def test_afl_ml_picks_wait_for_a_model_trained_after_the_fix():
     page = Path("templates/afl.html").read_text(encoding="utf-8")
     assert "needs_retrain" in page and "Experimental, not a recommendation" in page
     assert ">Confidence</span>" not in page
+
+
+def test_counting_stats_use_the_negative_binomial():
+    """Tackles averaging 4 (spread 2.5) over a 4.5 line: the old bell curve +
+    hit-rate mix said Over far too often; the count maths says about 37%."""
+    import afl_data
+    calculate_market_edge = _import_afl_calculate_market_edge()
+    vals = [2, 4, 6, 3, 7, 1, 5, 4, 2, 6]
+    games = [{"tackles": v, "time_on_ground_percentage": 85} for v in vals]
+    res = calculate_market_edge(player_avg=4, book_line=4.5, odds=2.5, line_type="Over",
+                                market="player_tackles", player_stats=games)
+    mean = sum(vals) / len(vals)
+    var = sum((v - mean) ** 2 for v in vals) / (len(vals) - 1)
+    expected = afl_data._count_over_probability(mean, var, 4.5)
+    assert abs(res["raw_model_prob"] - round(expected * 100, 1)) < 0.11
+    assert 30 < res["raw_model_prob"] < 45
+    # Below the mean-equals-variance line it falls back to Poisson.
+    assert abs(afl_data._count_over_probability(3.0, 2.0, 2.5) - 0.5768) < 1e-3

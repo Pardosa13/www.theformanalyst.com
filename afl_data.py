@@ -2378,6 +2378,20 @@ def get_player_last_n_games(player_stats: list[dict], n: int = 5) -> list[dict]:
     return sorted_games[:n]
 
 
+def _count_over_probability(mean: float, variance: float, line: float) -> float:
+    """P(count > line) for a negative binomial with this mean and variance."""
+    from scipy import stats as _stats
+    from math import floor as _floor
+    mean = max(float(mean), 0.01)
+    k = int(_floor(line))
+    if k < 0:
+        return 1.0
+    if variance <= mean * 1.0001:
+        return float(_stats.poisson.sf(k, mean))
+    r = mean * mean / (variance - mean)
+    return float(_stats.nbinom.sf(k, r, r / (r + mean)))
+
+
 # Chance x price a pick must reach to count as value (see calculate_market_edge).
 VALUE_PRICE_RATIO = 1.10
 # Sides that can be called value. After the overconfidence correction, Unders
@@ -2484,11 +2498,20 @@ def calculate_market_edge(
             cumulative += term
         return 1.0 - cumulative
 
-    # Distribution estimate for the requested market. Goals are genuinely
-    # low-count; the other AFL props are better represented by a normal model
-    # using each player's observed variance rather than sqrt(mean).
-    if market == "player_goals":
-        model_prob_over = _poisson_sf(int(floor(float(book_line))), mu)
+    # Counting stats (disposals, kicks, handballs, marks, tackles, goals) use a
+    # negative binomial: whole numbers, never below zero, with the player's own
+    # extra spread (Poisson when his games vary no more than their mean). On
+    # 2019-2026 games it beat the old bell curve + hit-rate mix on every stat
+    # and its chances matched reality (tackles: old method said Over 36.9%,
+    # actual 31.5%, new 30.8%; audit/tasks/afldist.py). Fantasy points keep
+    # the old method: they are not a simple count.
+    if market != "player_afl_fantasy_points":
+        if len(stat_values) >= 2:
+            mean_hist = sum(stat_values) / len(stat_values)
+            variance = sum((v - mean_hist) ** 2 for v in stat_values) / (len(stat_values) - 1)
+        else:
+            variance = mu
+        model_prob_over = _count_over_probability(mu, variance, float(book_line))
     else:
         if len(stat_values) >= 2:
             mean_hist = sum(stat_values) / len(stat_values)
@@ -2496,16 +2519,13 @@ def calculate_market_edge(
             hist_sigma = sqrt(max(variance, 0.0))
         else:
             hist_sigma = sqrt(mu)
-        sigma_floor = 12.0 if market == "player_afl_fantasy_points" else 2.0
-        model_prob_over = _normal_sf(float(book_line), mu, max(hist_sigma, sigma_floor))
-
-    # Historical hit-rate with light Bayesian smoothing. This anchors the model
-    # to how often a player has actually cleared the exact posted line.
-    if stat_values:
-        over_hits = sum(1 for value in stat_values if value > float(book_line))
-        empirical_over = (over_hits + 1.0) / (len(stat_values) + 2.0)
-        empirical_weight = 0.60 if len(stat_values) >= 8 else 0.35
-        model_prob_over = empirical_weight * empirical_over + (1 - empirical_weight) * model_prob_over
+        model_prob_over = _normal_sf(float(book_line), mu, max(hist_sigma, 12.0))
+        # Historical hit-rate with light Bayesian smoothing (fantasy points only).
+        if stat_values:
+            over_hits = sum(1 for value in stat_values if value > float(book_line))
+            empirical_over = (over_hits + 1.0) / (len(stat_values) + 2.0)
+            empirical_weight = 0.60 if len(stat_values) >= 8 else 0.35
+            model_prob_over = empirical_weight * empirical_over + (1 - empirical_weight) * model_prob_over
 
     model_prob_over = max(0.001, min(0.999, model_prob_over))
 
