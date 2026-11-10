@@ -11792,6 +11792,17 @@ def best_bets():
         .all()
     )
 
+    # The saved record decides which rules still make picks (retired rules and
+    # rules losing after place_bet.RETIRE_AFTER_BETS live bets do not).
+    place_rules_record = None
+    place_rules_saved_at = None
+    try:
+        place_rules_record, place_rules_saved_at = place_bet.record_for_page(db.session)
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("Place rules record unavailable: %s", e, exc_info=True)
+    active_rules = place_bet.active_rules(place_rules_record)
+
     best_bets = []
     total_horses_scanned = 0
     races_with_picks = []
@@ -11801,7 +11812,7 @@ def best_bets():
         for race in meeting.races:
             active = [h for h in race.horses if not getattr(h, 'is_scratched', False)]
             total_horses_scanned += len(race.horses)
-            picks = [(h, place_bet.matching_rules(h)) for h in active]
+            picks = [(h, place_bet.matching_rules(h, rules=active_rules)) for h in active]
             picks = [(h, rules) for h, rules in picks if rules]
             if picks:
                 races_with_picks.append((meeting, race, active, picks, track_name, date_str))
@@ -11823,6 +11834,11 @@ def best_bets():
     with ThreadPoolExecutor(max_workers=8) as pool:
         odds_by_race = list(pool.map(lambda item: _ladbrokes_for(item[4], item[5], item[1].race_number),
                                      races_with_picks))
+
+    from datetime import date as _date
+    combo_pairs = {place_bet._combo_key(h.jockey, h.trainer)
+                   for _m, _r, _a, picks, _t, _d in races_with_picks for h, _rules in picks}
+    hot = place_bet.hot_combos(db.session, combo_pairs, _date.today())
 
     for (meeting, race, active, picks, track_name, date_str), (race_info, odds) in zip(races_with_picks, odds_by_race):
         race_started = race_has_started(race, meeting, allow_network=False)[0]
@@ -11868,6 +11884,7 @@ def best_bets():
                 'ladbrokes_fixed_win_price': lb.get('ladbrokes_fixed_win_price'),
                 'ladbrokes_market_rank': lb.get('ladbrokes_market_rank'),
                 'ladbrokes_odds_updated_at': lb.get('ladbrokes_odds_updated_at'),
+                'hot_combo': hot.get(place_bet._combo_key(horse.jockey, horse.trainer)),
             })
 
     db.session.commit()
@@ -11884,14 +11901,6 @@ def best_bets():
             'places_paid': bet['places_paid'], 'no_place_market': bet['no_place_market'], 'horses': []})
         race['horses'].append(bet)
 
-    place_rules_record = None
-    place_rules_saved_at = None
-    try:
-        place_rules_record, place_rules_saved_at = place_bet.record_for_page(db.session)
-    except Exception as e:
-        db.session.rollback()
-        logger.warning("Place rules record unavailable: %s", e, exc_info=True)
-
     import data_checks
     data_check_failures = data_checks.latest_failures(db.session)
 
@@ -11899,6 +11908,8 @@ def best_bets():
         place_rules_age_min=place_bet.age_minutes(place_rules_saved_at),
         data_check_failures=data_check_failures,
         place_rules=place_bet.RULES,
+        active_rule_keys=[rule.key for rule in active_rules],
+        retire_after_bets=place_bet.RETIRE_AFTER_BETS,
         place_rules_record=place_rules_record,
         best_bets=best_bets,
         meetings_with_bets=meetings_with_bets,

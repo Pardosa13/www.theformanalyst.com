@@ -37,8 +37,8 @@ def test_old_win_routes_are_gone_only_place_rules_record():
             a.prediction.value_edge_pct = 15.0
             _runner(r1, 'B', 80, 70, 50)
             # A place-rule horse that is nobody's top pick.
-            c = _runner(r2, 'C', 50, 40, 10, notes='+ 8.0 : ONPACE in Mile - sweet spot',
-                        csv_data={'horse last10': '561'})
+            c = _runner(r2, 'C', 50, 40, 10, notes='+4.0 : Ran places: 3rd 2nd\n+ 0.0 : No wins at this track+distance',
+                        csv_data={'horse last10': '3x52'})
             _runner(r2, 'D', 90, 80, 100)
             db.session.commit()
 
@@ -46,12 +46,12 @@ def test_old_win_routes_are_gone_only_place_rules_record():
             db.session.commit()
             assert recorded == 1
             assert a.prediction.best_bet_routes is None
-            assert c.prediction.best_bet_routes == 'place_won_onpace_mile'
+            assert c.prediction.best_bet_routes == 'place_32_tdnowin'
             assert c.prediction.best_bet_qualified_at is not None
 
             # Recording again is safe: routes only grow, never duplicate.
             appmod.record_best_bet_routes([r2])
-            assert c.prediction.best_bet_routes == 'place_won_onpace_mile'
+            assert c.prediction.best_bet_routes == 'place_32_tdnowin'
 
             for gone in ('RETIRED_BEST_BET_ROUTES', 'PROVEN_EDGE_COMPONENTS', 'MAIDEN_AGREEMENT_BADGE',
                          'VALUE_TOP_PICK_MIN_EDGE_PCT', 'evaluate_component_edge_badges'):

@@ -48,17 +48,30 @@ class Rule:
     max_margin: float = None  # last start margin must be below this (lengths)
     note_like: tuple = field(default_factory=tuple)  # SQL LIKE fragments that narrow the history query
     audit: str = ''          # what the audit found
+    retired: str = ''        # why and when it stopped making picks ('' = still live)
 
+
+# October 2026 was the first month the rules had never seen (they were fitted on
+# Feb-Sep). Together they made -4.4% on 568 place bets there (audit/tasks/octcheck.py);
+# only place_32_tdnowin held up (+17.3% on 162). The rest stopped making picks on
+# 10 Nov 2026. Their record still shows, so a comeback would be visible.
+_RETIRED_OCT = 'Retired 10 Nov 2026: {oct} in October, the first month it had not been fitted on'
+
+# A live rule that is still losing at Betfair place SP after this many live bets
+# stops making picks (see active_rules).
+RETIRE_AFTER_BETS = 500
 
 RULES = (
     Rule('place_2nd_light', 'Ran 2nd last start + carries 2-3kg less than the field average',
          '2nd last start, 2-3kg light', ('Weight vs Field - Below (2-3kg)',), last_pos=2,
          note_like=('%below race avg%',),
-         audit='533 bets, +35%, up in 7 of 8 months'),
+         audit='533 bets, +35%, up in 7 of 8 months',
+         retired=_RETIRED_OCT.format(oct='+1.8% on 71 bets')),
     Rule('place_close_trackpod', 'Finished within 1 length last start + placed in 55-69% of runs at this track',
          'Within 1L last start, track placer', ('Track Podium Rate - Strong (55-69%)',), max_margin=1.0,
          note_like=('%Strong podium rate%at this track%',),
-         audit='804 bets, +21%, up in 6 of 8 months'),
+         audit='804 bets, +21%, up in 6 of 8 months',
+         retired=_RETIRED_OCT.format(oct='-5.1% on 100 bets')),
     Rule('place_32_tdnowin', 'Last-5 placings start 3rd then 2nd + has run at this track and distance without winning',
          '3rd-2nd, no track+dist win', ('Ran places: 3rd 2nd', 'Track+Distance Win Rate - No Wins'),
          note_like=('%Ran places: 3rd 2nd%',),
@@ -66,18 +79,36 @@ RULES = (
     Rule('place_32_poortrack', 'Last-5 placings start 3rd then 2nd + poor record at this track',
          '3rd-2nd, poor at track', ('Ran places: 3rd 2nd', 'Track - Poor Performance'),
          note_like=('%Ran places: 3rd 2nd%',),
-         audit='731 bets, +26%, up in 6 of 8 months'),
+         audit='731 bets, +26%, up in 6 of 8 months',
+         retired=_RETIRED_OCT.format(oct='-1.5% on 97 bets')),
     Rule('place_goingpod_backsprint', 'Placed in 55-69% of runs on today\'s going + backmarker in a sprint (1200m or less)',
          'Going placer, backmarker sprint', ('Condition Podium Rate - Strong (55-69%)', 'Running Position - Backmarker Sprint'),
          note_like=('%BACKMARKER in Sprint%',),
-         audit='690 bets, +26%, up in 6 of 8 months'),
+         audit='690 bets, +26%, up in 6 of 8 months',
+         retired=_RETIRED_OCT.format(oct='-18.4% on 110 bets')),
     Rule('place_won_onpace_mile', 'Won last start + on pace in a mile race (1300-1700m)',
          'Won last start, on pace mile', ('Running Position - OnPace Mile',), last_pos=1,
          note_like=('%ONPACE in Mile%',),
-         audit='655 bets, +24%, up in 6 of 8 months (smaller lately)'),
+         audit='655 bets, +24%, up in 6 of 8 months (smaller lately)',
+         retired=_RETIRED_OCT.format(oct='-2.2% on 130 bets')),
 )
 RULES_BY_KEY = {rule.key: rule for rule in RULES}
 ROUTE_KEYS = tuple(rule.key for rule in RULES)
+LIVE_RULES = tuple(rule for rule in RULES if not rule.retired)
+
+
+def failing_live(rule, record):
+    """True when a rule's live record has RETIRE_AFTER_BETS+ priced bets and is losing."""
+    for r in (record or {}).get('rules', []):
+        if r.get('key') == rule.key:
+            live = r.get('live') or {}
+            return (live.get('priced_bets') or 0) >= RETIRE_AFTER_BETS and (live.get('roi') or 0) < 0
+    return False
+
+
+def active_rules(record=None):
+    """Rules that make picks: not retired, and not losing after RETIRE_AFTER_BETS live bets."""
+    return tuple(rule for rule in LIVE_RULES if not failing_live(rule, record))
 
 # The first rule keeps its old names so existing callers and saved routes still work.
 ROUTE = RULES[0].key
@@ -181,12 +212,17 @@ def rules_for(csv_data, notes):
     return [rule for rule in candidates if all(name in components for name in rule.components)]
 
 
-def matching_rules(horse):
-    """Rules this runner fits, in RULES order. Scratched runners fit none."""
+def matching_rules(horse, rules=None):
+    """Active rules this runner fits, in RULES order. Scratched runners fit none.
+
+    rules: the rules allowed to pick (default: active_rules()). The record
+    uses rules_for(), which checks every rule, retired ones included.
+    """
     prediction = getattr(horse, 'prediction', None)
     if prediction is None or getattr(horse, 'is_scratched', False):
         return []
-    return rules_for(horse, prediction.notes)
+    allowed = {rule.key for rule in (active_rules() if rules is None else rules)}
+    return [rule for rule in rules_for(horse, prediction.notes) if rule.key in allowed]
 
 
 def has_component(notes, components=None):
@@ -483,6 +519,7 @@ def performance_all(session, date_from=None, date_to=None):
             months[item['date'][:7]].append(item)
         rules_out.append({
             'key': rule.key, 'name': rule.name, 'short': rule.short, 'audit': rule.audit,
+            'retired': rule.retired,
             'history': history, 'live': live,
             'months': [_summary(v, k) for k, v in sorted(months.items(), reverse=True) if k],
             'chart': {'label': rule.short, 'history': series, 'waiting': waiting},
@@ -618,3 +655,52 @@ if __name__ == '__main__':
     from bsp_import import get_engine
     with Session(get_engine()) as s:
         refresh_stored(s)
+
+
+# ---------------------------------------------------------------------------
+# "Hot combo" tag: shown on Best Bets as information only, never a reason to
+# pick. Jockey + trainer pairs winning 33%+ of 10+ runs in the last 90 days
+# (results before today only). Tested Feb-Oct 2026 (audit/tasks/trending.py):
+# as a WIN bet no better than luck; as a PLACE bet +8.4% on 732 bets but up in
+# only 3 of 8 months. Not proven, so it never adds or removes a pick.
+# ---------------------------------------------------------------------------
+HOT_COMBO_DAYS = 90
+HOT_COMBO_MIN_RUNS = 10
+HOT_COMBO_MIN_STRIKE = 0.33
+
+
+def _combo_key(jockey, trainer):
+    return (str(jockey or '').strip().lower(), str(trainer or '').strip().lower())
+
+
+def hot_combos(session, pairs, today):
+    """{(jockey, trainer): (wins, runs)} for the given pairs that are hot."""
+    from datetime import timedelta
+    from sqlalchemy import bindparam
+    jockeys = sorted({j for j, t in pairs if j and t})
+    if not jockeys:
+        return {}
+    try:
+        rows = session.execute(text("""
+            SELECT LOWER(TRIM(h.jockey)) AS j, LOWER(TRIM(h.trainer)) AS t, COUNT(*) AS n,
+                   SUM(CASE WHEN r.finish_position = 1 THEN 1 ELSE 0 END) AS w
+            FROM horses h
+            JOIN results r ON r.horse_id = h.id
+            JOIN races rc ON rc.id = h.race_id
+            JOIN meetings m ON m.id = rc.meeting_id
+            WHERE r.finish_position > 0 AND m.date >= :start AND m.date < :today
+              AND LOWER(TRIM(h.jockey)) IN :jockeys
+            GROUP BY 1, 2
+        """).bindparams(bindparam('jockeys', expanding=True)),
+            {'start': today - timedelta(days=HOT_COMBO_DAYS), 'today': today, 'jockeys': jockeys}).fetchall()
+    except Exception as e:
+        session.rollback()
+        logger.warning("Hot combo lookup failed: %s", e)
+        return {}
+    wanted = set(pairs)
+    out = {}
+    for j, t, n, w in rows:
+        n, w = int(n or 0), int(w or 0)
+        if (j, t) in wanted and n >= HOT_COMBO_MIN_RUNS and w / n >= HOT_COMBO_MIN_STRIKE:
+            out[(j, t)] = (w, n)
+    return out

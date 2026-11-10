@@ -563,7 +563,7 @@
           {% for r in place_rules_record.rules %}
             {% for row in [r.history, r.live] %}
             <tr>
-              {% if loop.first %}<td rowspan="2"><strong>{{ r.name }}</strong></td><td rowspan="2" class="text-muted" style="font-size:12px">{{ r.audit }}</td>{% endif %}
+              {% if loop.first %}<td rowspan="2"><strong>{{ r.name }}</strong>{% if r.retired %}<div class="text-muted" style="font-size:11px;font-weight:400" title="{{ r.retired }}">Retired: no longer picks. {{ r.retired }}</div>{% endif %}</td><td rowspan="2" class="text-muted" style="font-size:12px">{{ r.audit }}</td>{% endif %}
               <td style="font-size:12px">{{ 'History' if loop.first else 'Live' }}</td>
               <td>{{ row.bets }}</td><td>{{ row.placed }}</td><td>{% if row.bets %}{{ "%.1f"|format(row.place_rate) }}%{% else %}&ndash;{% endif %}</td>
               <td>{{ row.priced_bets }}</td>
