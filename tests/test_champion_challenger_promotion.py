@@ -319,7 +319,7 @@ def test_challenger_trained_on_non_live_computable_features_cannot_promote(monke
         run_id=321,
         model_type="xgboost",
         model_name="XGBoost Challenger",
-        validation_metrics=metrics(selection_score=13.0),
+        validation_metrics=metrics(selection_score=15.0),
     )
 
     assert conn.activated_challenger is None
@@ -333,14 +333,14 @@ def test_challenger_trained_on_non_live_computable_features_cannot_promote(monke
 def test_better_challenger_promotes_immediately_when_champion_is_under_seven_days_old(monkeypatch, tmp_path):
     conn = FakeConnection(champion=champion_row(10.0))
 
-    # Margin (13.0 - 10.0 = 3.0) clears PROMOTION_SELECTION_SCORE_EDGE (1.0) —
+    # Margin (15.0 - 10.0 = 5.0) clears PROMOTION_SELECTION_SCORE_EDGE (3.0) —
     # promotion requires a real improvement, not just any positive delta.
-    save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=13.0))
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=15.0))
 
     assert conn.champion_promoted_at > datetime.utcnow() - timedelta(days=7)
     assert conn.deactivated_champions is True
     assert conn.activated_challenger["id"] == conn.challenger_id
-    assert "Promoted: challenger Champion Score 13.000 beat Champion Score 10.000" in conn.activated_challenger["reason"]
+    assert "Promoted: challenger Champion Score 15.000 beat Champion Score 10.000" in conn.activated_challenger["reason"]
     assert conn.rejected_challenger is None
     assert conn.committed is True
 
@@ -352,7 +352,7 @@ def test_otherwise_qualified_challenger_without_walk_forward_folds_cannot_promot
         monkeypatch,
         tmp_path,
         conn,
-        metrics(selection_score=13.0, walk_forward_folds=None),
+        metrics(selection_score=15.0, walk_forward_folds=None),
     )
 
     assert conn.activated_challenger is None
@@ -406,14 +406,14 @@ def test_negative_roi_challenger_promotes_when_it_wins_on_champion_score(monkeyp
         monkeypatch,
         tmp_path,
         conn,
-        metrics(selection_score=12.0, roi=-1.0, strike_rate=20.0, bets=150),
+        metrics(selection_score=15.0, roi=-1.0, strike_rate=20.0, bets=150),
     )
 
     assert conn.activated_challenger is not None
     assert conn.activated_challenger["id"] == conn.challenger_id
     assert conn.deactivated_champions is True
     assert conn.promotion_history["new_champion_id"] == conn.challenger_id
-    assert "Champion Score 12.000 beat Champion Score 10.000" in conn.activated_challenger["reason"]
+    assert "Champion Score 15.000 beat Champion Score 10.000" in conn.activated_challenger["reason"]
 
 
 def test_validation_failures_still_block_higher_scoring_challenger(monkeypatch, tmp_path):
@@ -426,7 +426,7 @@ def test_validation_failures_still_block_higher_scoring_challenger(monkeypatch, 
         monkeypatch,
         tmp_path,
         conn,
-        metrics(selection_score=12.0, roi=-1.0, strike_rate=20.0,
+        metrics(selection_score=15.0, roi=-1.0, strike_rate=20.0,
                 bets=backtest.MIN_VALIDATION_BETS - 1),
     )
 
@@ -445,7 +445,7 @@ def test_below_gate_strike_rate_still_blocks_a_negative_roi_challenger(monkeypat
         monkeypatch,
         tmp_path,
         conn,
-        metrics(selection_score=12.0, roi=-1.0,
+        metrics(selection_score=15.0, roi=-1.0,
                 strike_rate=backtest.MIN_PROMOTION_STRIKE_RATE_PCT - 1.0, bets=150),
     )
 
@@ -464,7 +464,7 @@ def test_all_negative_walk_forward_folds_no_longer_veto_promotion(monkeypatch, t
     A challenger that loses less than the champion on the same fold boundaries
     is the best model available, and it wins promotion."""
     conn = FakeConnection(champion=champion_row(10.0, fold_rois=[-6.0, -8.0]))
-    losing = metrics(selection_score=12.0, roi=-1.0, strike_rate=20.0, bets=150)
+    losing = metrics(selection_score=15.0, roi=-1.0, strike_rate=20.0, bets=150)
     losing["walk_forward"] = {
         "folds": [{"roi": -2.0, "strike_rate": 18.0, "bets": 50},
                   {"roi": -4.0, "strike_rate": 17.0, "bets": 50}],
@@ -476,7 +476,7 @@ def test_all_negative_walk_forward_folds_no_longer_veto_promotion(monkeypatch, t
     assert conn.activated_challenger["id"] == conn.challenger_id
     assert conn.promotion_history["old_champion_id"] == 101
     assert "every walk-forward fold" not in conn.promotion_history["reason"]
-    assert "Champion Score 12.000 beat Champion Score 10.000" in conn.promotion_history["reason"]
+    assert "Champion Score 15.000 beat Champion Score 10.000" in conn.promotion_history["reason"]
 
 
 def test_all_negative_folds_still_face_every_other_promotion_gate(monkeypatch, tmp_path):
@@ -503,7 +503,7 @@ def test_all_negative_folds_still_need_the_walk_forward_fold_minimum(monkeypatch
     with a single negative fold has too little out-of-sample evidence to be
     champion at all, whatever its Champion Score."""
     conn = FakeConnection(champion=champion_row(10.0, fold_rois=[-6.0, -8.0]))
-    losing = metrics(selection_score=12.0, roi=-1.0, strike_rate=20.0, bets=150)
+    losing = metrics(selection_score=15.0, roi=-1.0, strike_rate=20.0, bets=150)
     losing["walk_forward"] = {
         "folds": [{"roi": -2.0, "strike_rate": 18.0, "bets": 50}],
         "roi_std": 0.0,
@@ -530,7 +530,7 @@ def test_promotion_rule_text_no_longer_advertises_a_positive_roi_requirement():
 def test_promotion_preserves_model_history_and_rollback_records(monkeypatch, tmp_path):
     conn = FakeConnection(champion=champion_row(10.0))
 
-    save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=12.0))
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=15.0))
 
     assert conn.deactivated_champions is True
     assert conn.retention_days == backtest.CHAMPION_ROLLBACK_RETENTION_DAYS
@@ -538,7 +538,7 @@ def test_promotion_preserves_model_history_and_rollback_records(monkeypatch, tmp
     assert conn.promotion_history["new_champion_id"] == conn.challenger_id
     assert conn.promotion_history["run_id"] == 321
     assert conn.promotion_history["model_type"] == "xgboost"
-    assert "Champion Score 12.000 beat Champion Score 10.000" in conn.promotion_history["reason"]
+    assert "Champion Score 15.000 beat Champion Score 10.000" in conn.promotion_history["reason"]
 
 
 def test_champion_without_walk_forward_folds_records_durable_alert(monkeypatch, tmp_path):
@@ -573,7 +573,7 @@ def test_promoting_a_validated_challenger_over_stale_champion_resolves_alert(mon
     carry enough walk-forward folds, the open alert should be resolved — the
     promotion is itself the rollback review the alert was asking for."""
     conn = FakeConnection(champion=champion_row(10.0))
-    challenger_metrics = metrics(selection_score=13.0)
+    challenger_metrics = metrics(selection_score=15.0)
     challenger_metrics["walk_forward"] = {
         "folds": [{"roi": 5.0, "strike_rate": 20.0, "bets": 50}, {"roi": 6.0, "strike_rate": 21.0, "bets": 50}],
         "roi_std": 0.5,
@@ -606,6 +606,19 @@ def test_non_stale_champion_resolves_any_previously_open_alert(monkeypatch, tmp_
 
     assert conn.pipeline_alerts == []
     assert "champion_missing_walk_forward_validation" in conn.resolved_alert_keys
+
+
+def test_challenger_inside_the_retrain_noise_is_not_promoted(monkeypatch, tmp_path):
+    """Retraining the same model with another seed moves the Champion Score by
+    about 2.8 points, so a 2.5 point win is not evidence of a better model."""
+    assert backtest.PROMOTION_SELECTION_SCORE_EDGE >= 3.0
+    conn = FakeConnection(champion=champion_row(10.0))
+
+    save_model_with_fake_db(monkeypatch, tmp_path, conn, metrics(selection_score=12.5))
+
+    assert conn.activated_challenger is None
+    assert conn.deactivated_champions is False
+    assert "did not beat Champion Score 10.000" in conn.rejected_challenger["reason"]
 
 
 def test_bootstrap_significance_gate_blocks_noisy_score_edge_win():
@@ -699,14 +712,14 @@ def test_promotion_reason_notes_large_snapshot_coverage_gap(monkeypatch, tmp_pat
     champion[10] = json.dumps(champion_metrics)
     conn = FakeConnection(champion=champion)
 
-    challenger_metrics = metrics(selection_score=13.0)
+    challenger_metrics = metrics(selection_score=15.0)
     challenger_metrics['jockey_snapshot_coverage_pct'] = 55.0
     challenger_metrics['trainer_snapshot_coverage_pct'] = 50.0
     save_model_with_fake_db(monkeypatch, tmp_path, conn, challenger_metrics)
 
     assert conn.activated_challenger["id"] == conn.challenger_id
     reason = conn.activated_challenger["reason"]
-    assert "Promoted: challenger Champion Score 13.000 beat Champion Score 10.000" in reason
+    assert "Promoted: challenger Champion Score 15.000 beat Champion Score 10.000" in reason
     assert "snapshot coverage differs by more than" in reason
     assert "jockey coverage champion=10.0% challenger=55.0%" in reason
 
@@ -1710,7 +1723,7 @@ def test_champion_is_judged_on_tonights_retest_not_its_frozen_score(monkeypatch,
     # Stored score 20 would beat the challenger's 13. Re-tested on tonight's
     # races the champion only scores 5, so the challenger must win.
     conn = FakeConnection(champion=champion_row(20.0))
-    challenger = metrics(selection_score=13.0)
+    challenger = metrics(selection_score=15.0)
     challenger["champion_retest"] = _retest(101, 5.0, [1.0, 2.0])
 
     save_model_with_fake_db(monkeypatch, tmp_path, conn, challenger)
@@ -1721,7 +1734,7 @@ def test_champion_is_judged_on_tonights_retest_not_its_frozen_score(monkeypatch,
 
 def test_retest_for_a_different_champion_is_ignored(monkeypatch, tmp_path):
     conn = FakeConnection(champion=champion_row(20.0))
-    challenger = metrics(selection_score=13.0)
+    challenger = metrics(selection_score=15.0)
     challenger["champion_retest"] = _retest(999, 5.0, [1.0, 2.0])
 
     save_model_with_fake_db(monkeypatch, tmp_path, conn, challenger)
@@ -1732,7 +1745,7 @@ def test_retest_for_a_different_champion_is_ignored(monkeypatch, tmp_path):
 
 def test_retest_without_enough_folds_is_ignored(monkeypatch, tmp_path):
     conn = FakeConnection(champion=champion_row(20.0))
-    challenger = metrics(selection_score=13.0)
+    challenger = metrics(selection_score=15.0)
     challenger["champion_retest"] = _retest(101, 5.0, [1.0])
 
     save_model_with_fake_db(monkeypatch, tmp_path, conn, challenger)
