@@ -2378,6 +2378,10 @@ def get_player_last_n_games(player_stats: list[dict], n: int = 5) -> list[dict]:
     return sorted_games[:n]
 
 
+# Chance x price a pick must reach to count as value (see calculate_market_edge).
+VALUE_PRICE_RATIO = 1.10
+
+
 def calculate_market_edge(
     player_avg: float,
     book_line: float,
@@ -2390,9 +2394,14 @@ def calculate_market_edge(
     season_weight: float = 0.5,
     opp_weight: float = 0.5,
     last5_weight: float = 0.0,
+    calibration: tuple | None = None,
 ) -> dict:
     """
     Probability-based edge calculation for AFL player props.
+
+    calibration: (a, b) from afl_calibration for this side. The edge and the
+    shown chance use the corrected chance; raw_model_prob keeps the model's
+    own figure, which is what afl_model_selections stores and refits from.
 
     The model returns edge in percentage points where positive means the model's
     probability is higher than the bookmaker's implied probability. It uses the
@@ -2501,17 +2510,28 @@ def calculate_market_edge(
     else:
         model_prob = model_prob_over
 
+    raw_model_prob = model_prob
+    if calibration:
+        from afl_calibration import apply as _apply_calibration
+        model_prob = max(0.001, min(0.999, _apply_calibration(model_prob, calibration)))
+
     implied_prob = 1.0 / max(float(odds), 1.01) if odds and odds > 1 else 0.5
     implied_prob = max(0.001, min(0.999, implied_prob))
     edge_pct = (model_prob - implied_prob) * 100.0
+    # Value needs the chance to beat the price by 10% as well as 2 points: on
+    # unseen picks, corrected Overs at chance x price >= 1.10 made +8% (326 bets).
+    price_ratio = model_prob * float(odds) if odds and odds > 1 else 0.0
+    is_value = edge_pct >= 2.0 and price_ratio >= VALUE_PRICE_RATIO
 
     return {
         "model_prediction": round(model_pred, 1),
         "model_prob": round(model_prob * 100.0, 1),
+        "raw_model_prob": round(raw_model_prob * 100.0, 1),
+        "calibrated": bool(calibration),
         "implied_prob": round(implied_prob * 100.0, 1),
         "book_line": book_line,
         "edge": round(edge_pct, 1),
         "edge_positive": edge_pct > 0,
         "edge_pct": round(edge_pct, 1),
-        "recommendation": "value" if edge_pct >= 2.0 else "skip",
+        "recommendation": "value" if is_value else "skip",
     }

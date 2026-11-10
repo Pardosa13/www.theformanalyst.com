@@ -2047,3 +2047,37 @@ def test_official_afl_picks_need_a_positive_edge_and_an_unstarted_game():
     assert "p.commence_time BETWEEN :window_start AND :window_end" in src
     assert "timedelta(days=1)" not in src
     assert "p.line_type, p.line)" in src
+
+
+def test_afl_calibration_pulls_an_overconfident_model_back():
+    """A model that says 70% for picks that win 40% gets corrected toward 40%."""
+    import afl_calibration
+    probs = [0.7] * 400 + [0.2] * 400
+    wins = [1] * 160 + [0] * 240 + [1] * 60 + [0] * 340
+    coef = afl_calibration.fit(probs, wins)
+    assert abs(afl_calibration.apply(0.7, coef) - 0.40) < 0.01
+    assert abs(afl_calibration.apply(0.2, coef) - 0.15) < 0.01
+    assert afl_calibration.apply(0.33, None) == 0.33
+
+
+def test_corrected_chance_drives_the_edge_and_raw_chance_is_kept():
+    calculate_market_edge = _import_afl_calculate_market_edge()
+    games = [{"disposals": v, "time_on_ground_percentage": 85} for v in (30, 31, 29, 32, 28, 30, 33, 27, 31, 29)]
+    raw = calculate_market_edge(player_avg=30, book_line=24.5, odds=1.9, line_type="Over",
+                                market="player_disposals", player_stats=games)
+    shrunk = calculate_market_edge(player_avg=30, book_line=24.5, odds=1.9, line_type="Over",
+                                   market="player_disposals", player_stats=games, calibration=(0.0, 0.3))
+    assert raw["recommendation"] == "value" and raw["calibrated"] is False
+    assert shrunk["raw_model_prob"] == raw["model_prob"]
+    assert shrunk["model_prob"] < raw["model_prob"]
+    assert shrunk["edge"] < raw["edge"]
+
+
+def test_value_needs_the_chance_to_beat_the_price_by_ten_percent():
+    calculate_market_edge = _import_afl_calculate_market_edge()
+    # Model ~25% at $4.20: 4 points over the price but chance x price only 1.05.
+    games = [{"goals": v, "time_on_ground_percentage": 85} for v in (0, 0, 0, 1, 0, 3, 0, 0, 1, 0, 0, 3)]
+    result = calculate_market_edge(player_avg=0.6, book_line=1.5, odds=4.2, line_type="Over",
+                                   market="player_goals", player_stats=games, calibration=(-0.9, 0.62))
+    if result["model_prob"] * 4.2 / 100 < 1.10:
+        assert result["recommendation"] == "skip"

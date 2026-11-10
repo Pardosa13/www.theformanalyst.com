@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 import math
 import os
+
+import afl_calibration
 import re
 import time
 import unicodedata
@@ -1009,6 +1011,7 @@ def register_afl_routes(app, db):
                 season_weight=market_weighting["season_weight"],
                 opp_weight=market_weighting["opp_weight"],
                 last5_weight=market_weighting["last5_weight"],
+                calibration=afl_calibration.coefficients(db, line_type),
             )
             edge = edge_data["edge"]
             if edge < min_edge:

@@ -1507,6 +1507,7 @@ def snapshot_model_selections_from_props(
 ) -> int:
     """Create official, deduped model selections from recent prop lines."""
     from afl_data import calculate_market_edge, _normalise_prop_market, _normalise_team_name
+    import afl_calibration
     BASE_CONFIDENCE = 40.0
     SEASON_GAME_WEIGHT = 1.6
     EDGE_WEIGHT = 2.2
@@ -1619,9 +1620,11 @@ def snapshot_model_selections_from_props(
             vs_opp_avg=vs_opp_avg,
             last5_avg=last5_avg,
             player_stats=rows,
+            calibration=afl_calibration.coefficients(db, prop.get("line_type")),
         )
         edge = float(edge_data.get("edge") or 0.0)
-        model_prob = edge_data.get("model_prob")
+        # Stored chance stays the model's own, so the correction can keep refitting.
+        model_prob = edge_data.get("raw_model_prob", edge_data.get("model_prob"))
         implied_prob = edge_data.get("implied_prob")
         confidence = max(0.0, min(
             100.0,
@@ -1633,7 +1636,7 @@ def snapshot_model_selections_from_props(
         # Positive edge only. This used abs(edge), so bets the model rated as
         # WORSE than the price were saved as "value" (10,844 settled Over picks
         # with the model at 14% against a price of 26%; they lost 42%).
-        if edge < min_edge or confidence < min_confidence:
+        if edge < min_edge or confidence < min_confidence or edge_data.get("recommendation") != "value":
             continue
 
         line = float(prop.get("line") or 0.0)
