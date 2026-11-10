@@ -324,27 +324,6 @@
 .vm-race-card tbody tr.ml-agreement-highlight:hover {
   filter: brightness(1.16);
 }
-/* Value-edge column — display-only, opt-in highlight, never hides a row */
-.edge-value.edge-positive { color: #34d399; }
-.edge-value.edge-negative { color: #f87171; }
-.edge-badge {
-  display: inline-block;
-  margin-left: 4px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  background: linear-gradient(135deg, #22d3ee 0%, #0e7490 100%);
-  color: #04252b;
-}
-.vm-race-card tbody tr.edge-highlight {
-  background: rgba(34, 211, 238, 0.14) !important;
-  border-left: 5px solid #22d3ee !important;
-  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.30), 0 0 16px rgba(34, 211, 238, 0.16);
-}
-.vm-race-card tbody tr.edge-highlight:hover { filter: brightness(1.16); }
 
 .vm-ml-shadow-badge,
 .vm-ml-agreement-badge {
@@ -1571,18 +1550,6 @@ function updateScratchings(meetingId) {
   {% endfor %}
 </div>
 
-<!-- Edge sort/highlight controls — display-only, never removes or hides a horse -->
-<div class="vm-nav-card">
-  <span class="vm-nav-label">Value Edge:</span>
-  <button type="button" id="edge-sort-toggle" class="vm-nav-pill" style="background:linear-gradient(135deg,#00e5b0 0%,#006b5e 100%); cursor:pointer; border:none;" onclick="toggleEdgeSort()">
-    ⚡ Sort each race by Edge
-  </button>
-  <button type="button" id="edge-highlight-toggle" class="vm-nav-pill" style="background:linear-gradient(135deg,#22d3ee 0%,#0e7490 100%); cursor:pointer; border:none;" onclick="toggleEdgeHighlight()">
-    ✨ Highlight high-edge horses
-  </button>
-  <span style="font-size:11px; color:var(--text-muted);">Every horse stays visible either way — this only changes order/emphasis.</span>
-</div>
-
 <!-- Filter bar placeholder — JS appends here -->
 <div id="filter-bar-placeholder"></div>
 
@@ -1643,7 +1610,6 @@ function updateScratchings(meetingId) {
           <th style="padding:12px; text-align:center;">Assessed Odds</th>
           <th style="padding:12px; text-align:center;">Ladbrokes Price</th>
           <th style="padding:12px; text-align:center;">Win %</th>
-          <th style="padding:12px; text-align:center;" title="Model's fair win probability minus the market's implied probability from the live Ladbrokes price. A bigger positive edge means the model likes this horse more than the market does.">Edge</th>
           {% if current_user.is_admin %}
           <th style="padding:12px; text-align:left;">Notes</th>
           {% endif %}
@@ -1656,7 +1622,6 @@ function updateScratchings(meetingId) {
             data-horse-id="{{ horse.horse_id }}"
             data-active-components="{{ horse.matched_component_keys|join(',') }}"
             data-ml-win-prob-pct="{{ horse.ml_fair_probability_pct if horse.ml_fair_probability_pct is not none else '' }}"
-            {% if horse.value_edge_pct is not none %}data-edge="{{ horse.value_edge_pct }}"{% endif %}
             class="{% if horse.is_scratched %}horse-scratched{% endif %}{% if is_ml_top %} ml-agreement-highlight{% endif %}">
 
           <td style="padding:12px; text-align:center; font-weight:bold; border-bottom:1px solid #e2e8f0;">
@@ -1692,25 +1657,13 @@ function updateScratchings(meetingId) {
             {% if horse.ml_assessed_odds %}{{ horse.ml_assessed_odds }}{% else %}<span style="color:#666;font-size:13px">N/A</span>{% endif %}
           </td>
           <td class="lb-price-cell" style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0;">
-            {# The price the server struck this row's edge and stake at, from the
+            {# The last saved Ladbrokes price, from the
                stored live-odds snapshots. Overwritten in place by the Ladbrokes
                polling JS below whenever that poll lands. #}
             {% if horse.ladbrokes_fixed_win_price %}<span style="font-weight:600;">${{ '%.2f'|format(horse.ladbrokes_fixed_win_price) }}</span>{% endif %}
           </td>
           <td style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0;">
             {% if horse.ml_win_probability %}{{ horse.ml_win_probability }}{% else %}<span style="color:#666;font-size:13px">N/A</span>{% endif %}
-          </td>
-          <td class="edge-cell" style="padding:12px; text-align:center; border-bottom:1px solid #e2e8f0; font-weight:700;">
-            {# Server-rendered from predictions.value_edge_pct, which the ML
-               scoring run persists off the stored live market. The Ladbrokes
-               polling JS refreshes this cell in place when a live price
-               arrives, but the column no longer depends on that poll landing. #}
-            {% if horse.value_edge_pct is not none %}
-              <span class="edge-value {{ 'edge-positive' if horse.value_edge_pct >= 0 else 'edge-negative' }}"
-                    title="Model {{ '%.1f'|format(horse.ml_fair_probability_pct or 0) }}% vs market {{ '%.1f'|format(horse.market_implied_probability_pct or 0) }}%{% if horse.ladbrokes_fixed_win_price %} (from ${{ '%.2f'|format(horse.ladbrokes_fixed_win_price) }}){% endif %}">{{ '+' if horse.value_edge_pct > 0 }}{{ '%.1f'|format(horse.value_edge_pct) }}pp{% if horse.value_edge_pct >= 5 %}<span class="edge-badge">value</span>{% endif %}</span>
-            {% else %}
-              <span class="edge-value" style="color:#666;font-size:13px;">—</span>
-            {% endif %}
           </td>
           {% if current_user.is_admin %}
 <td style="padding:12px; border-bottom:1px solid #e2e8f0; font-size:11px; max-width:300px;">
@@ -2772,14 +2725,14 @@ function calculateRaceConfidence(horses) {
     const entropyScore = Math.max(0, Math.min(100, (1 - entropy / maxEntropy) * 100));
     const finalConfidence = Math.round(dominanceScore * 0.20 + gapScore * 0.35 + strengthScore * 0.25 + cvScore * 0.10 + entropyScore * 0.10);
     let rating, description, style, emoji;
-    if (finalConfidence >= 90)      { rating = "Extremely High"; emoji = "🟢"; description = "Near-certainty - Maximum confidence bet"; style = "background: #d4edda; border-left: 4px solid #28a745;"; }
-    else if (finalConfidence >= 75) { rating = "Very High";      emoji = "🟢"; description = "Top pick - Strong betting opportunity"; style = "background: #d4edda; border-left: 4px solid #28a745;"; }
-    else if (finalConfidence >= 60) { rating = "High";           emoji = "🟢"; description = "Strong favorite - Solid bet recommended"; style = "background: #d1ecf1; border-left: 4px solid #17a2b8;"; }
-    else if (finalConfidence >= 50) { rating = "Medium";         emoji = "🟡"; description = "Moderate confidence - Standard stake"; style = "background: #fff3cd; border-left: 4px solid #ffc107;"; }
-    else if (finalConfidence >= 40) { rating = "Medium-Low";     emoji = "🟡"; description = "Competitive field - Reduced stake or exotics"; style = "background: #fff3cd; border-left: 4px solid #ffc107;"; }
-    else if (finalConfidence >= 30) { rating = "Low";            emoji = "🟠"; description = "Uncertain race - Small stake or avoid"; style = "background: #ffe5cc; border-left: 4px solid #fd7e14;"; }
-    else if (finalConfidence >= 20) { rating = "Very Low";       emoji = "🔴"; description = "High risk - Avoid or exotic bets only"; style = "background: #f8d7da; border-left: 4px solid #dc3545;"; }
-    else                            { rating = "No Bet";         emoji = "🔴"; description = "Too uncertain - Do not bet"; style = "background: #f8d7da; border-left: 4px solid #dc3545;"; }
+    if (finalConfidence >= 90)      { rating = "Extremely High"; emoji = "🟢"; description = "One runner stands well clear on the model"; style = "background: #d4edda; border-left: 4px solid #28a745;"; }
+    else if (finalConfidence >= 75) { rating = "Very High";      emoji = "🟢"; description = "Clear top pick on the model"; style = "background: #d4edda; border-left: 4px solid #28a745;"; }
+    else if (finalConfidence >= 60) { rating = "High";           emoji = "🟢"; description = "Top pick ahead of the rest"; style = "background: #d1ecf1; border-left: 4px solid #17a2b8;"; }
+    else if (finalConfidence >= 50) { rating = "Medium";         emoji = "🟡"; description = "Top pick, but others close"; style = "background: #fff3cd; border-left: 4px solid #ffc107;"; }
+    else if (finalConfidence >= 40) { rating = "Medium-Low";     emoji = "🟡"; description = "Competitive field"; style = "background: #fff3cd; border-left: 4px solid #ffc107;"; }
+    else if (finalConfidence >= 30) { rating = "Low";            emoji = "🟠"; description = "Open race"; style = "background: #ffe5cc; border-left: 4px solid #fd7e14;"; }
+    else if (finalConfidence >= 20) { rating = "Very Low";       emoji = "🔴"; description = "Wide open race"; style = "background: #f8d7da; border-left: 4px solid #dc3545;"; }
+    else                            { rating = "Minimal";        emoji = "🔴"; description = "Anything could win"; style = "background: #f8d7da; border-left: 4px solid #dc3545;"; }
     return { confidence: finalConfidence, rating: rating, description: description, style: style, emoji: emoji };
 }
 
@@ -2900,148 +2853,6 @@ document.addEventListener('DOMContentLoaded', function() {
     highlightBiasButton(currentBias);
 });
 // ══════════════════════════════════════════
-//  VALUE EDGE — model fair win probability vs. market implied probability
-//  Additional information only: every horse in every race is always shown
-//  with its score/win% as before. This never filters or hides a selection.
-// ══════════════════════════════════════════
-var EDGE_HIGHLIGHT_THRESHOLD_PCT = 5; // matches backtest.py's VALUE_EDGE_THRESHOLDS "meaningful" bucket
-var edgeHighlightEnabled = false;
-var edgeSortEnabled = false;
-var _edgeOriginalOrder = {}; // raceNumber -> array of <tr> in server (score) order
-
-// ── Market fair probability — port of market_probability.fair_probabilities
-// (Shin 1992/93) and ml_predict.live_market_probabilities. The server prices
-// edges against the market's FAIR probability: the bookmaker's margin and the
-// favourite-longshot bias taken out of the whole book at once. A live poll
-// must read the price the same way, or a repainted edge would disagree with
-// the one the server stored for the very same price.
-var SHIN_MAX_ITERATIONS = 100;
-var SHIN_CONVERGENCE_TOL = 1e-10;
-
-function shinFairProbabilities(prices) {
-    var raw = prices.map(function(price) { return 1 / price; });
-    var book = raw.reduce(function(sum, value) { return sum + value; }, 0);
-    var naive = raw.map(function(value) { return value / book; });
-    // An underround (or exactly fair) book has no margin to attribute: naive
-    // normalisation is the answer there, as on the server.
-    if (book <= 1 + SHIN_CONVERGENCE_TOL) return naive;
-
-    function impliedSum(z) {
-        if (z >= 1 - 1e-12) return 1;
-        return raw.reduce(function(sum, value) {
-            var inner = Math.sqrt((z * z) + (4 * (1 - z) * value * value / book));
-            return sum + ((inner - z) / (2 * (1 - z)));
-        }, 0);
-    }
-
-    var low = 0, high = 1 - 1e-9, z = null;
-    for (var i = 0; i < SHIN_MAX_ITERATIONS; i++) {
-        var mid = 0.5 * (low + high);
-        var value = impliedSum(mid);
-        if (Math.abs(value - 1) < SHIN_CONVERGENCE_TOL) { z = mid; break; }
-        if (value > 1) { low = mid; } else { high = mid; }
-        if ((high - low) < SHIN_CONVERGENCE_TOL) break;
-    }
-    if (z === null) {
-        var candidate = 0.5 * (low + high);
-        if (Math.abs(impliedSum(candidate) - 1) > 1e-6) return naive;
-        z = candidate;
-    }
-    var fair = raw.map(function(value) {
-        var inner = Math.sqrt((z * z) + (4 * (1 - z) * value * value / book));
-        return (inner - z) / (2 * (1 - z));
-    });
-    var total = fair.reduce(function(sum, value) { return sum + value; }, 0);
-    if (!isFinite(total) || total <= 0) return naive;
-    return fair.map(function(value) { return value / total; });
-}
-
-// prices: one entry per ACTIVE runner in the race, NaN where unpriced.
-// Returns market probability percentages aligned with it (NaN where
-// unpriced). Shin only runs on a complete book: on a partial one it would
-// hand the missing runners' share to the priced ones and overstate them, so
-// a partly priced race falls back to raw 100/price, which understates edge —
-// the safe direction to be wrong in.
-function marketFairPcts(prices) {
-    var usable = prices.map(function(price) { return isFinite(price) && price > 1; });
-    var complete = prices.length >= 2 && usable.every(Boolean);
-    if (!complete) {
-        return prices.map(function(price, i) { return usable[i] ? 100 / price : NaN; });
-    }
-    return shinFairProbabilities(prices).map(function(probability) { return probability * 100; });
-}
-
-function updateEdgeCell(row, horseOdds, marketPct) {
-    var edgeCell = row.querySelector('.edge-cell .edge-value');
-    if (!edgeCell) return;
-
-    var mlProbPct = parseFloat(row.dataset.mlWinProbPct);
-    var price = horseOdds && horseOdds.win ? parseFloat(horseOdds.win) : NaN;
-
-    if (isNaN(mlProbPct) || isNaN(price) || price <= 0) {
-        // No live price in this poll. The cell may already hold the edge the
-        // server computed from the stored odds snapshot, which is a real
-        // number and stays — a poll that came back empty is not evidence that
-        // the edge is unknown, and blanking it here is what made the column
-        // look permanently empty.
-        return;
-    }
-
-    var impliedPct = (marketPct !== undefined && isFinite(marketPct)) ? marketPct : 100 / price;
-    var edge = mlProbPct - impliedPct;
-    row.dataset.edge = edge;
-
-    var sign = edge > 0 ? '+' : '';
-    edgeCell.className = 'edge-value ' + (edge >= 0 ? 'edge-positive' : 'edge-negative');
-    edgeCell.style.color = '';
-    edgeCell.style.fontSize = '';
-    edgeCell.title = 'Model ' + mlProbPct.toFixed(1) + '% vs market ' + impliedPct.toFixed(1) + '% (from $' + price.toFixed(2) + ')';
-    edgeCell.textContent = sign + edge.toFixed(1) + 'pp';
-    if (edge >= EDGE_HIGHLIGHT_THRESHOLD_PCT) {
-        edgeCell.innerHTML = sign + edge.toFixed(1) + 'pp<span class="edge-badge">value</span>';
-    }
-
-    row.classList.toggle('edge-highlight', edgeHighlightEnabled && edge >= EDGE_HIGHLIGHT_THRESHOLD_PCT);
-}
-
-function toggleEdgeHighlight() {
-    edgeHighlightEnabled = !edgeHighlightEnabled;
-    var btn = document.getElementById('edge-highlight-toggle');
-    if (btn) btn.style.opacity = edgeHighlightEnabled ? '1' : '0.6';
-    document.querySelectorAll('tr[data-edge]').forEach(function(row) {
-        var edge = parseFloat(row.dataset.edge);
-        row.classList.toggle('edge-highlight', edgeHighlightEnabled && edge >= EDGE_HIGHLIGHT_THRESHOLD_PCT);
-    });
-}
-
-function applyEdgeOrderToRace(tbody) {
-    var raceNumber = tbody.closest('.vm-race-card').dataset.raceNumber;
-    if (!_edgeOriginalOrder[raceNumber]) {
-        _edgeOriginalOrder[raceNumber] = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
-    }
-
-    if (!edgeSortEnabled) {
-        _edgeOriginalOrder[raceNumber].forEach(function(row) { tbody.appendChild(row); });
-        return;
-    }
-
-    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
-    rows.sort(function(a, b) {
-        var edgeA = a.dataset.edge !== undefined ? parseFloat(a.dataset.edge) : -Infinity;
-        var edgeB = b.dataset.edge !== undefined ? parseFloat(b.dataset.edge) : -Infinity;
-        return edgeB - edgeA;
-    });
-    rows.forEach(function(row) { tbody.appendChild(row); });
-}
-
-function toggleEdgeSort() {
-    edgeSortEnabled = !edgeSortEnabled;
-    var btn = document.getElementById('edge-sort-toggle');
-    if (btn) btn.textContent = edgeSortEnabled ? '⚡ Sorted by Edge (click to reset)' : '⚡ Sort each race by Edge';
-    document.querySelectorAll('.vm-race-card tbody').forEach(applyEdgeOrderToRace);
-}
-
-// ══════════════════════════════════════════
 //  LADBROKES LIVE ODDS
 //  Polls /api/odds/ladbrokes/<uuid> every 45s
 //  Injects:
@@ -3102,23 +2913,6 @@ function toggleEdgeSort() {
         var odds    = oddsData.odds     || {};
         var silkUrl = oddsData.silk_url || '';
 
-        // The market's fair probability is a property of the whole book, so
-        // it is solved once per race from every active runner's price before
-        // any row's edge is painted.
-        var activeRows = [];
-        var activePrices = [];
-        raceCard.querySelectorAll('tbody tr').forEach(function(row) {
-            if (row.classList.contains('horse-scratched')) return;
-            var activeNameCell = row.cells[1];
-            var activeNameSpan = activeNameCell ? activeNameCell.querySelector(HORSE_NAME_SELECTOR) : null;
-            var activeOdds = activeNameSpan ? odds[lbNorm(activeNameSpan.textContent)] : null;
-            activeRows.push(row);
-            activePrices.push(activeOdds && activeOdds.win ? parseFloat(activeOdds.win) : NaN);
-        });
-        var activeMarketPcts = marketFairPcts(activePrices);
-        var marketPctByRow = new Map();
-        activeRows.forEach(function(row, i) { marketPctByRow.set(row, activeMarketPcts[i]); });
-
         raceCard.querySelectorAll('tbody tr').forEach(function(row) {
             var nameCell = row.cells[1]; // td:nth-child(2) — horse name + silk
             var oddsCell = row.cells[4]; // td:nth-child(5) — dedicated Ladbrokes Price column
@@ -3130,12 +2924,6 @@ function toggleEdgeSort() {
             if (!normName) return;
 
             var horseOdds = odds[normName];
-
-            // ── 0. VALUE EDGE — model fair win% minus market fair win% ──
-            // Display-only: every row keeps its edge cell updated (or reset
-            // to "—" when the market price isn't available yet); nothing is
-            // ever hidden or filtered out based on this value.
-            updateEdgeCell(row, horseOdds, marketPctByRow.get(row));
 
             // ── 1. SILK ───────────────────────────────────────────────
             var existingSilk = nameCell.querySelector('.lb-silk');
@@ -3218,11 +3006,6 @@ function toggleEdgeSort() {
 
 
         syncVisibleSpeedMapSilks(raceNumber);
-
-        if (edgeSortEnabled) {
-            var tbodyEl = raceCard.querySelector('tbody');
-            if (tbodyEl) applyEdgeOrderToRace(tbodyEl);
-        }
 
         // Stop polling once race is settled
         if (['Closed','Final','Abandoned','Interim'].indexOf(status) !== -1) {

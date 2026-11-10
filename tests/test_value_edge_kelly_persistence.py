@@ -398,16 +398,18 @@ def test_the_ml_meeting_view_prices_from_the_stored_snapshots_first():
     assert 'if race.get(\'race_number\') not in priced_race_numbers:' in view
 
 
-def test_the_meeting_page_renders_the_stored_edge_rather_than_waiting_on_a_poll():
+def test_the_ml_meeting_page_shows_no_edge_value_badge_or_stake_advice():
+    """Removed Nov 2026: backing every runner the model rated above its price
+    lost 20-35% for every model (backtest run 268), so the page no longer shows
+    an edge, a VALUE badge, edge sorting or staking advice. Edges are still
+    stored and tracked on ML Data."""
     template = Path('templates/MLRaceMeetings.html').read_text()
-    assert 'horse.value_edge_pct is not none' in template
-    assert 'data-edge="{{ horse.value_edge_pct }}"' in template
-    # And the live-odds JS must not blank that server value when a poll returns
-    # no price — doing so is what made the column look permanently empty.
-    start = template.index('function updateEdgeCell(')
-    end = template.index('function toggleEdgeHighlight(', start)
-    no_price_branch = template[start:end]
-    assert 'delete row.dataset.edge;' not in no_price_branch
+    for gone in ('class="edge-cell"', 'edge-badge', 'toggleEdgeSort', 'updateEdgeCell',
+                 'data-edge=', 'Standard stake', 'Reduced stake', 'Small stake',
+                 'Solid bet recommended', 'Do not bet'):
+        assert gone not in template, gone
+    assert 'horse.ml_win_probability' in template
+    assert 'lb-price-cell' in template
 
 
 # ── A market-dependent champion is only priced against the price it was scored with ──
