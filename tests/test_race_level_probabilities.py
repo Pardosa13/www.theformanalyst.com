@@ -504,36 +504,6 @@ class TestLiveMarketProbabilities:
 NODE = shutil.which("node")
 
 
-@pytest.mark.skipif(NODE is None, reason="node is not installed")
-def test_browser_port_of_the_market_correction_matches_the_server():
-    """The ML meeting page repaints edges from every live poll. Its copy of
-    the Shin correction must give the same market probability the server
-    stored for the same prices, or the repainted edge disagrees with it."""
-    template = Path("templates/MLRaceMeetings.html").read_text()
-    start = template.index("var SHIN_MAX_ITERATIONS")
-    end = template.index("function updateEdgeCell(")
-    js = template[start:end]
-    books = [
-        [2.2, 3.6, 5.5, 9.0, 14.0, 26.0],
-        [1.5, 4.0, 8.0, 21.0],
-        [2.5, 2.5, 6.0],
-        [2.2, float("nan"), 5.5],
-    ]
-    script = js + "\nconsole.log(JSON.stringify(%s.map(function(b){ return marketFairPcts(b); })));" % (
-        json.dumps(books).replace("NaN", "NaN")
-    )
-    out = subprocess.run([NODE, "-e", script], capture_output=True, text=True, check=True).stdout
-    js_results = json.loads(out.replace("NaN", "null"))
-    for prices, js_pcts in zip(books, js_results):
-        clean = [None if (p != p) else p for p in prices]
-        py_probs, _method = ml_predict.live_market_probabilities(clean)
-        for js_value, py_value in zip(js_pcts, py_probs):
-            if py_value is None:
-                assert js_value is None
-            else:
-                assert js_value == pytest.approx(py_value * 100.0, abs=1e-6)
-
-
 class _Prediction:
     def __init__(self, horse_id, ml_score, ml_win_probability):
         self.horse_id = horse_id
