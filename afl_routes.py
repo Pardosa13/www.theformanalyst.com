@@ -1192,8 +1192,9 @@ def register_afl_routes(app, db):
         min_edge = request.args.get("min_edge", 0.0, type=float)
         limit = min(request.args.get("limit", 200, type=int), 500)
 
-        conditions = ["season = :season"]
-        params: dict = {"season": season, "limit": limit, "min_edge": min_edge}
+        conditions = ["season = :season", "created_at >= :record_start"]
+        params: dict = {"season": season, "limit": limit, "min_edge": min_edge,
+                        "record_start": AFL_RECORD_START}
         if status in {"pending", "win", "loss", "push"}:
             conditions.append("result = :status")
             params["status"] = status
@@ -1220,6 +1221,7 @@ def register_afl_routes(app, db):
                 "status": status,
                 "count": len(rows),
                 "rows": rows,
+                "record_start": AFL_RECORD_START,
             }
         )
 
@@ -1354,6 +1356,7 @@ def register_afl_routes(app, db):
         return jsonify(
             {
                 "season": season,
+                "record_start": AFL_RECORD_START,
                 "summary": _calc_model_metrics(rows),
                 "breakdowns": {
                     "market": _calc_model_breakdown(rows, "market"),
@@ -1408,6 +1411,7 @@ def register_afl_routes(app, db):
         return jsonify(
             {
                 "season": season,
+                "record_start": AFL_RECORD_START,
                 "summary": {
                     "captured_total": total,
                     "settled_total": settled_total,
@@ -3447,8 +3451,16 @@ def _check_data_sources(db) -> dict:
     }
 
 
+
+# The tracked AFL record counts picks saved on or after this date. Picks saved
+# before it came from a rule that kept edges in either direction (abs(edge)),
+# scored with a model margin that contained the result, and before the
+# overconfidence correction, so they are not a fair record. They stay in the
+# table: the correction and the AFL ML model still learn from them.
+AFL_RECORD_START = os.environ.get("AFL_RECORD_START", "2026-11-10")
+
 def _db_model_selections(db, season: int, settled_only: bool = False) -> list[dict]:
-    where = ["season = :season"]
+    where = ["season = :season", "created_at >= :record_start"]
     if settled_only:
         where.append("result IN ('win', 'loss', 'push')")
     sql = db.text(
@@ -3460,7 +3472,7 @@ def _db_model_selections(db, season: int, settled_only: bool = False) -> list[di
         """
     )
     with db.engine.connect() as conn:
-        rows = conn.execute(sql, {"season": season}).mappings().fetchall()
+        rows = conn.execute(sql, {"season": season, "record_start": AFL_RECORD_START}).mappings().fetchall()
     return [dict(r) for r in rows]
 
 

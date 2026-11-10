@@ -2081,3 +2081,16 @@ def test_value_needs_the_chance_to_beat_the_price_by_ten_percent():
                                    market="player_goals", player_stats=games, calibration=(-0.9, 0.62))
     if result["model_prob"] * 4.2 / 100 < 1.10:
         assert result["recommendation"] == "skip"
+
+
+def test_afl_record_only_counts_picks_from_the_restart_date():
+    """Picks saved before the restart came from a faulty rule; the record ignores them."""
+    import inspect
+    import afl_routes
+    assert afl_routes.AFL_RECORD_START == "2026-11-10"
+    src = inspect.getsource(afl_routes._db_model_selections)
+    assert "created_at >= :record_start" in src
+    routes = Path("afl_routes.py").read_text(encoding="utf-8")
+    assert routes.count('"record_start": AFL_RECORD_START') >= 3
+    page = Path("templates/afl.html").read_text(encoding="utf-8")
+    assert page.count("aflRecordStartNote(data.record_start)") == 2
