@@ -2991,11 +2991,13 @@ def generate_feature_recommendations(importance_sorted):
 
 
 MIN_VALIDATION_BETS = int(os.environ.get('ML_MIN_VALIDATION_BETS', '100'))
-# A near-zero edge lets a challenger take the Champion seat on essentially any
-# positive noise in a single validation window. Champion Score is on the order
-# of single-to-double digits (roi_pct + 0.5*strike_rate_pct - penalties), so
-# require a real, non-trivial improvement before swapping the production model.
-PROMOTION_SELECTION_SCORE_EDGE = float(os.environ.get('ML_PROMOTION_SELECTION_SCORE_EDGE', '1.0'))
+# How far a challenger must beat the Champion Score before it takes over.
+# Champion Score (v9) is led by -1000 x race log loss vs the market, and the
+# weekly ablation retrains the SAME model with a different random seed to see
+# how far that number moves on luck alone: about 0.0028, i.e. 2.8 points
+# (run 284, 10 Nov 2026). The old margin of 1.0 sat inside that noise, so a
+# lucky retrain could replace the production model. 3.0 sits just above it.
+PROMOTION_SELECTION_SCORE_EDGE = float(os.environ.get('ML_PROMOTION_SELECTION_SCORE_EDGE', '3.0'))
 PROMOTION_ROI_EDGE_PCT = 3.0  # Legacy display only; promotion is Champion Score based.
 PROMOTION_SR_TOLERANCE_PCT = 2.0
 LARGE_PROMOTION_ROI_EDGE_PCT = float(os.environ.get('ML_LARGE_PROMOTION_ROI_EDGE_PCT', '10.0'))
