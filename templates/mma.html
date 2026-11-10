@@ -547,7 +547,7 @@
         <h4 style="margin:0;font-size:1.1rem;font-weight:800;color:var(--text-primary);">
           ⚡ UFC Edge Finder
         </h4>
-        <span style="font-size:11px;color:var(--text-muted);">Model win probability vs bookmaker implied odds</span>
+        <span style="font-size:11px;color:var(--text-muted);">Our chance (mostly the market, part model) vs the bookmaker price</span>
       </div>
 
       <div id="ef-no-odds-note" class="ef-no-odds-note" style="display:none;">
@@ -1003,6 +1003,7 @@ function applyEdgeFilters() {
   const summary = `${allBets.length} result(s) · min edge: ${minEdge.toFixed(1)}%`;
 
   el.innerHTML = `
+    ${efTrackRecordHTML(_efRawData.track_record, _efRawData.model_weight)}
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;font-family:'DM Mono',monospace;">
       ${escHtml(summary)}
     </div>
@@ -1010,6 +1011,21 @@ function applyEdgeFilters() {
       ${allBets.map(bet => efCardHTML(bet)).join('')}
     </div>
   `;
+}
+
+// How the model's picks have really gone, so its "edges" can be judged.
+function efTrackRecordHTML(tr, modelWeight) {
+  if (!tr || !tr.fights) return '';
+  const beatsMarket = tr.model_log_loss < tr.market_log_loss;
+  const pctModel = Math.round((modelWeight || 0) * 100);
+  return `
+    <div style="background:var(--bg-elevated,rgba(255,255,255,.04));border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:var(--text-secondary,var(--text-muted));">
+      <strong style="color:var(--text-primary);">Model track record</strong> · ${tr.fights} finished fights with odds<br>
+      Model's pick won <strong>${tr.model_pick_won_pct}%</strong> · bookies' favourite won <strong>${tr.favourite_won_pct}%</strong>.
+      ${beatsMarket
+        ? 'The model has been more accurate than the market so far.'
+        : 'The market has been more accurate than the model, so "our chance" is ' + (100 - pctModel) + '% market and ' + pctModel + '% model, and edges stay small.'}
+    </div>`;
 }
 
 function efCardHTML(bet) {
@@ -1054,9 +1070,10 @@ function efCardHTML(bet) {
       </div>
       ${badges ? `<div class="ef-badges" style="margin-bottom:10px;">${badges}</div>` : ''}
       <div class="ef-prob-row">
-        <span class="ef-prob-item">Model <strong>${(bet.model_prob || 0).toFixed(1)}%</strong></span>
+        <span class="ef-prob-item" title="Mostly the market's chance, part the model's">Our chance <strong>${(bet.model_prob || 0).toFixed(1)}%</strong></span>
+        <span class="ef-prob-item">Model alone <strong>${(bet.raw_model_prob ?? bet.model_prob ?? 0).toFixed(1)}%</strong></span>
         <span class="ef-prob-item">Implied <strong>${(bet.implied_prob || 0).toFixed(1)}%</strong>${bet.devigged ? '' : ' <span title="Opponent price from this bookmaker was unavailable, so this is the raw 1/odds price (includes the bookmaker\'s vig) rather than a devigged estimate.">⚠️</span>'}</span>
-        <span class="ef-prob-item">Opponent <strong>${(bet.opponent_model_prob || 0).toFixed(1)}%</strong></span>
+        <span class="ef-prob-item">Opponent (model) <strong>${(bet.opponent_model_prob || 0).toFixed(1)}%</strong></span>
         <span class="ef-prob-item">Confidence <strong>${escHtml(bet.confidence || '')}</strong></span>
       </div>
     </div>

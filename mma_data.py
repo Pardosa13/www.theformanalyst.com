@@ -188,11 +188,30 @@ def fetch_mma_fight_odds(
 # Mirrors the front-end's default Edge Finder slider value (efMinEdge in mma.html).
 DEFAULT_VALUE_EDGE_THRESHOLD_PCT = 2.0
 
+# How much of "our chance" comes from the model; the rest is the market.
+# On 55 completed fights with odds (May-Nov 2026) the model's pick won 54.5%
+# against 72.7% for the bookies' favourite (log loss 0.667 vs 0.553), so on
+# its own its disagreements with the price were mostly its own errors. Taking
+# 15% from the model (the horse racing champion uses the same split) keeps an
+# "edge" only where the model leans hard against the price.
+MMA_MODEL_WEIGHT = float(os.environ.get("MMA_MODEL_WEIGHT", "0.15"))
+
+
+def market_anchored_probability(model_prob: float, market_prob: float, model_weight: float = None) -> float:
+    """Model and market combined on the log-odds scale (0-1)."""
+    import math
+    w = MMA_MODEL_WEIGHT if model_weight is None else model_weight
+    clip = lambda p: max(0.001, min(0.999, float(p)))
+    logit = lambda p: math.log(clip(p) / (1 - clip(p)))
+    z = w * logit(model_prob) + (1 - w) * logit(market_prob)
+    return 1.0 / (1.0 + math.exp(-z))
+
 
 def calculate_mma_edge(
     model_prob: float,
     odds: float,
     opponent_odds: Optional[float] = None,
+    model_weight: Optional[float] = None,
 ) -> dict:
     """
     Probability-based edge for an MMA fight outcome (fighter win).
@@ -213,6 +232,10 @@ def calculate_mma_edge(
 
     Returns a dict matching the AFL calculate_market_edge() return shape so
     the front-end can share the same rendering logic, plus a `devigged` flag.
+
+    model_prob in the result is "our chance": the model blended with the
+    market (MMA_MODEL_WEIGHT from the model). raw_model_prob is the model alone.
+    Pass model_weight=1.0 for the model alone.
     """
     if not odds or odds <= 1.0:
         raw_implied = 0.5
@@ -229,12 +252,15 @@ def calculate_mma_edge(
             devigged = True
 
     implied_prob = max(0.001, min(0.999, implied_prob))
-    model_prob = max(0.001, min(0.999, float(model_prob)))
+    raw_model_prob = max(0.001, min(0.999, float(model_prob)))
+    model_prob = market_anchored_probability(raw_model_prob, implied_prob, model_weight)
 
     edge_pct = (model_prob - implied_prob) * 100.0
 
     return {
         "model_prob": round(model_prob * 100.0, 1),
+        "raw_model_prob": round(raw_model_prob * 100.0, 1),
+        "model_weight": MMA_MODEL_WEIGHT if model_weight is None else model_weight,
         "implied_prob": round(implied_prob * 100.0, 1),
         "odds": round(odds, 2),
         "devigged": devigged,

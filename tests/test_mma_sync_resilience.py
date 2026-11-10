@@ -695,3 +695,18 @@ def test_tracker_placeholder_striking_never_replaces_real_stored_stats():
     sv = mma_sync.stat_vector_for_fighter("f2", {"f2": tracker}, {}, None, default_sv)
     assert sv["slpm"] == 0.0
     assert sv["wins"] == 1 and sv["rust_days"] == 151
+
+
+def test_ufc_edge_leans_on_the_market():
+    """The model has been less accurate than the market, so most of "our chance"
+    is the market's and a big model disagreement only moves it a little."""
+    import importlib, sys
+    sys.modules.pop("mma_data", None)
+    import mma_data
+    importlib.reload(mma_data)
+    alone = mma_data.calculate_mma_edge(model_prob=0.70, odds=2.0, opponent_odds=2.0, model_weight=1.0)
+    blended = mma_data.calculate_mma_edge(model_prob=0.70, odds=2.0, opponent_odds=2.0)
+    assert alone["edge"] == 20.0
+    assert blended["raw_model_prob"] == 70.0
+    assert 0 < blended["edge"] < 5
+    assert abs(mma_data.market_anchored_probability(0.5, 0.5) - 0.5) < 1e-9

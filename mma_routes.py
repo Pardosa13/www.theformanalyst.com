@@ -294,6 +294,52 @@ def register_mma_routes(app, db):
             logger.error(f"Fighter API error: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
 
+    def _model_track_record():
+        """How the model's picks have gone on finished fights that had odds.
+
+        Each fighter's price is the average across bookmakers from the day of
+        the event (one day either side), made fair by removing the margin.
+        """
+        from sqlalchemy import text
+        import math
+        rows = db.session.execute(text("""
+            WITH o AS (
+                SELECT LOWER(fighter_name) AS fighter, commence_time::date AS d, AVG(odds) AS odds
+                FROM mma_fight_odds WHERE odds > 1 GROUP BY 1, 2
+            )
+            SELECT f.fighter_1_name, f.winner_name, p.predicted_winner, p.f1_win_probability,
+                   o1.odds, o2.odds
+            FROM mma_fights f
+            JOIN mma_events e ON e.id = f.event_id
+            JOIN mma_predictions p ON p.fight_id = f.id
+            JOIN o o1 ON o1.fighter = LOWER(f.fighter_1_name) AND ABS(o1.d - e.date) <= 1
+            JOIN o o2 ON o2.fighter = LOWER(f.fighter_2_name) AND ABS(o2.d - e.date) <= 1
+            WHERE e.is_completed = TRUE AND f.winner_name IS NOT NULL
+              AND p.f1_win_probability IS NOT NULL
+              AND COALESCE(p.model_version, 'catboost_v1') <> 'fallback_5050'
+        """)).fetchall()
+        n = model_right = fav_right = 0
+        model_ll = market_ll = 0.0
+        for f1, winner, pick, p1, odds1, odds2 in rows:
+            mkt1 = (1 / odds1) / (1 / odds1 + 1 / odds2)
+            f1_won = winner == f1
+            n += 1
+            model_right += int(pick == winner)
+            fav_right += int((mkt1 >= 0.5) == f1_won)
+            model_p = float(p1) if f1_won else 1 - float(p1)
+            market_p = mkt1 if f1_won else 1 - mkt1
+            model_ll -= math.log(max(model_p, 0.001))
+            market_ll -= math.log(max(market_p, 0.001))
+        if not n:
+            return {'fights': 0}
+        return {
+            'fights': n,
+            'model_pick_won_pct': round(100.0 * model_right / n, 1),
+            'favourite_won_pct': round(100.0 * fav_right / n, 1),
+            'model_log_loss': round(model_ll / n, 3),
+            'market_log_loss': round(market_ll / n, 3),
+        }
+
     @mma_bp.route('/api/mma/edge-finder')
     @login_required
     def api_mma_edge_finder():
@@ -478,6 +524,7 @@ def register_mma_routes(app, db):
                         'predicted_winner': pred_winner,
                         'confidence': confidence or '',
                         'model_prob': edge_data['model_prob'],
+                        'raw_model_prob': edge_data['raw_model_prob'],
                         'opponent_model_prob': round(opponent_prob * 100.0, 1),
                         'implied_prob': edge_data['implied_prob'],
                         'odds': edge_data['odds'],
@@ -494,11 +541,21 @@ def register_mma_routes(app, db):
             odds_count_sql = text("SELECT COUNT(*) FROM mma_fight_odds")
             total_odds = db.session.execute(odds_count_sql).scalar() or 0
 
+            try:
+                track_record = _model_track_record()
+            except Exception as exc:
+                db.session.rollback()
+                logger.warning("MMA track record unavailable: %s", exc)
+                track_record = None
+
+            from mma_data import MMA_MODEL_WEIGHT
             return jsonify({
                 'bets': bets,
                 'count': len(bets),
                 'min_edge': min_edge,
                 'total_odds_rows': total_odds,
+                'track_record': track_record,
+                'model_weight': MMA_MODEL_WEIGHT,
                 'message': None if bets else (
                     'No value bets found. Odds may not yet be loaded — '
                     'use "Refresh Odds" to fetch from The Odds API, '
