@@ -51,7 +51,23 @@ def test_picks_settle_from_the_stored_winner(conn):
     conn.execute(text("UPDATE mma_fights SET winner_name = 'Alpha One' WHERE id = 1"))   # fight 2: no contest
     rec = mma_tracking.edge_record(conn)
     assert rec["bets"] == 1 and rec["wins"] == 1 and rec["void"] == 1 and rec["pending"] == 0
-    assert rec["profit_units"] == pytest.approx(2.7)
-    assert rec["roi_pct"] == pytest.approx(270.0)
+    assert abs(rec["profit_units"] - 2.7) < 1e-9
+    assert abs(rec["roi_pct"] - 270.0) < 1e-9
     statuses = {r["fighter"]: r["status"] for r in rec["recent"]}
     assert statuses == {"Alpha One": "won", "Charlie Three": "void"}
+
+
+def test_value_label_needs_a_proven_record():
+    assert not mma_tracking.value_proven({'bets': 99, 'profit_units': 30})
+    assert not mma_tracking.value_proven({'bets': 150, 'profit_units': -2})
+    assert mma_tracking.value_proven({'bets': 100, 'profit_units': 0.5})
+
+
+def test_edge_finder_cards_show_tracking_not_value_until_proven():
+    from pathlib import Path
+    page = Path("templates/mma.html").read_text(encoding="utf-8")
+    start = page.index("function efCardHTML(")
+    card = page[start:page.index("\n}\n", start)]
+    assert "TRACKING" in card and "proven" in card
+    assert "Confidence <strong>" not in card
+    assert "🎯 Long Shot" not in card

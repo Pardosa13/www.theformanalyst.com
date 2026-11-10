@@ -1135,6 +1135,7 @@ function applyEdgeFilters() {
 
   const valueBets = bets.filter(b => b.recommendation === 'value');
   const allBets   = bets;
+  const proven = !!(_efRawData.value_record && _efRawData.value_record.proven);
 
   const summary = `${allBets.length} result(s) · min edge: ${minEdge.toFixed(1)}%`;
 
@@ -1144,7 +1145,7 @@ function applyEdgeFilters() {
       ${escHtml(summary)}
     </div>
     <div class="ef-cards-grid">
-      ${allBets.map(bet => efCardHTML(bet)).join('')}
+      ${allBets.map(bet => efCardHTML(bet, proven, _efRawData.proven_after_bets)).join('')}
     </div>
   `;
 }
@@ -1164,7 +1165,7 @@ function efTrackRecordHTML(tr, modelWeight) {
     </div>`;
 }
 
-function efCardHTML(bet) {
+function efCardHTML(bet, proven, provenAfter) {
   const edge = bet.edge || 0;
   const edgeCls = edge >= 5 ? 'pos' : edge >= 2 ? 'pos' : edge <= -2 ? 'neg' : 'neu';
   const isValue = bet.recommendation === 'value';
@@ -1172,13 +1173,16 @@ function efCardHTML(bet) {
 
   const cardCls = [
     'ef-card',
-    isValue ? 'value-bet' : '',
-    isLongShot ? 'long-shot' : '',
+    isValue && proven ? 'value-bet' : '',
   ].filter(Boolean).join(' ');
 
   const badges = [
-    isValue    ? '<span class="ef-badge value">✓ VALUE</span>' : '',
-    isLongShot ? '<span class="ef-badge longshot">🎯 Long Shot</span>' : '',
+    isValue
+      ? (proven
+          ? '<span class="ef-badge value">✓ VALUE</span>'
+          : `<span class="ef-badge" title="Saved to the Results tab. Called value only once ${provenAfter || 100}+ tracked picks show a profit.">📈 TRACKING</span>`)
+      : '',
+    isLongShot ? '<span class="ef-badge" title="Over $3.50: wins less often, so results swing more">Long odds</span>' : '',
     bet.is_title_fight ? '<span class="ef-badge title">🏆 Title Fight</span>' : '',
     bet.is_main_card   ? '<span class="ef-badge main">Main Card</span>' : '',
     bet.weight_class   ? `<span class="ef-badge">${escHtml(bet.weight_class)}</span>` : '',
@@ -1210,7 +1214,6 @@ function efCardHTML(bet) {
         <span class="ef-prob-item">Model alone <strong>${(bet.raw_model_prob ?? bet.model_prob ?? 0).toFixed(1)}%</strong></span>
         <span class="ef-prob-item">Implied <strong>${(bet.implied_prob || 0).toFixed(1)}%</strong>${bet.devigged ? '' : ' <span title="Opponent price from this bookmaker was unavailable, so this is the raw 1/odds price (includes the bookmaker\'s vig) rather than a devigged estimate.">⚠️</span>'}</span>
         <span class="ef-prob-item">Opponent (model) <strong>${(bet.opponent_model_prob || 0).toFixed(1)}%</strong></span>
-        <span class="ef-prob-item">Confidence <strong>${escHtml(bet.confidence || '')}</strong></span>
       </div>
     </div>
   `;

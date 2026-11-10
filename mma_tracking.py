@@ -225,6 +225,15 @@ def record_value_edges(conn, bets, now=None):
     return saved
 
 
+# Edge Finder picks are labelled "Tracking" until this many have settled with
+# a profit; only then are they called "Value".
+PROVEN_AFTER_BETS = 100
+
+
+def value_proven(record):
+    return (record.get('bets') or 0) >= PROVEN_AFTER_BETS and (record.get('profit_units') or 0) > 0
+
+
 def edge_record(conn, recent=40):
     """Settled and pending Edge Finder value picks."""
     ensure_table(conn)

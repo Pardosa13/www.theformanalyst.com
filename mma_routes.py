@@ -334,6 +334,14 @@ def register_mma_routes(app, db):
                 db.session.rollback()
                 logger.warning("MMA track record unavailable: %s", exc)
                 track_record = None
+            try:
+                value_record = mma_tracking.edge_record(db.session, recent=0)
+                value_record.pop('recent', None)
+                value_record['proven'] = mma_tracking.value_proven(value_record)
+            except Exception as exc:
+                db.session.rollback()
+                logger.warning("MMA value record unavailable: %s", exc)
+                value_record = {'proven': False}
 
             bets = [mma_tracking.public(b) for b in all_bets if abs(b.get('edge', 0)) >= min_edge]
             message = None
@@ -349,6 +357,8 @@ def register_mma_routes(app, db):
                 'min_edge': min_edge,
                 'total_odds_rows': total_odds,
                 'track_record': track_record,
+                'value_record': value_record,
+                'proven_after_bets': mma_tracking.PROVEN_AFTER_BETS,
                 'model_weight': MMA_MODEL_WEIGHT,
                 'message': message,
             })
