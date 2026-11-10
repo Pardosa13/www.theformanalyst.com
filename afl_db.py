@@ -278,10 +278,37 @@ AFL_SCHEMA_STATEMENTS = [
     """,
     """
     CREATE OR REPLACE VIEW afl_match_predictions AS
+    -- Predicted margin from each team's rating over its last five games played
+    -- BEFORE the match (the same rule the match pages use). This used to rate
+    -- each team on the stats of the match itself, so for every finished game
+    -- the "prediction" contained the result, and the AFL ML model trained on it.
     WITH team_match_stats AS (
         SELECT
             ps.match_date,
-            LOWER(TRIM(ps.player_team)) AS team_key,
+            CASE LOWER(TRIM(ps.player_team))
+            WHEN 'west coast eagles' THEN 'west coast'
+            WHEN 'greater western sydney' THEN 'gws giants'
+            WHEN 'greater western sydney giants' THEN 'gws giants'
+            WHEN 'gws' THEN 'gws giants'
+            WHEN 'footscray' THEN 'western bulldogs'
+            WHEN 'brisbane' THEN 'brisbane lions'
+            WHEN 'adelaide crows' THEN 'adelaide'
+            WHEN 'carlton blues' THEN 'carlton'
+            WHEN 'collingwood magpies' THEN 'collingwood'
+            WHEN 'essendon bombers' THEN 'essendon'
+            WHEN 'fremantle dockers' THEN 'fremantle'
+            WHEN 'geelong cats' THEN 'geelong'
+            WHEN 'gold coast suns' THEN 'gold coast'
+            WHEN 'hawthorn hawks' THEN 'hawthorn'
+            WHEN 'melbourne demons' THEN 'melbourne'
+            WHEN 'north melbourne kangaroos' THEN 'north melbourne'
+            WHEN 'port adelaide power' THEN 'port adelaide'
+            WHEN 'richmond tigers' THEN 'richmond'
+            WHEN 'st kilda saints' THEN 'st kilda'
+            WHEN 'sydney swans' THEN 'sydney'
+            WHEN 'western bulldogs bulldogs' THEN 'western bulldogs'
+            WHEN 'brisbane lions lions' THEN 'brisbane lions'
+            ELSE LOWER(TRIM(ps.player_team)) END AS team_key,
             (
                 -- Scoring
                 6.00 * SUM(COALESCE(ps.goals, 0)) +
@@ -318,20 +345,99 @@ AFL_SCHEMA_STATEMENTS = [
             ) AS team_rating
         FROM afl_player_stats ps
         WHERE COALESCE(ps.player_team, '') <> ''
-        GROUP BY ps.match_date, LOWER(TRIM(ps.player_team))
+        GROUP BY ps.match_date, CASE LOWER(TRIM(ps.player_team))
+            WHEN 'west coast eagles' THEN 'west coast'
+            WHEN 'greater western sydney' THEN 'gws giants'
+            WHEN 'greater western sydney giants' THEN 'gws giants'
+            WHEN 'gws' THEN 'gws giants'
+            WHEN 'footscray' THEN 'western bulldogs'
+            WHEN 'brisbane' THEN 'brisbane lions'
+            WHEN 'adelaide crows' THEN 'adelaide'
+            WHEN 'carlton blues' THEN 'carlton'
+            WHEN 'collingwood magpies' THEN 'collingwood'
+            WHEN 'essendon bombers' THEN 'essendon'
+            WHEN 'fremantle dockers' THEN 'fremantle'
+            WHEN 'geelong cats' THEN 'geelong'
+            WHEN 'gold coast suns' THEN 'gold coast'
+            WHEN 'hawthorn hawks' THEN 'hawthorn'
+            WHEN 'melbourne demons' THEN 'melbourne'
+            WHEN 'north melbourne kangaroos' THEN 'north melbourne'
+            WHEN 'port adelaide power' THEN 'port adelaide'
+            WHEN 'richmond tigers' THEN 'richmond'
+            WHEN 'st kilda saints' THEN 'st kilda'
+            WHEN 'sydney swans' THEN 'sydney'
+            WHEN 'western bulldogs bulldogs' THEN 'western bulldogs'
+            WHEN 'brisbane lions lions' THEN 'brisbane lions'
+            ELSE LOWER(TRIM(ps.player_team)) END
+    ),
+    team_rolling AS (
+        SELECT match_date, team_key,
+               AVG(team_rating) OVER (PARTITION BY team_key ORDER BY match_date
+                                      ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS rolling_avg_5
+        FROM team_match_stats
     )
     SELECT
         g.id AS match_id,
         g.hteam AS home_team,
         g.ateam AS away_team,
-        home.team_rating - away.team_rating AS predicted_margin
+        home.rolling_avg_5 - away.rolling_avg_5 AS predicted_margin
     FROM afl_games g
-    JOIN team_match_stats home
-        ON home.match_date = g.date::DATE
-       AND home.team_key = LOWER(TRIM(g.hteam))
-    JOIN team_match_stats away
-        ON away.match_date = g.date::DATE
-       AND away.team_key = LOWER(TRIM(g.ateam))
+    LEFT JOIN LATERAL (
+        SELECT tr.rolling_avg_5 FROM team_rolling tr
+        WHERE tr.team_key = CASE LOWER(TRIM(g.hteam))
+            WHEN 'west coast eagles' THEN 'west coast'
+            WHEN 'greater western sydney' THEN 'gws giants'
+            WHEN 'greater western sydney giants' THEN 'gws giants'
+            WHEN 'gws' THEN 'gws giants'
+            WHEN 'footscray' THEN 'western bulldogs'
+            WHEN 'brisbane' THEN 'brisbane lions'
+            WHEN 'adelaide crows' THEN 'adelaide'
+            WHEN 'carlton blues' THEN 'carlton'
+            WHEN 'collingwood magpies' THEN 'collingwood'
+            WHEN 'essendon bombers' THEN 'essendon'
+            WHEN 'fremantle dockers' THEN 'fremantle'
+            WHEN 'geelong cats' THEN 'geelong'
+            WHEN 'gold coast suns' THEN 'gold coast'
+            WHEN 'hawthorn hawks' THEN 'hawthorn'
+            WHEN 'melbourne demons' THEN 'melbourne'
+            WHEN 'north melbourne kangaroos' THEN 'north melbourne'
+            WHEN 'port adelaide power' THEN 'port adelaide'
+            WHEN 'richmond tigers' THEN 'richmond'
+            WHEN 'st kilda saints' THEN 'st kilda'
+            WHEN 'sydney swans' THEN 'sydney'
+            WHEN 'western bulldogs bulldogs' THEN 'western bulldogs'
+            WHEN 'brisbane lions lions' THEN 'brisbane lions'
+            ELSE LOWER(TRIM(g.hteam)) END AND tr.match_date < g.date::DATE
+        ORDER BY tr.match_date DESC LIMIT 1
+    ) home ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT tr.rolling_avg_5 FROM team_rolling tr
+        WHERE tr.team_key = CASE LOWER(TRIM(g.ateam))
+            WHEN 'west coast eagles' THEN 'west coast'
+            WHEN 'greater western sydney' THEN 'gws giants'
+            WHEN 'greater western sydney giants' THEN 'gws giants'
+            WHEN 'gws' THEN 'gws giants'
+            WHEN 'footscray' THEN 'western bulldogs'
+            WHEN 'brisbane' THEN 'brisbane lions'
+            WHEN 'adelaide crows' THEN 'adelaide'
+            WHEN 'carlton blues' THEN 'carlton'
+            WHEN 'collingwood magpies' THEN 'collingwood'
+            WHEN 'essendon bombers' THEN 'essendon'
+            WHEN 'fremantle dockers' THEN 'fremantle'
+            WHEN 'geelong cats' THEN 'geelong'
+            WHEN 'gold coast suns' THEN 'gold coast'
+            WHEN 'hawthorn hawks' THEN 'hawthorn'
+            WHEN 'melbourne demons' THEN 'melbourne'
+            WHEN 'north melbourne kangaroos' THEN 'north melbourne'
+            WHEN 'port adelaide power' THEN 'port adelaide'
+            WHEN 'richmond tigers' THEN 'richmond'
+            WHEN 'st kilda saints' THEN 'st kilda'
+            WHEN 'sydney swans' THEN 'sydney'
+            WHEN 'western bulldogs bulldogs' THEN 'western bulldogs'
+            WHEN 'brisbane lions lions' THEN 'brisbane lions'
+            ELSE LOWER(TRIM(g.ateam)) END AND tr.match_date < g.date::DATE
+        ORDER BY tr.match_date DESC LIMIT 1
+    ) away ON TRUE
     """,
     """
     CREATE TABLE IF NOT EXISTS afl_ml_artifacts (

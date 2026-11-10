@@ -90,7 +90,7 @@ FEATURE_AUDIT = {
     },
     "afl_match_predictions": {
         "used": ["predicted_margin"],
-        "notes": "Existing AFL model output, joined by match_id as a pre-match meta feature.",
+        "notes": "Each team's rolling five-game rating from games BEFORE the match (fixed Nov 2026: the view used the match's own stats, so finished games carried the result). Retrain after this change.",
     },
     "afl_player_stats": {
         "used": TEAM_STATS,
