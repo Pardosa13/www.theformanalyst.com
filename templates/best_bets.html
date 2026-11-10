@@ -587,30 +587,31 @@
 <!-- Page header -->
 <div class="bets-header">
   <h2>🥉 Best Bets &mdash; Place Bets Only</h2>
-  <p>Every pick here is a <strong>PLACE bet, not a win bet</strong>. A horse shows when it fits one of the six place rules found in the
-     28 Oct 2026 audit (Feb&ndash;Sep 2026, settled at Betfair place SP after 8% commission). Each row shows the form it was picked on, so you can check it.
-     The rules are unproven live, so stake small.</p>
+  <p>Every pick here is a <strong>PLACE bet, not a win bet</strong>, best taken at the <strong>Betfair place price</strong> (the record is settled there, after 8% commission).
+     A horse shows when it fits a <strong>live</strong> place rule. Five of the six rules from the 28 Oct 2026 audit lost money in October, the first month they had not been fitted on, so they were retired on 10 Nov 2026; their record still shows below.
+     The live rule is unproven, so stake small. Each row shows the form it was picked on, so you can check it.</p>
 </div>
 
 <!-- Stat tiles -->
 <div class="stat-row">
   <div class="stat-tile s-primary"><h5>Place Picks</h5><h2>{{ total_bets }}</h2></div>
-  <div class="stat-tile s-info"><h5>Place Rules</h5><h2>{{ place_rules|length }}</h2></div>
+  <div class="stat-tile s-info"><h5>Live Rules</h5><h2>{{ active_rule_keys|length }}<span style="font-size:.5em;opacity:.6"> / {{ place_rules|length }}</span></h2></div>
   <div class="stat-tile s-success"><h5>Horses Scanned</h5><h2>{{ total_horses_scanned }}</h2></div>
   <div class="stat-tile s-warning"><h5>Time Window</h5><h2>{{ hours_back }}h</h2></div>
 </div>
 
-<!-- The six rules and their record, settled on the place (place_bet.py). -->
+<!-- Every rule and its record, settled on the place (place_bet.py). Retired rules stay listed. -->
 <div class="filter-card" style="margin-bottom:24px">
   <h5 style="margin:0 0 6px;font-weight:700">📒 Place Rules &amp; Record ($10 place bets)</h5>
   <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">
     &ldquo;History&rdquo; is every settled runner since February that fits the rule. &ldquo;Live&rdquo; counts only picks shown here before the jump (from 28 Oct 2026) &mdash; that is the real test.
+    A live rule still losing after {{ retire_after_bets }} live bets stops making picks on its own.
     Placed = top 3 with 8+ runners, top 2 with 5&ndash;7. Betfair place prices arrive monthly{% if place_rules_record and place_rules_record.place_bsp_through %} (loaded up to {{ place_rules_record.place_bsp_through }}){% endif %}, so new bets show a place % before they show a profit.
   </p>
   {% if not place_rules_record %}<p class="text-muted" style="font-size:13px">The place rules record is being worked out in the background. Refresh in a few minutes.</p>{% elif place_rules_age_min is not none %}<p class="text-muted" style="font-size:12px;margin:0 0 8px">Record updated {{ place_rules_age_min }} min ago (refreshes after each results check).</p>{% endif %}
   <div class="record-wrap">
     <table class="record-table">
-      <thead><tr><th>Rule</th><th>Feb&ndash;Sep test</th><th>History bets</th><th>Placed</th><th>ROI</th><th>Live bets</th><th>Live placed</th><th>Live ROI</th></tr></thead>
+      <thead><tr><th>Rule</th><th>Status</th><th>Feb&ndash;Sep test</th><th>History bets</th><th>Placed</th><th>ROI</th><th>Live bets</th><th>Live placed</th><th>Live ROI</th></tr></thead>
       <tbody>
       {% set rec_by_key = {} %}
       {% if place_rules_record %}{% for r in place_rules_record.rules %}{% set _ = rec_by_key.update({r.key: r}) %}{% endfor %}{% endif %}
@@ -618,6 +619,7 @@
         {% set r = rec_by_key.get(rule.key) %}
         <tr data-rules="{{ rule.key }}">
           <td class="rule-name">{{ rule.name }}</td>
+          <td>{% if rule.key in active_rule_keys %}<span class="pos">Live</span>{% elif rule.retired %}<span class="muted" title="{{ rule.retired }}">Retired</span><div class="muted" style="font-size:11px;white-space:normal;max-width:220px">{{ rule.retired|replace('Retired ', '', 1) }}</div>{% else %}<span class="neg" title="Losing after {{ retire_after_bets }} live bets">Stopped</span><div class="muted" style="font-size:11px">Losing after {{ retire_after_bets }}+ live bets</div>{% endif %}</td>
           <td class="muted" style="white-space:normal">{{ rule.audit }}</td>
           {% if r %}
           <td>{{ r.history.bets }}</td>
@@ -656,7 +658,7 @@
 <div class="filter-card">
   <span class="filter-label" id="ruleToggleNote">All rules on.</span>
   <div class="rule-toggles" id="ruleToggles" style="margin-top:8px">
-    {% for rule in place_rules %}
+    {% for rule in place_rules if rule.key in active_rule_keys %}
     <button type="button" class="rule-toggle on" data-rule="{{ rule.key }}" aria-pressed="true"><span class="rule-dot" style="background:{{ rule_colours[loop.index0 % rule_colours|length] }}"></span>{{ rule.short }}</button>
     {% endfor %}
     <button type="button" class="rule-toggle on" data-rule="all" aria-pressed="true">All</button>
@@ -725,7 +727,7 @@
                     {% if bet.race_started %}<span class="edge-badge" title="This race has started, so this pick is not recorded in the live record">Started</span>{% endif %}
                   </div>
                   <div class="horse-form" title="Form, oldest to newest (x = spell)">Form {{ bet.last10 or '—' }}</div>
-                  <div class="muted-note">🥉 Back for a PLACE</div>
+                  <div class="muted-note">🥉 Back for a PLACE (Betfair place price)</div>
                 </td>
                 <td>
                   <div class="evidence">
@@ -743,7 +745,9 @@
                 <td>{{ bet.barrier }}</td>
                 <td>{{ bet.weight }}kg</td>
                 <td>{{ bet.jockey }}</td>
-                <td>{{ bet.trainer }}</td>
+                <td>{{ bet.trainer }}
+                  {% if bet.hot_combo %}<div class="rule-checks" title="This jockey and trainer together have won {{ bet.hot_combo[0] }} of {{ bet.hot_combo[1] }} runs in the last 90 days. Information only: it is not proven to make money and never adds or removes a pick.">🔥 Hot combo: {{ bet.hot_combo[0] }}/{{ bet.hot_combo[1] }} wins, 90 days (info only)</div>{% endif %}
+                </td>
                 <td>
                   {% if bet.ladbrokes_fixed_win_price %}
                     ${{ '%.2f'|format(bet.ladbrokes_fixed_win_price) }}

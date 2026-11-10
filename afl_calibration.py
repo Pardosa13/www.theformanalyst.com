@@ -21,6 +21,11 @@ import time
 log = logging.getLogger(__name__)
 
 MIN_PICKS = 300
+# Picks priced by the current maths (negative binomial, 10 Nov 2026). Older
+# picks came from the bell-curve method, whose overconfidence this correction
+# was first fitted to; the new maths matched reality on 2019-2026 games, so no
+# correction applies until MIN_PICKS of its own picks have settled.
+FIT_FROM = "2026-11-10"
 REFIT_SECONDS = 6 * 3600
 _cache = {"at": 0.0, "coefficients": {}}
 
@@ -84,7 +89,8 @@ def _refit(db):
                 FROM afl_model_selections
                 WHERE settled_at IS NOT NULL AND result IN ('win', 'loss')
                   AND model_prob IS NOT NULL AND odds > 1
-            """)).fetchall()
+                  AND created_at >= :since
+            """), {"since": FIT_FROM}).fetchall()
     except Exception as exc:
         log.warning("AFL calibration refit failed; chances used uncorrected: %s", exc)
         return {}

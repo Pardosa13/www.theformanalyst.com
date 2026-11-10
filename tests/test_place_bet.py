@@ -30,7 +30,8 @@ def keys(csv_data, *lines, scratched=False):
     from types import SimpleNamespace
     horse = SimpleNamespace(csv_data=csv_data, is_scratched=scratched,
                             prediction=SimpleNamespace(notes='\n'.join(lines)))
-    return [rule.key for rule in place_bet.matching_rules(horse)]
+    # Every rule, retired ones included: these tests check how each rule matches.
+    return [rule.key for rule in place_bet.matching_rules(horse, rules=place_bet.RULES)]
 
 
 def test_each_rule_needs_every_part():
@@ -129,9 +130,13 @@ def test_best_bets_routes_are_only_place_rules():
             other = _runner(race, 'Other', {'horse last10': '41'}, ONPACE_MILE)
             none = _runner(race, 'None', {'horse last10': '11'}, HEAVY)
             db.session.commit()
-            assert appmod.best_bet_routes_for_horse(yes, race)[0] == ['place_2nd_light']
-            assert appmod.best_bet_routes_for_horse(other, race)[0] == ['place_won_onpace_mile']
+            live_rule = _runner(race, 'Live', {'horse last10': '3x52'}, PLACES_32 + '\n' + TD_NO_WINS)
+            db.session.commit()
+            # 10 Nov 2026: only the live rule makes picks; retired rules record nothing.
+            assert appmod.best_bet_routes_for_horse(yes, race)[0] == []
+            assert appmod.best_bet_routes_for_horse(other, race)[0] == []
             assert appmod.best_bet_routes_for_horse(none, race)[0] == []
+            assert appmod.best_bet_routes_for_horse(live_rule, race)[0] == ['place_32_tdnowin']
         finally:
             db.session.remove()
             db.drop_all()
@@ -142,11 +147,14 @@ def test_daily_run_records_the_place_routes():
         db.create_all()
         try:
             race = _setup()
-            yes = _runner(race, 'Yes', {'horse last10': '3x52', 'form margin': '0.4'}, LIGHT + '\n' + TRACK_PODIUM)
+            yes = _runner(race, 'Yes', {'horse last10': '3x52', 'form margin': '0.4'},
+                          '\n'.join([LIGHT, TRACK_PODIUM, PLACES_32, TD_NO_WINS]))
+            retired_only = _runner(race, 'Retired', {'horse last10': '52'}, LIGHT)
             _runner(race, 'No', {'horse last10': '55'}, LIGHT)
             db.session.commit()
             assert appmod.record_best_bet_routes([race]) == 1
-            assert set(yes.prediction.best_bet_routes.split(',')) == {'place_2nd_light', 'place_close_trackpod'}
+            assert yes.prediction.best_bet_routes == 'place_32_tdnowin'
+            assert retired_only.prediction.best_bet_routes is None
         finally:
             db.session.remove()
             db.drop_all()
@@ -316,3 +324,38 @@ def test_refresh_saves_what_the_pages_show():
             db.session.commit()
             db.session.remove()
             db.drop_all()
+
+
+def test_five_rules_retired_after_october_and_only_one_picks():
+    """October 2026 (unseen): the six rules made -4.4% together; only
+    place_32_tdnowin held up. The other five stop making picks but keep a record."""
+    assert [rule.key for rule in place_bet.LIVE_RULES] == ['place_32_tdnowin']
+    assert all(rule.retired.startswith('Retired 10 Nov 2026') for rule in place_bet.RULES
+               if rule.key != 'place_32_tdnowin')
+    assert [rule.key for rule in place_bet.active_rules()] == ['place_32_tdnowin']
+
+
+def test_a_live_rule_losing_after_500_live_bets_stops_picking():
+    losing = {'rules': [{'key': 'place_32_tdnowin', 'live': {'priced_bets': 500, 'roi': -0.5}}]}
+    young = {'rules': [{'key': 'place_32_tdnowin', 'live': {'priced_bets': 499, 'roi': -20.0}}]}
+    winning = {'rules': [{'key': 'place_32_tdnowin', 'live': {'priced_bets': 900, 'roi': 3.0}}]}
+    assert place_bet.active_rules(losing) == ()
+    assert [r.key for r in place_bet.active_rules(young)] == ['place_32_tdnowin']
+    assert [r.key for r in place_bet.active_rules(winning)] == ['place_32_tdnowin']
+    horse = __import__('types').SimpleNamespace(
+        csv_data={'horse last10': '3x52'}, is_scratched=False,
+        prediction=__import__('types').SimpleNamespace(notes=PLACES_32 + '\n' + TD_NO_WINS))
+    assert place_bet.matching_rules(horse, rules=place_bet.active_rules(losing)) == []
+
+
+def test_the_record_still_covers_retired_rules():
+    """rules_for (the record) checks every rule; only picking is limited."""
+    got = place_bet.rules_for({'horse last10': '52'}, LIGHT)
+    assert [rule.key for rule in got] == ['place_2nd_light']
+
+
+def test_hot_combo_is_information_only():
+    """It never adds or removes a pick: matching_rules does not look at it."""
+    import inspect
+    assert 'hot' not in inspect.getsource(place_bet.matching_rules)
+    assert place_bet.HOT_COMBO_MIN_RUNS == 10 and place_bet.HOT_COMBO_MIN_STRIKE == 0.33

@@ -13,4 +13,8 @@ COPY notes_parsing.py /app/notes_parsing.py
 COPY place_bet.py /app/place_bet.py
 COPY past_runs.py /app/past_runs.py
 COPY strike_rate_matching.py /app/strike_rate_matching.py
+# The UFC model and what it needs, so ufcmodel tests the live code.
+COPY mma_model.py /app/mma_model.py
+COPY mma_glicko.py /app/mma_glicko.py
+COPY mma_name_utils.py /app/mma_name_utils.py
 CMD ["python", "-m", "audit.run_audit"]

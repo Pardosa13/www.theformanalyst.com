@@ -225,6 +225,15 @@ def record_value_edges(conn, bets, now=None):
     return saved
 
 
+# Edge Finder picks are labelled "Tracking" until this many have settled with
+# a profit; only then are they called "Value".
+PROVEN_AFTER_BETS = 100
+
+
+def value_proven(record):
+    return (record.get('bets') or 0) >= PROVEN_AFTER_BETS and (record.get('profit_units') or 0) > 0
+
+
 def edge_record(conn, recent=40):
     """Settled and pending Edge Finder value picks."""
     ensure_table(conn)
@@ -270,6 +279,10 @@ def edge_record(conn, recent=40):
     }
 
 
+# The record tracks the in-repo model only (mma_model.MODEL_VERSION). The old
+# CatBoost model's picks stay in the table but no longer count.
+CURRENT_MODEL_VERSION = 'lgbm_ufcstats_v1'
+
 MODEL_RECORD_SQL = """
     SELECT e.date, e.name, f.fighter_1_name, f.fighter_2_name, f.winner_name,
            p.predicted_winner, p.f1_win_probability
@@ -278,7 +291,7 @@ MODEL_RECORD_SQL = """
     JOIN mma_predictions p ON p.fight_id = f.id
     WHERE e.is_completed = TRUE AND f.winner_name IS NOT NULL
       AND p.f1_win_probability IS NOT NULL
-      AND COALESCE(p.model_version, 'catboost_v1') <> 'fallback_5050'
+      AND p.model_version = :version
       AND p.generated_at IS NOT NULL AND p.generated_at < e.date
     ORDER BY e.date DESC, f.id DESC
 """
@@ -298,7 +311,7 @@ def model_record(conn, recent=40):
     Where both fighters have a price from that day (one day either side), the
     bookies' favourite is shown next to the model's pick.
     """
-    rows = conn.execute(text(MODEL_RECORD_SQL)).fetchall()
+    rows = conn.execute(text(MODEL_RECORD_SQL), {'version': CURRENT_MODEL_VERSION}).fetchall()
     prices = {}
     for r in conn.execute(text(ODDS_FOR_FIGHT_SQL)).fetchall():
         if r.commence_time is None:

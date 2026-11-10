@@ -1342,10 +1342,10 @@
     </div>
     <div class="afl-card-body">
       <div class="vf-why" style="margin-top:0;margin-bottom:12px;background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.28);">
-        <strong>What this section is:</strong> selections here come from a separately <strong>trained machine learning
-        model</strong> (champion/challenger .pkl artifact scored via <code>/api/afl/ml-current-selections</code>) —
-        it is not the weighted-average formula used by the <strong>Value Finder</strong> tab. If it shows
-        "model has not been trained yet," the ML pipeline needs a training run before picks appear here.
+        <strong>Experimental, not a recommendation.</strong> These picks come from a separately trained machine learning
+        model that guesses which Value Finder picks will win. It is shown for comparison only until it beats the plain
+        Value Finder on games it has not seen. A model trained before the 10 Nov 2026 fixes shows no picks: it learned
+        from a match margin that already contained the result.
       </div>
       <div class="value-finder-bar">
         <select class="form-select" id="mlMarket" style="width:200px;" onchange="_aflApplyMlFilters()">
@@ -2092,7 +2092,7 @@ function loadAflMachineLearningSelections() {
           throw new Error(`Invalid JSON returned by AFL ML endpoint: ${e.message}`);
         }
       }
-      if (['missing_model', 'no_data', 'error'].includes(data.status)) return data;
+      if (['missing_model', 'needs_retrain', 'not_better', 'no_data', 'error'].includes(data.status)) return data;
       if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
       return data;
     })
@@ -2101,6 +2101,18 @@ function loadAflMachineLearningSelections() {
         _aflMlLastRenderedBets = [];
         if (summary) summary.textContent = 'AFL Machine Learning model status: missing model.';
         wrap.innerHTML = `<div class="props-banner"><i class="bi bi-exclamation-triangle-fill"></i> ${esc(data.message || 'AFL Machine Learning model has not been trained yet. Run training on Railway first.')}</div>`;
+        return;
+      }
+      if (data.status === 'not_better') {
+        _aflMlLastRenderedBets = [];
+        if (summary) summary.textContent = 'AFL Machine Learning model status: not better than the Value Finder yet.';
+        wrap.innerHTML = `<div class="props-banner"><i class="bi bi-hourglass-split"></i> ${esc(data.message || 'The AFL ML model has not beaten the Value Finder, so its picks are hidden.')}</div>`;
+        return;
+      }
+      if (data.status === 'needs_retrain') {
+        _aflMlLastRenderedBets = [];
+        if (summary) summary.textContent = 'AFL Machine Learning model status: waiting for retraining.';
+        wrap.innerHTML = `<div class="props-banner"><i class="bi bi-hourglass-split"></i> ${esc(data.message || 'The AFL ML model needs retraining before its picks show.')}</div>`;
         return;
       }
       if (data.status === 'error') {
@@ -3124,7 +3136,7 @@ function _vfRenderTable(rows, data) {
       if (bet.ml_bet_probability != null || bet.model_prob != null) bits.push(`ML probability ${bet.model_prob != null ? safeNum(bet.model_prob, 0).toFixed(1) + '%' : fmtPctFromUnit(bet.ml_bet_probability)}`);
       if (bet.edge != null) bits.push(`${safeNum(bet.edge, 0) > 0 ? '+' : ''}${safeNum(bet.edge, 0).toFixed(1)}% edge`);
       if (bet.ml_expected_value_score != null) bits.push(`EV score ${fmtMlScore(bet.ml_expected_value_score)}`);
-      if (bet.confidence_score != null) bits.push(`confidence ${safeNum(bet.confidence_score, 0).toFixed(1)}`);
+      if (bet.model_prob != null && safeNum(bet.odds, 0) > 1) bits.push(`chance × price ${(safeNum(bet.model_prob, 0) / 100 * safeNum(bet.odds, 0)).toFixed(2)}`);
       return bits.length ? `Picked because the AFL ML model ranked this as a BET using ${esc(bits.join(', '))}.` : 'Picked because the AFL ML model marked this selection as a BET.';
     }
     return `Value model probability is above the market implied probability by ${safeNum(bet.edge, 0).toFixed(1)}%.`;
@@ -3137,7 +3149,7 @@ function _vfRenderTable(rows, data) {
     const odds = safeNum(bet.odds, 0);
     const isValue = (bet.recommendation || '') === 'value';
     const recBadge = isMlPick
-    ? '<span class="vf-rec-badge vf-rec-ml"><i class="bi bi-stars"></i> AFL ML PICK</span>'
+    ? '<span class="vf-rec-badge vf-rec-ml" title="Experimental: shown for comparison, not a recommendation"><i class="bi bi-stars"></i> AFL ML (EXPERIMENTAL)</span>'
     : (isValue
       ? '<span class="vf-rec-badge vf-rec-value"><i class="bi bi-check-circle-fill"></i> VALUE</span>'
       : '<span class="vf-rec-badge vf-rec-skip">SKIP</span>');
@@ -3150,8 +3162,11 @@ function _vfRenderTable(rows, data) {
     const impliedProb = bet.implied_prob != null ? safeNum(bet.implied_prob, 0).toFixed(1) + '%' : '—';
     const statOneLabel = isMlPick ? 'ML EV' : 'Season Avg';
     const statOneVal = isMlPick ? fmtMlScore(bet.ml_expected_value_score) : (bet.season_avg != null ? safeNum(bet.season_avg, 0).toFixed(1) : '—');
-    const statTwoLabel = isMlPick ? 'Confidence' : 'Last 5';
-    const statTwoVal = isMlPick ? (bet.confidence_score != null ? safeNum(bet.confidence_score, 0).toFixed(1) : '—') : (bet.last5_avg != null ? safeNum(bet.last5_avg, 0).toFixed(1) : '—');
+    // Chance x price: value needs 1.10+ (afl_data.VALUE_PRICE_RATIO). It replaces the
+    // old "confidence" score, which counted the edge a second time.
+    const priceRatio = (bet.model_prob != null && odds > 1) ? (safeNum(bet.model_prob, 0) / 100 * odds) : null;
+    const statTwoLabel = isMlPick ? 'Chance × price' : 'Last 5';
+    const statTwoVal = isMlPick ? (priceRatio != null ? priceRatio.toFixed(2) : '—') : (bet.last5_avg != null ? safeNum(bet.last5_avg, 0).toFixed(1) : '—');
     const statThreeLabel = isMlPick ? 'Threshold' : 'vs Opp';
     const statThreeVal = isMlPick ? fmtMlScore(bet.threshold_used) : (bet.vs_opp_avg != null ? safeNum(bet.vs_opp_avg, 0).toFixed(1) : '—');
     const statFourLabel = isMlPick ? 'ML Hit' : 'Hit Rate';
@@ -3332,7 +3347,7 @@ function _aflRenderMlSelectionCards(rows) {
       : `<div style="display:flex;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));align-items:center;justify-content:center;font-size:12px;font-weight:800;color:white;flex-shrink:0;">${initials}</div>`;
     const modelProb = bet.model_prob != null ? safeNum(bet.model_prob, 0).toFixed(1) + '%' : '—';
     const impliedProb = bet.implied_prob != null ? safeNum(bet.implied_prob, 0).toFixed(1) + '%' : '—';
-    const why = bet.why || `Picked because the AFL ML model ranked this as a BET using ML probability ${modelProb}, ${edge > 0 ? '+' : ''}${edge.toFixed(1)}% edge, EV score ${fmtMlScore(bet.ml_expected_value_score)}, and confidence ${bet.confidence_score != null ? safeNum(bet.confidence_score, 0).toFixed(1) : '—'}.`;
+    const why = bet.why || `Picked because the AFL ML model ranked this as a BET using ML probability ${modelProb}, ${edge > 0 ? '+' : ''}${edge.toFixed(1)}% edge, EV score ${fmtMlScore(bet.ml_expected_value_score)}, and chance × price ${(bet.model_prob != null && safeNum(bet.odds, 0) > 1) ? (safeNum(bet.model_prob, 0) / 100 * safeNum(bet.odds, 0)).toFixed(2) : '—'}.`;
     const marketLabel = (bet.market || 'selection').replace('player_', '').replace(/_/g, ' ');
     return `
       <div class="vf-card vf-card-ml">
@@ -3367,7 +3382,7 @@ function _aflRenderMlSelectionCards(rows) {
         </div>
         <div class="vf-card-stats">
           <div class="vf-stat-item"><span class="vf-stat-label">ML EV</span><span class="vf-stat-val">${fmtMlScore(bet.ml_expected_value_score)}</span></div>
-          <div class="vf-stat-item"><span class="vf-stat-label">Confidence</span><span class="vf-stat-val">${bet.confidence_score != null ? safeNum(bet.confidence_score, 0).toFixed(1) : '—'}</span></div>
+          <div class="vf-stat-item"><span class="vf-stat-label">Chance × price</span><span class="vf-stat-val">${(bet.model_prob != null && safeNum(bet.odds, 0) > 1) ? (safeNum(bet.model_prob, 0) / 100 * safeNum(bet.odds, 0)).toFixed(2) : '—'}</span></div>
           <div class="vf-stat-item"><span class="vf-stat-label">Threshold</span><span class="vf-stat-val">${fmtMlScore(bet.threshold_used)}</span></div>
           <div class="vf-stat-item"><span class="vf-stat-label">ML Hit</span><span class="vf-stat-val">${bet.hist_pct == null ? '—' : esc(String(bet.hist_pct)) + '%'}</span></div>
           <div class="vf-stat-item vf-stat-rec"><span class="vf-rec-badge vf-rec-ml"><i class="bi bi-stars"></i> ML PICK</span></div>

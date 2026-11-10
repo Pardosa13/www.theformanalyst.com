@@ -1277,6 +1277,39 @@ def register_afl_routes(app, db):
                 **artifact_fields,
             }, 200)  # a normal state the page shows, not a broken request
 
+        # A model trained before the 10 Nov 2026 fixes learned from a match
+        # margin that contained the result and from picks saved by the old
+        # abs(edge) rule, so its picks are not shown until it is retrained.
+        trained_at = str((artifact or {}).get("training_timestamp") or "")[:10]
+        if not trained_at or trained_at < AFL_ML_CLEAN_FROM:
+            return safe_json_response({
+                "ok": True,
+                "status": "needs_retrain",
+                "message": (f"The AFL ML model was trained {('on ' + trained_at) if trained_at else 'before'} "
+                            f"the {AFL_ML_CLEAN_FROM} fixes, from data where the match margin contained the "
+                            "result. Its picks show again after its next training run."),
+                "rows": [], "selections": [], "summary": {}, "count": 0,
+                **artifact_fields,
+            }, 200)
+
+        vs = ((artifact or {}).get("validation_summary") or {}).get("vs_value_finder") or {}
+        if not vs.get("beats_value_finder"):
+            if vs:
+                detail = (f"On {vs.get('value_finder_picks', 0)} test picks it never saw, backing every Value Finder "
+                          f"pick returned {100 * float(vs.get('value_finder_roi') or 0):+.1f}%; the ML model's "
+                          f"{vs.get('ml_picks', 0)} picks returned {100 * float(vs.get('ml_roi') or 0):+.1f}%.")
+            else:
+                detail = "This model was trained before the comparison with the Value Finder existed."
+            return safe_json_response({
+                "ok": True,
+                "status": "not_better",
+                "message": ("The AFL ML model has not beaten the plain Value Finder, so its picks are hidden. "
+                            + detail),
+                "vs_value_finder": vs,
+                "rows": [], "selections": [], "summary": {}, "count": 0,
+                **artifact_fields,
+            }, 200)
+
         logger.info("AFL ML current selections using model artifact source=%s", artifact_source)
         try:
             scored = score_current(emit=False)
@@ -3458,6 +3491,8 @@ def _check_data_sources(db) -> dict:
 # overconfidence correction, so they are not a fair record. They stay in the
 # table: the correction and the AFL ML model still learn from them.
 AFL_RECORD_START = os.environ.get("AFL_RECORD_START", "2026-11-10")
+# The AFL ML model's picks only show when it was trained on or after this date.
+AFL_ML_CLEAN_FROM = "2026-11-10"
 
 def _db_model_selections(db, season: int, settled_only: bool = False) -> list[dict]:
     where = ["season = :season", "created_at >= :record_start"]
