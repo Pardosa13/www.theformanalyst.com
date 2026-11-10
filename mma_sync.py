@@ -2305,6 +2305,14 @@ def main():
     postgres_history_is_complete_enough(conn)
     try:
         stats_tracker, name_to_id, espn_to_id = rebuild_stats_from_db(conn)
+        # Ratings were only ever set by the seed import; bring them up to date
+        # with every completed fight since, before predictions read them.
+        try:
+            from mma_glicko import update_ratings
+            update_ratings(conn, name_to_id=name_to_id, normalize=normalize_name)
+        except Exception as e:
+            conn.rollback()
+            log.warning("GLICKO_UPDATE failed; using stored ratings: %s", e)
         fighter_bio = load_fighters_bio(conn)
     except Exception as e:
         log.warning(
