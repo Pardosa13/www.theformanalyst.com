@@ -619,7 +619,7 @@
         {% set r = rec_by_key.get(rule.key) %}
         <tr data-rules="{{ rule.key }}">
           <td class="rule-name">{{ rule.name }}</td>
-          <td>{% if rule.key in active_rule_keys %}<span class="pos">Live</span>{% elif rule.retired %}<span class="muted" title="{{ rule.retired }}">Retired</span><div class="muted" style="font-size:11px;white-space:normal;max-width:220px">{{ rule.retired }}</div>{% else %}<span class="neg" title="Losing after {{ retire_after_bets }} live bets">Stopped</span><div class="muted" style="font-size:11px">Losing after {{ retire_after_bets }}+ live bets</div>{% endif %}</td>
+          <td>{% if rule.key in active_rule_keys %}<span class="pos">Live</span>{% elif rule.retired %}<span class="muted" title="{{ rule.retired }}">Retired</span><div class="muted" style="font-size:11px;white-space:normal;max-width:220px">{{ rule.retired|replace('Retired ', '', 1) }}</div>{% else %}<span class="neg" title="Losing after {{ retire_after_bets }} live bets">Stopped</span><div class="muted" style="font-size:11px">Losing after {{ retire_after_bets }}+ live bets</div>{% endif %}</td>
           <td class="muted" style="white-space:normal">{{ rule.audit }}</td>
           {% if r %}
           <td>{{ r.history.bets }}</td>
