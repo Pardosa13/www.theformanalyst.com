@@ -107,6 +107,7 @@ HEADERS = {
 # ── Name normalisation (matches Octagon-AI predict_model.py) ─────────────────
 # Canonical implementation lives in mma_name_utils.py and is shared with
 # mma_data.py so the two modules can't silently drift apart on alias tables.
+import mma_model
 from mma_name_utils import (
     normalize_name,
     normalized_name_aliases,
@@ -1755,6 +1756,15 @@ def load_model():
         return None
 
 
+def load_live_model():
+    """The in-repo UFC model, trained now on full ufcstats history (None on failure)."""
+    try:
+        return mma_model.Live()
+    except Exception:
+        log.exception("UFC_MODEL could not be built; falling back to the old model")
+        return None
+
+
 def map_weight_class(raw):
     """
     Map ESPN weight class strings to the '### lbs' format the model was trained on.
@@ -2338,8 +2348,10 @@ def main():
     conn = get_conn()
     ensure_mma_integrity_schema(conn)
 
-    # Load model
+    # Load models. The in-repo model (rebuilt from full UFC history each run)
+    # is used first; the old CatBoost file is only a fallback if it fails.
     model = load_model()
+    live_model = load_live_model()
 
     # Build stats from Postgres fight history (mma_fights / mma_fighters), which
     # holds the original Octagon-AI seed plus every fight this cron has synced
@@ -2552,8 +2564,25 @@ def main():
                 apex = is_apex_event(event['event_name'], event['location'])
                 alt = is_altitude(event['location'])
 
-                prob, used_fallback = predict_fight(model, st1, st2, b1, b2, g1, g2, apex, alt,
-                                    weight_class=fight.get('weight_class', ''))
+                prob, version = None, None
+                if live_model is not None:
+                    try:
+                        prob, _, _ = live_model.win_chance(
+                            fight['fighter_1'], fight['fighter_2'], event.get('date') or today,
+                            weightclass=str(fight.get('weight_class') or ''),
+                            five_rounds=bool(fight.get('is_title_fight')))
+                        version = mma_model.MODEL_VERSION
+                        for nm in (fight['fighter_1'], fight['fighter_2']):
+                            if not live_model.known(nm):
+                                log.info("UFC_MODEL no UFC history for %s (treated as a debut)", nm)
+                    except Exception:
+                        log.exception("UFC_MODEL prediction failed; using old model")
+                        prob = None
+                used_fallback = False
+                if prob is None:
+                    prob, used_fallback = predict_fight(model, st1, st2, b1, b2, g1, g2, apex, alt,
+                                        weight_class=fight.get('weight_class', ''))
+                    version = MODEL_VERSION_FALLBACK if used_fallback else MODEL_VERSION_CATBOOST
                 if used_fallback:
                     log.warning("PREDICTION_FALLBACK fight=%s vs %s — model unavailable/errored, writing 50/50",
                                 fight['fighter_1'], fight['fighter_2'])
@@ -2566,7 +2595,7 @@ def main():
                     'f1_prob': prob,
                     'f2_prob': 1.0 - prob,
                     'confidence': confidence,
-                    'model_version': MODEL_VERSION_FALLBACK if used_fallback else MODEL_VERSION_CATBOOST,
+                    'model_version': version,
                     'factors': {
                         fight['fighter_1']: {
                             'slpm': round(st1['slpm'], 2),

@@ -1027,7 +1027,7 @@ async function loadResults() {
 function mrModelHTML(m) {
   const w = m.with_odds || {};
   if (!m.fights) {
-    return `<div class="mr-card"><h4>🤖 ML Predictor</h4><div class="mma-empty">No finished fights with a pre-fight prediction yet.</div></div>`;
+    return `<div class="mr-card"><h4>🤖 ML Predictor</h4><div class="mma-empty">No finished fights for the new model yet. It was rebuilt from full UFC history in November 2026, so its record starts from its first card.</div></div>`;
   }
   const beats = w.fights && w.model_log_loss < w.market_log_loss;
   const compare = w.fights
