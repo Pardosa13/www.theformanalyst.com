@@ -11754,24 +11754,12 @@ def backtest_run_now():
     flash('Backtest started in the background. Results will appear here when complete (may take several minutes).', 'info')
     return redirect(url_for('backtest'))
 
-@app.route("/best-bets")
-@login_required
-def best_bets():
-    """Best Bets: only runners that fit one of the place rules (place_bet.RULES).
-
-    Every pick is a PLACE bet. Routes are recorded only while the race is
-    still to run, so the record never counts a pick made after the jump.
-    Started races still show, unrecorded.
-    """
-    if not current_user.is_admin:
-        flash("Access denied. Admin privileges required.", "danger")
-        return redirect(url_for("history"))
+def _recent_best_bet_meetings(hours_back):
+    """Meetings uploaded in the last `hours_back` hours, with races, runners and predictions."""
     from datetime import datetime, timedelta
     from sqlalchemy.orm import load_only, selectinload
-
-    hours_back = request.args.get('hours', default=12, type=int)
     cutoff = datetime.utcnow() - timedelta(hours=hours_back)
-    recent_meetings = (
+    return (
         Meeting.query
         .options(
             load_only(Meeting.id, Meeting.meeting_name, Meeting.uploaded_at, Meeting.track, Meeting.date, Meeting.puntingform_id),
@@ -11791,6 +11779,25 @@ def best_bets():
         .order_by(Meeting.meeting_name.asc())
         .all()
     )
+
+
+@app.route("/best-bets")
+@login_required
+def best_bets():
+    """Best Bets: only runners that fit one of the place rules (place_bet.RULES).
+
+    Every pick is a PLACE bet. Routes are recorded only while the race is
+    still to run, so the record never counts a pick made after the jump.
+    Started races still show, unrecorded.
+    """
+    if not current_user.is_admin:
+        flash("Access denied. Admin privileges required.", "danger")
+        return redirect(url_for("history"))
+    from datetime import datetime, timedelta
+    from sqlalchemy.orm import load_only, selectinload
+
+    hours_back = request.args.get('hours', default=12, type=int)
+    recent_meetings = _recent_best_bet_meetings(hours_back)
 
     # The saved record decides which rules still make picks (retired rules and
     # rules losing after place_bet.RETIRE_AFTER_BETS live bets do not).
@@ -11917,6 +11924,75 @@ def best_bets():
         total_horses_scanned=total_horses_scanned,
         hours_back=hours_back,
     )
+@app.route("/api/best-bets/review-list")
+@login_required
+def api_best_bets_review_list():
+    """Runners still to race that fit an angle close to break even (review_list.ANGLES).
+
+    For a person to check against replays. Not bets, and never recorded.
+    """
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    import review_list
+    hours_back = request.args.get('hours', default=12, type=int)
+    try:
+        meetings = _recent_best_bet_meetings(hours_back)
+        races = []
+        for meeting in meetings:
+            track_name = _track_from_meeting(meeting)
+            date_str = meeting.date.strftime('%Y-%m-%d') if meeting.date else None
+            for race in meeting.races:
+                if race_has_started(race, meeting, allow_network=False)[0]:
+                    continue
+                races.append((meeting, race, track_name, date_str))
+
+        def _odds(item):
+            meeting, race, track_name, date_str = item
+            if not (track_name and date_str):
+                return None, None
+            try:
+                info = match_race_info(track_name, date_str, race.race_number)
+                if info and info.get('uuid'):
+                    return info, fetch_race_odds(info['uuid'])
+            except Exception as e:
+                logger.warning("Review list: Ladbrokes odds unavailable for %s R%s: %s", track_name, race.race_number, e)
+            return None, None
+
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            odds = list(pool.map(_odds, races))
+
+        rows = []
+        for (meeting, race, _t, _d), (info, payload) in zip(races, odds):
+            market = evaluate_ladbrokes_best_bet_signals(race, meeting, payload, info) if info is not None else {}
+            active = [h for h in race.horses if not getattr(h, 'is_scratched', False) and h.prediction]
+            ranked = sorted(active, key=lambda h: (h.prediction.score or 0), reverse=True)
+            top_id = ranked[0].id if ranked else None
+            for horse in active:
+                m = market.get(horse.id, {})
+                keys = review_list.matching_angles(
+                    place_bet.note_components(horse.prediction.notes),
+                    analyzer_rank=1 if horse.id == top_id else None,
+                    price=m.get('ladbrokes_fixed_win_price'),
+                    is_favourite=m.get('is_ladbrokes_favourite'))
+                if not keys:
+                    continue
+                rows.append({
+                    'meeting_name': meeting.meeting_name, 'race_number': race.race_number,
+                    'start_time_utc': race.start_time_utc.isoformat() if race.start_time_utc else None,
+                    'distance': race.distance, 'horse_name': horse.horse_name,
+                    'tab': (place_bet._csv(horse) or {}).get('horse number'),
+                    'jockey': horse.jockey, 'trainer': horse.trainer,
+                    'price': m.get('ladbrokes_fixed_win_price'), 'angles': keys,
+                })
+        rows.sort(key=lambda r: (r['start_time_utc'] or '', r['meeting_name'], r['race_number'], r['horse_name']))
+        return jsonify({'runners': rows, 'angles': review_list.angles_for_page()})
+    except Exception as e:
+        db.session.rollback()
+        logger.error("Review list error: %s", e, exc_info=True)
+        return jsonify({'error': 'Internal server error'}), 500
+
+
 @app.route("/best-bets/post", methods=["POST"])
 @login_required
 def post_best_bets_manual():
