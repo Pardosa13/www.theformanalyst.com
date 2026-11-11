@@ -3,14 +3,15 @@ import review_list
 
 def test_top_pick_price_band_and_favourite():
     assert review_list.matching_angles(set(), analyzer_rank=1, price=4.2, is_favourite=False) == ["top_pick_3_6"]
-    assert review_list.matching_angles(set(), analyzer_rank=1, price=2.4, is_favourite=True) == ["top_pick_fav"]
+    assert review_list.matching_angles(set(), analyzer_rank=1, price=2.4, is_favourite=True) == []
     assert review_list.matching_angles(set(), analyzer_rank=1, price=6.0) == []
 
 
 def test_not_top_pick_needs_a_component():
     assert review_list.matching_angles(set(), analyzer_rank=2, price=4.0, is_favourite=True) == []
-    keys = review_list.matching_angles({"Ran places: 3rd 2nd", "Running Position - Backmarker Sprint"})
-    assert keys == ["ran_3_2", "backmarker_sprint"]
+    keys = review_list.matching_angles({"Ran places: 3rd 2nd", "Weight vs Field - Below (2-3kg)",
+                                        "Running Position - Backmarker Sprint"})
+    assert keys == ["ran_3_2", "weight_below"]
 
 
 def test_no_price_means_no_price_angle():
@@ -20,7 +21,7 @@ def test_no_price_means_no_price_angle():
 def test_every_angle_is_described():
     keys = {a["key"] for a in review_list.angles_for_page()}
     assert set(review_list.COMPONENT_ANGLES.values()) <= keys
-    assert {"top_pick_3_6", "top_pick_fav"} <= keys
+    assert "top_pick_3_6" in keys
 
 
 def test_review_list_endpoint_lists_matching_runners(monkeypatch):
