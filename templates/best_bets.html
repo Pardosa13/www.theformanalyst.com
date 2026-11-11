@@ -845,4 +845,85 @@ document.getElementById('post-btn').addEventListener('click', function (e) {
 </script>
 {% endif %}
 
+<!-- Review list (review_list.py): angles closest to break even, for a person to check replays. Not bets. -->
+<div class="filter-card" id="reviewList" style="margin-top:28px">
+  <h5 style="margin:0 0 6px;font-weight:700">🔎 Review List &mdash; closest to break even (not bets)</h5>
+  <p style="font-size:13px;color:var(--text-muted);margin:0 0 10px">
+    Nothing in racing has made money here over time. These angles came closest on 72,884 runners (Feb&ndash;Oct 2026, Betfair prices), and stayed close in both halves of the year.
+    Use them as a short-list to check replays, then decide yourself. Backing every runner lost 7.7% to win and 8.0% for a place.
+    Jockeys, trainers and jockey + trainer pairs were tested too: the ones near break even early on did worse than average later, so none are listed.
+  </p>
+  <div class="record-wrap">
+    <table class="record-table" id="reviewAngles">
+      <thead><tr><th>Angle</th><th>Bet</th><th>Bets</th><th>Return</th><th>Feb&ndash;Jun</th><th>Jul&ndash;Oct</th><th>Months up</th></tr></thead>
+      <tbody><tr><td colspan="7" class="muted">Loading&hellip;</td></tr></tbody>
+    </table>
+  </div>
+  <div class="record-wrap">
+    <table class="record-table" id="reviewRunners">
+      <thead><tr><th>Race</th><th>Runner</th><th>Price</th><th>Angles</th></tr></thead>
+      <tbody><tr><td colspan="4" class="muted">Loading today&rsquo;s runners&hellip;</td></tr></tbody>
+    </table>
+  </div>
+  <p style="font-size:12px;color:var(--text-muted);margin:6px 0 0">Only races still to run. Price is the live Ladbrokes win price; Betfair usually pays a little more. Nothing here is recorded or posted.</p>
+</div>
+
+<script>
+(function () {
+  const angleTable = document.querySelector('#reviewAngles tbody');
+  const runnerTable = document.querySelector('#reviewRunners tbody');
+  if (!angleTable || !runnerTable) return;
+  const cell = (text, cls) => { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; return td; };
+  const pct = v => (v > 0 ? '+' : '') + v.toFixed(1) + '%';
+  const tone = v => v >= 0 ? 'pos' : 'neg';
+  const fail = msg => {
+    angleTable.innerHTML = ''; runnerTable.innerHTML = '';
+    const tr = document.createElement('tr'); const td = cell(msg, 'muted'); td.colSpan = 7; tr.appendChild(td); angleTable.appendChild(tr);
+  };
+  fetch('/api/best-bets/review-list?hours={{ hours_back }}', { credentials: 'same-origin' })
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(data => {
+      const names = {};
+      angleTable.innerHTML = '';
+      (data.angles || []).forEach(a => {
+        names[a.key] = a;
+        const tr = document.createElement('tr');
+        const name = cell(a.name); name.title = a.note || '';
+        tr.append(name, cell(a.bet === 'win' ? 'Win' : 'Place'), cell(a.bets.toLocaleString()),
+                  cell(pct(a.roi), tone(a.roi)), cell(pct(a.roi_first), tone(a.roi_first)),
+                  cell(pct(a.roi_second), tone(a.roi_second)), cell(a.months_up));
+        angleTable.appendChild(tr);
+      });
+      runnerTable.innerHTML = '';
+      const runners = data.runners || [];
+      if (!runners.length) {
+        const tr = document.createElement('tr'); const td = cell('No runner still to race fits an angle.', 'muted'); td.colSpan = 4;
+        tr.appendChild(td); runnerTable.appendChild(tr); return;
+      }
+      runners.forEach(r => {
+        const tr = document.createElement('tr');
+        let when = '';
+        if (r.start_time_utc) {
+          const d = new Date(r.start_time_utc.endsWith('Z') || r.start_time_utc.includes('+') ? r.start_time_utc : r.start_time_utc + 'Z');
+          if (!isNaN(d)) when = ' · ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        }
+        const race = cell((r.meeting_name || '') + ' R' + r.race_number + when);
+        const runner = cell((r.tab ? r.tab + '. ' : '') + r.horse_name);
+        const who = document.createElement('div'); who.className = 'muted'; who.style.fontSize = '11px';
+        who.textContent = [r.jockey, r.trainer].filter(Boolean).join(' / ');
+        runner.appendChild(who);
+        const angles = cell('');
+        r.angles.forEach(k => {
+          const a = names[k]; if (!a) return;
+          const chip = document.createElement('div'); chip.className = 'rule-checks';
+          chip.textContent = (a.bet === 'win' ? 'Win: ' : 'Place: ') + a.name + ' (' + pct(a.roi) + ')';
+          angles.appendChild(chip);
+        });
+        tr.append(race, runner, cell(r.price ? '$' + Number(r.price).toFixed(2) : '–'), angles);
+        runnerTable.appendChild(tr);
+      });
+    })
+    .catch(() => fail('Review list unavailable right now. Refresh to try again.'));
+})();
+</script>
 {% endblock %}
