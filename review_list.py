@@ -27,8 +27,8 @@ Angle = namedtuple("Angle", "key name bet bets roi roi_first roi_second months_u
 ANGLES = (
     Angle("top_pick_3_6", "Analyzer top pick at $3-$6", "place", 2664, -1.4, -0.3, -2.9, "4/9", -1.6,
           "Any favourite lost 2.1% for a place. Price is the live Ladbrokes win price."),
-    Angle("ran_3_2", "Ran 3rd then 2nd at its last two starts", "place", 4037, 1.6, 2.5, 0.4, "3/9", -3.8,
-          "One 119-unit place dividend makes it positive; -1.4% without it."),
+    Angle("ran_3_2", "Last 5 starts: placings go 3rd, then 2nd (e.g. 3-6-2)", "place", 4037, 1.6, 2.5, 0.4, "3/9", -3.8,
+          "Only placings count: unplaced runs in between are skipped. One 119-unit place dividend makes it positive; -1.4% without it."),
     Angle("weight_below", "Carrying 2-3kg below the field average", "win", 6101, 22.5, 32.3, 11.0, "6/9", 8.1,
           "Win bet at long prices (median $23, 8% strike). -9.4% without its 10 biggest winners. Expect long losing runs."),
 )
