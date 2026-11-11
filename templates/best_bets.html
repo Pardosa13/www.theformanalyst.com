@@ -849,14 +849,14 @@ document.getElementById('post-btn').addEventListener('click', function (e) {
 <div class="filter-card" id="reviewList" style="margin-top:28px">
   <h5 style="margin:0 0 6px;font-weight:700">🔎 Review List &mdash; closest to break even (not bets)</h5>
   <p style="font-size:13px;color:var(--text-muted);margin:0 0 10px">
-    Nothing in racing has made money here over time. These angles came closest on 72,884 runners (Feb&ndash;Oct 2026, Betfair prices), and stayed close in both halves of the year.
+    Nothing in racing has made money here over time. These angles came closest on 72,884 runners (Feb&ndash;Oct 2026, Betfair prices), stayed close in both halves of the year, and were checked with the price known before the jump. Hover an angle for its catch.
     Use them as a short-list to check replays, then decide yourself. Backing every runner lost 7.7% to win and 8.0% for a place.
     Jockeys, trainers and jockey + trainer pairs were tested too: the ones near break even early on did worse than average later, so none are listed.
   </p>
   <div class="record-wrap">
     <table class="record-table" id="reviewAngles">
-      <thead><tr><th>Angle</th><th>Bet</th><th>Bets</th><th>Return</th><th>Feb&ndash;Jun</th><th>Jul&ndash;Oct</th><th>Months up</th></tr></thead>
-      <tbody><tr><td colspan="7" class="muted">Loading&hellip;</td></tr></tbody>
+      <thead><tr><th>Angle</th><th>Bet</th><th>Bets</th><th>Return</th><th>Feb&ndash;Jun</th><th>Jul&ndash;Oct</th><th>Without 3 biggest</th><th>Months up</th></tr></thead>
+      <tbody><tr><td colspan="8" class="muted">Loading&hellip;</td></tr></tbody>
     </table>
   </div>
   <div class="record-wrap">
@@ -878,7 +878,7 @@ document.getElementById('post-btn').addEventListener('click', function (e) {
   const tone = v => v >= 0 ? 'pos' : 'neg';
   const fail = msg => {
     angleTable.innerHTML = ''; runnerTable.innerHTML = '';
-    const tr = document.createElement('tr'); const td = cell(msg, 'muted'); td.colSpan = 7; tr.appendChild(td); angleTable.appendChild(tr);
+    const tr = document.createElement('tr'); const td = cell(msg, 'muted'); td.colSpan = 8; tr.appendChild(td); angleTable.appendChild(tr);
   };
   fetch('/api/best-bets/review-list?hours={{ hours_back }}', { credentials: 'same-origin' })
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
@@ -891,7 +891,7 @@ document.getElementById('post-btn').addEventListener('click', function (e) {
         const name = cell(a.name); name.title = a.note || '';
         tr.append(name, cell(a.bet === 'win' ? 'Win' : 'Place'), cell(a.bets.toLocaleString()),
                   cell(pct(a.roi), tone(a.roi)), cell(pct(a.roi_first), tone(a.roi_first)),
-                  cell(pct(a.roi_second), tone(a.roi_second)), cell(a.months_up));
+                  cell(pct(a.roi_second), tone(a.roi_second)), cell(pct(a.without_top3), tone(a.without_top3)), cell(a.months_up));
         angleTable.appendChild(tr);
       });
       runnerTable.innerHTML = '';

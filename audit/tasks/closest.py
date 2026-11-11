@@ -45,6 +45,17 @@ def _angles(d, ctx):
         p[f"{name} top pick and favourite"] = (r == 1) & fav
         for lo, hi in ((1, 3), (3, 6), (6, 11), (11, 1001)):
             p[f"{name} top pick, BSP ${lo}-{hi}"] = (r == 1) & (d.bsp >= lo) & (d.bsp < hi)
+    # Same angles, but priced and ranked on the average price matched BEFORE
+    # the jump (Betfair pre-play), which a person could see on race day.
+    pre = d.pre_wap.where(d.pre_wap > 1)
+    pre_fav = pre.groupby(d.race_id).rank(method="min") == 1
+    for name, col in (("analyzer", "a_rank"), ("ML", "ml_rank"), ("PFAI", "pfai_rank")):
+        r = d[col]
+        p[f"PRE-JUMP {name} top pick and favourite"] = (r == 1) & pre_fav
+        p[f"PRE-JUMP {name} top pick, not favourite"] = (r == 1) & ~pre_fav & pre.notna()
+        for lo, hi in ((1, 3), (3, 6), (6, 11), (11, 1001)):
+            p[f"PRE-JUMP {name} top pick, ${lo}-{hi}"] = (r == 1) & (pre >= lo) & (pre < hi)
+    p["PRE-JUMP favourite"] = pre_fav
     p["analyzer AND ML agree on top pick"] = (d.a_rank == 1) & (d.ml_rank == 1)
     p["analyzer AND PFAI agree on top pick"] = (d.a_rank == 1) & (d.pfai_rank == 1)
     p["favourite"] = fav
@@ -102,17 +113,20 @@ def run(ctx):
                 if na < MIN_HALF[fam] or nb < MIN_HALF[fam] // 2:
                     continue
                 tested += 1
-                if ra < CHOOSE_AT:
+                if ra < CHOOSE_AT and fam != "picks":
                     continue
                 rr = ret[m]
                 ok = np.isfinite(rr)
                 per = pd.Series(rr[ok]).groupby(months[m][ok]).agg(["count", "mean"])
                 per = per[per["count"] >= 10]
                 up = f"{int((per['mean'] > 0).sum())}/{len(per)}"
-                chosen_b.append(ret[m & ~first])
+                if ra >= CHOOSE_AT:
+                    chosen_b.append(ret[m & ~first])
                 rows.append((name, na, round(100 * ra, 1), nb, round(100 * rb, 1),
                              round(100 * np.nanmean(rr), 1), up))
             rows.sort(key=lambda r: -r[4])
+            if fam == "picks":
+                rows = [r for r in rows]
             pooled = np.concatenate(chosen_b) if chosen_b else np.array([])
             pooled = pooled[np.isfinite(pooled)]
             emit(f"closest.{fam}", f"[{bet}] tested={tested} chosen (first half {int(100 * CHOOSE_AT)}%+)={len(rows)} "
@@ -120,8 +134,47 @@ def run(ctx):
                                    f"roi={100 * pooled.mean() if len(pooled) else float('nan'):+.1f}%")
             ctx.table(f"closest.{fam}.{'win' if col == 'ret_bsp' else 'place'}",
                       ["angle", "bets_feb_jun", "roi_feb_jun", "bets_jul_oct", "roi_jul_oct", "roi_all", "months_up"],
-                      rows, limit=25)
+                      rows, limit=80 if fam == "picks" else 25)
         # Everything, for a baseline.
         n, r = _roi(ret)
         emit("closest.baseline", f"[{bet}] every runner: bets={n} roi={100 * r:+.1f}%")
+    _verify(d, fams)
     emit("closest", "done")
+
+
+def _verify(d, fams):
+    """Every Review List angle, both bets: strike rate, the return without its
+    biggest winners, each month, and against what the prices predict (z)."""
+    checks = [("picks", "analyzer top pick, BSP $3-6"), ("picks", "PRE-JUMP analyzer top pick, $3-6"),
+              ("picks", "analyzer top pick and favourite"), ("picks", "PRE-JUMP analyzer top pick and favourite"),
+              ("components", "Ran places: 3rd 2nd"),
+              ("components", "Running Position - Backmarker Sprint"),
+              ("components", "Weight vs Field - Below (2-3kg)"),
+              ("picks", "PRE-JUMP ML top pick, $3-6"), ("picks", "PRE-JUMP ML top pick and favourite"),
+              ("picks", "PRE-JUMP favourite"), ("picks", "favourite")]
+    months = d.date.dt.to_period("M").astype(str).values
+    for fam, name in checks:
+        m = fams[fam].get(name)
+        if m is None:
+            emit("closest.verify", f"{name}: not found")
+            continue
+        m = np.asarray(m, bool)
+        for bet, rcol, price, chance in (("win", "ret_bsp", "bsp", "mkt_p"), ("place", "ret_place", "place_bsp", "place_q")):
+            ok = m & np.isfinite(d[rcol].values) & np.isfinite(d[chance].values)
+            x = d[ok]
+            r = x[rcol].values
+            if not len(r):
+                continue
+            wins = np.sort(r[r > 0])[::-1]
+            drop = lambda k: (r.sum() - wins[:k].sum()) / len(r) * 100
+            q, w = x[chance].values, (x[price].values - 1) * 0.92
+            mu = q * w - (1 - q)
+            var = float((q * w ** 2 + (1 - q) - mu ** 2).sum())
+            z = (r.sum() - mu.sum()) / np.sqrt(var) if var > 0 else float("nan")
+            emit("closest.verify", f"{name} [{bet}]: bets={len(r)} hit={100 * len(wins) / len(r):.1f}% "
+                                   f"median price={np.median(x[price]):.1f} roi={100 * r.mean():+.1f}% "
+                                   f"without top 1/3/10 returns={drop(1):+.1f}/{drop(3):+.1f}/{drop(10):+.1f}% "
+                                   f"biggest (units)={', '.join(f'{v:.0f}' for v in wins[:5])} z vs prices={z:.2f}")
+            per = pd.Series(r).groupby(months[ok]).agg(["count", "mean"])
+            emit("closest.verify", f"{name} [{bet}] by month: " + " ".join(
+                f"{k[2:]}:{100 * v['mean']:+.0f}%({int(v['count'])})" for k, v in per.iterrows()))
