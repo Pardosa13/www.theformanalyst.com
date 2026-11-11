@@ -143,32 +143,38 @@ def run(ctx):
 
 
 def _verify(d, fams):
-    """Is a win angle real, or a few big winners? Strike rate, prices, the
-    return without its biggest winners, each month, and against the market."""
-    checks = [("components", "Weight vs Field - Below (2-3kg)"),
+    """Every Review List angle, both bets: strike rate, the return without its
+    biggest winners, each month, and against what the prices predict (z)."""
+    checks = [("picks", "analyzer top pick, BSP $3-6"), ("picks", "PRE-JUMP analyzer top pick, $3-6"),
+              ("picks", "analyzer top pick and favourite"), ("picks", "PRE-JUMP analyzer top pick and favourite"),
+              ("components", "Ran places: 3rd 2nd"),
               ("components", "Running Position - Backmarker Sprint"),
-              ("picks", "analyzer top pick, BSP $3-6"), ("picks", "PRE-JUMP analyzer top pick, $3-6"),
-              ("picks", "PRE-JUMP ML top pick, $3-6"), ("picks", "PRE-JUMP favourite")]
-    months = d.date.dt.to_period("M").astype(str)
+              ("components", "Weight vs Field - Below (2-3kg)"),
+              ("picks", "PRE-JUMP ML top pick, $3-6"), ("picks", "PRE-JUMP ML top pick and favourite"),
+              ("picks", "PRE-JUMP favourite"), ("picks", "favourite")]
+    months = d.date.dt.to_period("M").astype(str).values
     for fam, name in checks:
         m = fams[fam].get(name)
         if m is None:
             emit("closest.verify", f"{name}: not found")
             continue
-        x = d[np.asarray(m, bool) & np.isfinite(d.ret_bsp.values)]
-        r = x.ret_bsp.values
-        wins = np.sort(r[r > 0])[::-1]
-        drop = lambda k: (r.sum() - wins[:k].sum()) / len(r) * 100
-        exp = float((x.mkt_p * ((x.bsp - 1) * 0.92) - (1 - x.mkt_p)).sum())
-        var = float((x.mkt_p * ((x.bsp - 1) * 0.92) ** 2 + (1 - x.mkt_p) - (x.mkt_p * ((x.bsp - 1) * 0.92) - (1 - x.mkt_p)) ** 2).sum())
-        z = (r.sum() - exp) / np.sqrt(var) if var > 0 else float("nan")
-        emit("closest.verify", f"{name} [win]: bets={len(r)} winners={len(wins)} strike={100 * len(wins) / max(len(r), 1):.1f}% "
-                               f"median BSP={np.median(x.bsp):.1f} roi={100 * r.mean():+.1f}% "
-                               f"without top 1/3/5/10 winners={drop(1):+.1f}/{drop(3):+.1f}/{drop(5):+.1f}/{drop(10):+.1f}% "
-                               f"biggest wins (units)={', '.join(f'{w:.0f}' for w in wins[:5])} z vs prices={z:.2f}")
-        per = pd.Series(r).groupby(months[x.index].values).agg(["count", "mean"])
-        emit("closest.verify", f"{name} [win] by month: " + " ".join(f"{k}:{100 * v['mean']:+.0f}%({int(v['count'])})" for k, v in per.iterrows()))
-        rp = x.ret_place.values
-        rp = rp[np.isfinite(rp)]
-        if len(rp):
-            emit("closest.verify", f"{name} [place]: bets={len(rp)} roi={100 * rp.mean():+.1f}%")
+        m = np.asarray(m, bool)
+        for bet, rcol, price, chance in (("win", "ret_bsp", "bsp", "mkt_p"), ("place", "ret_place", "place_bsp", "place_q")):
+            ok = m & np.isfinite(d[rcol].values) & np.isfinite(d[chance].values)
+            x = d[ok]
+            r = x[rcol].values
+            if not len(r):
+                continue
+            wins = np.sort(r[r > 0])[::-1]
+            drop = lambda k: (r.sum() - wins[:k].sum()) / len(r) * 100
+            q, w = x[chance].values, (x[price].values - 1) * 0.92
+            mu = q * w - (1 - q)
+            var = float((q * w ** 2 + (1 - q) - mu ** 2).sum())
+            z = (r.sum() - mu.sum()) / np.sqrt(var) if var > 0 else float("nan")
+            emit("closest.verify", f"{name} [{bet}]: bets={len(r)} hit={100 * len(wins) / len(r):.1f}% "
+                                   f"median price={np.median(x[price]):.1f} roi={100 * r.mean():+.1f}% "
+                                   f"without top 1/3/10 returns={drop(1):+.1f}/{drop(3):+.1f}/{drop(10):+.1f}% "
+                                   f"biggest (units)={', '.join(f'{v:.0f}' for v in wins[:5])} z vs prices={z:.2f}")
+            per = pd.Series(r).groupby(months[ok]).agg(["count", "mean"])
+            emit("closest.verify", f"{name} [{bet}] by month: " + " ".join(
+                f"{k[2:]}:{100 * v['mean']:+.0f}%({int(v['count'])})" for k, v in per.iterrows()))
