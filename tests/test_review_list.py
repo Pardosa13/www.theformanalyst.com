@@ -73,3 +73,11 @@ def test_review_list_endpoint_lists_matching_runners(monkeypatch):
         finally:
             db.session.remove()
             db.drop_all()
+
+
+def test_ran_3_2_label_says_placings_not_last_two_starts():
+    # "Ran places" lists only the 1st-3rd finishes in the last 5 starts, so
+    # 3-6-2 fits. The label must not say "last two starts".
+    a = review_list.BY_KEY["ran_3_2"]
+    assert "last two starts" not in a.name
+    assert "placings" in a.name
