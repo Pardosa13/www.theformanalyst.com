@@ -6185,6 +6185,17 @@ def _summarise_analyzer_selections(selections, stake=10.0):
         'avg_winner_sp': (sum(winner_sps) / len(winner_sps)) if winner_sps else 0,
     }
 
+def _all_track_names():
+    """Every track ever uploaded, for the data page track dropdowns."""
+    names = db.session.query(Meeting.meeting_name).distinct().all()
+    out = set()
+    for (n,) in names:
+        if not n:
+            continue
+        out.add(n.split('_', 1)[1] if '_' in n else n)
+    return sorted(out)
+
+
 @app.route("/data")
 @login_required
 def data_analytics():
@@ -6198,8 +6209,7 @@ def data_analytics():
     date_to = request.args.get('date_to', '')
     limit_param = request.args.get('limit', 'all')
 
-    tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
-    track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
+    track_list = _all_track_names()
 
     canonical_selections = _build_canonical_analyzer_selections(
         track_filter=track_filter,
@@ -6486,8 +6496,7 @@ def ml_data_analytics():
     import time as _time
     page_started = _time.time()
 
-    tracks = db.session.query(Meeting.meeting_name).order_by(Meeting.uploaded_at.desc()).limit(200).all()
-    track_list = sorted(set([t[0].split('_')[1] if '_' in t[0] else t[0] for t in tracks]))
+    track_list = _all_track_names()
 
     active_model_metadata = None
     active_model_metadata_error = None
