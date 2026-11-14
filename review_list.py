@@ -14,7 +14,11 @@ after), so none are listed.
 Backing every runner lost 7.7% to win and 8.0% for a place.
 """
 
+import logging
+import time
 from collections import namedtuple
+
+logger = logging.getLogger(__name__)
 
 Angle = namedtuple("Angle", "key name bet bets roi roi_first roi_second months_up without_top3 note")
 
@@ -58,7 +62,8 @@ def angles_for_page():
 _HISTORY_SQL = """
     SELECT h.id AS horse_id, h.race_id, p.score, r.finish_position AS fin, r.sp, r.place_bsp,
            rc.start_time_utc AS start,
-           CASE WHEN LOWER(p.notes) LIKE '%ran places:%' OR LOWER(p.notes) LIKE '%below race avg%'
+           CASE WHEN LOWER(p.notes) LIKE '%ran places:%3rd%2nd%'
+                  OR LOWER(p.notes) LIKE '%10.0%weight%below race avg%'
                 THEN p.notes END AS notes
     FROM horses h
     JOIN predictions p ON p.horse_id = h.id
@@ -67,6 +72,56 @@ _HISTORY_SQL = """
     JOIN results r ON r.horse_id = h.id
     WHERE r.finish_position > 0 AND rc.results_incomplete IS NOT TRUE
 """
+
+
+def _angle_components(notes):
+    """Names in COMPONENT_ANGLES found in the notes.
+
+    Runs only the notes parser's own patterns for those names. The full
+    parser tries every pattern on every runner, which is far too slow here.
+    """
+    global _ANGLE_PATTERNS
+    if not notes:
+        return set()
+    if _ANGLE_PATTERNS is None:
+        from notes_parsing import _COMPILED_NOTES_COMPONENT_PATTERNS
+        _ANGLE_PATTERNS = [(p, n) for p, n in _COMPILED_NOTES_COMPONENT_PATTERNS if n in COMPONENT_ANGLES]
+    return {name for pattern, name in _ANGLE_PATTERNS if pattern.search(notes)}
+
+
+_ANGLE_PATTERNS = None
+
+
+def _ladbrokes_prices(session, horse_ids, column):
+    """{horse_id: last Ladbrokes price saved before the jump}. column: 'odds' (win) or 'place_odds'.
+
+    One index lookup per runner (race_id, horse_id, newest first), so the
+    database never reads a runner's whole odds history.
+    """
+    if column not in ('odds', 'place_odds'):
+        raise ValueError(column)
+    from sqlalchemy import text
+    horse_ids = sorted(set(horse_ids))
+    prices = {}
+    try:
+        for first in range(0, len(horse_ids), 1000):
+            chunk = horse_ids[first:first + 1000]
+            params = {f'h{i}': hid for i, hid in enumerate(chunk)}
+            rows = session.execute(text(
+                f'SELECT h.id AS horse_id, (SELECT o.{column} FROM live_odds_snapshots o '
+                f'WHERE o.race_id = h.race_id AND o.horse_id = h.id AND o.{column} > 1 '
+                f'AND (rc.start_time_utc IS NULL OR o.captured_at <= rc.start_time_utc) '
+                f'ORDER BY o.captured_at DESC LIMIT 1) AS price '
+                f'FROM horses h JOIN races rc ON rc.id = h.race_id '
+                f'WHERE h.id IN ({", ".join(f":h{i}" for i in range(len(chunk)))})'), params).mappings()
+            for row in rows:
+                if row['price']:
+                    prices[row['horse_id']] = float(row['price'])
+    except Exception:
+        # No odds table (e.g. a fresh database): no Ladbrokes prices.
+        session.rollback()
+        return {}
+    return prices
 
 
 def history(session, track='', date_from='', date_to='', race_ids=None, stake=10.0):
@@ -97,6 +152,7 @@ def history(session, track='', date_from='', date_to='', race_ids=None, stake=10
         params.update({f'race{i}': rid for i, rid in enumerate(race_ids)})
 
     races, seen = {}, set()
+    timing, started = {}, time.time()
     for row in place_bet._rows(session, sql, params):
         if row['horse_id'] in seen:
             continue
@@ -104,9 +160,11 @@ def history(session, track='', date_from='', date_to='', race_ids=None, stake=10
         races.setdefault(row['race_id'], []).append(row)
 
     tops = {rid: max(runners, key=lambda r: r['score'] or 0) for rid, runners in races.items()}
-    ladbrokes = place_bet.ladbrokes_place_prices(
-        session, [{'race_id': t['race_id'], 'horse_id': t['horse_id'], 'start': t['start']} for t in tops.values()],
-        column='odds')
+    timing['rows'] = time.time() - started
+    started = time.time()
+    ladbrokes = _ladbrokes_prices(session, [t['horse_id'] for t in tops.values()], 'odds')
+    timing['win_prices'] = time.time() - started
+    started = time.time()
 
     picks = {a.key: [] for a in ANGLES}
     sp_priced = 0
@@ -117,7 +175,7 @@ def history(session, track='', date_from='', date_to='', race_ids=None, stake=10
             price = None
             if row is top:
                 price = ladbrokes.get(row['horse_id']) or row['sp']
-            keys = matching_angles(place_bet.note_components(row['notes']),
+            keys = matching_angles(_angle_components(row['notes']),
                                    analyzer_rank=1 if row is top else None, price=price)
             if not keys:
                 continue
@@ -129,7 +187,17 @@ def history(session, track='', date_from='', date_to='', race_ids=None, stake=10
             for key in keys:
                 picks[key].append(item)
 
-    place_bet._add_ladbrokes_place_prices(session, list({id(i): i for items in picks.values() for i in items}.values()))
+    timing['match'] = time.time() - started
+    started = time.time()
+    # Placed with no Betfair place price yet: the Ladbrokes place price stands in.
+    waiting = [i for items in picks.values() for i in items if i['placed'] and not i['place_bsp']]
+    place_prices = _ladbrokes_prices(session, [i['horse_id'] for i in waiting], 'place_odds')
+    for items in picks.values():
+        for i in items:
+            i['ladbrokes_place'] = place_prices.get(i['horse_id']) if i['placed'] and not i['place_bsp'] else None
+    timing['place_prices'] = time.time() - started
+    logger.info("REVIEW_ANGLES_TIMING races=%d %s", len(races),
+                ' '.join(f'{k}={v:.2f}s' for k, v in timing.items()))
 
     stats = {}
     for key, items in picks.items():
