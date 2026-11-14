@@ -7965,7 +7965,11 @@ def api_component_analysis():
 @app.route("/api/data/review-angles")
 @login_required
 def api_review_angles():
-    """Win and place record of the review-list angles (review_list.ANGLES)."""
+    """Win and place record of the review angles (review_list.ANGLES).
+
+    source=ml (the ML Data page) uses the ML top pick and only races the ML
+    model scored before the jump.
+    """
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     import review_list
@@ -7973,28 +7977,45 @@ def api_review_angles():
     track_filter = request.args.get('track', '')
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    limit_param = request.args.get('limit', '200')
+    limit_param = request.args.get('limit', 'all')
+    use_ml = request.args.get('source', '') == 'ml'
     try:
-        race_ids = None
+        q = db.session.query(Race.id, Meeting.uploaded_at).join(
+            Meeting, Race.meeting_id == Meeting.id
+        ).join(Horse, Horse.race_id == Race.id
+        ).join(Result, Result.horse_id == Horse.id
+        ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
+        if track_filter:
+            q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+        if date_from:
+            q = q.filter(Meeting.uploaded_at >= date_from)
+        if date_to:
+            q = q.filter(Meeting.uploaded_at <= date_to)
+        if use_ml:
+            q = _join_ml_predictions_for_race_ids(q)
+        q = q.distinct().order_by(Meeting.uploaded_at.desc(), Race.id.desc())
         if limit_param != 'all':
-            limit = int(limit_param) if str(limit_param).isdigit() else 200
-            q = db.session.query(Race.id, Meeting.uploaded_at).join(
-                Meeting, Race.meeting_id == Meeting.id
-            ).join(Horse, Horse.race_id == Race.id
-            ).join(Result, Result.horse_id == Horse.id
-            ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
-            if track_filter:
-                q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
-            if date_from:
-                q = q.filter(Meeting.uploaded_at >= date_from)
-            if date_to:
-                q = q.filter(Meeting.uploaded_at <= date_to)
-            race_ids = [r[0] for r in q.distinct().order_by(
-                Meeting.uploaded_at.desc(), Race.id.desc()).limit(limit).all()]
-        return jsonify(review_list.history(db.session, track_filter, date_from, date_to, race_ids))
+            q = q.limit(int(limit_param) if str(limit_param).isdigit() else 200)
+        race_ids = [r[0] for r in q.all()]
+        return jsonify(review_list.history(db.session, race_ids, source='ml' if use_ml else 'analyzer'))
     except Exception as e:
         db.session.rollback()
         logger.error("Review angles error: %s", e, exc_info=True)
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@app.route("/api/data/people-form")
+@login_required
+def api_people_form():
+    """Jockeys, trainers and pairs in form over the last N days (people_form.form)."""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    import people_form
+    try:
+        return jsonify(people_form.form(db.session, days=request.args.get('days', default=30, type=int)))
+    except Exception as e:
+        db.session.rollback()
+        logger.error("People form error: %s", e, exc_info=True)
         return jsonify({'error': 'Internal server error'}), 500
 
 
