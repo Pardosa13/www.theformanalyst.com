@@ -783,6 +783,24 @@
 </div>
 
 <div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#reviewAngles" aria-expanded="false">
+    <h5>🔎 Review Angles — Win &amp; Place</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="reviewAngles" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load review angles...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#peopleForm" aria-expanded="false">
+    <h5>🔥 Jockeys &amp; Trainers In Form</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="peopleForm" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load jockeys, trainers and pairs in form...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
   <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#mlExternalFactors" aria-expanded="false">
     <h5>🏇 ML External Factors</h5><i class="bi bi-chevron-down"></i>
   </div>
@@ -884,6 +902,7 @@
 
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g" crossorigin="anonymous"></script>
+<script src="{{ url_for('static', filename='js/data-shared.js') }}?v=20261114"></script>
 <script>
 // Cumulative P&L chart, one line per place rule. Each button turns its rule
 // on or off; "All" turns every rule on together.
@@ -1036,6 +1055,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (mlSoleLeaderAnalysis) { mlSoleLeaderAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-sole-leader')) { loadMlSoleLeader(); } }); }
     const mlComponentAnalysis = document.getElementById('mlComponentAnalysis');
     if (mlComponentAnalysis) { mlComponentAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-component-analysis')) { loadMlComponentAnalysis(); } }); }
+    const reviewAngles = document.getElementById('reviewAngles');
+    if (reviewAngles) { reviewAngles.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('review-angles')) { loadReviewAngles(); } }); }
+    const peopleForm = document.getElementById('peopleForm');
+    if (peopleForm) { peopleForm.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('people-form')) { loadPeopleForm(); } }); }
     const mlExternalFactors = document.getElementById('mlExternalFactors');
     if (mlExternalFactors) { mlExternalFactors.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('ml-external-factors')) { loadMlExternalFactors(); } }); }
     const mlPriceAnalysis = document.getElementById('mlPriceAnalysis');
@@ -1135,6 +1158,18 @@ function loadMlSoleLeader() {
         .catch(err => { container.innerHTML = '<div class="card-body text-danger">Error loading ML sole leader analysis. Please try again.</div>'; console.error(err); });
 }
 
+function loadReviewAngles() {
+    const container = document.getElementById('reviewAngles');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading review angles...</p></div>';
+    fetch(`/api/data/review-angles?${filterParams}`)
+        .then(response => response.json())
+        .then(data => { if (data.error) throw new Error(data.error); DataShared.renderReviewAngles(container, data); loadedSections.add('review-angles'); })
+        .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>'; console.error('Error:', error); });
+}
+function loadPeopleForm() {
+    DataShared.initPeopleForm(document.getElementById('peopleForm'));
+    loadedSections.add('people-form');
+}
 function loadMlComponentAnalysis() {
     const container = document.getElementById('mlComponentAnalysis');
     container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading ML component analysis...</p></div>';
