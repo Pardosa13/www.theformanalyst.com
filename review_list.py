@@ -364,6 +364,8 @@ def history(session, race_ids, source='analyzer', stake=10.0):
         # Betfair win price after commission, in units of one stake.
         betfair = sorted(((i['bsp'] - 1) * (1 - COMMISSION) if i['won'] else -1.0) for i in found if i['bsp'])
         without3 = betfair[:-3] if len(betfair) > 3 else []
+        # The starting price on those same bets, so the two prices can be compared fairly.
+        sp_same = [(i['sp'] - 1) if i['won'] else -1.0 for i in found if i['bsp']]
         placed = sum(1 for i in found if i['placed'])
         settled = [p for p in (place_bet._chart_profit(i) for i in found) if p is not None]
         place_profit = sum(p[0] for p in settled) * stake / place_bet.STAKE
@@ -376,6 +378,7 @@ def history(session, race_ids, source='analyzer', stake=10.0):
             'betfair_bets': len(betfair),
             'betfair_roi': round(100.0 * sum(betfair) / len(betfair), 1) if betfair else None,
             'betfair_roi_without_top3': round(100.0 * sum(without3) / len(without3), 1) if without3 else None,
+            'sp_roi_on_betfair_bets': round(100.0 * sum(sp_same) / len(sp_same), 1) if sp_same else None,
             'placed': placed,
             'place_rate': round(100.0 * placed / bets, 1) if bets else 0.0,
             'place_bets': len(settled),

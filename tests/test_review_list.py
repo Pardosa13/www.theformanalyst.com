@@ -122,6 +122,7 @@ def test_review_angles_history_counts_win_and_place_bets():
                 top, ran, light = got['top_pick_3_6'], got['ran_3_2'], got['weight_below']
                 assert (top['bets'], top['wins'], top['win_profit'], top['win_roi']) == (1, 1, 30.0, 300.0)
                 assert top['betfair_roi'] == 368.0                        # (5 - 1) * 0.92
+                assert top['sp_roi_on_betfair_bets'] == 300.0            # same bet at the starting price
                 assert (top['placed'], top['place_waiting']) == (1, 1)   # placed, no place price yet
                 assert (ran['bets'], ran['wins'], ran['win_roi'], ran['placed']) == (1, 0, -100.0, 1)
                 assert (light['bets'], light['placed'], light['place_bets'], light['place_roi']) == (1, 0, 1, -100.0)
