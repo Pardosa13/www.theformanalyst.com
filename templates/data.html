@@ -501,6 +501,15 @@
 </div>
 
 <div class="section-card">
+  <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#reviewAngles" aria-expanded="false">
+    <h5>🔎 Review Angles — Win &amp; Place</h5><i class="bi bi-chevron-down"></i>
+  </div>
+  <div id="reviewAngles" class="collapse">
+    <div class="card-body text-center"><p class="text-muted">Click to expand and load review angles...</p></div>
+  </div>
+</div>
+
+<div class="section-card">
   <div class="section-card-header" data-bs-toggle="collapse" data-bs-target="#externalFactors" aria-expanded="false">
     <h5>🏇 External Factors</h5><i class="bi bi-chevron-down"></i>
   </div>
@@ -759,6 +768,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (scoreAnalysis) { scoreAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('score-analysis')) { loadScoreAnalysis(); } }); }
     const componentAnalysis = document.getElementById('componentAnalysis');
     if (componentAnalysis) { componentAnalysis.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('component-analysis')) { loadComponentAnalysis(); } }); }
+    const reviewAngles = document.getElementById('reviewAngles');
+    if (reviewAngles) { reviewAngles.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('review-angles')) { loadReviewAngles(); } }); }
     const externalFactors = document.getElementById('externalFactors');
     if (externalFactors) { externalFactors.addEventListener('show.bs.collapse', function() { if (!loadedSections.has('external-factors')) { loadExternalFactors(); } }); }
     const priceAnalysis = document.getElementById('priceAnalysis');
@@ -849,6 +860,47 @@ function loadComponentAnalysis() {
         .then(response => response.json())
         .then(data => { renderComponentAnalysis(data); loadedSections.add('component-analysis'); })
         .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>'; console.error('Error:', error); });
+}
+function loadReviewAngles() {
+    const container = document.getElementById('reviewAngles');
+    container.innerHTML = '<div class="card-body text-center"><div class="spinner-border" role="status"></div><p class="mt-2">Loading review angles...</p></div>';
+    fetch(`/api/data/review-angles?${filterParams}`)
+        .then(response => response.json())
+        .then(data => { if (data.error) throw new Error(data.error); renderReviewAngles(data); loadedSections.add('review-angles'); })
+        .catch(error => { container.innerHTML = '<div class="card-body text-danger">Error loading data. Please try again.</div>'; console.error('Error:', error); });
+}
+function renderReviewAngles(data) {
+    const container = document.getElementById('reviewAngles');
+    const money = v => (v < 0 ? '-$' : '+$') + Math.abs(v).toFixed(2);
+    const pct = v => v === null || v === undefined ? '—' : (v > 0 ? '+' : '') + v.toFixed(1) + '%';
+    const cls = v => v === null || v === undefined ? '' : (v >= 0 ? 'text-success' : 'text-danger');
+    let html = '<div class="card-body">';
+    html += `<p class="text-muted mb-3" style="font-size:12px">$10 on every runner that fit each angle, across ${data.races} races. One $10 win bet and one $10 place bet.</p>`;
+    html += '<div class="table-responsive"><table class="table table-hover table-sm"><thead class="table-light"><tr>';
+    html += '<th>Angle</th><th class="text-center">Bets</th>';
+    html += '<th class="text-center">Wins</th><th class="text-center">Win %</th><th class="text-center">Win Profit</th><th class="text-center">Win ROI</th>';
+    html += '<th class="text-center">Placed</th><th class="text-center">Place %</th><th class="text-center">Place Profit</th><th class="text-center">Place ROI</th>';
+    html += '</tr></thead><tbody>';
+    let notes = '';
+    for (const a of data.angles) {
+        html += `<tr><td><strong>${a.name}</strong></td><td class="text-center">${a.bets}</td>`;
+        html += `<td class="text-center">${a.wins}</td><td class="text-center">${a.win_rate.toFixed(1)}%</td>`;
+        html += `<td class="text-center ${a.bets ? cls(a.win_profit) : ''}">${a.bets ? money(a.win_profit) : '—'}</td><td class="text-center ${cls(a.win_roi)}"><strong>${pct(a.win_roi)}</strong></td>`;
+        html += `<td class="text-center">${a.placed}</td><td class="text-center">${a.place_rate.toFixed(1)}%</td>`;
+        html += `<td class="text-center ${a.place_bets ? cls(a.place_profit) : ''}">${a.place_bets ? money(a.place_profit) : '—'}</td><td class="text-center ${cls(a.place_roi)}"><strong>${pct(a.place_roi)}</strong></td></tr>`;
+        if (a.place_waiting || a.place_estimated) {
+            notes += `<li><strong>${a.name}</strong>: ${a.place_estimated} place bets use the Ladbrokes place price for now. ${a.place_waiting} placed with no price yet and are left out of place profit.</li>`;
+        }
+    }
+    html += '</tbody></table></div>';
+    html += '<div class="mt-3 p-3 bg-light rounded"><h6>📖 How to read this:</h6><ul class="mb-0 small">';
+    html += '<li><strong>Win</strong> — paid at the starting price.</li>';
+    html += '<li><strong>Place</strong> — paid at the Betfair place price, less 8% commission. Top 3 in fields of 8+, top 2 in fields of 5-7.</li>';
+    html += `<li><strong>Top pick at $3-$6</strong> — uses the last Ladbrokes win price before the jump. ${data.top_pick_priced_at_sp} of these had no saved Ladbrokes price, so the starting price was used.</li>`;
+    html += notes;
+    html += '<li>Uses the filters at the top of the page.</li>';
+    html += '</ul></div></div>';
+    container.innerHTML = html;
 }
 function loadExternalFactors() {
     const container = document.getElementById('externalFactors');
