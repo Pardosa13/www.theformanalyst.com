@@ -1,8 +1,9 @@
-"""Review list: today's runners that fit the angles closest to break even.
+"""Review angles: the angles that came closest to break even. Not bets.
 
-Not bets. Nothing in horse racing has made money here over time. These are
-the angles that came closest, for a person to check against race replays
-before deciding anything.
+Nothing in horse racing has made money here over time. These are the angles
+that came closest. They were taken off the Best Bets page on 14 Nov 2026:
+on every saved race all three lose, to win and for a place. Their running
+record still shows on the Data page (history(), /api/data/review-angles).
 
 Found by audit/tasks/closest.py on 72,884 runners (Feb-Oct 2026), settled at
 Betfair prices (8% commission). Each angle was close to break even in
@@ -55,8 +56,6 @@ def matching_angles(components, analyzer_rank=None, price=None, is_favourite=Fal
     return keys
 
 
-def angles_for_page():
-    return [a._asdict() for a in ANGLES]
 
 
 _HISTORY_SQL = """
