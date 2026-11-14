@@ -346,12 +346,15 @@ def settled_picks(session, date_from=None, date_to=None):
     return out
 
 
-def ladbrokes_place_prices(session, runners):
+def ladbrokes_place_prices(session, runners, column='place_odds'):
     """{horse_id: last Ladbrokes fixed place price saved before the jump}.
 
     `runners` are dicts with race_id, horse_id and start (start_time_utc or
-    None). Runners with no saved place price are left out.
+    None). Runners with no saved place price are left out. column='odds'
+    gives the fixed win price instead.
     """
+    if column not in ('place_odds', 'odds'):
+        raise ValueError(column)
     runners = list(runners)
     if not runners:
         return {}
@@ -369,11 +372,11 @@ def ladbrokes_place_prices(session, runners):
             races = ', '.join(f':r{i}' for i in range(len(chunk)))
             horses = ', '.join(f':h{i}' for i in range(len(chunk)))
             rows = session.execute(text(
-                f'SELECT horse_id, place_odds, captured_at FROM live_odds_snapshots '
-                f'WHERE race_id IN ({races}) AND horse_id IN ({horses}) AND place_odds > 1'),
+                f'SELECT horse_id, {column} AS price, captured_at FROM live_odds_snapshots '
+                f'WHERE race_id IN ({races}) AND horse_id IN ({horses}) AND {column} > 1'),
                 params).mappings()
             for row in rows:
-                snaps.setdefault(row['horse_id'], []).append((row['captured_at'], row['place_odds']))
+                snaps.setdefault(row['horse_id'], []).append((row['captured_at'], row['price']))
     except Exception:
         # No odds table (e.g. a fresh database): no stand-in prices.
         session.rollback()

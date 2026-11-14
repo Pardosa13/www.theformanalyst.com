@@ -7962,6 +7962,42 @@ def api_component_analysis():
     payload['last_updated'] = row[1].isoformat() if row[1] else None
     return jsonify(payload)
 
+@app.route("/api/data/review-angles")
+@login_required
+def api_review_angles():
+    """Win and place record of the review-list angles (review_list.ANGLES)."""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    import review_list
+
+    track_filter = request.args.get('track', '')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    limit_param = request.args.get('limit', '200')
+    try:
+        race_ids = None
+        if limit_param != 'all':
+            limit = int(limit_param) if str(limit_param).isdigit() else 200
+            q = db.session.query(Race.id, Meeting.uploaded_at).join(
+                Meeting, Race.meeting_id == Meeting.id
+            ).join(Horse, Horse.race_id == Race.id
+            ).join(Result, Result.horse_id == Horse.id
+            ).filter(Result.finish_position > 0, Race.results_incomplete.isnot(True))
+            if track_filter:
+                q = q.filter(Meeting.meeting_name.ilike(f'%{track_filter}%'))
+            if date_from:
+                q = q.filter(Meeting.uploaded_at >= date_from)
+            if date_to:
+                q = q.filter(Meeting.uploaded_at <= date_to)
+            race_ids = [r[0] for r in q.distinct().order_by(
+                Meeting.uploaded_at.desc(), Race.id.desc()).limit(limit).all()]
+        return jsonify(review_list.history(db.session, track_filter, date_from, date_to, race_ids))
+    except Exception as e:
+        db.session.rollback()
+        logger.error("Review angles error: %s", e, exc_info=True)
+        return jsonify({'error': 'Internal server error'}), 500
+
+
 @app.route("/api/data/external-factors")
 @login_required
 def api_external_factors():
