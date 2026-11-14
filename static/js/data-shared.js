@@ -16,7 +16,9 @@
       html += `<td class="text-center">${a.bets}</td><td class="text-center">${a.wins}</td><td class="text-center">${a.win_rate.toFixed(1)}%</td>`;
       html += `<td class="text-center ${a.bets ? cls(a.win_profit) : ''}">${a.bets ? money(a.win_profit) : '—'}</td>`;
       html += `<td class="text-center ${cls(a.win_roi)}"><strong>${pct(a.win_roi)}</strong></td>`;
-      html += `<td class="text-center ${cls(a.betfair_roi)}"><strong>${pct(a.betfair_roi)}</strong></td>`;
+      html += `<td class="text-center ${cls(a.betfair_roi)}"><strong>${pct(a.betfair_roi)}</strong>`;
+      if (a.betfair_bets) html += `<br><span class="text-muted" style="font-size:11px;white-space:nowrap">${a.betfair_bets} of ${a.bets} bets<br>SP on these: ${pct(a.sp_roi_on_betfair_bets)}</span>`;
+      html += '</td>';
       html += `<td class="text-center ${cls(a.betfair_roi_without_top3)}">${pct(a.betfair_roi_without_top3)}</td>`;
       html += `<td class="text-center">${a.placed}</td><td class="text-center">${a.place_rate.toFixed(1)}%</td>`;
       html += `<td class="text-center ${a.place_bets ? cls(a.place_profit) : ''}">${a.place_bets ? money(a.place_profit) : '—'}</td>`;
@@ -48,7 +50,8 @@
       data.angles.filter((a) => a.group === 'long'));
     html += '<div class="mt-3 p-3 bg-light rounded"><h6>📖 How to read this:</h6><ul class="mb-0 small">';
     html += '<li><strong>Win ROI (SP)</strong> — paid at the starting price. The starting price is poor on long shots, so most angles look bad here.</li>';
-    html += '<li><strong>Win ROI (Betfair)</strong> — paid at the Betfair starting price, less 8% commission. Only races with a Betfair price count.</li>';
+    html += '<li><strong>Win ROI (Betfair)</strong> — paid at the Betfair starting price, less 8% commission. Betfair prices arrive once a month, so the newest races are missing. The small print shows how many bets it covers and what the starting price paid on those same bets.</li>';
+    html += '<li><strong>Why the two differ so much</strong> — on your saved results, winners paid about 20% more at Betfair than at the starting price, and two to three times more on big long shots. Backing every runner lost about 27% at the starting price and about 8% at Betfair. One $100+ winner can swing a small angle by 30 points or more.</li>';
     html += '<li><strong>Betfair, no top 3</strong> — the same, with the three biggest winners taken out. If this is far lower, a few lucky results carry the angle.</li>';
     html += '<li><strong>Place</strong> — paid at the Betfair place price, less 8% commission. Top 3 in fields of 8+, top 2 in fields of 5-7.</li>';
     html += '<li><strong>Earlier check</strong> — what a past check found at Betfair prices (Feb-Jun / Jul-Oct). Picked with hindsight, so trust the live columns more.</li>';
