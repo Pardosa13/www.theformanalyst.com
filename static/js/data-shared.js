@@ -10,17 +10,21 @@
 
   // ── Review Angles ────────────────────────────────────────────────────
   function angleRows(angles) {
+    const edge = 'border-left:2px solid rgba(128,128,128,0.35)';
     let html = '';
     for (const a of angles) {
-      html += `<tr><td><strong>${esc(a.name)}</strong>${a.audit ? `<br><span class="text-muted" style="font-size:11px">Earlier check: ${esc(a.audit)}</span>` : ''}</td>`;
-      html += `<td class="text-center">${a.bets}</td><td class="text-center">${a.wins}</td><td class="text-center">${a.win_rate.toFixed(1)}%</td>`;
+      html += `<tr><td style="min-width:190px"><strong>${esc(a.name)}</strong></td>`;
+      // All bets, at the starting price
+      html += `<td class="text-center" style="${edge}">${a.bets}</td><td class="text-center">${a.wins}</td><td class="text-center">${a.win_rate.toFixed(1)}%</td>`;
       html += `<td class="text-center ${a.bets ? cls(a.win_profit) : ''}">${a.bets ? money(a.win_profit) : '—'}</td>`;
       html += `<td class="text-center ${cls(a.win_roi)}"><strong>${pct(a.win_roi)}</strong></td>`;
-      html += `<td class="text-center ${cls(a.betfair_roi)}"><strong>${pct(a.betfair_roi)}</strong>`;
-      if (a.betfair_bets) html += `<br><span class="text-muted" style="font-size:11px;white-space:nowrap">${a.betfair_bets} of ${a.bets} bets<br>SP on these: ${pct(a.sp_roi_on_betfair_bets)}</span>`;
-      html += '</td>';
+      // Only the bets that have a Betfair price
+      html += `<td class="text-center" style="${edge}">${a.betfair_bets}</td>`;
+      html += `<td class="text-center ${cls(a.sp_roi_on_betfair_bets)}">${pct(a.sp_roi_on_betfair_bets)}</td>`;
+      html += `<td class="text-center ${cls(a.betfair_roi)}"><strong>${pct(a.betfair_roi)}</strong></td>`;
       html += `<td class="text-center ${cls(a.betfair_roi_without_top3)}">${pct(a.betfair_roi_without_top3)}</td>`;
-      html += `<td class="text-center">${a.placed}</td><td class="text-center">${a.place_rate.toFixed(1)}%</td>`;
+      // Place bets
+      html += `<td class="text-center" style="${edge}">${a.placed}</td><td class="text-center">${a.place_rate.toFixed(1)}%</td>`;
       html += `<td class="text-center ${a.place_bets ? cls(a.place_profit) : ''}">${a.place_bets ? money(a.place_profit) : '—'}</td>`;
       html += `<td class="text-center ${cls(a.place_roi)}"><strong>${pct(a.place_roi)}</strong></td></tr>`;
     }
@@ -29,39 +33,59 @@
 
   function angleTable(title, blurb, angles) {
     if (!angles.length) return '';
+    const edge = 'border-left:2px solid rgba(128,128,128,0.35)';
+    const th = (label, first) => `<th class="text-center" style="white-space:nowrap${first ? ';' + edge : ''}">${label}</th>`;
     let html = `<h5 style="margin:20px 0 4px">${title}</h5><p class="text-muted mb-2" style="font-size:12px">${blurb}</p>`;
-    html += '<div class="table-responsive"><table class="table table-hover table-sm"><thead class="table-light"><tr>';
-    html += '<th>Angle</th><th class="text-center">Bets</th><th class="text-center">Wins</th><th class="text-center">Win %</th>';
-    html += '<th class="text-center">Win Profit (SP)</th><th class="text-center">Win ROI (SP)</th>';
-    html += '<th class="text-center">Win ROI (Betfair)</th><th class="text-center">Betfair, no top 3</th>';
-    html += '<th class="text-center">Placed</th><th class="text-center">Place %</th><th class="text-center">Place Profit</th><th class="text-center">Place ROI</th>';
+    html += '<div class="table-responsive"><table class="table table-hover table-sm"><thead class="table-light">';
+    html += '<tr><th></th>';
+    html += `<th colspan="5" class="text-center" style="${edge}">Win bets: every bet, at the starting price</th>`;
+    html += `<th colspan="4" class="text-center" style="${edge}">Win bets: only the bets that have a Betfair price</th>`;
+    html += `<th colspan="4" class="text-center" style="${edge}">Place bets</th></tr>`;
+    html += '<tr><th>Angle</th>';
+    html += th('Bets', true) + th('Winners') + th('Winners %') + th('Profit') + th('Return');
+    html += th('Bets', true) + th('Return at starting price') + th('Return at Betfair') + th('Betfair, 3 biggest winners removed');
+    html += th('Placed', true) + th('Placed %') + th('Profit') + th('Return');
     html += '</tr></thead><tbody>' + angleRows(angles) + '</tbody></table></div>';
     return html;
   }
 
   function renderReviewAngles(container, data) {
-    let waiting = 0, estimated = 0;
-    for (const a of data.angles) { waiting += a.place_waiting; estimated += a.place_estimated; }
+    let waiting = 0, estimated = 0, betfair = 0, bets = 0;
+    for (const a of data.angles) { waiting += a.place_waiting; estimated += a.place_estimated; betfair += a.betfair_bets; bets += a.bets; }
     let html = '<div class="card-body">';
     html += `<p class="text-muted mb-1" style="font-size:12px">$10 on every runner that fit each angle, across ${data.races} races. One $10 win bet and one $10 place bet. These are angles to watch, not bets.</p>`;
     html += angleTable('🎯 Shorter prices', 'Steadier. These sit closest to break even.',
       data.angles.filter((a) => a.group !== 'long'));
     html += angleTable('🎲 Long shots', 'Mostly $10 and longer. Few winners, big swings. Any profit has only shown at the Betfair price, and a few big winners carry it.',
       data.angles.filter((a) => a.group === 'long'));
+
     html += '<div class="mt-3 p-3 bg-light rounded"><h6>📖 How to read this:</h6><ul class="mb-0 small">';
-    html += '<li><strong>Win ROI (SP)</strong> — paid at the starting price. The starting price is poor on long shots, so most angles look bad here.</li>';
-    html += '<li><strong>Win ROI (Betfair)</strong> — paid at the Betfair starting price, less 8% commission. Betfair prices arrive once a month, so the newest races are missing. The small print shows how many bets it covers and what the starting price paid on those same bets.</li>';
-    html += '<li><strong>Why the two differ so much</strong> — on your saved results, winners paid about 20% more at Betfair than at the starting price, and two to three times more on big long shots. Backing every runner lost about 27% at the starting price and about 8% at Betfair. One $100+ winner can swing a small angle by 30 points or more.</li>';
-    html += '<li><strong>Betfair, no top 3</strong> — the same, with the three biggest winners taken out. If this is far lower, a few lucky results carry the angle.</li>';
-    html += '<li><strong>Place</strong> — paid at the Betfair place price, less 8% commission. Top 3 in fields of 8+, top 2 in fields of 5-7.</li>';
-    html += '<li><strong>Earlier check</strong> — what a past check found at Betfair prices (Feb-Jun / Jul-Oct). Picked with hindsight, so trust the live columns more.</li>';
-    html += `<li><strong>Price bands</strong> ($3-$6 and so on) use the last Ladbrokes win price before the jump. ${data.band_bets_at_sp} of ${data.band_bets} had no saved Ladbrokes price, so the starting price was used.</li>`;
+    html += '<li><strong>Return</strong> — profit or loss for every $100 bet. +5% means $5 profit per $100. -5% means $5 lost.</li>';
+    html += '<li><strong>The table has three parts.</strong> Read each part on its own. They do not all count the same bets.</li>';
+    html += '<li><strong>Part 1: every bet, at the starting price.</strong> All bets that fit the angle, paid at the official starting price.</li>';
+    html += `<li><strong>Part 2: only the bets that have a Betfair price.</strong> Betfair prices load once a month, so the newest races are not in this part yet${bets ? ` (${betfair} of ${bets} bets so far)` : ''}. It shows the same bets paid two ways: at the starting price and at the Betfair price (less 8% commission). That is the fair way to compare the two prices.</li>`;
+    html += '<li><strong>Why Part 1 and Part 2 can disagree.</strong> Part 1 includes the newest races and Part 2 does not. If the newest races went badly, Part 1 looks worse.</li>';
+    html += '<li><strong>Why Betfair pays more.</strong> On your saved results, winners paid about 20% more at Betfair than at the starting price, and two to three times more on big long shots.</li>';
+    html += '<li><strong>Betfair, 3 biggest winners removed</strong> — the Betfair return again, without the three biggest winners. If this is far lower, a few lucky results carry the angle. This is the number to trust most.</li>';
+    html += '<li><strong>Part 3: place bets.</strong> Paid at the Betfair place price, less 8% commission. A place is top 3 in races of 8 or more runners, top 2 in races of 5 to 7.</li>';
+    html += `<li><strong>Price ranges</strong> ($3-$6 and so on) use the last Ladbrokes win price before the race. ${data.band_bets_at_sp} of ${data.band_bets} had no saved Ladbrokes price, so the starting price was used.</li>`;
     html += '<li><strong>Favourite</strong> — the runner with the shortest starting price.</li>';
+    html += '<li><strong>Long-shot angles</strong> — the "two or more" row counts a runner that fits at least two of: 2-3kg less than the field average, settles at the back in a sprint, trainer out of form, low win rate at this track, final 200m rated average, won a photo finish last start, racing again within 7 days.</li>';
     if (waiting || estimated) {
       html += `<li>${estimated} place bets use the Ladbrokes place price for now. ${waiting} placed with no price yet and are left out of place profit.</li>`;
     }
     html += '<li>Uses the filters at the top of the page.</li>';
-    html += '</ul></div></div>';
+    html += '</ul></div>';
+
+    const checked = data.angles.filter((a) => a.audit);
+    if (checked.length) {
+      html += '<details class="mt-3"><summary style="cursor:pointer;font-weight:600">What an earlier check found for each angle</summary>';
+      html += '<p class="text-muted mt-2 mb-2" style="font-size:12px">From checks run in November 2026 on results up to October, at Betfair prices. These angles were picked after seeing those results, so the tables above are the fairer test.</p>';
+      html += '<ul class="small">';
+      for (const a of checked) html += `<li><strong>${esc(a.name)}</strong> — ${esc(a.audit)}</li>`;
+      html += '</ul></details>';
+    }
+    html += '</div>';
     container.innerHTML = html;
   }
 
@@ -69,8 +93,8 @@
   const KINDS = [['jockeys', '🏇 Jockeys'], ['trainers', '👔 Trainers'], ['combos', '🤝 Jockey + Trainer']];
   const COLUMNS = {
     name: ['Name', false], runs: ['Runs', true], wins: ['Wins', true], strike_rate: ['Strike %', true],
-    place_rate: ['Top 3 %', true], roi: ['ROI', true], profit: ['Profit', true],
-    pf_sr: ['PF last 100', true], pf_ae: ['PF A/E', true], upcoming: ['Coming up', true],
+    place_rate: ['Top 3 %', true], roi: ['Return', true], profit: ['Profit', true],
+    pf_sr: ['PuntingForm last 100', true], pf_ae: ['PuntingForm vs market', true], upcoming: ['Coming up', true],
   };
 
   function initPeopleForm(container) {
@@ -146,9 +170,9 @@
       html += '<div class="mt-3 p-3 bg-light rounded"><h6>📖 How to read this:</h6><ul class="mb-0 small">';
       html += `<li>Listed with at least ${d.min_runs.jockeys} rides (jockeys), ${d.min_runs.trainers} runners (trainers) or ${d.min_runs.combos} runs together (pairs) in the period.</li>`;
       html += '<li><strong>Strike %</strong> — how often they won. <strong>Top 3 %</strong> — how often they ran 1st, 2nd or 3rd.</li>';
-      html += '<li><strong>ROI</strong> — return from $10 on every one of their runners at the starting price. Tap any heading to sort by it.</li>';
-      html += '<li><strong>PF last 100</strong> — PuntingForm\'s own count of wins in their last 100 runs.</li>';
-      html += '<li><strong>PF A/E</strong> — PuntingForm wins against what the market expected. Above 1.00 means winning more than their prices say.</li>';
+      html += '<li><strong>Return</strong> — profit or loss per $100 bet, backing every one of their runners at the starting price. <strong>Profit</strong> is the same in dollars at $10 a bet. Tap any heading to sort by it.</li>';
+      html += '<li><strong>PuntingForm last 100</strong> — PuntingForm\'s own count: wins out of their last 100 runs.</li>';
+      html += '<li><strong>PuntingForm vs market</strong> — their last 100 wins against what their prices predicted. 1.00 is exactly as expected. Above 1.00 means winning more often than the prices say.</li>';
       html += '<li><strong>Coming up</strong> — runners they have in meetings loaded but not yet run, and where.</li>';
       html += '<li>A small number of runs can look great by luck. Past checks found hot jockeys and trainers did not keep it up, so use this as a starting point, not a tip.</li>';
       html += '</ul></div></div>';

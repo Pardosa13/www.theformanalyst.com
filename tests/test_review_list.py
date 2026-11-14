@@ -133,6 +133,8 @@ def test_review_angles_history_counts_win_and_place_bets():
             ml = client.get('/api/data/review-angles?source=ml').get_json()
             assert ml['races'] == 0 and ml['source'] == 'ml'
             assert ml['angles'][0]['name'] == 'ML top pick at $3-$6'
+            # The earlier-check note on the ML page is about the ML pick, not the analyzer's.
+            assert ml['angles'][0]['audit'] == review_list.BY_KEY['top_pick_3_6'].audit_ml
         finally:
             db.session.remove()
             db.drop_all()
