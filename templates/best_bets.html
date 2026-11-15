@@ -587,7 +587,7 @@
 <!-- Page header -->
 <div class="bets-header">
   <h2>🎯 Best Bets &mdash; Favourites The ML Also Picks</h2>
-  <p>A short-list to <strong>check against the replays</strong>, not sure things. Each pick is the <strong>favourite</strong>, backed by the ML model or by three or more ratings.
+  <p>A short-list to <strong>check against the replays</strong>, not sure things. Each pick is the <strong>favourite</strong> and the <strong>ML model's top pick</strong>, where at most one other rating agrees.
      They win and place often, at short prices. In testing they sat close to break even at <strong>Betfair prices</strong> and lost at the starting price, so the price you take matters.
      The old place rules were taken off this page on 15 Nov 2026; their record is on the ML Data page.</p>
 </div>
@@ -595,18 +595,18 @@
 <!-- Stat tiles -->
 <div class="stat-row">
   <div class="stat-tile s-primary"><h5>Picks</h5><h2>{{ total_bets }}</h2></div>
-  <div class="stat-tile s-info"><h5>To Avoid</h5><h2>{{ avoid|length }}</h2></div>
+  <div class="stat-tile s-info"><h5>Rules</h5><h2>{{ rules|length }}</h2></div>
   <div class="stat-tile s-success"><h5>Horses Scanned</h5><h2>{{ total_horses_scanned }}</h2></div>
   <div class="stat-tile s-warning"><h5>Time Window</h5><h2>{{ hours_back }}h</h2></div>
 </div>
 
-<!-- Every rule: what the 15 Nov 2026 sweep found, and its live record (best_bet_rules.py). -->
+<!-- The rule: what the 15 Nov 2026 sweep found, and its live record (best_bet_rules.py). -->
 <div class="filter-card" style="margin-bottom:24px">
-  <h5 style="margin:0 0 6px;font-weight:700">📒 The Rules &amp; How They Tested</h5>
+  <h5 style="margin:0 0 6px;font-weight:700">📒 The Rule &amp; How It Tested</h5>
   <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">
-    &ldquo;Tested&rdquo; is every runner that fit the rule from February to November 2026, paid at Betfair prices after 8% commission. Those rules were picked after seeing the results, so they flatter a little.
+    &ldquo;Tested&rdquo; is every runner that fit the rule from February to November 2026, paid at Betfair prices after 8% commission. The rule was picked after seeing the results, so that flatters it a little.
     &ldquo;Live&rdquo; counts only picks shown on this page before the jump, from 15 Nov 2026, as win bets &mdash; that is the real test.
-    The favourite and the price come from live Ladbrokes odds, so a pick can come and go as the market moves.
+    The favourite comes from live Ladbrokes odds, so a pick can come and go as the market moves.
     Ratings are the analyzer, PFAI, the time rating and the class rating.
   </p>
   <div class="record-wrap">
@@ -668,30 +668,6 @@
 <div class="no-bets-alert" id="noRulePicks" style="display:none">
   <h4>No Picks For These Rules</h4>
   <p>Tap a rule above to show its picks.</p>
-</div>
-{% endif %}
-
-<!-- Favourites to be wary of: never selectable, never posted. -->
-{% if avoid %}
-<div class="filter-card" style="margin-bottom:24px;border-color:#ef4444">
-  <h5 style="margin:0 0 6px;font-weight:700">⛔ Favourites To Be Wary Of ({{ avoid|length }})</h5>
-  <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">{{ avoid_note }} These are not picks and cannot be posted.</p>
-  <div class="record-wrap">
-    <table class="record-table">
-      <thead><tr><th>Meeting</th><th>Race</th><th>Horse</th><th>On top of</th><th>Ladbrokes win</th></tr></thead>
-      <tbody>
-      {% for a in avoid %}
-        <tr>
-          <td>{{ a.meeting_name|replace('_', ' ') }}</td>
-          <td>R{{ a.race_number }}</td>
-          <td>{{ a.horse_name }}</td>
-          <td class="muted" style="white-space:normal">{{ a.on_top|join(' · ') }}</td>
-          <td>{% if a.ladbrokes_fixed_win_price %}${{ '%.2f'|format(a.ladbrokes_fixed_win_price) }}{% else %}&ndash;{% endif %}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
 </div>
 {% endif %}
 

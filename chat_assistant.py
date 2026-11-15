@@ -268,9 +268,8 @@ BACKTEST_TOOL = _tool(
     'component ROI, momentum analysis and the grid-searched models.', {})
 
 BEST_BETS_TOOL = _tool(
-    'get_best_bets', 'Admin only. Today\'s Best Bets: favourites the ML model also picks, or that three or '
-    'more ratings back. Each says whether a WIN or a PLACE bet tested closer to break even. A short-list to '
-    'check against replays, not proven winners.', {
+    'get_best_bets', 'Admin only. Today\'s Best Bets: favourites the ML model also picks, where at most one '
+    'other rating agrees. Win bets. A short-list to check against replays, not proven winners.', {
         'date': {'type': 'string', 'description': 'YYYY-MM-DD. Default today.'},
     })
 
@@ -751,14 +750,13 @@ def get_best_bets(date=None, today=None):
                         'rules': [rule.name for rule in rules],
                     })
     return {'date': day.isoformat() if day else None,
-            'rule': ('Favourites the ML model also picks, or that three or more ratings back. A short-list to check '
-                     'against replays, not proven winners. Picks are recorded when the Best Bets page is opened '
-                     'before the race, so a day nobody opened the page shows none.'),
+            'rule': ('Favourites the ML model also picks, where at most one other rating agrees. A short-list to '
+                     'check against replays, not proven winners. Picks are recorded when the Best Bets page is '
+                     'opened before the race, so a day nobody opened the page shows none.'),
             'rules': [{'name': rule.name, 'suggested_bet': rule.bet, 'tested_bets': rule.bets,
                        'won_pct': rule.win_pct, 'placed_pct': rule.place_pct,
                        'win_return_pct_betfair': rule.win_roi, 'place_return_pct_betfair': rule.place_roi}
                       for rule in best_bet_rules.RULES],
-            'to_avoid': best_bet_rules.AVOID_NOTE,
             'picks': picks}
 
 

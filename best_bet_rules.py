@@ -1,10 +1,10 @@
-"""Best Bets rules from 15 Nov 2026: favourites the ML model also picks.
+"""Best Bets rule from 15 Nov 2026: a favourite the ML model also picks.
 
-These replace the place rules on the Best Bets page (place_bet.py still keeps
-the place rules' record for the ML Data page). They are a short-list for a
-person to check against race replays, not proven winners.
+This replaced the place rules on the Best Bets page (place_bet.py still keeps
+the place rules' record for the ML Data page). It is a short-list for a
+person to check against race replays, not a proven winner.
 
-Where they came from: a read-only sweep on 15 Nov 2026 of every mix of the
+Where it came from: a read-only sweep on 15 Nov 2026 of every mix of the
 favourite and five top picks (analyzer, ML, PFAI, time rating, weight-class
 rating) over about 77,000 runners, Feb-Nov 2026, at Betfair prices after 8%
 commission. What it found:
@@ -13,16 +13,16 @@ commission. What it found:
   non-ML ratings -3.4%, three or more -8.1%, all four -12.0%. When everything
   lines up the price is already too short.
 - The ML model is the exception. A favourite the ML also picks about broke
-  even (+0.7% on 1,889 bets); a favourite backed by three or more ratings
-  that the ML did NOT pick lost 27.1% (269 bets).
-- Nothing here is a proven profit. Every rule loses at the starting price.
+  even (+0.7% on 1,889 bets), and did best when the other ratings mostly
+  did NOT agree (+4.0% on 1,061 bets): the one rule kept.
+- Nothing here is a proven profit. The rule loses at the starting price.
   Before 16 Oct 2026 the ML scores were worked out after the race, so the
   ML figures may flatter it.
 
-Each rule needs the live market (who is favourite, and the price), so picks
-are made and recorded when the Best Bets page is opened before the jump.
-Route keys start with "agree_": betfair_check.py counts every route that
-does not start with "place" in the win record.
+The rule needs the live market (who is favourite), so picks are made and
+recorded when the Best Bets page is opened before the jump. Route keys
+start with "agree_": betfair_check.py counts every route that does not
+start with "place" in the win record.
 """
 import json
 from dataclasses import dataclass
@@ -47,25 +47,15 @@ RULES = (
          'Favourite + ML top pick, and at most one other rating has it on top',
          'ML + favourite, quiet', 'win', 1061, 38.2, 65.3, 4.0, -5.1,
          'In profit in both halves of the year (+9.2%, +3.6%). The best win result in the sweep.'),
-    Rule('agree_ml_pfai_fav',
-         'Favourite + ML top pick + PFAI top pick',
-         'ML + PFAI + favourite', 'place', 839, 41.7, 71.3, -3.2, -3.8,
-         'On races the ML scored before the jump (351 bets): 45% won, 76% placed, place bets +7.1%.'),
-    Rule('agree_fav_3of4_mid',
-         'Favourite with 3 or more ratings on top, in a race of 8 to 11 runners',
-         '3+ ratings, 8-11 runners', 'place', 877, 39.5, 73.1, -2.7, -0.4,
-         'Steady in both halves for the place (-1.5%, +0.7%). Not picked when the ML prefers another horse.'),
-    Rule('agree_fav_3of4_odds_on',
-         'Favourite under $2 with 3 or more ratings on top',
-         '3+ ratings, under $2', 'win', 436, 56.9, 82.0, -4.4, -3.6,
-         'The highest strike rate, at very short prices. Not picked when the ML prefers another horse.'),
 )
 RULES_BY_KEY = {rule.key: rule for rule in RULES}
 ROUTE_KEYS = tuple(rule.key for rule in RULES)
 
-# A favourite backed by three or more ratings that the ML does not pick.
-AVOID_NOTE = ('Favourite with 3 or more ratings on top, but the ML picks another horse. '
-              'In the sweep these won 27% of the time and lost 27.1% (269 bets), in both halves of the year.')
+# Rules that made picks for a short time and were taken off the page. Their
+# keys stay reserved so an old saved route is never mistaken for a new rule.
+#   agree_ml_pfai_fav       favourite + ML + PFAI (15 Nov 2026 only)
+#   agree_fav_3of4_mid      favourite, 3+ ratings, 8-11 runners (15 Nov 2026 only)
+#   agree_fav_3of4_odds_on  favourite under $2, 3+ ratings (15 Nov 2026 only)
 
 
 def _load(value):
@@ -145,25 +135,17 @@ def race_signals(race):
 
 
 def rules_for(signals, is_favourite, price, starters, has_ratings=True):
-    """Rules a runner fits, in RULES order. signals: one entry of race_signals()."""
+    """Rules a runner fits, in RULES order. signals: one entry of race_signals().
+
+    price and starters are not used by the one rule left; they stay so a
+    rule that needs them can be added without touching the callers.
+    """
     if not signals or not is_favourite or not has_ratings:
         return []
     keys = []
     if signals['ml'] and signals['n4'] <= 1:
         keys.append('agree_ml_fav_quiet')
-    if signals['ml'] and signals['pf']:
-        keys.append('agree_ml_pfai_fav')
-    if signals['n4'] >= 3 and not signals['ml_other']:
-        if starters is not None and 8 <= starters <= 11:
-            keys.append('agree_fav_3of4_mid')
-        if price is not None and price < 2.0:
-            keys.append('agree_fav_3of4_odds_on')
     return [RULES_BY_KEY[key] for key in keys]
-
-
-def to_avoid(signals, is_favourite, has_ratings=True):
-    """True for a favourite three or more ratings back that the ML does not pick."""
-    return bool(signals and is_favourite and has_ratings and signals['n4'] >= 3 and signals['ml_other'])
 
 
 def recorded_rules(routes):

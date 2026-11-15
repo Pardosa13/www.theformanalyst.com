@@ -53,8 +53,8 @@ def test_nothing_is_recorded_without_the_live_market():
 
             # Routes only grow, never duplicate, when the page records them.
             appmod.merge_best_bet_tracking(c.prediction, ['agree_ml_fav_quiet'], {})
-            appmod.merge_best_bet_tracking(c.prediction, ['agree_ml_fav_quiet', 'agree_ml_pfai_fav'], {})
-            assert c.prediction.best_bet_routes == 'agree_ml_fav_quiet,agree_ml_pfai_fav'
+            appmod.merge_best_bet_tracking(c.prediction, ['agree_ml_fav_quiet', 'place_32_tdnowin'], {})
+            assert c.prediction.best_bet_routes == 'agree_ml_fav_quiet,place_32_tdnowin'
             assert c.prediction.best_bet_qualified_at is not None
 
             for gone in ('RETIRED_BEST_BET_ROUTES', 'PROVEN_EDGE_COMPONENTS', 'MAIDEN_AGREEMENT_BADGE',
