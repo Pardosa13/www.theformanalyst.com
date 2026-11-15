@@ -61,13 +61,17 @@ def test_value_edge_buckets_cover_every_edge_level():
     assert threshold in [lower for _k, _l, lower, _u in buckets]
 
 
-def test_best_bets_has_no_favourite_route():
-    """The favourite route was removed on 16 Oct 2026 (-10.5% over all history,
-    the same as backing every favourite)."""
+def test_best_bets_has_no_plain_favourite_route():
+    """The plain favourite route was removed on 16 Oct 2026 (-10.5% over all
+    history, the same as backing every favourite). The 15 Nov 2026 rules only
+    pick a favourite the ML also picks, or that three or more ratings back."""
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
     assert 'favourite_agreement' not in source
     assert "('favourite'," not in source
+    import best_bet_rules
+    plain = {'a': False, 'ml': False, 'pf': False, 't': False, 'w': False, 'n4': 0, 'ml_other': False}
+    assert best_bet_rules.rules_for(plain, True, 2.5, 10) == []
 
 
 def test_is_maiden_race_matches_maiden_and_mdn():
@@ -79,12 +83,13 @@ def test_is_maiden_race_matches_maiden_and_mdn():
     assert not is_maiden_race(None)
 
 
-def test_best_bets_shows_only_place_rules():
-    """28 Oct 2026: Best Bets is place bets only. No maiden, value, Proven Edge
-    or 3-way agreement routes."""
+def test_best_bets_shows_only_the_live_market_rules():
+    """28 Oct 2026: no maiden, value, Proven Edge or 3-way agreement routes.
+    15 Nov 2026: the place rules came off too; best_bet_rules.RULES pick."""
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
-    assert 'place_bet.matching_rules(' in source
+    assert 'best_bet_rules.rules_for(' in source
+    assert 'place_bet.matching_rules(' not in source
     for gone in ('maiden_agreement', 'value_top_pick', 'proven_edge', 'signal_agreement',
                  'VALUE_EDGE_PROMOTE_TO_NORMAL_THRESHOLD_PCT'):
         assert gone not in source

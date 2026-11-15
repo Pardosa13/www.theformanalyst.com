@@ -1,4 +1,5 @@
-"""Place rules: the only Best Bets. Each is settled on the place, never the win.
+"""Place rules. Each is settled on the place, never the win. They were the
+Best Bets until 15 Nov 2026 (see best_bet_rules.py); their record stays.
 
 Notes below are the exact lines the analyzer writes (analyzer.js), so these
 tests also prove the parser turns them into the component names the rules
@@ -121,7 +122,7 @@ def _runner(race, name, csv_data, notes, fin=None, place_bsp=None):
     return horse
 
 
-def test_best_bets_routes_are_only_place_rules():
+def test_place_rules_no_longer_make_best_bets():
     with appmod.app.app_context():
         db.create_all()
         try:
@@ -132,17 +133,19 @@ def test_best_bets_routes_are_only_place_rules():
             db.session.commit()
             live_rule = _runner(race, 'Live', {'horse last10': '3x52'}, PLACES_32 + '\n' + TD_NO_WINS)
             db.session.commit()
-            # 10 Nov 2026: only the live rule makes picks; retired rules record nothing.
+            # 15 Nov 2026: the place rules came off Best Bets, the live one included.
             assert appmod.best_bet_routes_for_horse(yes, race)[0] == []
             assert appmod.best_bet_routes_for_horse(other, race)[0] == []
             assert appmod.best_bet_routes_for_horse(none, race)[0] == []
-            assert appmod.best_bet_routes_for_horse(live_rule, race)[0] == ['place_32_tdnowin']
+            assert appmod.best_bet_routes_for_horse(live_rule, race)[0] == []
+            # The rule itself still matches, so its record keeps counting.
+            assert [rule.key for rule in place_bet.matching_rules(live_rule)] == ['place_32_tdnowin']
         finally:
             db.session.remove()
             db.drop_all()
 
 
-def test_daily_run_records_the_place_routes():
+def test_daily_run_no_longer_records_place_routes():
     with appmod.app.app_context():
         db.create_all()
         try:
@@ -152,8 +155,8 @@ def test_daily_run_records_the_place_routes():
             retired_only = _runner(race, 'Retired', {'horse last10': '52'}, LIGHT)
             _runner(race, 'No', {'horse last10': '55'}, LIGHT)
             db.session.commit()
-            assert appmod.record_best_bet_routes([race]) == 1
-            assert yes.prediction.best_bet_routes == 'place_32_tdnowin'
+            assert appmod.record_best_bet_routes([race]) == 0
+            assert yes.prediction.best_bet_routes is None
             assert retired_only.prediction.best_bet_routes is None
         finally:
             db.session.remove()

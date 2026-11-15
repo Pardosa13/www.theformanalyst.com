@@ -268,8 +268,9 @@ BACKTEST_TOOL = _tool(
     'component ROI, momentum analysis and the grid-searched models.', {})
 
 BEST_BETS_TOOL = _tool(
-    'get_best_bets', 'Admin only. Today\'s Best Bets: runners that fit one of the place rules. '
-    'Every Best Bet is a PLACE bet, never a win bet.', {
+    'get_best_bets', 'Admin only. Today\'s Best Bets: favourites the ML model also picks, or that three or '
+    'more ratings back. Each says whether a WIN or a PLACE bet tested closer to break even. A short-list to '
+    'check against replays, not proven winners.', {
         'date': {'type': 'string', 'description': 'YYYY-MM-DD. Default today.'},
     })
 
@@ -725,7 +726,12 @@ def class_change_stats(days=None):
 
 
 def get_best_bets(date=None, today=None):
-    import place_bet
+    """Best Bets recorded for a day: favourites the ML also picks (best_bet_rules.RULES).
+
+    The rules need the live market, so this reads the picks the Best Bets
+    page recorded before each race; it does not work them out again.
+    """
+    import best_bet_rules
     try:
         day = datetime.strptime(date, '%Y-%m-%d').date() if date else today
     except ValueError:
@@ -734,17 +740,25 @@ def get_best_bets(date=None, today=None):
     for meeting in Meeting.query.filter(Meeting.date == day).all():
         for race in sorted(meeting.races, key=lambda r: r.race_number):
             for h in race.horses:
-                rules = place_bet.matching_rules(h)
+                if getattr(h, 'is_scratched', False) or not h.prediction:
+                    continue
+                rules = best_bet_rules.recorded_rules(h.prediction.best_bet_routes)
                 if rules:
                     picks.append({
                         'meeting': meeting.meeting_name, 'meeting_id': meeting.id,
                         'race_number': race.race_number, 'horse': h.horse_name,
-                        'bet': 'PLACE (not win)',
+                        'bet': 'WIN' if best_bet_rules.bet_type(rules) == 'win' else 'PLACE (not win)',
                         'rules': [rule.name for rule in rules],
                     })
     return {'date': day.isoformat() if day else None,
-            'rule': 'Place bets only: runners that fit one of the place rules on the Best Bets page',
-            'rules': [{'name': rule.name, 'feb_sep_test': rule.audit} for rule in place_bet.RULES],
+            'rule': ('Favourites the ML model also picks, or that three or more ratings back. A short-list to check '
+                     'against replays, not proven winners. Picks are recorded when the Best Bets page is opened '
+                     'before the race, so a day nobody opened the page shows none.'),
+            'rules': [{'name': rule.name, 'suggested_bet': rule.bet, 'tested_bets': rule.bets,
+                       'won_pct': rule.win_pct, 'placed_pct': rule.place_pct,
+                       'win_return_pct_betfair': rule.win_roi, 'place_return_pct_betfair': rule.place_roi}
+                      for rule in best_bet_rules.RULES],
+            'to_avoid': best_bet_rules.AVOID_NOTE,
             'picks': picks}
 
 

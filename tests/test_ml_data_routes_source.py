@@ -89,11 +89,12 @@ def test_ml_data_page_passes_filters_to_overview_stats():
 def test_best_bets_records_routes_not_favourite_badges():
     source = _function_source('best_bets')
 
-    # The favourite badges are no longer captured; the place-rule routes are.
+    # The favourite badges are no longer captured; the Best Bets rules' routes are,
+    # and only for races still to run (started races are shown, never recorded).
     assert 'horse.prediction.ladbrokes_signal_mask =' not in source
-    assert 'place_bet.matching_rules(' in source
-    assert 'merge_best_bet_tracking(horse.prediction, routes, {})' in source
-    assert 'if not race_started:' in source
+    assert 'best_bet_rules.rules_for(' in source
+    assert 'merge_best_bet_tracking(horse.prediction, [rule.key for rule in rules], {})' in source
+    assert 'for (meeting, race, _track, _date), (race_info, odds) in zip(open_races, odds_by_race):' in source
 
 
 
