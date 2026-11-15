@@ -72,12 +72,14 @@ LONG_SHOT_FLAGS = (WB, BM, "Trainer - Cold (L100 <5% SR)", "Track Win Rate - Low
 
 # key      stored nowhere; identifies the angle on the page
 # name     plain words; "{model}" becomes "Analyzer" or "ML" (the page's top pick)
-# group    'steady' (short prices), 'agree' (the models and the market) or 'long' (long shots)
+# group    'steady' (short prices), 'agree' (the models and the market), 'long' (long shots)
+#          or 'lay' (bet AGAINST the horse on Betfair: you win when it loses)
 # comps    analyzer components that must ALL be in the notes
 # flags    'top' = the page's top pick, 'a_top' / 'ml_top' = analyzer / ML top pick, 'fav' = favourite,
 #          'a_other' / 'ml_other' = that model picked a different horse in this race,
 #          'lead_small' / 'lead_big' = the analyzer's top pick scores under / at least 15% more than its 2nd,
-#          'saturday' = the meeting is on a Saturday
+#          'saturday' = the meeting is on a Saturday,
+#          'ratings_3' = top pick of at least 3 of: analyzer, PFAI, time rating, weight-class rating
 # at_least (n, names): at least n of these components
 # price    (low, high): low <= price < high. Last Ladbrokes win price before the jump, else starting price
 # field    (low, high) runners in the race, both included
@@ -126,6 +128,11 @@ ANGLES = (
     Angle("fav_neither", "Favourite that neither the analyzer nor the ML picks", "agree",
           flags=("fav", "a_other", "ml_other"),
           audit="1,673 bets: win bets lost 2.1%, place bets lost 2.2%."),
+    # ---- added 15 Nov 2026: the one LAY angle (bet AGAINST the horse on Betfair) ----
+    Angle("lay_fav_ml_other_3of4", "LAY: Favourite the ML does not pick, but 3 or more ratings do", "lay",
+          flags=("fav", "ml_other", "ratings_3"),
+          audit="269 lay bets: made 8.4% per $1 risked (+16.0% in Feb-Jun, +5.2% in Jul-Oct). The horse won 27% "
+                "of the time; any favourite wins 34%. Best of 32 lay ideas tested, so it is flattered."),
     Angle("photo_under_6", "Won a photo finish last start, now under $6", "steady",
           comps=("Last Start - Photo Win (<0.5L)",), price=(1.0, 6.0),
           audit="Win bets lost 8.7% in Feb-Jun and made 0.7% in Jul-Oct. Place bets lost 7.6% then made 2.4%."),
@@ -320,6 +327,42 @@ def _chunk_rows(session, race_ids, state):
     return races
 
 
+def _ratings_for(session, horse_ids):
+    """{horse_id: {'pf': rank, 't': rank, 'w': rank}} from the saved PuntingForm ratings.
+
+    Only called for the few runners an angle needs it for: a race's saved
+    ratings can hold the whole meeting, so they are never read for every race.
+    """
+    from types import SimpleNamespace
+    from sqlalchemy import text
+    import best_bet_rules
+    horse_ids = sorted(set(horse_ids))
+    out = {}
+    try:
+        for first in range(0, len(horse_ids), 200):
+            chunk = horse_ids[first:first + 200]
+            params = {f'h{i}': hid for i, hid in enumerate(chunk)}
+            rows = session.execute(text(
+                'SELECT h.id AS horse_id, h.csv_data, rc.id AS race_id, rc.race_number, rc.ratings_json '
+                'FROM horses h JOIN races rc ON rc.id = h.race_id '
+                f'WHERE rc.ratings_json IS NOT NULL AND h.id IN ({", ".join(f":h{i}" for i in range(len(chunk)))})'),
+                params).mappings()
+            by_race = {}
+            for row in rows:
+                if row['race_id'] not in by_race:
+                    by_race[row['race_id']] = best_bet_rules.ratings_ranks(
+                        SimpleNamespace(race_number=row['race_number'], ratings_json=row['ratings_json']))
+                tab = best_bet_rules._tab(SimpleNamespace(csv_data=row['csv_data']))
+                ranks = by_race[row['race_id']].get(tab)
+                if ranks:
+                    out[row['horse_id']] = ranks
+    except Exception as e:
+        session.rollback()
+        logger.warning("Review angles: saved ratings unavailable: %s", e)
+        return {}
+    return out
+
+
 def _is_saturday(value):
     """True when a meeting date (a date, or 'YYYY-MM-DD...' text) is a Saturday."""
     from datetime import date
@@ -350,6 +393,9 @@ def history(session, race_ids, source='analyzer', stake=10.0):
     A price band uses the last Ladbrokes win price saved before the jump, or
     the starting price when none was saved. The favourite is the runner with
     the shortest starting price.
+    Lay figures (for the 'lay' group) risk the same amount on every bet at
+    the Betfair price: lose it when the horse wins, win the backer's stake
+    less commission when it loses.
     """
     import place_bet
 
@@ -363,6 +409,7 @@ def history(session, race_ids, source='analyzer', stake=10.0):
         races = _chunk_rows(session, race_ids[first:first + CHUNK_RACES], state)
         timing['rows'] += time.time() - started
         waiting = []          # (angle, item) that still need a price
+        need_ratings = []     # (angle, item, is the analyzer's top pick) that still need the saved ratings
         for rid, runners in races.items():
             if source == 'ml' and not any(r['ml_ok'] for r in runners):
                 continue
@@ -402,18 +449,28 @@ def history(session, race_ids, source='analyzer', stake=10.0):
                     flags.add('saturday')
                 item = None
                 for a in ANGLES:
-                    if not _fits_before_price(a, components, flags, starters):
+                    by_ratings = 'ratings_3' in a.flags
+                    if not _fits_before_price(a, components, flags | {'ratings_3'} if by_ratings else flags, starters):
                         continue
                     if item is None:
                         item = {'horse_id': row['horse_id'], 'won': row['fin'] == 1, 'sp': row['sp'] or 0,
                                 'bsp': row['bsp'] if row['bsp'] and row['bsp'] > 1 else None,
                                 'placed': row['fin'] <= paid,
                                 'place_bsp': row['place_bsp'] if row['place_bsp'] and row['place_bsp'] > 1 else None}
-                    if a.price:
+                    if by_ratings:
+                        need_ratings.append((a, item, 'a_top' in flags))
+                    elif a.price:
                         waiting.append((a, item))
                     else:
                         picks[a.key].append(item)
         started = time.time()
+        ratings = _ratings_for(session, [item['horse_id'] for _a, item, _top_pick in need_ratings])
+        for a, item, analyzer_top in need_ratings:
+            ranks = ratings.get(item['horse_id'])
+            # No saved PFAI rank means the race has no ratings to count.
+            if ranks and 'pf' in ranks and int(analyzer_top) + sum(
+                    1 for key in ('pf', 't', 'w') if ranks.get(key) == 1) >= 3:
+                picks[a.key].append(item)
         ladbrokes = _ladbrokes_prices(session, [item['horse_id'] for _a, item in waiting], 'odds')
         timing['prices'] += time.time() - started
         for a, item in waiting:
@@ -445,6 +502,10 @@ def history(session, race_ids, source='analyzer', stake=10.0):
         without3 = betfair[:-3] if len(betfair) > 3 else []
         # The starting price on those same bets, so the two prices can be compared fairly.
         sp_same = [(i['sp'] - 1) if i['won'] else -1.0 for i in found if i['bsp']]
+        # Laying it instead (betting it loses), risking 1 unit a bet: lose the unit
+        # when it wins, keep the backer's stake less commission when it loses.
+        lay = [(-1.0 if i['won'] else (1 - COMMISSION) / (i['bsp'] - 1)) for i in found if i['bsp']]
+        lay_prices = sorted(i['bsp'] for i in found if i['bsp'])
         placed = sum(1 for i in found if i['placed'])
         settled = [p for p in (place_bet._chart_profit(i) for i in found) if p is not None]
         place_profit = sum(p[0] for p in settled) * stake / place_bet.STAKE
@@ -459,6 +520,11 @@ def history(session, race_ids, source='analyzer', stake=10.0):
             'betfair_roi': round(100.0 * sum(betfair) / len(betfair), 1) if betfair else None,
             'betfair_roi_without_top3': round(100.0 * sum(without3) / len(without3), 1) if without3 else None,
             'sp_roi_on_betfair_bets': round(100.0 * sum(sp_same) / len(sp_same), 1) if sp_same else None,
+            'lay_bets': len(lay),
+            'lay_horse_lost_rate': round(100.0 * sum(1 for v in lay if v > 0) / len(lay), 1) if lay else None,
+            'lay_typical_price': round(lay_prices[len(lay_prices) // 2], 2) if lay_prices else None,
+            'lay_roi': round(100.0 * sum(lay) / len(lay), 1) if lay else None,
+            'lay_profit': round(sum(lay) * stake, 2),
             'placed': placed,
             'place_rate': round(100.0 * placed / bets, 1) if bets else 0.0,
             'place_bets': len(settled),
