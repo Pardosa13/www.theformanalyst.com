@@ -55,7 +55,9 @@
     let html = '<div class="card-body">';
     html += `<p class="text-muted mb-1" style="font-size:12px">$10 on every runner that fit each angle, across ${data.races} races. One $10 win bet and one $10 place bet. These are angles to watch, not bets.</p>`;
     html += angleTable('🎯 Shorter prices', 'Steadier. These sit closest to break even.',
-      data.angles.filter((a) => a.group !== 'long'));
+      data.angles.filter((a) => a.group === 'steady'));
+    html += angleTable('🤝 Models and market agree', 'What happens when the analyzer, the ML and the favourite line up, or don\'t. Small numbers of bets so far, so these can swing.',
+      data.angles.filter((a) => a.group === 'agree'));
     html += angleTable('🎲 Long shots', 'Mostly $10 and longer. Few winners, big swings. Any profit has only shown at the Betfair price, and a few big winners carry it.',
       data.angles.filter((a) => a.group === 'long'));
 
@@ -70,6 +72,7 @@
     html += '<li><strong>Part 3: place bets.</strong> Paid at the Betfair place price, less 8% commission. A place is top 3 in races of 8 or more runners, top 2 in races of 5 to 7.</li>';
     html += `<li><strong>Price ranges</strong> ($3-$6 and so on) use the last Ladbrokes win price before the race. ${data.band_bets_at_sp} of ${data.band_bets} had no saved Ladbrokes price, so the starting price was used.</li>`;
     html += '<li><strong>Favourite</strong> — the runner with the shortest starting price.</li>';
+    html += '<li><strong>Analyzer has it well clear / close behind</strong> — compares the analyzer score of its top pick with its second pick in the race. Well clear means at least 15% higher.</li>';
     html += '<li><strong>Long-shot angles</strong> — the "two or more" row counts a runner that fits at least two of: 2-3kg less than the field average, settles at the back in a sprint, trainer out of form, low win rate at this track, final 200m rated average, won a photo finish last start, racing again within 7 days.</li>';
     if (waiting || estimated) {
       html += `<li>${estimated} place bets use the Ladbrokes place price for now. ${waiting} placed with no price yet and are left out of place profit.</li>`;

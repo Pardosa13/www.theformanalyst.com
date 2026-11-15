@@ -31,7 +31,20 @@ def test_favourite_and_field_size():
     assert review_list.matching_angles(set(), flags={"fav"}, starters=12) == []
     assert review_list.matching_angles(set(), flags={"fav"}) == []
     keys = review_list.matching_angles(set(), flags={"a_top", "ml_top", "fav"}, starters=14)
-    assert keys == ["all_agree_fav", "ml_top_fav"]
+    assert keys == ["all_agree_fav", "ml_top_fav", "agree_field_8"]
+
+
+def test_agreement_angles():
+    match = review_list.matching_angles
+    assert "agree_close" in match(set(), flags={"a_top", "ml_top", "fav", "lead_small"})
+    assert "agree_clear" in match(set(), flags={"a_top", "ml_top", "fav", "lead_big"})
+    assert "agree_saturday" in match(set(), flags={"a_top", "ml_top", "fav", "saturday"})
+    assert match(set(), flags={"saturday"}) == []
+    assert match(set(), flags={"ml_top", "fav", "a_other"}) == ["ml_top_fav", "ml_fav_not_analyzer"]
+    assert match(set(), flags={"a_top", "fav", "ml_other"}) == ["analyzer_fav_not_ml"]
+    assert match(set(), flags={"fav", "a_other", "ml_other"}) == ["fav_neither"]
+    # No ML score in the race: nothing can be said about the ML picking another horse.
+    assert match(set(), flags={"a_top", "fav"}) == []
 
 
 def test_every_angle_can_be_matched():
@@ -40,7 +53,7 @@ def test_every_angle_can_be_matched():
     keys = [a.key for a in review_list.ANGLES]
     assert len(keys) == len(set(keys))
     for a in review_list.ANGLES:
-        assert a.group in ("steady", "long")
+        assert a.group in ("steady", "agree", "long")
         assert a.comps or a.flags or a.at_least
         for name in tuple(a.comps) + (a.at_least[1] if a.at_least else ()):
             assert name in known, name
