@@ -21,6 +21,20 @@ What both checks found:
   expect long losing runs. Cut down to under $10 they all lose.
 - Jockey, trainer and jockey + trainer angles did not hold up.
 
+"All three agree" (analyzer pick, ML pick and favourite are one horse) was
+looked at about 40 ways on 15 Nov 2026 (1,052 bets, May-Nov):
+- It breaks even at the Betfair price and loses at the starting price. That
+  is about 3 points better than any favourite, well inside luck.
+- The ML model's agreement is what matters. A favourite the analyzer picks
+  but the ML does not lost 19.7% (430 bets): the one clear result, as a
+  horse to avoid.
+- It did better when the analyzer's top two were close, in fields of 8+,
+  and on Saturdays. Each of those is one of 40 cuts on a few hundred bets,
+  so each could be luck. They are listed to be tested on new races.
+- Before 16 Oct 2026 the ML scores were worked out after the race, so the
+  earlier-check figures may flatter the ML. The page counts only races the
+  ML scored before the jump.
+
 The "audit" text on each angle is that earlier Betfair-price result
 (Feb-Jun / Jul-Oct). It was chosen with hindsight, so the running record on
 the page is the honest test.
@@ -33,6 +47,7 @@ from collections import namedtuple
 logger = logging.getLogger(__name__)
 
 COMMISSION = 0.08
+LEAD_BIG = 1.15      # analyzer top pick scores at least 15% more than its second pick
 CHUNK_RACES = 500
 
 # Analyzer component names (notes_parsing.py) -> a lower-case SQL LIKE that
@@ -57,9 +72,12 @@ LONG_SHOT_FLAGS = (WB, BM, "Trainer - Cold (L100 <5% SR)", "Track Win Rate - Low
 
 # key      stored nowhere; identifies the angle on the page
 # name     plain words; "{model}" becomes "Analyzer" or "ML" (the page's top pick)
-# group    'steady' (short prices) or 'long' (long shots, Betfair price only)
+# group    'steady' (short prices), 'agree' (the models and the market) or 'long' (long shots)
 # comps    analyzer components that must ALL be in the notes
-# flags    'top' = the page's top pick, 'a_top' / 'ml_top' = analyzer / ML top pick, 'fav' = favourite
+# flags    'top' = the page's top pick, 'a_top' / 'ml_top' = analyzer / ML top pick, 'fav' = favourite,
+#          'a_other' / 'ml_other' = that model picked a different horse in this race,
+#          'lead_small' / 'lead_big' = the analyzer's top pick scores under / at least 15% more than its 2nd,
+#          'saturday' = the meeting is on a Saturday
 # at_least (n, names): at least n of these components
 # price    (low, high): low <= price < high. Last Ladbrokes win price before the jump, else starting price
 # field    (low, high) runners in the race, both included
@@ -81,11 +99,33 @@ ANGLES = (
     # ---- added 14 Nov 2026 ----
     Angle("fav_field_8_11", "Favourite in a race with 8 to 11 runners", "steady", flags=("fav",), field=(8, 11),
           audit="Win bets lost 2.7% in Feb-Jun and made 1.3% in Jul-Oct. Place bets lost 1.5% then 0.3%."),
-    Angle("all_agree_fav", "Analyzer pick, ML pick and favourite are all the same horse", "steady",
+    Angle("all_agree_fav", "Analyzer pick, ML pick and favourite are all the same horse", "agree",
           flags=("a_top", "ml_top", "fav"),
-          audit="Jul-Oct, 819 bets: win bets lost 0.9%, place bets made 1.2%."),
-    Angle("ml_top_fav", "ML top pick is also the favourite", "steady", flags=("ml_top", "fav"),
+          audit="May-Oct, 854 bets: win bets broke even, place bets made 0.4%. A plain favourite lost 2.7% and 3.9%."),
+    Angle("ml_top_fav", "ML top pick is also the favourite", "agree", flags=("ml_top", "fav"),
           audit="Jul-Oct, 1,801 bets: win bets broke even, place bets lost 4.5%."),
+    # ---- added 15 Nov 2026: a closer look at "all three agree" (about 40 cuts; see AGREE_NOTE) ----
+    Angle("agree_close", "All three agree, and the analyzer's 2nd pick is close behind (within 15%)", "agree",
+          flags=("a_top", "ml_top", "fav", "lead_small"),
+          audit="494 bets: win bets made 8.7%, place bets made 4.0%."),
+    Angle("agree_clear", "All three agree, and the analyzer has it well clear (15% or more)", "agree",
+          flags=("a_top", "ml_top", "fav", "lead_big"),
+          audit="360 bets: win bets lost 11.9%, place bets lost 4.5%."),
+    Angle("agree_field_8", "All three agree, in a race with 8 or more runners", "agree",
+          flags=("a_top", "ml_top", "fav"), field=(8, 99),
+          audit="663 bets: win bets made 2.6%, place bets made 4.1%. With 7 or fewer runners they lost 8.9% and 12.4%."),
+    Angle("agree_saturday", "All three agree, on a Saturday", "agree",
+          flags=("a_top", "ml_top", "fav", "saturday"),
+          audit="262 bets: win bets made 11.5%, place bets made 6.6%. On other days win bets lost 5.1%."),
+    Angle("ml_fav_not_analyzer", "ML pick is the favourite, but the analyzer picks another horse", "agree",
+          flags=("ml_top", "fav", "a_other"),
+          audit="1,038 bets: win bets made 1.2%, place bets lost 7.8%."),
+    Angle("analyzer_fav_not_ml", "Analyzer pick is the favourite, but the ML picks another horse", "agree",
+          flags=("a_top", "fav", "ml_other"),
+          audit="430 bets: win bets lost 19.7%, place bets lost 9.4%. The clearest result: one to avoid."),
+    Angle("fav_neither", "Favourite that neither the analyzer nor the ML picks", "agree",
+          flags=("fav", "a_other", "ml_other"),
+          audit="1,673 bets: win bets lost 2.1%, place bets lost 2.2%."),
     Angle("photo_under_6", "Won a photo finish last start, now under $6", "steady",
           comps=("Last Start - Photo Win (<0.5L)",), price=(1.0, 6.0),
           audit="Win bets lost 8.7% in Feb-Jun and made 0.7% in Jul-Oct. Place bets lost 7.6% then made 2.4%."),
@@ -240,7 +280,7 @@ def _history_sql():
            p.score, p.ml_score,
            CASE WHEN p.ml_score IS NOT NULL AND p.ml_scored_at IS NOT NULL AND rc.start_time_utc IS NOT NULL
                      AND p.ml_scored_at < rc.start_time_utc THEN 1 ELSE 0 END AS ml_ok,
-           r.finish_position AS fin, r.sp, r.bsp, r.place_bsp,
+           r.finish_position AS fin, r.sp, r.bsp, r.place_bsp, m.date AS meeting_date,
            CASE WHEN {likes} THEN p.notes END AS notes
     FROM horses h
     JOIN predictions p ON p.horse_id = h.id
@@ -278,6 +318,17 @@ def _chunk_rows(session, race_ids, state):
     for row in best.values():
         races.setdefault(row['race_id'], []).append(row)
     return races
+
+
+def _is_saturday(value):
+    """True when a meeting date (a date, or 'YYYY-MM-DD...' text) is a Saturday."""
+    from datetime import date
+    try:
+        if not hasattr(value, 'weekday'):
+            value = date.fromisoformat(str(value)[:10])
+        return value.weekday() == 5
+    except (TypeError, ValueError):
+        return False
 
 
 def _top(runners, value):
@@ -322,19 +373,33 @@ def history(session, race_ids, source='analyzer', stake=10.0):
             ml_top = {id(r) for r in _top(runners, lambda r: r['ml_score'] if r['ml_ok'] else None)}
             priced = [r['sp'] for r in runners if r['sp'] and r['sp'] > 1]
             fav_sp = min(priced) if priced else None
+            # How far the analyzer's top pick is ahead of its second pick.
+            scores = sorted((r['score'] for r in runners if r['score'] is not None), reverse=True)
+            lead = None
+            if len(scores) > 1 and scores[1] > 0:
+                lead = 'lead_big' if scores[0] >= LEAD_BIG * scores[1] else 'lead_small'
+            saturday = _is_saturday(runners[0]['meeting_date'])
             for row in runners:
                 flags = set()
                 if id(row) in a_top:
                     flags.add('a_top')
+                    if lead:
+                        flags.add(lead)
+                elif a_top:
+                    flags.add('a_other')
                 if id(row) in ml_top:
                     flags.add('ml_top')
+                elif ml_top:
+                    flags.add('ml_other')
                 if fav_sp is not None and row['sp'] == fav_sp:
                     flags.add('fav')
                 if ('ml_top' if source == 'ml' else 'a_top') in flags:
                     flags.add('top')
                 components = _angle_components(row['notes'])
-                if not flags and not components:
+                if not components and not flags - {'a_other', 'ml_other'}:
                     continue
+                if saturday:
+                    flags.add('saturday')
                 item = None
                 for a in ANGLES:
                     if not _fits_before_price(a, components, flags, starters):
