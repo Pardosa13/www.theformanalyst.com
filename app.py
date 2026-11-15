@@ -11900,7 +11900,6 @@ def best_bets():
         odds_by_race = list(pool.map(_ladbrokes_for, open_races))
 
     best_bets = []
-    avoid = []
     races_without_prices = 0
 
     def _row(meeting, race, horse, rules, signals, runners, race_started, lb):
@@ -11955,8 +11954,6 @@ def best_bets():
             if rules:
                 merge_best_bet_tracking(horse.prediction, [rule.key for rule in rules], {})
                 best_bets.append(_row(meeting, race, horse, rules, sig, runners, False, lb))
-            elif best_bet_rules.to_avoid(sig, True, has_ratings):
-                avoid.append(_row(meeting, race, horse, [], sig, runners, False, lb))
 
     # Started races: show what was recorded before the jump. Never recorded now.
     for meeting, race in started_races:
@@ -11971,7 +11968,6 @@ def best_bets():
 
     db.session.commit()
     best_bets.sort(key=lambda b: (b['meeting_name'], b['race_number'], b['horse_name']))
-    avoid.sort(key=lambda b: (b['meeting_name'], b['race_number'], b['horse_name']))
 
     meetings_with_bets = {}
     for bet in best_bets:
@@ -12002,8 +11998,6 @@ def best_bets():
         data_check_failures=data_check_failures,
         rules=best_bet_rules.RULES,
         live_record=live_record,
-        avoid=avoid,
-        avoid_note=best_bet_rules.AVOID_NOTE,
         races_without_prices=races_without_prices,
         best_bets=best_bets,
         meetings_with_bets=meetings_with_bets,

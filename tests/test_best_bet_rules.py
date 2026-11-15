@@ -1,5 +1,5 @@
-"""Best Bets rules from 15 Nov 2026: favourites the ML also picks, or that
-three or more ratings back (best_bet_rules.py)."""
+"""Best Bets rule from 15 Nov 2026: a favourite the ML also picks, where at
+most one other rating agrees (best_bet_rules.py)."""
 import json
 from types import SimpleNamespace
 
@@ -45,10 +45,9 @@ def test_rule_keys_are_unique_never_inside_each_other_and_not_place_routes():
 
 
 def test_only_a_favourite_is_ever_picked():
-    everything = _sig(a=True, ml=True, pf=True, t=True, w=True)
-    assert bbr.rules_for(everything, False, 1.8, 9) == []
-    assert bbr.rules_for(everything, True, 1.8, 9) != []
-    assert bbr.rules_for(None, True, 1.8, 9) == []
+    assert bbr.rules_for(_sig(ml=True), False, 2.8, 9) == []
+    assert bbr.rules_for(_sig(ml=True), True, 2.8, 9) != []
+    assert bbr.rules_for(None, True, 2.8, 9) == []
 
 
 def test_ml_favourite_with_few_other_ratings():
@@ -60,34 +59,20 @@ def test_ml_favourite_with_few_other_ratings():
     assert _keys(bbr.rules_for(_sig(a=True, ml_other=True), True, 3.0, 12)) == []
 
 
-def test_ml_and_pfai_favourite():
-    assert _keys(bbr.rules_for(_sig(ml=True, pf=True), True, 3.0, 12)) == ['agree_ml_fav_quiet', 'agree_ml_pfai_fav']
-    assert _keys(bbr.rules_for(_sig(ml=True, pf=True, t=True), True, 3.0, 12)) == ['agree_ml_pfai_fav']
-
-
-def test_three_ratings_need_the_field_size_or_a_short_price():
+def test_rules_taken_off_the_page_no_longer_pick():
+    """15 Nov 2026: ML + PFAI + favourite, 3+ ratings in 8-11 runners and 3+
+    ratings under $2 were removed. Only the quiet ML favourite is left."""
+    assert _keys(bbr.RULES) == ['agree_ml_fav_quiet']
+    assert _keys(bbr.rules_for(_sig(ml=True, pf=True), True, 3.0, 12)) == ['agree_ml_fav_quiet']
+    assert _keys(bbr.rules_for(_sig(ml=True, pf=True, t=True), True, 3.0, 12)) == []
     three = _sig(a=True, pf=True, t=True)
-    assert _keys(bbr.rules_for(three, True, 2.6, 9)) == ['agree_fav_3of4_mid']
-    assert _keys(bbr.rules_for(three, True, 2.6, 12)) == []
-    assert _keys(bbr.rules_for(three, True, 2.6, 7)) == []
-    assert _keys(bbr.rules_for(three, True, 1.9, 12)) == ['agree_fav_3of4_odds_on']
-    assert _keys(bbr.rules_for(three, True, 2.0, 12)) == []
-    assert _keys(bbr.rules_for(three, True, None, 12)) == []
-    assert _keys(bbr.rules_for(three, True, 1.9, 9)) == ['agree_fav_3of4_mid', 'agree_fav_3of4_odds_on']
-
-
-def test_three_ratings_but_the_ml_picks_another_is_avoided_not_picked():
-    wary = _sig(a=True, pf=True, t=True, ml_other=True)
-    assert bbr.rules_for(wary, True, 1.9, 9) == []
-    assert bbr.to_avoid(wary, True)
-    assert not bbr.to_avoid(wary, False)
-    assert not bbr.to_avoid(_sig(a=True, pf=True, ml_other=True), True)       # only two ratings
-    assert not bbr.to_avoid(_sig(a=True, pf=True, t=True, ml=True), True)     # the ML agrees
+    assert bbr.rules_for(three, True, 2.6, 9) == []
+    assert bbr.rules_for(three, True, 1.9, 12) == []
+    assert not hasattr(bbr, 'to_avoid') and not hasattr(bbr, 'AVOID_NOTE')
 
 
 def test_no_saved_ratings_means_no_picks():
     assert bbr.rules_for(_sig(ml=True), True, 3.0, 12, has_ratings=False) == []
-    assert not bbr.to_avoid(_sig(a=True, pf=True, t=True, ml_other=True), True, has_ratings=False)
 
 
 def test_race_signals_read_the_top_picks_and_the_saved_ratings():
@@ -116,15 +101,15 @@ def test_no_ml_score_in_the_race():
     race = _race([(1, 1, 90, None, False), (2, 2, 50, None, False)], ratings=_ratings([(1, 1, 1, 2), (2, 2, 2, 1)]))
     signals, _has = bbr.race_signals(race)
     assert not signals[1]['ml'] and not signals[1]['ml_other']
-    # Three ratings and nothing from the ML against it: still picked.
-    assert _keys(bbr.rules_for(signals[1], True, 2.4, 9)) == ['agree_fav_3of4_mid']
+    # The rule needs the ML's pick, so a race the ML has not scored has no picks.
+    assert bbr.rules_for(signals[1], True, 2.4, 9) == []
+    assert bbr.rules_for(signals[2], True, 2.4, 9) == []
 
 
 def test_recorded_rules_and_bet_type():
-    rules = bbr.recorded_rules('agree_ml_pfai_fav,place_32_tdnowin')
-    assert _keys(rules) == ['agree_ml_pfai_fav']
-    assert bbr.bet_type(rules) == 'place'
-    both = bbr.recorded_rules('agree_ml_pfai_fav,agree_ml_fav_quiet')
-    assert _keys(both) == ['agree_ml_fav_quiet', 'agree_ml_pfai_fav']
-    assert bbr.bet_type(both) == 'win'
+    rules = bbr.recorded_rules('agree_ml_fav_quiet,place_32_tdnowin')
+    assert _keys(rules) == ['agree_ml_fav_quiet']
+    assert bbr.bet_type(rules) == 'win'
+    # Routes saved by rules that have since been removed are ignored.
+    assert bbr.recorded_rules('agree_ml_pfai_fav,agree_fav_3of4_mid,agree_fav_3of4_odds_on') == []
     assert bbr.recorded_rules(None) == [] and bbr.recorded_rules('') == []

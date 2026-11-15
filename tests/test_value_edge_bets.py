@@ -64,7 +64,7 @@ def test_value_edge_buckets_cover_every_edge_level():
 def test_best_bets_has_no_plain_favourite_route():
     """The plain favourite route was removed on 16 Oct 2026 (-10.5% over all
     history, the same as backing every favourite). The 15 Nov 2026 rules only
-    pick a favourite the ML also picks, or that three or more ratings back."""
+    pick a favourite that is also the ML's top pick."""
     source = APP_SOURCE[APP_SOURCE.index('def best_bets('):]
     source = source[:source.index('\n@app.route(', 1)]
     assert 'favourite_agreement' not in source
