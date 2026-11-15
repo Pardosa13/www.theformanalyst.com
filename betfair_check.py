@@ -100,6 +100,7 @@ _BEST_BET_BASE = """
       AND r.finish_position > 0 AND r.sp > 1
       AND rc.results_incomplete IS NOT TRUE
       AND COALESCE(p.best_bet_routes, '') NOT LIKE 'place%'
+      AND COALESCE(p.best_bet_routes, '') NOT LIKE 'lay%'
 """
 _PRE_RACE = """ AND rc.start_time_utc IS NOT NULL AND COALESCE(
         CASE WHEN p.best_bet_flagged_at IS NULL THEN p.best_bet_qualified_at
@@ -152,6 +153,8 @@ def best_bets_record(session):
         for route in str(row.route).split(','):
             if route.strip().startswith('place_'):
                 continue  # a place bet: tracked by place_bet.py, not as a win
+            if route.strip().startswith('lay_'):
+                continue  # a lay (a bet AGAINST the horse): never a win bet
             exploded.append(type('R', (), {'route': route.strip() or 'posted', 'fin': row.fin, 'sp': row.sp, 'bsp': row.bsp}))
     by_route = sorted(fold(exploded, lambda r: r.route), key=lambda x: -x['bets'])
     by_month = sorted(fold(by_month_raw, lambda r: str(r.d)[:7]), key=lambda x: x['key'], reverse=True)

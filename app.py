@@ -1032,7 +1032,9 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
         
         for bet in best_bets:
             message += f"*R{bet['race_number']}: {bet['horse_name']}*\n"
-            if bet.get('bet_type') == 'place' or bet.get('place_rules'):
+            if bet.get('bet_type') == 'lay':
+                message += "⛔ *LAY bet: bet AGAINST this horse (Betfair)*\n\n"
+            elif bet.get('bet_type') == 'place' or bet.get('place_rules'):
                 message += "🥉 *PLACE bet (not the win)*\n\n"
             elif bet.get('bet_type') == 'win':
                 message += "🏆 *WIN bet*\n\n"
@@ -1100,7 +1102,9 @@ def post_best_bets_to_twitter(best_bets, meeting_name):
         
         for bet in best_bets:
             message += f"R{bet['race_number']}: {bet['horse_name']}\n"
-            if bet.get('bet_type') == 'place' or bet.get('place_rules'):
+            if bet.get('bet_type') == 'lay':
+                message += "⛔ LAY bet: bet AGAINST this horse (Betfair)\n\n"
+            elif bet.get('bet_type') == 'place' or bet.get('place_rules'):
                 message += "🥉 PLACE bet (not the win)\n\n"
             elif bet.get('bet_type') == 'win':
                 message += "🏆 WIN bet\n\n"
@@ -11900,6 +11904,7 @@ def best_bets():
         odds_by_race = list(pool.map(_ladbrokes_for, open_races))
 
     best_bets = []
+    lay_bets = []          # favourites to bet AGAINST: listed apart, never mixed with the picks
     races_without_prices = 0
 
     def _row(meeting, race, horse, rules, signals, runners, race_started, lb):
@@ -11954,6 +11959,11 @@ def best_bets():
             if rules:
                 merge_best_bet_tracking(horse.prediction, [rule.key for rule in rules], {})
                 best_bets.append(_row(meeting, race, horse, rules, sig, runners, False, lb))
+                continue
+            lay_rules = best_bet_rules.lay_rules_for(sig, True, has_ratings)
+            if lay_rules:
+                merge_best_bet_tracking(horse.prediction, [rule.key for rule in lay_rules], {})
+                lay_bets.append(_row(meeting, race, horse, lay_rules, sig, runners, False, lb))
 
     # Started races: show what was recorded before the jump. Never recorded now.
     for meeting, race in started_races:
@@ -11964,10 +11974,12 @@ def best_bets():
             continue
         signals, _has_ratings = best_bet_rules.race_signals(race)
         for horse, rules in recorded:
-            best_bets.append(_row(meeting, race, horse, rules, signals.get(horse.id), len(signals), True, {}))
+            row = _row(meeting, race, horse, rules, signals.get(horse.id), len(signals), True, {})
+            (lay_bets if row['bet_type'] == 'lay' else best_bets).append(row)
 
     db.session.commit()
     best_bets.sort(key=lambda b: (b['meeting_name'], b['race_number'], b['horse_name']))
+    lay_bets.sort(key=lambda b: (b['meeting_name'], b['race_number'], b['horse_name']))
 
     meetings_with_bets = {}
     for bet in best_bets:
@@ -11991,6 +12003,13 @@ def best_bets():
         db.session.rollback()
         logger.warning("Best Bets live record unavailable: %s", e, exc_info=True)
 
+    lay_record = {}
+    try:
+        lay_record = best_bet_rules.lay_record(db.session)
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("Best Bets lay record unavailable: %s", e, exc_info=True)
+
     import data_checks
     data_check_failures = data_checks.latest_failures(db.session)
 
@@ -11998,6 +12017,9 @@ def best_bets():
         data_check_failures=data_check_failures,
         rules=best_bet_rules.RULES,
         live_record=live_record,
+        lay_rules=best_bet_rules.LAY_RULES,
+        lay_bets=lay_bets,
+        lay_record=lay_record,
         races_without_prices=races_without_prices,
         best_bets=best_bets,
         meetings_with_bets=meetings_with_bets,

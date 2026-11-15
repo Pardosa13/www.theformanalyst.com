@@ -587,7 +587,7 @@
 <!-- Page header -->
 <div class="bets-header">
   <h2>🎯 Best Bets &mdash; Favourites The ML Also Picks</h2>
-  <p>A short-list to <strong>check against the replays</strong>, not sure things. Each pick is the <strong>favourite</strong> and the <strong>ML model's top pick</strong>, where at most one other rating agrees.
+  <p>A short-list to <strong>check against the replays</strong>, not sure things. Each pick is the <strong>favourite</strong> and the <strong>ML model's top pick</strong>, where at most one other rating agrees. Horses to bet <strong>against</strong> are in the red LAY box, kept apart.
      They win and place often, at short prices. In testing they sat close to break even at <strong>Betfair prices</strong> and lost at the starting price, so the price you take matters.
      The old place rules were taken off this page on 15 Nov 2026; their record is on the ML Data page.</p>
 </div>
@@ -595,7 +595,7 @@
 <!-- Stat tiles -->
 <div class="stat-row">
   <div class="stat-tile s-primary"><h5>Picks</h5><h2>{{ total_bets }}</h2></div>
-  <div class="stat-tile s-info"><h5>Rules</h5><h2>{{ rules|length }}</h2></div>
+  <div class="stat-tile s-info"><h5>Lay Bets</h5><h2>{{ lay_bets|length }}</h2></div>
   <div class="stat-tile s-success"><h5>Horses Scanned</h5><h2>{{ total_horses_scanned }}</h2></div>
   <div class="stat-tile s-warning"><h5>Time Window</h5><h2>{{ hours_back }}h</h2></div>
 </div>
@@ -670,6 +670,82 @@
   <p>Tap a rule above to show its picks.</p>
 </div>
 {% endif %}
+
+<!-- LAY bets: favourites to bet AGAINST. Own box, own form, own button: never mixed with the picks. -->
+<div class="filter-card" style="margin-bottom:24px;border:2px solid #ef4444">
+  <h5 style="margin:0 0 6px;font-weight:700;color:#ef4444">⛔ LAY BETS &mdash; Bet AGAINST These Horses ({{ lay_bets|length }})</h5>
+  <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">
+    These are <strong>not horses to back</strong>. A lay bet on Betfair <strong>wins when the horse loses</strong>.
+    You risk more than you win: at a $3 price you risk $10 to win about $4.60 (after 8% commission). Unproven, so stake small.
+  </p>
+  <div class="record-wrap">
+    <table class="record-table">
+      <thead><tr><th>Lay rule</th><th>Tested lay bets</th><th>Horse won (lay lost)</th><th>Tested return per $100 risked</th><th>Live lay bets</th><th>Live: horse lost (lay won)</th><th>Live return per $100 risked</th></tr></thead>
+      <tbody>
+      {% for rule in lay_rules %}
+        {% set r = lay_record.get(rule.key) %}
+        <tr>
+          <td class="rule-name">{{ rule.name }}{% if rule.note %}<div class="muted" style="font-size:11px;white-space:normal;max-width:360px">{{ rule.note }}</div>{% endif %}</td>
+          <td>{{ rule.bets }}</td>
+          <td>{{ "%.0f"|format(rule.win_pct) }}%</td>
+          <td class="{{ 'pos' if rule.win_roi >= 0 else 'neg' }}">{{ "%+.1f"|format(rule.win_roi) }}%</td>
+          {% if r and r.bets %}
+          <td>{{ r.bets }}</td>
+          <td>{{ "%.0f"|format(r.horse_lost_rate) }}%</td>
+          <td class="{% if r.roi is not none and r.roi >= 0 %}pos{% elif r.roi is not none %}neg{% else %}muted{% endif %}">{% if r.roi is not none %}{{ "%+.1f"|format(r.roi) }}% <span class="muted">({{ r.priced }} priced)</span>{% else %}&ndash;{% endif %}</td>
+          {% else %}
+          <td>0</td><td class="muted">&ndash;</td><td class="muted">&ndash;</td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p style="font-size:12px;color:var(--text-muted);margin:10px 0 12px">&ldquo;Live&rdquo; counts lay bets listed here before the jump. The return needs the Betfair price, which loads once a month. Ratings are the analyzer, PFAI, the time rating and the class rating.</p>
+
+  {% if lay_bets %}
+  <form method="POST" action="{{ url_for('post_best_bets_manual') }}" id="post-lay-bets-form">
+    <div class="table-responsive">
+      <table class="bets-table">
+        <thead><tr><th></th><th>Lay this horse</th><th>Meeting</th><th>Race</th><th>On top of</th><th>Runners</th><th>Jockey</th><th>Trainer</th><th>Ladbrokes Win</th></tr></thead>
+        <tbody>
+        {% for bet in lay_bets %}
+          <tr>
+            <td><input type="checkbox" name="bet_ids[]" value="{{ bet.horse_id }}" class="lay-checkbox"></td>
+            <td>
+              <div class="horse-name">{{ bet.horse_name }}
+                {% if bet.race_started %}<span class="edge-badge" title="This race has started. It was listed before the jump.">Started</span>{% endif %}
+              </div>
+              <div class="muted-note" style="color:#ef4444;font-weight:700">⛔ LAY: bet AGAINST it. Do not back.</div>
+            </td>
+            <td>{{ bet.meeting_name|replace('_', ' ') }}</td>
+            <td>R{{ bet.race_number }} <span class="muted-note">{{ bet.distance }}</span></td>
+            <td><div class="rule-checks">{{ bet.on_top|join(' · ') }}<br>The ML picks another horse</div></td>
+            <td>{{ bet.runners }}</td>
+            <td>{{ bet.jockey }}</td>
+            <td>{{ bet.trainer }}</td>
+            <td>{% if bet.ladbrokes_fixed_win_price %}${{ '%.2f'|format(bet.ladbrokes_fixed_win_price) }}{% else %}<span class="text-muted">{{ 'Race started' if bet.race_started else 'Unavailable' }}</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div style="text-align:center;margin-top:14px">
+      <button type="submit" class="btn btn-danger" id="post-lay-btn">⛔ Post Selected LAY Bets to Telegram &amp; Twitter</button>
+      <p style="font-size:12px;color:var(--text-muted);margin:6px 0 0">Each post says &ldquo;LAY bet: bet AGAINST this horse&rdquo;.</p>
+    </div>
+  </form>
+  <script>
+  document.getElementById('post-lay-btn').addEventListener('click', function (e) {
+    const selected = document.querySelectorAll('.lay-checkbox:checked').length;
+    if (selected === 0) { e.preventDefault(); alert('Please select at least one lay bet to post'); return; }
+    if (!confirm(`Post ${selected} LAY bet(s) to Telegram and Twitter?\n\nThese are bets AGAINST the horse. This will publicly share them.`)) e.preventDefault();
+  });
+  </script>
+  {% else %}
+  <p class="text-muted" style="font-size:13px;margin:0">No lay bets right now. One shows when a favourite is the top pick of three or more ratings but the ML picks another horse.</p>
+  {% endif %}
+</div>
 
 <!-- Picks / empty state -->
 {% if total_bets == 0 %}

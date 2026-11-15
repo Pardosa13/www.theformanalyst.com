@@ -106,6 +106,42 @@ def test_no_ml_score_in_the_race():
     assert bbr.rules_for(signals[2], True, 2.4, 9) == []
 
 
+def test_the_lay_rule_is_kept_apart_from_the_picks():
+    wary = _sig(a=True, pf=True, t=True, ml_other=True)
+    assert bbr.rules_for(wary, True, 2.9, 9) == []                    # never a horse to back
+    lay = bbr.lay_rules_for(wary, True)
+    assert _keys(lay) == ['lay_fav_ml_other_3of4']
+    assert lay[0].bet == 'lay' and lay[0].name.startswith('LAY:')
+    assert bbr.lay_rules_for(wary, False) == []                        # not the favourite
+    assert bbr.lay_rules_for(wary, True, has_ratings=False) == []      # no saved ratings
+    assert bbr.lay_rules_for(_sig(a=True, pf=True, ml_other=True), True) == []      # only two ratings
+    assert bbr.lay_rules_for(_sig(a=True, pf=True, t=True, ml=True), True) == []    # the ML picks it
+    assert bbr.lay_rules_for(_sig(a=True, pf=True, t=True), True) == []             # no ML pick in the race
+    # No rule key is shared, and no lay key can be counted as a win bet.
+    assert not set(_keys(bbr.RULES)) & set(_keys(bbr.LAY_RULES))
+    for rule in bbr.LAY_RULES:
+        assert rule.key.startswith('lay_') and rule.bet == 'lay'
+    for rule in bbr.RULES:
+        assert rule.bet != 'lay'
+
+
+def test_a_lay_is_never_posted_as_a_bet_to_back():
+    lay = bbr.recorded_rules('lay_fav_ml_other_3of4')
+    assert bbr.bet_type(lay) == 'lay'
+    # Even if the same horse was once listed as a pick, lay wins.
+    both = bbr.recorded_rules('agree_ml_fav_quiet,lay_fav_ml_other_3of4')
+    assert _keys(both) == ['agree_ml_fav_quiet', 'lay_fav_ml_other_3of4']
+    assert bbr.bet_type(both) == 'lay'
+    import betfair_check
+    assert "NOT LIKE 'lay%'" in betfair_check._BEST_BET_BASE
+
+
+def test_lay_return_risks_one_unit():
+    assert bbr.lay_return(True, 3.0) == -1.0                 # the horse won: the unit risked is lost
+    assert round(bbr.lay_return(False, 3.0), 4) == 0.46      # it lost: 0.92 / (3.0 - 1)
+    assert round(bbr.lay_return(False, 1.5), 4) == 1.84
+
+
 def test_recorded_rules_and_bet_type():
     rules = bbr.recorded_rules('agree_ml_fav_quiet,place_32_tdnowin')
     assert _keys(rules) == ['agree_ml_fav_quiet']

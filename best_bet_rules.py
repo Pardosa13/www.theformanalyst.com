@@ -22,7 +22,9 @@ commission. What it found:
 The rule needs the live market (who is favourite), so picks are made and
 recorded when the Best Bets page is opened before the jump. Route keys
 start with "agree_": betfair_check.py counts every route that does not
-start with "place" in the win record.
+start with "place" or "lay" in the win record.
+
+The page also lists one LAY bet (LAY_RULES): a favourite to bet AGAINST.
 """
 import json
 from dataclasses import dataclass
@@ -50,6 +52,23 @@ RULES = (
 )
 RULES_BY_KEY = {rule.key: rule for rule in RULES}
 ROUTE_KEYS = tuple(rule.key for rule in RULES)
+
+# LAY bets: bet AGAINST the horse on Betfair. Kept apart from RULES so a lay
+# is never shown, counted or posted as a horse to back. For a lay rule,
+# win_pct is how often the horse WON (the lay lost) and win_roi is the lay
+# return per $1 risked; the place figures are unused.
+# The best of 32 lay ideas checked read-only on 15 Nov 2026: 269 lay bets,
+# +8.4% per $1 risked (+16.0% Feb-Jun, +5.2% Jul-Oct), against -3.2% for
+# laying every favourite. Picked with hindsight, so it is flattered.
+LAY_RULES = (
+    Rule('lay_fav_ml_other_3of4',
+         'LAY: Favourite the ML does not pick, but 3 or more ratings do',
+         'LAY: ML against it', 'lay', 269, 27.1, 0.0, 8.4, 0.0,
+         'The horse won 27% of the time; any favourite wins 34%. Ahead in both halves of the year '
+         '(+16.0%, +5.2%). On races the ML scored before the jump: 39 lay bets, +16.9%.'),
+)
+LAY_RULES_BY_KEY = {rule.key: rule for rule in LAY_RULES}
+ALL_RULES = RULES + LAY_RULES
 
 # Rules that made picks for a short time and were taken off the page. Their
 # keys stay reserved so an old saved route is never mistaken for a new rule.
@@ -148,12 +167,59 @@ def rules_for(signals, is_favourite, price, starters, has_ratings=True):
     return [RULES_BY_KEY[key] for key in keys]
 
 
+def lay_rules_for(signals, is_favourite, has_ratings=True):
+    """Lay rules a runner fits: the favourite, top pick of 3+ ratings, and the ML picks another horse."""
+    if not signals or not is_favourite or not has_ratings:
+        return []
+    if signals['n4'] >= 3 and signals['ml_other']:
+        return [LAY_RULES_BY_KEY['lay_fav_ml_other_3of4']]
+    return []
+
+
 def recorded_rules(routes):
-    """Rules named in a saved Prediction.best_bet_routes value, in RULES order."""
+    """Rules named in a saved Prediction.best_bet_routes value: back rules, then lay rules."""
     saved = {r.strip() for r in str(routes or '').split(',')}
-    return [rule for rule in RULES if rule.key in saved]
+    return [rule for rule in ALL_RULES if rule.key in saved]
 
 
 def bet_type(rules):
-    """'win' when any of the rules is a win rule, else 'place'."""
+    """'lay' when any rule is a lay rule; else 'win' when any is a win rule; else 'place'.
+
+    Lay comes first on purpose: a horse must never be posted as a bet to
+    back when it was listed as one to bet against.
+    """
+    if any(rule.bet == 'lay' for rule in rules):
+        return 'lay'
     return 'win' if any(rule.bet == 'win' for rule in rules) else 'place'
+
+
+def lay_return(won, betfair_price, commission=0.08):
+    """Return of a lay risking 1 unit: -1 when the horse wins, else the backer's stake less commission."""
+    return -1.0 if won else (1 - commission) / (betfair_price - 1)
+
+
+def lay_record(session):
+    """Live record of each lay rule: picks recorded on Best Bets before the jump.
+
+    {key: {'bets', 'priced', 'horse_lost_rate', 'roi'}}. roi is the return
+    per 100 risked at the Betfair price, over the bets that have one.
+    """
+    from sqlalchemy import text
+    out = {}
+    for rule in LAY_RULES:
+        rows = session.execute(text(
+            "SELECT r.finish_position AS fin, r.bsp FROM predictions p "
+            "JOIN horses h ON h.id = p.horse_id JOIN races rc ON rc.id = h.race_id "
+            "JOIN results r ON r.horse_id = h.id "
+            "WHERE p.best_bet_routes LIKE :route AND r.finish_position > 0 "
+            "AND rc.results_incomplete IS NOT TRUE AND p.best_bet_qualified_at IS NOT NULL "
+            "AND rc.start_time_utc IS NOT NULL AND p.best_bet_qualified_at < rc.start_time_utc"),
+            {'route': f'%{rule.key}%'}).fetchall()
+        priced = [lay_return(row[0] == 1, row[1]) for row in rows if row[1] and row[1] > 1]
+        out[rule.key] = {
+            'bets': len(rows),
+            'priced': len(priced),
+            'horse_lost_rate': 100.0 * sum(1 for row in rows if row[0] != 1) / len(rows) if rows else None,
+            'roi': 100.0 * sum(priced) / len(priced) if priced else None,
+        }
+    return out

@@ -746,7 +746,8 @@ def get_best_bets(date=None, today=None):
                     picks.append({
                         'meeting': meeting.meeting_name, 'meeting_id': meeting.id,
                         'race_number': race.race_number, 'horse': h.horse_name,
-                        'bet': 'WIN' if best_bet_rules.bet_type(rules) == 'win' else 'PLACE (not win)',
+                        'bet': {'win': 'WIN', 'lay': 'LAY (bet AGAINST this horse on Betfair)'}.get(
+                            best_bet_rules.bet_type(rules), 'PLACE (not win)'),
                         'rules': [rule.name for rule in rules],
                     })
     return {'date': day.isoformat() if day else None,
@@ -757,6 +758,9 @@ def get_best_bets(date=None, today=None):
                        'won_pct': rule.win_pct, 'placed_pct': rule.place_pct,
                        'win_return_pct_betfair': rule.win_roi, 'place_return_pct_betfair': rule.place_roi}
                       for rule in best_bet_rules.RULES],
+            'lay_rule': ('Picks marked LAY are favourites to bet AGAINST on Betfair, not to back: the favourite, '
+                         'top pick of three or more ratings, that the ML does not pick. Tested on 269 lay bets: '
+                         '+8.4% per $1 risked. Unproven.'),
             'picks': picks}
 
 
