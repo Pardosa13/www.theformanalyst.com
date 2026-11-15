@@ -640,6 +640,42 @@
   {% if races_without_prices %}<p style="font-size:12px;color:#fbbf24;margin:6px 0 0">⚠️ {{ races_without_prices }} race(s) still to run have no Ladbrokes prices yet, so they could not be checked. Refresh closer to race time.</p>{% endif %}
 </div>
 
+<!-- Graph: running profit of the picks and of the lay bets (best_bet_rules.chart). -->
+<div class="filter-card" style="margin-bottom:24px">
+  <h5 style="margin:0 0 6px;font-weight:700">📈 How They Have Been Going</h5>
+  <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">
+    Running profit of every bet listed on this page before the jump.
+    <strong style="color:#00e5b0">Picks</strong>: a $10 win bet at the starting price.
+    <strong style="color:#ef4444">Lay bets</strong>: risking $10 at the Betfair price.
+  </p>
+  {% if record_chart.labels %}
+  <div style="position:relative;height:300px"><canvas id="bestBetsChart"></canvas></div>
+  <div class="record-wrap" style="margin-top:12px">
+    <table class="record-table">
+      <thead><tr><th>Line</th><th>Bets settled</th><th>Went your way</th><th>Profit so far</th><th>Per $100 put at risk</th></tr></thead>
+      <tbody>
+      {% for s in record_chart.series %}
+        <tr>
+          <td class="rule-name"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;background:{{ '#ef4444' if s.kind == 'lay' else '#00e5b0' }}"></span>{{ s.name }}</td>
+          <td>{{ s.bets }}</td>
+          <td>{% if s.bets %}{{ s.won }} ({{ "%.0f"|format(100 * s.won / s.bets) }}%){% else %}&ndash;{% endif %}</td>
+          <td class="{% if s.bets and s.profit >= 0 %}pos{% elif s.bets %}neg{% else %}muted{% endif %}">{% if s.bets %}{{ '-' if s.profit < 0 else '+' }}${{ "%.2f"|format(s.profit|abs) }}{% else %}&ndash;{% endif %}</td>
+          <td class="{% if s.bets and s.profit >= 0 %}pos{% elif s.bets %}neg{% else %}muted{% endif %}">{% if s.bets %}{{ "%+.1f"|format(10 * s.profit / s.bets) }}%{% else %}&ndash;{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0">
+    &ldquo;Went your way&rdquo; means the pick won, or the lay horse lost.
+    {% for s in record_chart.series if s.kind == 'lay' and s.estimated %}{{ s.estimated }} lay bet(s) use the starting price until the monthly Betfair price loads. The Betfair price is usually a little higher, so those lay wins are shown a little too big.{% endfor %}
+  </p>
+  <script type="application/json" id="bestBetsChartData">{{ record_chart|tojson }}</script>
+  {% else %}
+  <p class="text-muted" style="font-size:13px;margin:0">No settled bets yet. The graph starts once a pick or a lay bet listed here has run and its result is in.</p>
+  {% endif %}
+</div>
+
 <!-- Filter card -->
 <div class="filter-card">
   <form method="GET" action="{{ url_for('best_bets') }}" class="filter-form">
@@ -918,6 +954,45 @@ document.getElementById('post-btn').addEventListener('click', function (e) {
     e.preventDefault();
   }
 });
+</script>
+{% endif %}
+{% if record_chart.labels %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g" crossorigin="anonymous"></script>
+<script>
+(function () {
+  const holder = document.getElementById('bestBetsChartData');
+  const canvas = document.getElementById('bestBetsChart');
+  if (!holder || !canvas || typeof Chart === 'undefined') return;
+  const data = JSON.parse(holder.textContent);
+  const money = (v) => (v < 0 ? '-$' : '+$') + Math.abs(v).toFixed(2);
+  new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: data.labels,
+      datasets: data.series.map((s) => ({
+        label: (s.kind === 'lay' ? 'LAY bets' : 'Picks') + ' (' + s.bets + ' bets)',
+        data: s.points,
+        borderColor: s.kind === 'lay' ? '#ef4444' : '#00e5b0',
+        backgroundColor: s.kind === 'lay' ? '#ef4444' : '#00e5b0',
+        borderWidth: 2, pointRadius: data.labels.length > 40 ? 0 : 3, tension: 0, spanGaps: true,
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#cbd5e1' } },
+        tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + (c.parsed.y === null ? 'no bets yet' : money(c.parsed.y)) } },
+      },
+      scales: {
+        x: { ticks: { color: '#94a3b8', maxTicksLimit: 10 }, grid: { color: 'rgba(148,163,184,0.12)' } },
+        y: { ticks: { color: '#94a3b8', callback: (v) => (v < 0 ? '-$' : '$') + Math.abs(v) },
+             grid: { color: (c) => (c.tick.value === 0 ? 'rgba(148,163,184,0.6)' : 'rgba(148,163,184,0.12)') },
+             title: { display: true, text: 'Running profit', color: '#94a3b8' } },
+      },
+    },
+  });
+})();
 </script>
 {% endif %}
 {% endblock %}

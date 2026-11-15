@@ -149,3 +149,49 @@ def test_recorded_rules_and_bet_type():
     # Routes saved by rules that have since been removed are ignored.
     assert bbr.recorded_rules('agree_ml_pfai_fav,agree_fav_3of4_mid,agree_fav_3of4_odds_on') == []
     assert bbr.recorded_rules(None) == [] and bbr.recorded_rules('') == []
+
+
+def test_chart_runs_a_separate_line_for_picks_and_lay_bets():
+    """The Best Bets graph: $10 win bets for the picks, $10 risked for the lay bets,
+    counting only bets listed before the jump."""
+    import sqlite3
+    from types import SimpleNamespace
+
+    class Session:
+        def __init__(self):
+            self.c = sqlite3.connect(':memory:')
+
+        def execute(self, sql, params=None):
+            rows = self.c.execute(str(sql), params or {}).fetchall()
+            return SimpleNamespace(fetchall=lambda: rows)
+
+    s = Session()
+    s.c.executescript("""
+        create table meetings(id integer primary key, date text);
+        create table races(id integer primary key, meeting_id int, start_time_utc text, results_incomplete int);
+        create table horses(id integer primary key, race_id int);
+        create table predictions(id integer primary key, horse_id int, best_bet_routes text, best_bet_qualified_at text);
+        create table results(id integer primary key, horse_id int, finish_position int, sp real, bsp real);
+        insert into meetings values(1,'2026-11-16'),(2,'2026-11-17');
+        insert into races values(1,1,'2026-11-16 05:00:00',null),(2,2,'2026-11-17 05:00:00',null);
+        insert into horses values(1,1),(2,1),(3,2),(4,2),(5,2);
+        insert into predictions values
+          (1,1,'agree_ml_fav_quiet','2026-11-16 03:00:00'),
+          (2,2,'lay_fav_ml_other_3of4','2026-11-16 03:00:00'),
+          (3,3,'agree_ml_fav_quiet','2026-11-17 03:00:00'),
+          (4,4,'lay_fav_ml_other_3of4','2026-11-17 03:00:00'),
+          (5,5,'agree_ml_fav_quiet','2026-11-17 09:00:00');
+        insert into results(horse_id,finish_position,sp,bsp) values
+          (1,1,3.0,3.4),(2,5,3.0,3.0),(3,5,2.5,null),(4,1,2.0,null),(5,1,9.0,9.0);
+    """)
+    out = bbr.chart(s)
+    assert out['labels'] == ['2026-11-16', '2026-11-17']
+    picks, lay = out['series']
+    # Picks: +$20 (won at $3), then -$10. The pick listed after the jump is left out.
+    assert (picks['kind'], picks['bets'], picks['won'], picks['profit'], picks['points']) == ('pick', 2, 1, 10.0, [20.0, 10.0])
+    # Lay: the horse lost at Betfair $3 -> +$4.60. Then a horse won -> -$10, priced at the
+    # starting price because the Betfair price has not loaded (an estimate).
+    assert (lay['kind'], lay['bets'], lay['won'], lay['profit'], lay['points']) == ('lay', 2, 1, -5.4, [4.6, -5.4])
+    assert lay['estimated'] == 1 and picks['estimated'] == 0
+    s.c.execute("delete from predictions")
+    assert bbr.chart(s)['labels'] == []
