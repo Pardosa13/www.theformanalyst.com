@@ -49,33 +49,6 @@
     return html;
   }
 
-  // Lay angles: a bet AGAINST the horse on Betfair. Shown apart so they are never read as back bets.
-  function layTable(angles) {
-    if (!angles.length) return '';
-    const th = (label) => `<th class="text-center" style="white-space:nowrap">${label}</th>`;
-    let html = '<div style="margin-top:24px;padding:12px;border:2px solid #ef4444;border-radius:8px">';
-    html += '<h5 style="margin:0 0 4px">⛔ LAY bets &mdash; betting AGAINST the horse</h5>';
-    html += '<p class="text-muted mb-2" style="font-size:12px">These are <strong>not</strong> horses to back. A lay bet on Betfair wins when the horse <strong>loses</strong>. Every bet here risks the same amount: you lose it if the horse wins, and you win a smaller amount (less 8% commission) if it loses.</p>';
-    html += '<div class="table-responsive"><table class="table table-hover table-sm"><thead class="table-light"><tr><th>Lay angle</th>';
-    html += th('Horses that fit') + th('Lay bets (have a Betfair price)') + th('Horse lost (lay won)') + th('Typical Betfair price');
-    html += th('Lay return per $100 risked') + th('Lay profit, risking $10 a bet') + th('If you had BACKED it (Betfair)');
-    html += '</tr></thead><tbody>';
-    for (const a of angles) {
-      html += `<tr><td style="min-width:190px"><strong>${esc(a.name)}</strong></td>`;
-      html += `<td class="text-center">${a.bets}</td><td class="text-center">${a.lay_bets}</td>`;
-      html += `<td class="text-center">${a.lay_horse_lost_rate === null ? '—' : a.lay_horse_lost_rate.toFixed(1) + '%'}</td>`;
-      html += `<td class="text-center">${a.lay_typical_price === null ? '—' : '$' + a.lay_typical_price.toFixed(2)}</td>`;
-      html += `<td class="text-center ${cls(a.lay_roi)}"><strong>${pct(a.lay_roi)}</strong></td>`;
-      html += `<td class="text-center ${a.lay_bets ? cls(a.lay_profit) : ''}">${a.lay_bets ? money(a.lay_profit) : '—'}</td>`;
-      html += `<td class="text-center ${cls(a.betfair_roi)}">${pct(a.betfair_roi)}</td></tr>`;
-    }
-    html += '</tbody></table></div>';
-    html += '<ul class="small mb-0"><li>Only races the ML scored before the race count, and only once the Betfair price has loaded (monthly). So this fills in slowly.</li>';
-    html += '<li>At a $3 price you risk $10 to win about $4.60. You win most bets, then give a chunk back when the horse wins.</li>';
-    html += '<li>Ratings are the analyzer, PFAI, the time rating and the class rating. The favourite is the runner with the shortest starting price.</li></ul></div>';
-    return html;
-  }
-
   function renderReviewAngles(container, data) {
     let waiting = 0, estimated = 0, betfair = 0, bets = 0;
     for (const a of data.angles) { waiting += a.place_waiting; estimated += a.place_estimated; betfair += a.betfair_bets; bets += a.bets; }
@@ -85,7 +58,6 @@
       data.angles.filter((a) => a.group === 'steady'));
     html += angleTable('🤝 Models and market agree', 'What happens when the analyzer, the ML and the favourite line up, or don\'t. Small numbers of bets so far, so these can swing.',
       data.angles.filter((a) => a.group === 'agree'));
-    html += layTable(data.angles.filter((a) => a.group === 'lay'));
     html += angleTable('🎲 Long shots', 'Mostly $10 and longer. Few winners, big swings. Any profit has only shown at the Betfair price, and a few big winners carry it.',
       data.angles.filter((a) => a.group === 'long'));
 

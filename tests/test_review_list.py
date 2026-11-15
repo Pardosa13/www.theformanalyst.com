@@ -47,24 +47,13 @@ def test_agreement_angles():
     assert match(set(), flags={"a_top", "fav"}) == []
 
 
-def test_the_lay_angle_is_marked_and_needs_all_three_parts():
-    match = review_list.matching_angles
-    lay = review_list.BY_KEY["lay_fav_ml_other_3of4"]
-    assert lay.group == "lay" and lay.name.startswith("LAY:")
-    assert [a.key for a in review_list.ANGLES if a.group == "lay"] == ["lay_fav_ml_other_3of4"]
-    assert "lay_fav_ml_other_3of4" in match(set(), flags={"fav", "ml_other", "ratings_3", "a_top"})
-    assert "lay_fav_ml_other_3of4" not in match(set(), flags={"fav", "ml_other", "a_top"})      # under 3 ratings
-    assert "lay_fav_ml_other_3of4" not in match(set(), flags={"fav", "ml_top", "ratings_3"})    # the ML picks it
-    assert "lay_fav_ml_other_3of4" not in match(set(), flags={"ml_other", "ratings_3"})         # not the favourite
-
-
 def test_every_angle_can_be_matched():
     from notes_parsing import _NOTES_COMPONENT_PATTERNS
     known = {name for _pattern, name in _NOTES_COMPONENT_PATTERNS}
     keys = [a.key for a in review_list.ANGLES]
     assert len(keys) == len(set(keys))
     for a in review_list.ANGLES:
-        assert a.group in ("steady", "agree", "long", "lay")
+        assert a.group in ("steady", "agree", "long")
         assert a.comps or a.flags or a.at_least
         for name in tuple(a.comps) + (a.at_least[1] if a.at_least else ()):
             assert name in known, name
