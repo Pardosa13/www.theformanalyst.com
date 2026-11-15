@@ -31,6 +31,7 @@ from race_animation_routes import register_race_animation_routes
 from ml_shadow_routes import register_ml_shadow_routes
 from pattern_routes import register_pattern_routes
 import place_bet
+import best_bet_rules
 from bet_tracker import register_bet_tracker_routes
 from budget_tracker import register_budget_tracker_routes, is_budget_tracker_allowed, is_julz
 from notes_parsing import (
@@ -122,15 +123,16 @@ def merge_best_bet_tracking(prediction, routes, edge_badges):
 
 
 def best_bet_routes_for_horse(horse, race=None, signal_top_ids=None, components=None):
-    """The Best Bets rule for one runner: the place rules in place_bet.RULES.
+    """Routes a runner can be given without the live market: none.
 
-    Every Best Bet is a PLACE bet. The old win routes (Maiden, Proven Edge,
-    3-way agreement, Value Top Pick) were removed on 28 Oct 2026: their
-    pre-race picks lost money. Returns (routes, edge_badges, signal_agreement)
-    for older callers; the last two are always empty now. Shared by the Best
-    Bets page and the daily run, so both record exactly the same routes.
+    From 15 Nov 2026 the Best Bets rules (best_bet_rules.RULES) are about the
+    favourite, so they need live Ladbrokes prices. The Best Bets page works
+    them out and records them when it is opened before the jump. The place
+    rules (place_bet.RULES) no longer make Best Bets; their record stays on
+    the ML Data page. Returns (routes, edge_badges, signal_agreement) for
+    older callers; all three are always empty now.
     """
-    return [rule.key for rule in place_bet.matching_rules(horse)], {}, False
+    return [], {}, False
 
 
 def record_best_bet_routes(races):
@@ -1030,8 +1032,10 @@ def post_best_bets_to_telegram(best_bets, meeting_name):
         
         for bet in best_bets:
             message += f"*R{bet['race_number']}: {bet['horse_name']}*\n"
-            if bet.get('place_rules'):
+            if bet.get('bet_type') == 'place' or bet.get('place_rules'):
                 message += "🥉 *PLACE bet (not the win)*\n\n"
+            elif bet.get('bet_type') == 'win':
+                message += "🏆 *WIN bet*\n\n"
             else:
                 message += f"💰 *Predicted Price: {bet['predicted_odds']}*\n\n"
         
@@ -1096,8 +1100,10 @@ def post_best_bets_to_twitter(best_bets, meeting_name):
         
         for bet in best_bets:
             message += f"R{bet['race_number']}: {bet['horse_name']}\n"
-            if bet.get('place_rules'):
+            if bet.get('bet_type') == 'place' or bet.get('place_rules'):
                 message += "🥉 PLACE bet (not the win)\n\n"
+            elif bet.get('bet_type') == 'win':
+                message += "🏆 WIN bet\n\n"
             else:
                 message += f"💰 Predicted Price: {bet['predicted_odds']}\n\n"
         
@@ -11831,7 +11837,7 @@ def _recent_best_bet_meetings(hours_back):
             load_only(Meeting.id, Meeting.meeting_name, Meeting.uploaded_at, Meeting.track, Meeting.date, Meeting.puntingform_id),
             selectinload(Meeting.races)
             .load_only(Race.id, Race.meeting_id, Race.race_number, Race.distance, Race.race_class,
-                       Race.track_condition, Race.start_time_utc)
+                       Race.track_condition, Race.start_time_utc, Race.ratings_json)
             .selectinload(Race.horses)
             .load_only(Horse.id, Horse.race_id, Horse.horse_name, Horse.barrier, Horse.weight, Horse.jockey,
                        Horse.trainer, Horse.form, Horse.csv_data, Horse.is_scratched)
@@ -11850,118 +11856,122 @@ def _recent_best_bet_meetings(hours_back):
 @app.route("/best-bets")
 @login_required
 def best_bets():
-    """Best Bets: only runners that fit one of the place rules (place_bet.RULES).
+    """Best Bets: favourites the ML model also picks (best_bet_rules.RULES).
 
-    Every pick is a PLACE bet. Routes are recorded only while the race is
-    still to run, so the record never counts a pick made after the jump.
-    Started races still show, unrecorded.
+    The rules need the live Ladbrokes market, so a pick is made and recorded
+    only while the race is still to run. Once a race has started, the picks
+    recorded for it earlier still show.
     """
     if not current_user.is_admin:
         flash("Access denied. Admin privileges required.", "danger")
         return redirect(url_for("history"))
-    from datetime import datetime, timedelta
-    from sqlalchemy.orm import load_only, selectinload
 
     hours_back = request.args.get('hours', default=12, type=int)
     recent_meetings = _recent_best_bet_meetings(hours_back)
 
-    # The saved record decides which rules still make picks (retired rules and
-    # rules losing after place_bet.RETIRE_AFTER_BETS live bets do not).
-    place_rules_record = None
-    place_rules_saved_at = None
-    try:
-        place_rules_record, place_rules_saved_at = place_bet.record_for_page(db.session)
-    except Exception as e:
-        db.session.rollback()
-        logger.warning("Place rules record unavailable: %s", e, exc_info=True)
-    active_rules = place_bet.active_rules(place_rules_record)
-
-    best_bets = []
     total_horses_scanned = 0
-    races_with_picks = []
+    open_races, started_races = [], []
     for meeting in recent_meetings:
         track_name = _track_from_meeting(meeting)
         date_str = meeting.date.strftime('%Y-%m-%d') if meeting.date else None
         for race in meeting.races:
-            active = [h for h in race.horses if not getattr(h, 'is_scratched', False)]
             total_horses_scanned += len(race.horses)
-            picks = [(h, place_bet.matching_rules(h, rules=active_rules)) for h in active]
-            picks = [(h, rules) for h, rules in picks if rules]
-            if picks:
-                races_with_picks.append((meeting, race, active, picks, track_name, date_str))
+            if race_has_started(race, meeting, allow_network=False)[0]:
+                started_races.append((meeting, race))
+            else:
+                open_races.append((meeting, race, track_name, date_str))
 
-    # Live Ladbrokes win price, shown as context only (never used to pick).
-    # Fetched for all races at once: one at a time took 10-50 seconds.
-    def _ladbrokes_for(track_name, date_str, race_number):
+    # Live Ladbrokes prices decide the favourite. Fetched for all races at
+    # once: one at a time took 10-50 seconds.
+    def _ladbrokes_for(item):
+        meeting, race, track_name, date_str = item
         if not (track_name and date_str):
             return None, None
         try:
-            race_info = match_race_info(track_name, date_str, race_number)
+            race_info = match_race_info(track_name, date_str, race.race_number)
             if race_info and race_info.get('uuid'):
                 return race_info, fetch_race_odds(race_info['uuid'])
         except Exception as e:
-            logger.warning("Best Bets: Ladbrokes odds unavailable for %s R%s: %s", track_name, race_number, e)
+            logger.warning("Best Bets: Ladbrokes odds unavailable for %s R%s: %s", track_name, race.race_number, e)
         return None, None
 
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        odds_by_race = list(pool.map(lambda item: _ladbrokes_for(item[4], item[5], item[1].race_number),
-                                     races_with_picks))
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        odds_by_race = list(pool.map(_ladbrokes_for, open_races))
 
-    from datetime import date as _date
-    combo_pairs = {place_bet._combo_key(h.jockey, h.trainer)
-                   for _m, _r, _a, picks, _t, _d in races_with_picks for h, _rules in picks}
-    hot = place_bet.hot_combos(db.session, combo_pairs, _date.today())
+    best_bets = []
+    avoid = []
+    races_without_prices = 0
 
-    for (meeting, race, active, picks, track_name, date_str), (race_info, odds) in zip(races_with_picks, odds_by_race):
-        race_started = race_has_started(race, meeting, allow_network=False)[0]
-        ladbrokes_fields = {}
-        if race_info is not None:
-            ladbrokes_fields = evaluate_ladbrokes_best_bet_signals(race, meeting, odds, race_info)
-        runners = len(active)
-        places = place_bet.places_paid(runners)
-        for horse, rules in picks:
-            routes = [rule.key for rule in rules]
-            if not race_started:
-                merge_best_bet_tracking(horse.prediction, routes, {})
-            csv_data = place_bet._csv(horse)
-            components = place_bet.note_components(horse.prediction.notes)
-            lb = ladbrokes_fields.get(horse.id, {})
-            best_bets.append({
-                'meeting_id': meeting.id,
-                'meeting_name': meeting.meeting_name,
-                'uploaded_at': meeting.uploaded_at,
-                'race_id': race.id,
-                'race_number': race.race_number,
-                'distance': race.distance,
-                'race_class': race.race_class,
-                'track_condition': race.track_condition,
-                'horse_id': horse.id,
-                'horse_name': horse.horse_name,
-                'barrier': horse.barrier,
-                'weight': horse.weight,
-                'jockey': horse.jockey,
-                'trainer': horse.trainer,
-                'last10': csv_data.get('horse last10') or horse.form or '',
-                'last_pos': place_bet.last_start_position(csv_data),
-                'last_margin': place_bet.last_start_margin(csv_data),
-                'last_date': csv_data.get('form meeting date'),
-                'rules': [{'key': rule.key, 'name': rule.name, 'short': rule.short, 'audit': rule.audit,
-                           'checks': [name for name in rule.components if name in components]}
-                          for rule in rules],
-                'best_bet_routes': routes,
-                'runners': runners,
-                'places_paid': places,
-                'no_place_market': runners < 5,
-                'race_started': race_started,
-                'ladbrokes_fixed_win_price': lb.get('ladbrokes_fixed_win_price'),
-                'ladbrokes_market_rank': lb.get('ladbrokes_market_rank'),
-                'ladbrokes_odds_updated_at': lb.get('ladbrokes_odds_updated_at'),
-                'hot_combo': hot.get(place_bet._combo_key(horse.jockey, horse.trainer)),
-            })
+    def _row(meeting, race, horse, rules, signals, runners, race_started, lb):
+        csv_data = place_bet._csv(horse)
+        return {
+            'meeting_id': meeting.id,
+            'meeting_name': meeting.meeting_name,
+            'uploaded_at': meeting.uploaded_at,
+            'race_id': race.id,
+            'race_number': race.race_number,
+            'distance': race.distance,
+            'race_class': race.race_class,
+            'track_condition': race.track_condition,
+            'horse_id': horse.id,
+            'horse_name': horse.horse_name,
+            'barrier': horse.barrier,
+            'weight': horse.weight,
+            'jockey': horse.jockey,
+            'trainer': horse.trainer,
+            'last10': csv_data.get('horse last10') or horse.form or '',
+            'last_pos': place_bet.last_start_position(csv_data),
+            'last_margin': place_bet.last_start_margin(csv_data),
+            'last_date': csv_data.get('form meeting date'),
+            'rules': [{'key': rule.key, 'name': rule.name, 'short': rule.short, 'bet': rule.bet} for rule in rules],
+            'bet_type': best_bet_rules.bet_type(rules) if rules else None,
+            'best_bet_routes': [rule.key for rule in rules],
+            'on_top': [label for key, label in (('ml', 'ML'), ('a', 'Analyzer'), ('pf', 'PFAI'),
+                                                ('t', 'Time rating'), ('w', 'Class rating'))
+                       if signals and signals.get(key)],
+            'runners': runners,
+            'places_paid': place_bet.places_paid(runners),
+            'no_place_market': runners < 5,
+            'race_started': race_started,
+            'ladbrokes_fixed_win_price': lb.get('ladbrokes_fixed_win_price'),
+            'ladbrokes_market_rank': lb.get('ladbrokes_market_rank'),
+            'ladbrokes_odds_updated_at': lb.get('ladbrokes_odds_updated_at'),
+        }
+
+    for (meeting, race, _track, _date), (race_info, odds) in zip(open_races, odds_by_race):
+        if race_info is None:
+            races_without_prices += 1
+            continue
+        market = evaluate_ladbrokes_best_bet_signals(race, meeting, odds, race_info)
+        signals, has_ratings = best_bet_rules.race_signals(race)
+        runners = len(signals)
+        for horse in race.horses:
+            sig = signals.get(horse.id)
+            lb = market.get(horse.id, {})
+            if not sig or not lb.get('is_ladbrokes_favourite'):
+                continue
+            rules = best_bet_rules.rules_for(sig, True, lb.get('ladbrokes_fixed_win_price'), runners, has_ratings)
+            if rules:
+                merge_best_bet_tracking(horse.prediction, [rule.key for rule in rules], {})
+                best_bets.append(_row(meeting, race, horse, rules, sig, runners, False, lb))
+            elif best_bet_rules.to_avoid(sig, True, has_ratings):
+                avoid.append(_row(meeting, race, horse, [], sig, runners, False, lb))
+
+    # Started races: show what was recorded before the jump. Never recorded now.
+    for meeting, race in started_races:
+        recorded = [(h, best_bet_rules.recorded_rules(h.prediction.best_bet_routes)) for h in race.horses
+                    if not getattr(h, 'is_scratched', False) and getattr(h, 'prediction', None)]
+        recorded = [(h, rules) for h, rules in recorded if rules]
+        if not recorded:
+            continue
+        signals, _has_ratings = best_bet_rules.race_signals(race)
+        for horse, rules in recorded:
+            best_bets.append(_row(meeting, race, horse, rules, signals.get(horse.id), len(signals), True, {}))
 
     db.session.commit()
     best_bets.sort(key=lambda b: (b['meeting_name'], b['race_number'], b['horse_name']))
+    avoid.sort(key=lambda b: (b['meeting_name'], b['race_number'], b['horse_name']))
 
     meetings_with_bets = {}
     for bet in best_bets:
@@ -11974,16 +11984,27 @@ def best_bets():
             'places_paid': bet['places_paid'], 'no_place_market': bet['no_place_market'], 'horses': []})
         race['horses'].append(bet)
 
+    # Live record of each rule's picks as win bets (betfair_check counts every
+    # route that does not start with "place").
+    live_record = {}
+    try:
+        import betfair_check
+        for row in betfair_check.best_bets_record(db.session).get('by_route', []):
+            live_record[row['key']] = row
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("Best Bets live record unavailable: %s", e, exc_info=True)
+
     import data_checks
     data_check_failures = data_checks.latest_failures(db.session)
 
     return render_template("best_bets.html",
-        place_rules_age_min=place_bet.age_minutes(place_rules_saved_at),
         data_check_failures=data_check_failures,
-        place_rules=place_bet.RULES,
-        active_rule_keys=[rule.key for rule in active_rules],
-        retire_after_bets=place_bet.RETIRE_AFTER_BETS,
-        place_rules_record=place_rules_record,
+        rules=best_bet_rules.RULES,
+        live_record=live_record,
+        avoid=avoid,
+        avoid_note=best_bet_rules.AVOID_NOTE,
+        races_without_prices=races_without_prices,
         best_bets=best_bets,
         meetings_with_bets=meetings_with_bets,
         total_bets=len(best_bets),
@@ -12031,11 +12052,13 @@ def post_best_bets_manual():
             if meeting_name not in bets_by_meeting:
                 bets_by_meeting[meeting_name] = []
             
+            # Win or place: from the Best Bets rules recorded for this horse.
+            rules = best_bet_rules.recorded_rules(horse.prediction.best_bet_routes)
             bets_by_meeting[meeting_name].append({
                 'race_number': race.race_number,
                 'horse_name': horse.horse_name,
                 'predicted_odds': _analyzer_display_price(horse.prediction)[0],
-                'place_rules': [rule.short for rule in place_bet.matching_rules(horse)],
+                'bet_type': best_bet_rules.bet_type(rules) if rules else None,
             })
         
         db.session.commit()

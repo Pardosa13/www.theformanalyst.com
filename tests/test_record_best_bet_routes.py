@@ -16,9 +16,11 @@ def _runner(race, name, analyzer, pfai, ml, notes='x', csv_data=None):
     return horse
 
 
-def test_old_win_routes_are_gone_only_place_rules_record():
+def test_nothing_is_recorded_without_the_live_market():
     """28 Oct 2026: Maiden, Proven Edge, 3-way agreement and Value Top Pick were
-    removed (their pre-race picks lost). Only the place rules record routes."""
+    removed (their pre-race picks lost). 15 Nov 2026: the place rules came off
+    Best Bets too. The rules now need the live market (best_bet_rules.py), so
+    the daily run, which has no prices, records nothing."""
     with appmod.app.app_context():
         db.create_all()
         try:
@@ -44,14 +46,16 @@ def test_old_win_routes_are_gone_only_place_rules_record():
 
             recorded = appmod.record_best_bet_routes([r1, r2])
             db.session.commit()
-            assert recorded == 1
+            assert recorded == 0
             assert a.prediction.best_bet_routes is None
-            assert c.prediction.best_bet_routes == 'place_32_tdnowin'
-            assert c.prediction.best_bet_qualified_at is not None
+            assert c.prediction.best_bet_routes is None
+            assert c.prediction.best_bet_qualified_at is None
 
-            # Recording again is safe: routes only grow, never duplicate.
-            appmod.record_best_bet_routes([r2])
-            assert c.prediction.best_bet_routes == 'place_32_tdnowin'
+            # Routes only grow, never duplicate, when the page records them.
+            appmod.merge_best_bet_tracking(c.prediction, ['agree_ml_fav_quiet'], {})
+            appmod.merge_best_bet_tracking(c.prediction, ['agree_ml_fav_quiet', 'agree_ml_pfai_fav'], {})
+            assert c.prediction.best_bet_routes == 'agree_ml_fav_quiet,agree_ml_pfai_fav'
+            assert c.prediction.best_bet_qualified_at is not None
 
             for gone in ('RETIRED_BEST_BET_ROUTES', 'PROVEN_EDGE_COMPONENTS', 'MAIDEN_AGREEMENT_BADGE',
                          'VALUE_TOP_PICK_MIN_EDGE_PCT', 'evaluate_component_edge_badges'):
@@ -61,14 +65,15 @@ def test_old_win_routes_are_gone_only_place_rules_record():
             db.drop_all()
 
 
-def test_best_bets_page_and_daily_run_share_one_rule():
+def test_best_bets_page_picks_with_the_live_market_rules():
     source = Path('app.py').read_text()
     page = source[source.index('def best_bets('):]
     page = page[:page.index('\n@app.route(', 1)]
-    assert 'place_bet.matching_rules(' in page
+    assert 'best_bet_rules.rules_for(' in page
+    assert 'place_bet.matching_rules(' not in page
     rule = source[source.index('def best_bet_routes_for_horse('):]
     rule = rule[:rule.index('\n\n\n', 1)]
-    assert 'place_bet.matching_rules(horse)' in rule
+    assert 'return [], {}, False' in rule
     daily = Path('daily_run.py').read_text()
     assert 'record_best_bet_routes(races)' in daily
     run_pass = daily[daily.index('def run_pass('):]

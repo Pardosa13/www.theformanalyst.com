@@ -586,57 +586,58 @@
 
 <!-- Page header -->
 <div class="bets-header">
-  <h2>🥉 Best Bets &mdash; Place Bets Only</h2>
-  <p>Every pick here is a <strong>PLACE bet, not a win bet</strong>, best taken at the <strong>Betfair place price</strong> (the record is settled there, after 8% commission).
-     A horse shows when it fits a <strong>live</strong> place rule. Five of the six rules from the 28 Oct 2026 audit lost money in October, the first month they had not been fitted on, so they were retired on 10 Nov 2026; their record still shows below.
-     The live rule is unproven, so stake small. Each row shows the form it was picked on, so you can check it.</p>
+  <h2>🎯 Best Bets &mdash; Favourites The ML Also Picks</h2>
+  <p>A short-list to <strong>check against the replays</strong>, not sure things. Each pick is the <strong>favourite</strong>, backed by the ML model or by three or more ratings.
+     They win and place often, at short prices. In testing they sat close to break even at <strong>Betfair prices</strong> and lost at the starting price, so the price you take matters.
+     The old place rules were taken off this page on 15 Nov 2026; their record is on the ML Data page.</p>
 </div>
 
 <!-- Stat tiles -->
 <div class="stat-row">
-  <div class="stat-tile s-primary"><h5>Place Picks</h5><h2>{{ total_bets }}</h2></div>
-  <div class="stat-tile s-info"><h5>Live Rules</h5><h2>{{ active_rule_keys|length }}<span style="font-size:.5em;opacity:.6"> / {{ place_rules|length }}</span></h2></div>
+  <div class="stat-tile s-primary"><h5>Picks</h5><h2>{{ total_bets }}</h2></div>
+  <div class="stat-tile s-info"><h5>To Avoid</h5><h2>{{ avoid|length }}</h2></div>
   <div class="stat-tile s-success"><h5>Horses Scanned</h5><h2>{{ total_horses_scanned }}</h2></div>
   <div class="stat-tile s-warning"><h5>Time Window</h5><h2>{{ hours_back }}h</h2></div>
 </div>
 
-<!-- Every rule and its record, settled on the place (place_bet.py). Retired rules stay listed. -->
+<!-- Every rule: what the 15 Nov 2026 sweep found, and its live record (best_bet_rules.py). -->
 <div class="filter-card" style="margin-bottom:24px">
-  <h5 style="margin:0 0 6px;font-weight:700">📒 Place Rules &amp; Record ($10 place bets)</h5>
+  <h5 style="margin:0 0 6px;font-weight:700">📒 The Rules &amp; How They Tested</h5>
   <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">
-    &ldquo;History&rdquo; is every settled runner since February that fits the rule. &ldquo;Live&rdquo; counts only picks shown here before the jump (from 28 Oct 2026) &mdash; that is the real test.
-    A live rule still losing after {{ retire_after_bets }} live bets stops making picks on its own.
-    Placed = top 3 with 8+ runners, top 2 with 5&ndash;7. Betfair place prices arrive monthly{% if place_rules_record and place_rules_record.place_bsp_through %} (loaded up to {{ place_rules_record.place_bsp_through }}){% endif %}, so new bets show a place % before they show a profit.
+    &ldquo;Tested&rdquo; is every runner that fit the rule from February to November 2026, paid at Betfair prices after 8% commission. Those rules were picked after seeing the results, so they flatter a little.
+    &ldquo;Live&rdquo; counts only picks shown on this page before the jump, from 15 Nov 2026, as win bets &mdash; that is the real test.
+    The favourite and the price come from live Ladbrokes odds, so a pick can come and go as the market moves.
+    Ratings are the analyzer, PFAI, the time rating and the class rating.
   </p>
-  {% if not place_rules_record %}<p class="text-muted" style="font-size:13px">The place rules record is being worked out in the background. Refresh in a few minutes.</p>{% elif place_rules_age_min is not none %}<p class="text-muted" style="font-size:12px;margin:0 0 8px">Record updated {{ place_rules_age_min }} min ago (refreshes after each results check).</p>{% endif %}
   <div class="record-wrap">
     <table class="record-table">
-      <thead><tr><th>Rule</th><th>Status</th><th>Feb&ndash;Sep test</th><th>History bets</th><th>Placed</th><th>ROI</th><th>Live bets</th><th>Live placed</th><th>Live ROI</th></tr></thead>
+      <thead><tr><th>Rule</th><th>Suggested bet</th><th>Tested bets</th><th>Won</th><th>Placed</th><th>Win return</th><th>Place return</th><th>Live bets</th><th>Live won</th><th>Live win return (SP)</th><th>Live win return (Betfair)</th></tr></thead>
       <tbody>
-      {% set rec_by_key = {} %}
-      {% if place_rules_record %}{% for r in place_rules_record.rules %}{% set _ = rec_by_key.update({r.key: r}) %}{% endfor %}{% endif %}
-      {% for rule in place_rules %}
-        {% set r = rec_by_key.get(rule.key) %}
+      {% for rule in rules %}
+        {% set r = live_record.get(rule.key) %}
         <tr data-rules="{{ rule.key }}">
-          <td class="rule-name">{{ rule.name }}</td>
-          <td>{% if rule.key in active_rule_keys %}<span class="pos">Live</span>{% elif rule.retired %}<span class="muted" title="{{ rule.retired }}">Retired</span><div class="muted" style="font-size:11px;white-space:normal;max-width:220px">{{ rule.retired|replace('Retired ', '', 1) }}</div>{% else %}<span class="neg" title="Losing after {{ retire_after_bets }} live bets">Stopped</span><div class="muted" style="font-size:11px">Losing after {{ retire_after_bets }}+ live bets</div>{% endif %}</td>
-          <td class="muted" style="white-space:normal">{{ rule.audit }}</td>
+          <td class="rule-name">{{ rule.name }}{% if rule.note %}<div class="muted" style="font-size:11px;white-space:normal;max-width:320px">{{ rule.note }}</div>{% endif %}</td>
+          <td>{{ 'Win' if rule.bet == 'win' else 'Place' }}</td>
+          <td>{{ '{:,}'.format(rule.bets) }}</td>
+          <td>{{ "%.0f"|format(rule.win_pct) }}%</td>
+          <td>{{ "%.0f"|format(rule.place_pct) }}%</td>
+          <td class="{{ 'pos' if rule.win_roi >= 0 else 'neg' }}">{{ "%+.1f"|format(rule.win_roi) }}%</td>
+          <td class="{{ 'pos' if rule.place_roi >= 0 else 'neg' }}">{{ "%+.1f"|format(rule.place_roi) }}%</td>
           {% if r %}
-          <td>{{ r.history.bets }}</td>
-          <td>{{ "%.1f"|format(r.history.place_rate) }}%</td>
-          <td class="{% if r.history.roi is not none and r.history.roi >= 0 %}pos{% elif r.history.roi is not none %}neg{% else %}muted{% endif %}">{% if r.history.roi is not none %}{{ "%+.1f"|format(r.history.roi) }}%{% else %}&ndash;{% endif %}</td>
-          <td>{{ r.live.bets }}</td>
-          <td>{% if r.live.bets %}{{ "%.1f"|format(r.live.place_rate) }}%{% else %}&ndash;{% endif %}</td>
-          <td class="{% if r.live.roi is not none and r.live.roi >= 0 %}pos{% elif r.live.roi is not none %}neg{% else %}muted{% endif %}">{% if r.live.roi is not none %}{{ "%+.1f"|format(r.live.roi) }}%{% if r.live.estimate %}<span title="Includes Ladbrokes place prices until Betfair prices arrive">*</span>{% endif %}{% else %}&ndash;{% endif %}</td>
+          <td>{{ r.bets }}</td>
+          <td>{{ "%.0f"|format(r.strike_rate) }}%</td>
+          <td class="{{ 'pos' if r.roi_sp >= 0 else 'neg' }}">{{ "%+.1f"|format(r.roi_sp) }}%</td>
+          <td class="{% if r.roi_bsp is not none and r.roi_bsp >= 0 %}pos{% elif r.roi_bsp is not none %}neg{% else %}muted{% endif %}">{% if r.roi_bsp is not none %}{{ "%+.1f"|format(r.roi_bsp) }}%{% else %}&ndash;{% endif %}</td>
           {% else %}
-          <td colspan="6" class="muted">Record unavailable</td>
+          <td>0</td><td class="muted">&ndash;</td><td class="muted">&ndash;</td><td class="muted">&ndash;</td>
           {% endif %}
         </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
-  <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0">The old win routes (Proven Edge, Maiden, Analyzer + PFAI + ML agree, Value Top Pick) were removed on 28 Oct 2026: their pre-race picks lost money.</p>
+  <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0">Return = profit or loss per $100 bet. Betfair prices load once a month, so the live Betfair column fills in later.</p>
+  {% if races_without_prices %}<p style="font-size:12px;color:#fbbf24;margin:6px 0 0">⚠️ {{ races_without_prices }} race(s) still to run have no Ladbrokes prices yet, so they could not be checked. Refresh closer to race time.</p>{% endif %}
 </div>
 
 <!-- Filter card -->
@@ -652,13 +653,13 @@
   </form>
 </div>
 
-<!-- Rule toggles: show or hide picks by place rule. -->
+<!-- Rule toggles: show or hide picks by rule. -->
 {% if total_bets > 0 %}
 {% set rule_colours = ['#facc15', '#00e5b0', '#60a5fa', '#c084fc', '#fb923c', '#f472b6', '#a3e635'] %}
 <div class="filter-card">
   <span class="filter-label" id="ruleToggleNote">All rules on.</span>
   <div class="rule-toggles" id="ruleToggles" style="margin-top:8px">
-    {% for rule in place_rules if rule.key in active_rule_keys %}
+    {% for rule in rules %}
     <button type="button" class="rule-toggle on" data-rule="{{ rule.key }}" aria-pressed="true"><span class="rule-dot" style="background:{{ rule_colours[loop.index0 % rule_colours|length] }}"></span>{{ rule.short }}</button>
     {% endfor %}
     <button type="button" class="rule-toggle on" data-rule="all" aria-pressed="true">All</button>
@@ -670,14 +671,39 @@
 </div>
 {% endif %}
 
-<!-- Place picks / empty state -->
+<!-- Favourites to be wary of: never selectable, never posted. -->
+{% if avoid %}
+<div class="filter-card" style="margin-bottom:24px;border-color:#ef4444">
+  <h5 style="margin:0 0 6px;font-weight:700">⛔ Favourites To Be Wary Of ({{ avoid|length }})</h5>
+  <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">{{ avoid_note }} These are not picks and cannot be posted.</p>
+  <div class="record-wrap">
+    <table class="record-table">
+      <thead><tr><th>Meeting</th><th>Race</th><th>Horse</th><th>On top of</th><th>Ladbrokes win</th></tr></thead>
+      <tbody>
+      {% for a in avoid %}
+        <tr>
+          <td>{{ a.meeting_name|replace('_', ' ') }}</td>
+          <td>R{{ a.race_number }}</td>
+          <td>{{ a.horse_name }}</td>
+          <td class="muted" style="white-space:normal">{{ a.on_top|join(' · ') }}</td>
+          <td>{% if a.ladbrokes_fixed_win_price %}${{ '%.2f'|format(a.ladbrokes_fixed_win_price) }}{% else %}&ndash;{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- Picks / empty state -->
 {% if total_bets == 0 %}
 <div class="no-bets-alert">
-  <h4>No Place Picks</h4>
-  <p>No runner in meetings uploaded in the last {{ hours_back }} hours fits a place rule.</p>
+  <h4>No Picks</h4>
+  <p>No favourite in meetings uploaded in the last {{ hours_back }} hours fits a rule right now.</p>
   <p style="margin-bottom:4px;">Check:</p>
   <ul>
-    <li>The meeting has been uploaded and run through the analyzer</li>
+    <li>The meeting has been uploaded and run through the analyzer and the ML</li>
+    <li>Ladbrokes has prices up for the races (picks need a favourite)</li>
     <li>Increasing the time window</li>
   </ul>
 </div>
@@ -709,7 +735,7 @@
                 <th><input type="checkbox" class="select-all" aria-label="Select all in this race"></th>
                 <th>Horse</th>
                 <th>Last Start</th>
-                <th>Place Rule(s)</th>
+                <th>Rule(s)</th>
                 <th>Barrier</th>
                 <th>Weight</th>
                 <th>Jockey</th>
@@ -724,10 +750,10 @@
                 <td>
                   <div class="horse-name">
                     {{ bet.horse_name }}
-                    {% if bet.race_started %}<span class="edge-badge" title="This race has started, so this pick is not recorded in the live record">Started</span>{% endif %}
+                    {% if bet.race_started %}<span class="edge-badge" title="This race has started. The pick shown was made before the jump.">Started</span>{% endif %}
                   </div>
                   <div class="horse-form" title="Form, oldest to newest (x = spell)">Form {{ bet.last10 or '—' }}</div>
-                  <div class="muted-note">🥉 Back for a PLACE (Betfair place price)</div>
+                  <div class="muted-note">{% if bet.bet_type == 'win' %}🏆 Suggested: WIN bet{% else %}🥉 Suggested: PLACE bet{% endif %} (Betfair price tested best)</div>
                 </td>
                 <td>
                   <div class="evidence">
@@ -738,22 +764,20 @@
                 </td>
                 <td>
                   {% for rule in bet.rules %}
-                  <div><span class="rule-chip" title="Feb–Sep test: {{ rule.audit }}">{{ rule.name }}</span></div>
-                  {% if rule.checks %}<div class="rule-checks">Analyzer: {{ rule.checks|join(' · ') }}</div>{% endif %}
+                  <div><span class="rule-chip" title="Suggested bet: {{ rule.bet }}">{{ rule.name }}</span></div>
                   {% endfor %}
+                  {% if bet.on_top %}<div class="rule-checks">On top of: {{ bet.on_top|join(' · ') }}</div>{% endif %}
                 </td>
                 <td>{{ bet.barrier }}</td>
                 <td>{{ bet.weight }}kg</td>
                 <td>{{ bet.jockey }}</td>
-                <td>{{ bet.trainer }}
-                  {% if bet.hot_combo %}<div class="rule-checks" title="This jockey and trainer together have won {{ bet.hot_combo[0] }} of {{ bet.hot_combo[1] }} runs in the last 90 days. Information only: it is not proven to make money and never adds or removes a pick.">🔥 Hot combo: {{ bet.hot_combo[0] }}/{{ bet.hot_combo[1] }} wins, 90 days (info only)</div>{% endif %}
-                </td>
+                <td>{{ bet.trainer }}</td>
                 <td>
                   {% if bet.ladbrokes_fixed_win_price %}
                     ${{ '%.2f'|format(bet.ladbrokes_fixed_win_price) }}
                     <div style="font-size:11px;color:var(--text-muted);">Rank #{{ bet.ladbrokes_market_rank }}</div>
                   {% else %}
-                    <span class="text-muted">Unavailable</span>
+                    <span class="text-muted">{{ 'Race started' if bet.race_started else 'Unavailable' }}</span>
                   {% endif %}
                 </td>
               </tr>
@@ -770,9 +794,9 @@
 
 <div class="post-btn-area">
   <button type="submit" form="post-best-bets-form" class="btn btn-success btn-lg" id="post-btn">
-    📤 Post Selected Place Bets to Telegram &amp; Twitter
+    📤 Post Selected Bets to Telegram &amp; Twitter
   </button>
-  <p>Select bets using checkboxes, then click to post publicly. Posts say PLACE bet.</p>
+  <p>Select bets using checkboxes, then click to post publicly. Each post says WIN bet or PLACE bet, as suggested above.</p>
 </div>
 
 <script>
@@ -838,7 +862,7 @@ document.getElementById('post-btn').addEventListener('click', function (e) {
     alert('Please select at least one bet to post');
     return;
   }
-  if (!confirm(`Post ${selected} place bet(s) to Telegram and Twitter?\n\nThis will publicly share these selections.`)) {
+  if (!confirm(`Post ${selected} bet(s) to Telegram and Twitter?\n\nThis will publicly share these selections.`)) {
     e.preventDefault();
   }
 });
