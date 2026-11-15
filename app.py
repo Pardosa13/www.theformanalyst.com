@@ -12010,11 +12010,19 @@ def best_bets():
         db.session.rollback()
         logger.warning("Best Bets lay record unavailable: %s", e, exc_info=True)
 
+    record_chart = {'labels': [], 'series': []}
+    try:
+        record_chart = best_bet_rules.chart(db.session)
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("Best Bets graph unavailable: %s", e, exc_info=True)
+
     import data_checks
     data_check_failures = data_checks.latest_failures(db.session)
 
     return render_template("best_bets.html",
         data_check_failures=data_check_failures,
+        record_chart=record_chart,
         rules=best_bet_rules.RULES,
         live_record=live_record,
         lay_rules=best_bet_rules.LAY_RULES,

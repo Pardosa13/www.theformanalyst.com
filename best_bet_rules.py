@@ -223,3 +223,65 @@ def lay_record(session):
             'roi': 100.0 * sum(priced) / len(priced) if priced else None,
         }
     return out
+
+
+CHART_STAKE = 10.0
+
+
+def chart(session):
+    """Running profit of the picks and of the lay bets, for the Best Bets graph.
+
+    Only bets listed on the Best Bets page before the jump count.
+    - Picks: a $10 win bet at the starting price.
+    - Lay bets: risking $10 at the Betfair price. Until the monthly Betfair
+      price loads, the starting price stands in and the bet is marked as an
+      estimate (the Betfair price is usually a little higher, so an estimated
+      lay win is a little too big).
+
+    Returns {'labels': [dates], 'series': [{'key', 'name', 'kind', 'bets',
+    'won', 'profit', 'estimated', 'points': [running profit per date or
+    None before the first bet]}]}.
+    """
+    from sqlalchemy import text
+    series, days = [], set()
+    for rule in ALL_RULES:
+        rows = session.execute(text(
+            "SELECT m.date AS day, rc.start_time_utc AS start, r.finish_position AS fin, r.sp, r.bsp "
+            "FROM predictions p JOIN horses h ON h.id = p.horse_id JOIN races rc ON rc.id = h.race_id "
+            "JOIN meetings m ON m.id = rc.meeting_id JOIN results r ON r.horse_id = h.id "
+            "WHERE p.best_bet_routes LIKE :route AND r.finish_position > 0 "
+            "AND rc.results_incomplete IS NOT TRUE AND p.best_bet_qualified_at IS NOT NULL "
+            "AND rc.start_time_utc IS NOT NULL AND p.best_bet_qualified_at < rc.start_time_utc "
+            "ORDER BY rc.start_time_utc, h.id"),
+            {'route': f'%{rule.key}%'}).fetchall()
+        lay = rule.bet == 'lay'
+        by_day, bets, good, profit, estimated = {}, 0, 0, 0.0, 0
+        for day, _start, fin, sp, bsp in rows:
+            won = fin == 1
+            if lay:
+                price = bsp if bsp and bsp > 1 else sp
+                if not price or price <= 1:
+                    continue                      # no price at all yet: cannot be settled
+                estimated += 0 if bsp and bsp > 1 else 1
+                result = lay_return(won, price) * CHART_STAKE
+                good += 0 if won else 1           # a lay is a good result when the horse loses
+            else:
+                if won and not sp:
+                    continue
+                result = ((sp - 1) if won else -1.0) * CHART_STAKE
+                good += 1 if won else 0
+            bets += 1
+            profit += result
+            key = str(day)[:10] if day else ''
+            by_day[key] = round(profit, 2)
+            days.add(key)
+        series.append({'key': rule.key, 'name': rule.name, 'kind': 'lay' if lay else 'pick', 'bets': bets,
+                       'won': good, 'profit': round(profit, 2), 'estimated': estimated, 'by_day': by_day})
+    labels = sorted(days)
+    for s in series:
+        by_day, last, points = s.pop('by_day'), None, []
+        for label in labels:
+            last = by_day.get(label, last)
+            points.append(last)
+        s['points'] = points
+    return {'labels': labels, 'series': series}
