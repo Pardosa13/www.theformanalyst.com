@@ -10,6 +10,7 @@ repository root because Railway starts the app from there (`gunicorn app:app`).
 |---|---|
 | `app.py` | The Flask app: login, racing pages, analytics APIs, Best Bets, chat |
 | `models.py` | Database tables (users, meetings, races, horses, predictions, results, bets) |
+| `security.py` | HTTPS redirect, security headers, real visitor IP behind Railway, upload size caps, rate-limit keys, `SECURITY|` log lines |
 | `analyzer.js` | The scoring algorithm, run by `app.py` through Node |
 | `notes_parsing.py` | Turns analyzer notes into scoring components |
 | `scoring_versions.py` | Keeps scores comparable across formula versions |

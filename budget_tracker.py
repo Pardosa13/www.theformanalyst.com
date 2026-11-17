@@ -21,6 +21,7 @@ from flask_login import login_required, current_user
 from sqlalchemy import func
 
 from models import BudgetCategory, BudgetFortnight, BudgetEntry, DebtConfig, DebtTracker
+from security import finite_float
 
 logger = logging.getLogger(__name__)
 
@@ -399,7 +400,7 @@ def register_budget_tracker_routes(app, db):
         data = request.get_json(silent=True) or {}
         try:
             category_id = int(data.get('category_id'))
-            actual_spend = float(data.get('actual_spend'))
+            actual_spend = finite_float(data.get('actual_spend'))
         except (TypeError, ValueError):
             return jsonify({'error': 'category_id and actual_spend are required'}), 400
         if actual_spend < 0:
@@ -537,11 +538,11 @@ def register_budget_tracker_routes(app, db):
 
         try:
             if 'starting_balance' in data:
-                config.starting_balance = float(data['starting_balance'])
+                config.starting_balance = finite_float(data['starting_balance'])
             if 'annual_interest_rate' in data:
-                config.annual_interest_rate = float(data['annual_interest_rate'])
+                config.annual_interest_rate = finite_float(data['annual_interest_rate'])
             if 'planned_fortnightly_payment' in data:
-                config.planned_fortnightly_payment = float(data['planned_fortnightly_payment'])
+                config.planned_fortnightly_payment = finite_float(data['planned_fortnightly_payment'])
         except (TypeError, ValueError):
             return jsonify({'error': 'Values must be numbers'}), 400
 

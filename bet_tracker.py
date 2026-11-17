@@ -20,6 +20,7 @@ from flask import jsonify, render_template, request, flash, redirect, url_for
 from flask_login import login_required, current_user
 
 from models import Bet
+from security import finite_float
 
 SPORTS = ['Horse Racing', 'Greyhounds', 'AFL', 'MMA', 'Soccer', 'NFL', 'NBA', 'Other']
 BOOKIES = ['Sportsbet', 'Betfair', 'Ladbrokes', 'Neds', 'Other']
@@ -303,12 +304,12 @@ def register_bet_tracker_routes(app, db):
 
         data = request.get_json(silent=True) or {}
         try:
-            stake = float(data.get('stake'))
-            odds = float(data.get('odds'))
+            stake = finite_float(data.get('stake'))
+            odds = finite_float(data.get('odds'))
         except (TypeError, ValueError):
             return jsonify({'error': 'Stake and odds must be numbers'}), 400
 
-        selection = (data.get('selection') or '').strip()
+        selection = str(data.get('selection') or '').strip()[:200]
         if not selection:
             return jsonify({'error': 'Selection is required'}), 400
         if stake <= 0 or odds <= 0:
@@ -333,13 +334,13 @@ def register_bet_tracker_routes(app, db):
             user_id=current_user.id,
             date_placed=date_placed,
             sport=sport,
-            event_track=(data.get('event_track') or '').strip() or None,
+            event_track=str(data.get('event_track') or '').strip()[:200] or None,
             selection=selection,
-            bookie=data.get('bookie') or None,
+            bookie=str(data.get('bookie') or '').strip()[:50] or None,
             stake=stake,
             odds=odds,
             result=result,
-            notes=(data.get('notes') or '').strip() or None,
+            notes=str(data.get('notes') or '').strip()[:5000] or None,
         )
         bet.payout = _auto_payout(bet)
 
@@ -365,9 +366,9 @@ def register_bet_tracker_routes(app, db):
         data = request.get_json(silent=True) or {}
         try:
             if 'stake' in data:
-                bet.stake = float(data['stake'])
+                bet.stake = finite_float(data['stake'])
             if 'odds' in data:
-                bet.odds = float(data['odds'])
+                bet.odds = finite_float(data['odds'])
         except (TypeError, ValueError):
             return jsonify({'error': 'Stake and odds must be numbers'}), 400
 
@@ -377,20 +378,20 @@ def register_bet_tracker_routes(app, db):
         if 'sport' in data:
             bet.sport = data['sport'] if data['sport'] in SPORTS else bet.sport
         if 'event_track' in data:
-            bet.event_track = (data['event_track'] or '').strip() or None
+            bet.event_track = str(data['event_track'] or '').strip()[:200] or None
         if 'selection' in data:
-            selection = (data['selection'] or '').strip()
+            selection = str(data['selection'] or '').strip()[:200]
             if not selection:
                 return jsonify({'error': 'Selection is required'}), 400
             bet.selection = selection
         if 'bookie' in data:
-            bet.bookie = data['bookie'] or None
+            bet.bookie = str(data['bookie'] or '').strip()[:50] or None
         if 'result' in data:
             if data['result'] not in RESULTS:
                 return jsonify({'error': 'Invalid result'}), 400
             bet.result = data['result']
         if 'notes' in data:
-            bet.notes = (data['notes'] or '').strip() or None
+            bet.notes = str(data['notes'] or '').strip()[:5000] or None
         if 'date_placed' in data and data['date_placed']:
             try:
                 bet.date_placed = datetime.fromisoformat(data['date_placed'])
@@ -399,7 +400,7 @@ def register_bet_tracker_routes(app, db):
 
         if data.get('payout') not in (None, ''):
             try:
-                bet.payout = float(data['payout'])
+                bet.payout = finite_float(data['payout'])
             except (TypeError, ValueError):
                 return jsonify({'error': 'Payout must be a number'}), 400
         else:

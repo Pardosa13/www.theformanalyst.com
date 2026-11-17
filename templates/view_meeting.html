@@ -1568,7 +1568,7 @@ function updateScratchings(meetingId) {
       <div class="speedmap-container"></div>
     </div>
   </div>
-  <script>window.speedMapData_{{ race.race_number }} = {{ race.speed_maps_json|safe }};</script>
+  <script>window.speedMapData_{{ race.race_number }} = {{ race.speed_maps_json|script_json|safe }};</script>
   {% endif %}
 
   <!-- Sectional analysis — id UNCHANGED -->

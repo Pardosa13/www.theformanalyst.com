@@ -5,6 +5,7 @@ the sixth question, statistics counted one arbitrary runner per race, value
 analysis ignored losers, quaddies used races 5-8 and kept scratched runners,
 and admin-only data was not gated.
 """
+from conftest import session_id_for
 import json
 import re
 import uuid
@@ -232,14 +233,14 @@ def test_chat_route_streams_and_saves_the_reply(monkeypatch):
     try:
         with appmod.app.test_client() as c:
             with c.session_transaction() as sess:
-                sess['_user_id'] = str(user_id)
+                sess['_user_id'] = session_id_for(user_id)
             resp = c.post('/api/chat', json={'message': 'hello there'})
             body = resp.get_data(as_text=True)
             history = c.get('/api/chat/history').get_json()
         # A fresh login (no chat session in the cookie) still finds the conversation.
         with appmod.app.test_client() as c2:
             with c2.session_transaction() as sess:
-                sess['_user_id'] = str(user_id)
+                sess['_user_id'] = session_id_for(user_id)
             later = c2.get('/api/chat/history').get_json()
     finally:
         appmod.limiter.enabled = True
