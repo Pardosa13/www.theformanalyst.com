@@ -141,6 +141,11 @@ page-specific CSS and JS inline in each template.
   hash.
 - Anything that changes data must be a `POST`. A `before_request` hook in
   `app.py` blocks cross-site posts by checking `Origin`/`Referer`.
+- `security.py` sets a Content-Security-Policy. A new outside script, style or
+  font host must be added there, or the browser will refuse to load it.
+- The login cookie holds the user id plus a password fingerprint
+  (`User.get_id`). Tests that fake a login use `session_id_for()` from
+  `tests/conftest.py`, not the bare id.
 - Escape data before putting it into `innerHTML` (each page has an `esc()`
   helper).
 - Analytics pages, results entry, database export and model download are admin

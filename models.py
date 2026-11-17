@@ -29,7 +29,17 @@ class User(UserMixin, db.Model):
     def check_password(self, password):
         """Check if password matches"""
         return check_password_hash(self.password_hash, password)
-    
+
+    def get_id(self):
+        """Value stored in the login cookie: the account id and a password fingerprint.
+
+        When the password changes the fingerprint changes, so every browser
+        still signed in with the old password is logged out (load_user in
+        app.py checks it).
+        """
+        from security import session_fingerprint
+        return f"{self.id}:{session_fingerprint(self.password_hash)}"
+
     def __repr__(self):
         return f'<User {self.username}>'
 

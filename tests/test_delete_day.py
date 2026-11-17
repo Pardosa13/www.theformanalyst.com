@@ -1,4 +1,5 @@
 """Admin can delete a whole raceday from the History page in one go."""
+from conftest import session_id_for
 import uuid
 from datetime import date
 
@@ -40,7 +41,7 @@ def _post(user_id, day):
     try:
         with appmod.app.test_client() as c:
             with c.session_transaction() as sess:
-                sess['_user_id'] = str(user_id)
+                sess['_user_id'] = session_id_for(user_id)
             return c.post('/meetings/delete-day', data={'date': day.isoformat()})
     finally:
         appmod.limiter.enabled = True

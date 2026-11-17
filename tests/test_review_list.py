@@ -1,3 +1,4 @@
+from conftest import session_id_for
 import review_list
 
 WB = "Weight vs Field - Below (2-3kg)"
@@ -107,7 +108,7 @@ def _client_with_race(field):
     db.session.commit()
     client = appmod.app.test_client()
     with client.session_transaction() as sess:
-        sess['_user_id'] = str(user.id)
+        sess['_user_id'] = session_id_for(user.id)
         sess['_fresh'] = True
     return appmod, db, client
 

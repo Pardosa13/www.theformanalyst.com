@@ -4,6 +4,7 @@ It once silently showed the analyzer's numbers after the analysis moved to
 the nightly backtest. These tests pin both halves: backtest.py builds an
 ML-ranked copy, and the route hands that copy to source=ml requests.
 """
+from conftest import session_id_for
 import json
 import os
 
@@ -76,7 +77,7 @@ def test_route_serves_ml_copy_for_source_ml():
     try:
         with appmod.app.test_client() as c:
             with c.session_transaction() as sess:
-                sess['_user_id'] = str(admin_id)
+                sess['_user_id'] = session_id_for(admin_id)
             ml = c.get('/api/data/component-analysis?source=ml').get_json()
             analyzer = c.get('/api/data/component-analysis').get_json()
     finally:

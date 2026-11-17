@@ -10,13 +10,16 @@ import io
 import math
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, session, abort
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date
 import requests
 import tweepy
 from anthropic import Anthropic
 from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+from security import (
+    init_security, rate_limit_key, default_rate_limit, login_username_key,
+    log_security_event, session_fingerprint, client_ip,
+)
 from sqlalchemy import text, bindparam, func, inspect as sa_inspect
 from sqlalchemy.orm import defer
 import uuid
@@ -310,15 +313,30 @@ app = Flask(__name__)
 # Initialize Claude API client
 client = Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
 
+# HTTPS redirect, security headers, real visitor IP behind Railway's proxy,
+# request size caps and SECURITY| logging. See security.py.
+init_security(app)
+
 # Initialize rate limiter
 # RATELIMIT_STORAGE_URI (e.g. a Redis URL) shares counts across gunicorn
 # workers; the in-memory default gives each worker its own count.
+# Members are counted per account, everyone else per IP address. Static files
+# (icons, scripts) do not count.
 limiter = Limiter(
     app=app,
-    key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"],
+    key_func=rate_limit_key,
+    default_limits=[default_rate_limit],
+    default_limits_exempt_when=lambda: request.endpoint == 'static',
     storage_uri=os.environ.get('RATELIMIT_STORAGE_URI', 'memory://'),
+    swallow_errors=True,
 )
+
+# Checked against when a login names an unknown user, so a wrong username
+# takes as long as a wrong password.
+_DUMMY_PASSWORD_HASH = generate_password_hash(uuid.uuid4().hex)
+
+# New and reset passwords must be at least this long.
+MIN_PASSWORD_LENGTH = 10
 
 # Configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///formanalyst.db')
@@ -420,6 +438,21 @@ db.init_app(app)
 # Initialize PuntingForm API service
 pf_service = PuntingFormService()
 
+def _script_json(value):
+    """Stored JSON text made safe to place inside a <script> block.
+
+    `<`, `>` and `&` become \\u escapes, so text from an outside feed such
+    as "</script>" cannot end the script block early.
+    """
+    text_value = value if isinstance(value, str) else json.dumps(value)
+    if not text_value:
+        return 'null'
+    return (text_value.replace('<', '\\u003c').replace('>', '\\u003e')
+            .replace('&', '\\u0026').replace('\u2028', '\\u2028').replace('\u2029', '\\u2029'))
+
+
+app.jinja_env.filters['script_json'] = _script_json
+
 login_manager = LoginManager()
 login_manager.login_view = "login"
 login_manager.init_app(app)
@@ -433,7 +466,32 @@ register_budget_tracker_routes(app, db)
 register_race_animation_routes(app, db)
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    """Load the signed-in account from the login cookie.
+
+    The cookie holds "<id>:<password fingerprint>" (User.get_id). A cookie
+    from before the last password change, a cookie in the old bare-id format,
+    or a deactivated account all count as logged out.
+    """
+    import hmac as _hmac
+    raw_id, _, fingerprint = str(user_id or '').partition(':')
+    try:
+        uid = int(raw_id)
+    except ValueError:
+        return None
+    user = db.session.get(User, uid)
+    if not user or not user.is_active or not fingerprint:
+        return None
+    if not _hmac.compare_digest(fingerprint, session_fingerprint(user.password_hash)):
+        return None
+    return user
+
+
+@login_manager.unauthorized_handler
+def _login_needed():
+    """Logged-out visitors: pages go to the login form, API calls get a 401."""
+    if request.path.startswith('/api/'):
+        return jsonify({'success': False, 'error': 'Please log in'}), 401
+    return redirect(url_for('login'))
 
 @app.context_processor
 def inject_budget_tracker_context():
@@ -447,6 +505,40 @@ def shutdown_session(exception=None):
     db.session.remove()
     import gc
     gc.collect()
+
+
+# "changeme123" was the built-in admin password in Nov 2025 and can still be
+# read in the public Git history.
+LEAKED_DEFAULT_PASSWORDS = ('changeme123',)
+
+
+def lock_leaked_default_admins(admin_password=None):
+    """Close any admin account still using a password published in the code.
+
+    Such an account is switched to ADMIN_PASSWORD when that is set, otherwise
+    deactivated. To recover a deactivated account, set ADMIN_PASSWORD in
+    Railway and redeploy. Returns how many accounts were changed.
+    """
+    changed = 0
+    try:
+        for user in User.query.filter_by(is_admin=True).all():
+            if not any(user.check_password(p) for p in LEAKED_DEFAULT_PASSWORDS):
+                continue
+            if admin_password and admin_password not in LEAKED_DEFAULT_PASSWORDS:
+                user.set_password(admin_password)
+                user.is_active = True
+                logger.warning("SECURITY|leaked-default-password|user_id=%s|action=set-to-ADMIN_PASSWORD", user.id)
+            else:
+                user.is_active = False
+                logger.warning("SECURITY|leaked-default-password|user_id=%s|action=deactivated", user.id)
+            changed += 1
+        if changed:
+            db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("Leaked default password check skipped: %s", e)
+    return changed
+
 
 # Create tables and default admin user
 with app.app_context():
@@ -903,6 +995,8 @@ with app.app_context():
         db.session.commit()
     elif not admin:
         print('⚠ No admin user and ADMIN_PASSWORD not set - default admin not created')
+
+    lock_leaked_default_admins(admin_password)
 
 # ----- Analyzer Integration -----
 from scoring_integrity import (
@@ -2102,30 +2196,41 @@ def home():
 
 @app.route("/login", methods=["GET", "POST"])
 @limiter.limit("10 per minute; 50 per hour", methods=["POST"])
+# Also cap guesses at one account from many addresses.
+@limiter.limit("20 per hour", key_func=login_username_key, methods=["POST"])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for(default_landing_endpoint(current_user)))
-        
+
     if request.method == "POST":
-        username = request.form.get("username")
-        password = request.form.get("password")
+        username = (request.form.get("username") or "").strip()[:80]
+        password = request.form.get("password") or ""
         remember = bool(request.form.get("remember"))
-        
-        user = User.query.filter_by(username=username).first()
-        
+
+        user = User.query.filter_by(username=username).first() if username else None
+
+        if not user:
+            # Spend the same time as a real password check, so the response
+            # time does not reveal which usernames exist.
+            check_password_hash(_DUMMY_PASSWORD_HASH, password)
         if not user or not user.check_password(password):
+            log_security_event('login-failed', username=username)
             flash("Invalid username or password", "danger")
             return redirect(url_for("login"))
-        
+
         if not user.is_active:
+            log_security_event('login-deactivated', username=username)
             flash("Your account has been deactivated", "danger")
             return redirect(url_for("login"))
-        
+
         # Update last login
         user.last_login = datetime.utcnow()
         db.session.commit()
-        
+
+        # Start from a clean session so nothing set before login carries over.
+        session.clear()
         login_user(user, remember=remember)
+        logger.info("SECURITY|login-ok|ip=%s|user_id=%s", client_ip(), user.id)
         flash(f"Welcome back, {username}!", "success")
         return redirect(url_for(default_landing_endpoint(user)))
     
@@ -5278,7 +5383,7 @@ def analyze():
         flash("Please select a CSV file", "danger")
         return redirect(url_for("dashboard"))
     
-    if not csv_file.filename.endswith('.csv'):
+    if not csv_file.filename.lower().endswith('.csv'):
         flash("Please upload a CSV file", "danger")
         return redirect(url_for("dashboard"))
     
@@ -5287,7 +5392,18 @@ def analyze():
     
     try:
         # Read CSV data
-        csv_data = csv_file.read().decode('utf-8')
+        # A CSV is text. Anything that is not (an image, a zip, a program)
+        # is refused here. Size is capped by MAX_CONTENT_LENGTH (security.py).
+        try:
+            csv_data = csv_file.read().decode('utf-8-sig')
+        except UnicodeDecodeError:
+            log_security_event('upload-refused', reason='not-text')
+            flash("That file is not a readable CSV", "danger")
+            return redirect(url_for("dashboard"))
+        if '\x00' in csv_data:
+            log_security_event('upload-refused', reason='binary')
+            flash("That file is not a readable CSV", "danger")
+            return redirect(url_for("dashboard"))
         
         # Process and store results
         meeting = process_and_store_results(
@@ -5876,24 +5992,29 @@ def admin_panel():
         action = request.form.get("action")
         
         if action == "create_user":
-            username = request.form.get("username")
-            email = request.form.get("email")
-            password = request.form.get("password")
+            username = (request.form.get("username") or "").strip()
+            email = (request.form.get("email") or "").strip().lower()
+            password = request.form.get("password") or ""
             is_admin = bool(request.form.get("is_admin"))
             
             if not username or not email or not password:
                 flash("All fields are required", "danger")
+            elif not re.fullmatch(r"[A-Za-z0-9_.@-]{2,80}", username):
+                flash("Username must be 2-80 letters, numbers or . _ - @", "danger")
+            elif len(email) > 120 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+                flash("Enter a valid email address", "danger")
             elif User.query.filter_by(username=username).first():
                 flash(f"Username '{username}' already exists", "danger")
             elif User.query.filter_by(email=email).first():
                 flash(f"Email '{email}' already exists", "danger")
-            elif len(password) < 6:
-                flash("Password must be at least 6 characters", "danger")
+            elif len(password) < MIN_PASSWORD_LENGTH:
+                flash(f"Password must be at least {MIN_PASSWORD_LENGTH} characters", "danger")
             else:
                 new_user = User(username=username, email=email, is_admin=is_admin)
                 new_user.set_password(password)
                 db.session.add(new_user)
                 db.session.commit()
+                log_security_event('admin-create-user', target=username, admin=is_admin)
                 flash(f"User '{username}' created successfully", "success")
         
         elif action == "delete_user":
@@ -5908,20 +6029,22 @@ def admin_panel():
                 username = user.username
                 db.session.delete(user)
                 db.session.commit()
+                log_security_event('admin-delete-user', target=username)
                 flash(f"User '{username}' deleted", "success")
         
         elif action == "reset_password":
             user_id = request.form.get("user_id")
-            new_password = request.form.get("new_password")
+            new_password = request.form.get("new_password") or ""
             user = User.query.get(user_id)
             
             if not user:
                 flash("User not found", "danger")
-            elif len(new_password) < 6:
-                flash("Password must be at least 6 characters", "danger")
+            elif len(new_password) < MIN_PASSWORD_LENGTH:
+                flash(f"Password must be at least {MIN_PASSWORD_LENGTH} characters", "danger")
             else:
                 user.set_password(new_password)
                 db.session.commit()
+                log_security_event('admin-reset-password', target_user_id=user.id)
                 flash(f"Password reset for '{user.username}'", "success")
         
         elif action == "toggle_admin":
@@ -5936,6 +6059,7 @@ def admin_panel():
                 user.is_admin = not user.is_admin
                 db.session.commit()
                 status = "admin" if user.is_admin else "regular user"
+                log_security_event('admin-toggle-admin', target_user_id=user.id, now=status)
                 flash(f"'{user.username}' is now a {status}", "success")
         
         elif action == "toggle_active":
@@ -5950,22 +6074,27 @@ def admin_panel():
                 user.is_active = not user.is_active
                 db.session.commit()
                 status = "activated" if user.is_active else "deactivated"
+                log_security_event('admin-toggle-active', target_user_id=user.id, now=status)
                 flash(f"'{user.username}' has been {status}", "success")
         
         elif action == "change_my_password":
             current_password = request.form.get("current_password")
-            new_password = request.form.get("new_password")
+            new_password = request.form.get("new_password") or ""
             confirm_password = request.form.get("confirm_password")
             
             if not current_user.check_password(current_password):
                 flash("Current password is incorrect", "danger")
-            elif len(new_password) < 6:
-                flash("New password must be at least 6 characters", "danger")
+            elif len(new_password) < MIN_PASSWORD_LENGTH:
+                flash(f"New password must be at least {MIN_PASSWORD_LENGTH} characters", "danger")
             elif new_password != confirm_password:
                 flash("New passwords do not match", "danger")
             else:
                 current_user.set_password(new_password)
                 db.session.commit()
+                # The new password changes the login fingerprint, which logs
+                # out every other browser on this account. Sign this one back in.
+                login_user(current_user._get_current_object())
+                log_security_event('password-changed')
                 flash("Your password has been changed successfully", "success")
         
         # NEW COMPONENT ACTIONS START HERE
@@ -10993,7 +11122,7 @@ def export_ml_data():
     """Export all race data with parsed scoring components AND raw CSV data for ML analysis"""
     if not current_user.is_admin:
         flash('Access denied. Admin privileges required to download ML training data.', 'error')
-        return redirect(url_for('analytics'))
+        return redirect(url_for('history'))
     import csv
     from io import StringIO
     from flask import make_response
@@ -12552,3 +12681,26 @@ def api_race_tempo_analysis():
         'par_coverage': round(par_matched / total_horses * 100, 1) if total_horses else 0,
         'par_tracks':   len(par_lookup),
     })
+
+
+# ----- Rate limits on buttons that spend paid API credit or start heavy jobs -----
+# Every route above exists by now. Each member may press these a limited
+# number of times an hour, so a stolen login or a stuck script cannot run up
+# PuntingForm / Odds API bills or tie up the workers.
+_COSTLY_ENDPOINT_LIMITS = {
+    'api_afl_sync_fixtures': '30 per hour',
+    'api_afl_sync_ladder': '30 per hour',
+    'api_afl_sync_player_stats': '30 per hour',
+    'api_afl_sync_props': '30 per hour',
+    'api_afl_sync_match_markets': '30 per hour',
+    'api_afl_refresh': '30 per hour',
+    'mma.api_mma_sync_odds': '30 per hour',
+    'api_import_meeting': '60 per hour',
+    'update_scratchings': '60 per hour',
+    'fetch_automatic_results': '60 per hour',
+    'backtest_run_now': '5 per hour',
+    'pattern_finder_run': '10 per hour',
+}
+for _endpoint, _limit in _COSTLY_ENDPOINT_LIMITS.items():
+    if _endpoint in app.view_functions:
+        app.view_functions[_endpoint] = limiter.limit(_limit, methods=['POST'])(app.view_functions[_endpoint])
