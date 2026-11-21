@@ -61,14 +61,36 @@ def test_ml_favourite_with_few_other_ratings():
 
 def test_rules_taken_off_the_page_no_longer_pick():
     """15 Nov 2026: ML + PFAI + favourite, 3+ ratings in 8-11 runners and 3+
-    ratings under $2 were removed. Only the quiet ML favourite is left."""
-    assert _keys(bbr.RULES) == ['agree_ml_fav_quiet']
+    ratings under $2 were removed. 21 Nov 2026: the $2-$3 ML + PFAI trial was added."""
+    assert _keys(bbr.RULES) == ['agree_ml_fav_quiet', 'agree_fav_ml_pf_2to3']
+    # $3.00 is outside the trial's $2-$3 band, so only the quiet rule fits.
     assert _keys(bbr.rules_for(_sig(ml=True, pf=True), True, 3.0, 12)) == ['agree_ml_fav_quiet']
     assert _keys(bbr.rules_for(_sig(ml=True, pf=True, t=True), True, 3.0, 12)) == []
     three = _sig(a=True, pf=True, t=True)
     assert bbr.rules_for(three, True, 2.6, 9) == []
     assert bbr.rules_for(three, True, 1.9, 12) == []
     assert not hasattr(bbr, 'to_avoid') and not hasattr(bbr, 'AVOID_NOTE')
+
+
+def test_ml_and_pfai_favourite_at_two_to_three_dollars():
+    """21 Nov 2026 trial: the favourite at $2-$3, top pick of the ML and PFAI, not of the analyzer."""
+    both = _sig(ml=True, pf=True)
+    assert _keys(bbr.rules_for(both, True, 2.0, 9)) == ['agree_ml_fav_quiet', 'agree_fav_ml_pf_2to3']
+    assert _keys(bbr.rules_for(both, True, 2.99, 9)) == ['agree_ml_fav_quiet', 'agree_fav_ml_pf_2to3']
+    # Time and class ratings also on top: no longer "quiet", but the trial still fits.
+    assert _keys(bbr.rules_for(_sig(ml=True, pf=True, t=True, w=True), True, '2.40', 9)) == ['agree_fav_ml_pf_2to3']
+    # Outside $2-$3, or no readable price: not the trial.
+    for price in (1.99, 3.0, 4.5, None, '', 'SP'):
+        assert 'agree_fav_ml_pf_2to3' not in _keys(bbr.rules_for(both, True, price, 9))
+    # The analyzer also has it on top, PFAI does not, the ML does not, or not the favourite: not the trial.
+    assert 'agree_fav_ml_pf_2to3' not in _keys(bbr.rules_for(_sig(ml=True, pf=True, a=True), True, 2.5, 9))
+    assert 'agree_fav_ml_pf_2to3' not in _keys(bbr.rules_for(_sig(ml=True), True, 2.5, 9))
+    assert bbr.rules_for(_sig(pf=True, ml_other=True), True, 2.5, 9) == []
+    assert bbr.rules_for(both, False, 2.5, 9) == []
+    assert bbr.rules_for(both, True, 2.5, 9, has_ratings=False) == []
+    # Saved routes for both rules read back as two win rules.
+    rules = bbr.recorded_rules('agree_ml_fav_quiet,agree_fav_ml_pf_2to3')
+    assert _keys(rules) == ['agree_ml_fav_quiet', 'agree_fav_ml_pf_2to3'] and bbr.bet_type(rules) == 'win'
 
 
 def test_no_saved_ratings_means_no_picks():
@@ -151,9 +173,9 @@ def test_recorded_rules_and_bet_type():
     assert bbr.recorded_rules(None) == [] and bbr.recorded_rules('') == []
 
 
-def test_chart_runs_a_separate_line_for_picks_and_lay_bets():
+def test_chart_runs_a_line_per_rule_with_one_point_per_bet():
     """The Best Bets graph: $10 win bets for the picks, $10 risked for the lay bets,
-    counting only bets listed before the jump."""
+    counting only bets listed before the jump, one point per bet in race order."""
     import sqlite3
     from types import SimpleNamespace
 
@@ -167,16 +189,16 @@ def test_chart_runs_a_separate_line_for_picks_and_lay_bets():
 
     s = Session()
     s.c.executescript("""
-        create table meetings(id integer primary key, date text);
-        create table races(id integer primary key, meeting_id int, start_time_utc text, results_incomplete int);
-        create table horses(id integer primary key, race_id int);
+        create table meetings(id integer primary key, date text, meeting_name text);
+        create table races(id integer primary key, meeting_id int, race_number int, start_time_utc text, results_incomplete int);
+        create table horses(id integer primary key, race_id int, horse_name text);
         create table predictions(id integer primary key, horse_id int, best_bet_routes text, best_bet_qualified_at text);
         create table results(id integer primary key, horse_id int, finish_position int, sp real, bsp real);
-        insert into meetings values(1,'2026-11-16'),(2,'2026-11-17');
-        insert into races values(1,1,'2026-11-16 05:00:00',null),(2,2,'2026-11-17 05:00:00',null);
-        insert into horses values(1,1),(2,1),(3,2),(4,2),(5,2);
+        insert into meetings values(1,'2026-11-16','Moe'),(2,'2026-11-17','Kyneton');
+        insert into races values(1,1,4,'2026-11-16 05:00:00',null),(2,2,7,'2026-11-17 05:00:00',null);
+        insert into horses values(1,1,'Alpha'),(2,1,'Bravo'),(3,2,'Charlie'),(4,2,'Delta'),(5,2,'Echo');
         insert into predictions values
-          (1,1,'agree_ml_fav_quiet','2026-11-16 03:00:00'),
+          (1,1,'agree_ml_fav_quiet,agree_fav_ml_pf_2to3','2026-11-16 03:00:00'),
           (2,2,'lay_fav_ml_other_3of4','2026-11-16 03:00:00'),
           (3,3,'agree_ml_fav_quiet','2026-11-17 03:00:00'),
           (4,4,'lay_fav_ml_other_3of4','2026-11-17 03:00:00'),
@@ -185,13 +207,23 @@ def test_chart_runs_a_separate_line_for_picks_and_lay_bets():
           (1,1,3.0,3.4),(2,5,3.0,3.0),(3,5,2.5,null),(4,1,2.0,null),(5,1,9.0,9.0);
     """)
     out = bbr.chart(s)
-    assert out['labels'] == ['2026-11-16', '2026-11-17']
-    picks, lay = out['series']
-    # Picks: +$20 (won at $3), then -$10. The pick listed after the jump is left out.
-    assert (picks['kind'], picks['bets'], picks['won'], picks['profit'], picks['points']) == ('pick', 2, 1, 10.0, [20.0, 10.0])
+    quiet, trial, lay = out['series']
+    assert [x['key'] for x in out['series']] == ['agree_ml_fav_quiet', 'agree_fav_ml_pf_2to3', 'lay_fav_ml_other_3of4']
+    # Quiet rule: +$20 (won at $3), then -$10. The pick listed after the jump is left out.
+    assert (quiet['kind'], quiet['bets'], quiet['won'], quiet['profit']) == ('pick', 2, 1, 10.0)
+    assert [h['cumulative'] for h in quiet['history']] == [20.0, 10.0]
+    assert [h['profit'] for h in quiet['history']] == [20.0, -10.0]
+    first = quiet['history'][0]
+    assert (first['date'], first['meeting'], first['race'], first['horse'], first['price'], first['won']) == \
+        ('2026-11-16', 'Moe', 4, 'Alpha', 3.0, True)
+    # A horse that fits both rules is a bet on each line.
+    assert (trial['bets'], trial['won'], trial['profit']) == (1, 1, 20.0)
+    assert trial['short'] == 'ML + PFAI favourite $2-3'
     # Lay: the horse lost at Betfair $3 -> +$4.60. Then a horse won -> -$10, priced at the
     # starting price because the Betfair price has not loaded (an estimate).
-    assert (lay['kind'], lay['bets'], lay['won'], lay['profit'], lay['points']) == ('lay', 2, 1, -5.4, [4.6, -5.4])
-    assert lay['estimated'] == 1 and picks['estimated'] == 0
+    assert (lay['kind'], lay['bets'], lay['won'], lay['profit']) == ('lay', 2, 1, -5.4)
+    assert [h['cumulative'] for h in lay['history']] == [4.6, -5.4]
+    assert [h['estimate'] for h in lay['history']] == [False, True]
+    assert lay['estimated'] == 1 and quiet['estimated'] == 0
     s.c.execute("delete from predictions")
-    assert bbr.chart(s)['labels'] == []
+    assert all(x['bets'] == 0 and x['history'] == [] for x in bbr.chart(s)['series'])

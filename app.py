@@ -12139,7 +12139,7 @@ def best_bets():
         db.session.rollback()
         logger.warning("Best Bets lay record unavailable: %s", e, exc_info=True)
 
-    record_chart = {'labels': [], 'series': []}
+    record_chart = {'series': []}
     try:
         record_chart = best_bet_rules.chart(db.session)
     except Exception as e:
