@@ -587,7 +587,7 @@
 <!-- Page header -->
 <div class="bets-header">
   <h2>🎯 Best Bets &mdash; Favourites The ML Also Picks</h2>
-  <p>A short-list to <strong>check against the replays</strong>, not sure things. Each pick is the <strong>favourite</strong> and the <strong>ML model's top pick</strong>, where at most one other rating agrees. Horses to bet <strong>against</strong> are in the red LAY box, kept apart.
+  <p>A short-list to <strong>check against the replays</strong>, not sure things. Each pick is the <strong>favourite</strong> and the <strong>ML model's top pick</strong>. The first rule wants at most one other rating to agree. The second, a trial from 21 Nov 2026, wants a <strong>$2&ndash;$3</strong> favourite that <strong>PFAI</strong> also has on top and the analyzer does not. Horses to bet <strong>against</strong> are in the red LAY box, kept apart.
      They win and place often, at short prices. In testing they sat close to break even at <strong>Betfair prices</strong> and lost at the starting price, so the price you take matters.
      The old place rules were taken off this page on 15 Nov 2026; their record is on the ML Data page.</p>
 </div>
@@ -602,9 +602,9 @@
 
 <!-- The rule: what the 15 Nov 2026 sweep found, and its live record (best_bet_rules.py). -->
 <div class="filter-card" style="margin-bottom:24px">
-  <h5 style="margin:0 0 6px;font-weight:700">📒 The Rule &amp; How It Tested</h5>
+  <h5 style="margin:0 0 6px;font-weight:700">📒 The Rules &amp; How They Tested</h5>
   <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">
-    &ldquo;Tested&rdquo; is every runner that fit the rule from February to November 2026, paid at Betfair prices after 8% commission. The rule was picked after seeing the results, so that flatters it a little.
+    &ldquo;Tested&rdquo; is every runner that fit the rule in past races (February to November 2026 for the first rule, July to November for the $2&ndash;$3 trial), paid at Betfair prices after 8% commission. Both rules were picked after seeing the results, which flatters them; the $2&ndash;$3 trial most of all.
     &ldquo;Live&rdquo; counts only picks shown on this page before the jump, from 15 Nov 2026, as win bets &mdash; that is the real test.
     The favourite comes from live Ladbrokes odds, so a pick can come and go as the market moves.
     Ratings are the analyzer, PFAI, the time rating and the class rating.
@@ -620,9 +620,9 @@
           <td>{{ 'Win' if rule.bet == 'win' else 'Place' }}</td>
           <td>{{ '{:,}'.format(rule.bets) }}</td>
           <td>{{ "%.0f"|format(rule.win_pct) }}%</td>
-          <td>{{ "%.0f"|format(rule.place_pct) }}%</td>
+          <td>{% if rule.place_pct is not none %}{{ "%.0f"|format(rule.place_pct) }}%{% else %}<span class="muted">&ndash;</span>{% endif %}</td>
           <td class="{{ 'pos' if rule.win_roi >= 0 else 'neg' }}">{{ "%+.1f"|format(rule.win_roi) }}%</td>
-          <td class="{{ 'pos' if rule.place_roi >= 0 else 'neg' }}">{{ "%+.1f"|format(rule.place_roi) }}%</td>
+          {% if rule.place_roi is not none %}<td class="{{ 'pos' if rule.place_roi >= 0 else 'neg' }}">{{ "%+.1f"|format(rule.place_roi) }}%</td>{% else %}<td class="muted">&ndash;</td>{% endif %}
           {% if r %}
           <td>{{ r.bets }}</td>
           <td>{{ "%.0f"|format(r.strike_rate) }}%</td>
@@ -640,23 +640,39 @@
   {% if races_without_prices %}<p style="font-size:12px;color:#fbbf24;margin:6px 0 0">⚠️ {{ races_without_prices }} race(s) still to run have no Ladbrokes prices yet, so they could not be checked. Refresh closer to race time.</p>{% endif %}
 </div>
 
-<!-- Graph: running profit of the picks and of the lay bets (best_bet_rules.chart). -->
+<!-- Graph: running profit of each rule, one dot per bet (best_bet_rules.chart). -->
+{% set chart_series = record_chart.series|selectattr('bets')|list %}
 <div class="filter-card" style="margin-bottom:24px">
-  <h5 style="margin:0 0 6px;font-weight:700">📈 How They Have Been Going</h5>
-  <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">
-    Running profit of every bet listed on this page before the jump.
-    <strong style="color:#00e5b0">Picks</strong>: a $10 win bet at the starting price.
-    <strong style="color:#ef4444">Lay bets</strong>: risking $10 at the Betfair price.
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+    <div>
+      <h5 style="margin:0 0 6px;font-weight:700">📈 How They Have Been Going</h5>
+      <p style="font-size:13px;color:var(--text-muted);margin:0" id="bbChartSubtitle">
+        Running profit, one dot per bet, in race order. Tap a rule to show or hide it.
+      </p>
+    </div>
+    {% if chart_series %}
+    <div style="text-align:right">
+      <span id="bbChartTotal" style="font-size:1.6rem;font-weight:800;font-family:'DM Mono',monospace"></span>
+      <div id="bbChartBets" style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em"></div>
+    </div>
+    {% endif %}
+  </div>
+  <p style="font-size:12px;color:var(--text-muted);margin:6px 0 12px">
+    <strong style="color:var(--text-primary)">Picks</strong>: a $10 win bet at the starting price.
+    <strong style="color:#fb923c">Lay bets</strong>: risking $10 at the Betfair price.
+    <span style="color:#22c55e">Green dot</span>: the bet went your way. <span style="color:#ef4444">Red dot</span>: it did not.
+    A horse that fits two rules counts once on each rule's line.
   </p>
-  {% if record_chart.labels %}
-  <div style="position:relative;height:300px"><canvas id="bestBetsChart"></canvas></div>
+  {% if chart_series %}
+  <div class="rule-toggles" id="bbChartButtons" style="margin-bottom:12px"></div>
+  <div style="position:relative;height:320px"><canvas id="bestBetsChart"></canvas></div>
   <div class="record-wrap" style="margin-top:12px">
     <table class="record-table">
       <thead><tr><th>Line</th><th>Bets settled</th><th>Went your way</th><th>Profit so far</th><th>Per $100 put at risk</th></tr></thead>
       <tbody>
       {% for s in record_chart.series %}
         <tr>
-          <td class="rule-name"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;background:{{ '#ef4444' if s.kind == 'lay' else '#00e5b0' }}"></span>{{ s.name }}</td>
+          <td class="rule-name">{{ s.name }}</td>
           <td>{{ s.bets }}</td>
           <td>{% if s.bets %}{{ s.won }} ({{ "%.0f"|format(100 * s.won / s.bets) }}%){% else %}&ndash;{% endif %}</td>
           <td class="{% if s.bets and s.profit >= 0 %}pos{% elif s.bets %}neg{% else %}muted{% endif %}">{% if s.bets %}{{ '-' if s.profit < 0 else '+' }}${{ "%.2f"|format(s.profit|abs) }}{% else %}&ndash;{% endif %}</td>
@@ -667,10 +683,10 @@
     </table>
   </div>
   <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0">
-    &ldquo;Went your way&rdquo; means the pick won, or the lay horse lost.
+    &ldquo;Went your way&rdquo; means the pick won, or the lay horse lost. Hover or tap a dot to see the bet.
     {% for s in record_chart.series if s.kind == 'lay' and s.estimated %}{{ s.estimated }} lay bet(s) use the starting price until the monthly Betfair price loads. The Betfair price is usually a little higher, so those lay wins are shown a little too big.{% endfor %}
   </p>
-  <script type="application/json" id="bestBetsChartData">{{ record_chart|tojson }}</script>
+  <script type="application/json" id="bestBetsChartData">{{ chart_series|tojson }}</script>
   {% else %}
   <p class="text-muted" style="font-size:13px;margin:0">No settled bets yet. The graph starts once a pick or a lay bet listed here has run and its result is in.</p>
   {% endif %}
@@ -956,42 +972,117 @@ document.getElementById('post-btn').addEventListener('click', function (e) {
 });
 </script>
 {% endif %}
-{% if record_chart.labels %}
+{% if chart_series %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g" crossorigin="anonymous"></script>
 <script>
+// One line per rule, one dot per bet: the line steps up when a bet goes your
+// way and down when it does not (the same style as the ML Data page).
 (function () {
   const holder = document.getElementById('bestBetsChartData');
   const canvas = document.getElementById('bestBetsChart');
   if (!holder || !canvas || typeof Chart === 'undefined') return;
-  const data = JSON.parse(holder.textContent);
+  const series = JSON.parse(holder.textContent).filter((s) => s && s.history && s.history.length);
+  if (!series.length) return;
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (v) => (v < 0 ? '-$' : '+$') + Math.abs(v).toFixed(2);
-  new Chart(canvas, {
-    type: 'line',
-    data: {
-      labels: data.labels,
-      datasets: data.series.map((s) => ({
-        label: (s.kind === 'lay' ? 'LAY bets' : 'Picks') + ' (' + s.bets + ' bets)',
-        data: s.points,
-        borderColor: s.kind === 'lay' ? '#ef4444' : '#00e5b0',
-        backgroundColor: s.kind === 'lay' ? '#ef4444' : '#00e5b0',
-        borderWidth: 2, pointRadius: data.labels.length > 40 ? 0 : 3, tension: 0, spanGaps: true,
-      })),
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { labels: { color: '#cbd5e1' } },
-        tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + (c.parsed.y === null ? 'no bets yet' : money(c.parsed.y)) } },
-      },
-      scales: {
-        x: { ticks: { color: '#94a3b8', maxTicksLimit: 10 }, grid: { color: 'rgba(148,163,184,0.12)' } },
-        y: { ticks: { color: '#94a3b8', callback: (v) => (v < 0 ? '-$' : '$') + Math.abs(v) },
-             grid: { color: (c) => (c.tick.value === 0 ? 'rgba(148,163,184,0.6)' : 'rgba(148,163,184,0.12)') },
-             title: { display: true, text: 'Running profit', color: '#94a3b8' } },
-      },
-    },
+  // Lines avoid green and red: the dots use them for a bet that went your way or did not.
+  const pickColours = ['#60a5fa', '#facc15', '#c084fc', '#f472b6', '#94a3b8'];
+  let pickIndex = 0;
+  const colours = series.map((s) => (s.kind === 'lay' ? '#fb923c' : pickColours[pickIndex++ % pickColours.length]));
+  const on = new Set(series.map((_, i) => i));
+  const buttonsEl = document.getElementById('bbChartButtons');
+  const totalEl = document.getElementById('bbChartTotal');
+  const betsEl = document.getElementById('bbChartBets');
+  let chart = null;
+
+  const finalOf = (s) => s.history[s.history.length - 1].cumulative;
+
+  buttonsEl.innerHTML = series.map((s, i) =>
+    '<button type="button" class="rule-toggle on" data-index="' + i + '" aria-pressed="true">' +
+    '<span class="rule-dot" style="background:' + colours[i] + '"></span>' + esc(s.short || s.name) +
+    ' <span style="opacity:.7">(' + s.bets + ')</span></button>').join('') +
+    '<button type="button" class="rule-toggle on" data-index="all" aria-pressed="true">All</button>';
+  buttonsEl.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.index === 'all') {
+      if (on.size === series.length) { on.clear(); } else { series.forEach((_, i) => on.add(i)); }
+    } else {
+      const i = Number(b.dataset.index);
+      if (on.has(i)) { on.delete(i); } else { on.add(i); }
+    }
+    draw();
   });
+
+  function datasetFor(i) {
+    const s = series[i];
+    const many = s.history.length > 60;
+    return {
+      label: s.short || s.name,
+      data: s.history.map((h, n) => ({ x: n + 1, y: h.cumulative })),
+      borderColor: colours[i],
+      backgroundColor: colours[i],
+      borderWidth: 2,
+      tension: 0,
+      pointRadius: many ? 2.2 : 3.5,
+      pointBorderWidth: 0,
+      pointHoverRadius: 6,
+      pointBackgroundColor: s.history.map((h) => ((s.kind === 'lay') !== h.won ? '#22c55e' : '#ef4444')),
+      pointBorderColor: s.history.map((h) => ((s.kind === 'lay') !== h.won ? '#22c55e' : '#ef4444')),
+    };
+  }
+
+  function draw() {
+    const shown = series.map((_, i) => i).filter((i) => on.has(i));
+    const total = shown.reduce((sum, i) => sum + finalOf(series[i]), 0);
+    const bets = shown.reduce((sum, i) => sum + series[i].history.length, 0);
+    totalEl.textContent = shown.length ? money(total) : '';
+    totalEl.style.color = total >= 0 ? '#00e5b0' : '#f87171';
+    betsEl.textContent = shown.length ? bets + ' bets' + (shown.length > 1 ? ' \u00b7 ' + shown.length + ' lines added together' : '') : 'No lines on';
+    buttonsEl.querySelectorAll('button').forEach((b) => {
+      const active = b.dataset.index === 'all' ? on.size === series.length : on.has(Number(b.dataset.index));
+      b.className = 'rule-toggle' + (active ? ' on' : '');
+      b.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    if (chart) chart.destroy();
+    chart = new Chart(canvas, {
+      type: 'line',
+      data: { datasets: shown.map(datasetFor) },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const s = series[shown[items[0].datasetIndex]];
+                return (s.short || s.name) + ' \u2014 bet ' + items[0].parsed.x;
+              },
+              label: (c) => {
+                const s = series[shown[c.datasetIndex]];
+                const h = s.history[c.dataIndex];
+                const result = s.kind === 'lay' ? (h.won ? 'Horse won (lay lost)' : 'Horse lost (lay won)') : (h.won ? 'Won' : 'Lost');
+                return [
+                  ' ' + h.date + '  ' + h.meeting + ' R' + h.race + '  ' + h.horse,
+                  ' ' + result + ' at $' + Number(h.price).toFixed(2) + (h.estimate ? ' (starting price, estimate)' : '') + ': ' + money(h.profit),
+                  ' Running total: ' + money(h.cumulative),
+                ];
+              },
+            },
+          },
+        },
+        scales: {
+          x: { type: 'linear', title: { display: true, text: 'Bet number', color: '#94a3b8' },
+               ticks: { color: '#94a3b8', precision: 0 }, grid: { display: false } },
+          y: { ticks: { color: '#94a3b8', callback: (v) => (v < 0 ? '-$' : '$') + Math.abs(v) },
+               grid: { color: (c) => (c.tick.value === 0 ? 'rgba(148,163,184,0.6)' : 'rgba(148,163,184,0.12)') },
+               title: { display: true, text: 'Running profit', color: '#94a3b8' } },
+        },
+      },
+    });
+  }
+  draw();
 })();
 </script>
 {% endif %}

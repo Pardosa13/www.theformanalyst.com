@@ -1,4 +1,7 @@
-"""Best Bets rule from 15 Nov 2026: a favourite the ML model also picks.
+"""Best Bets rules: a favourite the ML model also picks.
+
+From 21 Nov 2026 a second, narrower rule runs as a trial: the favourite at
+$2-$3 that the ML and PFAI both have on top, where the analyzer does not.
 
 This replaced the place rules on the Best Bets page (place_bet.py still keeps
 the place rules' record for the ML Data page). It is a short-list for a
@@ -38,9 +41,9 @@ class Rule:
     bet: str        # 'win' or 'place': the bet the sweep found closer to break even
     bets: int       # bets in the sweep
     win_pct: float
-    place_pct: float
+    place_pct: float    # None when the sweep did not measure it
     win_roi: float      # Betfair price after commission
-    place_roi: float    # Betfair place price after commission
+    place_roi: float    # Betfair place price after commission; None when not measured
     note: str = ''
 
 
@@ -49,6 +52,12 @@ RULES = (
          'Favourite + ML top pick, and at most one other rating has it on top',
          'ML + favourite, quiet', 'win', 1061, 38.2, 65.3, 4.0, -5.1,
          'In profit in both halves of the year (+9.2%, +3.6%). The best win result in the sweep.'),
+    Rule('agree_fav_ml_pf_2to3',
+         'Favourite at $2-$3 + ML and PFAI both have it on top, the analyzer does not',
+         'ML + PFAI favourite $2-3', 'win', 130, 46.9, None, 21.2, None,
+         'Added 21 Nov 2026 as a trial. 130 bets Jul-Nov 2026: 61 won, +12.9% at the starting price, '
+         '+21.2% at Betfair (87 bets with a Betfair price). Lost in Aug and Sep. Picked as the best of '
+         'about 960 mixes and only works at $2-$3, so it is flattered and may be luck.'),
 )
 RULES_BY_KEY = {rule.key: rule for rule in RULES}
 ROUTE_KEYS = tuple(rule.key for rule in RULES)
@@ -156,15 +165,27 @@ def race_signals(race):
 def rules_for(signals, is_favourite, price, starters, has_ratings=True):
     """Rules a runner fits, in RULES order. signals: one entry of race_signals().
 
-    price and starters are not used by the one rule left; they stay so a
-    rule that needs them can be added without touching the callers.
+    price is the live Ladbrokes win price of the favourite. starters is not
+    used yet; it stays so a rule that needs it can be added without touching
+    the callers.
     """
     if not signals or not is_favourite or not has_ratings:
         return []
     keys = []
     if signals['ml'] and signals['n4'] <= 1:
         keys.append('agree_ml_fav_quiet')
+    if signals['ml'] and signals['pf'] and not signals['a'] and _in_band(price, 2.0, 3.0):
+        keys.append('agree_fav_ml_pf_2to3')
     return [RULES_BY_KEY[key] for key in keys]
+
+
+def _in_band(price, low, high):
+    """True when low <= price < high. A missing or unreadable price is never in the band."""
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        return False
+    return low <= price < high
 
 
 def lay_rules_for(signals, is_favourite, has_ratings=True):
@@ -229,24 +250,27 @@ CHART_STAKE = 10.0
 
 
 def chart(session):
-    """Running profit of the picks and of the lay bets, for the Best Bets graph.
+    """Running profit of each rule, one point per bet, for the Best Bets graph.
 
-    Only bets listed on the Best Bets page before the jump count.
+    Only bets listed on the Best Bets page before the jump count, in the
+    order the races started.
     - Picks: a $10 win bet at the starting price.
     - Lay bets: risking $10 at the Betfair price. Until the monthly Betfair
       price loads, the starting price stands in and the bet is marked as an
       estimate (the Betfair price is usually a little higher, so an estimated
       lay win is a little too big).
 
-    Returns {'labels': [dates], 'series': [{'key', 'name', 'kind', 'bets',
-    'won', 'profit', 'estimated', 'points': [running profit per date or
-    None before the first bet]}]}.
+    Returns {'series': [{'key', 'name', 'short', 'kind', 'bets', 'won',
+    'profit', 'estimated', 'history': [{'date', 'meeting', 'race', 'horse',
+    'price', 'won', 'profit', 'cumulative', 'estimate'} per bet]}]}.
+    A horse that fits two rules is a bet on each rule's line.
     """
     from sqlalchemy import text
-    series, days = [], set()
+    series = []
     for rule in ALL_RULES:
         rows = session.execute(text(
-            "SELECT m.date AS day, rc.start_time_utc AS start, r.finish_position AS fin, r.sp, r.bsp "
+            "SELECT m.date AS day, m.meeting_name AS meeting, rc.race_number AS race, h.horse_name AS horse, "
+            "r.finish_position AS fin, r.sp, r.bsp "
             "FROM predictions p JOIN horses h ON h.id = p.horse_id JOIN races rc ON rc.id = h.race_id "
             "JOIN meetings m ON m.id = rc.meeting_id JOIN results r ON r.horse_id = h.id "
             "WHERE p.best_bet_routes LIKE :route AND r.finish_position > 0 "
@@ -255,33 +279,29 @@ def chart(session):
             "ORDER BY rc.start_time_utc, h.id"),
             {'route': f'%{rule.key}%'}).fetchall()
         lay = rule.bet == 'lay'
-        by_day, bets, good, profit, estimated = {}, 0, 0, 0.0, 0
-        for day, _start, fin, sp, bsp in rows:
+        history, good, profit, estimated = [], 0, 0.0, 0
+        for day, meeting, race, horse, fin, sp, bsp in rows:
             won = fin == 1
+            estimate = False
             if lay:
                 price = bsp if bsp and bsp > 1 else sp
                 if not price or price <= 1:
                     continue                      # no price at all yet: cannot be settled
-                estimated += 0 if bsp and bsp > 1 else 1
+                estimate = not (bsp and bsp > 1)
                 result = lay_return(won, price) * CHART_STAKE
                 good += 0 if won else 1           # a lay is a good result when the horse loses
             else:
+                price = sp
                 if won and not sp:
                     continue
                 result = ((sp - 1) if won else -1.0) * CHART_STAKE
                 good += 1 if won else 0
-            bets += 1
+            estimated += 1 if estimate else 0
             profit += result
-            key = str(day)[:10] if day else ''
-            by_day[key] = round(profit, 2)
-            days.add(key)
-        series.append({'key': rule.key, 'name': rule.name, 'kind': 'lay' if lay else 'pick', 'bets': bets,
-                       'won': good, 'profit': round(profit, 2), 'estimated': estimated, 'by_day': by_day})
-    labels = sorted(days)
-    for s in series:
-        by_day, last, points = s.pop('by_day'), None, []
-        for label in labels:
-            last = by_day.get(label, last)
-            points.append(last)
-        s['points'] = points
-    return {'labels': labels, 'series': series}
+            history.append({'date': str(day)[:10] if day else '', 'meeting': meeting or '', 'race': race,
+                            'horse': horse or '', 'price': price, 'won': won,
+                            'profit': round(result, 2), 'cumulative': round(profit, 2), 'estimate': estimate})
+        series.append({'key': rule.key, 'name': rule.name, 'short': rule.short, 'kind': 'lay' if lay else 'pick',
+                       'bets': len(history), 'won': good, 'profit': round(profit, 2), 'estimated': estimated,
+                       'history': history})
+    return {'series': series}

@@ -63,6 +63,23 @@ Things decided but parked for a later phase. Tick them off as they land.
 - New ML champion #207 (LightGBM, 15% model / 85% market) replaced #163 once
   the champion was re-tested on the same races as the challengers.
 
+## Decisions log (21 Nov 2026)
+- Read-only sweep of the favourite, the analyzer, ML and PFAI top picks, the
+  gap to each one's 2nd pick and the price band (4,694 races with all three
+  ratings, mostly Jul-Nov 2026, starting price and Betfair after 8%).
+- A bigger gap to the 2nd pick lifts the strike rate but the price shortens to
+  match. Big gaps on all three ratings were the worst favourites: 212 bets,
+  -26% SP, -21% Betfair. A big analyzer gap lost in every price band.
+- Added as a **trial** on Best Bets (`agree_fav_ml_pf_2to3`): the favourite at
+  $2-$3 that the ML and PFAI both have on top and the analyzer does not. 130
+  bets, 47% won, +12.9% SP, +21.2% Betfair (87 priced). Lost in Aug and Sep,
+  loses under $2 and at $3-$4, and was the best of ~960 cuts, so it is
+  flattered. The quiet ML favourite rule stays. Compare the two after ~200
+  live bets each at Betfair prices.
+- PFAI top pick alone at $10+ (+19% SP on 494) was one $151 winner; without it
+  -11%. Dropped. Analyzer note components (class drop, fast last race and 211
+  others) gave no clean filter on either rule.
+
 ## Missing runners (fixed 16 Oct 2026)
 - [x] **The CSV reader dropped runners.** `parseCSV` split on every comma, so
   any row with a quoted comma (a name, gear or comment) was silently thrown
